@@ -1,0 +1,22 @@
+[gd_scene format=3 uid="uid://cxi4cr0u5qq04"]
+
+[ext_resource type="PackedScene" uid="uid://c102ttk0cevu4" path="res://scenes/world/base_floor.tscn" id="1_base_floor"]
+[ext_resource type="PackedScene" path="res://scenes/player/player_character.tscn" id="2_player_character"]
+[ext_resource type="PackedScene" path="res://scenes/world/crafting_bench.tscn" id="3_crafting_bench"]
+
+[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_a0tk4"]
+
+[node name="TraversalSandbox" type="Node3D" unique_id=885265317]
+
+[node name="BaseFloor" parent="." unique_id=332460655 instance=ExtResource("1_base_floor")]
+physics_material_override = SubResource("PhysicsMaterial_a0tk4")
+
+[node name="PlayerCharacter" parent="." unique_id=2099834590 instance=ExtResource("2_player_character")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 6)
+
+[node name="CraftingBench" parent="." unique_id=1953969368 instance=ExtResource("3_crafting_bench")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.15511024, 0, -1.5)
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1881004526]
+transform = Transform3D(0.81915206, -0.46984634, 0.32898995, 0, 0.57357645, 0.81915206, -0.57357645, -0.6710101, 0.46984634, 0, 0, 0)
+light_energy = 2.25

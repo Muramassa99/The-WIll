@@ -1,0 +1,133 @@
+[gd_resource type="Resource" script_class="BaseMaterialDef" format=3 uid="uid://d4antppivacp3"]
+
+[ext_resource type="Script" path="res://core/defs/base_material_def.gd" id="1_base_material"]
+[ext_resource type="Script" path="res://core/atoms/stat_line.gd" id="2_stat_line"]
+
+[sub_resource type="Resource" id="Resource_atk_mod_flat"]
+script = ExtResource("2_stat_line")
+stat_id = &"atk_mod_flat"
+value = 1.2
+
+[sub_resource type="Resource" id="Resource_def_mod_flat"]
+script = ExtResource("2_stat_line")
+stat_id = &"def_mod_flat"
+value = 1.0
+
+[sub_resource type="Resource" id="Resource_power_flat"]
+script = ExtResource("2_stat_line")
+stat_id = &"power_flat"
+value = 0.5
+
+[sub_resource type="Resource" id="Resource_endurance_flat"]
+script = ExtResource("2_stat_line")
+stat_id = &"endurance_flat"
+value = 0.4
+
+[sub_resource type="Resource" id="Resource_crit_chance_pct"]
+script = ExtResource("2_stat_line")
+stat_id = &"crit_chance_pct"
+value = 0.05
+value_kind = 1
+
+[sub_resource type="Resource" id="Resource_crit_damage_bonus_add"]
+script = ExtResource("2_stat_line")
+stat_id = &"crit_damage_bonus_add"
+value = 0.25
+value_kind = 1
+
+[sub_resource type="Resource" id="Resource_heal_power_flat"]
+script = ExtResource("2_stat_line")
+stat_id = &"heal_power_flat"
+value = 0.2
+
+[sub_resource type="Resource" id="Resource_move_speed_pct_add"]
+script = ExtResource("2_stat_line")
+stat_id = &"move_speed_pct_add"
+value = -0.1
+value_kind = 1
+
+[sub_resource type="Resource" id="Resource_aspd_pct_add"]
+script = ExtResource("2_stat_line")
+stat_id = &"aspd_pct_add"
+value = -0.05
+value_kind = 1
+
+[sub_resource type="Resource" id="Resource_cap_edge"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_edge"
+value = 0.7
+
+[sub_resource type="Resource" id="Resource_cap_blunt"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_blunt"
+value = 0.8
+
+[sub_resource type="Resource" id="Resource_cap_guard"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_guard"
+value = 0.6
+
+[sub_resource type="Resource" id="Resource_cap_impact"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_impact"
+value = 0.7
+
+[sub_resource type="Resource" id="Resource_cap_stability"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_stability"
+value = 0.7
+
+[sub_resource type="Resource" id="Resource_cap_plate"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_plate"
+value = 0.6
+
+[sub_resource type="Resource" id="Resource_fam_melee"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_melee"
+value = 0.8
+
+[sub_resource type="Resource" id="Resource_fam_defense"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_defense"
+value = 0.7
+
+[sub_resource type="Resource" id="Resource_fam_single_target"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_single_target"
+value = 0.6
+
+[sub_resource type="Resource" id="Resource_ctx_weapon"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_weapon"
+value = 0.8
+
+[sub_resource type="Resource" id="Resource_ctx_armor"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_armor"
+value = 0.7
+
+[sub_resource type="Resource" id="Resource_ctx_shield"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_shield"
+value = 0.6
+
+[resource]
+script = ExtResource("1_base_material")
+base_material_id = &"mat_iron_base"
+display_name = "Iron"
+material_family = &"structural"
+color_group = &"gray"
+albedo_color = Color(0.643137, 0.698039, 0.792157, 1)
+density_per_cell = 1.5
+hardness = 0.8
+toughness = 0.6
+elasticity = 0.2
+base_stat_lines = Array[Resource]([SubResource("Resource_atk_mod_flat"), SubResource("Resource_def_mod_flat"), SubResource("Resource_power_flat"), SubResource("Resource_endurance_flat"), SubResource("Resource_crit_chance_pct"), SubResource("Resource_crit_damage_bonus_add"), SubResource("Resource_heal_power_flat"), SubResource("Resource_move_speed_pct_add"), SubResource("Resource_aspd_pct_add")])
+capability_bias_lines = Array[Resource]([SubResource("Resource_cap_edge"), SubResource("Resource_cap_blunt"), SubResource("Resource_cap_guard"), SubResource("Resource_cap_impact"), SubResource("Resource_cap_stability"), SubResource("Resource_cap_plate")])
+skill_family_bias_lines = Array[Resource]([SubResource("Resource_fam_melee"), SubResource("Resource_fam_defense"), SubResource("Resource_fam_single_target")])
+equipment_context_bias_lines = Array[Resource]([SubResource("Resource_ctx_weapon"), SubResource("Resource_ctx_armor"), SubResource("Resource_ctx_shield")])
+can_be_beveled_edge = true
+can_be_blunt_surface = true
+can_be_guard_surface = true
+can_be_plate_surface = true

@@ -1,0 +1,407 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://runtime/ui/system_menu_overlay.gd" id="1_system_menu"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_system_panel"]
+bg_color = Color(0.0627451, 0.0705882, 0.0901961, 0.97)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.631373, 0.568627, 0.403922, 1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_section"]
+bg_color = Color(0.101961, 0.117647, 0.14902, 0.95)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.360784, 0.419608, 0.505882, 0.95)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[node name="SystemMenuOverlay" type="CanvasLayer"]
+script = ExtResource("1_system_menu")
+
+[node name="Backdrop" type="ColorRect" parent="."]
+visible = false
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0, 0, 0, 0.52)
+
+[node name="Panel" type="PanelContainer" parent="."]
+visible = false
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 48.0
+offset_top = 48.0
+offset_right = -48.0
+offset_bottom = -48.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_system_panel")
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel"]
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="RootVBox" type="VBoxContainer" parent="Panel/MarginContainer"]
+theme_override_constants/separation = 14
+
+[node name="HeaderBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox"]
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/HeaderBox"]
+text = "System Menu"
+theme_override_font_sizes/font_size = 24
+
+[node name="SubtitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/HeaderBox"]
+text = "Control-room overlay for active expeditions. Settings persist per user, and the world is not paused in online-safe flow."
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 13
+
+[node name="MainHBox" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox"]
+size_flags_vertical = 3
+theme_override_constants/separation = 14
+
+[node name="NavPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox"]
+custom_minimum_size = Vector2(280, 0)
+theme_override_styles/panel = SubResource("StyleBoxFlat_system_panel")
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/NavPanel"]
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="NavVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/NavPanel/MarginContainer"]
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="ResumeButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/NavPanel/MarginContainer/NavVBox"]
+custom_minimum_size = Vector2(0, 42)
+text = "Resume"
+
+[node name="SettingsButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/NavPanel/MarginContainer/NavVBox"]
+custom_minimum_size = Vector2(0, 42)
+text = "Settings"
+
+[node name="ControlsButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/NavPanel/MarginContainer/NavVBox"]
+custom_minimum_size = Vector2(0, 42)
+text = "Controls"
+
+[node name="InterfaceButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/NavPanel/MarginContainer/NavVBox"]
+custom_minimum_size = Vector2(0, 42)
+text = "Interface"
+
+[node name="SocialButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/NavPanel/MarginContainer/NavVBox"]
+custom_minimum_size = Vector2(0, 42)
+text = "Social"
+
+[node name="HelpButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/NavPanel/MarginContainer/NavVBox"]
+custom_minimum_size = Vector2(0, 42)
+text = "Help"
+
+[node name="NavSpacer" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/NavPanel/MarginContainer/NavVBox"]
+size_flags_vertical = 3
+
+[node name="ReturnToTitleButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/NavPanel/MarginContainer/NavVBox"]
+custom_minimum_size = Vector2(0, 42)
+text = "Return to Title"
+
+[node name="QuitGameButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/NavPanel/MarginContainer/NavVBox"]
+custom_minimum_size = Vector2(0, 42)
+text = "Quit Game"
+
+[node name="ContentPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox"]
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_system_panel")
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel"]
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 14
+
+[node name="ContentVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer"]
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="PageHeader" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox"]
+theme_override_constants/separation = 4
+
+[node name="PageTitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageHeader"]
+text = "Settings"
+theme_override_font_sizes/font_size = 22
+
+[node name="PageSubtitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageHeader"]
+text = "Display and audio settings apply immediately and persist per user across boots."
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 13
+
+[node name="PageScroll" type="ScrollContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="PageStack" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="SettingsPage" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage"]
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 4
+
+[node name="SettingsVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer"]
+theme_override_constants/separation = 12
+
+[node name="DisplayPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox"]
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="DisplayMargin" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel"]
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="DisplayVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin"]
+theme_override_constants/separation = 10
+
+[node name="DisplayTitle" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox"]
+text = "Display / Graphics"
+theme_override_font_sizes/font_size = 16
+
+[node name="WindowModeRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox"]
+theme_override_constants/separation = 10
+
+[node name="WindowModeLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox/WindowModeRow"]
+custom_minimum_size = Vector2(180, 0)
+text = "Window Mode"
+
+[node name="WindowModeOption" type="OptionButton" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox/WindowModeRow"]
+size_flags_horizontal = 3
+
+[node name="MonitorRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox"]
+theme_override_constants/separation = 10
+
+[node name="MonitorLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox/MonitorRow"]
+custom_minimum_size = Vector2(180, 0)
+text = "Monitor"
+
+[node name="MonitorOption" type="OptionButton" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox/MonitorRow"]
+size_flags_horizontal = 3
+
+[node name="ResolutionRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox"]
+theme_override_constants/separation = 10
+
+[node name="ResolutionLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox/ResolutionRow"]
+custom_minimum_size = Vector2(180, 0)
+text = "Resolution"
+
+[node name="ResolutionOption" type="OptionButton" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox/ResolutionRow"]
+size_flags_horizontal = 3
+
+[node name="VSyncCheckBox" type="CheckBox" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox"]
+text = "Enable V-Sync"
+
+[node name="RenderScaleRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox"]
+theme_override_constants/separation = 10
+
+[node name="RenderScaleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox/RenderScaleRow"]
+custom_minimum_size = Vector2(180, 0)
+text = "3D Render Scale"
+
+[node name="RenderScaleOption" type="OptionButton" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox/RenderScaleRow"]
+size_flags_horizontal = 3
+
+[node name="MaxFpsRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox"]
+theme_override_constants/separation = 10
+
+[node name="MaxFpsLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox/MaxFpsRow"]
+custom_minimum_size = Vector2(180, 0)
+text = "Max FPS"
+
+[node name="MaxFpsOption" type="OptionButton" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox/MaxFpsRow"]
+size_flags_horizontal = 3
+
+[node name="DisplayHelp" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DisplayPanel/DisplayMargin/DisplayVBox"]
+text = "These are the first priority display controls: video mode, monitor, resolution, render scale, V-Sync, and max FPS."
+autowrap_mode = 3
+
+[node name="AudioPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox"]
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="AudioMargin" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/AudioPanel"]
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="AudioVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/AudioPanel/AudioMargin"]
+theme_override_constants/separation = 10
+
+[node name="AudioTitle" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/AudioPanel/AudioMargin/AudioVBox"]
+text = "Audio"
+theme_override_font_sizes/font_size = 16
+
+[node name="MasterVolumeRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/AudioPanel/AudioMargin/AudioVBox"]
+theme_override_constants/separation = 10
+
+[node name="MasterVolumeLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/AudioPanel/AudioMargin/AudioVBox/MasterVolumeRow"]
+custom_minimum_size = Vector2(180, 0)
+text = "Master Volume"
+
+[node name="MasterVolumeSlider" type="HSlider" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/AudioPanel/AudioMargin/AudioVBox/MasterVolumeRow"]
+size_flags_horizontal = 3
+max_value = 1.0
+step = 0.01
+value = 1.0
+
+[node name="MasterVolumeValueLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/AudioPanel/AudioMargin/AudioVBox/MasterVolumeRow"]
+custom_minimum_size = Vector2(70, 0)
+horizontal_alignment = 2
+text = "100%"
+
+[node name="MasterMuteCheckBox" type="CheckBox" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/AudioPanel/AudioMargin/AudioVBox"]
+text = "Mute Master"
+
+[node name="AudioHelp" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/AudioPanel/AudioMargin/AudioVBox"]
+text = "This first pass keeps audio practical: master volume and mute with per-user persistence."
+autowrap_mode = 3
+
+[node name="ControlsPage" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack"]
+visible = false
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/ControlsPage"]
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 4
+
+[node name="ControlsVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/ControlsPage/MarginContainer"]
+theme_override_constants/separation = 12
+
+[node name="CategoryRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/ControlsPage/MarginContainer/ControlsVBox"]
+theme_override_constants/separation = 10
+
+[node name="CategoryLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/ControlsPage/MarginContainer/ControlsVBox/CategoryRow"]
+custom_minimum_size = Vector2(180, 0)
+text = "Binding Category"
+
+[node name="CategoryOption" type="OptionButton" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/ControlsPage/MarginContainer/ControlsVBox/CategoryRow"]
+size_flags_horizontal = 3
+
+[node name="BindingsStatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/ControlsPage/MarginContainer/ControlsVBox"]
+text = "Select an action to change its key."
+autowrap_mode = 3
+
+[node name="BindingsScroll" type="ScrollContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/ControlsPage/MarginContainer/ControlsVBox"]
+size_flags_vertical = 3
+
+[node name="BindingsVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/ControlsPage/MarginContainer/ControlsVBox/BindingsScroll"]
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="ControlsFooterRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/ControlsPage/MarginContainer/ControlsVBox"]
+alignment = 2
+
+[node name="RestoreDefaultsButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/ControlsPage/MarginContainer/ControlsVBox/ControlsFooterRow"]
+custom_minimum_size = Vector2(220, 42)
+text = "Restore Category Defaults"
+
+[node name="InterfacePage" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack"]
+visible = false
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/InterfacePage"]
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 4
+
+[node name="InterfaceVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/InterfacePage/MarginContainer"]
+theme_override_constants/separation = 12
+
+[node name="UIScaleRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/InterfacePage/MarginContainer/InterfaceVBox"]
+theme_override_constants/separation = 10
+
+[node name="UIScaleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/InterfacePage/MarginContainer/InterfaceVBox/UIScaleRow"]
+custom_minimum_size = Vector2(180, 0)
+text = "UI Size"
+
+[node name="UIScaleOption" type="OptionButton" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/InterfacePage/MarginContainer/InterfaceVBox/UIScaleRow"]
+size_flags_horizontal = 3
+
+[node name="TextScaleRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/InterfacePage/MarginContainer/InterfaceVBox"]
+theme_override_constants/separation = 10
+
+[node name="TextScaleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/InterfacePage/MarginContainer/InterfaceVBox/TextScaleRow"]
+custom_minimum_size = Vector2(180, 0)
+text = "Text Size"
+
+[node name="TextScaleOption" type="OptionButton" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/InterfacePage/MarginContainer/InterfaceVBox/TextScaleRow"]
+size_flags_horizontal = 3
+
+[node name="InterfaceHelp" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/InterfacePage/MarginContainer/InterfaceVBox"]
+text = "Small, normal, and large scale presets raise or lower the whole interface while keeping larger text larger and smaller text smaller."
+autowrap_mode = 3
+
+[node name="SocialPage" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack"]
+visible = false
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SocialPage"]
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 4
+
+[node name="SocialLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SocialPage/MarginContainer"]
+text = "Social and privacy controls will expand here next: invites, request filtering, inspect privacy, and clutter visibility rules."
+autowrap_mode = 3
+
+[node name="HelpPage" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack"]
+visible = false
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/HelpPage"]
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 4
+
+[node name="HelpLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/HelpPage/MarginContainer"]
+text = "Current priority path: display settings, keybindings, and UI scaling. Online-safe Escape opens an overlay without pausing the world."
+autowrap_mode = 3
+
+[node name="FooterRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox"]
+theme_override_constants/separation = 12
+
+[node name="FooterStatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/FooterRow"]
+size_flags_horizontal = 3
+text = ""
+autowrap_mode = 3
+
+[node name="ResetPageButton" type="Button" parent="Panel/MarginContainer/RootVBox/FooterRow"]
+custom_minimum_size = Vector2(220, 42)
+text = "Reset Display / Audio"
+
+[node name="CloseButton" type="Button" parent="Panel/MarginContainer/RootVBox/FooterRow"]
+custom_minimum_size = Vector2(180, 42)
+text = "Close"

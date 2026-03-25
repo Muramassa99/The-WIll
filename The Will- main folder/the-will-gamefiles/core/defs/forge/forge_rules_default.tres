@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="ForgeRulesDef" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://core/defs/forge_rules_def.gd" id="1_8wou1"]
+[ext_resource type="Resource" path="res://core/defs/forge/sample_presets/sample_grip.tres" id="2_sample_grip"]
+[ext_resource type="Resource" path="res://core/defs/forge/sample_presets/sample_flex.tres" id="3_sample_flex"]
+[ext_resource type="Resource" path="res://core/defs/forge/sample_presets/sample_bow.tres" id="4_sample_bow"]
+
+[resource]
+script = ExtResource("1_8wou1")
+sample_presets = [ExtResource("2_sample_grip"), ExtResource("3_sample_flex"), ExtResource("4_sample_bow")]

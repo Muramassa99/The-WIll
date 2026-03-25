@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ForgeViewTuningDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/defs/forge_view_tuning_def.gd" id="1_gw9tk"]
+
+[resource]
+script = ExtResource("1_gw9tk")
+workspace_orbit_mouse_button = 2
+workspace_pan_modifier_keycode = 67
+workspace_capture_mouse_during_drag = true
+workspace_pan_sensitivity = 0.0025
+workspace_pan_min_distance = 0.25
+workspace_voxel_inset_factor = 1.0
+workspace_zoom_min_distance = 0.1

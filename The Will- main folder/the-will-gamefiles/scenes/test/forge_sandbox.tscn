@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://runtime/forge/forge_grid_controller.gd" id="1_forge_grid_controller"]
+
+[node name="ForgeSandbox" type="Node"]
+script = ExtResource("1_forge_grid_controller")
+auto_run_debug_bake_loop = true

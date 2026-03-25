@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="TierDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/defs/tier_def.gd" id="1_tier_def"]
+
+[resource]
+script = ExtResource("1_tier_def")
+tier_id = &"tier_basic"
+tier_name = "Basic"
+stat_multiplier = 1.0
+value_multiplier = 1.0
+drop_quality = 1.0

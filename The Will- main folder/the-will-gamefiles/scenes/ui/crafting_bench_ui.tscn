@@ -1,0 +1,384 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://runtime/forge/crafting_bench_ui.gd" id="1_ui"]
+[ext_resource type="Script" path="res://runtime/forge/forge_plane_viewport.gd" id="2_plane_viewport"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
+bg_color = Color(0.0823529, 0.0901961, 0.109804, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.654902, 0.556863, 0.376471, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_section"]
+bg_color = Color(0.121569, 0.137255, 0.172549, 0.94)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.431373, 0.47451, 0.552941, 0.95)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[node name="CraftingBenchUI" type="CanvasLayer"]
+script = ExtResource("1_ui")
+
+[node name="Panel" type="PanelContainer" parent="."]
+visible = false
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = -24.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel"]
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="RootVBox" type="VBoxContainer" parent="Panel/MarginContainer"]
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="HeaderBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox"]
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/HeaderBox"]
+text = "Forge Station"
+theme_override_font_sizes/font_size = 24
+
+[node name="SubtitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/HeaderBox"]
+text = "Forge workstation"
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 13
+
+[node name="MainHBox" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox"]
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="LeftPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox"]
+custom_minimum_size = Vector2(250, 0)
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel"]
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="LeftScroll" type="ScrollContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="LeftVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll"]
+theme_override_constants/separation = 10
+
+[node name="LayerStatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox"]
+text = "Active layer"
+
+[node name="PlaneStatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox"]
+text = "Plane"
+
+[node name="ArmedMaterialLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox"]
+text = "Armed material"
+autowrap_mode = 3
+
+[node name="CapacityLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox"]
+text = "Capacity"
+autowrap_mode = 3
+
+[node name="CapacityBar" type="ProgressBar" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox"]
+custom_minimum_size = Vector2(0, 20)
+max_value = 1.0
+
+[node name="ProjectPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox"]
+custom_minimum_size = Vector2(0, 220)
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="ProjectMargin" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel"]
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="ProjectVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin"]
+theme_override_constants/separation = 8
+
+[node name="ProjectTitle" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
+text = "Forge Projects"
+theme_override_font_sizes/font_size = 15
+
+[node name="ProjectSourceLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
+text = "Current project source"
+autowrap_mode = 3
+
+[node name="ProjectNameEdit" type="LineEdit" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
+placeholder_text = "Temporary forge project name"
+
+[node name="ProjectButtonRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
+theme_override_constants/separation = 6
+
+[node name="NewProjectButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectButtonRow"]
+size_flags_horizontal = 3
+text = "New"
+
+[node name="SaveProjectButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectButtonRow"]
+size_flags_horizontal = 3
+text = "Save"
+
+[node name="ProjectButtonRowSecondary" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
+theme_override_constants/separation = 6
+
+[node name="DuplicateProjectButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectButtonRowSecondary"]
+size_flags_horizontal = 3
+text = "Duplicate"
+
+[node name="DeleteProjectButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectButtonRowSecondary"]
+size_flags_horizontal = 3
+text = "Delete"
+
+[node name="ProjectNotesLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
+text = "Forge notes"
+
+[node name="ProjectNotesEdit" type="TextEdit" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
+custom_minimum_size = Vector2(0, 84)
+size_flags_vertical = 3
+placeholder_text = "Temporary forge-side notes. Final item naming is decided later outside this panel."
+
+[node name="ProjectList" type="ItemList" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
+custom_minimum_size = Vector2(0, 120)
+size_flags_vertical = 3
+select_mode = 0
+
+[node name="ToolCategoryTitle" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox"]
+text = "Tool Categories"
+theme_override_font_sizes/font_size = 15
+
+[node name="ToolCategoryStrip" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox"]
+theme_override_constants/separation = 6
+
+[node name="PlaceCategoryButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ToolCategoryStrip"]
+custom_minimum_size = Vector2(0, 36)
+text = "Place"
+
+[node name="EraseCategoryButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ToolCategoryStrip"]
+custom_minimum_size = Vector2(0, 36)
+text = "Erase"
+
+[node name="ToolPaletteTitle" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox"]
+text = "Tool Palette"
+theme_override_font_sizes/font_size = 15
+
+[node name="ToolPalette" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox"]
+theme_override_constants/separation = 6
+
+[node name="SingleToolButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ToolPalette"]
+custom_minimum_size = Vector2(0, 36)
+text = "Single Cell"
+
+[node name="PickToolButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ToolPalette"]
+custom_minimum_size = Vector2(0, 36)
+text = "Pick Material"
+
+[node name="PlaneSelectorTitle" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox"]
+text = "Plane Selector"
+theme_override_font_sizes/font_size = 15
+
+[node name="PlaneSelectorRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox"]
+theme_override_constants/separation = 6
+
+[node name="XYPlaneButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/PlaneSelectorRow"]
+size_flags_horizontal = 3
+text = "XY"
+
+[node name="ZXPlaneButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/PlaneSelectorRow"]
+size_flags_horizontal = 3
+text = "ZX"
+
+[node name="ZYPlaneButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/PlaneSelectorRow"]
+size_flags_horizontal = 3
+text = "ZY"
+
+[node name="LayerStepRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox"]
+theme_override_constants/separation = 6
+
+[node name="LayerDownButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/LayerStepRow"]
+size_flags_horizontal = 3
+text = "Layer -"
+
+[node name="LayerUpButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/LayerStepRow"]
+size_flags_horizontal = 3
+text = "Layer +"
+
+[node name="CenterPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox"]
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel"]
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="CenterVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer"]
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="ActionHostRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox"]
+theme_override_constants/separation = 8
+
+[node name="ViewMenuButton" type="MenuButton" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow"]
+custom_minimum_size = Vector2(140, 34)
+text = "View"
+
+[node name="GeometryMenuButton" type="MenuButton" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow"]
+custom_minimum_size = Vector2(140, 34)
+text = "Geometry"
+
+[node name="WorkflowMenuButton" type="MenuButton" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow"]
+custom_minimum_size = Vector2(160, 34)
+text = "Workflow"
+
+[node name="ViewportSplit" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox"]
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="PlaneViewPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit"]
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="PlaneVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/PlaneViewPanel"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="PlaneTitle" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/PlaneViewPanel/PlaneVBox"]
+text = "Plane-Locked View"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 16
+
+[node name="PlaneViewport" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/PlaneViewPanel/PlaneVBox"]
+custom_minimum_size = Vector2(700, 620)
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("2_plane_viewport")
+
+[node name="FreeViewPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit"]
+custom_minimum_size = Vector2(520, 0)
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="FreeVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/FreeViewPanel"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="FreeTitle" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/FreeViewPanel/FreeVBox"]
+text = "Free 3D View"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 16
+
+[node name="FreeViewContainer" type="SubViewportContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/FreeViewPanel/FreeVBox"]
+custom_minimum_size = Vector2(500, 620)
+size_flags_horizontal = 3
+size_flags_vertical = 3
+stretch = true
+
+[node name="FreeSubViewport" type="SubViewport" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/FreeViewPanel/FreeVBox/FreeViewContainer"]
+size = Vector2i(500, 620)
+transparent_bg = false
+handle_input_locally = false
+render_target_update_mode = 4
+
+[node name="OrientationLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/FreeViewPanel/FreeVBox"]
+text = "Free View"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 13
+
+[node name="StatusText" type="RichTextLabel" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox"]
+custom_minimum_size = Vector2(0, 170)
+size_flags_vertical = 3
+bbcode_enabled = true
+fit_content = false
+scroll_active = true
+theme_override_font_sizes/normal_font_size = 13
+
+[node name="RightPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox"]
+custom_minimum_size = Vector2(360, 0)
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel"]
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="RightScroll" type="ScrollContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="RightVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer/RightScroll"]
+theme_override_constants/separation = 10
+
+[node name="InventoryPageTabs" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer/RightScroll/RightVBox"]
+theme_override_constants/separation = 6
+
+[node name="OwnedTabButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer/RightScroll/RightVBox/InventoryPageTabs"]
+size_flags_horizontal = 3
+text = "Owned"
+
+[node name="AllTabButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer/RightScroll/RightVBox/InventoryPageTabs"]
+size_flags_horizontal = 3
+text = "All"
+
+[node name="WeaponTabButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer/RightScroll/RightVBox/InventoryPageTabs"]
+size_flags_horizontal = 3
+text = "Weapon"
+
+[node name="SearchBox" type="LineEdit" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer/RightScroll/RightVBox"]
+placeholder_text = "Search materials"
+
+[node name="InventoryList" type="ItemList" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer/RightScroll/RightVBox"]
+custom_minimum_size = Vector2(0, 240)
+size_flags_vertical = 3
+select_mode = 0
+
+[node name="DescriptionPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer/RightScroll/RightVBox"]
+custom_minimum_size = Vector2(0, 190)
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="DescriptionMargin" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer/RightScroll/RightVBox/DescriptionPanel"]
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="DescriptionText" type="RichTextLabel" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer/RightScroll/RightVBox/DescriptionPanel/DescriptionMargin"]
+bbcode_enabled = true
+fit_content = false
+scroll_active = true
+theme_override_font_sizes/normal_font_size = 12
+
+[node name="StatsPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer/RightScroll/RightVBox"]
+custom_minimum_size = Vector2(0, 260)
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="StatsMargin" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer/RightScroll/RightVBox/StatsPanel"]
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="StatsText" type="RichTextLabel" parent="Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer/RightScroll/RightVBox/StatsPanel/StatsMargin"]
+bbcode_enabled = true
+fit_content = false
+scroll_active = true
+theme_override_font_sizes/normal_font_size = 12

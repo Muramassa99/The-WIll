@@ -5,7 +5,7 @@ Owner: (You)
 Contributors: (Friend names here)
 Engine Target: Godot 4.x (prototype in primitives)
 Scope Note: This document defines CORE rules + player-facing systems. Visuals/content are placeholders until core loop is proven.
-
+54
 ────────────────────────────────────────────────────────────
 1) HIGH CONCEPT
 ────────────────────────────────────────────────────────────

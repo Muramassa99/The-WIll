@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="RawDropDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/defs/raw_drop_def.gd" id="1_raw_drop_def"]
+
+[resource]
+script = ExtResource("1_raw_drop_def")
+drop_id = &"drop_iron_raw"
+base_material_id = &"mat_iron_base"
+quantity_min = 1
+quantity_max = 1

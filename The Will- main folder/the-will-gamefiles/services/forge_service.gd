@@ -2,6 +2,7 @@ extends RefCounted
 class_name ForgeService
 
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
+const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
 
 var forge_rules: ForgeRulesDef = DEFAULT_FORGE_RULES_RESOURCE
 var tier_resolver: TierResolver
@@ -12,12 +13,14 @@ var joint_resolver: JointResolver
 var bow_resolver: BowResolver
 var profile_resolver: ProfileResolver
 var capability_resolver: CapabilityResolver
+var material_runtime_resolver
 
 func _init(rules: ForgeRulesDef = null) -> void:
 	tier_resolver = TierResolver.new()
 	process_resolver = ProcessResolver.new()
 	profile_resolver = ProfileResolver.new()
 	capability_resolver = CapabilityResolver.new()
+	material_runtime_resolver = MaterialRuntimeResolverScript.new()
 	set_forge_rules(rules)
 
 func set_forge_rules(rules: ForgeRulesDef) -> void:
@@ -50,8 +53,13 @@ func bake_wip(
 	)
 	var profile: BakedProfile = bake_profile(cells, segments, anchors, material_lookup, shape_data, resolved_joint_data, resolved_bow_data)
 	profile.profile_id = _build_profile_id(wip)
-	var material_bias_lines: Array[StatLine] = _collect_material_capability_bias_lines(cells, material_lookup)
-	profile.capability_scores = derive_capability_scores(profile, material_bias_lines)
+	profile.material_variant_mix = _collect_material_variant_mix(cells)
+	profile.resolved_material_stat_lines = _collect_aggregated_material_lines(cells, material_lookup, &"material_stats")
+	profile.resolved_capability_bias_lines = _collect_aggregated_material_lines(cells, material_lookup, &"capability_bias")
+	profile.resolved_skill_family_bias_lines = _collect_aggregated_material_lines(cells, material_lookup, &"skill_family_bias")
+	profile.resolved_elemental_affinity_lines = _collect_aggregated_material_lines(cells, material_lookup, &"elemental_affinity")
+	profile.resolved_equipment_context_bias_lines = _collect_aggregated_material_lines(cells, material_lookup, &"equipment_context_bias")
+	profile.capability_scores = derive_capability_scores(profile, profile.resolved_capability_bias_lines)
 	wip.latest_baked_profile_snapshot = profile.duplicate(true) as BakedProfile
 	debug_print_profile(profile)
 	return profile
@@ -149,6 +157,8 @@ func debug_print_profile(profile: BakedProfile) -> void:
 	print("  guard_score=", profile.guard_score)
 	print("  flex_score=", profile.flex_score)
 	print("  launch_score=", profile.launch_score)
+	print("  resolved_material_stat_line_count=", profile.resolved_material_stat_lines.size())
+	print("  resolved_capability_bias_line_count=", profile.resolved_capability_bias_lines.size())
 	print("  capability_scores=", profile.capability_scores)
 
 func _collect_wip_cells(wip: CraftedItemWIP) -> Array[CellAtom]:
@@ -172,28 +182,71 @@ func _build_profile_id(wip: CraftedItemWIP) -> StringName:
 		return &"profile_runtime"
 	return StringName("profile_%s" % String(wip.wip_id))
 
-func _collect_material_capability_bias_lines(cells: Array[CellAtom], material_lookup: Dictionary) -> Array[StatLine]:
-	var material_bias_lines: Array[StatLine] = []
+func _collect_aggregated_material_lines(
+		cells: Array[CellAtom],
+		material_lookup: Dictionary,
+		line_kind: StringName
+	) -> Array[StatLine]:
+	var line_lookup: Dictionary = {}
 	for cell: CellAtom in cells:
-		var base_material: BaseMaterialDef = _resolve_base_material_for_cell(cell, material_lookup)
-		if base_material == null:
+		_merge_stat_lines(line_lookup, _resolve_material_lines_for_cell(cell, material_lookup, line_kind))
+	return _build_sorted_stat_line_array(line_lookup)
+
+func _resolve_material_lines_for_cell(
+		cell: CellAtom,
+		material_lookup: Dictionary,
+		line_kind: StringName
+	) -> Array[StatLine]:
+	match line_kind:
+		&"material_stats":
+			return material_runtime_resolver.resolve_material_stat_lines_for_cell(cell, material_lookup)
+		&"capability_bias":
+			return material_runtime_resolver.resolve_capability_bias_lines_for_cell(cell, material_lookup)
+		&"skill_family_bias":
+			return material_runtime_resolver.resolve_skill_family_bias_lines_for_cell(cell, material_lookup)
+		&"elemental_affinity":
+			return material_runtime_resolver.resolve_elemental_affinity_lines_for_cell(cell, material_lookup)
+		&"equipment_context_bias":
+			return material_runtime_resolver.resolve_equipment_context_bias_lines_for_cell(cell, material_lookup)
+		_:
+			return []
+
+func _merge_stat_lines(line_lookup: Dictionary, stat_lines: Array[StatLine]) -> void:
+	for stat_line: StatLine in stat_lines:
+		if stat_line == null or not stat_line.is_valid():
 			continue
-		for bias_line: StatLine in base_material.capability_bias_lines:
-			if bias_line == null:
-				continue
-			material_bias_lines.append(bias_line)
-	return material_bias_lines
+		var line_key: String = _build_stat_line_key(stat_line)
+		var existing_line: StatLine = line_lookup.get(line_key) as StatLine
+		if existing_line == null:
+			line_lookup[line_key] = stat_line.copy_scaled(1.0)
+			continue
+		if stat_line.is_numeric():
+			existing_line.value += stat_line.value
+			continue
+		if stat_line.is_flag():
+			existing_line.value = maxf(existing_line.value, stat_line.value)
+			continue
+		if stat_line.is_enum() and existing_line.enum_value == StringName():
+			existing_line.enum_value = stat_line.enum_value
 
-func _resolve_base_material_for_cell(cell: CellAtom, material_lookup: Dictionary) -> BaseMaterialDef:
-	if cell == null:
-		return null
+func _build_sorted_stat_line_array(line_lookup: Dictionary) -> Array[StatLine]:
+	var sorted_keys: Array = line_lookup.keys()
+	sorted_keys.sort()
+	var sorted_lines: Array[StatLine] = []
+	for line_key in sorted_keys:
+		var stat_line: StatLine = line_lookup.get(line_key) as StatLine
+		if stat_line == null:
+			continue
+		sorted_lines.append(stat_line)
+	return sorted_lines
 
-	var material_entry: Variant = material_lookup.get(cell.material_variant_id)
-	if material_entry is BaseMaterialDef:
-		return material_entry as BaseMaterialDef
-	if material_entry is MaterialVariantDef:
-		var material_variant: MaterialVariantDef = material_entry as MaterialVariantDef
-		var base_material_entry: Variant = material_lookup.get(material_variant.base_material_id)
-		if base_material_entry is BaseMaterialDef:
-			return base_material_entry as BaseMaterialDef
-	return null
+func _build_stat_line_key(stat_line: StatLine) -> String:
+	return "%s|%d|%s" % [String(stat_line.stat_id), int(stat_line.value_kind), String(stat_line.enum_value)]
+
+func _collect_material_variant_mix(cells: Array[CellAtom]) -> Dictionary:
+	var material_variant_mix: Dictionary = {}
+	for cell: CellAtom in cells:
+		if cell == null or cell.material_variant_id == StringName():
+			continue
+		material_variant_mix[cell.material_variant_id] = int(material_variant_mix.get(cell.material_variant_id, 0)) + 1
+	return material_variant_mix

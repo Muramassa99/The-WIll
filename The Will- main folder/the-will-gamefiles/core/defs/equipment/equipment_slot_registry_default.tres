@@ -1,0 +1,122 @@
+[gd_resource type="Resource" script_class="EquipmentSlotRegistryDef" format=3 uid="uid://ddb0pjx6rso36"]
+
+[ext_resource type="Script" uid="uid://b506fqk3eeoot" path="res://core/defs/equipment_slot_registry_def.gd" id="1_registry"]
+[ext_resource type="Script" uid="uid://615bo3v6e08o" path="res://core/defs/equipment_slot_def.gd" id="2_slot"]
+
+[sub_resource type="Resource" id="EquipmentSlotDef_hand_right"]
+script = ExtResource("2_slot")
+slot_id = &"hand_right"
+display_name = "Right Hand"
+category_id = &"weapon"
+section_id = &"hands"
+supports_forge_test_loadout = true
+display_order = 10
+
+[sub_resource type="Resource" id="EquipmentSlotDef_hand_left"]
+script = ExtResource("2_slot")
+slot_id = &"hand_left"
+display_name = "Left Hand"
+category_id = &"weapon"
+section_id = &"hands"
+supports_forge_test_loadout = true
+display_order = 20
+
+[sub_resource type="Resource" id="EquipmentSlotDef_helmet"]
+script = ExtResource("2_slot")
+slot_id = &"helmet"
+display_name = "Helmet"
+category_id = &"armor"
+section_id = &"armor"
+display_order = 30
+
+[sub_resource type="Resource" id="EquipmentSlotDef_chest"]
+script = ExtResource("2_slot")
+slot_id = &"chest"
+display_name = "Chest"
+category_id = &"armor"
+section_id = &"armor"
+display_order = 40
+
+[sub_resource type="Resource" id="EquipmentSlotDef_pants"]
+script = ExtResource("2_slot")
+slot_id = &"pants"
+display_name = "Pants"
+category_id = &"armor"
+section_id = &"armor"
+display_order = 50
+
+[sub_resource type="Resource" id="EquipmentSlotDef_boots"]
+script = ExtResource("2_slot")
+slot_id = &"boots"
+display_name = "Boots"
+category_id = &"armor"
+section_id = &"armor"
+display_order = 60
+
+[sub_resource type="Resource" id="EquipmentSlotDef_gloves"]
+script = ExtResource("2_slot")
+slot_id = &"gloves"
+display_name = "Gloves"
+category_id = &"armor"
+section_id = &"armor"
+display_order = 70
+
+[sub_resource type="Resource" id="EquipmentSlotDef_ring_left"]
+script = ExtResource("2_slot")
+slot_id = &"ring_left"
+display_name = "Ring Left"
+category_id = &"accessory"
+section_id = &"accessory"
+display_order = 80
+
+[sub_resource type="Resource" id="EquipmentSlotDef_ring_right"]
+script = ExtResource("2_slot")
+slot_id = &"ring_right"
+display_name = "Ring Right"
+category_id = &"accessory"
+section_id = &"accessory"
+display_order = 90
+
+[sub_resource type="Resource" id="EquipmentSlotDef_bracelet"]
+script = ExtResource("2_slot")
+slot_id = &"bracelet"
+display_name = "Bracelet"
+category_id = &"accessory"
+section_id = &"accessory"
+display_order = 100
+
+[sub_resource type="Resource" id="EquipmentSlotDef_necklace"]
+script = ExtResource("2_slot")
+slot_id = &"necklace"
+display_name = "Necklace"
+category_id = &"accessory"
+section_id = &"accessory"
+display_order = 110
+
+[sub_resource type="Resource" id="EquipmentSlotDef_belt"]
+script = ExtResource("2_slot")
+slot_id = &"belt"
+display_name = "Belt"
+category_id = &"accessory"
+section_id = &"accessory"
+display_order = 120
+
+[sub_resource type="Resource" id="EquipmentSlotDef_earring_left"]
+script = ExtResource("2_slot")
+slot_id = &"earring_left"
+display_name = "Earring Left"
+category_id = &"accessory"
+section_id = &"accessory"
+display_order = 130
+
+[sub_resource type="Resource" id="EquipmentSlotDef_earring_right"]
+script = ExtResource("2_slot")
+slot_id = &"earring_right"
+display_name = "Earring Right"
+category_id = &"accessory"
+section_id = &"accessory"
+display_order = 140
+
+[resource]
+script = ExtResource("1_registry")
+entries = Array[Resource]([SubResource("EquipmentSlotDef_hand_right"), SubResource("EquipmentSlotDef_hand_left"), SubResource("EquipmentSlotDef_helmet"), SubResource("EquipmentSlotDef_chest"), SubResource("EquipmentSlotDef_pants"), SubResource("EquipmentSlotDef_boots"), SubResource("EquipmentSlotDef_gloves"), SubResource("EquipmentSlotDef_ring_left"), SubResource("EquipmentSlotDef_ring_right"), SubResource("EquipmentSlotDef_bracelet"), SubResource("EquipmentSlotDef_necklace"), SubResource("EquipmentSlotDef_belt"), SubResource("EquipmentSlotDef_earring_left"), SubResource("EquipmentSlotDef_earring_right")])

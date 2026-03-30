@@ -1,50 +1,45 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene format=3 uid="uid://c3bmmm5kkgf5h"]
 
 [ext_resource type="Script" path="res://runtime/player/player_controller.gd" id="1_player_controller"]
 [ext_resource type="PackedScene" path="res://scenes/ui/system_menu_overlay.tscn" id="2_system_menu_overlay"]
+[ext_resource type="PackedScene" path="res://scenes/player/player_humanoid_rig.tscn" id="3_player_humanoid_rig"]
+[ext_resource type="PackedScene" path="res://scenes/ui/player_inventory_overlay.tscn" id="4_player_inventory_overlay"]
+[ext_resource type="PackedScene" path="res://scenes/ui/player_crosshair_overlay.tscn" id="5_player_crosshair_overlay"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
-radius = 0.4
-height = 1.0
+radius = 0.35
+height = 1.3
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_player"]
-albedo_color = Color(0.862745, 0.760784, 0.427451, 1)
-roughness = 0.7
-
-[sub_resource type="BoxMesh" id="BoxMesh_player"]
-size = Vector3(0.7, 1.8, 0.7)
-
-[node name="PlayerCharacter" type="CharacterBody3D"]
+[node name="PlayerCharacter" type="CharacterBody3D" unique_id=1599119956]
+floor_max_angle = 1.0471976
 script = ExtResource("1_player_controller")
-floor_snap_length = 0.2
+jump_velocity = 8.0
+min_pitch_degrees = -80.0
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-position = Vector3(0, 0.9, 0)
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=454361507]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
 shape = SubResource("CapsuleShape3D_player")
 
-[node name="VisualRoot" type="Node3D" parent="."]
+[node name="VisualRoot" type="Node3D" parent="." unique_id=268812189]
 
-[node name="BodyMesh" type="MeshInstance3D" parent="VisualRoot"]
-position = Vector3(0, 0.9, 0)
-mesh = SubResource("BoxMesh_player")
-surface_material_override/0 = SubResource("StandardMaterial3D_player")
+[node name="PlayerHumanoidRig" parent="VisualRoot" unique_id=1034308648 instance=ExtResource("3_player_humanoid_rig")]
 
-[node name="CameraPivot" type="Node3D" parent="."]
-position = Vector3(0, 1.65, 0)
-rotation_degrees = Vector3(-12, 0, 0)
+[node name="CameraPivot" type="Node3D" parent="." unique_id=1739983458]
+transform = Transform3D(1, 0, 0, 0, 0.9781476, 0.2079117, 0, -0.2079117, 0.9781476, 0, 1.72, 0)
 
-[node name="SpringArm3D" type="SpringArm3D" parent="CameraPivot"]
-position = Vector3(0.6, 0, 0)
+[node name="SpringArm3D" type="SpringArm3D" parent="CameraPivot" unique_id=1821075175]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.6, 0, 0)
 spring_length = 4.5
 margin = 0.2
 
-[node name="Camera3D" type="Camera3D" parent="CameraPivot/SpringArm3D"]
+[node name="Camera3D" type="Camera3D" parent="CameraPivot/SpringArm3D" unique_id=2008693244]
 current = true
-fov = 75.0
-near = 0.05
 
-[node name="InteractionRayCast3D" type="RayCast3D" parent="CameraPivot/SpringArm3D/Camera3D"]
+[node name="InteractionRayCast3D" type="RayCast3D" parent="CameraPivot/SpringArm3D/Camera3D" unique_id=2114062617]
 target_position = Vector3(0, 0, -3)
-enabled = true
 
-[node name="SystemMenuOverlay" parent="." instance=ExtResource("2_system_menu_overlay")]
+[node name="SystemMenuOverlay" parent="." unique_id=255196846 instance=ExtResource("2_system_menu_overlay")]
+
+[node name="PlayerInventoryOverlay" parent="." unique_id=94085804 instance=ExtResource("4_player_inventory_overlay")]
+
+[node name="PlayerCrosshairOverlay" parent="." unique_id=1531823853 instance=ExtResource("5_player_crosshair_overlay")]

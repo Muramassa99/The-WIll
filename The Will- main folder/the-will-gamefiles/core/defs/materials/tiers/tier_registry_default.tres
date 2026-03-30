@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="TierRegistryDef" load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://core/defs/materials/tier_registry_def.gd" id="1_registry_def"]
+[ext_resource type="Resource" path="res://core/defs/materials/tiers/tier_gray.tres" id="2_tier"]
+[ext_resource type="Resource" path="res://core/defs/materials/tiers/tier_green.tres" id="3_tier"]
+[ext_resource type="Resource" path="res://core/defs/materials/tiers/tier_blue.tres" id="4_tier"]
+[ext_resource type="Resource" path="res://core/defs/materials/tiers/tier_purple.tres" id="5_tier"]
+[ext_resource type="Resource" path="res://core/defs/materials/tiers/tier_orange.tres" id="6_tier"]
+
+[resource]
+script = ExtResource("1_registry_def")
+registry_id = &"tier_registry_default"
+entries = Array[Resource]([ExtResource("2_tier"), ExtResource("3_tier"), ExtResource("4_tier"), ExtResource("5_tier"), ExtResource("6_tier")])

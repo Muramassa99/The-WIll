@@ -7,7 +7,6 @@ func build_stack(process_rule: ProcessRuleDef, material_variant: MaterialVariant
 	stack.material_variant_id = material_variant.variant_id
 	stack.quantity = process_rule.output_count_per_input
 	stack.variant_stats = _copy_stat_lines(material_variant.variant_stats)
-	# TODO: validate process_rule.output_material_variant_id against material_variant.variant_id once IDs are locked.
 	return stack
 
 func _copy_stat_lines(stat_lines: Array[StatLine]) -> Array[StatLine]:

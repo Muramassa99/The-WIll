@@ -1,0 +1,311 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://runtime/ui/player_inventory_overlay.gd" id="1_player_inventory_overlay"]
+
+[node name="PlayerInventoryOverlay" type="CanvasLayer"]
+layer = 18
+script = ExtResource("1_player_inventory_overlay")
+
+[node name="Backdrop" type="ColorRect" parent="."]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.58)
+
+[node name="Panel" type="PanelContainer" parent="."]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 14
+
+[node name="RootVBox" type="VBoxContainer" parent="Panel/MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 12
+
+[node name="HeaderBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox"]
+theme_override_constants/separation = 4
+
+[node name="TitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/HeaderBox"]
+text = "Player Inventory"
+horizontal_alignment = 1
+
+[node name="SubtitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/HeaderBox"]
+text = "Use this shared player surface for equipment, storage, materials, and saved WIP."
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="PageButtonFlow" type="HFlowContainer" parent="Panel/MarginContainer/RootVBox"]
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 8
+
+[node name="EquipmentPageButton" type="Button" parent="Panel/MarginContainer/RootVBox/PageButtonFlow"]
+text = "Equipment"
+
+[node name="InventoryPageButton" type="Button" parent="Panel/MarginContainer/RootVBox/PageButtonFlow"]
+text = "Inventory"
+
+[node name="StoragePageButton" type="Button" parent="Panel/MarginContainer/RootVBox/PageButtonFlow"]
+text = "Storage"
+
+[node name="ForgeMaterialsPageButton" type="Button" parent="Panel/MarginContainer/RootVBox/PageButtonFlow"]
+text = "Forge Materials"
+
+[node name="WipPageButton" type="Button" parent="Panel/MarginContainer/RootVBox/PageButtonFlow"]
+text = "WIP Storage"
+
+[node name="PageScroll" type="ScrollContainer" parent="Panel/MarginContainer/RootVBox"]
+size_flags_vertical = 3
+
+[node name="StackedPages" type="TabContainer" parent="Panel/MarginContainer/RootVBox/PageScroll"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+tabs_visible = false
+
+[node name="EquipmentPage" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages"]
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/EquipmentPage"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="EquipmentVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/EquipmentPage/MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="EquipmentHeaderLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/EquipmentPage/MarginContainer/EquipmentVBox"]
+text = "Equipment Slots"
+
+[node name="EquipmentSubLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/EquipmentPage/MarginContainer/EquipmentVBox"]
+text = "View the current slot shell. Hand slots already support forge-internal WIP testing, while the rest of the layout is ready for finalized-item follow-through later."
+autowrap_mode = 2
+
+[node name="EquipmentList" type="ItemList" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/EquipmentPage/MarginContainer/EquipmentVBox"]
+size_flags_vertical = 3
+allow_reselect = true
+
+[node name="EquipmentDetailLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/EquipmentPage/MarginContainer/EquipmentVBox"]
+autowrap_mode = 2
+text = "Select an equipment slot to inspect it."
+
+[node name="ActionRow" type="HFlowContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/EquipmentPage/MarginContainer/EquipmentVBox"]
+theme_override_constants/separation = 8
+
+[node name="ClearSlotButton" type="Button" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/EquipmentPage/MarginContainer/EquipmentVBox/ActionRow"]
+text = "Clear Selected Slot"
+
+[node name="BodyInventoryPage" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages"]
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/BodyInventoryPage"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="BodyInventoryVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/BodyInventoryPage/MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="BodyInventoryHeaderLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/BodyInventoryPage/MarginContainer/BodyInventoryVBox"]
+text = "Body Inventory"
+
+[node name="BodyInventorySubLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/BodyInventoryPage/MarginContainer/BodyInventoryVBox"]
+text = "This is the player's on-body item space. Use it for carried items, then move things into personal storage when you want to unload them."
+autowrap_mode = 2
+
+[node name="BodyInventoryList" type="ItemList" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/BodyInventoryPage/MarginContainer/BodyInventoryVBox"]
+size_flags_vertical = 3
+allow_reselect = true
+
+[node name="BodyInventoryDetailLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/BodyInventoryPage/MarginContainer/BodyInventoryVBox"]
+autowrap_mode = 2
+text = "Select an item to inspect it or move it into storage."
+
+[node name="ActionRow" type="HFlowContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/BodyInventoryPage/MarginContainer/BodyInventoryVBox"]
+theme_override_constants/separation = 8
+
+[node name="MoveToStorageButton" type="Button" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/BodyInventoryPage/MarginContainer/BodyInventoryVBox/ActionRow"]
+text = "Move To Storage"
+
+[node name="RefreshBodyInventoryButton" type="Button" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/BodyInventoryPage/MarginContainer/BodyInventoryVBox/ActionRow"]
+text = "Refresh"
+
+[node name="StoragePage" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages"]
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/StoragePage"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="StorageVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/StoragePage/MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="StorageHeaderLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/StoragePage/MarginContainer/StorageVBox"]
+text = "Personal Storage"
+
+[node name="StorageSubLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/StoragePage/MarginContainer/StorageVBox"]
+text = "This is the persistent personal-storage surface that can be opened from placeholder storage boxes or other future storage access points."
+autowrap_mode = 2
+
+[node name="StorageList" type="ItemList" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/StoragePage/MarginContainer/StorageVBox"]
+size_flags_vertical = 3
+allow_reselect = true
+
+[node name="StorageDetailLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/StoragePage/MarginContainer/StorageVBox"]
+autowrap_mode = 2
+text = "Select a stored item to inspect it or move it back into body inventory."
+
+[node name="ActionRow" type="HFlowContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/StoragePage/MarginContainer/StorageVBox"]
+theme_override_constants/separation = 8
+
+[node name="MoveToInventoryButton" type="Button" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/StoragePage/MarginContainer/StorageVBox/ActionRow"]
+text = "Move To Inventory"
+
+[node name="RefreshStorageButton" type="Button" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/StoragePage/MarginContainer/StorageVBox/ActionRow"]
+text = "Refresh"
+
+[node name="ForgeMaterialsPage" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages"]
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/ForgeMaterialsPage"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="ForgeMaterialsVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/ForgeMaterialsPage/MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="ForgeMaterialsHeaderLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/ForgeMaterialsPage/MarginContainer/ForgeMaterialsVBox"]
+text = "Forge Materials"
+
+[node name="ForgeMaterialsSubLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/ForgeMaterialsPage/MarginContainer/ForgeMaterialsVBox"]
+text = "A logistics page for checking forge-building material counts without walking back to the forge just to inspect a number."
+autowrap_mode = 2
+
+[node name="ForgeMaterialsList" type="ItemList" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/ForgeMaterialsPage/MarginContainer/ForgeMaterialsVBox"]
+size_flags_vertical = 3
+
+[node name="ForgeMaterialsSummaryLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/ForgeMaterialsPage/MarginContainer/ForgeMaterialsVBox"]
+autowrap_mode = 2
+text = "Visible forge stack count: 0"
+
+[node name="WipStoragePage" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages"]
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/WipStoragePage"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="WipVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/WipStoragePage/MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="WipHeaderLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/WipStoragePage/MarginContainer/WipVBox"]
+text = "WIP Storage"
+
+[node name="WipSubLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/WipStoragePage/MarginContainer/WipVBox"]
+text = "Saved forge projects live here. You can mark one as the preferred forge project or push it into a forge-internal hand test slot if it passes the current gate."
+autowrap_mode = 2
+
+[node name="WipList" type="ItemList" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/WipStoragePage/MarginContainer/WipVBox"]
+size_flags_vertical = 3
+allow_reselect = true
+
+[node name="WipDetailLabel" type="Label" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/WipStoragePage/MarginContainer/WipVBox"]
+autowrap_mode = 2
+text = "Select a WIP project to inspect it or use the action buttons."
+
+[node name="ActionRow" type="HFlowContainer" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/WipStoragePage/MarginContainer/WipVBox"]
+theme_override_constants/separation = 8
+
+[node name="MarkForForgeButton" type="Button" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/WipStoragePage/MarginContainer/WipVBox/ActionRow"]
+text = "Mark For Forge"
+
+[node name="EquipRightHandButton" type="Button" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/WipStoragePage/MarginContainer/WipVBox/ActionRow"]
+text = "Test Equip Right"
+
+[node name="EquipLeftHandButton" type="Button" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/WipStoragePage/MarginContainer/WipVBox/ActionRow"]
+text = "Test Equip Left"
+
+[node name="ClearHandTestButton" type="Button" parent="Panel/MarginContainer/RootVBox/PageScroll/StackedPages/WipStoragePage/MarginContainer/WipVBox/ActionRow"]
+text = "Clear Hand Test"
+
+[node name="FooterRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox"]
+theme_override_constants/separation = 10
+
+[node name="FooterStatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/FooterRow"]
+size_flags_horizontal = 3
+text = "Inventory ready."
+autowrap_mode = 2
+
+[node name="CloseButton" type="Button" parent="Panel/MarginContainer/RootVBox/FooterRow"]
+text = "Close"

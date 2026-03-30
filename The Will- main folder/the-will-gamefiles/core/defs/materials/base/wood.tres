@@ -1,7 +1,7 @@
 [gd_resource type="Resource" script_class="BaseMaterialDef" format=3 uid="uid://b8wbqvo46uhia"]
 
-[ext_resource type="Script" path="res://core/defs/base_material_def.gd" id="1_base_material"]
-[ext_resource type="Script" path="res://core/atoms/stat_line.gd" id="2_stat_line"]
+[ext_resource type="Script" uid="uid://7m86a3xt1dlg" path="res://core/defs/base_material_def.gd" id="1_base_material"]
+[ext_resource type="Script" uid="uid://cl8i2kjpv5mh3" path="res://core/atoms/stat_line.gd" id="2_stat_line"]
 
 [sub_resource type="Resource" id="Resource_atk_mod_flat"]
 script = ExtResource("2_stat_line")
@@ -61,21 +61,6 @@ script = ExtResource("2_stat_line")
 stat_id = &"cap_anchor"
 value = 0.5
 
-[sub_resource type="Resource" id="Resource_fam_melee"]
-script = ExtResource("2_stat_line")
-stat_id = &"fam_melee"
-value = 0.7
-
-[sub_resource type="Resource" id="Resource_fam_mobility"]
-script = ExtResource("2_stat_line")
-stat_id = &"fam_mobility"
-value = 0.6
-
-[sub_resource type="Resource" id="Resource_fam_support"]
-script = ExtResource("2_stat_line")
-stat_id = &"fam_support"
-value = 0.4
-
 [sub_resource type="Resource" id="Resource_elem_life"]
 script = ExtResource("2_stat_line")
 stat_id = &"elem_life"
@@ -101,22 +86,36 @@ script = ExtResource("2_stat_line")
 stat_id = &"ctx_ranged_support"
 value = 0.6
 
+[sub_resource type="Resource" id="Resource_fam_melee"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_melee"
+value = 0.7
+
+[sub_resource type="Resource" id="Resource_fam_mobility"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_mobility"
+value = 0.6
+
+[sub_resource type="Resource" id="Resource_fam_support"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_support"
+value = 0.4
+
 [resource]
 script = ExtResource("1_base_material")
 base_material_id = &"mat_wood_base"
 display_name = "Wood"
-material_family = &"structural"
-color_group = &"brown"
-albedo_color = Color(0.756863, 0.560784, 0.333333, 1)
 density_per_cell = 0.5
 hardness = 0.4
 toughness = 0.5
 elasticity = 0.7
-base_stat_lines = Array[Resource]([SubResource("Resource_atk_mod_flat"), SubResource("Resource_move_speed_pct_add"), SubResource("Resource_aspd_pct_add"), SubResource("Resource_heal_power_flat"), SubResource("Resource_dot_duration_pct_add")])
-capability_bias_lines = Array[Resource]([SubResource("Resource_cap_reach"), SubResource("Resource_cap_flex"), SubResource("Resource_cap_launch"), SubResource("Resource_cap_mobility"), SubResource("Resource_cap_grip"), SubResource("Resource_cap_anchor")])
-skill_family_bias_lines = Array[Resource]([SubResource("Resource_fam_melee"), SubResource("Resource_fam_mobility"), SubResource("Resource_fam_support")])
-elemental_affinity_lines = Array[Resource]([SubResource("Resource_elem_life"), SubResource("Resource_elem_terre")])
-equipment_context_bias_lines = Array[Resource]([SubResource("Resource_ctx_weapon"), SubResource("Resource_ctx_armor"), SubResource("Resource_ctx_ranged_support")])
+color_group = &"brown"
+albedo_color = Color(0.756863, 0.560784, 0.333333, 1)
+base_stat_lines = Array[ExtResource("2_stat_line")]([SubResource("Resource_atk_mod_flat"), SubResource("Resource_move_speed_pct_add"), SubResource("Resource_aspd_pct_add"), SubResource("Resource_heal_power_flat"), SubResource("Resource_dot_duration_pct_add")])
+capability_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Resource_cap_reach"), SubResource("Resource_cap_flex"), SubResource("Resource_cap_launch"), SubResource("Resource_cap_mobility"), SubResource("Resource_cap_grip"), SubResource("Resource_cap_anchor")])
+skill_family_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Resource_fam_melee"), SubResource("Resource_fam_mobility"), SubResource("Resource_fam_support")])
+elemental_affinity_lines = Array[ExtResource("2_stat_line")]([SubResource("Resource_elem_life"), SubResource("Resource_elem_terre")])
+equipment_context_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Resource_ctx_weapon"), SubResource("Resource_ctx_armor"), SubResource("Resource_ctx_ranged_support")])
 can_be_anchor_material = true
 can_be_grip_profile = true
 can_be_joint_support = true

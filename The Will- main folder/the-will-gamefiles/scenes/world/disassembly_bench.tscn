@@ -1,0 +1,36 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://runtime/disassembly/disassembly_bench.gd" id="1_disassembly_bench"]
+[ext_resource type="PackedScene" path="res://scenes/ui/disassembly_bench_ui.tscn" id="2_disassembly_bench_ui"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_disassembly_collider"]
+size = Vector3(1.3, 1.3, 1.3)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_disassembly_top"]
+albedo_color = Color(0.294118, 0.411765, 0.360784, 1)
+metallic = 0.08
+roughness = 0.58
+
+[sub_resource type="BoxMesh" id="BoxMesh_disassembly_top"]
+size = Vector3(1.2, 1.2, 1.2)
+
+[node name="DisassemblyBench" type="StaticBody3D"]
+script = ExtResource("1_disassembly_bench")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.6, 0)
+shape = SubResource("BoxShape3D_disassembly_collider")
+
+[node name="PlaceholderCube" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.6, 0)
+mesh = SubResource("BoxMesh_disassembly_top")
+surface_material_override/0 = SubResource("StandardMaterial3D_disassembly_top")
+
+[node name="PromptLabel3D" type="Label3D" parent="."]
+position = Vector3(0, 1.55, 0)
+billboard = 1
+text = "F - Use Disassembly Bench"
+font_size = 38
+outline_size = 12
+
+[node name="DisassemblyBenchUI" parent="." instance=ExtResource("2_disassembly_bench_ui")]

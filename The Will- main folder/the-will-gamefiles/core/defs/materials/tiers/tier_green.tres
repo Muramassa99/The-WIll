@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="TierDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/defs/tier_def.gd" id="1_tier_def"]
+
+[resource]
+script = ExtResource("1_tier_def")
+tier_id = &"green"
+tier_name = "Green"
+stat_multiplier = 1.02
+weight_multiplier = 1.0
+value_multiplier = 1.02
+drop_quality = 1.02
+tier_color = Color(0.36, 0.78, 0.39, 1)
+sort_order = 1

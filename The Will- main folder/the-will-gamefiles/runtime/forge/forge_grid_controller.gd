@@ -29,6 +29,7 @@ var forge_service: ForgeService = ForgeServiceScript.new(DEFAULT_FORGE_RULES_RES
 var test_print_mesh_builder: TestPrintMeshBuilder = TestPrintMeshBuilderScript.new()
 var test_print_spawn_root: Node3D
 var test_print_mesh_instance: MeshInstance3D
+var active_cell_lookup: Dictionary = {}
 
 var active_sample_preset_id: StringName = DEFAULT_FORGE_RULES_RESOURCE.default_sample_preset_id
 
@@ -80,8 +81,24 @@ func get_sample_preset_display_name(sample_preset_id: StringName) -> String:
 func get_debug_inventory_seed_quantity() -> int:
 	return _get_forge_rules().debug_inventory_seed_quantity
 
+func get_debug_inventory_bonus_quantity() -> int:
+	return _get_forge_rules().debug_inventory_bonus_quantity
+
+func get_inventory_seed_def() -> Resource:
+	return _get_forge_rules().inventory_seed_def
+
+func get_material_catalog_def() -> Resource:
+	return _get_forge_rules().material_catalog_def
+
+func get_default_material_tier_def() -> Resource:
+	return _get_forge_rules().default_material_tier_def
+
+func get_material_catalog_ids() -> Array[StringName]:
+	return _build_ordered_material_ids(build_default_material_lookup())
+
 func set_active_wip(wip: CraftedItemWIP) -> void:
 	active_wip = wip
+	_rebuild_active_cell_lookup()
 	active_baked_profile = null
 	emit_signal("active_wip_changed", active_wip)
 
@@ -91,6 +108,8 @@ func set_active_test_print(test_print: TestPrintInstance) -> void:
 	emit_signal("active_test_print_changed", active_test_print)
 
 func clear_active_test_print() -> void:
+	if active_test_print == null:
+		return
 	active_test_print = null
 	_sync_spawned_test_print_mesh()
 	emit_signal("active_test_print_changed", active_test_print)
@@ -154,15 +173,8 @@ func get_max_fill_cells() -> int:
 	return int(floor(float(grid_size.x * grid_size.y * grid_size.z) * _get_forge_rules().max_fill_ratio))
 
 func get_material_id_at(grid_position: Vector3i) -> StringName:
-	if active_wip == null:
-		return StringName()
-	for layer_atom: LayerAtom in active_wip.layers:
-		if layer_atom == null:
-			continue
-		var target_cell: CellAtom = _find_cell_at_position(layer_atom, grid_position)
-		if target_cell != null:
-			return target_cell.material_variant_id
-	return StringName()
+	var target_cell: CellAtom = _get_cell_at_position(grid_position)
+	return target_cell.material_variant_id if target_cell != null else StringName()
 
 func set_material_at(grid_position: Vector3i, material_variant_id: StringName) -> bool:
 	if material_variant_id == StringName():
@@ -171,13 +183,14 @@ func set_material_at(grid_position: Vector3i, material_variant_id: StringName) -
 	if wip == null:
 		return false
 	var layer_atom: LayerAtom = _get_or_create_layer(wip, grid_position.z)
-	var existing_cell: CellAtom = _find_cell_at_position(layer_atom, grid_position)
+	var existing_cell: CellAtom = _get_cell_at_position(grid_position)
 	if existing_cell == null:
 		var new_cell: CellAtom = CellAtom.new()
 		new_cell.grid_position = grid_position
 		new_cell.layer_index = grid_position.z
 		new_cell.material_variant_id = material_variant_id
 		layer_atom.cells.append(new_cell)
+		active_cell_lookup[_build_cell_lookup_key(grid_position)] = new_cell
 	else:
 		existing_cell.material_variant_id = material_variant_id
 	_sort_layer_cells(layer_atom)
@@ -187,17 +200,16 @@ func set_material_at(grid_position: Vector3i, material_variant_id: StringName) -
 func remove_material_at(grid_position: Vector3i) -> StringName:
 	if active_wip == null:
 		return StringName()
-	for layer_atom: LayerAtom in active_wip.layers:
-		if layer_atom == null:
-			continue
-		var target_cell: CellAtom = _find_cell_at_position(layer_atom, grid_position)
-		if target_cell == null:
-			continue
-		var removed_material_id: StringName = target_cell.material_variant_id
-		layer_atom.cells.erase(target_cell)
-		_mark_wip_dirty(active_wip)
-		return removed_material_id
-	return StringName()
+	var target_cell: CellAtom = _get_cell_at_position(grid_position)
+	if target_cell == null:
+		return StringName()
+	var target_layer: LayerAtom = _find_layer_by_index(target_cell.layer_index)
+	if target_layer != null:
+		target_layer.cells.erase(target_cell)
+	active_cell_lookup.erase(_build_cell_lookup_key(grid_position))
+	var removed_material_id: StringName = target_cell.material_variant_id
+	_mark_wip_dirty(active_wip)
+	return removed_material_id
 
 func build_default_material_lookup() -> Dictionary:
 	return _build_debug_material_lookup()
@@ -366,11 +378,25 @@ func _find_cell_at_position(layer_atom: LayerAtom, grid_position: Vector3i) -> C
 			return cell
 	return null
 
+func _get_cell_at_position(grid_position: Vector3i) -> CellAtom:
+	return active_cell_lookup.get(_build_cell_lookup_key(grid_position)) as CellAtom
+
+func _find_layer_by_index(layer_index: int) -> LayerAtom:
+	if active_wip == null:
+		return null
+	for layer_atom: LayerAtom in active_wip.layers:
+		if layer_atom == null:
+			continue
+		if layer_atom.layer_index == layer_index:
+			return layer_atom
+	return null
+
 func _mark_wip_dirty(wip: CraftedItemWIP) -> void:
 	if wip != null:
 		wip.latest_baked_profile_snapshot = null
 	active_baked_profile = null
-	set_active_wip(wip)
+	active_wip = wip
+	emit_signal("active_wip_changed", active_wip)
 	clear_active_test_print()
 
 func _sort_layer_cells(layer_atom: LayerAtom) -> void:
@@ -393,10 +419,97 @@ func _make_cell(grid_position: Vector3i, material_variant_id: StringName) -> Cel
 	cell.material_variant_id = material_variant_id
 	return cell
 
+func _rebuild_active_cell_lookup() -> void:
+	active_cell_lookup.clear()
+	if active_wip == null:
+		return
+	for layer_atom: LayerAtom in active_wip.layers:
+		if layer_atom == null:
+			continue
+		for cell: CellAtom in layer_atom.cells:
+			if cell == null:
+				continue
+			active_cell_lookup[_build_cell_lookup_key(cell.grid_position)] = cell
+
+func _build_cell_lookup_key(grid_position: Vector3i) -> StringName:
+	return StringName("%d,%d,%d" % [grid_position.x, grid_position.y, grid_position.z])
+
 func _build_debug_material_lookup() -> Dictionary:
 	var material_lookup: Dictionary = {}
+	_collect_catalog_material_defs(material_lookup)
 	_collect_material_defs_in_dir(material_defs_root_dir, material_lookup)
 	return material_lookup
+
+func _collect_catalog_material_defs(material_lookup: Dictionary) -> void:
+	var catalog_def: Resource = get_material_catalog_def()
+	if catalog_def == null or catalog_def.is_empty():
+		return
+	for catalog_entry: Resource in catalog_def.entries:
+		var base_material: BaseMaterialDef = _resolve_catalog_entry_material_def(catalog_entry)
+		var material_id: StringName = _resolve_catalog_entry_material_id(catalog_entry, base_material)
+		var material_variant: MaterialVariantDef = _build_catalog_material_variant(base_material)
+		if base_material == null:
+			continue
+		material_lookup[base_material.base_material_id] = base_material
+		if material_variant != null:
+			material_lookup[material_variant.variant_id] = material_variant
+		if material_id != StringName() and material_lookup.has(material_id):
+			continue
+		if material_id != StringName():
+			if material_variant != null:
+				material_lookup[material_id] = material_variant
+			else:
+				material_lookup[material_id] = base_material
+
+func _build_ordered_material_ids(material_lookup: Dictionary) -> Array[StringName]:
+	var ordered_ids: Array[StringName] = []
+	var catalog_def: Resource = get_material_catalog_def()
+	var has_authored_catalog: bool = false
+	if catalog_def != null and not catalog_def.is_empty():
+		has_authored_catalog = true
+		for catalog_entry: Resource in catalog_def.entries:
+			var base_material: BaseMaterialDef = _resolve_catalog_entry_material_def(catalog_entry)
+			var material_id: StringName = _resolve_catalog_entry_material_id(catalog_entry, base_material)
+			if material_id == StringName() or ordered_ids.has(material_id):
+				continue
+			if base_material != null and not material_lookup.has(material_id):
+				material_lookup[material_id] = base_material
+			if material_lookup.has(material_id):
+				ordered_ids.append(material_id)
+	if has_authored_catalog and not ordered_ids.is_empty():
+		return ordered_ids
+
+	var discovered_material_ids: Array = material_lookup.keys()
+	discovered_material_ids.sort()
+	for material_id_value in discovered_material_ids:
+		var material_id: StringName = material_id_value
+		if ordered_ids.has(material_id):
+			continue
+		ordered_ids.append(material_id)
+	return ordered_ids
+
+func _resolve_catalog_entry_material_def(catalog_entry: Resource) -> BaseMaterialDef:
+	if catalog_entry == null:
+		return null
+	return catalog_entry.material_def as BaseMaterialDef
+
+func _resolve_catalog_entry_material_id(catalog_entry: Resource, base_material: BaseMaterialDef = null) -> StringName:
+	var material_variant: MaterialVariantDef = _build_catalog_material_variant(base_material)
+	if catalog_entry != null and catalog_entry.material_id != StringName():
+		if base_material != null and material_variant != null and catalog_entry.material_id == base_material.base_material_id:
+			return material_variant.variant_id
+		return catalog_entry.material_id
+	if material_variant != null:
+		return material_variant.variant_id
+	if base_material != null:
+		return base_material.base_material_id
+	return StringName()
+
+func _build_catalog_material_variant(base_material: BaseMaterialDef) -> MaterialVariantDef:
+	var default_tier: TierDef = get_default_material_tier_def() as TierDef
+	if base_material == null or default_tier == null:
+		return null
+	return forge_service.build_material_variant(base_material, default_tier)
 
 func _collect_material_defs_in_dir(directory_path: String, material_lookup: Dictionary) -> void:
 	if directory_path.is_empty():

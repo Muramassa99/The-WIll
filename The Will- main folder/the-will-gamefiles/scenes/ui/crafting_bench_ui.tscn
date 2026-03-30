@@ -125,6 +125,16 @@ autowrap_mode = 3
 [node name="ProjectNameEdit" type="LineEdit" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
 placeholder_text = "Temporary forge project name"
 
+[node name="ProjectStowPositionLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
+text = "Stowed weapon position"
+
+[node name="ProjectStowPositionOptionButton" type="OptionButton" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
+
+[node name="ProjectGripStyleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
+text = "Weapon grip style"
+
+[node name="ProjectGripStyleOptionButton" type="OptionButton" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
+
 [node name="ProjectButtonRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
 theme_override_constants/separation = 6
 
@@ -146,6 +156,17 @@ text = "Duplicate"
 [node name="DeleteProjectButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectButtonRowSecondary"]
 size_flags_horizontal = 3
 text = "Delete"
+
+[node name="ProjectButtonRowTertiary" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
+theme_override_constants/separation = 6
+
+[node name="LoadProjectButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectButtonRowTertiary"]
+size_flags_horizontal = 3
+text = "Load Selected"
+
+[node name="ResumeLastProjectButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectButtonRowTertiary"]
+size_flags_horizontal = 3
+text = "Resume Last"
 
 [node name="ProjectNotesLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
 text = "Forge notes"
@@ -249,66 +270,84 @@ text = "Geometry"
 custom_minimum_size = Vector2(160, 34)
 text = "Workflow"
 
-[node name="ViewportSplit" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox"]
-size_flags_vertical = 3
-theme_override_constants/separation = 10
-
-[node name="PlaneViewPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit"]
+[node name="ActionSpacer" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow"]
 size_flags_horizontal = 3
+
+[node name="FlipViewButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow"]
+custom_minimum_size = Vector2(150, 34)
+text = "2D Main"
+
+[node name="DebugInfoButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow"]
+custom_minimum_size = Vector2(132, 34)
+text = "Debug"
+
+[node name="WorkspaceStage" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox"]
+clip_contents = true
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="MainViewportHost" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage"]
+clip_contents = true
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="FreeViewPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost"]
+anchor_right = 1.0
+anchor_bottom = 1.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_section")
 
-[node name="PlaneVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/PlaneViewPanel"]
+[node name="FreeVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/FreeViewPanel"]
 size_flags_horizontal = 3
 size_flags_vertical = 3
+mouse_filter = 2
 
-[node name="PlaneTitle" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/PlaneViewPanel/PlaneVBox"]
-text = "Plane-Locked View"
-horizontal_alignment = 1
-theme_override_font_sizes/font_size = 16
-
-[node name="PlaneViewport" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/PlaneViewPanel/PlaneVBox"]
-custom_minimum_size = Vector2(700, 620)
-size_flags_horizontal = 3
-size_flags_vertical = 3
-script = ExtResource("2_plane_viewport")
-
-[node name="FreeViewPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit"]
-custom_minimum_size = Vector2(520, 0)
-theme_override_styles/panel = SubResource("StyleBoxFlat_section")
-
-[node name="FreeVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/FreeViewPanel"]
-size_flags_horizontal = 3
-size_flags_vertical = 3
-
-[node name="FreeTitle" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/FreeViewPanel/FreeVBox"]
+[node name="FreeTitle" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/FreeViewPanel/FreeVBox"]
 text = "Free 3D View"
 horizontal_alignment = 1
 theme_override_font_sizes/font_size = 16
+mouse_filter = 2
 
-[node name="FreeViewContainer" type="SubViewportContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/FreeViewPanel/FreeVBox"]
+[node name="FreeViewContainer" type="SubViewportContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/FreeViewPanel/FreeVBox"]
 custom_minimum_size = Vector2(500, 620)
 size_flags_horizontal = 3
 size_flags_vertical = 3
 stretch = true
 
-[node name="FreeSubViewport" type="SubViewport" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/FreeViewPanel/FreeVBox/FreeViewContainer"]
+[node name="FreeSubViewport" type="SubViewport" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/FreeViewPanel/FreeVBox/FreeViewContainer"]
 size = Vector2i(500, 620)
 transparent_bg = false
 handle_input_locally = false
 render_target_update_mode = 4
 
-[node name="OrientationLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/FreeViewPanel/FreeVBox"]
+[node name="OrientationLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/FreeViewPanel/FreeVBox"]
 text = "Free View"
 horizontal_alignment = 1
 theme_override_font_sizes/font_size = 13
+mouse_filter = 2
 
-[node name="StatusText" type="RichTextLabel" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox"]
-custom_minimum_size = Vector2(0, 170)
+[node name="InsetViewportHost" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage"]
+clip_contents = true
+z_index = 2
+
+[node name="PlaneViewPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/InsetViewportHost"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="PlaneVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/InsetViewportHost/PlaneViewPanel"]
+size_flags_horizontal = 3
 size_flags_vertical = 3
-bbcode_enabled = true
-fit_content = false
-scroll_active = true
-theme_override_font_sizes/normal_font_size = 13
+
+[node name="PlaneTitle" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/InsetViewportHost/PlaneViewPanel/PlaneVBox"]
+text = "Plane-Locked View"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 16
+
+[node name="PlaneViewport" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/InsetViewportHost/PlaneViewPanel/PlaneVBox"]
+custom_minimum_size = Vector2(220, 140)
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("2_plane_viewport")
 
 [node name="RightPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox"]
 custom_minimum_size = Vector2(360, 0)
@@ -382,3 +421,71 @@ bbcode_enabled = true
 fit_content = false
 scroll_active = true
 theme_override_font_sizes/normal_font_size = 12
+
+[node name="DebugPopup" type="PopupPanel" parent="."]
+visible = false
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="StowHintPopup" type="PopupPanel" parent="."]
+visible = false
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="StowHintMargin" type="MarginContainer" parent="StowHintPopup"]
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
+
+[node name="StowHintLabel" type="Label" parent="StowHintPopup/StowHintMargin"]
+custom_minimum_size = Vector2(220, 0)
+autowrap_mode = 3
+text = "Stowed weapon note"
+
+[node name="GripHintPopup" type="PopupPanel" parent="."]
+visible = false
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="GripHintMargin" type="MarginContainer" parent="GripHintPopup"]
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
+
+[node name="GripHintLabel" type="Label" parent="GripHintPopup/GripHintMargin"]
+custom_minimum_size = Vector2(260, 0)
+autowrap_mode = 3
+text = "Grip style note"
+
+[node name="DebugMargin" type="MarginContainer" parent="DebugPopup"]
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="DebugVBox" type="VBoxContainer" parent="DebugPopup/DebugMargin"]
+custom_minimum_size = Vector2(420, 260)
+theme_override_constants/separation = 10
+
+[node name="DebugHeaderRow" type="HBoxContainer" parent="DebugPopup/DebugMargin/DebugVBox"]
+theme_override_constants/separation = 8
+
+[node name="DebugTitleLabel" type="Label" parent="DebugPopup/DebugMargin/DebugVBox/DebugHeaderRow"]
+size_flags_horizontal = 3
+text = "Forge Debug"
+theme_override_font_sizes/font_size = 16
+
+[node name="DebugCloseButton" type="Button" parent="DebugPopup/DebugMargin/DebugVBox/DebugHeaderRow"]
+text = "Close"
+
+[node name="DebugScroll" type="ScrollContainer" parent="DebugPopup/DebugMargin/DebugVBox"]
+custom_minimum_size = Vector2(0, 220)
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="DebugText" type="RichTextLabel" parent="DebugPopup/DebugMargin/DebugVBox/DebugScroll"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+bbcode_enabled = true
+fit_content = false
+scroll_active = false
+theme_override_font_sizes/normal_font_size = 13

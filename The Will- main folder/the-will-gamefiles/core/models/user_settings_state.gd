@@ -112,7 +112,18 @@ func _ensure_defaults() -> void:
 		keybindings = {}
 
 func _ensure_save_directory() -> void:
-	var save_directory_path: String = save_file_path.get_base_dir()
+	var normalized_save_path: String = save_file_path.replace("\\", "/")
+	if normalized_save_path.begins_with("user://"):
+		var relative_save_path: String = normalized_save_path.trim_prefix("user://")
+		var last_separator_index: int = relative_save_path.rfind("/")
+		if last_separator_index < 0:
+			return
+		var relative_directory_path: String = relative_save_path.substr(0, last_separator_index)
+		if relative_directory_path.is_empty():
+			return
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("user://%s" % relative_directory_path))
+		return
+	var save_directory_path: String = normalized_save_path.get_base_dir()
 	if save_directory_path.is_empty():
 		return
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(save_directory_path))

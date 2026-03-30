@@ -4,7 +4,8 @@
 
 [resource]
 script = ExtResource("1_raw_drop_def")
-drop_id = &"drop_iron_raw"
+drop_id = &"drop_iron_raw_gray"
 base_material_id = &"mat_iron_base"
+default_tier_id = &"gray"
 quantity_min = 1
 quantity_max = 1

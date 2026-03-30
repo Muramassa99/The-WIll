@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="ProcessRuleRegistryDef" format=3]
+
+[ext_resource type="Script" path="res://core/defs/materials/process_rule_registry_def.gd" id="1_registry_def"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/wood_gray_process_rule.tres" id="2_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/iron_gray_process_rule.tres" id="3_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/bone_gray_process_rule.tres" id="4_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/hide_gray_process_rule.tres" id="5_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/crystal_gray_process_rule.tres" id="6_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/mana_core_gray_process_rule.tres" id="7_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/healing_gray_process_rule.tres" id="8_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/pyro_gray_process_rule.tres" id="9_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/frost_gray_process_rule.tres" id="10_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/aqua_gray_process_rule.tres" id="11_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/scale_gray_process_rule.tres" id="12_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/tendon_gray_process_rule.tres" id="13_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/carapace_gray_process_rule.tres" id="14_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/silver_gray_process_rule.tres" id="15_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/gold_gray_process_rule.tres" id="16_process_rule"]
+[ext_resource type="Resource" path="res://core/defs/materials/process_rules/copper_gray_process_rule.tres" id="17_process_rule"]
+
+[resource]
+script = ExtResource("1_registry_def")
+registry_id = &"process_rule_registry_default"
+entries = Array[Resource]([ExtResource("2_process_rule"), ExtResource("3_process_rule"), ExtResource("4_process_rule"), ExtResource("5_process_rule"), ExtResource("6_process_rule"), ExtResource("7_process_rule"), ExtResource("8_process_rule"), ExtResource("9_process_rule"), ExtResource("10_process_rule"), ExtResource("11_process_rule"), ExtResource("12_process_rule"), ExtResource("13_process_rule"), ExtResource("14_process_rule"), ExtResource("15_process_rule"), ExtResource("16_process_rule"), ExtResource("17_process_rule")])

@@ -1,0 +1,92 @@
+[gd_resource type="Resource" script_class="BaseMaterialDef" format=3 uid="uid://bdjpi11sk3t3e"]
+
+[ext_resource type="Script" uid="uid://7m86a3xt1dlg" path="res://core/defs/base_material_def.gd" id="1_base_material"]
+[ext_resource type="Script" uid="uid://cl8i2kjpv5mh3" path="res://core/atoms/stat_line.gd" id="2_stat_line"]
+
+[sub_resource type="Resource" id="Stat_atk"]
+script = ExtResource("2_stat_line")
+stat_id = &"atk_mod_flat"
+value = 1.0
+
+[sub_resource type="Resource" id="Stat_power"]
+script = ExtResource("2_stat_line")
+stat_id = &"power_flat"
+value = 0.35
+
+[sub_resource type="Resource" id="Stat_crit"]
+script = ExtResource("2_stat_line")
+stat_id = &"crit_chance_pct"
+value = 0.03
+value_kind = 1
+
+[sub_resource type="Resource" id="Stat_stagger"]
+script = ExtResource("2_stat_line")
+stat_id = &"stagger_resist_flat"
+value = 0.2
+
+[sub_resource type="Resource" id="Cap_pierce"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_pierce"
+value = 0.6
+
+[sub_resource type="Resource" id="Cap_blunt"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_blunt"
+value = 0.4
+
+[sub_resource type="Resource" id="Cap_stability"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_stability"
+value = 0.4
+
+[sub_resource type="Resource" id="Elem_life"]
+script = ExtResource("2_stat_line")
+stat_id = &"elem_life"
+value = 0.2
+
+[sub_resource type="Resource" id="Elem_death"]
+script = ExtResource("2_stat_line")
+stat_id = &"elem_death"
+value = 0.1
+
+[sub_resource type="Resource" id="Ctx_weapon"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_weapon"
+value = 0.7
+
+[sub_resource type="Resource" id="Ctx_ranged"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_ranged_support"
+value = 0.5
+
+[sub_resource type="Resource" id="Fam_melee"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_melee"
+value = 0.7
+
+[sub_resource type="Resource" id="Fam_single_target"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_single_target"
+value = 0.5
+
+[resource]
+script = ExtResource("1_base_material")
+base_material_id = &"mat_bone_base"
+display_name = "Bone"
+material_family = &"organic"
+density_per_cell = 0.85
+hardness = 0.55
+toughness = 0.45
+elasticity = 0.2
+brittleness = 0.35
+edge_retention = 0.45
+color_group = &"ivory"
+albedo_color = Color(0.882353, 0.85098, 0.776471, 1)
+base_stat_lines = Array[ExtResource("2_stat_line")]([SubResource("Stat_atk"), SubResource("Stat_power"), SubResource("Stat_crit"), SubResource("Stat_stagger")])
+capability_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Cap_pierce"), SubResource("Cap_blunt"), SubResource("Cap_stability")])
+skill_family_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Fam_melee"), SubResource("Fam_single_target")])
+elemental_affinity_lines = Array[ExtResource("2_stat_line")]([SubResource("Elem_life"), SubResource("Elem_death")])
+equipment_context_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Ctx_weapon"), SubResource("Ctx_ranged")])
+can_be_anchor_material = true
+can_be_beveled_edge = true
+can_be_blunt_surface = true

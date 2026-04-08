@@ -1,0 +1,105 @@
+[gd_resource type="Resource" script_class="ForgeMaterialCatalogDef" format=3 uid="uid://nbosyacb8or"]
+
+[ext_resource type="Script" uid="uid://c84w3flavboh1" path="res://core/defs/forge/forge_material_catalog_def.gd" id="1_catalog_def"]
+[ext_resource type="Script" uid="uid://p6ywfvb71rp1" path="res://core/defs/forge/forge_material_catalog_entry_def.gd" id="2_catalog_entry"]
+[ext_resource type="Resource" uid="uid://b8wbqvo46uhia" path="res://core/defs/materials/base/wood.tres" id="3_material"]
+[ext_resource type="Resource" uid="uid://d4antppivacp3" path="res://core/defs/materials/base/iron.tres" id="4_material"]
+[ext_resource type="Resource" uid="uid://bdjpi11sk3t3e" path="res://core/defs/materials/base/bone.tres" id="5_material"]
+[ext_resource type="Resource" uid="uid://x2vkt3ikproo" path="res://core/defs/materials/base/hide.tres" id="6_material"]
+[ext_resource type="Resource" uid="uid://dcepgr2rst6ds" path="res://core/defs/materials/base/crystal.tres" id="7_material"]
+[ext_resource type="Resource" uid="uid://c3qhs4fdv2bhv" path="res://core/defs/materials/base/mana_core.tres" id="8_material"]
+[ext_resource type="Resource" uid="uid://b8hqq424p2wl0" path="res://core/defs/materials/base/healing.tres" id="9_material"]
+[ext_resource type="Resource" uid="uid://bddh3rdmrvx80" path="res://core/defs/materials/base/pyro.tres" id="10_material"]
+[ext_resource type="Resource" uid="uid://db86n27srgjf" path="res://core/defs/materials/base/frost.tres" id="11_material"]
+[ext_resource type="Resource" uid="uid://bloj1mcufjims" path="res://core/defs/materials/base/aqua.tres" id="12_material"]
+[ext_resource type="Resource" uid="uid://c8v5itahpjwo1" path="res://core/defs/materials/base/scale.tres" id="13_material"]
+[ext_resource type="Resource" uid="uid://dqssmwbs0ybkk" path="res://core/defs/materials/base/tendon.tres" id="14_material"]
+[ext_resource type="Resource" uid="uid://bj8n7crfoi71r" path="res://core/defs/materials/base/carapace.tres" id="15_material"]
+[ext_resource type="Resource" uid="uid://viqkv7kwmi6w" path="res://core/defs/materials/base/silver.tres" id="16_material"]
+[ext_resource type="Resource" uid="uid://bfjv5iyj4mly0" path="res://core/defs/materials/base/gold.tres" id="17_material"]
+[ext_resource type="Resource" uid="uid://be5p1tcyaa31e" path="res://core/defs/materials/base/copper.tres" id="18_material"]
+
+[sub_resource type="Resource" id="CatalogEntry_wood"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_wood_gray"
+material_def = ExtResource("3_material")
+
+[sub_resource type="Resource" id="CatalogEntry_iron"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_iron_gray"
+material_def = ExtResource("4_material")
+
+[sub_resource type="Resource" id="CatalogEntry_bone"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_bone_gray"
+material_def = ExtResource("5_material")
+
+[sub_resource type="Resource" id="CatalogEntry_hide"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_hide_gray"
+material_def = ExtResource("6_material")
+
+[sub_resource type="Resource" id="CatalogEntry_crystal"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_crystal_gray"
+material_def = ExtResource("7_material")
+
+[sub_resource type="Resource" id="CatalogEntry_mana_core"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_mana_core_gray"
+material_def = ExtResource("8_material")
+
+[sub_resource type="Resource" id="CatalogEntry_healing"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_healing_gray"
+material_def = ExtResource("9_material")
+
+[sub_resource type="Resource" id="CatalogEntry_pyro"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_pyro_gray"
+material_def = ExtResource("10_material")
+
+[sub_resource type="Resource" id="CatalogEntry_frost"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_frost_gray"
+material_def = ExtResource("11_material")
+
+[sub_resource type="Resource" id="CatalogEntry_aqua"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_aqua_gray"
+material_def = ExtResource("12_material")
+
+[sub_resource type="Resource" id="CatalogEntry_scale"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_scale_gray"
+material_def = ExtResource("13_material")
+
+[sub_resource type="Resource" id="CatalogEntry_tendon"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_tendon_gray"
+material_def = ExtResource("14_material")
+
+[sub_resource type="Resource" id="CatalogEntry_carapace"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_carapace_gray"
+material_def = ExtResource("15_material")
+
+[sub_resource type="Resource" id="CatalogEntry_silver"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_silver_gray"
+material_def = ExtResource("16_material")
+
+[sub_resource type="Resource" id="CatalogEntry_gold"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_gold_gray"
+material_def = ExtResource("17_material")
+
+[sub_resource type="Resource" id="CatalogEntry_copper"]
+script = ExtResource("2_catalog_entry")
+material_id = &"mat_copper_gray"
+material_def = ExtResource("18_material")
+
+[resource]
+script = ExtResource("1_catalog_def")
+catalog_id = &"forge_material_catalog_default"
+entries = Array[Resource]([SubResource("CatalogEntry_wood"), SubResource("CatalogEntry_iron"), SubResource("CatalogEntry_bone"), SubResource("CatalogEntry_hide"), SubResource("CatalogEntry_crystal"), SubResource("CatalogEntry_mana_core"), SubResource("CatalogEntry_healing"), SubResource("CatalogEntry_pyro"), SubResource("CatalogEntry_frost"), SubResource("CatalogEntry_aqua"), SubResource("CatalogEntry_scale"), SubResource("CatalogEntry_tendon"), SubResource("CatalogEntry_carapace"), SubResource("CatalogEntry_silver"), SubResource("CatalogEntry_gold"), SubResource("CatalogEntry_copper")])

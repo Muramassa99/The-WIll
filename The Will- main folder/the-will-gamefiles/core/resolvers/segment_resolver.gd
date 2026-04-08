@@ -2,8 +2,10 @@ extends RefCounted
 class_name SegmentResolver
 
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
+const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
 
 var forge_rules: ForgeRulesDef = DEFAULT_FORGE_RULES_RESOURCE
+var material_runtime_resolver = MaterialRuntimeResolverScript.new()
 
 func _init(rules: ForgeRulesDef = null) -> void:
 	forge_rules = rules if rules != null else DEFAULT_FORGE_RULES_RESOURCE
@@ -297,18 +299,7 @@ func _resolve_profile_state(cross_section_data: Dictionary) -> StringName:
 	return &""
 
 func _resolve_base_material_for_cell(cell: CellAtom, material_lookup: Dictionary) -> BaseMaterialDef:
-	if cell == null:
-		return null
-
-	var material_entry: Variant = material_lookup.get(cell.material_variant_id)
-	if material_entry is BaseMaterialDef:
-		return material_entry as BaseMaterialDef
-	if material_entry is MaterialVariantDef:
-		var material_variant: MaterialVariantDef = material_entry as MaterialVariantDef
-		var base_material_entry: Variant = material_lookup.get(material_variant.base_material_id)
-		if base_material_entry is BaseMaterialDef:
-			return base_material_entry as BaseMaterialDef
-	return null
+	return material_runtime_resolver.resolve_base_material_for_cell(cell, material_lookup)
 
 func _supports_type(base_material: BaseMaterialDef, support_type: StringName) -> bool:
 	if base_material == null:

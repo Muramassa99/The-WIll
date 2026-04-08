@@ -7,6 +7,13 @@ func build_variant(base_material: BaseMaterialDef, tier: TierDef) -> MaterialVar
 	variant.tier_id = tier.tier_id
 	variant.variant_id = _build_variant_id(base_material, tier)
 	variant.variant_stats = _scale_stat_lines(base_material.base_stat_lines, tier.stat_multiplier)
+	variant.resolved_density_per_cell = base_material.density_per_cell * tier.weight_multiplier
+	variant.resolved_processing_output_count = base_material.processing_output_count
+	variant.resolved_value_score = tier.value_multiplier
+	variant.resolved_capability_bias_lines = _scale_stat_lines(base_material.capability_bias_lines, tier.stat_multiplier)
+	variant.resolved_skill_family_bias_lines = _scale_stat_lines(base_material.skill_family_bias_lines, tier.stat_multiplier)
+	variant.resolved_elemental_affinity_lines = _scale_stat_lines(base_material.elemental_affinity_lines, tier.stat_multiplier)
+	variant.resolved_equipment_context_bias_lines = _scale_stat_lines(base_material.equipment_context_bias_lines, tier.stat_multiplier)
 	return variant
 
 func _scale_stat_lines(stat_lines: Array[StatLine], stat_multiplier: float) -> Array[StatLine]:
@@ -20,4 +27,12 @@ func _scale_stat_lines(stat_lines: Array[StatLine], stat_multiplier: float) -> A
 func _build_variant_id(base_material: BaseMaterialDef, tier: TierDef) -> StringName:
 	if base_material == null or tier == null:
 		return StringName()
-	return StringName("%s__%s" % [String(base_material.base_material_id), String(tier.tier_id)])
+	var base_material_id_text: String = String(base_material.base_material_id)
+	if base_material_id_text.ends_with("_base"):
+		base_material_id_text = base_material_id_text.trim_suffix("_base")
+	var tier_id_text: String = String(tier.tier_id)
+	if tier_id_text.begins_with("tier_"):
+		tier_id_text = tier_id_text.trim_prefix("tier_")
+	if tier_id_text.is_empty():
+		return StringName(base_material_id_text)
+	return StringName("%s_%s" % [base_material_id_text, tier_id_text])

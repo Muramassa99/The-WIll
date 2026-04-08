@@ -3,6 +3,8 @@
 [ext_resource type="PackedScene" uid="uid://c102ttk0cevu4" path="res://scenes/world/base_floor.tscn" id="1_base_floor"]
 [ext_resource type="PackedScene" path="res://scenes/player/player_character.tscn" id="2_player_character"]
 [ext_resource type="PackedScene" path="res://scenes/world/crafting_bench.tscn" id="3_crafting_bench"]
+[ext_resource type="PackedScene" path="res://scenes/world/disassembly_bench.tscn" id="4_disassembly_bench"]
+[ext_resource type="PackedScene" path="res://scenes/world/storage_box.tscn" id="5_storage_box"]
 
 [sub_resource type="PhysicsMaterial" id="PhysicsMaterial_a0tk4"]
 
@@ -16,6 +18,12 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 6)
 
 [node name="CraftingBench" parent="." unique_id=1953969368 instance=ExtResource("3_crafting_bench")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.15511024, 0, -1.5)
+
+[node name="DisassemblyBench" parent="." instance=ExtResource("4_disassembly_bench")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.85, 0, -1.45)
+
+[node name="StorageBox" parent="." instance=ExtResource("5_storage_box")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.75, 0, -1.55)
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1881004526]
 transform = Transform3D(0.81915206, -0.46984634, 0.32898995, 0, 0.57357645, 0.81915206, -0.57357645, -0.6710101, 0.46984634, 0, 0, 0)

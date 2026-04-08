@@ -16,7 +16,15 @@ const ForgeSamplePresetDefScript = preload("res://core/defs/forge/forge_sample_p
 @export var sample_flex_preset_id: StringName = &"sample_flex"
 @export var sample_bow_preset_id: StringName = &"sample_bow"
 @export var sample_presets: Array[ForgeSamplePresetDef] = []
+
+@export_group("Forge Materials")
+@export var material_catalog_def: Resource
+@export var default_material_tier_def: Resource
+
+@export_group("Forge Inventory")
+@export var inventory_seed_def: Resource
 @export var debug_inventory_seed_quantity: int = 96
+@export var debug_inventory_bonus_quantity: int = 0
 
 @export_group("Anchor Rules")
 @export var primary_grip_min_length_voxels: int = 10

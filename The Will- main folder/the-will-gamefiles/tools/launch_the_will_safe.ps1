@@ -2,6 +2,10 @@ param(
 	[switch]$UseGui,
 	[switch]$Headless,
 	[switch]$Editor,
+	[switch]$Import,
+	[switch]$CheckOnly,
+	[switch]$Quit,
+	[string]$ScriptPath = "",
 	[string]$DisplayDriver = "",
 	[string]$RenderingDriver = "",
 	[string]$RenderingMethod = "",
@@ -19,6 +23,15 @@ if ($UseGui -and $Headless) {
 }
 if ($Editor -and $Headless) {
 	throw "Editor mode cannot run with -Headless."
+}
+if ($Editor -and $Import) {
+	throw "Choose either -Editor or -Import, not both."
+}
+if ($Import -and $ScriptPath -ne "") {
+	throw "Import mode cannot run with -ScriptPath."
+}
+if ($CheckOnly -and $ScriptPath -eq "") {
+	throw "Check-only mode requires -ScriptPath."
 }
 
 $godotExeName = if ($UseGui -or $Editor) {
@@ -43,6 +56,9 @@ if ($Headless) {
 if ($Editor) {
 	$arguments = @("--editor") + $arguments
 }
+if ($Import) {
+	$arguments = @("--import") + $arguments
+}
 if ($DisplayDriver -ne "") {
 	$arguments = @("--display-driver", $DisplayDriver) + $arguments
 }
@@ -54,6 +70,15 @@ if ($RenderingMethod -ne "") {
 }
 if ($QuitAfterSeconds -gt 0) {
 	$arguments += @("--quit-after", $QuitAfterSeconds.ToString())
+}
+if ($Quit) {
+	$arguments += @("--quit")
+}
+if ($ScriptPath -ne "") {
+	$arguments += @("--script", $ScriptPath)
+}
+if ($CheckOnly) {
+	$arguments += @("--check-only")
 }
 
 Write-Host "Project:" $projectDir

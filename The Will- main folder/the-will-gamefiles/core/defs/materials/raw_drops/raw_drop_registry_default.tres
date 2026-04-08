@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="RawDropRegistryDef" format=3]
+
+[ext_resource type="Script" path="res://core/defs/materials/raw_drop_registry_def.gd" id="1_registry_def"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/wood_raw_drop.tres" id="2_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/iron_raw_drop.tres" id="3_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/bone_raw_drop.tres" id="4_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/hide_raw_drop.tres" id="5_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/crystal_raw_drop.tres" id="6_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/mana_core_raw_drop.tres" id="7_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/healing_raw_drop.tres" id="8_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/pyro_raw_drop.tres" id="9_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/frost_raw_drop.tres" id="10_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/aqua_raw_drop.tres" id="11_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/scale_raw_drop.tres" id="12_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/tendon_raw_drop.tres" id="13_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/carapace_raw_drop.tres" id="14_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/silver_raw_drop.tres" id="15_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/gold_raw_drop.tres" id="16_raw_drop"]
+[ext_resource type="Resource" path="res://core/defs/materials/raw_drops/copper_raw_drop.tres" id="17_raw_drop"]
+
+[resource]
+script = ExtResource("1_registry_def")
+registry_id = &"raw_drop_registry_default"
+entries = Array[Resource]([ExtResource("2_raw_drop"), ExtResource("3_raw_drop"), ExtResource("4_raw_drop"), ExtResource("5_raw_drop"), ExtResource("6_raw_drop"), ExtResource("7_raw_drop"), ExtResource("8_raw_drop"), ExtResource("9_raw_drop"), ExtResource("10_raw_drop"), ExtResource("11_raw_drop"), ExtResource("12_raw_drop"), ExtResource("13_raw_drop"), ExtResource("14_raw_drop"), ExtResource("15_raw_drop"), ExtResource("16_raw_drop"), ExtResource("17_raw_drop")])
+

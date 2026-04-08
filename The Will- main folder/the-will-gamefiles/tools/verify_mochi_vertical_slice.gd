@@ -17,26 +17,32 @@ func _init() -> void:
 
 	var wood_material: BaseMaterialDef = load("res://core/defs/materials/base/wood.tres") as BaseMaterialDef
 	var iron_material: BaseMaterialDef = load("res://core/defs/materials/base/iron.tres") as BaseMaterialDef
-	var basic_tier: TierDef = load("res://core/defs/materials/tiers/tier_basic.tres") as TierDef
+	var gray_tier: TierDef = load("res://core/defs/materials/tiers/tier_gray.tres") as TierDef
 	var wood_raw_drop: RawDropDef = load("res://core/defs/materials/raw_drops/wood_raw_drop.tres") as RawDropDef
 	var iron_raw_drop: RawDropDef = load("res://core/defs/materials/raw_drops/iron_raw_drop.tres") as RawDropDef
-	var wood_process_rule: ProcessRuleDef = load("res://core/defs/materials/process_rules/wood_basic_process_rule.tres") as ProcessRuleDef
-	var iron_process_rule: ProcessRuleDef = load("res://core/defs/materials/process_rules/iron_basic_process_rule.tres") as ProcessRuleDef
+	var wood_process_rule: ProcessRuleDef = load("res://core/defs/materials/process_rules/wood_gray_process_rule.tres") as ProcessRuleDef
+	var iron_process_rule: ProcessRuleDef = load("res://core/defs/materials/process_rules/iron_gray_process_rule.tres") as ProcessRuleDef
 
 	var material_lookup: Dictionary = controller.build_default_material_lookup()
 	lines.append("grid_configurable=%s" % str(controller.grid_size == Vector3i(32, 16, 8)))
-	lines.append("material_lookup_has_wood=%s" % str(material_lookup.has(&"mat_wood_base")))
-	lines.append("material_lookup_has_iron=%s" % str(material_lookup.has(&"mat_iron_base")))
-	lines.append("tier_basic_loaded=%s" % str(basic_tier != null and basic_tier.tier_id == &"tier_basic"))
+	lines.append("material_lookup_has_wood_base=%s" % str(material_lookup.has(&"mat_wood_base")))
+	lines.append("material_lookup_has_iron_base=%s" % str(material_lookup.has(&"mat_iron_base")))
+	lines.append("material_lookup_has_wood_gray=%s" % str(material_lookup.has(&"mat_wood_gray")))
+	lines.append("material_lookup_has_iron_gray=%s" % str(material_lookup.has(&"mat_iron_gray")))
+	lines.append("tier_gray_loaded=%s" % str(gray_tier != null and gray_tier.tier_id == &"gray"))
 	lines.append("raw_drop_paths_loaded=%s" % str(
 		wood_raw_drop != null
 		and iron_raw_drop != null
+		and wood_raw_drop.drop_id == &"drop_wood_raw_gray"
+		and iron_raw_drop.drop_id == &"drop_iron_raw_gray"
 		and wood_raw_drop.base_material_id == &"mat_wood_base"
 		and iron_raw_drop.base_material_id == &"mat_iron_base"
+		and wood_raw_drop.default_tier_id == &"gray"
+		and iron_raw_drop.default_tier_id == &"gray"
 	))
 
-	var wood_variant: MaterialVariantDef = forge_service.build_material_variant(wood_material, basic_tier)
-	var iron_variant: MaterialVariantDef = forge_service.build_material_variant(iron_material, basic_tier)
+	var wood_variant: MaterialVariantDef = forge_service.build_material_variant(wood_material, gray_tier)
+	var iron_variant: MaterialVariantDef = forge_service.build_material_variant(iron_material, gray_tier)
 	var wood_stack: ForgeMaterialStack = forge_service.build_material_stack(wood_process_rule, wood_variant)
 	var iron_stack: ForgeMaterialStack = forge_service.build_material_stack(iron_process_rule, iron_variant)
 	lines.append("wood_variant_id=%s" % String(wood_variant.variant_id))
@@ -46,7 +52,7 @@ func _init() -> void:
 	lines.append("wood_stack_output_matches_rule=%s" % str(wood_process_rule.output_material_variant_id == wood_variant.variant_id))
 	lines.append("iron_stack_output_matches_rule=%s" % str(iron_process_rule.output_material_variant_id == iron_variant.variant_id))
 
-	var iron_rectangle_wip: CraftedItemWIP = _build_box_wip(&"mochi_iron_rect", &"mat_iron_base", Vector3i(4, 5, 1))
+	var iron_rectangle_wip: CraftedItemWIP = _build_box_wip(&"mochi_iron_rect", &"mat_iron_gray", Vector3i(4, 5, 1))
 	var iron_rectangle_profile: BakedProfile = forge_service.bake_wip(iron_rectangle_wip, material_lookup)
 	lines.append("iron_4x5x1_total_mass=%s" % String.num(iron_rectangle_profile.total_mass))
 	lines.append("iron_4x5x1_validation=%s" % iron_rectangle_profile.validation_error)
@@ -62,13 +68,13 @@ func _init() -> void:
 			Vector3i(0, 0, 0),
 			Vector3i(2, 0, 0),
 		],
-		&"mat_iron_base"
+		&"mat_iron_gray"
 	)
 	var disconnected_profile: BakedProfile = forge_service.bake_wip(disconnected_wip, material_lookup)
 	lines.append("disconnected_validation=%s" % disconnected_profile.validation_error)
 
-	var wood_capability_wip: CraftedItemWIP = _build_box_wip(&"mochi_wood_caps", &"mat_wood_base", Vector3i(12, 3, 2))
-	var iron_capability_wip: CraftedItemWIP = _build_box_wip(&"mochi_iron_caps", &"mat_iron_base", Vector3i(12, 3, 2))
+	var wood_capability_wip: CraftedItemWIP = _build_box_wip(&"mochi_wood_caps", &"mat_wood_gray", Vector3i(12, 3, 2))
+	var iron_capability_wip: CraftedItemWIP = _build_box_wip(&"mochi_iron_caps", &"mat_iron_gray", Vector3i(12, 3, 2))
 	var wood_profile: BakedProfile = forge_service.bake_wip(wood_capability_wip, material_lookup)
 	var iron_profile: BakedProfile = forge_service.bake_wip(iron_capability_wip, material_lookup)
 	lines.append("wood_cap_flex_gt_iron=%s" % str(
@@ -81,7 +87,7 @@ func _init() -> void:
 	))
 
 	var two_cell_mesh: ArrayMesh = test_print_mesh_builder.build_mesh(
-		_build_cells_from_positions([Vector3i(0, 0, 0), Vector3i(1, 0, 0)], &"mat_iron_base"),
+		_build_cells_from_positions([Vector3i(0, 0, 0), Vector3i(1, 0, 0)], &"mat_iron_gray"),
 		material_lookup
 	)
 	lines.append("test_print_mesh_surface_count=%d" % two_cell_mesh.get_surface_count())
@@ -94,14 +100,14 @@ func _init() -> void:
 	var save_source_wip: CraftedItemWIP = _build_custom_wip(
 		&"draft_mochi_save",
 		[Vector3i(0, 0, 0)],
-		&"mat_wood_base"
+		&"mat_wood_gray"
 	)
 	save_source_wip.forge_project_name = "Mochi Save Test"
 	var saved_wip: CraftedItemWIP = library_state.save_wip(save_source_wip)
 	var reloaded_state: PlayerForgeWipLibraryState = PlayerForgeWipLibraryStateScript.load_or_create(save_path)
 	var reloaded_wip: CraftedItemWIP = reloaded_state.get_saved_wip_clone(reloaded_state.selected_wip_id)
 	controller.load_player_saved_wip(reloaded_wip)
-	controller.set_material_at(Vector3i(1, 0, 0), &"mat_wood_base")
+	controller.set_material_at(Vector3i(1, 0, 0), &"mat_wood_gray")
 	lines.append("save_reload_continue_edit=%s" % str(_count_cells(controller.active_wip) == 2))
 	lines.append("snapshot_cleared_after_edit=%s" % str(
 		controller.active_wip != null and controller.active_wip.latest_baked_profile_snapshot == null

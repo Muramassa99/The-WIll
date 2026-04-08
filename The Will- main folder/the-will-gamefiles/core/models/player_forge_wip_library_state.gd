@@ -44,6 +44,12 @@ func save_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 	saved_clone.wip_id = resolved_wip_id
 	saved_clone.forge_project_name = _resolve_forge_project_name(saved_clone)
 	saved_clone.forge_project_notes = _resolve_forge_project_notes(saved_clone)
+	saved_clone.stow_position_mode = CraftedItemWIP.normalize_stow_position_mode(saved_clone.stow_position_mode)
+	saved_clone.grip_style_mode = CraftedItemWIP.resolve_supported_grip_style(
+		saved_clone.grip_style_mode,
+		saved_clone.forge_intent,
+		saved_clone.equipment_context
+	)
 	var existing_index: int = _find_saved_wip_index(resolved_wip_id)
 	if existing_index >= 0:
 		saved_wips[existing_index] = saved_clone
@@ -61,6 +67,12 @@ func duplicate_saved_wip(saved_wip_id: StringName) -> CraftedItemWIP:
 	duplicate_wip.wip_id = _build_generated_wip_id()
 	duplicate_wip.forge_project_name = _build_duplicate_project_name(duplicate_wip.forge_project_name)
 	duplicate_wip.forge_project_notes = _resolve_forge_project_notes(duplicate_wip)
+	duplicate_wip.stow_position_mode = CraftedItemWIP.normalize_stow_position_mode(duplicate_wip.stow_position_mode)
+	duplicate_wip.grip_style_mode = CraftedItemWIP.resolve_supported_grip_style(
+		duplicate_wip.grip_style_mode,
+		duplicate_wip.forge_intent,
+		duplicate_wip.equipment_context
+	)
 	saved_wips.append(duplicate_wip)
 	selected_wip_id = duplicate_wip.wip_id
 	persist()
@@ -127,7 +139,18 @@ func _build_duplicate_project_name(project_name: String) -> String:
 	return "%s Copy" % cleaned_name
 
 func _ensure_save_directory() -> void:
-	var save_directory_path: String = save_file_path.get_base_dir()
+	var normalized_save_path: String = save_file_path.replace("\\", "/")
+	if normalized_save_path.begins_with("user://"):
+		var relative_save_path: String = normalized_save_path.trim_prefix("user://")
+		var last_separator_index: int = relative_save_path.rfind("/")
+		if last_separator_index < 0:
+			return
+		var relative_directory_path: String = relative_save_path.substr(0, last_separator_index)
+		if relative_directory_path.is_empty():
+			return
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("user://%s" % relative_directory_path))
+		return
+	var save_directory_path: String = normalized_save_path.get_base_dir()
 	if save_directory_path.is_empty():
 		return
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(save_directory_path))

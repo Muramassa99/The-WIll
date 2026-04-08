@@ -1,8 +1,11 @@
 extends RefCounted
 class_name ProfileResolver
 
+const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
+
 var anchor_resolver: AnchorResolver = AnchorResolver.new()
 var shape_classifier_resolver: ShapeClassifierResolver = ShapeClassifierResolver.new()
+var material_runtime_resolver = MaterialRuntimeResolverScript.new()
 
 func bake_profile(
 		cells: Array[CellAtom],
@@ -19,15 +22,21 @@ func bake_profile(
 	if not _is_connectivity_valid(cells, segments):
 		profile.validation_error = "disconnected_islands"
 
-	var primary_grip: AnchorAtom = _find_primary_grip_anchor(anchors)
+	var primary_grip: AnchorAtom = _find_primary_grip_anchor(anchors, profile.center_of_mass)
 	profile.primary_grip_valid = primary_grip != null
 	if primary_grip != null:
+		var grip_contact_position: Vector3 = anchor_resolver.resolve_primary_grip_contact_position(primary_grip, profile.center_of_mass)
 		var forward_axis: Vector3 = _resolve_forward_axis(primary_grip)
+		profile.primary_grip_contact_position = grip_contact_position
+		profile.primary_grip_span_start = primary_grip.span_start_local_position
+		profile.primary_grip_span_end = primary_grip.span_end_local_position
+		profile.primary_grip_span_length_voxels = primary_grip.span_length
+		profile.primary_grip_slide_axis = forward_axis
 		profile.primary_grip_offset = anchor_resolver.calculate_primary_grip_offset(
 			profile.center_of_mass,
-			primary_grip.local_position
+			grip_contact_position
 		)
-		profile.reach = _calculate_reach(cells, primary_grip.local_position)
+		profile.reach = _calculate_reach(cells, grip_contact_position)
 		profile.front_heavy_score = _calculate_front_heavy_score(
 			profile.primary_grip_offset,
 			forward_axis,
@@ -83,38 +92,29 @@ func _get_cell_mass(
 		cell: CellAtom,
 		material_lookup: Dictionary
 	) -> float:
-	var base_material: BaseMaterialDef = _resolve_base_material_for_cell(cell, material_lookup)
-	if base_material == null:
-		return 0.0
-	return base_material.density_per_cell
+	return material_runtime_resolver.resolve_density_per_cell(cell, material_lookup)
 
-func _resolve_base_material_for_cell(cell: CellAtom, material_lookup: Dictionary) -> BaseMaterialDef:
-	if cell == null:
-		return null
-
-	var material_entry: Variant = material_lookup.get(cell.material_variant_id)
-	if _is_base_material_entry(material_entry):
-		return material_entry as BaseMaterialDef
-	if _is_material_variant_entry(material_entry):
-		var material_variant: MaterialVariantDef = material_entry as MaterialVariantDef
-		var base_material: BaseMaterialDef = material_lookup.get(material_variant.base_material_id) as BaseMaterialDef
-		if _is_base_material_entry(base_material):
-			return base_material
-	return null
-
-func _is_base_material_entry(material_entry: Variant) -> bool:
-	return material_entry is BaseMaterialDef
-
-func _is_material_variant_entry(material_entry: Variant) -> bool:
-	return material_entry is MaterialVariantDef
-
-func _find_primary_grip_anchor(anchors: Array[AnchorAtom]) -> AnchorAtom:
+func _find_primary_grip_anchor(anchors: Array[AnchorAtom], center_of_mass: Vector3 = Vector3.ZERO) -> AnchorAtom:
+	var best_anchor: AnchorAtom = null
+	var best_distance_squared: float = INF
+	var best_span_length: int = -1
 	for anchor: AnchorAtom in anchors:
 		if anchor == null:
 			continue
-		if anchor.anchor_type == "primary_grip":
-			return anchor
-	return null
+		if anchor.anchor_type != "primary_grip":
+			continue
+		var candidate_position: Vector3 = anchor_resolver.resolve_primary_grip_contact_position(anchor, center_of_mass)
+		var distance_squared: float = candidate_position.distance_squared_to(center_of_mass)
+		var candidate_span_length: int = maxi(anchor.span_length, 0)
+		if best_anchor == null or distance_squared < best_distance_squared - 0.00001:
+			best_anchor = anchor
+			best_distance_squared = distance_squared
+			best_span_length = candidate_span_length
+			continue
+		if is_equal_approx(distance_squared, best_distance_squared) and candidate_span_length > best_span_length:
+			best_anchor = anchor
+			best_span_length = candidate_span_length
+	return best_anchor
 
 func _resolve_forward_axis(primary_grip: AnchorAtom) -> Vector3:
 	if primary_grip == null:
@@ -258,8 +258,7 @@ func _calculate_material_support_ratio(segment: SegmentAtom, material_lookup: Di
 
 	var supporting_cell_count: int = 0
 	for cell: CellAtom in segment.member_cells:
-		var base_material: BaseMaterialDef = _resolve_base_material_for_cell(cell, material_lookup)
-		if _supports_profile_score_type(base_material, support_type):
+		if _supports_profile_score_type(cell, material_lookup, support_type):
 			supporting_cell_count += 1
 
 	return float(supporting_cell_count) / float(segment.member_cells.size())
@@ -274,14 +273,14 @@ func _calculate_profile_material_support_ratio(segments: Array[SegmentAtom], mat
 			if cell == null:
 				continue
 			total_cells += 1
-			var base_material: BaseMaterialDef = _resolve_base_material_for_cell(cell, material_lookup)
-			if _supports_profile_score_type(base_material, support_type):
+			if _supports_profile_score_type(cell, material_lookup, support_type):
 				supporting_cells += 1
 	if total_cells == 0:
 		return 0.0
 	return float(supporting_cells) / float(total_cells)
 
-func _supports_profile_score_type(base_material: BaseMaterialDef, support_type: StringName) -> bool:
+func _supports_profile_score_type(cell: CellAtom, material_lookup: Dictionary, support_type: StringName) -> bool:
+	var base_material: BaseMaterialDef = material_runtime_resolver.resolve_base_material_for_cell(cell, material_lookup)
 	if base_material == null:
 		return false
 	match support_type:
@@ -290,26 +289,21 @@ func _supports_profile_score_type(base_material: BaseMaterialDef, support_type: 
 		&"blunt":
 			return base_material.can_be_blunt_surface
 		&"pierce":
-			return _has_capability_bias(base_material, &"cap_pierce")
+			return material_runtime_resolver.has_positive_capability_bias_for_cell(cell, material_lookup, &"cap_pierce")
 		&"guard":
 			return base_material.can_be_guard_surface or base_material.can_be_plate_surface
 		&"flex":
-			return _has_capability_bias(base_material, &"cap_flex") or base_material.can_be_joint_support or base_material.can_be_joint_membrane or base_material.can_be_bow_limb
+			return (
+				material_runtime_resolver.has_positive_capability_bias_for_cell(cell, material_lookup, &"cap_flex")
+				or base_material.can_be_joint_support
+				or base_material.can_be_joint_membrane
+				or base_material.can_be_bow_limb
+			)
 		&"launch":
-			return _has_capability_bias(base_material, &"cap_launch") or base_material.can_be_projectile_support or base_material.can_be_bow_string
+			return (
+				material_runtime_resolver.has_positive_capability_bias_for_cell(cell, material_lookup, &"cap_launch")
+				or base_material.can_be_projectile_support
+				or base_material.can_be_bow_string
+			)
 		_:
 			return false
-
-func _has_capability_bias(base_material: BaseMaterialDef, capability_id: StringName) -> bool:
-	if base_material == null:
-		return false
-	for bias_line: StatLine in base_material.capability_bias_lines:
-		if bias_line == null:
-			continue
-		if bias_line.stat_id != capability_id:
-			continue
-		if not bias_line.is_numeric():
-			continue
-		if bias_line.value > 0.0:
-			return true
-	return false

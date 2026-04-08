@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="RawDropDef" format=3]
+
+[ext_resource type="Script" path="res://core/defs/raw_drop_def.gd" id="1_raw_drop_def"]
+
+[resource]
+script = ExtResource("1_raw_drop_def")
+drop_id = &"drop_carapace_raw_gray"
+base_material_id = &"mat_carapace_base"
+default_tier_id = &"gray"
+quantity_min = 1
+quantity_max = 1
+

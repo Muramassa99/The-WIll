@@ -2,8 +2,10 @@ extends RefCounted
 class_name TestPrintMeshBuilder
 
 const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://core/defs/forge/forge_view_tuning_default.tres")
+const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
 
 var forge_view_tuning: ForgeViewTuningDef = DEFAULT_FORGE_VIEW_TUNING_RESOURCE
+var material_runtime_resolver = MaterialRuntimeResolverScript.new()
 
 func set_view_tuning(value: ForgeViewTuningDef) -> void:
 	forge_view_tuning = value if value != null else DEFAULT_FORGE_VIEW_TUNING_RESOURCE
@@ -106,7 +108,8 @@ func _get_face_corners(direction: Vector3i) -> Array[Vector3]:
 			]
 
 func _resolve_cell_color(material_variant_id: StringName, material_lookup: Dictionary) -> Color:
-	var base_material: BaseMaterialDef = material_lookup.get(material_variant_id) as BaseMaterialDef
-	if base_material != null:
-		return base_material.albedo_color
-	return forge_view_tuning.test_print_fallback_color
+	return material_runtime_resolver.resolve_material_color(
+		material_variant_id,
+		material_lookup,
+		forge_view_tuning.test_print_fallback_color
+	)

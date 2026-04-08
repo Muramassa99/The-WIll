@@ -22,17 +22,28 @@ func _run_verification() -> void:
 	await process_frame
 
 	var preview: ForgeWorkspacePreview = crafting_ui.free_workspace_preview
-	var free_view_container: SubViewportContainer = crafting_ui.get_node("Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ViewportSplit/FreeViewPanel/FreeVBox/FreeViewContainer") as SubViewportContainer
+	var free_view_container: SubViewportContainer = crafting_ui.free_view_container
+	var free_view_panel: PanelContainer = crafting_ui.free_view_panel
 	var preview_box_mesh: BoxMesh = preview.occupied_cells_instance.multimesh.mesh as BoxMesh if preview != null and preview.occupied_cells_instance != null and preview.occupied_cells_instance.multimesh != null else null
 	var initial_distance: float = preview.camera.position.z if preview != null and preview.camera != null else -1.0
 	var initial_pivot: Vector3 = preview.camera_pivot.position if preview != null and preview.camera_pivot != null else Vector3.ZERO
 	var initial_rotation_y: float = preview.camera_pivot.rotation.y if preview != null and preview.camera_pivot != null else 0.0
+	var initial_light_forward: Vector3 = preview.light.global_transform.basis.z if preview != null and preview.light != null else Vector3.ZERO
 	var initial_mouse_mode: Input.MouseMode = Input.get_mouse_mode()
 	var plane_position: Vector3 = preview.active_plane_instance.position if preview != null and preview.active_plane_instance != null else Vector3.ZERO
 	var cell_world_size: float = forge_controller.get_cell_world_size_meters()
 	var expected_plane_z: float = (float(crafting_ui.active_layer) * cell_world_size) - ((float(forge_controller.grid_size.z - 1) * cell_world_size) * 0.5)
 	var plane_centered_xy: bool = is_zero_approx(plane_position.x) and is_zero_approx(plane_position.y) and is_equal_approx(plane_position.z, expected_plane_z)
 	var preview_cells_touching: bool = preview_box_mesh != null and preview_box_mesh.size.is_equal_approx(Vector3.ONE * cell_world_size)
+
+	var panel_wheel_zoom_event: InputEventMouseButton = InputEventMouseButton.new()
+	panel_wheel_zoom_event.button_index = MOUSE_BUTTON_WHEEL_UP
+	panel_wheel_zoom_event.pressed = true
+	panel_wheel_zoom_event.position = Vector2(8.0, 8.0)
+	crafting_ui.call("_on_free_view_panel_gui_input", panel_wheel_zoom_event)
+	await process_frame
+
+	var distance_after_panel_zoom: float = preview.camera.position.z if preview != null and preview.camera != null else initial_distance
 
 	if preview != null:
 		preview.zoom_by(-100.0)
@@ -70,6 +81,8 @@ func _run_verification() -> void:
 	await process_frame
 
 	var rotation_after_orbit_drag: float = preview.camera_pivot.rotation.y if preview != null and preview.camera_pivot != null else initial_rotation_y
+	var light_forward_after_orbit: Vector3 = preview.light.global_transform.basis.z if preview != null and preview.light != null else initial_light_forward
+	var camera_forward_after_orbit: Vector3 = preview.camera.global_transform.basis.z if preview != null and preview.camera != null else Vector3.ZERO
 
 	var orbit_release: InputEventMouseButton = InputEventMouseButton.new()
 	orbit_release.button_index = MOUSE_BUTTON_RIGHT
@@ -120,6 +133,7 @@ func _run_verification() -> void:
 	lines.append("expected_plane_z=%s" % str(expected_plane_z))
 	lines.append("plane_centered_xy=%s" % str(plane_centered_xy))
 	lines.append("preview_cells_touching=%s" % str(preview_cells_touching))
+	lines.append("panel_wheel_zoom_changed_distance=%s" % str(distance_after_panel_zoom < initial_distance))
 	lines.append("initial_distance=%s" % str(initial_distance))
 	lines.append("edited_distance=%s" % str(edited_distance))
 	lines.append("distance_after_refresh=%s" % str(distance_after_refresh))
@@ -137,6 +151,9 @@ func _run_verification() -> void:
 	))
 	lines.append("orbit_captured_mouse=%s" % str(orbit_captured_mouse))
 	lines.append("orbit_changed_rotation=%s" % str(not is_equal_approx(rotation_after_orbit_drag, initial_rotation_y)))
+	lines.append("light_parent_is_camera=%s" % str(preview != null and preview.light != null and preview.camera != null and preview.light.get_parent() == preview.camera))
+	lines.append("light_changed_with_orbit=%s" % str(light_forward_after_orbit.distance_to(initial_light_forward) > 0.0001))
+	lines.append("light_aligned_to_camera=%s" % str(light_forward_after_orbit.distance_to(camera_forward_after_orbit) <= 0.0001))
 	lines.append("mouse_restored_after_orbit=%s" % str(mouse_restored_after_orbit))
 	lines.append("pan_changed_pivot=%s" % str(pivot_after_pan_drag.distance_to(pivot_before_pan_drag) > 0.0001))
 	lines.append("mouse_restored_after_pan=%s" % str(mouse_restored_after_pan))

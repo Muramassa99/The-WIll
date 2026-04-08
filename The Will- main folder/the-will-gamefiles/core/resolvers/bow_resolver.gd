@@ -2,9 +2,11 @@ extends RefCounted
 class_name BowResolver
 
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
+const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
 
 var forge_rules: ForgeRulesDef = DEFAULT_FORGE_RULES_RESOURCE
 var subsegment_resolver: SegmentResolver = SegmentResolver.new(DEFAULT_FORGE_RULES_RESOURCE)
+var material_runtime_resolver = MaterialRuntimeResolverScript.new()
 
 func _init(rules: ForgeRulesDef = null) -> void:
 	forge_rules = rules if rules != null else DEFAULT_FORGE_RULES_RESOURCE
@@ -417,7 +419,7 @@ func _calculate_limb_flex_score(segment: SegmentAtom, material_lookup: Dictionar
 	var flex_supporting_cells: int = 0
 	for cell: CellAtom in segment.member_cells:
 		var base_material: BaseMaterialDef = _resolve_base_material_for_cell(cell, material_lookup)
-		if base_material != null and _has_capability_bias(base_material, &"cap_flex"):
+		if base_material != null and material_runtime_resolver.has_positive_capability_bias_for_cell(cell, material_lookup, &"cap_flex"):
 			flex_supporting_cells += 1
 	var material_ratio: float = float(flex_supporting_cells) / float(segment.member_cells.size())
 	var geometry_ratio: float = clampf(float(segment.length_voxels) / forge_rules.bow_limb_flex_length_reference_voxels, 0.0, 1.0)
@@ -463,27 +465,7 @@ func _resolve_validation_error(
 	return &""
 
 func _resolve_base_material_for_cell(cell: CellAtom, material_lookup: Dictionary) -> BaseMaterialDef:
-	if cell == null:
-		return null
-	var material_entry: Variant = material_lookup.get(cell.material_variant_id)
-	if material_entry is BaseMaterialDef:
-		return material_entry as BaseMaterialDef
-	if material_entry is MaterialVariantDef:
-		var material_variant: MaterialVariantDef = material_entry as MaterialVariantDef
-		var base_material_entry: Variant = material_lookup.get(material_variant.base_material_id)
-		if base_material_entry is BaseMaterialDef:
-			return base_material_entry as BaseMaterialDef
-	return null
-
-func _has_capability_bias(base_material: BaseMaterialDef, capability_id: StringName) -> bool:
-	if base_material == null:
-		return false
-	for bias_line: StatLine in base_material.capability_bias_lines:
-		if bias_line == null:
-			continue
-		if bias_line.stat_id == capability_id and bias_line.is_numeric() and bias_line.value > 0.0:
-			return true
-	return false
+	return material_runtime_resolver.resolve_base_material_for_cell(cell, material_lookup)
 
 func _clear_segment_role_hints(segments: Array[SegmentAtom]) -> void:
 	for segment: SegmentAtom in segments:

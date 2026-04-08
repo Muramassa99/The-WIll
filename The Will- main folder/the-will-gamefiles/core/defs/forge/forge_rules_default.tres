@@ -1,10 +1,17 @@
-[gd_resource type="Resource" script_class="ForgeRulesDef" load_steps=5 format=3]
+[gd_resource type="Resource" script_class="ForgeRulesDef" load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://core/defs/forge_rules_def.gd" id="1_8wou1"]
 [ext_resource type="Resource" path="res://core/defs/forge/sample_presets/sample_grip.tres" id="2_sample_grip"]
 [ext_resource type="Resource" path="res://core/defs/forge/sample_presets/sample_flex.tres" id="3_sample_flex"]
 [ext_resource type="Resource" path="res://core/defs/forge/sample_presets/sample_bow.tres" id="4_sample_bow"]
+[ext_resource type="Resource" path="res://core/defs/forge/forge_material_catalog_default.tres" id="5_material_catalog"]
+[ext_resource type="Resource" path="res://core/defs/forge/forge_inventory_seed_default.tres" id="6_inventory_seed"]
+[ext_resource type="Resource" path="res://core/defs/materials/tiers/tier_gray.tres" id="7_default_tier"]
 
 [resource]
 script = ExtResource("1_8wou1")
 sample_presets = [ExtResource("2_sample_grip"), ExtResource("3_sample_flex"), ExtResource("4_sample_bow")]
+material_catalog_def = ExtResource("5_material_catalog")
+default_material_tier_def = ExtResource("7_default_tier")
+inventory_seed_def = ExtResource("6_inventory_seed")
+debug_inventory_bonus_quantity = 5000

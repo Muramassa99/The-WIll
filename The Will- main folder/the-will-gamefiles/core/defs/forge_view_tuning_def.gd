@@ -10,6 +10,9 @@ class_name ForgeViewTuningDef
 @export var plane_frame_color: Color = Color(0.803922, 0.717647, 0.498039, 1.0)
 @export var plane_margin_pixels: float = 12.0
 @export var plane_cell_inset_pixels: float = 0.5
+@export var plane_zoom_step: float = 0.2
+@export var plane_zoom_min_scale: float = 1.0
+@export var plane_zoom_max_scale: float = 4.0
 
 @export_group("Workspace Preview")
 @export var workspace_camera_fov_degrees: float = 55.0
@@ -18,7 +21,7 @@ class_name ForgeViewTuningDef
 @export var workspace_default_yaw_degrees: float = -34.0
 @export var workspace_default_pitch_degrees: float = -28.0
 @export var workspace_pitch_min_degrees: float = -80.0
-@export var workspace_pitch_max_degrees: float = 5.0
+@export var workspace_pitch_max_degrees: float = 80.0
 @export var workspace_orbit_mouse_button: MouseButton = MOUSE_BUTTON_RIGHT
 @export var workspace_pan_modifier_keycode: Key = KEY_C
 @export var workspace_capture_mouse_during_drag: bool = true
@@ -32,6 +35,8 @@ class_name ForgeViewTuningDef
 @export var workspace_fit_min_distance: float = 2.5
 @export var workspace_fit_max_distance: float = 10.0
 @export var workspace_ray_plane_epsilon: float = 0.00001
+@export var workspace_light_follows_camera: bool = true
+@export var workspace_light_follow_offset_degrees: Vector3 = Vector3.ZERO
 @export var workspace_light_energy: float = 2.2
 @export var workspace_light_rotation_degrees: Vector3 = Vector3(-48.0, -30.0, 0.0)
 @export var workspace_grid_bounds_color: Color = Color(0.760784, 0.709804, 0.564706, 0.06)

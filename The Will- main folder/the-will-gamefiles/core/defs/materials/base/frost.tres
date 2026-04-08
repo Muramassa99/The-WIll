@@ -1,0 +1,99 @@
+[gd_resource type="Resource" script_class="BaseMaterialDef" format=3 uid="uid://db86n27srgjf"]
+
+[ext_resource type="Script" uid="uid://7m86a3xt1dlg" path="res://core/defs/base_material_def.gd" id="1_base_material"]
+[ext_resource type="Script" uid="uid://cl8i2kjpv5mh3" path="res://core/atoms/stat_line.gd" id="2_stat_line"]
+
+[sub_resource type="Resource" id="Stat_def"]
+script = ExtResource("2_stat_line")
+stat_id = &"def_mod_flat"
+value = 0.4
+
+[sub_resource type="Resource" id="Stat_slow"]
+script = ExtResource("2_stat_line")
+stat_id = &"slow_strength_pct_add"
+value = 0.08
+value_kind = 1
+
+[sub_resource type="Resource" id="Stat_status"]
+script = ExtResource("2_stat_line")
+stat_id = &"status_apply_chance_pct"
+value = 0.05
+value_kind = 1
+
+[sub_resource type="Resource" id="Stat_channel"]
+script = ExtResource("2_stat_line")
+stat_id = &"channel_stability_flat"
+value = 0.2
+
+[sub_resource type="Resource" id="Cap_control"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_control"
+value = 0.8
+
+[sub_resource type="Resource" id="Cap_guard"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_guard"
+value = 0.5
+
+[sub_resource type="Resource" id="Cap_magic"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_magic"
+value = 0.5
+
+[sub_resource type="Resource" id="Cap_stability"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_stability"
+value = 0.5
+
+[sub_resource type="Resource" id="Elem_frost"]
+script = ExtResource("2_stat_line")
+stat_id = &"elem_frost"
+value = 1.0
+
+[sub_resource type="Resource" id="Elem_crystal"]
+script = ExtResource("2_stat_line")
+stat_id = &"elem_crystal"
+value = 0.2
+
+[sub_resource type="Resource" id="Elem_aqua"]
+script = ExtResource("2_stat_line")
+stat_id = &"elem_aqua"
+value = 0.2
+
+[sub_resource type="Resource" id="Ctx_weapon"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_weapon"
+value = 0.6
+
+[sub_resource type="Resource" id="Ctx_focus"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_focus"
+value = 0.6
+
+[sub_resource type="Resource" id="Ctx_shield"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_shield"
+value = 0.4
+
+[sub_resource type="Resource" id="Fam_control"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_control"
+value = 0.8
+
+[resource]
+script = ExtResource("1_base_material")
+base_material_id = &"mat_frost_base"
+display_name = "Frost"
+material_family = &"elemental"
+density_per_cell = 0.7
+hardness = 0.45
+toughness = 0.3
+elasticity = 0.1
+thermal_stability = 0.5
+color_group = &"ice"
+albedo_color = Color(0.760784, 0.921569, 1, 1)
+base_stat_lines = Array[ExtResource("2_stat_line")]([SubResource("Stat_def"), SubResource("Stat_slow"), SubResource("Stat_status"), SubResource("Stat_channel")])
+capability_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Cap_control"), SubResource("Cap_guard"), SubResource("Cap_magic"), SubResource("Cap_stability")])
+skill_family_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Fam_control")])
+elemental_affinity_lines = Array[ExtResource("2_stat_line")]([SubResource("Elem_frost"), SubResource("Elem_crystal"), SubResource("Elem_aqua")])
+equipment_context_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Ctx_weapon"), SubResource("Ctx_focus"), SubResource("Ctx_shield")])

@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="SalvageRulesDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/defs/salvage_rules_def.gd" id="1_salvage_rules_def"]
+
+[resource]
+script = ExtResource("1_salvage_rules_def")
+rule_id = &"salvage_rules_default"
+material_return_ratio_with_blueprint = 0.15
+material_return_ratio_without_blueprint = 0.35
+higher_tier_priority_weight = 1.0
+skill_core_priority_weight = 1.0
+allow_manual_salvage_selection = true

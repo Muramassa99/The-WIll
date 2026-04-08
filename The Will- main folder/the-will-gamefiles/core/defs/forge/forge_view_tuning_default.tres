@@ -4,10 +4,15 @@
 
 [resource]
 script = ExtResource("1_gw9tk")
+plane_zoom_step = 0.2
+plane_zoom_max_scale = 4.0
+workspace_pitch_max_degrees = 80.0
 workspace_orbit_mouse_button = 2
 workspace_pan_modifier_keycode = 67
 workspace_capture_mouse_during_drag = true
 workspace_pan_sensitivity = 0.0025
 workspace_pan_min_distance = 0.25
+workspace_light_follows_camera = true
+workspace_light_follow_offset_degrees = Vector3(0, 0, 0)
 workspace_voxel_inset_factor = 1.0
 workspace_zoom_min_distance = 0.1

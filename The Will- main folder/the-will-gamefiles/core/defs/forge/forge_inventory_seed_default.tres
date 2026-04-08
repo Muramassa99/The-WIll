@@ -1,0 +1,89 @@
+[gd_resource type="Resource" script_class="ForgeInventorySeedDef" format=3 uid="uid://cxgyf545yncc0"]
+
+[ext_resource type="Script" uid="uid://4ug8ronvlr2x" path="res://core/defs/forge/forge_inventory_seed_def.gd" id="1_seed_def"]
+[ext_resource type="Script" uid="uid://bjh3npp5q5467" path="res://core/defs/forge/forge_inventory_seed_entry_def.gd" id="2_seed_entry"]
+
+[sub_resource type="Resource" id="SeedEntry_wood"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_wood_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_iron"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_iron_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_bone"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_bone_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_hide"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_hide_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_crystal"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_crystal_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_mana_core"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_mana_core_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_healing"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_healing_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_pyro"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_pyro_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_frost"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_frost_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_aqua"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_aqua_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_scale"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_scale_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_tendon"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_tendon_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_carapace"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_carapace_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_silver"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_silver_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_gold"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_gold_gray"
+quantity = 96
+
+[sub_resource type="Resource" id="SeedEntry_copper"]
+script = ExtResource("2_seed_entry")
+material_id = &"mat_copper_gray"
+quantity = 96
+
+[resource]
+script = ExtResource("1_seed_def")
+seed_id = &"forge_inventory_seed_default"
+entries = Array[Resource]([SubResource("SeedEntry_wood"), SubResource("SeedEntry_iron"), SubResource("SeedEntry_bone"), SubResource("SeedEntry_hide"), SubResource("SeedEntry_crystal"), SubResource("SeedEntry_mana_core"), SubResource("SeedEntry_healing"), SubResource("SeedEntry_pyro"), SubResource("SeedEntry_frost"), SubResource("SeedEntry_aqua"), SubResource("SeedEntry_scale"), SubResource("SeedEntry_tendon"), SubResource("SeedEntry_carapace"), SubResource("SeedEntry_silver"), SubResource("SeedEntry_gold"), SubResource("SeedEntry_copper")])

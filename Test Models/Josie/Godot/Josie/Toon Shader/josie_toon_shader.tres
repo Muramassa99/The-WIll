@@ -1,0 +1,18 @@
+[gd_resource type="ShaderMaterial" load_steps=3 format=3]
+
+[ext_resource type="Shader" path="res://Josie/Toon Shader/Toon_Shader.gdshader" id="1_n5st7"]
+[ext_resource type="Texture2D" uid="uid://s37qy0gpa2o7" path="res://Josie/Textures/JosieColorSheet.png" id="2_efu0e"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_n5st7")
+shader_parameter/color = Color(1, 1, 1, 1)
+shader_parameter/shadow = 0.5
+shader_parameter/shadow_width = 0.0
+shader_parameter/shadow_color = Color(0.870588, 0.870588, 0.870588, 0.705882)
+shader_parameter/_specular_smoothness = 0.01
+shader_parameter/_specular_strength = 0.0
+shader_parameter/_glossiness = 0.1
+shader_parameter/_rim_size = 0.5
+shader_parameter/_rim_smoothness = 0.01
+shader_parameter/tex = ExtResource("2_efu0e")

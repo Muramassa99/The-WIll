@@ -1,0 +1,15 @@
+profile_primary_grip_valid=true
+stage2_geometry_menu_has_fillet=true
+stage2_geometry_menu_has_chamfer=true
+stage2_geometry_menu_has_pick=false
+grip_safe_patch_count=139
+grip_safe_patch_count_positive=true
+grip_hover_blocked=true
+grip_safe_carve_changed_shell=false
+grip_hover_blocked_for_fillet=false
+grip_safe_fillet_changed_shell=true
+grip_hover_blocked_for_chamfer=true
+grip_safe_chamfer_changed_shell=false
+general_hover_blocked=false
+general_carve_changed_shell=true
+general_chamfer_changed_shell=true

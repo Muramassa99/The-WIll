@@ -1,0 +1,8 @@
+test_print_exists=true
+spawn_root_resolved=true
+spawn_root_child_count=1
+test_print_mesh_instance_valid=true
+preview_mesh_exists=true
+preview_mesh_visible=true
+preview_surface_count=1
+preview_material_override_exists=true

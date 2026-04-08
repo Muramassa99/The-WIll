@@ -1,0 +1,109 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+ForgeService baked profile
+  total_mass=398.15
+  center_of_mass=(61.84621, 39.0058, 19.86513)
+  reach=52.0120162963867
+  front_heavy_score=-0.23367265049501
+  balance_score=0.76622190116085
+  edge_score=0.0
+  blunt_score=0.34020618556701
+  pierce_score=0.03943298969072
+  guard_score=0.23505154639175
+  flex_score=0.0
+  launch_score=0.0
+  resolved_material_stat_line_count=18
+  resolved_capability_bias_line_count=20
+  capability_scores={ &"cap_edge": 1.0, &"cap_blunt": 1.0, &"cap_pierce": 1.0, &"cap_guard": 1.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=398.15
+  center_of_mass=(61.84621, 39.0058, 19.86513)
+  reach=52.0120162963867
+  front_heavy_score=-0.23367265049501
+  balance_score=0.76622190116085
+  edge_score=0.0
+  blunt_score=0.34020618556701
+  pierce_score=0.03943298969072
+  guard_score=0.23505154639175
+  flex_score=0.0
+  launch_score=0.0
+  resolved_material_stat_line_count=18
+  resolved_capability_bias_line_count=20
+  capability_scores={ &"cap_edge": 1.0, &"cap_blunt": 1.0, &"cap_pierce": 1.0, &"cap_guard": 1.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=36.0
+  center_of_mass=(25.5, 11.0, 20.5)
+  reach=5.61248588562012
+  front_heavy_score=0.0
+  balance_score=1.0
+  edge_score=0.0
+  blunt_score=0.0
+  pierce_score=0.0
+  guard_score=0.0
+  flex_score=1.0
+  launch_score=0.0
+  resolved_material_stat_line_count=5
+  resolved_capability_bias_line_count=6
+  capability_scores={ &"cap_edge": 0.0, &"cap_blunt": 0.0, &"cap_pierce": 0.0, &"cap_guard": 0.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=36.0
+  center_of_mass=(25.5, 11.0, 20.5)
+  reach=5.61248588562012
+  front_heavy_score=0.0
+  balance_score=1.0
+  edge_score=0.0
+  blunt_score=0.0
+  pierce_score=0.0
+  guard_score=0.0
+  flex_score=1.0
+  launch_score=0.0
+  resolved_material_stat_line_count=5
+  resolved_capability_bias_line_count=6
+  capability_scores={ &"cap_edge": 0.0, &"cap_blunt": 0.0, &"cap_pierce": 0.0, &"cap_guard": 0.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=36.0
+  center_of_mass=(25.5, 11.0, 20.5)
+  reach=5.61248588562012
+  front_heavy_score=0.0
+  balance_score=1.0
+  edge_score=0.0
+  blunt_score=0.0
+  pierce_score=0.0
+  guard_score=0.0
+  flex_score=1.0
+  launch_score=0.0
+  resolved_material_stat_line_count=5
+  resolved_capability_bias_line_count=6
+  capability_scores={ &"cap_edge": 0.0, &"cap_blunt": 0.0, &"cap_pierce": 0.0, &"cap_guard": 0.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=398.15
+  center_of_mass=(61.84621, 39.0058, 19.86513)
+  reach=52.0120162963867
+  front_heavy_score=-0.23367265049501
+  balance_score=0.76622190116085
+  edge_score=0.0
+  blunt_score=0.34020618556701
+  pierce_score=0.03943298969072
+  guard_score=0.23505154639175
+  flex_score=0.0
+  launch_score=0.0
+  resolved_material_stat_line_count=18
+  resolved_capability_bias_line_count=20
+  capability_scores={ &"cap_edge": 1.0, &"cap_blunt": 1.0, &"cap_pierce": 1.0, &"cap_guard": 1.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=398.15
+  center_of_mass=(61.84621, 39.0058, 19.86513)
+  reach=52.0120162963867
+  front_heavy_score=-0.23367265049501
+  balance_score=0.76622190116085
+  edge_score=0.0
+  blunt_score=0.34020618556701
+  pierce_score=0.03943298969072
+  guard_score=0.23505154639175
+  flex_score=0.0
+  launch_score=0.0
+  resolved_material_stat_line_count=18
+  resolved_capability_bias_line_count=20
+  capability_scores={ &"cap_edge": 1.0, &"cap_blunt": 1.0, &"cap_pierce": 1.0, &"cap_guard": 1.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }

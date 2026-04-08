@@ -1,0 +1,15 @@
+player_loaded=true
+rig_loaded=true
+animation_player_loaded=true
+has_idle=true
+has_walk=true
+has_slow_run=true
+has_run=true
+has_jump_pose=true
+has_fall_pose=true
+idle_state_animation=Idle
+walk_state_animation=Walk
+jog_state_animation=SlowRun
+sprint_state_animation=Run
+jump_state_animation=Jump(Pose)
+fall_state_animation=Fall(Pose)

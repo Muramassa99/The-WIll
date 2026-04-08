@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ForgeAuthoringSandboxDef" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://core/defs/forge/forge_authoring_sandbox_def.gd" id="1_sandbox"]
+[ext_resource type="Resource" path="res://core/defs/forge/sample_presets/sample_grip.tres" id="2_sample_grip"]
+[ext_resource type="Resource" path="res://core/defs/forge/sample_presets/sample_flex.tres" id="3_sample_flex"]
+[ext_resource type="Resource" path="res://core/defs/forge/sample_presets/sample_bow.tres" id="4_sample_bow"]
+[ext_resource type="Resource" path="res://core/defs/forge/forge_inventory_seed_default.tres" id="5_inventory_seed"]
+
+[resource]
+script = ExtResource("1_sandbox")
+sample_presets = [ExtResource("2_sample_grip"), ExtResource("3_sample_flex"), ExtResource("4_sample_bow")]
+inventory_seed_def = ExtResource("5_inventory_seed")
+inventory_seed_bonus_quantity = 5000

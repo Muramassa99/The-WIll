@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="PlayerEquipmentState" format=3]
+
+[ext_resource type="Script" path="res://core/models/equipped_slot_instance.gd" id="1_lk4i7"]
+[ext_resource type="Script" path="res://core/models/player_equipment_state.gd" id="2_8xqls"]
+
+[sub_resource type="Resource" id="Resource_k6808"]
+script = ExtResource("1_lk4i7")
+slot_id = &"hand_right"
+entry_kind = &"forge_test_wip"
+source_wip_id = &"verify_two_hand_guidance_wip"
+display_name = "Verify Two Hand Guidance Sword"
+is_forge_internal_only = true
+
+[resource]
+script = ExtResource("2_8xqls")
+equipped_slots = Array[Resource]([SubResource("Resource_k6808")])
+save_file_path = "C:/WORKSPACE/test_artifacts/verify_guidance_player_equipment_state.tres"

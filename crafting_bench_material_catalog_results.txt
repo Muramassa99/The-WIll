@@ -1,0 +1,13 @@
+total_catalog_count=16
+selected_material_id=mat_wood_gray
+armed_material_id=mat_wood_gray
+selected_entry_exists=true
+armed_entry_exists=true
+owned_visible_count=16
+owned_entries_have_quantity=true
+all_visible_count=16
+search_query=wood_gray
+search_visible_count=1
+weapon_visible_count=16
+description_nonempty=true
+stats_nonempty=true

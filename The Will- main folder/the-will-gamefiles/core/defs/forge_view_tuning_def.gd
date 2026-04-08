@@ -13,6 +13,8 @@ class_name ForgeViewTuningDef
 @export var plane_zoom_step: float = 0.2
 @export var plane_zoom_min_scale: float = 1.0
 @export var plane_zoom_max_scale: float = 4.0
+@export_range(0.0, 1.0, 0.01) var plane_shape_add_preview_alpha: float = 0.35
+@export var plane_shape_remove_preview_color: Color = Color(0.886275, 0.313726, 0.258824, 0.35)
 
 @export_group("Workspace Preview")
 @export var workspace_camera_fov_degrees: float = 55.0
@@ -45,6 +47,16 @@ class_name ForgeViewTuningDef
 @export var workspace_voxel_roughness: float = 0.82
 @export var workspace_voxel_metallic: float = 0.05
 @export var workspace_plane_thickness_factor: float = 0.12
+@export var workspace_stage2_shell_color: Color = Color(0.392157, 0.176471, 0.568627, 0.26)
+@export var workspace_stage2_brush_color: Color = Color(0.392157, 0.176471, 0.568627, 0.16)
+@export var workspace_stage2_blocked_brush_color: Color = Color(0.780392, 0.25098, 0.309804, 0.18)
+@export var workspace_stage2_hover_face_color: Color = Color(0.392157, 0.176471, 0.568627, 0.2)
+@export var workspace_stage2_selected_face_color: Color = Color(0.392157, 0.176471, 0.568627, 0.3)
+@export var workspace_stage2_default_brush_radius_meters: float = 0.12
+@export_range(0.01, 1.0, 0.01) var workspace_stage2_brush_step_ratio: float = 0.25
+@export var workspace_generated_string_color: Color = Color(0.776471, 0.878431, 0.980392, 0.9)
+@export var workspace_generated_string_draw_color: Color = Color(1.0, 0.729412, 0.356863, 0.5)
+@export var workspace_generated_string_radius_meters: float = 0.0025
 
 @export_group("Test Print Preview")
 @export var test_print_fallback_color: Color = Color(0.819608, 0.811765, 0.772549, 1.0)

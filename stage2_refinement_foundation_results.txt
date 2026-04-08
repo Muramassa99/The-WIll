@@ -1,0 +1,9 @@
+stage2_initialized=true
+stage2_patch_count=40
+stage2_source_cell_count=16
+stage2_current_aabb_size=(4.0, 2.0, 2.0)
+stage2_has_positive_patch_depth=true
+stage2_has_positive_envelope=true
+test_print_exists=true
+test_print_stage2_exists=true
+test_print_uses_stage2_geometry=true

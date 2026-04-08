@@ -1,0 +1,92 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+WARNING: Material uses a specular and glossiness workflow. Textures will be converted to roughness and metallic workflow, which may not be 100% accurate.
+   at: _parse_materials (modules/gltf/gltf_document.cpp:2963)
+   GDScript backtrace (most recent call first):
+       [0] _load_gltf_scene_root (res://runtime/forge/forge_workspace_axis_indicator.gd:126)
+       [1] _instantiate_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:111)
+       [2] _ensure_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:92)
+       [3] _ready (res://runtime/forge/forge_workspace_axis_indicator.gd:23)
+       [4] _run_verification (res://tools/verify_ranged_bow_string_anchor_markers.gd:23)
+WARNING: Material uses a specular and glossiness workflow. Textures will be converted to roughness and metallic workflow, which may not be 100% accurate.
+   at: _parse_materials (modules/gltf/gltf_document.cpp:2963)
+   GDScript backtrace (most recent call first):
+       [0] _load_gltf_scene_root (res://runtime/forge/forge_workspace_axis_indicator.gd:126)
+       [1] _instantiate_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:111)
+       [2] _ensure_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:92)
+       [3] _ready (res://runtime/forge/forge_workspace_axis_indicator.gd:23)
+       [4] _run_verification (res://tools/verify_ranged_bow_string_anchor_markers.gd:23)
+WARNING: Material uses a specular and glossiness workflow. Textures will be converted to roughness and metallic workflow, which may not be 100% accurate.
+   at: _parse_materials (modules/gltf/gltf_document.cpp:2963)
+   GDScript backtrace (most recent call first):
+       [0] _load_gltf_scene_root (res://runtime/forge/forge_workspace_axis_indicator.gd:126)
+       [1] _instantiate_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:111)
+       [2] _ensure_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:92)
+       [3] _ready (res://runtime/forge/forge_workspace_axis_indicator.gd:23)
+       [4] _run_verification (res://tools/verify_ranged_bow_string_anchor_markers.gd:23)
+WARNING: Material uses a specular and glossiness workflow. Textures will be converted to roughness and metallic workflow, which may not be 100% accurate.
+   at: _parse_materials (modules/gltf/gltf_document.cpp:2963)
+   GDScript backtrace (most recent call first):
+       [0] _load_gltf_scene_root (res://runtime/forge/forge_workspace_axis_indicator.gd:126)
+       [1] _instantiate_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:111)
+       [2] _ensure_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:92)
+       [3] _ready (res://runtime/forge/forge_workspace_axis_indicator.gd:23)
+       [4] _run_verification (res://tools/verify_ranged_bow_string_anchor_markers.gd:23)
+SCRIPT ERROR: Trying to assign an array of type "Array" to a variable of type "Array[Vector3]".
+   at: ForgeWorkspacePreview._sync_generated_string_from_wip (res://runtime/forge/forge_workspace_preview.gd:238)
+   GDScript backtrace (most recent call first):
+       [0] _sync_generated_string_from_wip (res://runtime/forge/forge_workspace_preview.gd:238)
+       [1] sync_from_wip (res://runtime/forge/forge_workspace_preview.gd:69)
+       [2] refresh_workspace_visuals (res://runtime/forge/forge_workspace_presentation.gd:34)
+       [3] _refresh_workspace_visuals (res://runtime/forge/crafting_bench_ui.gd:766)
+       [4] _refresh_plane_and_preview (res://runtime/forge/crafting_bench_ui.gd:761)
+       [5] refresh_all (res://runtime/forge/forge_bench_refresh_presenter.gd:23)
+       [6] _refresh_all (res://runtime/forge/crafting_bench_ui.gd:575)
+       [7] handle_active_wip_changed (res://runtime/forge/forge_bench_debug_presenter.gd:30)
+       [8] _on_active_wip_changed (res://runtime/forge/crafting_bench_ui.gd:1470)
+       [9] set_active_wip (res://runtime/forge/forge_grid_controller.gd:129)
+       [10] load_new_blank_wip_for_builder_path (res://runtime/forge/forge_grid_controller.gd:236)
+       [11] create_new_blank_project_for_builder_path (res://runtime/forge/forge_project_workflow.gd:136)
+       [12] create_new_blank_project_for_builder_path (res://runtime/forge/forge_project_action_presenter.gd:90)
+       [13] _create_new_blank_project_for_builder_path (res://runtime/forge/crafting_bench_ui.gd:1038)
+       [14] _on_start_menu_new_ranged_physical_pressed (res://runtime/forge/crafting_bench_ui.gd:1373)
+       [15] _run_verification (res://tools/verify_ranged_bow_string_anchor_markers.gd:30)
+SCRIPT ERROR: Trying to assign an array of type "Array" to a variable of type "Array[Vector3]".
+   at: ForgeWorkspacePreview._sync_generated_string_from_wip (res://runtime/forge/forge_workspace_preview.gd:238)
+   GDScript backtrace (most recent call first):
+       [0] _sync_generated_string_from_wip (res://runtime/forge/forge_workspace_preview.gd:238)
+       [1] sync_from_wip (res://runtime/forge/forge_workspace_preview.gd:69)
+       [2] refresh_workspace_visuals (res://runtime/forge/forge_workspace_presentation.gd:34)
+       [3] _refresh_workspace_visuals (res://runtime/forge/crafting_bench_ui.gd:766)
+       [4] _refresh_plane_and_preview (res://runtime/forge/crafting_bench_ui.gd:761)
+       [5] refresh_all (res://runtime/forge/forge_bench_refresh_presenter.gd:23)
+       [6] _refresh_all (res://runtime/forge/crafting_bench_ui.gd:575)
+       [7] apply_project_action_result (res://runtime/forge/forge_project_action_presenter.gd:234)
+       [8] apply_project_action_result_to_layer (res://runtime/forge/forge_project_action_presenter.gd:247)
+       [9] _create_new_blank_project_for_builder_path (res://runtime/forge/crafting_bench_ui.gd:1046)
+       [10] _on_start_menu_new_ranged_physical_pressed (res://runtime/forge/crafting_bench_ui.gd:1373)
+       [11] _run_verification (res://tools/verify_ranged_bow_string_anchor_markers.gd:30)
+SCRIPT ERROR: Trying to assign an array of type "Array" to a variable of type "Array[Vector3]".
+   at: ForgeWorkspacePreview._sync_generated_string_from_wip (res://runtime/forge/forge_workspace_preview.gd:238)
+   GDScript backtrace (most recent call first):
+       [0] _sync_generated_string_from_wip (res://runtime/forge/forge_workspace_preview.gd:238)
+       [1] sync_from_wip (res://runtime/forge/forge_workspace_preview.gd:69)
+       [2] refresh_workspace_visuals (res://runtime/forge/forge_workspace_presentation.gd:34)
+       [3] _refresh_workspace_visuals (res://runtime/forge/crafting_bench_ui.gd:766)
+       [4] _refresh_workspace_visuals_for_pending_edit (res://runtime/forge/crafting_bench_ui.gd:823)
+       [5] process_pending_edit_refresh (res://runtime/forge/forge_workspace_edit_flow.gd:35)
+       [6] _process_pending_edit_refresh (res://runtime/forge/crafting_bench_ui.gd:796)
+       [7] _process (res://runtime/forge/crafting_bench_ui.gd:245)
+SCRIPT ERROR: Trying to assign an array of type "Array" to a variable of type "Array[Vector3]".
+   at: ForgeWorkspacePreview._sync_generated_string_from_wip (res://runtime/forge/forge_workspace_preview.gd:238)
+   GDScript backtrace (most recent call first):
+       [0] _sync_generated_string_from_wip (res://runtime/forge/forge_workspace_preview.gd:238)
+       [1] sync_from_wip (res://runtime/forge/forge_workspace_preview.gd:69)
+       [2] refresh_workspace_visuals (res://runtime/forge/forge_workspace_presentation.gd:34)
+       [3] _refresh_workspace_visuals (res://runtime/forge/crafting_bench_ui.gd:766)
+       [4] _refresh_workspace_visuals_for_pending_edit (res://runtime/forge/crafting_bench_ui.gd:823)
+       [5] process_pending_edit_refresh (res://runtime/forge/forge_workspace_edit_flow.gd:35)
+       [6] _process_pending_edit_refresh (res://runtime/forge/crafting_bench_ui.gd:796)
+       [7] _process (res://runtime/forge/crafting_bench_ui.gd:245)

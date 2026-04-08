@@ -1,0 +1,12 @@
+stage2_geometry_menu_has_edge_fillet=true
+stage2_geometry_menu_has_edge_chamfer=true
+edge_tool_apply_visible=true
+edge_tool_clear_visible=true
+hover_preview_visible=true
+selected_preview_visible=true
+selected_count_after_pick=3
+grip_safe_edge_fillet_changed_shell=true
+selected_count_after_clear=0
+grip_safe_edge_chamfer_changed_shell=false
+general_selected_count=7
+general_edge_chamfer_changed_shell=true

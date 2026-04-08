@@ -1,0 +1,7 @@
+[gd_resource type="Resource" script_class="PlayerEquipmentState" format=3]
+
+[ext_resource type="Script" path="res://core/models/player_equipment_state.gd" id="2_spf57"]
+
+[resource]
+script = ExtResource("2_spf57")
+save_file_path = "C:/WORKSPACE/test_artifacts/diagnose_left_mount_player_equipment_state.tres"

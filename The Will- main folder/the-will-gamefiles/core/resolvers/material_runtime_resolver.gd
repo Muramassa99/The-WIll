@@ -2,6 +2,7 @@ extends RefCounted
 class_name MaterialRuntimeResolver
 
 const TierResolverScript = preload("res://core/resolvers/tier_resolver.gd")
+const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
 const DEFAULT_TIER_REGISTRY_RESOURCE: Resource = preload("res://core/defs/materials/tiers/tier_registry_default.tres")
 
 var tier_resolver: TierResolver = TierResolverScript.new()
@@ -17,6 +18,8 @@ func resolve_material_variant_for_cell(cell: CellAtom, material_lookup: Dictiona
 
 func resolve_material_variant_for_material_id(material_id: StringName, material_lookup: Dictionary) -> MaterialVariantDef:
 	if material_id == StringName():
+		return null
+	if CraftedItemWIPScript.is_builder_marker_material_id(material_id):
 		return null
 	var material_entry: Variant = material_lookup.get(material_id)
 	if material_entry is MaterialVariantDef:
@@ -35,6 +38,8 @@ func resolve_base_material_for_cell(cell: CellAtom, material_lookup: Dictionary)
 
 func resolve_base_material_for_material_id(material_id: StringName, material_lookup: Dictionary) -> BaseMaterialDef:
 	if material_id == StringName():
+		return null
+	if CraftedItemWIPScript.is_builder_marker_material_id(material_id):
 		return null
 	var material_entry: Variant = material_lookup.get(material_id)
 	if material_entry is BaseMaterialDef:
@@ -111,6 +116,8 @@ func has_positive_capability_bias_for_cell(cell: CellAtom, material_lookup: Dict
 	return false
 
 func resolve_material_color(material_id: StringName, material_lookup: Dictionary, fallback_color: Color) -> Color:
+	if CraftedItemWIPScript.is_builder_marker_material_id(material_id):
+		return CraftedItemWIPScript.get_builder_marker_color(material_id)
 	var base_material: BaseMaterialDef = resolve_base_material_for_material_id(material_id, material_lookup)
 	if base_material != null:
 		return base_material.albedo_color

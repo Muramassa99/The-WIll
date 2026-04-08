@@ -1,9 +1,11 @@
-extends Control
+﻿extends Control
 class_name ForgePlaneViewport
 
 signal cell_place_requested(grid_position)
 signal cell_remove_requested(grid_position)
 signal cell_pick_requested(grid_position)
+signal drag_started(grid_position, button_index)
+signal drag_updated(grid_position, button_index)
 signal stroke_finished
 
 const PLANE_XY: StringName = &"xy"
@@ -13,6 +15,7 @@ const PLANE_ZY: StringName = &"zy"
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
 const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://core/defs/forge/forge_view_tuning_default.tres")
 const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
+const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
 
 @export var grid_size: Vector3i = DEFAULT_FORGE_RULES_RESOURCE.grid_size
 @export var forge_view_tuning: ForgeViewTuningDef = DEFAULT_FORGE_VIEW_TUNING_RESOURCE
@@ -27,6 +30,11 @@ var plane_zoom_focus: Vector2 = Vector2(0.5, 0.5)
 var active_drag_button: MouseButton = MOUSE_BUTTON_NONE
 var drag_has_last_grid: bool = false
 var drag_last_grid_position: Vector3i = Vector3i.ZERO
+var drag_has_last_plane_position: bool = false
+var drag_last_plane_position: Vector2i = Vector2i.ZERO
+var structural_shape_preview_cells: Array[Vector3i] = []
+var structural_shape_preview_material_id: StringName = &""
+var structural_shape_preview_remove_mode: bool = false
 
 func set_grid_size(value: Vector3i) -> void:
 	grid_size = value
@@ -79,6 +87,9 @@ func _gui_input(event: InputEvent) -> void:
 			return
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT or mouse_event.button_index == MOUSE_BUTTON_RIGHT:
 			active_drag_button = mouse_event.button_index
+			var drag_grid_position_variant: Variant = _screen_to_grid(mouse_event.position)
+			if drag_grid_position_variant is Vector3i:
+				emit_signal("drag_started", drag_grid_position_variant, active_drag_button)
 			_emit_drag_action(mouse_event.position, active_drag_button)
 			accept_event()
 			return
@@ -120,6 +131,8 @@ func _draw() -> void:
 					cell_size
 				)
 				draw_rect(cell_rect.grow(-tuning.plane_cell_inset_pixels), _resolve_material_color(cell.material_variant_id), true)
+		_draw_builder_markers(plane_rect, cell_size)
+	_draw_structural_shape_preview(plane_rect, cell_size)
 
 	for x in range(plane_dimensions.x + 1):
 		var x_pos: float = plane_rect.position.x + (float(x) * cell_size.x)
@@ -233,6 +246,35 @@ func _resolve_material_color(material_id: StringName) -> Color:
 		_get_view_tuning().unknown_material_color
 	)
 
+func _draw_builder_markers(plane_rect: Rect2, cell_size: Vector2) -> void:
+	if active_wip == null:
+		return
+	var font: Font = get_theme_default_font()
+	var font_size: int = maxi(get_theme_default_font_size() - 2, 10)
+	for marker_cell: CellAtom in CraftedItemWIPScript.collect_builder_marker_cells(active_wip):
+		if marker_cell == null:
+			continue
+		var plane_position: Variant = _grid_to_plane(marker_cell.grid_position)
+		if plane_position == null:
+			continue
+		var resolved_plane_position: Vector2i = plane_position
+		var cell_rect: Rect2 = Rect2(
+			plane_rect.position + Vector2(float(resolved_plane_position.x) * cell_size.x, float(resolved_plane_position.y) * cell_size.y),
+			cell_size
+		)
+		var marker_color: Color = _resolve_material_color(marker_cell.material_variant_id)
+		var center: Vector2 = cell_rect.get_center()
+		var radius: float = minf(cell_rect.size.x, cell_rect.size.y) * 0.28
+		draw_circle(center, radius, Color(marker_color.r, marker_color.g, marker_color.b, 0.28))
+		draw_arc(center, radius, 0.0, TAU, 24, marker_color, 2.0)
+		draw_circle(center, maxf(radius * 0.22, 2.0), Color(1.0, 1.0, 1.0, 0.9))
+		if font == null:
+			continue
+		var label: String = CraftedItemWIPScript.get_builder_marker_short_label(marker_cell.material_variant_id)
+		var label_size: Vector2 = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+		var label_position: Vector2 = center - Vector2(label_size.x * 0.5, -label_size.y * 0.35)
+		draw_string(font, label_position, label, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size, marker_color.lightened(0.5))
+
 func _zoom_plane_at(screen_position: Vector2, direction: float) -> void:
 	var tuning: ForgeViewTuningDef = _get_view_tuning()
 	var previous_zoom: float = plane_zoom_scale
@@ -268,18 +310,109 @@ func _emit_drag_action(screen_position: Vector2, button_index: MouseButton) -> v
 	if grid_position_variant == null:
 		return
 	var grid_position: Vector3i = grid_position_variant
-	if drag_has_last_grid and grid_position == drag_last_grid_position:
+	var plane_position_variant: Variant = _grid_to_plane(grid_position)
+	if plane_position_variant is not Vector2i:
 		return
+	var current_plane_position: Vector2i = plane_position_variant
+	for plane_position: Vector2i in _build_drag_plane_path(current_plane_position):
+		var drag_grid_position: Vector3i = _plane_to_grid(plane_position)
+		emit_signal("drag_updated", drag_grid_position, button_index)
+		if drag_has_last_grid and drag_grid_position == drag_last_grid_position:
+			continue
+		drag_has_last_grid = true
+		drag_last_grid_position = drag_grid_position
+		if button_index == MOUSE_BUTTON_RIGHT:
+			emit_signal("cell_remove_requested", drag_grid_position)
+		else:
+			emit_signal("cell_place_requested", drag_grid_position)
+	drag_has_last_plane_position = true
+	drag_last_plane_position = current_plane_position
+
+func has_active_drag_action() -> bool:
+	return drag_has_last_plane_position and (
+		active_drag_button == MOUSE_BUTTON_LEFT
+		or active_drag_button == MOUSE_BUTTON_RIGHT
+	)
+
+func emit_active_drag_action_for_current_layer() -> bool:
+	if not has_active_drag_action():
+		return false
+	var grid_position: Vector3i = _plane_to_grid(drag_last_plane_position)
+	if drag_has_last_grid and grid_position == drag_last_grid_position:
+		return false
 	drag_has_last_grid = true
 	drag_last_grid_position = grid_position
-	if button_index == MOUSE_BUTTON_RIGHT:
+	if active_drag_button == MOUSE_BUTTON_RIGHT:
 		emit_signal("cell_remove_requested", grid_position)
-		return
+		return true
 	emit_signal("cell_place_requested", grid_position)
+	return true
+
+func set_structural_shape_preview_state(
+	grid_positions: Array[Vector3i],
+	material_id: StringName,
+	remove_mode: bool
+) -> void:
+	structural_shape_preview_cells = grid_positions.duplicate()
+	structural_shape_preview_material_id = material_id
+	structural_shape_preview_remove_mode = remove_mode
+	queue_redraw()
+
+func clear_structural_shape_preview_state() -> void:
+	structural_shape_preview_cells.clear()
+	structural_shape_preview_material_id = StringName()
+	structural_shape_preview_remove_mode = false
+	queue_redraw()
+
+func _draw_structural_shape_preview(plane_rect: Rect2, cell_size: Vector2) -> void:
+	if structural_shape_preview_cells.is_empty():
+		return
+	var tuning: ForgeViewTuningDef = _get_view_tuning()
+	var preview_color: Color = tuning.plane_shape_remove_preview_color if structural_shape_preview_remove_mode else _resolve_material_color(structural_shape_preview_material_id)
+	if not structural_shape_preview_remove_mode:
+		preview_color = Color(preview_color.r, preview_color.g, preview_color.b, tuning.plane_shape_add_preview_alpha)
+	for grid_position: Vector3i in structural_shape_preview_cells:
+		var plane_position_variant: Variant = _grid_to_plane(grid_position)
+		if plane_position_variant == null:
+			continue
+		var plane_position: Vector2i = plane_position_variant
+		var cell_rect: Rect2 = Rect2(
+			plane_rect.position + Vector2(float(plane_position.x) * cell_size.x, float(plane_position.y) * cell_size.y),
+			cell_size
+		)
+		draw_rect(cell_rect.grow(-tuning.plane_cell_inset_pixels), preview_color, true)
+		draw_rect(cell_rect.grow(-tuning.plane_cell_inset_pixels), preview_color.lightened(0.2), false, 1.0)
 
 func _clear_drag_state() -> void:
 	active_drag_button = MOUSE_BUTTON_NONE
 	drag_has_last_grid = false
+	drag_has_last_plane_position = false
+
+func _build_drag_plane_path(current_plane_position: Vector2i) -> Array[Vector2i]:
+	if not drag_has_last_plane_position:
+		return [current_plane_position]
+	return _build_plane_line(drag_last_plane_position, current_plane_position)
+
+func _build_plane_line(start_plane_position: Vector2i, end_plane_position: Vector2i) -> Array[Vector2i]:
+	var resolved_positions: Array[Vector2i] = []
+	var delta_x: int = end_plane_position.x - start_plane_position.x
+	var delta_y: int = end_plane_position.y - start_plane_position.y
+	var step_count: int = maxi(abs(delta_x), abs(delta_y))
+	if step_count <= 0:
+		resolved_positions.append(end_plane_position)
+		return resolved_positions
+	var visited: Dictionary = {}
+	for step_index: int in range(step_count + 1):
+		var interpolation_ratio: float = float(step_index) / float(step_count)
+		var plane_position: Vector2i = Vector2i(
+			int(round(lerpf(float(start_plane_position.x), float(end_plane_position.x), interpolation_ratio))),
+			int(round(lerpf(float(start_plane_position.y), float(end_plane_position.y), interpolation_ratio)))
+		)
+		if visited.has(plane_position):
+			continue
+		visited[plane_position] = true
+		resolved_positions.append(plane_position)
+	return resolved_positions
 
 func _get_view_tuning() -> ForgeViewTuningDef:
 	return forge_view_tuning if forge_view_tuning != null else DEFAULT_FORGE_VIEW_TUNING_RESOURCE

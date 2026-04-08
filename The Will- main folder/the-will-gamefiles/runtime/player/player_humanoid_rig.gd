@@ -1,18 +1,36 @@
 extends Node3D
 class_name PlayerHumanoidRig
 
+const PlayerRigModelPresenterScript = preload("res://runtime/player/player_rig_model_presenter.gd")
+const PlayerRigGuidanceStatePresenterScript = preload("res://runtime/player/player_rig_guidance_state_presenter.gd")
+const PlayerRigLocomotionPresenterScript = preload("res://runtime/player/player_rig_locomotion_presenter.gd")
+const PlayerRigGripLayoutPresenterScript = preload("res://runtime/player/player_rig_grip_layout_presenter.gd")
+const PlayerRigSupportArmIkPresenterScript = preload("res://runtime/player/player_rig_support_arm_ik_presenter.gd")
 const RIGHT_HAND_BONE := &"CC_Base_R_Hand"
 const LEFT_HAND_BONE := &"CC_Base_L_Hand"
 const RIGHT_THIGH_BONE := &"CC_Base_R_Thigh"
 const LEFT_THIGH_BONE := &"CC_Base_L_Thigh"
 const RIGHT_CLAVICLE_BONE := &"CC_Base_R_Clavicle"
 const LEFT_CLAVICLE_BONE := &"CC_Base_L_Clavicle"
+const RIGHT_UPPERARM_BONE := &"CC_Base_R_Upperarm"
+const LEFT_UPPERARM_BONE := &"CC_Base_L_Upperarm"
+const RIGHT_FOREARM_BONE := &"CC_Base_R_Forearm"
+const LEFT_FOREARM_BONE := &"CC_Base_L_Forearm"
 
 @export_range(1.6, 2.4, 0.01) var standing_height_meters: float = 2.0
+@export_range(0.0, 0.5, 0.01) var pole_grip_arm_reach_margin_percent: float = 0.10
 @export var right_hand_anchor_position: Vector3 = Vector3(-0.0025, 0.0969, 0.0190)
 @export var right_hand_anchor_rotation_degrees: Vector3 = Vector3(0.0, 90.0, 0.0)
 @export var left_hand_anchor_position: Vector3 = Vector3(0.0025, 0.0969, 0.0190)
 @export var left_hand_anchor_rotation_degrees: Vector3 = Vector3(0.0, -90.0, 0.0)
+
+@export_category("Support Arm IK")
+@export var enable_support_arm_ik: bool = true
+@export_range(0.0, 1.0, 0.01) var support_arm_ik_influence: float = 1.0
+@export_range(1.0, 30.0, 0.1) var support_arm_ik_target_smoothing_speed: float = 12.0
+@export_range(0.0, 0.6, 0.01) var support_arm_ik_pole_side_offset_meters: float = 0.24
+@export_range(0.0, 0.6, 0.01) var support_arm_ik_pole_down_offset_meters: float = 0.18
+@export_range(0.0, 0.4, 0.01) var support_arm_ik_pole_back_offset_meters: float = 0.08
 
 @export_category("Stowed Weapon Anchors")
 @export var left_shoulder_stow_position: Vector3 = Vector3(0.08, 0.12, -0.10)
@@ -44,12 +62,31 @@ const LEFT_CLAVICLE_BONE := &"CC_Base_L_Clavicle"
 @onready var skeleton: Skeleton3D = $JosieModel/Josie/Skeleton3D
 @onready var mesh_instance: MeshInstance3D = $JosieModel/Josie/Skeleton3D/Mesh
 @onready var animation_player: AnimationPlayer = $JosieModel/AnimationPlayer
+@onready var ik_targets_root: Node3D = $IkTargets
+@onready var right_hand_ik_target: Node3D = $IkTargets/RightHandIkTarget
+@onready var left_hand_ik_target: Node3D = $IkTargets/LeftHandIkTarget
+@onready var right_hand_pole_target: Node3D = $IkTargets/RightHandPoleTarget
+@onready var left_hand_pole_target: Node3D = $IkTargets/LeftHandPoleTarget
 
 var resolved_visual_height_meters: float = 0.0
-var current_animation_name: StringName = StringName()
+var max_model_arm_reach_meters: float = 0.0
+var max_model_arm_reach_combat_meters: float = 0.0
+var pole_grip_negative_limit_meters: float = 0.0
+var pole_grip_positive_limit_meters: float = 0.0
+var right_arm_ik_modifier: TwoBoneIK3D = null
+var left_arm_ik_modifier: TwoBoneIK3D = null
+var bone_index_cache: Dictionary = {}
+var rig_model_presenter = PlayerRigModelPresenterScript.new()
+var guidance_state_presenter = PlayerRigGuidanceStatePresenterScript.new()
+var locomotion_presenter = PlayerRigLocomotionPresenterScript.new()
+var grip_layout_presenter = PlayerRigGripLayoutPresenterScript.new()
+var support_arm_ik_presenter = PlayerRigSupportArmIkPresenterScript.new()
 
 func _ready() -> void:
 	_apply_target_height_scale()
+	guidance_state_presenter.reset_state()
+	if skeleton != null:
+		skeleton.modifier_callback_mode_process = Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_IDLE
 	_ensure_hand_attachment("RightHandAttachment", RIGHT_HAND_BONE, "RightHandItemAnchor", right_hand_anchor_position, right_hand_anchor_rotation_degrees)
 	_ensure_hand_attachment("LeftHandAttachment", LEFT_HAND_BONE, "LeftHandItemAnchor", left_hand_anchor_position, left_hand_anchor_rotation_degrees)
 	_ensure_stow_attachment("LeftShoulderStowAttachment", LEFT_CLAVICLE_BONE, "LeftShoulderStowAnchor", left_shoulder_stow_position, left_shoulder_stow_rotation_degrees)
@@ -58,7 +95,18 @@ func _ready() -> void:
 	_ensure_stow_attachment("RightHipStowAttachment", RIGHT_THIGH_BONE, "RightHipStowAnchor", right_side_hip_stow_position, right_side_hip_stow_rotation_degrees)
 	_ensure_stow_attachment("LeftLowerBackStowAttachment", LEFT_THIGH_BONE, "LeftLowerBackStowAnchor", left_lower_back_stow_position, left_lower_back_stow_rotation_degrees)
 	_ensure_stow_attachment("RightLowerBackStowAttachment", RIGHT_THIGH_BONE, "RightLowerBackStowAnchor", right_lower_back_stow_position, right_lower_back_stow_rotation_degrees)
+	max_model_arm_reach_meters = _resolve_max_model_arm_reach_meters()
+	_apply_pole_grip_arm_reach_limits()
+	_ensure_support_arm_ik_modifiers()
+	_snap_support_arm_ik_targets_to_current_pose()
+	_refresh_support_arm_ik_influences()
+	process_priority = 10
+	set_process(true)
 	_play_default_animation()
+
+func _process(delta: float) -> void:
+	_update_support_arm_ik_targets(delta)
+	_refresh_support_arm_ik_influences()
 
 func get_standing_height_meters() -> float:
 	return standing_height_meters
@@ -66,38 +114,64 @@ func get_standing_height_meters() -> float:
 func get_visual_height_meters() -> float:
 	return resolved_visual_height_meters
 
+func get_max_model_arm_reach_meters() -> float:
+	return max_model_arm_reach_meters
+
+func get_max_model_arm_reach_combat_meters() -> float:
+	return max_model_arm_reach_combat_meters
+
+func get_pole_grip_negative_limit_meters() -> float:
+	return pole_grip_negative_limit_meters
+
+func get_pole_grip_positive_limit_meters() -> float:
+	return pole_grip_positive_limit_meters
+
+func get_required_cc_base_bone_names() -> Array[StringName]:
+	return [
+		RIGHT_HAND_BONE,
+		LEFT_HAND_BONE,
+		RIGHT_CLAVICLE_BONE,
+		LEFT_CLAVICLE_BONE,
+		RIGHT_UPPERARM_BONE,
+		LEFT_UPPERARM_BONE,
+		RIGHT_FOREARM_BONE,
+		LEFT_FOREARM_BONE,
+		RIGHT_THIGH_BONE,
+		LEFT_THIGH_BONE
+	]
+
+func get_arm_guidance_target(slot_id: StringName) -> Node3D:
+	return guidance_state_presenter.get_arm_guidance_target(slot_id)
+
+func is_support_hand_active(slot_id: StringName) -> bool:
+	return guidance_state_presenter.is_support_hand_active(slot_id)
+
+func resolve_grip_hold_layout(
+		baked_profile: BakedProfile,
+		dominant_slot_id: StringName,
+		cell_world_size_meters: float
+	) -> Dictionary:
+	return grip_layout_presenter.resolve_grip_hold_layout(
+		baked_profile,
+		dominant_slot_id,
+		cell_world_size_meters,
+		max_model_arm_reach_combat_meters
+	)
+
 func get_current_animation_name() -> StringName:
-	return current_animation_name
+	return locomotion_presenter.get_current_animation_name()
 
 func has_animation_name(animation_name: StringName) -> bool:
-	if animation_player == null or animation_name == StringName():
-		return false
-	return animation_player.has_animation(String(animation_name))
+	return locomotion_presenter.has_animation_name(animation_player, animation_name)
 
 func get_right_hand_item_anchor() -> Node3D:
-	return get_node_or_null("JosieModel/Josie/Skeleton3D/RightHandAttachment/RightHandItemAnchor") as Node3D
+	return rig_model_presenter.get_right_hand_item_anchor(self)
 
 func get_left_hand_item_anchor() -> Node3D:
-	return get_node_or_null("JosieModel/Josie/Skeleton3D/LeftHandAttachment/LeftHandItemAnchor") as Node3D
+	return rig_model_presenter.get_left_hand_item_anchor(self)
 
 func get_weapon_stow_anchor(stow_mode: StringName, slot_id: StringName) -> Node3D:
-	var normalized_mode: StringName = CraftedItemWIP.normalize_stow_position_mode(stow_mode)
-	if normalized_mode == CraftedItemWIP.STOW_SIDE_HIP:
-		if slot_id == &"hand_right":
-			return get_node_or_null("JosieModel/Josie/Skeleton3D/LeftHipStowAttachment/LeftHipStowAnchor") as Node3D
-		if slot_id == &"hand_left":
-			return get_node_or_null("JosieModel/Josie/Skeleton3D/RightHipStowAttachment/RightHipStowAnchor") as Node3D
-	elif normalized_mode == CraftedItemWIP.STOW_LOWER_BACK:
-		if slot_id == &"hand_right":
-			return get_node_or_null("JosieModel/Josie/Skeleton3D/RightLowerBackStowAttachment/RightLowerBackStowAnchor") as Node3D
-		if slot_id == &"hand_left":
-			return get_node_or_null("JosieModel/Josie/Skeleton3D/LeftLowerBackStowAttachment/LeftLowerBackStowAnchor") as Node3D
-	else:
-		if slot_id == &"hand_right":
-			return get_node_or_null("JosieModel/Josie/Skeleton3D/LeftShoulderStowAttachment/LeftShoulderStowAnchor") as Node3D
-		if slot_id == &"hand_left":
-			return get_node_or_null("JosieModel/Josie/Skeleton3D/RightShoulderStowAttachment/RightShoulderStowAnchor") as Node3D
-	return null
+	return rig_model_presenter.get_weapon_stow_anchor(self, stow_mode, slot_id)
 
 func update_locomotion_state(
 		horizontal_speed: float,
@@ -106,39 +180,34 @@ func update_locomotion_state(
 		vertical_velocity: float,
 		sprinting: bool
 	) -> void:
-	var target_animation_name: StringName = _resolve_locomotion_animation_name(
+	locomotion_presenter.update_locomotion_state(
+		animation_player,
 		horizontal_speed,
 		target_horizontal_speed,
 		grounded,
 		vertical_velocity,
-		sprinting
+		sprinting,
+		_get_locomotion_config()
 	)
-	_play_animation(target_animation_name)
 
-func set_hand_grip_active(_slot_id: StringName, _active: bool) -> void:
-	pass
+func set_support_hand_active(slot_id: StringName, active: bool) -> void:
+	guidance_state_presenter.set_support_hand_active(slot_id, active)
+	_refresh_support_arm_ik_influences()
 
-func set_support_hand_active(_slot_id: StringName, _active: bool) -> void:
-	pass
+func set_arm_guidance_target(slot_id: StringName, target_node: Node3D) -> void:
+	guidance_state_presenter.set_arm_guidance_target(slot_id, target_node)
+	_refresh_support_arm_ik_influences()
 
-func set_arm_guidance_target(_slot_id: StringName, _target_node: Node3D) -> void:
-	pass
-
-func clear_arm_guidance_target(_slot_id: StringName) -> void:
-	pass
-
-func set_aim_follow_target(_local_yaw_radians: float, _local_pitch_radians: float) -> void:
-	pass
+func clear_arm_guidance_target(slot_id: StringName) -> void:
+	guidance_state_presenter.clear_arm_guidance_target(slot_id)
+	_refresh_support_arm_ik_influences()
 
 func _apply_target_height_scale() -> void:
-	if josie_model == null or mesh_instance == null or mesh_instance.mesh == null:
-		return
-	var source_height_meters: float = mesh_instance.mesh.get_aabb().size.y
-	if source_height_meters <= 0.001:
-		return
-	var scale_factor: float = standing_height_meters / source_height_meters
-	josie_model.scale = Vector3.ONE * scale_factor
-	resolved_visual_height_meters = source_height_meters * scale_factor
+	resolved_visual_height_meters = rig_model_presenter.apply_target_height_scale(
+		josie_model,
+		mesh_instance,
+		standing_height_meters
+	)
 
 func _ensure_hand_attachment(
 		attachment_name: String,
@@ -147,22 +216,14 @@ func _ensure_hand_attachment(
 		anchor_position: Vector3,
 		anchor_rotation_degrees: Vector3
 	) -> void:
-	if skeleton == null:
-		return
-	var attachment: BoneAttachment3D = skeleton.get_node_or_null(attachment_name) as BoneAttachment3D
-	if attachment == null:
-		attachment = BoneAttachment3D.new()
-		attachment.name = attachment_name
-		skeleton.add_child(attachment)
-	attachment.bone_name = bone_name
-
-	var anchor: Node3D = attachment.get_node_or_null(anchor_name) as Node3D
-	if anchor == null:
-		anchor = Node3D.new()
-		anchor.name = anchor_name
-		attachment.add_child(anchor)
-	anchor.position = anchor_position
-	anchor.rotation_degrees = anchor_rotation_degrees
+	rig_model_presenter.ensure_hand_attachment(
+		skeleton,
+		attachment_name,
+		bone_name,
+		anchor_name,
+		anchor_position,
+		anchor_rotation_degrees
+	)
 
 func _ensure_stow_attachment(
 		attachment_name: String,
@@ -170,42 +231,128 @@ func _ensure_stow_attachment(
 		anchor_name: String,
 		anchor_position: Vector3,
 		anchor_rotation_degrees: Vector3
-	) -> void:
-	_ensure_hand_attachment(attachment_name, bone_name, anchor_name, anchor_position, anchor_rotation_degrees)
+) -> void:
+	rig_model_presenter.ensure_stow_attachment(
+		skeleton,
+		attachment_name,
+		bone_name,
+		anchor_name,
+		anchor_position,
+		anchor_rotation_degrees
+	)
+
+func _ensure_support_arm_ik_modifiers() -> void:
+	var modifier_state: Dictionary = support_arm_ik_presenter.ensure_support_arm_ik_modifiers(
+		skeleton,
+		right_arm_ik_modifier,
+		left_arm_ik_modifier,
+		right_hand_ik_target,
+		left_hand_ik_target,
+		right_hand_pole_target,
+		left_hand_pole_target,
+		RIGHT_UPPERARM_BONE,
+		RIGHT_FOREARM_BONE,
+		RIGHT_HAND_BONE,
+		LEFT_UPPERARM_BONE,
+		LEFT_FOREARM_BONE,
+		LEFT_HAND_BONE
+	)
+	right_arm_ik_modifier = modifier_state.get("right_arm_ik_modifier", right_arm_ik_modifier)
+	left_arm_ik_modifier = modifier_state.get("left_arm_ik_modifier", left_arm_ik_modifier)
+
+func _snap_support_arm_ik_targets_to_current_pose() -> void:
+	support_arm_ik_presenter.snap_support_arm_ik_targets_to_current_pose(
+		skeleton,
+		right_hand_ik_target,
+		left_hand_ik_target,
+		right_hand_pole_target,
+		left_hand_pole_target,
+		RIGHT_HAND_BONE,
+		LEFT_HAND_BONE,
+		RIGHT_FOREARM_BONE,
+		LEFT_FOREARM_BONE,
+		Callable(self, "_get_bone_world_position")
+	)
+
+func _update_support_arm_ik_targets(delta: float) -> void:
+	support_arm_ik_presenter.update_support_arm_ik_targets(
+		skeleton,
+		enable_support_arm_ik,
+		_get_support_arm_ik_config(),
+		global_basis,
+		right_hand_ik_target,
+		left_hand_ik_target,
+		right_hand_pole_target,
+		left_hand_pole_target,
+		get_arm_guidance_target(&"hand_right"),
+		get_arm_guidance_target(&"hand_left"),
+		get_right_hand_item_anchor(),
+		get_left_hand_item_anchor(),
+		RIGHT_UPPERARM_BONE,
+		LEFT_UPPERARM_BONE,
+		RIGHT_FOREARM_BONE,
+		LEFT_FOREARM_BONE,
+		RIGHT_HAND_BONE,
+		LEFT_HAND_BONE,
+		Callable(self, "_get_bone_world_position"),
+		delta
+	)
+
+func _refresh_support_arm_ik_influences() -> void:
+	support_arm_ik_presenter.refresh_support_arm_ik_influences(
+		enable_support_arm_ik,
+		support_arm_ik_influence,
+		right_arm_ik_modifier,
+		left_arm_ik_modifier,
+		is_support_hand_active(&"hand_right"),
+		is_support_hand_active(&"hand_left"),
+		get_arm_guidance_target(&"hand_right"),
+		get_arm_guidance_target(&"hand_left")
+	)
+
+func _resolve_max_model_arm_reach_meters() -> float:
+	return rig_model_presenter.resolve_max_model_arm_reach_meters(
+		skeleton,
+		RIGHT_HAND_BONE,
+		LEFT_HAND_BONE,
+		right_hand_anchor_position,
+		left_hand_anchor_position,
+		bone_index_cache
+	)
+
+func _apply_pole_grip_arm_reach_limits() -> void:
+	var limits: Dictionary = grip_layout_presenter.apply_pole_grip_arm_reach_limits(
+		max_model_arm_reach_meters,
+		pole_grip_arm_reach_margin_percent
+	)
+	max_model_arm_reach_combat_meters = float(limits.get("max_model_arm_reach_combat_meters", 0.0))
+	pole_grip_negative_limit_meters = float(limits.get("pole_grip_negative_limit_meters", 0.0))
+	pole_grip_positive_limit_meters = float(limits.get("pole_grip_positive_limit_meters", 0.0))
+
+func _get_bone_world_position(bone_name: StringName) -> Vector3:
+	return rig_model_presenter.get_bone_world_position(global_position, skeleton, bone_name, bone_index_cache)
 
 func _play_default_animation() -> void:
-	_play_animation(default_animation_name, 0.0)
+	locomotion_presenter.play_default_animation(animation_player, default_animation_name)
 
-func _resolve_locomotion_animation_name(
-		horizontal_speed: float,
-		target_horizontal_speed: float,
-		grounded: bool,
-		vertical_velocity: float,
-		sprinting: bool
-	) -> StringName:
-	if not grounded:
-		if vertical_velocity >= jump_vertical_velocity_threshold:
-			return jump_animation_name
-		return fall_animation_name
+func _get_support_arm_ik_config() -> Dictionary:
+	return {
+		"support_arm_ik_target_smoothing_speed": support_arm_ik_target_smoothing_speed,
+		"support_arm_ik_pole_side_offset_meters": support_arm_ik_pole_side_offset_meters,
+		"support_arm_ik_pole_down_offset_meters": support_arm_ik_pole_down_offset_meters,
+		"support_arm_ik_pole_back_offset_meters": support_arm_ik_pole_back_offset_meters,
+	}
 
-	if horizontal_speed <= idle_horizontal_speed_threshold:
-		return default_animation_name
-
-	var resolved_target_speed: float = maxf(target_horizontal_speed, 0.001)
-	var speed_ratio: float = clampf(horizontal_speed / resolved_target_speed, 0.0, 1.5)
-	if sprinting:
-		return sprint_animation_name
-	if speed_ratio < walk_ratio_threshold:
-		return walk_animation_name
-	return jog_animation_name
-
-func _play_animation(animation_name: StringName, custom_blend_seconds: float = -1.0) -> void:
-	if animation_player == null or animation_name == StringName():
-		return
-	if not animation_player.has_animation(String(animation_name)):
-		return
-	if current_animation_name == animation_name:
-		return
-	var blend_seconds: float = animation_blend_seconds if custom_blend_seconds < 0.0 else custom_blend_seconds
-	animation_player.play(String(animation_name), blend_seconds)
-	current_animation_name = animation_name
+func _get_locomotion_config() -> Dictionary:
+	return {
+		"default_animation_name": default_animation_name,
+		"walk_animation_name": walk_animation_name,
+		"jog_animation_name": jog_animation_name,
+		"sprint_animation_name": sprint_animation_name,
+		"jump_animation_name": jump_animation_name,
+		"fall_animation_name": fall_animation_name,
+		"animation_blend_seconds": animation_blend_seconds,
+		"idle_horizontal_speed_threshold": idle_horizontal_speed_threshold,
+		"walk_ratio_threshold": walk_ratio_threshold,
+		"jump_vertical_velocity_threshold": jump_vertical_velocity_threshold,
+	}

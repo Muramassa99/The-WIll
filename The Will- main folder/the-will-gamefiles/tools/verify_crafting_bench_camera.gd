@@ -24,10 +24,16 @@ func _run_verification() -> void:
 	var preview: ForgeWorkspacePreview = crafting_ui.free_workspace_preview
 	var free_view_container: SubViewportContainer = crafting_ui.free_view_container
 	var free_view_panel: PanelContainer = crafting_ui.free_view_panel
+	var axis_indicator = crafting_ui.axis_indicator_control
+	var axis_panel: Control = crafting_ui.get_node("Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/AxisIndicatorPanel")
+	var axis_stylebox: StyleBoxFlat = axis_panel.get_theme_stylebox("panel") as StyleBoxFlat if axis_panel is PanelContainer else null
 	var preview_box_mesh: BoxMesh = preview.occupied_cells_instance.multimesh.mesh as BoxMesh if preview != null and preview.occupied_cells_instance != null and preview.occupied_cells_instance.multimesh != null else null
 	var initial_distance: float = preview.camera.position.z if preview != null and preview.camera != null else -1.0
 	var initial_pivot: Vector3 = preview.camera_pivot.position if preview != null and preview.camera_pivot != null else Vector3.ZERO
 	var initial_rotation_y: float = preview.camera_pivot.rotation.y if preview != null and preview.camera_pivot != null else 0.0
+	var initial_axis_x: Vector2 = axis_indicator.get_axis_screen_vector(&"x") if axis_indicator != null else Vector2.ZERO
+	var initial_axis_y: Vector2 = axis_indicator.get_axis_screen_vector(&"y") if axis_indicator != null else Vector2.ZERO
+	var initial_axis_z: Vector2 = axis_indicator.get_axis_screen_vector(&"z") if axis_indicator != null else Vector2.ZERO
 	var initial_light_forward: Vector3 = preview.light.global_transform.basis.z if preview != null and preview.light != null else Vector3.ZERO
 	var initial_mouse_mode: Input.MouseMode = Input.get_mouse_mode()
 	var plane_position: Vector3 = preview.active_plane_instance.position if preview != null and preview.active_plane_instance != null else Vector3.ZERO
@@ -83,6 +89,9 @@ func _run_verification() -> void:
 	var rotation_after_orbit_drag: float = preview.camera_pivot.rotation.y if preview != null and preview.camera_pivot != null else initial_rotation_y
 	var light_forward_after_orbit: Vector3 = preview.light.global_transform.basis.z if preview != null and preview.light != null else initial_light_forward
 	var camera_forward_after_orbit: Vector3 = preview.camera.global_transform.basis.z if preview != null and preview.camera != null else Vector3.ZERO
+	var axis_x_after_orbit: Vector2 = axis_indicator.get_axis_screen_vector(&"x") if axis_indicator != null else Vector2.ZERO
+	var axis_y_after_orbit: Vector2 = axis_indicator.get_axis_screen_vector(&"y") if axis_indicator != null else Vector2.ZERO
+	var axis_z_after_orbit: Vector2 = axis_indicator.get_axis_screen_vector(&"z") if axis_indicator != null else Vector2.ZERO
 
 	var orbit_release: InputEventMouseButton = InputEventMouseButton.new()
 	orbit_release.button_index = MOUSE_BUTTON_RIGHT
@@ -129,6 +138,28 @@ func _run_verification() -> void:
 
 	var lines: PackedStringArray = []
 	lines.append("preview_loaded=%s" % str(preview != null))
+	lines.append("axis_indicator_exists=%s" % str(axis_indicator != null))
+	lines.append("axis_panel_parent_is_main_host=%s" % str(axis_panel != null and axis_panel.get_parent() == crafting_ui.main_viewport_host))
+	lines.append("axis_panel_bottom_right=%s" % str(
+		axis_panel != null and
+		is_equal_approx(axis_panel.anchor_left, 1.0) and
+		is_equal_approx(axis_panel.anchor_top, 1.0) and
+		is_equal_approx(axis_panel.anchor_right, 1.0) and
+		is_equal_approx(axis_panel.anchor_bottom, 1.0) and
+		axis_panel.offset_right < 0.0 and
+		axis_panel.offset_bottom < 0.0
+	))
+	lines.append("axis_panel_style_transparent=%s" % str(
+		axis_stylebox != null and
+		is_zero_approx(axis_stylebox.bg_color.a) and
+		axis_stylebox.border_width_left == 0 and
+		axis_stylebox.border_width_top == 0 and
+		axis_stylebox.border_width_right == 0 and
+		axis_stylebox.border_width_bottom == 0
+	))
+	lines.append("initial_axis_x=%s" % str(initial_axis_x))
+	lines.append("initial_axis_y=%s" % str(initial_axis_y))
+	lines.append("initial_axis_z=%s" % str(initial_axis_z))
 	lines.append("plane_position=%s" % str(plane_position))
 	lines.append("expected_plane_z=%s" % str(expected_plane_z))
 	lines.append("plane_centered_xy=%s" % str(plane_centered_xy))
@@ -151,6 +182,11 @@ func _run_verification() -> void:
 	))
 	lines.append("orbit_captured_mouse=%s" % str(orbit_captured_mouse))
 	lines.append("orbit_changed_rotation=%s" % str(not is_equal_approx(rotation_after_orbit_drag, initial_rotation_y)))
+	lines.append("axis_indicator_changed_with_orbit=%s" % str(
+		axis_x_after_orbit.distance_to(initial_axis_x) > 0.0001 or
+		axis_y_after_orbit.distance_to(initial_axis_y) > 0.0001 or
+		axis_z_after_orbit.distance_to(initial_axis_z) > 0.0001
+	))
 	lines.append("light_parent_is_camera=%s" % str(preview != null and preview.light != null and preview.camera != null and preview.light.get_parent() == preview.camera))
 	lines.append("light_changed_with_orbit=%s" % str(light_forward_after_orbit.distance_to(initial_light_forward) > 0.0001))
 	lines.append("light_aligned_to_camera=%s" % str(light_forward_after_orbit.distance_to(camera_forward_after_orbit) <= 0.0001))

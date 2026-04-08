@@ -1,0 +1,11 @@
+armed_material_variant_id=mat_wood_gray
+plane_position_count=3
+plane_draw_count=3
+plane_drag_place_success=true
+plane_remaining_count=1
+plane_drag_erase_success=true
+free_position_count=3
+free_draw_count=3
+free_drag_place_success=true
+free_remaining_count=1
+free_drag_erase_success=true

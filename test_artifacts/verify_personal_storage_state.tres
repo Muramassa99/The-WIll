@@ -1,0 +1,7 @@
+[gd_resource type="Resource" script_class="PlayerPersonalStorageState" format=3]
+
+[ext_resource type="Script" path="res://core/models/player_personal_storage_state.gd" id="1_gtw77"]
+
+[resource]
+script = ExtResource("1_gtw77")
+save_file_path = "C:/WORKSPACE/test_artifacts/verify_personal_storage_state.tres"

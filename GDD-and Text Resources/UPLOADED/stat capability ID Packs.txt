@@ -1,0 +1,735 @@
+Yes. Let’s make them.
+
+You asked for the first-pass ID pack for the five groups, and this is the right moment to lock them, because your system already depends on `StatLine` as the smallest stored atom, on capability-driven behavior rather than visible classes, and on a baked profile being the gameplay truth instead of raw forge cells.   
+
+I’m going to give you:
+
+* direct stat ids
+* capability ids
+* family ids
+* element ids
+* equipment context ids
+
+And then one bonus pack that I think you actually need too:
+
+* forge intent ids
+
+Because your tabs and “start from melee/ranged/magic/shield” idea are useful, but they are a different layer from material truth. That matches the split we already locked: material says what matter can contribute; context/intent says what kind of thing the player is trying to build; profile says what it actually became. 
+
+---
+
+# 0) The law before the list
+
+Use this split:
+
+* `base_stat_lines` = direct numeric stats that can end up affecting final gear numbers
+* `capability_bias_lines` = hidden “what this matter supports physically/behaviorally”
+* `skill_family_bias_lines` = hidden “what kind of skill families this matter leans toward”
+* `elemental_affinity_lines` = hidden “what elements this matter brings/supports”
+* `equipment_context_bias_lines` = hidden “what kind of craft this matter makes sense in”
+* `forge_intent_ids` = player/forge-side starting bias, not material truth
+
+That split fits both your atomic-first math sheet and your crafting-atoms doc.  
+
+---
+
+# 1) DIRECT STAT IDS
+
+These are the ones that belong in `base_stat_lines`.
+
+These should mostly be `FLAT` or `PCT_ADD` `StatLine`s.
+
+## Offense
+
+```text
+atk_mod_flat
+power_flat
+dmg_pct_add
+crit_chance_pct
+crit_damage_bonus_add
+```
+
+## Defense / survival
+
+```text
+def_mod_flat
+endurance_flat
+hp_pct_add
+dmg_reduction_pct_add
+bubble_hp_flat
+bubble_shield_defense_mult_add
+stagger_resist_flat
+guard_efficiency_pct_add
+block_power_flat
+parry_window_pct_add
+```
+
+## Movement / speed
+
+```text
+move_speed_pct_add
+move_speed_flat_add
+aspd_pct_add
+stamina_max_flat
+stamina_regen_pct_add
+stamina_regen_delay_flat
+```
+
+## Healing / support
+
+```text
+heal_power_flat
+heal_power_pct_add
+received_heal_pct_add
+heal_crit_scalar_flat
+bubble_duration_pct_add
+buff_duration_pct_add
+```
+
+## Damage-over-time / status
+
+```text
+dot_duration_pct_add
+hot_duration_pct_add
+status_apply_chance_pct
+status_potency_flat
+poison_power_flat
+burn_power_flat
+bleed_power_flat
+anti_heal_pct_add
+defense_down_pct_add
+slow_strength_pct_add
+```
+
+## Ranged / projectile
+
+```text
+projectile_speed_pct_add
+projectile_drop_reduction_pct
+draw_speed_pct_add
+reload_speed_pct_add
+quiver_capacity_flat
+ammo_recovery_pct
+projectile_crit_chance_pct
+projectile_count_flat
+projectile_spread_pct_add
+homing_strength_flat
+```
+
+## Magic / casting
+
+You do not use mana as a core player resource right now, so keep these about output/handling, not mana economy. 
+
+```text
+magic_power_flat
+cast_speed_pct_add
+channel_stability_flat
+elemental_amplify_pct
+barrier_power_flat
+summon_power_flat
+```
+
+## Threat / aggro
+
+These are useful on materials later only if you actually want material-driven threat play.
+
+```text
+threat_virtual_bonus_pct
+threat_from_heal_coeff
+threat_from_res_coeff
+```
+
+---
+
+# 2) CAPABILITY IDS
+
+These belong in `capability_bias_lines`.
+
+These are not “final weapon classes.”
+They are hidden build permissions / physical-behavior leanings. This matches your Crafting Atoms capability list directly. 
+
+```text
+cap_reach
+cap_impact
+cap_edge
+cap_pierce
+cap_blunt
+cap_guard
+cap_flex
+cap_tether
+cap_launch
+cap_magic
+cap_heal
+cap_mobility
+cap_control
+cap_stability
+cap_channel
+cap_barrier
+```
+
+I strongly recommend adding a few more that your current design clearly wants:
+
+```text
+cap_precision
+cap_burst
+cap_sustain
+cap_support
+cap_projectile
+cap_armor
+cap_plate
+cap_grip
+cap_anchor
+cap_aoe
+cap_counter
+cap_parry
+```
+
+## What these mean, briefly
+
+* `cap_edge` = supports cutting/bladed behavior
+* `cap_blunt` = supports impact/crushing behavior
+* `cap_pierce` = supports thrust/penetration
+* `cap_guard` = supports blocking/protective behavior
+* `cap_flex` = supports bend/whip/string behavior
+* `cap_tether` = supports leash/rope/chain behavior
+* `cap_launch` = supports ranged launch behavior
+* `cap_magic` = supports magical behaviors/casting overlays
+* `cap_heal` = supports healing/support payloads
+* `cap_stability` = supports reliable handling / less chaotic movement
+* `cap_anchor` = supports grip/attachment/socket-like structure
+* `cap_projectile` = supports projectile-style behavior cleanly
+* `cap_counter` / `cap_parry` = supports reactive defense gameplay
+
+These should mostly be hidden from the player or shown only as simplified bars.
+
+---
+
+# 3) FAMILY IDS
+
+These belong in `skill_family_bias_lines`.
+
+This is your pie-chart layer.
+These are the hidden behavior-family tendencies that help narrow the skill station options.
+
+```text
+fam_melee
+fam_ranged
+fam_magic
+fam_defense
+fam_mobility
+fam_aoe
+fam_control
+fam_support
+```
+
+I recommend adding these too:
+
+```text
+fam_single_target
+fam_burst
+fam_sustain
+fam_counter
+fam_guard
+fam_channel
+fam_throw
+fam_summon
+fam_trap
+fam_zone
+fam_tether
+```
+
+## Why both capability ids and family ids?
+
+Because they answer different questions.
+
+Capability asks:
+
+* “Can this built thing physically/logically support this?”
+
+Family asks:
+
+* “What style of skill package does this build lean toward?”
+
+Example:
+
+* a string may give `cap_flex`, `cap_tether`, `cap_launch`
+* that may translate into `fam_ranged`, `fam_control`, `fam_mobility`
+
+That separation will save you later.
+
+---
+
+# 4) ELEMENT IDS
+
+These belong in `elemental_affinity_lines`.
+
+These should line up with your actual material/world element language. Your source material already lists a big elemental vocabulary, so this pack should stay close to that. 
+
+## Core elemental ids
+
+```text
+elem_terre
+elem_life
+elem_spirit
+elem_fae
+elem_order
+elem_healing
+elem_crystal
+elem_frost
+elem_caelus
+elem_cloud
+elem_astral
+elem_aqua
+elem_storm
+elem_lightning
+elem_malice
+elem_undeath
+elem_plague
+elem_chaos
+elem_corrupt
+elem_death
+elem_pyro
+elem_lava
+elem_explosion
+elem_demon
+elem_light
+elem_holy
+elem_soul
+```
+
+## Practical recommendation
+
+For code, I would keep the ids exactly in this `elem_*` format, even if display names in UI are cleaner:
+
+* `elem_pyro` display name “Pyro”
+* `elem_aqua` display name “Aqua”
+* `elem_healing` display name “Healing”
+* `elem_terre` display name “Terre”
+
+That keeps data stable and UI flexible.
+
+## Optional simplified gameplay grouping later
+
+Under the hood you can keep the full lore names, but later build groupings like:
+
+* fire-family = `elem_pyro`, `elem_lava`, `elem_explosion`
+* death-family = `elem_death`, `elem_undeath`, `elem_plague`, `elem_corrupt`
+* sky-family = `elem_caelus`, `elem_cloud`, `elem_storm`, `elem_lightning`
+
+That way you do not lose richness.
+
+---
+
+# 5) EQUIPMENT CONTEXT IDS
+
+These belong in `equipment_context_bias_lines`.
+
+These are the craft-tab / item-role leaning ids, not visible classes.
+
+```text
+ctx_weapon
+ctx_armor
+ctx_accessory
+ctx_shield
+ctx_trinket
+ctx_ranged_support
+```
+
+I recommend adding two more because your system will probably want them:
+
+```text
+ctx_focus
+ctx_tool
+```
+
+## Why?
+
+* `ctx_focus` helps for magic catalysts / offhands / ritual objects
+* `ctx_tool` helps if later you make utility crafted things that are not quite weapons/armor/trinkets
+
+But your core six are enough to start.
+
+---
+
+# 6) BONUS: FORGE INTENT IDS
+
+This is the extra pack I think you actually need.
+
+These do **not** belong in `BaseMaterialDef`.
+These are for the forge tab / player start-choice / soft bias layer.
+
+```text
+intent_melee
+intent_ranged
+intent_magic
+intent_defense
+intent_support
+intent_hybrid
+```
+
+If you want to mirror your current thinking more tightly:
+
+```text
+intent_weapon_melee
+intent_weapon_ranged
+intent_weapon_magic
+intent_armor
+intent_shield
+intent_accessory
+intent_trinket
+```
+
+## My recommendation
+
+Keep it simple at first:
+
+* use `ctx_*` for what kind of thing is being crafted
+* use `intent_*` for what kind of behavior style the player is aiming for
+
+So:
+
+* tab = `ctx_weapon`
+* sub-intent = `intent_ranged`
+
+That is cleaner than turning one field into two jobs.
+
+---
+
+# 7) WHICH GROUP GOES WHERE
+
+## In `BaseMaterialDef`
+
+These arrays make sense:
+
+### `base_stat_lines`
+
+Use:
+
+* direct numeric ids only
+
+### `capability_bias_lines`
+
+Use:
+
+* `cap_*`
+
+### `skill_family_bias_lines`
+
+Use:
+
+* `fam_*`
+
+### `elemental_affinity_lines`
+
+Use:
+
+* `elem_*`
+
+### `equipment_context_bias_lines`
+
+Use:
+
+* `ctx_*`
+
+## Not in `BaseMaterialDef`
+
+Do **not** store `intent_*` on the material as truth.
+That is forge/player-side intent, not substance identity.
+
+---
+
+# 8) EXAMPLE: WOOD
+
+This will make the packs feel real.
+
+## `base_stat_lines`
+
+```text
+atk_mod_flat
+move_speed_pct_add
+aspd_pct_add
+heal_power_flat
+dot_duration_pct_add
+```
+
+## `capability_bias_lines`
+
+```text
+cap_reach
+cap_flex
+cap_mobility
+cap_grip
+cap_anchor
+```
+
+## `skill_family_bias_lines`
+
+```text
+fam_melee
+fam_mobility
+fam_support
+```
+
+## `elemental_affinity_lines`
+
+Maybe none, or a tiny:
+
+```text
+elem_life
+elem_terre
+```
+
+## `equipment_context_bias_lines`
+
+```text
+ctx_weapon
+ctx_armor
+ctx_ranged_support
+```
+
+Because wood works in shafts, bows, frames, light armor, handles.
+
+---
+
+# 9) EXAMPLE: IRON
+
+## `base_stat_lines`
+
+```text
+atk_mod_flat
+def_mod_flat
+power_flat
+endurance_flat
+crit_chance_pct
+crit_damage_bonus_add
+heal_power_flat
+move_speed_pct_add (negative)
+aspd_pct_add (negative)
+```
+
+## `capability_bias_lines`
+
+```text
+cap_edge
+cap_blunt
+cap_guard
+cap_impact
+cap_stability
+cap_plate
+```
+
+## `skill_family_bias_lines`
+
+```text
+fam_melee
+fam_defense
+fam_single_target
+```
+
+## `elemental_affinity_lines`
+
+Probably none by default, unless your world decides common iron resonates with something.
+
+## `equipment_context_bias_lines`
+
+```text
+ctx_weapon
+ctx_armor
+ctx_shield
+```
+
+---
+
+# 10) THE MASTER PACK, CLEAN COPY
+
+This is the copyable set.
+
+```text
+DIRECT STAT IDS
+atk_mod_flat
+power_flat
+dmg_pct_add
+crit_chance_pct
+crit_damage_bonus_add
+def_mod_flat
+endurance_flat
+hp_pct_add
+dmg_reduction_pct_add
+bubble_hp_flat
+bubble_shield_defense_mult_add
+stagger_resist_flat
+guard_efficiency_pct_add
+block_power_flat
+parry_window_pct_add
+move_speed_pct_add
+move_speed_flat_add
+aspd_pct_add
+stamina_max_flat
+stamina_regen_pct_add
+stamina_regen_delay_flat
+heal_power_flat
+heal_power_pct_add
+received_heal_pct_add
+heal_crit_scalar_flat
+bubble_duration_pct_add
+buff_duration_pct_add
+dot_duration_pct_add
+hot_duration_pct_add
+status_apply_chance_pct
+status_potency_flat
+poison_power_flat
+burn_power_flat
+bleed_power_flat
+anti_heal_pct_add
+defense_down_pct_add
+slow_strength_pct_add
+projectile_speed_pct_add
+projectile_drop_reduction_pct
+draw_speed_pct_add
+reload_speed_pct_add
+quiver_capacity_flat
+ammo_recovery_pct
+projectile_crit_chance_pct
+projectile_count_flat
+projectile_spread_pct_add
+homing_strength_flat
+magic_power_flat
+cast_speed_pct_add
+channel_stability_flat
+elemental_amplify_pct
+threat_virtual_bonus_pct
+threat_from_heal_coeff
+threat_from_res_coeff
+```
+
+```text
+CAPABILITY IDS
+cap_reach
+cap_impact
+cap_edge
+cap_pierce
+cap_blunt
+cap_guard
+cap_flex
+cap_tether
+cap_launch
+cap_magic
+cap_heal
+cap_mobility
+cap_control
+cap_stability
+cap_channel
+cap_barrier
+cap_precision
+cap_burst
+cap_sustain
+cap_support
+cap_projectile
+cap_armor
+cap_plate
+cap_grip
+cap_anchor
+cap_aoe
+cap_counter
+cap_parry
+```
+
+```text
+FAMILY IDS
+fam_melee
+fam_ranged
+fam_magic
+fam_defense
+fam_mobility
+fam_aoe
+fam_control
+fam_support
+fam_single_target
+fam_burst
+fam_sustain
+fam_counter
+fam_guard
+fam_channel
+fam_throw
+fam_summon
+fam_trap
+fam_zone
+fam_tether
+```
+
+```text
+ELEMENT IDS
+elem_terre
+elem_life
+elem_spirit
+elem_fae
+elem_order
+elem_healing
+elem_crystal
+elem_frost
+elem_caelus
+elem_cloud
+elem_astral
+elem_aqua
+elem_storm
+elem_lightning
+elem_malice
+elem_undeath
+elem_plague
+elem_chaos
+elem_corrupt
+elem_death
+elem_pyro
+elem_lava
+elem_explosion
+elem_demon
+elem_light
+elem_holy
+elem_soul
+```
+
+```text
+EQUIPMENT CONTEXT IDS
+ctx_weapon
+ctx_armor
+ctx_accessory
+ctx_shield
+ctx_trinket
+ctx_ranged_support
+ctx_focus
+ctx_tool
+```
+
+```text
+FORGE INTENT IDS
+intent_melee
+intent_ranged
+intent_magic
+intent_defense
+intent_support
+intent_hybrid
+```
+
+---
+
+# 11) FINAL SANITY CHECK
+
+What you are building here is not “too much.”
+
+It is the beginning of the **shared vocabulary** that lets the whole machine stay coherent:
+
+* materials
+* shape/profile
+* skill families
+* equipment contexts
+* forge UI hints
+* later balance tools
+
+That is exactly in line with your “measure twice, cut once” mindset and your atomic-first design law.   
+
+The best next move is to turn this into:
+
+* one text reference file for you
+* and then a smaller implementation subset for v0.1 so you do not try to use all 100 knobs on day one.
+
+Paste your current `base_material_def.gd` after you update it, and I’ll sanity-check whether the arrays and field names line up with this pack before you start filling `.tres` files.

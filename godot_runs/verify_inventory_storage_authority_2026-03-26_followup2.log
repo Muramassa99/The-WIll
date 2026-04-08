@@ -1,0 +1,74 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:6)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:22)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:25)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:33)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:41)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:55)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:88)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:26)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:27)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:34)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:44)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:44)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:46)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:59)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:63)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:63)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_body_inventory_state.gd:89)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_personal_storage_state.gd:6)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_personal_storage_state.gd:22)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_personal_storage_state.gd:25)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_personal_storage_state.gd:33)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_personal_storage_state.gd:47)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_personal_storage_state.gd:80)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_personal_storage_state.gd:26)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_personal_storage_state.gd:36)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_personal_storage_state.gd:36)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_personal_storage_state.gd:38)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_personal_storage_state.gd:51)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_personal_storage_state.gd:55)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_personal_storage_state.gd:55)
+SCRIPT ERROR: Parse Error: Could not find type "StoredItemInstance" in the current scope.
+   at: GDScript::reload (res://core/models/player_personal_storage_state.gd:81)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://tools/verify_inventory_storage_authority.gd:0)
+ERROR: Failed to load script "res://tools/verify_inventory_storage_authority.gd" with error "Compilation failed".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+SCRIPT ERROR: Invalid call. Nonexistent function 'load_or_create' in base 'GDScript'.
+   at: _init (res://tools/verify_inventory_storage_authority.gd:22)
+   GDScript backtrace (most recent call first):
+       [0] _init (res://tools/verify_inventory_storage_authority.gd:22)
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)

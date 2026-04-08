@@ -1,0 +1,591 @@
+# Crafting Atoms v0.1a
+
+## Purpose
+
+This entry defines the smallest buildable units that connect The Will's Forge to gameplay.
+
+The goal is not to classify players into weapon classes.
+The goal is to let crafted matter produce a usable gameplay profile.
+
+Core law:
+**The player crafts matter -> the Forge resolves matter into a profile -> the game uses the baked profile.**
+
+---
+
+## 1. Lifecycle of a Crafted Item
+
+### 1.1 Work-in-progress state
+
+A work-in-progress crafted item:
+
+* exists only inside the instanced Forge
+* can be edited repeatedly
+* can be fully refunded before finalization
+* can be baked into a temporary test instance
+* can be used on testing dummies inside the Forge
+* cannot leave the Forge
+* cannot be traded
+* cannot be equipped in the main game world
+
+### 1.2 Test instance
+
+A test instance is a baked playable copy of the current WIP design.
+It exists so the player can:
+
+* check handling
+* test swing/skill behavior
+* tune trajectory/timing/feel
+* compare revisions
+
+The editable source design remains intact in storage.
+A player may print multiple test iterations from the same source design.
+
+### 1.3 Finalized item
+
+Naming/finalization is the export point.
+Once finalized, the item:
+
+* gains identity
+* gains maker provenance
+* gains creation date/version data
+* can leave the Forge
+* can be equipped outside the Forge
+* can be traded under game rules
+* loses full refund status
+
+### 1.4 Salvage and blueprint extraction
+
+A finalized item may later be dismantled.
+Dismantling should support:
+
+* blueprint extraction
+* partial material recovery
+* priority toward higher-value components
+* lower recovery efficiency than pre-finalization refund
+
+Design rule:
+**Before naming, the cost of experimentation is time. After naming, the cost of revision is materials.**
+
+---
+
+## 2. Crafting Atoms
+
+Crafting Atoms are the smallest data units that matter to the Forge.
+They are not full weapons, classes, or skills.
+They are the smallest meaningful units from which those emerge.
+
+### 2.1 Material Atom
+
+Defines what a piece of matter contributes.
+
+Minimum fields:
+
+* material_id
+* display_name
+* rarity_tier
+* color_group
+* density
+* hardness
+* toughness
+* elasticity / flex
+* magic_affinity
+* heal_affinity
+* elemental_affinities
+* defense_affinity
+* mobility_affinity
+* special_effect_tags
+* salvage_priority
+* trade_state
+
+Material Atoms are the foundation of:
+
+* weight
+* stat contribution
+* elemental access
+* capability unlocks
+* visual identity
+
+### 2.2 Cell Atom
+
+One occupied unit in the crafting grid.
+
+Minimum fields:
+
+* grid_position
+* layer_index
+* material_id
+* block_shape_type
+* orientation
+* surface_flags
+* selected_state
+* mirrored_source_flag
+
+The Cell Atom is the smallest placed editable build unit.
+
+### 2.3 Anchor Atom
+
+A special marked point with gameplay meaning.
+
+Examples:
+
+* primary grip
+* secondary grip
+* offhand support
+* pivot point
+* projectile origin
+* guard center
+* shield handle point
+* skill emission point
+* tether origin
+
+Minimum fields:
+
+* anchor_id
+* anchor_type
+* local_position
+* local_orientation
+* validity_rules
+
+### 2.4 Segment Atom
+
+A logical grouped region within a crafted item.
+Used when a build must be understood as more than a raw cloud of cells.
+
+Examples:
+
+* blade section
+* head section
+* handle section
+* guard section
+* shaft section
+* rope/chain section
+* plate section
+* focus core
+
+Minimum fields:
+
+* segment_id
+* segment_role
+* member_cells
+* material_mix
+* anchor_links
+* rigidity_type
+
+### 2.5 Layer Atom
+
+The active editable stratum in the Forge workflow.
+
+Rules:
+
+* one layer is actively editable
+* non-active layers are shown as baked/preview states
+* switching layers preserves previous work
+* stopping at any point still yields a coherent saved WIP object
+
+Minimum fields:
+
+* layer_index
+* visibility_state
+* edit_lock_state
+* baked_preview_state
+* member_cells
+
+### 2.6 Profile Atom
+
+A derived value set produced from the crafted shape and materials.
+This is what gameplay reads.
+
+Minimum fields:
+
+* total_mass
+* center_of_mass
+* reach
+* balance_score
+* inertia_score
+* flex_score
+* guard_score
+* launch_score
+* damage_flavor_weights
+* capability_scores
+* backend_tags
+
+Important rule:
+**Gameplay should not read raw cells if a baked Profile Atom exists.**
+
+---
+
+## 3. Capability Atoms
+
+Capability Atoms describe what the crafted item is able to support.
+They are not visible classes.
+They are backend-facing build permissions and strength indicators.
+
+Suggested initial list:
+
+* reach
+* impact
+* edge
+* pierce
+* blunt
+* guard
+* flex
+* tether
+* launch
+* magic
+* heal
+* mobility
+* control
+* stability
+* channel
+* barrier
+
+Each capability should resolve to a normalized score.
+Example style:
+
+* 0 = absent
+* 1 = weak
+* 2 = available
+* 3 = strong
+* 4 = defining
+
+These scores are derived from:
+
+* material composition
+* shape geometry
+* mass distribution
+* anchor configuration
+* optional special materials
+
+---
+
+## 4. Skill Atoms
+
+A full skill is built from smaller tunable pieces.
+These pieces are Skill Atoms.
+
+### 4.1 Delivery Atom
+
+How the action exists in the world.
+Examples:
+
+* self
+* held-weapon
+* projectile
+* placed zone
+* tether
+* barrier
+* burst
+* orbit
+
+### 4.2 Origin Atom
+
+Where the action begins.
+Examples:
+
+* grip point A
+* grip point B
+* body center
+* weapon tip
+* weapon edge
+* projectile node
+* ground target
+
+### 4.3 Path Atom
+
+How the action moves.
+Examples:
+
+* straight
+* arc
+* sweep
+* thrust
+* spin
+* loop
+* fan spread
+* homing
+* chain follow
+* pulse
+
+### 4.4 Timing Atom
+
+How the action unfolds over time.
+Examples:
+
+* windup
+* active frames
+* linger
+* recovery
+* burst cadence
+* delayed trigger
+
+### 4.5 Contact Atom
+
+How the action checks impact.
+Examples:
+
+* point
+* line
+* cone
+* box
+* sweep volume
+* radial burst
+* persistent field
+
+### 4.6 Payload Atom
+
+What the action does on success.
+Examples:
+
+* physical damage
+* elemental damage
+* heal
+* shield/bubble
+* stagger
+* pull
+* push
+* slow
+* mark
+* pierce
+* split
+* status application
+
+### 4.7 Motion Atom
+
+What the action does to the player.
+Examples:
+
+* none
+* step
+* dash
+* blink
+* leap
+* recoil
+* planted stance
+* spin-in-place
+
+### 4.8 Constraint Atom
+
+What the crafted item must be capable of to allow the skill.
+Examples:
+
+* enough magic
+* enough reach
+* enough stability
+* enough guard
+* enough flex
+* enough launch
+* enough elemental budget
+* enough support anchors
+
+---
+
+## 5. Slot Roles vs Freeform Behavior
+
+The Will should not lock players into visible weapon classes.
+However, the system still needs stable slot roles.
+
+Recommended rule:
+
+* slot roles remain fixed
+* behavior inside those roles is capability-driven
+* the item profile determines what is available or strong
+* the player tunes legal outputs
+
+Example slot-role model:
+
+* Slot 1: close/primary pressure
+* Slot 2: secondary or mid-range extension
+* Slot 3: movement/displacement
+* Slot 4: defense/guard/counter
+* Slot 5+: utility/signature/future systems
+
+This preserves readability while still allowing expressive freedom.
+
+---
+
+## 6. Visible Freedom, Hidden Resolver
+
+The player-facing fantasy is:
+
+* any shape
+* mixed behavior styles
+* no obvious class box
+* cross-pollination between familiar weapon outcomes
+
+The backend reality should be:
+
+* capability scores
+* hidden outcome clusters
+* validated behavior families
+* clamped timing/pathing ranges
+* fixed slot role logic
+
+Design rule:
+**The player should feel freedom. The code should feel structure.**
+
+---
+
+## 7. Hidden Outcome Clusters
+
+These are not player-facing classes.
+They are backend pattern recognizers.
+
+Examples of outcome clusters:
+
+* sword-like
+* spear-like
+* staff-like
+* shield-like
+* bow-like
+* axe-like
+* flail-like
+* rope-dart-like
+
+A crafted item may map to one or more clusters.
+These clusters are used for:
+
+* suggested templates
+* fallback animation families
+* tuning defaults
+* validation hints
+
+The player does not need to be told these labels explicitly.
+
+---
+
+## 8. Material Families
+
+To prevent design chaos, materials should be split into families.
+
+### 8.1 Structural materials
+
+Drive:
+
+* mass
+* hardness
+* toughness
+* flexibility
+* durability
+* baseline physical output
+
+### 8.2 Affinity materials
+
+Drive:
+
+* elemental access
+* heal bias
+* status payload access
+* damage flavor bias
+* magical conversion potential
+
+### 8.3 Keystone materials
+
+Drive:
+
+* signature effects
+* rare behavior unlocks
+* chase mechanics
+* special skill slot takeovers or high-tier modifications
+
+Keystone materials should be rare and explicit.
+They should not be mixed into baseline progression casually.
+
+---
+
+## 9. Crafting Station Responsibilities
+
+### 9.1 Weapon Crafting Station
+
+Responsible for:
+
+* shape creation
+* grid editing
+* layering
+* symmetry
+* anchors
+* material placement
+* WIP save state
+
+### 9.2 Skill Crafting Station
+
+Responsible for:
+
+* reading baked profile/capabilities
+* showing available behavior families
+* letting the player assign/tune valid Skill Atoms
+* saving the resulting behavior template to the WIP design
+
+### 9.3 Testing Area
+
+Responsible for:
+
+* spawning baked test instances
+* reading current WIP profile + behavior data
+* allowing safe iteration before naming
+
+### 9.4 Naming Station
+
+Responsible for:
+
+* final validation
+* export/finalization
+* provenance lock-in
+* transition from Forge-bound object to world item
+
+### 9.5 Processing / Dismantling Station
+
+Responsible for:
+
+* turning raw drops into usable mats
+* dismantling finalized items
+* blueprint extraction
+* partial material recovery
+
+---
+
+## 10. First Prototype Scope
+
+The first Godot prototype should prove only this:
+
+1. Player enters Forge
+2. Player places cells in a 3D grid
+3. Player marks one grip anchor
+4. System bakes a Profile Atom
+5. Skill Crafting Station exposes a very small legal behavior set
+6. Player spawns a test instance on a dummy
+7. Profile changes handling in a noticeable way
+8. WIP can be refunded fully
+9. Finalization/export is disabled until naming
+
+Do not attempt full freedom on version one.
+Prove the pipeline first.
+
+---
+
+## 11. Stable Design Rules
+
+1. The player edits Forge data, not raw engine internals.
+2. Raw cells are for authoring; baked profiles are for gameplay.
+3. Capability unlocks come from matter and structure, not visible classes.
+4. Fixed slot roles are allowed; visible weapon prisons are not.
+5. Testing inside the Forge is part of the gameplay loop.
+6. Full refund exists only before naming.
+7. Finalization is identity, export, and material commitment.
+8. Blueprint extraction is downstream from finalized creation.
+9. The player should feel free; the resolver should stay strict.
+10. If a system cannot be validated centrally, it does not belong in the first implementation.
+
+---
+
+## 12. Open Questions for v0.1b
+
+* Exact capability score formula weights
+* Which anchors are mandatory per item type
+* Minimum valid profile for projectile-capable gear
+* How many elemental assignments per item are reasonable
+* How dual wielding modifies slot-role generation
+* How much of behavior tuning is freeform vs template-clamped
+* Whether hidden outcome clusters should be saved or derived every time
+* Salvage percentages by rarity/finalization state
+* Exact provenance fields stored on finalized items
+* WIP versioning for iterative test prints

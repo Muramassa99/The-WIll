@@ -1,0 +1,15 @@
+geometry_menu_has_rotation_label=true
+geometry_menu_has_rotate_left=true
+geometry_menu_has_rotate_right=true
+rectangle_status_zero_ok=true
+rectangle_rotation_ninety_ok=true
+rectangle_status_ninety_ok=true
+rectangle_rotation_changed_footprint=true
+rectangle_rotation_swapped_bounds=true
+rectangle_commit_ok=true
+oval_status_zero_ok=true
+oval_status_ninety_ok=true
+oval_rotation_changed_footprint=true
+triangle_status_ninety_ok=true
+triangle_rotation_changed_footprint=true
+circle_rotation_preserved_footprint=true

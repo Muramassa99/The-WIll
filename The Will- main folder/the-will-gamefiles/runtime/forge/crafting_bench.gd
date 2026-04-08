@@ -11,7 +11,7 @@ func _ready() -> void:
 	_update_prompt(false)
 
 func interact(player: PlayerController3D) -> void:
-	bench_ui.call("toggle_for", player, forge_controller, String(name))
+	bench_ui.call("toggle_start_menu_for", player, forge_controller, String(name))
 	_update_prompt(bool(bench_ui.call("is_open")))
 
 func _on_ui_closed() -> void:

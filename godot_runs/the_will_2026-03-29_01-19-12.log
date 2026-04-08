@@ -1,0 +1,24 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+SCRIPT ERROR: Parse Error: Could not find type "PlayerCrosshairOverlay" in the current scope.
+   at: GDScript::reload (res://runtime/player/player_controller.gd:37)
+SCRIPT ERROR: Parse Error: Could not find type "PlayerAimSolver" in the current scope.
+   at: GDScript::reload (res://runtime/player/player_controller.gd:50)
+SCRIPT ERROR: Parse Error: Could not find type "PlayerAimContext" in the current scope.
+   at: GDScript::reload (res://runtime/player/player_controller.gd:51)
+SCRIPT ERROR: Parse Error: Identifier "PlayerAimContext" not declared in the current scope.
+   at: GDScript::reload (res://runtime/player/player_controller.gd:51)
+SCRIPT ERROR: Parse Error: Could not find type "PlayerAimContext" in the current scope.
+   at: GDScript::reload (res://runtime/player/player_controller.gd:540)
+ERROR: Failed to load script "res://runtime/player/player_controller.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+SCRIPT ERROR: Parse Error: Could not find type "PlayerAimContext" in the current scope.
+   at: GDScript::reload (res://tools/verify_player_aim_baseline.gd:19)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "get_current_aim_context".
+   at: GDScript::reload (res://tools/verify_player_aim_baseline.gd:19)
+SCRIPT ERROR: Parse Error: Could not find type "PlayerCrosshairOverlay" in the current scope.
+   at: GDScript::reload (res://tools/verify_player_aim_baseline.gd:20)
+SCRIPT ERROR: Parse Error: Could not find type "PlayerCrosshairOverlay" in the current scope.
+   at: GDScript::reload (res://tools/verify_player_aim_baseline.gd:20)
+ERROR: Failed to load script "res://tools/verify_player_aim_baseline.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript.cpp:2907)

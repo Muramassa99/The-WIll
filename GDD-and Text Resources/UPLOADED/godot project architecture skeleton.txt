@@ -1,0 +1,633 @@
+Big W accepted. Gryffindor keeps the points.
+
+You were right to protect that last material-pipeline message. I’m using it as the spine here: raw world drop → processed forge material → placed forge cells → baked profile → test/finalized item. That separation is now law, and this skeleton is built to preserve it.   
+
+The core rule this structure obeys is still the same:
+
+**the player crafts matter → the Forge resolves matter into a profile → the game uses the baked profile.** Raw cells are authoring data; gameplay reads baked profile/state, not the edit cloud. 
+
+## The naming law
+
+This is the template I want you to follow so names do not drift.
+
+* `*Def` = static definition data, usually a `Resource`
+* `*Atom` = smallest stored unit
+* `*State` = mutable runtime state
+* `*Instance` = a concrete owned thing in play/in inventory
+* `*Profile` = baked/derived gameplay-facing result
+* `*Resolver` = pure rule logic that converts one layer into another
+* `*Service` = orchestration / application layer, no scene ownership
+* `*Controller` = scene/node behavior
+* `*Registry` = lookup table / index
+* `*Factory` = builds legal runtime objects from definitions/profiles
+
+That matches your atomic-first stat/material setup, where `StatLine` is the universal smallest stat unit and bigger systems are built upward from stored atoms. 
+
+## The folder skeleton
+
+This is the Godot project skeleton I would actually use for *The Will*:
+
+```text
+res://
+├── boot/
+│   ├── app_main.gd
+│   ├── game_bootstrap.gd
+│   └── service_locator.gd
+│
+├── core/
+│   ├── atoms/
+│   │   ├── stat_line.gd
+│   │   ├── cell_atom.gd
+│   │   ├── anchor_atom.gd
+│   │   ├── segment_atom.gd
+│   │   ├── layer_atom.gd
+│   │   ├── capability_atom.gd
+│   │   └── skill_atom.gd
+│   │
+│   ├── defs/
+│   │   ├── tier_def.gd
+│   │   ├── raw_drop_def.gd
+│   │   ├── process_rule_def.gd
+│   │   ├── base_material_def.gd
+│   │   ├── material_variant_def.gd
+│   │   ├── shape_threshold_def.gd
+│   │   ├── anchor_rule_def.gd
+│   │   ├── character_grip_profile_def.gd
+│   │   ├── ability_template_def.gd
+│   │   ├── dot_profile_def.gd
+│   │   ├── house_oath_def.gd
+│   │   ├── block_shape_def.gd
+│   │   └── outcome_cluster_def.gd
+│   │
+│   ├── models/
+│   │   ├── crafted_item_wip.gd
+│   │   ├── baked_profile.gd
+│   │   ├── behavior_template.gd
+│   │   ├── forge_material_stack.gd
+│   │   ├── item_instance.gd
+│   │   ├── finalized_item_instance.gd
+│   │   ├── test_print_instance.gd
+│   │   ├── character_combat_state.gd
+│   │   ├── inventory_state.gd
+│   │   └── floor_instance_state.gd
+│   │
+│   ├── resolvers/
+│   │   ├── stat_aggregation_resolver.gd
+│   │   ├── tier_resolver.gd
+│   │   ├── process_resolver.gd
+│   │   ├── segment_resolver.gd
+│   │   ├── anchor_resolver.gd
+│   │   ├── shape_classifier_resolver.gd
+│   │   ├── profile_resolver.gd
+│   │   ├── capability_resolver.gd
+│   │   ├── behavior_resolver.gd
+│   │   ├── weapon_profile_validator.gd
+│   │   ├── combat_resolver.gd
+│   │   ├── heal_resolver.gd
+│   │   ├── crit_resolver.gd
+│   │   ├── threat_resolver.gd
+│   │   └── durability_resolver.gd
+│   │
+│   ├── registries/
+│   │   ├── stat_id_registry.gd
+│   │   ├── material_registry.gd
+│   │   ├── ability_template_registry.gd
+│   │   ├── block_shape_registry.gd
+│   │   └── house_oath_registry.gd
+│   │
+│   └── constants/
+│       ├── stat_ids.gd
+│       ├── slot_roles.gd
+│       ├── item_trade_rules.gd
+│       └── forge_limits.gd
+│
+├── services/
+│   ├── inventory_service.gd
+│   ├── processing_service.gd
+│   ├── forge_save_service.gd
+│   ├── crafting_service.gd
+│   ├── testing_service.gd
+│   ├── naming_service.gd
+│   ├── salvage_service.gd
+│   ├── equipment_service.gd
+│   ├── ability_loadout_service.gd
+│   ├── floor_service.gd
+│   ├── loot_service.gd
+│   ├── progression_service.gd
+│   ├── save_service.gd
+│   └── mod_content_service.gd
+│
+├── runtime/
+│   ├── player/
+│   │   ├── player_controller.gd
+│   │   ├── player_input_controller.gd
+│   │   ├── player_camera_controller.gd
+│   │   ├── player_movement_controller.gd
+│   │   ├── player_combat_controller.gd
+│   │   ├── player_equipment_controller.gd
+│   │   ├── player_ability_controller.gd
+│   │   ├── player_status_controller.gd
+│   │   └── player_interaction_controller.gd
+│   │
+│   ├── combat/
+│   │   ├── hitbox_controller.gd
+│   │   ├── hurtbox_controller.gd
+│   │   ├── projectile_controller.gd
+│   │   ├── area_effect_controller.gd
+│   │   ├── cc_window_controller.gd
+│   │   └── threat_table_controller.gd
+│   │
+│   ├── forge/
+│   │   ├── forge_session_controller.gd
+│   │   ├── forge_grid_controller.gd
+│   │   ├── forge_layer_controller.gd
+│   │   ├── forge_tool_controller.gd
+│   │   ├── forge_selection_controller.gd
+│   │   ├── forge_mirror_controller.gd
+│   │   ├── forge_camera_controller.gd
+│   │   ├── forge_preview_controller.gd
+│   │   ├── forge_anchor_controller.gd
+│   │   ├── forge_material_painter_controller.gd
+│   │   ├── forge_bulk_shape_controller.gd
+│   │   ├── skill_crafting_controller.gd
+│   │   ├── naming_station_controller.gd
+│   │   ├── processing_station_controller.gd
+│   │   ├── dismantling_station_controller.gd
+│   │   ├── test_dummy_controller.gd
+│   │   └── test_print_spawner.gd
+│   │
+│   ├── world/
+│   │   ├── hub_controller.gd
+│   │   ├── floor_instance_controller.gd
+│   │   ├── fog_of_war_controller.gd
+│   │   ├── extraction_point_controller.gd
+│   │   └── contract_board_controller.gd
+│   │
+│   ├── enemies/
+│   │   ├── enemy_controller.gd
+│   │   ├── enemy_ai_controller.gd
+│   │   ├── boss_phase_controller.gd
+│   │   ├── aggro_controller.gd
+│   │   └── loot_drop_controller.gd
+│   │
+│   └── ui_bridge/
+│       ├── hud_event_bridge.gd
+│       ├── forge_event_bridge.gd
+│       └── inventory_event_bridge.gd
+│
+├── scenes/
+│   ├── main/
+│   │   └── main.tscn
+│   ├── hub/
+│   │   └── hub_world.tscn
+│   ├── floors/
+│   │   └── floor_instance.tscn
+│   ├── forge/
+│   │   ├── forge_instance.tscn
+│   │   ├── weapon_forge_station.tscn
+│   │   ├── processing_station.tscn
+│   │   ├── skill_crafting_station.tscn
+│   │   ├── naming_station.tscn
+│   │   ├── dismantling_station.tscn
+│   │   └── testing_area.tscn
+│   ├── player/
+│   │   └── player.tscn
+│   ├── enemies/
+│   │   ├── enemy_base.tscn
+│   │   └── boss_base.tscn
+│   ├── ui/
+│   │   ├── hud/
+│   │   ├── forge/
+│   │   ├── inventory/
+│   │   └── menus/
+│   └── test/
+│       ├── test_chamber.tscn
+│       └── forge_sandbox.tscn
+│
+├── data/
+│   ├── defs/
+│   │   ├── tiers/
+│   │   ├── materials/
+│   │   ├── drops/
+│   │   ├── process_rules/
+│   │   ├── abilities/
+│   │   ├── houses/
+│   │   ├── blocks/
+│   │   └── thresholds/
+│   ├── prototypes/
+│   │   ├── reference_weapons/
+│   │   └── reference_behaviors/
+│   └── balance/
+│       ├── combat/
+│       ├── crafting/
+│       └── economy/
+│
+├── saves/
+│   ├── profile/
+│   ├── world/
+│   ├── forge/
+│   └── migrations/
+│
+├── net/
+│   ├── authority/
+│   ├── replication/
+│   └── sessions/
+│
+├── mods/
+│   ├── manifest/
+│   ├── content/
+│   └── sandbox/
+│
+└── tools/
+    ├── importers/
+    ├── validators/
+    └── balance/
+```
+
+This keeps pure rules separate from scene logic, which is exactly what your docs keep circling back to: write the core rules once, keep naming consistent, and prevent logic from scattering everywhere.  
+
+## What each floor of the project does
+
+### `core/`
+
+This is the law of the machine.
+
+No scene ownership. No UI assumptions. No “grab this node and do magic.”
+This is where the atomic-first logic lives: `StatLine`, material/tier definitions, WIP/baked item models, and the resolvers that turn one layer into another. That follows both your atomic math sheet and the Forge rule that gameplay should stop reading raw cells once a baked profile exists.  
+
+### `services/`
+
+This is orchestration.
+
+A service is allowed to say:
+
+* take these drops
+* process them into forge mats
+* save that WIP object
+* bake this test print
+* finalize this item
+
+But it should **not** own visual/editor behavior. It coordinates rules and persistence.
+
+### `runtime/`
+
+This is the node world.
+
+These controllers are the Godot-facing layer:
+
+* player movement
+* forge viewport behavior
+* cameras
+* hitboxes
+* dummies
+* enemy AI nodes
+* station interaction
+
+This is where you “use Godot,” not where you define the truth of the systems.
+
+### `scenes/`
+
+Only composition.
+Scenes should wire together controllers and visuals, not become secret logic warehouses.
+
+### `data/`
+
+Actual `.tres` and content defs.
+This is where you store tiers, materials, thresholds, ability defs, and later enemy defs.
+
+### `saves/`
+
+Do **not** merge save domains too early.
+You already know WIP forge objects, finalized items, and profile/world data are different lifecycles. Keep them separate from the start.  
+
+## The dependency law
+
+This is the part that matters most.
+
+### Allowed direction
+
+`defs/atoms -> models -> resolvers -> services -> runtime controllers -> scenes/ui`
+
+### Not allowed
+
+* UI reading raw forge cells directly for gameplay truth
+* runtime controllers doing combat math locally “because it was convenient”
+* finalized combat reading `CellAtom[]` when a `BakedProfile` exists
+* forge tools writing directly into player combat state without going through services/models
+
+That is the same hidden structure you wanted: visible freedom for the player, strict resolver structure underneath. 
+
+## The core classes you should make first
+
+This is the smallest legal backbone for your current direction.
+
+### Absolute first-pass defs
+
+* `stat_line.gd`
+* `tier_def.gd`
+* `base_material_def.gd`
+* `material_variant_def.gd`
+* `raw_drop_def.gd`
+* `process_rule_def.gd`
+* `ability_template_def.gd`
+
+These are the roots that stop future naming drift. Your stat IDs and atomic data model already justify this layer. 
+
+### Absolute first-pass models
+
+* `forge_material_stack.gd`
+* `crafted_item_wip.gd`
+* `cell_atom.gd`
+* `anchor_atom.gd`
+* `segment_atom.gd`
+* `layer_atom.gd`
+* `baked_profile.gd`
+* `behavior_template.gd`
+
+This is the exact authoring-to-bake bridge defined in Crafting Atoms. 
+
+### Absolute first-pass resolvers
+
+* `tier_resolver.gd`
+* `process_resolver.gd`
+* `segment_resolver.gd`
+* `anchor_resolver.gd`
+* `shape_classifier_resolver.gd`
+* `profile_resolver.gd`
+* `capability_resolver.gd`
+
+These are the “this reads that, then outputs this” pieces from your best message. 
+
+### Absolute first-pass services
+
+* `processing_service.gd`
+* `crafting_service.gd`
+* `forge_save_service.gd`
+* `testing_service.gd`
+* `naming_service.gd`
+
+That matches your forge lifecycle: process → build → test → name/finalize.  
+
+### Absolute first-pass runtime controllers
+
+* `player_controller.gd`
+* `player_movement_controller.gd`
+* `player_camera_controller.gd`
+* `forge_session_controller.gd`
+* `forge_grid_controller.gd`
+* `forge_tool_controller.gd`
+* `forge_camera_controller.gd`
+* `test_dummy_controller.gd`
+
+That is enough to get the first ugly legal vertical slice.
+
+## The object chain, now in Godot class form
+
+This is your material pipeline translated into file/class names:
+
+### Material side
+
+* `RawDropDef`
+* `ProcessRuleDef`
+* `BaseMaterialDef`
+* `TierDef`
+* `MaterialVariantDef`
+* `ForgeMaterialStack`
+
+### Forge authoring side
+
+* `CellAtom`
+* `LayerAtom`
+* `SegmentAtom`
+* `AnchorAtom`
+* `CraftedItemWIP`
+
+### Bake/output side
+
+* `BakedProfile`
+* `BehaviorTemplate`
+* `TestPrintInstance`
+* `FinalizedItemInstance`
+
+That is just your last message converted into a reusable Godot naming spine, without changing the logic. 
+
+## Who reads what
+
+This part should be pinned to the wall.
+
+### `processing_service`
+
+Reads:
+
+* `RawDropDef`
+* `ProcessRuleDef`
+* `TierDef`
+
+Writes:
+
+* `ForgeMaterialStack`
+
+### `forge_grid_controller`
+
+Reads:
+
+* `ForgeMaterialStack`
+* tool state
+* mirror state
+
+Writes:
+
+* `CraftedItemWIP`
+* `CellAtom[]`
+* `LayerAtom[]`
+
+### `segment_resolver`
+
+Reads:
+
+* `CellAtom[]`
+
+Writes:
+
+* `SegmentAtom[]`
+
+### `anchor_resolver`
+
+Reads:
+
+* `SegmentAtom[]`
+* `AnchorRuleDef`
+* `CharacterGripProfileDef`
+
+Writes:
+
+* `AnchorAtom[]`
+
+### `profile_resolver`
+
+Reads:
+
+* `CellAtom[]`
+* `SegmentAtom[]`
+* `AnchorAtom[]`
+* `MaterialVariantDef`
+
+Writes:
+
+* `BakedProfile`
+
+### `capability_resolver`
+
+Reads:
+
+* `BakedProfile`
+
+Writes:
+
+* capability scores and hidden outcome cluster hints
+
+### `skill_crafting_controller`
+
+Reads:
+
+* `BakedProfile`
+* capability scores
+* slot role constants
+* ability templates
+
+Writes:
+
+* `BehaviorTemplate`
+
+### `testing_service`
+
+Reads:
+
+* `CraftedItemWIP`
+* `BakedProfile`
+* `BehaviorTemplate`
+
+Writes:
+
+* `TestPrintInstance`
+
+### `naming_service`
+
+Reads:
+
+* WIP + baked + behavior + provenance inputs
+
+Writes:
+
+* `FinalizedItemInstance`
+
+This is the exact separation your Forge docs require: WIP is forge-bound, test instances are baked copies, and finalized items are the export point.  
+
+## The naming and save split you must not violate
+
+There are four objects that must **never** collapse into one type:
+
+* `ForgeMaterialStack`
+* `CraftedItemWIP`
+* `TestPrintInstance`
+* `FinalizedItemInstance`
+
+If you make one “item.gd” and try to force all four meanings into it, that is how the spaghetti starts.
+
+Why this matters:
+
+* processed forge mats are not world drops
+* WIP objects are not finalized items
+* test prints are not tradeable exports
+* finalized items carry provenance, trade history, and later blueprint/salvage implications
+
+Your own notes already require different lifecycle laws for these.  
+
+## My one structural correction to the earlier Godot guide
+
+The earlier guide had a solid direction, but I would make one change for your project:
+
+Do **not** let `runtime/player/equipment.gd` or `runtime/player/abilities.gd` become the place where stat math or capability logic lives.
+
+Those controllers should ask the core/services layer for answers.
+
+So instead of:
+
+* player node computes attack/defense/crit/capability logic
+
+Do:
+
+* player node asks `equipment_service`
+* service asks `stat_aggregation_resolver`
+* service asks `profile_resolver` / `behavior_resolver`
+* runtime only applies the result
+
+That keeps your reverse-engineered final machine intact.
+
+## The v0.1 creation order
+
+If you want the first legal implementation order, I’d do this:
+
+1. `stat_line.gd`
+2. `tier_def.gd`
+3. `base_material_def.gd`
+4. `material_variant_def.gd`
+5. `raw_drop_def.gd`
+6. `process_rule_def.gd`
+7. `forge_material_stack.gd`
+8. `cell_atom.gd`
+9. `crafted_item_wip.gd`
+10. `segment_atom.gd`
+11. `anchor_atom.gd`
+12. `baked_profile.gd`
+13. `tier_resolver.gd`
+14. `process_resolver.gd`
+15. `segment_resolver.gd`
+16. `anchor_resolver.gd`
+17. `profile_resolver.gd`
+18. `forge_grid_controller.gd`
+19. `forge_session_controller.gd`
+20. `testing_service.gd`
+
+That order follows your material chain rather than random Godot convenience.
+
+## The future systems this skeleton already protects
+
+This is the part you care about most.
+
+This layout already leaves legal space for:
+
+* forge-bound unfinished items
+* naming/export as identity lock
+* blueprint extraction later
+* processed mats vs raw drops
+* capability-driven skills instead of visible classes
+* hidden outcome clusters
+* mod-safe content defs
+* separate save domains
+* server-authoritative validation later
+
+Those are all already in your docs, and this skeleton does not fight any of them.   
+
+## The shortest practical version
+
+If you want the condensed version to follow while creating folders:
+
+* `core/atoms` = smallest stored truths
+* `core/defs` = reusable static definitions
+* `core/models` = WIP/baked/runtime data containers
+* `core/resolvers` = all important math/logic conversions
+* `services` = application layer
+* `runtime` = Godot node behavior
+* `scenes` = composition only
+* `data` = `.tres` content
+* `saves` = separated persistence domains
+* `mods` = future content injection boundary
+
+And the one sentence to keep taped on the monitor is:
+
+**author in atoms, resolve into profile, play from baked state.**
+
+That is the cleanest Godot skeleton I can give you for *The Will* without skipping the future-aware laws you care about. It is built to support your social/crafting identity, your Forge lifecycle, and your material/profile pipeline rather than a generic RPG template.  
+
+When you want, the next step is the **exact first 20 files** with one-line purpose each, so you can create them in Godot/VS Code without hesitation.

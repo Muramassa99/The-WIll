@@ -15,7 +15,7 @@ func _init() -> void:
 	quit()
 
 func _append_preset_report(lines: PackedStringArray, controller: ForgeGridController, preset_id: StringName) -> void:
-	controller.load_debug_sample_preset(preset_id)
+	controller.load_sample_preset_wip(preset_id)
 	var forge_service: ForgeService = controller.get_forge_service()
 	var material_lookup: Dictionary = controller.build_default_material_lookup()
 	var test_print: TestPrintInstance = controller.spawn_test_print_from_active_wip(material_lookup)
@@ -24,14 +24,8 @@ func _append_preset_report(lines: PackedStringArray, controller: ForgeGridContro
 	if wip != null:
 		profile = controller.get_active_baked_profile()
 
-	var cells: Array[CellAtom] = []
-	if wip != null:
-		for layer_atom: LayerAtom in wip.layers:
-			if layer_atom == null:
-				continue
-			for cell: CellAtom in layer_atom.cells:
-				if cell != null:
-					cells.append(cell)
+	var authored_cells: Array[CellAtom] = CraftedItemWIP.collect_cells(wip, true)
+	var cells: Array[CellAtom] = CraftedItemWIP.collect_bake_cells(wip)
 
 	var segments: Array[SegmentAtom] = forge_service.build_segments(cells, material_lookup)
 	segments = forge_service.classify_joint_segments(segments, material_lookup)
@@ -40,7 +34,8 @@ func _append_preset_report(lines: PackedStringArray, controller: ForgeGridContro
 		segments,
 		material_lookup,
 		wip.forge_intent if wip != null else &"",
-		wip.equipment_context if wip != null else &""
+		wip.equipment_context if wip != null else &"",
+		authored_cells
 	)
 
 	lines.append("=== PRESET %s ===" % String(preset_id))

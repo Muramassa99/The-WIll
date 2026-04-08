@@ -1,0 +1,26 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+SCRIPT ERROR: Parse Error: Could not find type "ForgeAuthoringSandboxDef" in the current scope.
+   at: GDScript::reload (res://runtime/forge/forge_grid_controller.gd:18)
+SCRIPT ERROR: Parse Error: Could not find type "ForgeAuthoringSandboxDef" in the current scope.
+   at: GDScript::reload (res://runtime/forge/forge_grid_controller.gd:22)
+SCRIPT ERROR: Parse Error: Could not find type "ForgeAuthoringSandboxDef" in the current scope.
+   at: GDScript::reload (res://runtime/forge/forge_grid_controller.gd:281)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "get_sample_preset_def".
+   at: GDScript::reload (res://runtime/forge/forge_grid_controller.gd:85)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "build_sample_preset_wip".
+   at: GDScript::reload (res://runtime/forge/forge_grid_controller.gd:154)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/crafting_bench.gd:0)
+ERROR: Failed to load script "res://runtime/forge/crafting_bench.gd" with error "Compilation failed".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+SCRIPT ERROR: Trying to assign value of type 'Node' to a variable of type 'forge_grid_controller.gd'.
+   at: CraftingBench.@implicit_ready (res://runtime/forge/crafting_bench.gd:5)
+   GDScript backtrace (most recent call first):
+       [0] @implicit_ready (res://runtime/forge/crafting_bench.gd:5)
+SCRIPT ERROR: Cannot call method 'connect' on a null value.
+   at: CraftingBench._ready (res://runtime/forge/crafting_bench.gd:10)
+   GDScript backtrace (most recent call first):
+       [0] _ready (res://runtime/forge/crafting_bench.gd:10)

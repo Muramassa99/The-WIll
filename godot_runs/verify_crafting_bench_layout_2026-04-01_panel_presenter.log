@@ -1,0 +1,16 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+SCRIPT ERROR: Parse Error: Too few arguments for "refresh_status_text()" call. Expected at least 11 but received 10.
+   at: GDScript::reload (res://runtime/forge/crafting_bench_ui.gd:738)
+ERROR: Failed to load script "res://runtime/forge/crafting_bench_ui.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+ERROR: Required object "rp_child" is null.
+   at: add_child (scene/main/node.cpp:1703)
+   GDScript backtrace (most recent call first):
+       [0] _run_verification (res://tools/verify_crafting_bench_layout.gd:16)
+SCRIPT ERROR: Invalid call. Nonexistent function 'open_for' in base 'Nil'.
+   at: _run_verification (res://tools/verify_crafting_bench_layout.gd:20)
+   GDScript backtrace (most recent call first):
+       [0] _run_verification (res://tools/verify_crafting_bench_layout.gd:20)

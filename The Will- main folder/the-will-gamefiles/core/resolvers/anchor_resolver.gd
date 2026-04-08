@@ -22,7 +22,7 @@ func detect_primary_grip_candidates(segments: Array[SegmentAtom], material_looku
 			anchors.append(build_primary_grip_anchor(segment, grip_span))
 	return anchors
 
-func validate_primary_grip(segment: SegmentAtom, _material_lookup: Dictionary) -> bool:
+func validate_primary_grip(segment: SegmentAtom, material_lookup: Dictionary) -> bool:
 	if segment == null:
 		return false
 	if not _is_valid_grip_envelope(segment):
@@ -35,8 +35,7 @@ func validate_primary_grip(segment: SegmentAtom, _material_lookup: Dictionary) -
 		return false
 	if _overlaps_edge_span(segment):
 		return false
-	# TODO: material_lookup may enforce stricter anchor-material legality once segment ratios and lookup rules are both active.
-	return true
+	return not _build_primary_grip_spans(segment, material_lookup).is_empty()
 
 func build_primary_grip_anchor(segment: SegmentAtom, grip_span: Dictionary = {}) -> AnchorAtom:
 	var anchor: AnchorAtom = AnchorAtom.new()

@@ -1,0 +1,10 @@
+saved_alpha_id=player_wip_1775658673.202_1
+saved_beta_id=player_wip_1775658673.203_2
+library_saved_count=2
+initial_selected_wip_id=player_wip_1775658673.203_2
+auto_restore_selected_beta=true
+alpha_project_index=3
+manually_loaded_alpha=true
+selected_wip_id_after_manual_load=player_wip_1775658673.202_1
+reopened_selected_alpha=true
+load_button_disabled_after_refresh=false

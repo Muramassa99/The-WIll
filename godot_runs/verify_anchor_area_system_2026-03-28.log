@@ -1,0 +1,19 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+ForgeService baked profile
+  total_mass=666.0
+  center_of_mass=(90.85135, 39.0, 20.97297)
+  reach=12.6194295883179
+  front_heavy_score=0.46367776261218
+  balance_score=0.53480993023882
+  edge_score=0.0
+  blunt_score=0.85365853658537
+  pierce_score=0.0
+  guard_score=0.85365853658537
+  flex_score=0.0
+  launch_score=0.0
+  resolved_material_stat_line_count=10
+  resolved_capability_bias_line_count=12
+  capability_scores={ &"cap_edge": 1.0, &"cap_blunt": 1.0, &"cap_pierce": 0.0, &"cap_guard": 1.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }

@@ -54,7 +54,7 @@ func _run_verification() -> void:
 	await process_frame
 	await process_frame
 
-	var plane_draw_count: int = crafting_ui.call("_count_cells", crafting_ui.call("_ensure_wip_for_editing"))
+	var plane_draw_count: int = _count_cells(crafting_ui.call("_ensure_wip_for_editing"))
 
 	crafting_ui.call("_set_active_tool", &"erase")
 	await process_frame
@@ -80,7 +80,7 @@ func _run_verification() -> void:
 	await process_frame
 	await process_frame
 
-	var plane_remaining_count: int = crafting_ui.call("_count_cells", crafting_ui.call("_ensure_wip_for_editing"))
+	var plane_remaining_count: int = _count_cells(crafting_ui.call("_ensure_wip_for_editing"))
 
 	crafting_ui.call("_create_new_blank_project")
 	await process_frame
@@ -98,7 +98,7 @@ func _run_verification() -> void:
 	await process_frame
 	await process_frame
 
-	var free_draw_count: int = crafting_ui.call("_count_cells", crafting_ui.call("_ensure_wip_for_editing"))
+	var free_draw_count: int = _count_cells(crafting_ui.call("_ensure_wip_for_editing"))
 
 	crafting_ui.call("_set_active_tool", &"erase")
 	crafting_ui.call("_begin_free_view_paint")
@@ -109,7 +109,7 @@ func _run_verification() -> void:
 	await process_frame
 	await process_frame
 
-	var free_remaining_count: int = crafting_ui.call("_count_cells", crafting_ui.call("_ensure_wip_for_editing"))
+	var free_remaining_count: int = _count_cells(crafting_ui.call("_ensure_wip_for_editing"))
 
 	var lines: PackedStringArray = []
 	lines.append("armed_material_variant_id=%s" % String(initial_material_id))
@@ -162,3 +162,13 @@ func _build_free_view_drag_positions(preview: ForgeWorkspacePreview, container_s
 		if positions.size() == 3:
 			break
 	return positions
+
+func _count_cells(wip: CraftedItemWIP) -> int:
+	if wip == null:
+		return 0
+	var count: int = 0
+	for layer_atom: LayerAtom in wip.layers:
+		if layer_atom == null:
+			continue
+		count += layer_atom.cells.size()
+	return count

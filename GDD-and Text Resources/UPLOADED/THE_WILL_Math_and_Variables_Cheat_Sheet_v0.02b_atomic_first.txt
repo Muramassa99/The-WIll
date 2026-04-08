@@ -1,0 +1,287 @@
+THE WILL — Math & Variables (from atomic sources to formulas)
+Version: v0.02b (rebuild: atomic-first)
+Date: 2026-03-15
+
+GOAL
+- Define the smallest moving parts first (the “atoms” you put on items/skills).
+- Then show how atoms aggregate into derived stats.
+- Then show how derived stats feed damage/heal/threat/CC.
+- This prevents “doing math with unknown variables”.
+
+READING TIP
+- If it has a STAT_ID, it is something you can store on an item/buff/food/etc.
+- If it has “Σ”, it is a SUM over many sources.
+- If it has “BASE_”, it is a constant or a derived constant from Rank/Difficulty.
+
+────────────────────────────────────────────────────────────
+0) Data atoms (what you actually store in data files)
+────────────────────────────────────────────────────────────
+A) StatLine (the universal smallest unit)
+StatLine:
+- stat_id: string (see Stat IDs below)
+- value: number
+- value_kind: one of:
+  - FLAT        (adds directly)
+  - PCT_ADD     (adds to a % bucket as decimal, e.g. 0.15 = +15%)
+  - FLAG        (0/1, or true/false)
+  - ENUM        (string/int category)
+
+Where StatLines live:
+- ItemInstance.stats[]            (crafted gear, loot, accessories)
+- BuffInstance.stats[]            (self/party buffs)
+- FoodBuff.stats[]                (food)
+- HouseOath.stats[]               (house passives)
+- FloorDifficultyProfile.stats[]  (enemy-only scaling knobs)
+
+B) AbilityTemplate (skill definitions; THIS is where SKILL_BASE lives)
+AbilityTemplate:
+- ability_id: string
+- base_damage: number (for damage abilities)
+- base_heal: number (for healing abilities)   ← THIS IS “SKILL_BASE” FOR HEALING
+- scaling_tag: enum (damage/heal/utility)
+- can_crit: bool
+- dot_profile_id: optional string
+- hit_count: int (for multi-hit)
+- tick_interval: float (for ground effects)
+- snapshot_rules: enum (none, snapshot_on_cast)
+
+C) DotProfile (DoT definitions)
+DotProfile:
+- dot_id
+- tick_damage_flat
+- duration_sec
+- tick_rate_sec
+- can_crit (default false)
+
+D) Rank / Tier / Difficulty
+- RankValue: numeric (used for base_atk/base_def/base_hp)
+- Tier: enum (gray/green/blue/purple/orange)
+- FloorDifficultyProfile: object with multipliers and/or stat bonuses for NPCs
+
+────────────────────────────────────────────────────────────
+1) Atomic Stat IDs (the ones you put on gear/materials/buffs)
+────────────────────────────────────────────────────────────
+NOTE: These are “atoms”. Everything else is derived from these.
+
+OFFENSE (player)
+- atk_mod_flat                 (FLAT)  “Attack Mod” contribution from gear
+- power_flat                   (FLAT)  “Power” core stat from gear/food/buffs
+- dmg_pct_add                  (PCT_ADD) Outgoing damage % (generic)
+- crit_chance_pct              (PCT_ADD) Crit chance (0.00–1.00)
+- crit_damage_bonus_add        (FLAT)  Adds to crit BONUS (NOT a full multiplier)
+  - Example: +0.25 means “+25% crit bonus”
+  - Used to compute CRIT_MULT_DMG (see Crit section)
+
+DEFENSE (player)
+- def_mod_flat                 (FLAT)  “Defense Mod” contribution from gear
+- endurance_flat               (FLAT)  “Endurance” core stat from gear/food/buffs
+- dmg_reduction_pct_add        (PCT_ADD) Incoming damage reduction % (generic)
+- hp_pct_add                   (PCT_ADD) Max HP % bonus
+- bubble_hp_flat               (FLAT)  Flat temporary HP added as Bubble (from skills/buffs)
+
+MOVEMENT / SPEED
+- move_speed_pct_add           (PCT_ADD)
+- move_speed_flat_add          (FLAT)
+- aspd_pct_add                 (PCT_ADD) animation/cast speed modifier
+
+STAMINA
+- stamina_max_flat             (FLAT)  stamina pool size (not displayed numerically)
+- stamina_regen_pct_add        (PCT_ADD) (optional future)
+- stamina_regen_delay_flat     (FLAT) seconds (optional future)
+
+HEALING (outgoing)
+- heal_power_flat              (FLAT)  adds “healing power points”
+- heal_power_pct_add           (PCT_ADD) increases healing multiplicatively
+- heal_crit_scalar_flat        (FLAT)  optional override of heal crit scalar (default 0.75)
+
+HEALING (incoming on target)
+- received_heal_pct_add        (PCT_ADD) increases healing received
+
+THREAT
+- threat_virtual_bonus_pct     (PCT_ADD) tank buff amount as bonus (default +1.50)
+- threat_from_heal_coeff       (FLAT)  default 1.0
+- threat_from_res_coeff        (FLAT)  default 2.5
+
+UTILITY / DURATION (optional future)
+- buff_duration_pct_add
+- bubble_duration_pct_add
+- dot_duration_pct_add
+- cooldown_rate_pct_add  (careful: can become a balance nightmare)
+
+────────────────────────────────────────────────────────────
+2) Where do the atoms come from? (binding to item → source → place)
+────────────────────────────────────────────────────────────
+GEAR SLOT → typical atom contributions (not strict; crafting can bend rules)
+- Weapon: atk_mod_flat, power_flat, crit_chance_pct, crit_damage_bonus_add
+- Shield weapon: def_mod_flat, endurance_flat, dmg_reduction_pct_add
+- Helmet/Chest/Pants/Boots: def_mod_flat, endurance_flat, hp_pct_add
+- Rings/Necklace/Bracelet/Gloves/Belt: atk_mod_flat, power_flat, crit stats, heal stats (if support design)
+- Food: power_flat/endurance_flat/hp_pct_add/stamina_max_flat/regen buffs
+- House: special passives (bubble_hp_flat modifiers, heal power, threat coefficients, etc.)
+- Floor difficulty: applies to NPC stat calculation only (enemy multipliers / bonuses)
+
+AbilityTemplate atoms:
+- base_damage / base_heal are stored on each ability template.
+  Example: If you want the heal “SKILL_BASE” to be 850 instead of 1000,
+  you change AbilityTemplate.base_heal = 850 for that ability.
+
+────────────────────────────────────────────────────────────
+3) Derived constants (Rank-based)
+────────────────────────────────────────────────────────────
+RankValue table (current):
+F=50, E=120, D=200, C=350, B=600, A=800, S=1200
+
+Derived:
+- base_atk = 0.2  * rank_value
+- base_def = 0.15 * rank_value
+- base_hp  = 0.1  * rank_value
+
+────────────────────────────────────────────────────────────
+4) Aggregation (turn atoms into Σ buckets)
+────────────────────────────────────────────────────────────
+ΣATK_MOD_FLAT      = sum(atk_mod_flat from all sources)
+ΣPOWER             = sum(power_flat from all sources)
+ΣDEF_MOD_FLAT      = sum(def_mod_flat from all sources)
+ΣENDURANCE         = sum(endurance_flat from all sources)
+
+ΣDMG_PCT_ADD       = sum(dmg_pct_add)
+ΣDMG_REDUCTION_PCT = sum(dmg_reduction_pct_add)
+ΣHP_PCT_ADD        = sum(hp_pct_add)
+
+ΣMOVE_PCT_ADD      = sum(move_speed_pct_add)
+ΣMOVE_FLAT_ADD     = sum(move_speed_flat_add)
+ΣASPD_PCT_ADD      = sum(aspd_pct_add)
+
+ΣHEAL_FLAT         = sum(heal_power_flat)
+ΣHEAL_PCT_ADD      = sum(heal_power_pct_add)
+ΣRECEIVED_HEAL_PCT = sum(received_heal_pct_add)
+
+STAMINA_MAX        = base_stamina + sum(stamina_max_flat)
+
+CRIT_CHANCE        = clamp01(sum(crit_chance_pct))
+
+CRIT_DAMAGE_BONUS  = sum(crit_damage_bonus_add)
+
+────────────────────────────────────────────────────────────
+5) Derived stats (Attack, Defense, HP, Speed)
+────────────────────────────────────────────────────────────
+Attack:
+ATK = (ΣATK_MOD_FLAT) * (3 + 0.03 * ΣPOWER) + base_atk
+
+Defense:
+DEF_RAW  = (ΣDEF_MOD_FLAT) * (3 + (ΣENDURANCE / 100)) + base_def
+DEF_TRUE = DEF_RAW * (1 - ΣDMG_REDUCTION_PCT)
+
+HP (IMPORTANT: normalize stamina; avoid unit explosion)
+Define:
+STAMINA_BASE = 100   (tunable, but a clear reference)
+STAMINA_HP_COEFF = 0.4  (meaning “+40% HP at STAMINA_BASE”)
+
+HP_TOTAL = base_hp * (1 + ΣHP_PCT_ADD) * (1 + STAMINA_HP_COEFF * (STAMINA_MAX / STAMINA_BASE))
+
+Move speed:
+MOVE_TRUE = (move_base * (1 + ΣMOVE_PCT_ADD)) + ΣMOVE_FLAT_ADD
+MOVE_TRUE ≤ 240  (cap)
+
+Attack speed:
+ASPD_TRUE = aspd_base * (1 + ΣASPD_PCT_ADD)
+
+────────────────────────────────────────────────────────────
+6) Damage calculation (skill hit)
+────────────────────────────────────────────────────────────
+AbilityTemplate provides:
+- base_damage  (this is SKILL_BASE for damage)
+- hit_count
+- can_crit
+
+Raw damage (pre-mitigation):
+DMG_RAW = ATK * base_damage * (1 + ΣDMG_PCT_ADD)
+
+Mitigation model:
+DEF_SCALE = 1000 (TUNABLE)
+
+MITIGATION_HP = DEF_SCALE / (DEF_SCALE + DEF_TRUE)
+DMG_TRUE_HP   = DMG_RAW * MITIGATION_HP
+
+Bubble routing:
+BUBBLE_DEF_MULT = 0.5 (TUNABLE)
+DEF_TRUE_BUBBLE = DEF_TRUE * BUBBLE_DEF_MULT
+MITIGATION_BUBBLE = DEF_SCALE / (DEF_SCALE + DEF_TRUE_BUBBLE)
+DMG_TRUE_BUBBLE = DMG_RAW * MITIGATION_BUBBLE
+
+Apply to Bubble first, then spill to HP.
+
+────────────────────────────────────────────────────────────
+7) Crit calculation (damage + heal share same CRIT_MULT baseline)
+────────────────────────────────────────────────────────────
+Do NOT “sum multipliers”. Sum bonus parts.
+
+Damage crit:
+CRIT_MULT_BASE_DMG = 2.0
+CRIT_MULT_DMG = CRIT_MULT_BASE_DMG + CRIT_DAMAGE_BONUS
+
+CRIT_BONUS = CRIT_MULT_DMG - 1
+
+Damage on crit:
+DMG_CRIT_SCALAR = 1.0
+DMG_TRUE_CRIT = DMG_TRUE * (1 + DMG_CRIT_SCALAR * CRIT_BONUS)
+(Equivalent to DMG_TRUE * CRIT_MULT_DMG)
+
+Heal crit (scalable, not hardcoded):
+HEAL_CRIT_SCALAR_DEFAULT = 0.75
+HEAL_CRIT_SCALAR = (if present) heal_crit_scalar_flat else 0.75
+
+HEAL_CRIT_MULT = 1 + HEAL_CRIT_SCALAR * CRIT_BONUS
+HEAL_TRUE_CRIT = HEAL_TRUE * HEAL_CRIT_MULT
+
+────────────────────────────────────────────────────────────
+8) Healing calculation (clarified)
+────────────────────────────────────────────────────────────
+AbilityTemplate provides:
+- base_heal   ← THIS IS SKILL_BASE FOR HEALING
+
+Recommended clear healing formula:
+HEAL_TRUE =
+  base_heal
+  * (1 + ΣHEAL_FLAT / 1000)
+  * (1 + ΣHEAL_PCT_ADD)
+  * (1 + ΣRECEIVED_HEAL_PCT)
+
+Worked example:
+base_heal = 1000
+ΣHEAL_FLAT = 50
+ΣHEAL_PCT_ADD = 0.20
+ΣRECEIVED_HEAL_PCT = 0.10
+
+HEAL_TRUE = 1000 * (1 + 50/1000) * (1 + 0.20) * (1 + 0.10)
+          = 1000 * 1.05 * 1.20 * 1.10
+          = 1386.00
+
+If base_heal = 850:
+HEAL_TRUE = 850 * 1.05 * 1.20 * 1.10
+          = 1178.10
+
+────────────────────────────────────────────────────────────
+9) Threat (simple model)
+────────────────────────────────────────────────────────────
+Damage threat:
+THREAT += damage_done * (1 + threat_virtual_bonus_pct)
+
+Healing threat:
+THREAT += heal_done * threat_from_heal_coeff
+
+Resurrection threat:
+THREAT += base_damage_equiv * threat_from_res_coeff
+
+────────────────────────────────────────────────────────────
+10) CC (binary windows model)
+────────────────────────────────────────────────────────────
+CC types: stun, knockdown, snare, slow
+Boss window requires N successful CC hits; wrong type resets progress.
+
+────────────────────────────────────────────────────────────
+11) Floor difficulty profile (NPC-only scaling)
+────────────────────────────────────────────────────────────
+Apply multipliers/bonuses to NPC effective stats and drops.
+
+END — v0.02b

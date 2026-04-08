@@ -1,0 +1,14 @@
+player_loaded=true
+inventory_overlay_loaded=true
+humanoid_height_meters=2.00
+humanoid_height_is_two_meters=true
+moved_to_storage=true
+moved_back_to_inventory=true
+saved_wip_id=verify_test_wip
+preview_valid=true
+preview_message=Valid primary grip area detected.
+equip_success=true
+equip_message=Equipped Verify Sword into hand right.
+right_hand_entry_is_forge_test=true
+right_hand_visual_child_count=2
+storage_box_exists_in_world=true

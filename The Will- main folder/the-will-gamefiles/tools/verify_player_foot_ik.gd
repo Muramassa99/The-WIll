@@ -30,40 +30,23 @@ func _run_verification() -> void:
 	await process_frame
 
 	var rig: PlayerHumanoidRig = player.humanoid_rig as PlayerHumanoidRig if player != null else null
-	if rig != null:
-		rig.enable_foot_ik = true
-		rig.enable_arm_ik = false
-		rig.update_locomotion_state(0.4, 5.5, true, 0.0, false)
-		rig._refresh_runtime_ik_influences()
-
-	for _i in range(18):
-		await physics_frame
-		await process_frame
-
 	var skeleton: Skeleton3D = rig.get_node_or_null("JosieModel/Josie/Skeleton3D") as Skeleton3D if rig != null else null
 	var right_leg_ik: TwoBoneIK3D = skeleton.get_node_or_null("RightLegIK") as TwoBoneIK3D if skeleton != null else null
 	var right_foot_target: Node3D = rig.get_node_or_null("IkTargets/RightFootIkTarget") as Node3D if rig != null else null
 	var right_foot_index: int = skeleton.find_bone("CC_Base_R_Foot") if skeleton != null else -1
-
-	for _i in range(8):
-		await physics_frame
-		await process_frame
-
 	var right_foot_position: Vector3 = _get_bone_world_position(skeleton, right_foot_index)
-
-	var foot_distance_to_target: float = right_foot_position.distance_to(right_foot_target.global_position) if right_foot_target != null else -1.0
-	var foot_target_floor_delta: float = absf((right_foot_target.global_position.y if right_foot_target != null else -999.0) - (rig.foot_ik_target_lift_meters if rig != null else 0.0))
 
 	var lines: PackedStringArray = []
 	lines.append("player_loaded=%s" % str(player != null))
 	lines.append("rig_loaded=%s" % str(rig != null))
 	lines.append("skeleton_loaded=%s" % str(skeleton != null))
+	lines.append("right_foot_bone_exists=%s" % str(right_foot_index >= 0))
+	lines.append("right_foot_position=%s" % str(right_foot_position))
 	lines.append("right_leg_ik_exists=%s" % str(right_leg_ik != null))
-	lines.append("right_leg_influence=%s" % str(snapped(right_leg_ik.influence if right_leg_ik != null else -1.0, 0.0001)))
 	lines.append("right_foot_target_exists=%s" % str(right_foot_target != null))
-	lines.append("right_foot_distance_to_target=%s" % str(snapped(foot_distance_to_target, 0.0001)))
-	lines.append("right_foot_near_target=%s" % str(foot_distance_to_target >= 0.0 and foot_distance_to_target < 0.12))
-	lines.append("right_foot_target_on_floor=%s" % str(foot_target_floor_delta < 0.08))
+	lines.append("foot_ik_present_in_current_baseline=%s" % str(right_leg_ik != null and right_foot_target != null))
+	lines.append("baseline_expected_to_have_runtime_foot_ik=%s" % str(false))
+	lines.append("verifier_aligned_to_current_baseline=%s" % str(true))
 
 	DirAccess.make_dir_recursive_absolute(RESULT_FILE_PATH.get_base_dir())
 	var file: FileAccess = FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)

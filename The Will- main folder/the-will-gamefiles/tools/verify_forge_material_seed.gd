@@ -50,8 +50,8 @@ func _init() -> void:
 	player.call("ensure_forge_inventory_seeded",
 		material_lookup,
 		inventory_seed_def,
-		controller.get_debug_inventory_seed_quantity(),
-		controller.call("get_debug_inventory_bonus_quantity")
+		controller.get_inventory_seed_quantity(),
+		controller.get_inventory_seed_bonus_quantity()
 	)
 	var inventory_state: PlayerForgeInventoryState = player.get_forge_inventory_state()
 

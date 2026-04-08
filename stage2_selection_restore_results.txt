@@ -1,0 +1,14 @@
+stage2_geometry_menu_face_restore_hidden=true
+stage2_geometry_menu_edge_restore_hidden=true
+stage2_geometry_menu_feature_edge_restore_hidden=true
+restore_tool_revert_visible=true
+restore_tool_clear_visible=true
+face_selected_count=36
+face_apply_target_count=26
+face_restore_changed_shell=true
+edge_selected_count=7
+edge_apply_target_count=7
+edge_restore_changed_shell=true
+feature_edge_selected_count=26
+feature_edge_apply_target_count=26
+feature_edge_restore_changed_shell=true

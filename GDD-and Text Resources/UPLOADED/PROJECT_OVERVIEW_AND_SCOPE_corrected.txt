@@ -1,0 +1,263 @@
+Here is the surgical patch list in plain text.
+
+I am separating it into:
+
+* exact text that should be changed
+* exact replacement text
+* exact text that should be added
+
+These corrections are based on the current overview plus your newer atomic math, Crafting Atoms, and Godot architecture notes.   
+
+1. EXECUTIVE SUMMARY — MODDING CLAIM
+
+WRONG:
+
+* Modular enough that players can create custom assets and attack patterns
+
+USE:
+
+* Architected to support future modding, content injection, and player-authored extensions within controlled boundaries
+
+Reason:
+Your current project direction supports future modding, but not an unrestricted day-one promise. Your mod boundary notes are explicitly phased and restricted.  
+
+2. INSTANCING MODEL — PERFORMANCE WORDING
+
+WRONG:
+
+* Performance guaranteed (no lag from overload)
+
+USE:
+
+* Performance bounded through instancing, visibility controls, and future server-side validation; optimization targets must still be tested in real gameplay conditions
+
+Reason:
+“Guaranteed” is too absolute. Your own remarks call out networking/performance as a real risk area that still needs testing.  
+
+3. CRAFTING SYSTEM — MISSING FORGE LAW
+
+ADD this directly under:
+
+### THE FOUR SACRED CLASSES (NEVER COLLAPSE)
+
+ADD:
+
+* Work-in-progress items are forge-bound: they can be edited repeatedly, fully refunded before naming, baked into temporary test prints, and used only inside the Forge testing area.
+* Naming/finalization is the export point: once named, an item gains identity, provenance, and world legality, can leave the Forge, can be equipped/traded under rules, and loses full-refund status.
+* Design rule: Before naming, the cost of experimentation is time. After naming, the cost of revision is materials.
+
+Reason:
+This is one of your strongest core laws and it is already formalized in Crafting Atoms. 
+
+4. CRAFTING SYSTEM — MISSING MATERIAL VS CONTEXT SPLIT
+
+ADD this directly under:
+
+### Material Families
+
+ADD:
+
+### Material Truth vs Crafting Context
+
+* Base materials are universal matter definitions. Wood is still wood, iron is still iron, regardless of whether the final craft becomes a weapon, armor piece, shield, accessory, trinket, or ranged-support component.
+* Crafting context is a separate layer above material truth. Context examples: weapon, armor, accessory, shield, trinket, ranged_support.
+* Material defines what matter contributes. Context defines what kind of object the player is attempting to build. Geometry/profile defines what the built object actually becomes.
+
+Reason:
+This split now exists clearly in your current Godot architecture thinking and should be reflected in the overview.  
+
+5. STAT SYSTEM — THREAT IDS
+
+WRONG:
+**THREAT**
+
+* `threat_generated_mult` - Multiplier on threat generation
+* `threat_reduction_mult` - Multiplier on threat taken
+
+USE:
+**THREAT**
+
+* `threat_virtual_bonus_pct` - Bonus virtual threat contribution (tank bias / threat amplification)
+* `threat_from_heal_coeff` - Coefficient for threat generated from healing
+* `threat_from_res_coeff` - Coefficient for threat generated from resurrection effects
+
+Reason:
+These are the newer atomic IDs and they match your current threat model.  
+
+6. STAT SYSTEM — DURATION IDS
+
+WRONG:
+**DURATION**
+
+* `buff_duration_pct_add` - Buff duration
+* `debuff_duration_pct_add` - Debuff duration
+
+USE:
+**UTILITY / DURATION**
+
+* `buff_duration_pct_add` - Buff duration bonus
+* `bubble_duration_pct_add` - Bubble / temporary shield duration bonus
+* `dot_duration_pct_add` - Damage-over-time duration bonus
+* `cooldown_rate_pct_add` - Cooldown rate modifier (balance-sensitive; optional future)
+
+Reason:
+This matches the newer atomic-first sheet better than the current compressed version.  
+
+7. STAT SYSTEM — MISSING NOTE ABOUT MASTER ID UNIVERSE
+
+ADD this directly under:
+
+### Atomic Stat IDs (What You Store on Gear)
+
+ADD:
+Note:
+
+* This section lists direct atomic stat IDs only.
+* The full master ID universe also includes capability IDs, family IDs, elemental IDs, equipment-context IDs, and forge-intent IDs maintained in dedicated reference documents.
+* This overview is not the sole naming authority for all gameplay IDs.
+
+Reason:
+Right now the overview reads like the complete universe, but your newer work clearly expands beyond direct stat IDs.  
+
+8. CRAFTING SYSTEM — CAPABILITY LIST SHOULD MATCH CURRENT EXPANDED VOCABULARY
+
+CURRENT TEXT:
+**Suggested Capability List:**
+
+* Reach, Impact, Edge, Pierce, Blunt, Guard, Flex
+* Tether, Launch, Magic, Heal, Mobility, Control
+* Stability, Channel, Barrier
+
+USE:
+**Suggested Capability List (current first-pass)**
+
+* Reach, Impact, Edge, Pierce, Blunt, Guard, Flex
+* Tether, Launch, Magic, Heal, Mobility, Control
+* Stability, Channel, Barrier
+* Precision, Burst, Sustain, Support
+* Projectile, Armor, Plate, Grip, Anchor
+* AOE, Counter, Parry
+
+Reason:
+Your current capability pack is already broader than the overview’s older subset.  
+
+9. CRAFTING SYSTEM — HIDDEN RESOLVER SHOULD MENTION SLOT ROLES
+
+CURRENT TEXT:
+These scores determine:
+
+* Available behavior families
+* Fallback animation sets
+* Tuning defaults
+* Validation hints
+
+USE:
+These scores determine:
+
+* Available behavior families
+* Fallback animation sets
+* Tuning defaults
+* Validation hints
+* Which legal options can be shown inside fixed slot-role boundaries
+
+Reason:
+Your current law is not just “freeform behaviors”; it is freeform inside fixed slot roles.  
+
+10. CURRENT CODEBASE STATUS — TIMEBOX THE SNAPSHOT
+
+WRONG:
+
+## CURRENT CODEBASE STATUS
+
+USE:
+
+## CURRENT CODEBASE STATUS (SNAPSHOT AS OF 2026-03-21)
+
+Reason:
+Otherwise those percentages and file counts will go stale fast and start lying to future-you. 
+
+11. IMPLEMENTATION PHASES — REMOVE PERCENTAGES OR SOFTEN THEM
+
+WRONG:
+**Phase 1 - Definitions & Models (~40% complete)**
+**Phase 2 - Resolvers (~50% complete)**
+
+USE:
+**Phase 1 - Definitions & Models (in progress)**
+**Phase 2 - Resolvers (in progress)**
+
+Alternative acceptable version:
+**Phase 1 - Definitions & Models (snapshot estimate only; update as architecture changes)**
+**Phase 2 - Resolvers (snapshot estimate only; update as architecture changes)**
+
+Reason:
+Those percentages are brittle and will become false quickly. 
+
+12. SAVE / VERSIONING SPLIT — MISSING PROJECT LAW
+
+ADD this under:
+
+## CODEBASE ARCHITECTURE
+
+or under the saves section if you add one
+
+ADD:
+
+### Save / Versioning Separation
+
+* Save domains must remain separate from the start.
+* At minimum, the project distinguishes between: player progress, seasonal memory/leaderboard state, Forge WIP objects, test-print state if retained, finalized items, and world/floor state.
+* Save/version migration must be planned from day one so future updates do not corrupt earlier crafted items or progression.
+
+Reason:
+Your remarks and Godot architecture notes already call this out as important.  
+
+13. MODDING SECTION — ADD BOUNDARY LANGUAGE
+
+CURRENT TEXT:
+There is no exact line that states the limits, which is the issue.
+
+ADD under mods / future architecture / monetization / codebase section:
+
+### Modding Boundaries (Future)
+
+* Modding support is planned in a controlled form.
+* Modders may extend content, presentation, and data-driven definitions within allowed boundaries.
+* Core combat formulas, authoritative validation, progression ownership, and protected economy/state systems remain locked.
+
+Reason:
+This matches your mod-boundary notes and avoids implying fully open runtime authority. 
+
+14. CRAFTING PIPELINE — ADD ONE LINE ABOUT PROFILE AUTHORITY
+
+CURRENT TEXT:
+Baked Profile (gameplay-facing stats & capabilities)
+
+USE:
+Baked Profile (gameplay-facing stats, capabilities, and handling outputs; gameplay reads this instead of raw forge cells)
+
+Reason:
+This makes the profile authority rule explicit in the overview, not just implied.  
+
+15. OPTIONAL CLEANUP — “Players don’t see weapon classes” SHOULD ALIGN WITH TABS/CONTEXT
+
+CURRENT TEXT:
+Players don't see weapon "classes." Instead, items resolve to capability scores:
+
+USE:
+Players do not select visible combat classes. Instead, crafted items resolve to capability scores and backend outcome clusters, while crafting contexts/tabs remain a forge-side workflow aid rather than a class system.
+
+Reason:
+This keeps your newer “weapon / armor / accessory / shield / trinket / ranged_support” tabs from sounding like a contradiction.  
+
+If you want the shortest possible “do these first” priority order, it is:
+
+1. threat stat names
+2. duration stat names
+3. forge-bound WIP / naming law
+4. material-truth vs crafting-context split
+5. performance wording
+6. modding wording
+7. save/version separation note
+
+Those are the ones most likely to ripple outward if left fuzzy.

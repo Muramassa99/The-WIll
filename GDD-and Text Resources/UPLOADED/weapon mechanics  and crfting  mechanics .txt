@@ -1,0 +1,40 @@
+weapon building process 
+
+basic ingredient  types 
+-enemy mob components  that can be:
+	-externals
+		- scales, hides, fathers, carapace/ exoskeleton for insectoids
+	-internal
+		-bones, tendons, meat, fat, ligaments
+	-cores
+		-mana core
+			-elemental cores
+				-fire,  ice, electric,
+Terre - An earth based element that makes up most matter.
+Life - The element that gives motion to all living things, and fights against extinction.
+Spirit - The element that gives the soul, willpower, and courage to all living things.
+Fae - The element that all fairy type creatures control.
+Order - The existential element that holds the entire world together.
+Healing - An element that provides health and shelter to all living things, and can repair items.
+Crystal - An element that makes up all crystals. it works as a catalyst for most light magics.
+Frost - The element that makes up the ice and snow.
+Caelus - The element that makes up the air and the sky.
+Cloud - The element that makes up smoke, clouds, and steam.
+Astral - The element that makes up the astral realm.
+Aqua - A water based element that makes up the seas and the water.
+Storm - An element that makes up the chaotic storms.
+Lightning - The element that makes up electricity and thunder.
+Malice - An element that gives evil and unholiness to all creatures.
+Undeath - The element that creates all undead creatures.
+Plague - An element that creates germs, plagues, and bacteria.
+Chaos - The element that hopes to undo all that creates life, light, and all things good.
+Corrupt - The element that brings all living things to the dark side.
+Death - An element that brings inevitable death to all things living.
+Pyro - The element that makes up all the fire, aether, and others alike.
+Lava - The element that makes up the molten magma beneath the surface.
+Explosion - An unstable element that creates all explosions and combustions.
+Demon - The element that brings war and chaos to all living things.
+Light - The element that makes up all light.
+Holy - An element sustained by the belief of all living things, and has light-like powers.
+Iron, Tin, Gold, Silver, Mercury, Copper, and Lead are all self explanatory.
+Soul - An existential element that makes grants wisdom to all living things.

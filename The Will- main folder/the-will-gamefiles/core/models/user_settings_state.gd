@@ -2,6 +2,7 @@ extends Resource
 class_name UserSettingsState
 
 const DEFAULT_SAVE_FILE_PATH := "user://settings/user_settings_state.tres"
+const PersistentResourceStateIOScript = preload("res://core/models/persistent_resource_state_io.gd")
 
 const SCALE_SMALL := &"small"
 const SCALE_NORMAL := &"normal"
@@ -27,18 +28,16 @@ const DEFAULT_RESOLUTION := Vector2i(1600, 900)
 @export var keybindings: Dictionary = {}
 
 static func load_or_create(save_path: String = DEFAULT_SAVE_FILE_PATH) -> UserSettingsState:
-	var loaded_state: UserSettingsState = null
-	if FileAccess.file_exists(save_path):
-		loaded_state = ResourceLoader.load(save_path) as UserSettingsState
-	if loaded_state == null:
-		loaded_state = UserSettingsState.new()
+	var loaded_state: UserSettingsState = PersistentResourceStateIOScript.load_or_create(
+		save_path,
+		"res://core/models/user_settings_state.gd"
+	) as UserSettingsState
 	loaded_state.save_file_path = save_path
 	loaded_state._ensure_defaults()
 	return loaded_state
 
 func persist() -> bool:
-	_ensure_save_directory()
-	return ResourceSaver.save(self, save_file_path) == OK
+	return PersistentResourceStateIOScript.persist_resource(self, save_file_path)
 
 func get_keybinding_data(action_name: StringName, fallback_data: Dictionary = {}) -> Dictionary:
 	var key_name: String = String(action_name)
@@ -110,23 +109,6 @@ func _ensure_defaults() -> void:
 		text_scale_preset = SCALE_NORMAL
 	if keybindings == null:
 		keybindings = {}
-
-func _ensure_save_directory() -> void:
-	var normalized_save_path: String = save_file_path.replace("\\", "/")
-	if normalized_save_path.begins_with("user://"):
-		var relative_save_path: String = normalized_save_path.trim_prefix("user://")
-		var last_separator_index: int = relative_save_path.rfind("/")
-		if last_separator_index < 0:
-			return
-		var relative_directory_path: String = relative_save_path.substr(0, last_separator_index)
-		if relative_directory_path.is_empty():
-			return
-		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("user://%s" % relative_directory_path))
-		return
-	var save_directory_path: String = normalized_save_path.get_base_dir()
-	if save_directory_path.is_empty():
-		return
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(save_directory_path))
 
 func _preset_to_scale(preset: StringName, small_value: float, normal_value: float, large_value: float) -> float:
 	match preset:

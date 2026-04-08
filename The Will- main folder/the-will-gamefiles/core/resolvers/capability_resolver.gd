@@ -16,9 +16,7 @@ func derive_capability_scores(
 	capability_scores[&"cap_blunt"] = _clamp_capability(
 		profile.blunt_score + _get_bias_total(&"cap_blunt", material_bias_lines, context_bias_lines)
 	)
-	capability_scores[&"cap_pierce"] = _clamp_capability(
-		profile.pierce_score + _get_bias_total(&"cap_pierce", material_bias_lines, context_bias_lines)
-	)
+	capability_scores[&"cap_pierce"] = _resolve_pierce_capability(profile, material_bias_lines, context_bias_lines)
 	capability_scores[&"cap_guard"] = _clamp_capability(
 		profile.guard_score + _get_bias_total(&"cap_guard", material_bias_lines, context_bias_lines)
 	)
@@ -32,10 +30,22 @@ func derive_capability_scores(
 		profile.balance_score + _get_bias_total(&"cap_stability", material_bias_lines, context_bias_lines)
 	)
 	capability_scores[&"cap_reach"] = _normalize_reach_value(profile.reach)
-	# TODO: NEEDS_DECISION - lock optional reach bonus behavior for cap_pierce.
-	# TODO: context bias plumbing is now supported, but no forge context/page layer is passing lines yet.
-	# TODO: NEEDS_DECISION - lock capability thresholds mapping to 0/1/2/3/4.
+	# Current first-pass contract:
+	# - optional pierce reach bonus is intentionally disabled until a later weighting rule is locked
+	# - context bias lines are accepted when passed, even though no forge context/page layer emits them yet
+	# - threshold/display-tier mapping stays outside this resolver for now
 	return capability_scores
+
+func _resolve_pierce_capability(
+		profile: BakedProfile,
+		material_bias_lines: Array[StatLine],
+		context_bias_lines: Array[StatLine]
+	) -> float:
+	var pierce_total: float = profile.pierce_score + _get_bias_total(&"cap_pierce", material_bias_lines, context_bias_lines)
+	return _clamp_capability(pierce_total + _resolve_optional_pierce_reach_bonus(profile))
+
+func _resolve_optional_pierce_reach_bonus(_profile: BakedProfile) -> float:
+	return 0.0
 
 func _get_bias_total(
 		capability_id: StringName,
@@ -60,5 +70,6 @@ func _clamp_capability(value: float) -> float:
 	return clampf(value, 0.0, 1.0)
 
 func _normalize_reach_value(reach: float) -> float:
-	# TODO: NEEDS_DECISION - exact reach normalization baseline beyond first-pass max-distance is not locked yet.
+	# Current first-pass rule: use the existing max-distance reach output directly and clamp it
+	# into the debug-friendly 0.0-1.0 capability range until a richer normalization baseline exists.
 	return clampf(reach, 0.0, 1.0)

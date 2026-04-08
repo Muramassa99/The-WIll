@@ -1,0 +1,61 @@
+back to the plan . to go over some things  for game GDD
+:
+Combat tuning:
+- Exact out-of-combat timers X/Y for Return Scroll eligibility =
+considers  last  instance of Damage  taken  for all sources  if sources  are considered  "hostile entities" set timer  to (float) to be changed  base  40 seconds 
+considers  last  outgoing  attack, meaning  any key press  that is not  a basic movement skill or/and  jumping  is considered towards the "initiated  or still in combat" state individual  things  will be placed  under an umbrella category that will have  "in combat when used " tag   attached  to them  if the skills that have  those  tags  are used  then the  timer  from end of animation  and initiation  of idle animation  after recovery entering "idle in combat " animation  state  a timer  will start  for entering "out of combat animation" this timer  is default 15 seconds  (float) to be changed during testing .  In essence  there is a "idle in combat" state and once that is expired  the out of combat  state is initiated  so there is a "wait" based  on timed states . 
+
+- CC types list + window rules + failure consequences:
+CC combos  are stun, knock down , snare  and slow 
+
+where stun is  a full interrupt  of action . animation  cancelling the target  making the target go to in combat idle for a set amount  of time (float)  influenced  by specific  stats ( to be determined )  default  time  is 3 seconds  can be extended  or shortened  based  on circumstances  and gear .
+usually can be  used  on normal mobs freely as long as not on cooldown and can be perma stunned if multiple users  chain  stuns ,
+stuns can be used  max 3 times  on elite needing 1 cast  to proc and then are immune to stuns  until  dead or reset*( will explain resetting elites  later ) 
+boss type enemies can be stunned only within a specific time window , and usually that happens  in order  to  interrupt  a powerful attack  that  can be  devastating  if not interrupted , ( 1 shot mechanics ) requirement  to succeed  in stunning is combo 3-7 individual stun skills  ( number depends  on floor  difficulty and boss attack type  number can exceed  the 3-7 count  in some cases ) skill miss-match  during this  phase  results  in progress reset , and can become a problem if not enough people  have still available  stun based skills  to use before  the boss finishes  the windup for the 1 shot mechanic. ( note in this example scenario the 1 shot mechanics can not be i-framed or blocked )
+snare  is created  with a stun whilst airborne  via jump or floating due to active falling ( so character ascending  or descending  as well as floating "zero G " in other words within the "jump arc"  at any point using a stun will result in a snare) same conditions  as stuns when it comes to enemy types  
+snares do not prevent  enemy attacks  they prevent the horizontal axial movement of the target hit . ( essentially smacking them in the ground even if the visuals  are not showing terrain deformation but that is the idea ) 
+knockdowns are similar to stuns when it comes  to normal and boss enemy types 
+but  elites  can not be knocked down , only the damage will be applied . elites  are immune to knock down effects 
+for bosses  the knockdown is again a mechanic timed  thing  same example as for stuns just different phases or enemy types 
+ slows  are  essentially a arial knockdown  same as snares  uses  in air knockdown  skills but dose not prevent  movement, or attacks,  it just gives "dazed  effect" slowing down the target's movements.
+on normal mobs  it has a pushback/ knockback  effect 
+elites  are slowed more then bosses .
+slowing bosses  can be considered  a debuff can be prolonged  but can not stack in strength ( intended use is to time it with out indicators  to make potential rapid boss movement or combo sequence more manageable if boss pattern is anticipated )
+all CC types have a 3 second active base time   this can be changed  based on gear  in a positive or negative  manner  
+
+
+- Threat formula and how +40% buff stacks:
+
+aggro  works  as a non damage , damage  booster , it mimics  excessive  damage  output  WITHOUT  reducing  the target's hp  by that  amount  correct value is +150% equivalent actual  damage numbers . 
+meaning for the target  getting hit  the Threat  active  player  has  the equivalent of 250% of their damage output for the threat table placements . ( this value  will need testing  and undergo adjustments  because i do need to allow the Resurrection  and healing  skills  to pull threat  to a grate enough raw value  that  it will eclipse  regular  threat  levels  but  if the tank is good  the resurrections and healing will not cause a target change  or will be  held in place ( timed heavy hitting skills to compensate  the 3rd party  threat  spike) to prevent  loosing control of the enemy target. 
+raw damage classes can if properly played  take aggro from an actively-fighting "tank" 
+to allow aggro swapping  one must  use less dmg output  or stop  to allow a clean timed swap with raw strength  balancing ,
+
+i prefer  this system over a "i press button now i have aggro" system.
+having a good team is a clear balance  of power  and an orchestrated  dance between keeping  the enemy oriented  in a certain way, as well as doing the mechanics  and on top of that  not get people killed.
+
+
+Scroll economy:
+- Price points for return/res scrolls; early player affordability
+early scrolls will be given  to players  during  the introduction to crafting, at the point where  they will need to go get  materials  to craft  what the apprenticeship / tutorial tells them to craft the stack given is around 50 units  of each .  since it is not a self use  item  in general  having an abundance at the start will not create FOMO when it comes to scrolls  making people not feel bad for using them on randoms in need.
+after that , the cost  will be moderate enough  that  it will always be manageable 
+currently we do not have   an item  to use as a metric  item  to set prices  in reference  to that item across the game world as well as calibrating the rewards  on the same  metric  but placeholder  is 50 silver  for a resurrection scroll  and 1 gold and 80 silver for 
+
+- Accept windows for resurrection (suggest 30s; confirm)
+
+Downed/death:
+- Is there a “bleed out timer” before downed becomes full death? (currently: downed only, auto-return 15 min)
+- What exactly is “full death” vs “downed” if both lead to durability costs?
+
+Crafting resolution:
+- Block size (0.5cm / 1cm / 2cm / 3cm) and max block counts per item type
+- Weapon/armor layering rules and mannequin constraints across body types/races
+
+Economy:
+- NPC price structure for repairs and services
+- Barter UI support (quick trade offers, crafting fee standardization)
+
+Floors:
+- Boss spawn trigger mechanics (especially on high difficulty)
+- Seasonal rotation cadence and leaderboard rules
+

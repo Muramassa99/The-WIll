@@ -1,0 +1,154 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+ForgeService baked profile
+  total_mass=1749.64999999998
+  center_of_mass=(87.31209, 45.74586, 19.58195)
+  reach=104.001205444336
+  front_heavy_score=-0.42007120783506
+  balance_score=0.57986684073222
+  edge_score=0.0
+  blunt_score=0.5580823601721
+  pierce_score=0.0
+  guard_score=0.5580823601721
+  flex_score=0.0
+  launch_score=0.0
+  resolved_material_stat_line_count=12
+  resolved_capability_bias_line_count=14
+  capability_scores={ &"cap_edge": 1.0, &"cap_blunt": 1.0, &"cap_pierce": 0.0, &"cap_guard": 1.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=36.0
+  center_of_mass=(25.5, 11.0, 20.5)
+  reach=5.61248588562012
+  front_heavy_score=0.0
+  balance_score=1.0
+  edge_score=0.0
+  blunt_score=0.0
+  pierce_score=0.0
+  guard_score=0.0
+  flex_score=1.0
+  launch_score=0.0
+  resolved_material_stat_line_count=5
+  resolved_capability_bias_line_count=6
+  capability_scores={ &"cap_edge": 0.0, &"cap_blunt": 0.0, &"cap_pierce": 0.0, &"cap_guard": 0.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=36.0
+  center_of_mass=(25.5, 11.0, 20.5)
+  reach=5.61248588562012
+  front_heavy_score=0.0
+  balance_score=1.0
+  edge_score=0.0
+  blunt_score=0.0
+  pierce_score=0.0
+  guard_score=0.0
+  flex_score=1.0
+  launch_score=0.0
+  resolved_material_stat_line_count=5
+  resolved_capability_bias_line_count=6
+  capability_scores={ &"cap_edge": 0.0, &"cap_blunt": 0.0, &"cap_pierce": 0.0, &"cap_guard": 0.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=36.0
+  center_of_mass=(25.5, 11.0, 20.5)
+  reach=5.61248588562012
+  front_heavy_score=0.0
+  balance_score=1.0
+  edge_score=0.0
+  blunt_score=0.0
+  pierce_score=0.0
+  guard_score=0.0
+  flex_score=1.0
+  launch_score=0.0
+  resolved_material_stat_line_count=5
+  resolved_capability_bias_line_count=6
+  capability_scores={ &"cap_edge": 0.0, &"cap_blunt": 0.0, &"cap_pierce": 0.0, &"cap_guard": 0.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=36.0
+  center_of_mass=(25.5, 11.0, 20.5)
+  reach=5.61248588562012
+  front_heavy_score=0.0
+  balance_score=1.0
+  edge_score=0.0
+  blunt_score=0.0
+  pierce_score=0.0
+  guard_score=0.0
+  flex_score=1.0
+  launch_score=0.0
+  resolved_material_stat_line_count=5
+  resolved_capability_bias_line_count=6
+  capability_scores={ &"cap_edge": 0.0, &"cap_blunt": 0.0, &"cap_pierce": 0.0, &"cap_guard": 0.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=36.0
+  center_of_mass=(25.5, 11.0, 20.5)
+  reach=5.61248588562012
+  front_heavy_score=0.0
+  balance_score=1.0
+  edge_score=0.0
+  blunt_score=0.0
+  pierce_score=0.0
+  guard_score=0.0
+  flex_score=1.0
+  launch_score=0.0
+  resolved_material_stat_line_count=5
+  resolved_capability_bias_line_count=6
+  capability_scores={ &"cap_edge": 0.0, &"cap_blunt": 0.0, &"cap_pierce": 0.0, &"cap_guard": 0.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=36.0
+  center_of_mass=(25.5, 11.0, 20.5)
+  reach=5.61248588562012
+  front_heavy_score=0.0
+  balance_score=1.0
+  edge_score=0.0
+  blunt_score=0.0
+  pierce_score=0.0
+  guard_score=0.0
+  flex_score=1.0
+  launch_score=0.0
+  resolved_material_stat_line_count=5
+  resolved_capability_bias_line_count=6
+  capability_scores={ &"cap_edge": 0.0, &"cap_blunt": 0.0, &"cap_pierce": 0.0, &"cap_guard": 0.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=36.0
+  center_of_mass=(25.5, 11.0, 20.5)
+  reach=5.61248588562012
+  front_heavy_score=0.0
+  balance_score=1.0
+  edge_score=0.0
+  blunt_score=0.0
+  pierce_score=0.0
+  guard_score=0.0
+  flex_score=1.0
+  launch_score=0.0
+  resolved_material_stat_line_count=5
+  resolved_capability_bias_line_count=6
+  capability_scores={ &"cap_edge": 0.0, &"cap_blunt": 0.0, &"cap_pierce": 0.0, &"cap_guard": 0.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=36.0
+  center_of_mass=(25.5, 11.0, 20.5)
+  reach=5.61248588562012
+  front_heavy_score=0.0
+  balance_score=1.0
+  edge_score=0.0
+  blunt_score=0.0
+  pierce_score=0.0
+  guard_score=0.0
+  flex_score=1.0
+  launch_score=0.0
+  resolved_material_stat_line_count=5
+  resolved_capability_bias_line_count=6
+  capability_scores={ &"cap_edge": 0.0, &"cap_blunt": 0.0, &"cap_pierce": 0.0, &"cap_guard": 0.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }
+ForgeService baked profile
+  total_mass=36.0
+  center_of_mass=(25.5, 11.0, 20.5)
+  reach=5.61248588562012
+  front_heavy_score=0.0
+  balance_score=1.0
+  edge_score=0.0
+  blunt_score=0.0
+  pierce_score=0.0
+  guard_score=0.0
+  flex_score=1.0
+  launch_score=0.0
+  resolved_material_stat_line_count=5
+  resolved_capability_bias_line_count=6
+  capability_scores={ &"cap_edge": 0.0, &"cap_blunt": 0.0, &"cap_pierce": 0.0, &"cap_guard": 0.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }

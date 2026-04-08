@@ -1,0 +1,25 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+WARNING: At least one surface uses an old surface format and needs to be upgraded. The upgrade happens automatically at load time every time until the mesh is saved again or re-imported. Once saved (or re-imported), this mesh will be incompatible with earlier versions of Godot.
+   at: fix_surface_compatibility (servers/rendering/rendering_server.cpp:2233)
+WARNING: A surface of res://Josie/josie.tscn::ArrayMesh_0kp6p uses an old surface format and needs to be upgraded.
+   at: fix_surface_compatibility (servers/rendering/rendering_server.cpp:2236)
+WARNING: A surface of res://Josie/josie.tscn::ArrayMesh_0kp6p uses an old surface format and needs to be upgraded.
+   at: fix_surface_compatibility (servers/rendering/rendering_server.cpp:2236)
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+ForgeService baked profile
+  total_mass=1587.64999999998
+  center_of_mass=(91.57849, 45.01701, 19.49961)
+  reach=104.001205444336
+  front_heavy_score=-0.37904857564523
+  balance_score=0.62095138767541
+  edge_score=0.0
+  blunt_score=0.52666227781435
+  pierce_score=0.0
+  guard_score=0.52666227781435
+  flex_score=0.0
+  launch_score=0.0
+  resolved_material_stat_line_count=12
+  resolved_capability_bias_line_count=14
+  capability_scores={ &"cap_edge": 1.0, &"cap_blunt": 1.0, &"cap_pierce": 0.0, &"cap_guard": 1.0, &"cap_flex": 1.0, &"cap_launch": 1.0, &"cap_stability": 1.0, &"cap_reach": 1.0 }

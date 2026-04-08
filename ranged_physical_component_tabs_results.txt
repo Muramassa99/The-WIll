@@ -1,0 +1,9 @@
+ranged_tabs_visible=true
+bow_button_active_on_open=true
+quiver_button_inactive_on_open=true
+ranged_bow_component_ok=true
+quiver_button_active_after_switch=true
+bow_button_inactive_after_switch=true
+ranged_quiver_component_ok=true
+new_project_kept_quiver_component=true
+shield_tabs_hidden=true

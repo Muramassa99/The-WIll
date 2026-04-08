@@ -1,0 +1,13 @@
+overlay_loaded=true
+page_scroll_loaded=true
+wip_action_row_is_flow=true
+layout_inside_1280x720=true
+panel_rect_1280x720=[P: (12.0, 12.0), S: (1256.0, 696.0)]
+viewport_rect_1280x720=[P: (0.0, 0.0), S: (1280.0, 720.0)]
+page_scroll_size_1280x720=(1228.0, 518.0)
+layout_inside_1024x576=true
+panel_rect_1024x576=[P: (12.0, 12.0), S: (1000.0, 552.0)]
+viewport_rect_1024x576=[P: (0.0, 0.0), S: (1024.0, 576.0)]
+page_scroll_size_1024x576=(972.0, 348.0)
+vertical_scroll_max_1024x576=355.0
+vertical_scroll_page_1024x576=348.0

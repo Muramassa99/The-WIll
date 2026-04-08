@@ -11,8 +11,9 @@ const MaterialPipelineServiceScript = preload("res://services/material_pipeline_
 const WoodMaterialResource = preload("res://core/defs/materials/base/wood.tres")
 const ForgeStorageRulesResource = preload("res://core/defs/forge/forge_storage_rules_default.tres")
 
-const TEMP_BODY_SAVE_PATH := "user://inventory/verify_player_body_inventory_state.tres"
-const TEMP_STORAGE_SAVE_PATH := "user://storage/verify_player_personal_storage_state.tres"
+const TEMP_STATE_DIR := "c:/WORKSPACE/test_artifacts"
+const TEMP_BODY_SAVE_PATH := "%s/verify_player_body_inventory_state.tres" % TEMP_STATE_DIR
+const TEMP_STORAGE_SAVE_PATH := "%s/verify_player_personal_storage_state.tres" % TEMP_STATE_DIR
 const OUTPUT_PATH := "c:/WORKSPACE/inventory_storage_results.txt"
 
 func _init() -> void:

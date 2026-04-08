@@ -1,0 +1,374 @@
+THE WILL — RESOURCE USAGE RULES
+Godot 4.6.1
+
+CORE PRINCIPLE
+
+Use a `Resource` when the thing is primarily **data**, not behavior and not scene presence.
+
+A Resource is correct when the object’s main job is:
+- to hold structured data
+- to be passed around between systems
+- to be saved/loaded/duplicated cleanly
+- to be consumed by controllers/services/resolvers
+
+A Resource is NOT correct when the object’s main job is:
+- to live in the scene tree
+- to process frame-by-frame behavior
+- to own player/session interaction flow
+- to hold volatile UI or gameplay runtime state that changes constantly
+
+--------------------------------------------------
+1) WHAT A RESOURCE IS FOR
+--------------------------------------------------
+
+A Resource is for:
+- definitions
+- templates
+- structured data containers
+- saveable/duplicable data objects
+- resolver inputs/outputs when data needs strong shape and reuse
+
+Think of Resource as:
+- “data with structure and identity”
+
+Not:
+- “a place to dump logic”
+- “a replacement for Nodes”
+- “a bag for all runtime state”
+
+--------------------------------------------------
+2) WHEN TO USE A RESOURCE
+--------------------------------------------------
+
+Use a Resource if most of these are true:
+
+1. The thing is mostly DATA.
+2. The thing has little or no active behavior.
+3. The thing may be saved, loaded, duplicated, or passed between systems.
+4. The thing benefits from Godot inspector visibility.
+5. The thing needs a stable schema used by many systems.
+6. The thing should exist independently of the scene tree.
+
+Examples:
+- BaseMaterialDef
+- MaterialVariantDef
+- TierDef
+- ForgeMaterialStack
+- CraftedItemWIP
+- BakedProfile
+- TestPrintInstance
+- FinalizedItemInstance
+- AbilityTemplate
+- DotProfile
+- FloorDifficultyProfile
+- LootTableDef
+- ToolDef
+- stat line collections
+- save snapshot data objects
+
+--------------------------------------------------
+3) WHEN NOT TO USE A RESOURCE
+--------------------------------------------------
+
+Do NOT use a Resource if the thing is mainly:
+
+1. SCENE PRESENCE
+   If it needs transform, visibility, collision, parenting, or scene lifetime.
+   Use Node / Node3D / Control / Scene instead.
+
+2. LIVE CONTROLLER BEHAVIOR
+   If it processes input, orchestrates UI flow, updates every frame, or coordinates systems.
+   Use controller/service scripts, usually on Nodes or plain logic classes.
+
+3. VOLATILE INTERACTION STATE
+   If it changes constantly during hover, drag, focus, temporary selection, or camera motion.
+   Keep it in runtime controller state, not in a shared Resource definition.
+
+4. PURE TRANSIENT CALCULATION STATE
+   If it only exists for one function call or one short calculation pass.
+   Use local variables, plain dictionaries, or lightweight helper objects.
+
+--------------------------------------------------
+4) RESOURCE VS NODE
+--------------------------------------------------
+
+Use NODE when the thing:
+- exists in the world/UI hierarchy
+- needs lifecycle from the scene tree
+- handles input
+- updates visually
+- owns runtime interaction flow
+
+Use RESOURCE when the thing:
+- is the data being viewed/edited/consumed
+- should survive independently from a specific scene instance
+- should be duplicated or saved cleanly
+- should not depend on scene-tree presence
+
+Simple rule:
+- Node = “where it lives / what it does visually”
+- Resource = “what it is as data”
+
+Example:
+- `crafting_bench_ui.gd` = Node/Control/controller
+- `CraftedItemWIP` = Resource/data object
+
+--------------------------------------------------
+5) RESOURCE VS REFCOUNTED / PLAIN CLASS
+--------------------------------------------------
+
+Use RESOURCE if:
+- it benefits from inspector exposure
+- it needs serialization
+- it may become `.tres` / `.res` / saved object
+- it is important domain data
+
+Use REFCOUNTED / plain class if:
+- it is lightweight helper logic
+- it is a short-lived computation object
+- it does not need serialization or inspector support
+- it is not part of the game’s domain truth
+
+Examples of good non-Resource types:
+- temporary math helpers
+- UI formatter helpers
+- short-lived validation workers
+- local transformation utilities
+
+--------------------------------------------------
+6) RESOURCE CATEGORIES IN THE WILL
+--------------------------------------------------
+
+A) DEFINITION RESOURCES
+Purpose:
+- authored truth
+- static content definitions
+- tuning/config data
+
+Examples:
+- BaseMaterialDef
+- MaterialVariantDef
+- TierDef
+- ProcessRuleDef
+- AbilityTemplate
+- DotProfile
+- FloorDifficultyProfile
+- ToolDef
+- LootTableDef
+- CapabilityThresholdDef
+
+Behavior rule:
+- mostly read-only
+- shared safely
+- ideal `.tres` candidates
+
+B) INSTANCE DATA RESOURCES
+Purpose:
+- structured domain data for one item/session/state object
+- still mainly data, but specific to one player/item/run
+
+Examples:
+- ForgeMaterialStack
+- CraftedItemWIP
+- BakedProfile
+- TestPrintInstance
+- FinalizedItemInstance
+- saved blueprint object
+- player forge snapshot
+
+Behavior rule:
+- may be duplicated
+- may be mutable
+- must NOT be casually shared between unrelated instances
+- may or may not be stored as `.tres`, depending on use case
+
+C) VIEW-MODEL / UI DATA RESOURCES (optional)
+Purpose:
+- stable structured data prepared for UI display
+
+Examples:
+- material entry display model
+- compact profile summary model
+- codex entry display model
+
+Behavior rule:
+- okay if useful
+- do not let them become hidden gameplay truth
+- they mirror domain truth, they do not replace it
+
+--------------------------------------------------
+7) HARD LAW: RESOURCES HOLD DATA, NOT OWNERSHIP OF FLOW
+--------------------------------------------------
+
+A Resource may contain helper methods that are tightly related to its own data,
+but a Resource must NOT become the place that owns gameplay flow or UI orchestration.
+
+Bad:
+- `CraftedItemWIP` performing full bake orchestration
+- UI Resource deciding viewport interaction
+- material Resource spawning scenes
+- profile Resource owning combat runtime flow
+
+Correct:
+- Resource stores data
+- service/resolver/controller uses that data
+
+For The Will:
+- `CraftedItemWIP` is data
+- `ForgeService` orchestrates baking
+- `ProfileResolver` computes profile outputs
+- UI controllers manage interaction
+
+--------------------------------------------------
+8) HARD LAW: DO NOT MIX DEFINITION RESOURCE AND INSTANCE RESOURCE MEANINGS
+--------------------------------------------------
+
+Never treat:
+- a global shared definition Resource
+and
+- a per-player mutable instance Resource
+
+as if they are the same kind of object.
+
+Examples:
+- `BaseMaterialDef` is not the same thing as a player-owned `ForgeMaterialStack`
+- `AbilityTemplate` is not the same thing as an active runtime cast
+- `FloorDifficultyProfile` is not the same thing as a live floor instance state
+
+Meaning:
+- definitions define truth
+- instances carry specific realized data
+- runtime controllers/services create/use instances from definitions
+
+--------------------------------------------------
+9) DUPLICATION LAW
+--------------------------------------------------
+
+If a Resource is mutable and instance-specific, never assume one shared reference is safe.
+
+Before mutation, ask:
+- is this a shared definition?
+- is this meant to be unique to one player/item/session?
+- if unique, should this be duplicated or rebuilt as an instance object first?
+
+Rule:
+- shared definition Resources are read-only
+- instance Resources may mutate
+- if a shared definition needs per-instance changes, create an instance copy first
+
+--------------------------------------------------
+10) SAVE / LOAD LAW
+--------------------------------------------------
+
+Resources are allowed to represent saveable state,
+but save logic should preserve the separation between:
+
+- definition IDs/references
+- mutable instance state
+- runtime-only transient state
+
+Good save pattern:
+- store stable IDs for definitions
+- store mutable values for instance state
+- reconstruct runtime controllers/nodes on load
+
+Bad save pattern:
+- dumping live scene/controller state into domain Resources
+- copying whole shared definitions into save blobs for no reason
+
+--------------------------------------------------
+11) THE WILL-SPECIFIC USAGE GUIDE
+--------------------------------------------------
+
+Use RESOURCE for:
+- material definitions
+- tier definitions
+- processing rules
+- loot tables
+- ability templates
+- dot templates
+- forge WIP data
+- baked profile data
+- test print data
+- finalized item data
+- codex/material entry data
+- tuning configs
+- station config defaults
+
+Do NOT use RESOURCE for:
+- active mouse hover
+- current dragged slot state
+- viewport orbit runtime state
+- currently focused menu widget
+- per-frame camera interaction
+- temporary UI animation state
+- controller/service orchestration
+- active scene ownership
+
+Those belong in:
+- Node controllers
+- services
+- runtime state variables
+- scene-local state holders
+
+--------------------------------------------------
+12) 5-QUESTION TEST
+--------------------------------------------------
+
+Before making something a Resource, ask:
+
+1. Is this mostly data?
+2. Should it be inspectable/savable/duplicable?
+3. Does it need a stable schema?
+4. Can it exist meaningfully outside the scene tree?
+5. Would a Node/controller version make it more tangled, not less?
+
+If YES -> Resource is probably correct.
+
+Before NOT making something a Resource, ask:
+
+1. Is this mostly behavior?
+2. Does it depend on live scene interaction?
+3. Does it change constantly during play?
+4. Is it tied to one open UI/session moment?
+5. Would making it a Resource risk confusion between definition and state?
+
+If YES -> keep it out of Resource form.
+
+--------------------------------------------------
+13) AGENT CODING RULES
+--------------------------------------------------
+
+RULE 1
+Use Resource for domain data, not for scene control.
+
+RULE 2
+Use Node/Control/Node3D for interaction, presentation, and scene ownership.
+
+RULE 3
+Definition Resources and instance Resources must be named and treated differently.
+
+RULE 4
+Do not put orchestration logic into Resources.
+
+RULE 5
+Do not use shared Resources as mutable runtime scratchpads.
+
+RULE 6
+If data needs inspector visibility, serialization, duplication, or strong schema, prefer Resource.
+
+RULE 7
+If state is volatile, per-frame, hover/drag/focus based, or scene-local, keep it out of Resources.
+
+RULE 8
+When in doubt:
+- definition truth -> Resource
+- live interaction flow -> controller/service/node
+- scene presence -> Node
+- short-lived helper logic -> plain class / RefCounted / local object
+
+--------------------------------------------------
+14) ONE-SENTENCE STYLE LOCK
+--------------------------------------------------
+
+In The Will, a Resource is a structured data object for truth, templates, or instance data; it must not become a dumping ground for live scene behavior, UI flow, or volatile runtime interaction state.

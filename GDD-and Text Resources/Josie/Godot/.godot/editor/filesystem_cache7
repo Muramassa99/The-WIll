@@ -1,0 +1,19 @@
+0b7126e0c6e86d3ec295a72f5aa6e0bd
+::res://::1674761643
+icon.svg::CompressedTexture2D::7974130055280910611::1674687215::1674687220::1::::<><>::
+showcase.gd::GDScript::-1::1674761267::0::1::::<>Node3D<>::
+showcase.tscn::PackedScene::6951037407453587678::1674761379::0::1::::<><>::res://showcase.gd<>uid://iv7svnkvfdwv
+::res://Josie/::1674761361
+josie.tscn::PackedScene::606838893553757829::1674761361::0::1::::<><>::res://Josie/Toon Shader/Outline_Shader.gdshader<>res://Josie/Toon Shader/josie_toon_shader.tres<>uid://dol40r8qhvjce<>uid://dg2lcvn01ami8<>uid://by2q6ybroafj7
+::res://Josie/Import/::1674689940
+Josie.glb::PackedScene::1704797699077294278::1674687285::1674689940::1::::<><>::
+::res://Josie/Textures/::1674689715
+Eye Texture.png::CompressedTexture2D::4127719224757132326::1674689714::1674689715::1::::<><>::
+JosieColorSheet.png::CompressedTexture2D::1323174578542464984::1674687533::1674687709::1::::<><>::
+Mouth_01.png::CompressedTexture2D::1343056842979279121::1674687503::1674688356::1::::<><>::
+Mouth_02.png::CompressedTexture2D::7636805895018807265::1674687503::1674688365::1::::<><>::
+::res://Josie/Toon Shader/::1674761160
+josie_toon_shader.tres::ShaderMaterial::-1::1674687709::0::1::::<><>::res://Josie/Toon Shader/Toon_Shader.gdshader<>uid://s37qy0gpa2o7
+josie_toon_shader_hair.tres::ShaderMaterial::8166420399556919108::1674703000::0::1::::<><>::res://Josie/Toon Shader/Toon_Shader.gdshader<>uid://s37qy0gpa2o7
+Outline_Shader.gdshader::Shader::-1::1674702874::0::1::::<><>::
+Toon_Shader.gdshader::Shader::-1::1674600128::0::1::::<><>::

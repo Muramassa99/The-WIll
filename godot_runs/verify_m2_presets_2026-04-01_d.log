@@ -1,0 +1,139 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+SCRIPT ERROR: Parse Error: Function "_collect_segment_cells()" not found in base self.
+   at: GDScript::reload (res://core/resolvers/bow_resolver.gd:161)
+SCRIPT ERROR: Parse Error: Function "_resolve_primary_axis_from_cells()" not found in base self.
+   at: GDScript::reload (res://core/resolvers/bow_resolver.gd:165)
+SCRIPT ERROR: Parse Error: Function "_resolve_minor_axes()" not found in base self.
+   at: GDScript::reload (res://core/resolvers/bow_resolver.gd:166)
+SCRIPT ERROR: Parse Error: Function "_resolve_height_axis_from_cells()" not found in base self.
+   at: GDScript::reload (res://core/resolvers/bow_resolver.gd:167)
+SCRIPT ERROR: Parse Error: Function "_get_extreme_axis_value()" not found in base self.
+   at: GDScript::reload (res://core/resolvers/bow_resolver.gd:169)
+SCRIPT ERROR: Parse Error: Function "_get_axis_component()" not found in base self.
+   at: GDScript::reload (res://core/resolvers/bow_resolver.gd:174)
+SCRIPT ERROR: Parse Error: Function "_resolve_riser_slice_range()" not found in base self.
+   at: GDScript::reload (res://core/resolvers/bow_resolver.gd:179)
+SCRIPT ERROR: Parse Error: Function "_get_axis_component()" not found in base self.
+   at: GDScript::reload (res://core/resolvers/bow_resolver.gd:184)
+SCRIPT ERROR: Parse Error: Function "_build_synthetic_segment()" not found in base self.
+   at: GDScript::reload (res://core/resolvers/bow_resolver.gd:192)
+SCRIPT ERROR: Parse Error: Function "_build_synthetic_segment()" not found in base self.
+   at: GDScript::reload (res://core/resolvers/bow_resolver.gd:193)
+SCRIPT ERROR: Parse Error: Function "_build_synthetic_segment()" not found in base self.
+   at: GDScript::reload (res://core/resolvers/bow_resolver.gd:194)
+SCRIPT ERROR: Parse Error: Function "_build_synthetic_segment()" not found in base self.
+   at: GDScript::reload (res://core/resolvers/bow_resolver.gd:195)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://services/forge_service.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/forge_grid_controller.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://tools/verify_m2_presets.gd:0)
+ERROR: Failed to load script "res://tools/verify_m2_presets.gd" with error "Compilation failed".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: ForgeService.set_forge_rules (res://services/forge_service.gd:30)
+   GDScript backtrace (most recent call first):
+       [0] set_forge_rules (res://services/forge_service.gd:30)
+       [1] _init (res://services/forge_service.gd:23)
+       [2] @implicit_new (res://runtime/forge/forge_grid_controller.gd:30)
+       [3] _init (res://tools/verify_m2_presets.gd:4)
+SCRIPT ERROR: Invalid call. Nonexistent function 'validate_bow_structure' in base 'Nil'.
+   at: ForgeService.build_bow_data (res://services/forge_service.gd:132)
+   GDScript backtrace (most recent call first):
+       [0] build_bow_data (res://services/forge_service.gd:132)
+       [1] bake_wip (res://services/forge_service.gd:48)
+       [2] build_test_print_from_wip (res://services/forge_service.gd:83)
+       [3] spawn_test_print_from_active_wip (res://runtime/forge/forge_grid_controller.gd:250)
+       [4] _append_preset_report (res://tools/verify_m2_presets.gd:21)
+       [5] _init (res://tools/verify_m2_presets.gd:8)
+SCRIPT ERROR: Invalid call. Nonexistent function 'bake_profile' in base 'Nil'.
+   at: ForgeService.bake_profile (res://services/forge_service.gd:145)
+   GDScript backtrace (most recent call first):
+       [0] bake_profile (res://services/forge_service.gd:145)
+       [1] bake_wip (res://services/forge_service.gd:54)
+       [2] build_test_print_from_wip (res://services/forge_service.gd:83)
+       [3] spawn_test_print_from_active_wip (res://runtime/forge/forge_grid_controller.gd:250)
+       [4] _append_preset_report (res://tools/verify_m2_presets.gd:21)
+       [5] _init (res://tools/verify_m2_presets.gd:8)
+SCRIPT ERROR: Invalid assignment of property or key 'profile_id' with value of type 'StringName' on a base object of type 'Nil'.
+   at: ForgeService.bake_wip (res://services/forge_service.gd:65)
+   GDScript backtrace (most recent call first):
+       [0] bake_wip (res://services/forge_service.gd:65)
+       [1] build_test_print_from_wip (res://services/forge_service.gd:83)
+       [2] spawn_test_print_from_active_wip (res://runtime/forge/forge_grid_controller.gd:250)
+       [3] _append_preset_report (res://tools/verify_m2_presets.gd:21)
+       [4] _init (res://tools/verify_m2_presets.gd:8)
+SCRIPT ERROR: Invalid call. Nonexistent function 'validate_bow_structure' in base 'Nil'.
+   at: ForgeService.build_bow_data (res://services/forge_service.gd:132)
+   GDScript backtrace (most recent call first):
+       [0] build_bow_data (res://services/forge_service.gd:132)
+       [1] _append_preset_report (res://tools/verify_m2_presets.gd:39)
+       [2] _init (res://tools/verify_m2_presets.gd:8)
+SCRIPT ERROR: Invalid call. Nonexistent function 'validate_bow_structure' in base 'Nil'.
+   at: ForgeService.build_bow_data (res://services/forge_service.gd:132)
+   GDScript backtrace (most recent call first):
+       [0] build_bow_data (res://services/forge_service.gd:132)
+       [1] bake_wip (res://services/forge_service.gd:48)
+       [2] build_test_print_from_wip (res://services/forge_service.gd:83)
+       [3] spawn_test_print_from_active_wip (res://runtime/forge/forge_grid_controller.gd:250)
+       [4] _append_preset_report (res://tools/verify_m2_presets.gd:21)
+       [5] _init (res://tools/verify_m2_presets.gd:8)
+SCRIPT ERROR: Invalid call. Nonexistent function 'bake_profile' in base 'Nil'.
+   at: ForgeService.bake_profile (res://services/forge_service.gd:145)
+   GDScript backtrace (most recent call first):
+       [0] bake_profile (res://services/forge_service.gd:145)
+       [1] bake_wip (res://services/forge_service.gd:54)
+       [2] build_test_print_from_wip (res://services/forge_service.gd:83)
+       [3] spawn_test_print_from_active_wip (res://runtime/forge/forge_grid_controller.gd:250)
+       [4] _append_preset_report (res://tools/verify_m2_presets.gd:21)
+       [5] _init (res://tools/verify_m2_presets.gd:8)
+SCRIPT ERROR: Invalid assignment of property or key 'profile_id' with value of type 'StringName' on a base object of type 'Nil'.
+   at: ForgeService.bake_wip (res://services/forge_service.gd:65)
+   GDScript backtrace (most recent call first):
+       [0] bake_wip (res://services/forge_service.gd:65)
+       [1] build_test_print_from_wip (res://services/forge_service.gd:83)
+       [2] spawn_test_print_from_active_wip (res://runtime/forge/forge_grid_controller.gd:250)
+       [3] _append_preset_report (res://tools/verify_m2_presets.gd:21)
+       [4] _init (res://tools/verify_m2_presets.gd:8)
+SCRIPT ERROR: Invalid call. Nonexistent function 'validate_bow_structure' in base 'Nil'.
+   at: ForgeService.build_bow_data (res://services/forge_service.gd:132)
+   GDScript backtrace (most recent call first):
+       [0] build_bow_data (res://services/forge_service.gd:132)
+       [1] _append_preset_report (res://tools/verify_m2_presets.gd:39)
+       [2] _init (res://tools/verify_m2_presets.gd:8)
+SCRIPT ERROR: Invalid call. Nonexistent function 'validate_bow_structure' in base 'Nil'.
+   at: ForgeService.build_bow_data (res://services/forge_service.gd:132)
+   GDScript backtrace (most recent call first):
+       [0] build_bow_data (res://services/forge_service.gd:132)
+       [1] bake_wip (res://services/forge_service.gd:48)
+       [2] build_test_print_from_wip (res://services/forge_service.gd:83)
+       [3] spawn_test_print_from_active_wip (res://runtime/forge/forge_grid_controller.gd:250)
+       [4] _append_preset_report (res://tools/verify_m2_presets.gd:21)
+       [5] _init (res://tools/verify_m2_presets.gd:8)
+SCRIPT ERROR: Invalid call. Nonexistent function 'bake_profile' in base 'Nil'.
+   at: ForgeService.bake_profile (res://services/forge_service.gd:145)
+   GDScript backtrace (most recent call first):
+       [0] bake_profile (res://services/forge_service.gd:145)
+       [1] bake_wip (res://services/forge_service.gd:54)
+       [2] build_test_print_from_wip (res://services/forge_service.gd:83)
+       [3] spawn_test_print_from_active_wip (res://runtime/forge/forge_grid_controller.gd:250)
+       [4] _append_preset_report (res://tools/verify_m2_presets.gd:21)
+       [5] _init (res://tools/verify_m2_presets.gd:8)
+SCRIPT ERROR: Invalid assignment of property or key 'profile_id' with value of type 'StringName' on a base object of type 'Nil'.
+   at: ForgeService.bake_wip (res://services/forge_service.gd:65)
+   GDScript backtrace (most recent call first):
+       [0] bake_wip (res://services/forge_service.gd:65)
+       [1] build_test_print_from_wip (res://services/forge_service.gd:83)
+       [2] spawn_test_print_from_active_wip (res://runtime/forge/forge_grid_controller.gd:250)
+       [3] _append_preset_report (res://tools/verify_m2_presets.gd:21)
+       [4] _init (res://tools/verify_m2_presets.gd:8)
+SCRIPT ERROR: Invalid call. Nonexistent function 'validate_bow_structure' in base 'Nil'.
+   at: ForgeService.build_bow_data (res://services/forge_service.gd:132)
+   GDScript backtrace (most recent call first):
+       [0] build_bow_data (res://services/forge_service.gd:132)
+       [1] _append_preset_report (res://tools/verify_m2_presets.gd:39)
+       [2] _init (res://tools/verify_m2_presets.gd:8)
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)

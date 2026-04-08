@@ -1,0 +1,52 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+SCRIPT ERROR: Parse Error: Expression in match pattern must be a constant expression, an identifier, or an attribute access ("A.B").
+   at: GDScript::reload (res://runtime/ui/system_menu_page_presenter.gd:26)
+SCRIPT ERROR: Parse Error: Expression in match pattern must be a constant expression, an identifier, or an attribute access ("A.B").
+   at: GDScript::reload (res://runtime/ui/system_menu_page_presenter.gd:29)
+SCRIPT ERROR: Parse Error: Expression in match pattern must be a constant expression, an identifier, or an attribute access ("A.B").
+   at: GDScript::reload (res://runtime/ui/system_menu_page_presenter.gd:32)
+SCRIPT ERROR: Parse Error: Expression in match pattern must be a constant expression, an identifier, or an attribute access ("A.B").
+   at: GDScript::reload (res://runtime/ui/system_menu_page_presenter.gd:35)
+SCRIPT ERROR: Parse Error: Expression in match pattern must be a constant expression, an identifier, or an attribute access ("A.B").
+   at: GDScript::reload (res://runtime/ui/system_menu_page_presenter.gd:53)
+SCRIPT ERROR: Parse Error: Expression in match pattern must be a constant expression, an identifier, or an attribute access ("A.B").
+   at: GDScript::reload (res://runtime/ui/system_menu_page_presenter.gd:56)
+SCRIPT ERROR: Parse Error: Expression in match pattern must be a constant expression, an identifier, or an attribute access ("A.B").
+   at: GDScript::reload (res://runtime/ui/system_menu_page_presenter.gd:59)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/ui/system_menu_overlay.gd:0)
+ERROR: Failed to load script "res://runtime/ui/system_menu_overlay.gd" with error "Compilation failed".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: SystemMenuOverlay.@implicit_new (res://runtime/ui/system_menu_overlay.gd:105)
+   GDScript backtrace (most recent call first):
+       [0] @implicit_new (res://runtime/ui/system_menu_overlay.gd:105)
+       [1] _run_verification (res://tools/verify_system_menu.gd:37)
+SCRIPT ERROR: Invalid call. Nonexistent function 'apply_page_selection' in base 'Nil'.
+   at: SystemMenuOverlay._select_page (res://runtime/ui/system_menu_overlay.gd:530)
+   GDScript backtrace (most recent call first):
+       [0] _select_page (res://runtime/ui/system_menu_overlay.gd:530)
+       [1] _ready (res://runtime/ui/system_menu_overlay.gd:113)
+       [2] _run_verification (res://tools/verify_system_menu.gd:38)
+SCRIPT ERROR: Invalid call. Nonexistent function 'apply_page_selection' in base 'Nil'.
+   at: SystemMenuOverlay._select_page (res://runtime/ui/system_menu_overlay.gd:530)
+   GDScript backtrace (most recent call first):
+       [0] _select_page (res://runtime/ui/system_menu_overlay.gd:530)
+       [1] open_menu (res://runtime/ui/system_menu_overlay.gd:170)
+       [2] open_page (res://runtime/ui/system_menu_overlay.gd:143)
+       [3] _run_verification (res://tools/verify_system_menu.gd:41)
+SCRIPT ERROR: Invalid call. Nonexistent function 'apply_page_selection' in base 'Nil'.
+   at: SystemMenuOverlay._select_page (res://runtime/ui/system_menu_overlay.gd:530)
+   GDScript backtrace (most recent call first):
+       [0] _select_page (res://runtime/ui/system_menu_overlay.gd:530)
+       [1] open_page (res://runtime/ui/system_menu_overlay.gd:141)
+       [2] _run_verification (res://tools/verify_system_menu.gd:51)
+SCRIPT ERROR: Invalid call. Nonexistent function 'apply_page_selection' in base 'Nil'.
+   at: SystemMenuOverlay._select_page (res://runtime/ui/system_menu_overlay.gd:530)
+   GDScript backtrace (most recent call first):
+       [0] _select_page (res://runtime/ui/system_menu_overlay.gd:530)
+       [1] open_page (res://runtime/ui/system_menu_overlay.gd:141)
+       [2] _run_verification (res://tools/verify_system_menu.gd:55)

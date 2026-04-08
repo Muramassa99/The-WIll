@@ -1,0 +1,12 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+SCRIPT ERROR: Parse Error: Could not find type "PlayerHumanoidRig" in the current scope.
+   at: GDScript::reload (res://runtime/player/player_controller.gd:30)
+ERROR: Failed to load script "res://runtime/player/player_controller.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+SCRIPT ERROR: Parse Error: Could not find type "PlayerController3D" in the current scope.
+   at: GDScript::reload (res://runtime/ui/system_menu_overlay.gd:93)
+ERROR: Failed to load script "res://runtime/ui/system_menu_overlay.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+ERROR: Can't load script: res://scenes/player/player_character.tscn
+   at: start (main/main.cpp:4238)

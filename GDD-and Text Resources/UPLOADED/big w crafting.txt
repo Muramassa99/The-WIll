@@ -1,0 +1,1046 @@
+Reference status:
+* This file is a framework/reference note, not the active first-slice implementation source of truth.
+* For implementation decisions, use `quirky-cuddling-mochi.md` together with `DECISION_LEDGER_FIRST_SLICE.md`.
+* Normalized field name: `BaseMaterialDef.base_material_id`
+
+Yes, I understand exactly what you mean.
+
+You are asking for a **dependency tree and data flow template**, not code.
+
+You want to be able to say:
+
+* this data lives here
+* this resolver reads that
+* this output feeds that
+* this system must not read raw forge cells anymore after bake
+* one base material definition plus one tier multiplier table should scale the whole family
+
+That is the correct way to set it up, and it matches your existing atomic-first docs: `StatLine` is already your universal smallest stat unit, the forge already resolves matter into a baked profile, and gameplay is supposed to read the profile rather than raw cells.   
+
+---
+
+# The top rule
+
+For your first material pipeline, split the world into **three different objects**:
+
+### 1. World Drop Item
+
+This is what drops in the world.
+Example:
+
+* `item_wood_log`
+* `item_iron_ore_chunk`
+
+These are **not** forge blocks yet.
+
+### 2. Processed Forge Material
+
+This is what the disassembly / processing station outputs.
+Example:
+
+* `mat_wood_green`
+* `mat_iron_blue`
+
+This is what gets spent in the forge.
+
+### 3. Crafted Item WIP / Baked Item
+
+This is the thing made out of processed forge material.
+
+That separation already matches your processing station / forging loop and your rule that processed cubes are the material used by the crafting stations.  
+
+So your chain is:
+
+**world drop → processed forge cube stack → placed forge cells → baked profile → test instance / finalized item**
+
+That is the spine.
+
+---
+
+# The framework to follow
+
+I am going to give you the tree in the exact way you can build around.
+
+## A. Global tables
+
+These are shared roots.
+They should exist once and be reused everywhere.
+
+### A1. `TierDef`
+
+Purpose: define how quality tiers scale the same named material.
+
+Fields:
+
+* `tier_id` = gray / green / blue / purple / orange
+* `tier_mult_stats`
+* `tier_mult_weight` (usually 1.0 unless you want rarity to alter physicality, which I do **not** recommend at first)
+* `tier_mult_value`
+* `tier_color`
+* `tier_sort_order`
+
+Example:
+
+* gray = 1.00
+* green = 1.02
+* blue = 1.04
+* purple = 1.07
+* orange = 1.10
+
+This matches your existing rule that the same named material can exist in multiple tiers and mostly keep the same function while becoming numerically stronger.  
+
+### A2. `StatIdRegistry`
+
+Purpose: one source of truth for legal stat names.
+
+You already started this with the cheat sheet.
+Use that as law.
+
+Examples from your sheet:
+
+* `atk_mod_flat`
+* `power_flat`
+* `def_mod_flat`
+* `endurance_flat`
+* `move_speed_pct_add`
+* `aspd_pct_add`
+* `heal_power_flat`
+* `dot_duration_pct_add`
+* `crit_chance_pct`
+* `crit_damage_bonus_add` 
+
+### A3. `AnchorRuleDef`
+
+Purpose: define what is a valid grip / offhand / projectile origin candidate.
+
+Fields:
+
+* `anchor_type`
+* `min_contact_cells`
+* `min_contiguous_length`
+* `max_contiguous_thickness`
+* `allowed_material_tags`
+* `required_segment_role`
+* `hand_profile_id`
+
+This is where your “wood becomes a valid grip if enough of it exists and matches hand size” belongs.
+
+### A4. `ShapeThresholdDef`
+
+Purpose: convert segment geometry into profile tags.
+
+Examples:
+
+* thin enough = edge candidate
+* thick enough = blunt candidate
+* long + stable enough = shaft/pole candidate
+* broad enough = guard/barrier candidate
+* segmented enough = flex/tether candidate
+* too small / too isolated = decorative only
+
+### A5. `CharacterGripProfileDef`
+
+Purpose: define the abstract hand/grip requirements.
+
+Fields:
+
+* `grip_profile_id`
+* `min_grip_length`
+* `max_grip_thickness`
+* `min_contact_area`
+* `supports_one_hand`
+* `supports_two_hand`
+
+You were right to want “hand size” somewhere else.
+It should not live in the material.
+It should live in a character/rig/profile-side definition.
+
+---
+
+## B. Material source layer
+
+This is where Wood and Iron Ore start.
+
+## B1. `RawDropDef`
+
+Purpose: define a world-gathered raw item.
+
+Fields:
+
+* `raw_drop_id`
+* `display_name`
+* `base_material_id`
+* `default_tier_id`
+* `source_type` (tree, ore node, enemy drop, contract reward, etc.)
+* `processing_yield_rules`
+
+Examples:
+
+* `raw_drop_id = item_wood_log_green`
+
+* `base_material_id = wood`
+
+* `default_tier_id = green`
+
+* `raw_drop_id = item_iron_ore_blue`
+
+* `base_material_id = iron`
+
+* `default_tier_id = blue`
+
+This layer exists so the world item and the forge material are not the same thing.
+
+---
+
+## C. Base material definition layer
+
+This is the real root for reuse.
+
+## C1. `BaseMaterialDef`
+
+Purpose: define the named substance once.
+
+This is the part you hardcode once and reuse across all tiers.
+
+Fields:
+
+* `base_material_id`
+* `display_name`
+* `material_family` (structural / affinity / keystone)
+* `density_per_cell`
+* `hardness`
+* `toughness`
+* `elasticity`
+* `base_stat_lines[]`
+* `material_tags[]`
+* `shape_affinities`
+* `processing_output_count`
+* `salvage_priority`
+* `visual_defaults`
+
+### Example: Wood
+
+`base_material_id = wood`
+
+Base physical:
+
+* `density_per_cell = 0.03`
+* `hardness = low`
+* `toughness = medium`
+* `elasticity = medium`
+
+Base stat lines:
+
+* `atk_mod_flat = 0.01`
+* `move_speed_pct_add = 0.05`
+* `aspd_pct_add = 0.05`
+* `heal_power_flat = 0.02`
+* `dot_duration_pct_add = 0.03`
+
+Optional profile biases:
+
+* `mobility_bias = high`
+* `flex_bias = medium`
+* `guard_bias = low`
+* `impact_bias = low`
+
+Material tags:
+
+* `organic`
+* `grip_candidate`
+* `shaft_candidate`
+* `flex_candidate`
+
+Processing:
+
+* `processing_output_count = 6`
+
+### Example: Iron
+
+`base_material_id = iron`
+
+Base physical:
+
+* `density_per_cell = 0.06`
+* `hardness = medium-high`
+* `toughness = high`
+* `elasticity = low`
+
+Base stat lines:
+
+* `atk_mod_flat = 0.01`
+* `move_speed_pct_add = -0.02`
+* `aspd_pct_add = -0.02`
+* `heal_power_flat = 0.02`
+* `power_flat = 0.01`
+* `crit_chance_pct = 0.01`
+* `crit_damage_bonus_add = 0.01`
+* `def_mod_flat = 0.05`
+* `endurance_flat = 0.05`
+
+Profile biases:
+
+* `impact_bias = high`
+* `guard_bias = medium`
+* `edge_bias = medium`
+* `mobility_bias = low`
+
+Material tags:
+
+* `metal`
+* `edge_candidate`
+* `blunt_candidate`
+* `guard_candidate`
+* `head_candidate`
+
+This lines up with your atomic stat system because these contributions are just `StatLine` atoms attached to material-derived item outputs. 
+
+---
+
+## D. Tiered material instance layer
+
+This is where one material becomes many predictable versions without redefining it.
+
+## D1. `MaterialVariantDef`
+
+Purpose: combine base material + tier.
+
+Fields:
+
+* `material_variant_id`
+* `base_material_id`
+* `tier_id`
+* `tier_mult_stats`
+* `resolved_stat_lines[]`
+* `resolved_density_per_cell`
+* `resolved_processing_yield`
+* `resolved_value_score`
+
+Formula:
+
+* `resolved_stat = base_stat * tier_mult_stats`
+* `resolved_density = base_density * tier_mult_weight`
+* `resolved_processing_yield = base_yield` unless you decide tiers affect yield later
+
+So:
+
+### `mat_wood_green`
+
+* base = wood
+* tier = green
+* tier mult = 1.02
+
+Resolved:
+
+* `atk_mod_flat = 0.0102`
+* `move_speed_pct_add = 0.051`
+* `aspd_pct_add = 0.051`
+* `heal_power_flat = 0.0204`
+* `dot_duration_pct_add = 0.0306`
+* `density_per_cell = 0.03`
+* `processing_output_count = 6`
+
+### `mat_iron_blue`
+
+* base = iron
+* tier = blue
+* tier mult = 1.04
+
+Resolved:
+
+* `atk_mod_flat = 0.0104`
+* `move_speed_pct_add = -0.0208`
+* `aspd_pct_add = -0.0208`
+* `heal_power_flat = 0.0208`
+* `power_flat = 0.0104`
+* `crit_chance_pct = 0.0104`
+* `crit_damage_bonus_add = 0.0104`
+* `def_mod_flat = 0.052`
+* `endurance_flat = 0.052`
+* `density_per_cell = 0.06`
+
+This gives you exactly what you wanted:
+change one base material or one tier multiplier and the whole family moves.
+
+---
+
+# The full tree under Wood and Iron
+
+Now I’ll branch the full tree the way you asked.
+
+## WOOD TREE
+
+### 1. Raw source
+
+`RawDropDef`
+
+* `raw_drop_id = item_wood_log_green`
+* `base_material_id = wood`
+* `tier_id = green`
+
+### 2. Processing output
+
+`ProcessRuleDef`
+
+* input: `item_wood_log_green x1`
+* output: `mat_wood_green x6`
+
+### 3. Forge inventory unit
+
+`ForgeMaterialStack`
+
+* `material_variant_id = mat_wood_green`
+* `stack_count = N`
+
+### 4. Placement unit
+
+`CellAtom`
+Each placed cube stores:
+
+* `grid_position`
+* `layer_index`
+* `material_variant_id = mat_wood_green`
+* `orientation`
+* `surface_flags`
+* `mirrored_source_flag`
+
+### 5. Local material contribution
+
+For each wood cell:
+
+* contributes `mass = 0.03`
+* contributes resolved wood-green stat lines
+* contributes tags:
+
+  * `grip_candidate`
+  * `shaft_candidate`
+  * `flex_candidate`
+
+### 6. Segment formation
+
+`SegmentResolver` groups connected cells into:
+
+* handle section
+* shaft section
+* decorative section
+* flex section
+
+### 7. Anchor candidacy
+
+`AnchorResolver` checks wood segments against `AnchorRuleDef`.
+
+Possible result:
+
+* valid `primary_grip`
+* valid `secondary_grip`
+* invalid if too short / too thick / too thin / disconnected
+
+### 8. Geometry interpretation
+
+`ShapeClassifier` checks the segment:
+
+* long + narrow = shaft-like
+* moderate thickness + long = staff/spear support
+* tiny isolated clusters = decorative
+* not enough mass / wrong orientation = non-striking decorative only
+
+### 9. Profile contribution
+
+`ProfileResolver` accumulates wood contributions into:
+
+* `total_mass`
+* `center_of_mass`
+* `reach`
+* `flex_score`
+* `mobility_score`
+* `stability_score`
+* `damage_flavor_weights`
+* `capability_scores`
+
+Wood biases profile toward:
+
+* mobility
+* aspd
+* flexible handling
+* grip/shaft validity
+* lower impact
+
+### 10. Baked output use
+
+The baked profile then affects:
+
+* attack speed handling
+* recovery feel
+* movement feel
+* available skill atom families
+* anchor legality
+* grip options
+
+---
+
+## IRON TREE
+
+### 1. Raw source
+
+`RawDropDef`
+
+* `raw_drop_id = item_iron_ore_blue`
+* `base_material_id = iron`
+* `tier_id = blue`
+
+### 2. Processing output
+
+You did not specify the exact yield yet, so define it similarly:
+
+* input: `item_iron_ore_blue x1`
+* output: `mat_iron_blue x6` or whatever number you decide globally
+
+### 3. Forge inventory unit
+
+`ForgeMaterialStack`
+
+* `material_variant_id = mat_iron_blue`
+* `stack_count = N`
+
+### 4. Placement unit
+
+`CellAtom`
+
+* same structure as wood
+* different material variant
+
+### 5. Local material contribution
+
+Each iron cell:
+
+* contributes `mass = 0.06`
+* contributes resolved iron-blue stat lines
+* contributes tags:
+
+  * `edge_candidate`
+  * `blunt_candidate`
+  * `guard_candidate`
+  * `head_candidate`
+
+### 6. Segment formation
+
+`SegmentResolver` groups connected iron cells into:
+
+* blade section
+* head section
+* guard section
+* plate section
+* decorative section
+
+### 7. Shape interpretation
+
+`ShapeClassifier` checks thresholds:
+
+Examples:
+
+* thin + long + exposed = edge-capable
+* thick + heavy + front-loaded = blunt-capable
+* too stubby = decorative or guard-only
+* broad flat region = guard/barrier-capable
+* too small isolated iron patch = decorative only
+
+This is where your “if thin enough it becomes cutter, if thicker it becomes blunt, if not enough it is decorative” lives.
+
+### 8. Anchor interaction
+
+Iron itself is usually not the best grip material unless intentionally allowed.
+So:
+
+* can help form reinforced grip
+* can form offhand brace
+* can form guard center
+* should usually need another grip-valid segment unless your rules allow fully metallic handles
+
+### 9. Profile contribution
+
+Iron biases profile toward:
+
+* impact
+* edge/blunt contribution
+* guard
+* endurance
+* front-heaviness
+* lower mobility
+
+### 10. Baked output use
+
+The baked profile then affects:
+
+* slower or heavier-feeling attacks
+* stronger impact
+* different recovery
+* different legal behaviors
+* different skill atom constraints
+
+---
+
+# The systems that read each layer
+
+Now the important part: **who reads what?**
+
+## 1. Processing Station reads:
+
+* `RawDropDef`
+* `BaseMaterialDef`
+* `TierDef`
+* `ProcessRuleDef`
+
+Outputs:
+
+* `ForgeMaterialStack`
+
+## 2. Weapon Forge reads:
+
+* `ForgeMaterialStack`
+* `MaterialVariantDef`
+* `AnchorRuleDef`
+* `ShapeThresholdDef`
+* `CharacterGripProfileDef`
+
+Outputs:
+
+* `CraftedItemWIP`
+
+## 3. Bake/Profile Resolver reads:
+
+* `CraftedItemWIP`
+* `CellAtom[]`
+* `SegmentAtom[]`
+* `AnchorAtom[]`
+* `MaterialVariantDef`
+* `ShapeThresholdDef`
+
+Outputs:
+
+* `BakedProfileAtom`
+
+This matches your law that gameplay should stop reading raw cells once a baked profile exists. 
+
+## 4. Skill Crafting Station reads:
+
+* `BakedProfileAtom`
+* `CapabilityScores`
+* `SkillAtomDefs`
+* slot-role rules
+
+Outputs:
+
+* `BehaviorTemplate`
+
+That matches your existing skill crafting station responsibility: it reads baked profile/capabilities and exposes legal behavior families, then saves the result back to the WIP design. 
+
+## 5. Testing Area reads:
+
+* `BakedProfileAtom`
+* `BehaviorTemplate`
+
+Outputs:
+
+* test instance only
+
+## 6. Naming/Finalization reads:
+
+* current WIP
+* baked profile
+* behavior template
+* provenance metadata
+
+Outputs:
+
+* finalized world item
+
+---
+
+# The exact data objects I would use first
+
+These are the first objects that matter.
+
+## Shared defs
+
+* `TierDef`
+* `BaseMaterialDef`
+* `RawDropDef`
+* `ProcessRuleDef`
+* `AnchorRuleDef`
+* `ShapeThresholdDef`
+* `CharacterGripProfileDef`
+
+## Runtime / save objects
+
+* `ForgeMaterialStack`
+* `CellAtom`
+* `SegmentAtom`
+* `AnchorAtom`
+* `CraftedItemWIP`
+* `BakedProfileAtom`
+* `BehaviorTemplate`
+* `TestPrintInstance`
+* `FinalizedItemInstance`
+
+---
+
+# The formulas and resolver order
+
+This is the order your code should think in.
+
+## Stage 1 — resolve material variant
+
+Input:
+
+* `base_material_id`
+* `tier_id`
+
+Output:
+
+* fully resolved material variant
+
+Formula:
+
+* `resolved_stat_line.value = base_stat_line.value * tier_mult_stats`
+
+## Stage 2 — process raw drop into forge cubes
+
+Input:
+
+* `RawDropDef`
+* `ProcessRuleDef`
+
+Output:
+
+* `ForgeMaterialStack`
+
+## Stage 3 — place cells in forge
+
+Each cell stores only:
+
+* where
+* what material variant
+* what layer
+* what orientation/state
+
+## Stage 4 — group cells into segments
+
+Resolve connected or tool-defined regions into segments:
+
+* handle
+* blade
+* shaft
+* head
+* plate
+* decorative
+* flex section
+
+## Stage 5 — validate anchors
+
+Check segment geometry against hand/grip rule tables.
+
+## Stage 6 — compute physical profile
+
+At minimum:
+
+* `total_mass = Σ(cell.mass)`
+* `center_of_mass = Σ(cell.position * cell.mass) / total_mass`
+
+Then derive:
+
+* `balance_offset_from_primary_grip`
+* `front_heavy_score`
+* `reach`
+* `edge_score`
+* `blunt_score`
+* `guard_score`
+* `flex_score`
+* `mobility_penalty_score`
+
+## Stage 7 — convert physical profile into gameplay atoms
+
+This is where profile becomes stats/capabilities.
+
+Examples:
+
+* front-heavy + heavy mass = more impact, more windup, more recovery
+* light + centered mass = more speed, less impact
+* thin exposed iron edge = higher edge score
+* broad iron plate = higher guard score
+* wood shaft with long valid grip = easier reach/stability
+
+## Stage 8 — hand to combat/skill system
+
+Combat and skill systems should read:
+
+* baked stat lines
+* baked capability scores
+* baked handling values
+
+Not:
+
+* raw forge cells
+
+---
+
+# The minimum stat/capability split
+
+Do not mix all of this into one soup.
+
+## Material-to-stat contributions
+
+These are direct numeric atoms.
+Examples:
+
+* `atk_mod_flat`
+* `power_flat`
+* `def_mod_flat`
+* `endurance_flat`
+* `move_speed_pct_add`
+* `aspd_pct_add`
+* `heal_power_flat`
+* `crit_chance_pct`
+* `crit_damage_bonus_add`
+
+These already exist in your stat registry. 
+
+## Shape-to-capability contributions
+
+These are not direct player sheet stats.
+Examples:
+
+* `edge_score`
+* `blunt_score`
+* `reach_score`
+* `guard_score`
+* `flex_score`
+* `launch_score`
+* `stability_score`
+
+These correspond cleanly to your capability atom direction. 
+
+## Profile-to-handling outputs
+
+These are the bridge values.
+Examples:
+
+* `swing_windup_mult`
+* `swing_recovery_mult`
+* `anim_speed_bias`
+* `projectile_velocity_bias`
+* `movement_commitment_bias`
+* `turn_rate_bias`
+
+These are not base material stats.
+They are derived from the built profile.
+
+This is the part you were getting at with center of mass affecting how nimble or hammer-like something feels.
+
+---
+
+# Important correction: where not to put things
+
+There are a few places where your instinct is right but the data should live elsewhere.
+
+## Do not put “hand size” on the material
+
+Correct location:
+
+* `CharacterGripProfileDef`
+  or
+* rig/animation/equipment compatibility config
+
+## Do not put “is cutter” directly on iron
+
+Correct location:
+
+* `ShapeClassifier` result from geometry + material tags
+
+Iron is **edge-capable**, not automatically “a cutter.”
+
+## Do not put final attack speed directly on the material
+
+Correct location:
+
+* derived profile / handling resolver
+
+Material can bias speed.
+It should not directly decide final swing speed alone.
+
+---
+
+# The exact branch template for future materials
+
+You said you want something you can copy forever.
+This is the reusable template.
+
+## Template
+
+### `BaseMaterialDef`
+
+* identity
+* family
+* density
+* hardness
+* toughness
+* elasticity
+* base stat lines
+* material tags
+* capability biases
+* processing yield
+* salvage priority
+
+### `TierDef`
+
+* tier id
+* tier stat multiplier
+* tier value multiplier
+
+### `MaterialVariantDef = BaseMaterialDef + TierDef`
+
+* resolved stat lines
+* resolved physical values
+* resolved economic values
+
+### `RawDropDef`
+
+* world item
+* source
+* tier
+* conversion target
+
+### `ProcessRuleDef`
+
+* raw drop → processed forge cubes
+
+### `CellAtom`
+
+* smallest placed unit
+
+### `SegmentAtom`
+
+* grouped function area
+
+### `AnchorAtom`
+
+* validated functional point
+
+### `BakedProfileAtom`
+
+* gameplay-facing resolved profile
+
+### `BehaviorTemplate`
+
+* skill-facing output
+
+That is the material tree.
+
+---
+
+# The old systems this touches immediately
+
+Since you want dependency awareness, these are the older/future parts that must already be respected if you build this:
+
+## Processing station
+
+Must distinguish:
+
+* raw drops
+* processed forge mats
+* finalized salvage outputs
+
+## Inventory/storage
+
+Must support:
+
+* world items
+* forge material stacks
+* WIP item data
+* finalized items
+
+These are not the same object type.
+
+## Character/equipment
+
+Needs a grip/attachment compatibility layer later, even if crude now.
+
+## Stat resolver
+
+Must aggregate `StatLine` atoms from baked items, not from raw material defs directly.
+
+## Skill resolver
+
+Must read profile capabilities and handling outputs, not guess from “weapon class.”
+
+## Save system
+
+Must separately store:
+
+* material stacks
+* WIP forge data
+* baked test prints if needed
+* finalized items
+
+If you merge these too early, you create the exact spaghetti you are trying to avoid.
+
+---
+
+# The shortest stable version
+
+Here is the whole thing in one chain:
+
+**Wood / Iron base material**
+defines
+
+* physical properties
+* base stat atoms
+* material tags
+* processing yield
+
+**Tier**
+multiplies
+
+* base stat atoms
+* value scaling
+
+**Processing station**
+converts
+
+* raw world drop → forge material cubes
+
+**Forge cells**
+store
+
+* placed material variant per cell
+
+**Segment + anchor resolvers**
+derive
+
+* functional regions
+* valid grip points
+* striking regions
+* decorative regions
+
+**Profile resolver**
+computes
+
+* mass
+* center of mass
+* balance
+* reach
+* edge/blunt/guard/flex/etc.
+* capability scores
+* handling outputs
+
+**Skill/combat systems**
+read
+
+* baked profile
+* baked stat lines
+* baked behavior data
+
+That is the full tree under Wood and Iron.
+
+And yes — this absolutely supports your plan of defining one base material once, one global tier table once, and letting the rest of the system scale from those roots instead of rewriting every tier by hand. That matches both your atomic-stat naming direction and your crafting/profile architecture.   
+
+The best next move is to turn this into a **file/folder and class-name skeleton for Godot resources/scripts**, so you can start creating the actual `.gd` and `.tres` pieces without naming drift.

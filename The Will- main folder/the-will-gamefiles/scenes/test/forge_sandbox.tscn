@@ -4,4 +4,4 @@
 
 [node name="ForgeSandbox" type="Node"]
 script = ExtResource("1_forge_grid_controller")
-auto_run_debug_bake_loop = true
+auto_spawn_test_print_on_ready = true

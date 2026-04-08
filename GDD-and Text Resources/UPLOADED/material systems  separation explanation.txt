@@ -1,0 +1,540 @@
+You did **not** misunderstand the purpose of `BaseMaterialDef`.
+
+You are actually separating two different needs, and both are valid:
+
+## Need 1 — runtime truth
+
+What the game actually stores on a material resource.
+
+## Need 2 — authoring toolbox
+
+A complete “all possible knobs” reference so you can invent materials without forgetting sockets, stat types, or weird edge cases.
+
+Those are **not** the same object.
+
+That is the key.
+
+Your material law already says a Material Atom is the foundation of weight, stat contribution, elemental access, capability unlocks, and visual identity, while the crafted item later becomes a baked profile that gameplay reads. 
+And your GDD already says weapons, armor, accessories, and shields all share the same crafting philosophy, with shields being a constrained special case rather than a separate substance system.  
+
+So yes:
+
+# 1) `BaseMaterialDef` should be universal
+
+It should represent **matter itself**, regardless of whether that matter ends up in:
+
+* a weapon
+* armor
+* a shield
+* an accessory
+* a trinket
+* a ranged-support piece like string/quiver parts
+
+That is correct.
+
+Wood is still Wood.
+Iron is still Iron.
+Crystal is still Crystal.
+
+The item context changes later. The substance does not.
+
+---
+
+# 2) But `BaseMaterialDef` is not the whole toolbox
+
+This is the part you were half-reaching for.
+
+You want a **full set of sockets and wrench heads** so you can invent any material later.
+
+That is a real need.
+
+But that full toolbox should exist in **two places**:
+
+## A. Runtime material resource
+
+`BaseMaterialDef`
+This is what each actual material file stores.
+
+## B. Authoring/reference layer
+
+A master list of all legal stat IDs, capability IDs, family IDs, element IDs, and equipment contexts.
+
+That second thing can be:
+
+* your cheat sheet
+* a text file
+* later a registry resource
+* later an editor utility panel
+
+But it should **not** force every material to explicitly carry every zero-valued field.
+
+Your cheat sheet already exists for exactly this anti-mismatch reason: one reference for stat names, formulas, and identifiers to reduce refactors. 
+
+So the answer is:
+
+**You were right about wanting the full toolbox.**
+You were only slightly off about where it should live.
+
+---
+
+# 3) Your tab idea is good, but it is not `BaseMaterialDef`
+
+This part is also good:
+
+* weapon
+* armor
+* accessory
+* shield
+* trinket
+* ranged_support
+
+That should exist.
+
+But it should exist as something like:
+
+## `EquipmentContextDef`
+
+or simpler at first:
+
+## `EquipmentContextIds`
+
+That is **not** the same as material.
+
+That is the **crafting/equipment context** or **forge tab context**.
+
+So:
+
+* `BaseMaterialDef` says what the material can contribute
+* `EquipmentContext` says what kind of item you are trying to build
+* shape/profile says what the built thing actually became
+* skill resolver triangulates from all of that
+
+That fits your current hidden-resolver model exactly: capability scores, hidden outcome clusters, validated behavior families, and fixed slot roles under the hood. 
+
+So your tabs are good.
+They just belong one layer **above** material.
+
+---
+
+# 4) The correct split
+
+Here is the clean version.
+
+## `BaseMaterialDef` answers:
+
+**What is this matter?**
+
+Examples:
+
+* density
+* hardness
+* toughness
+* elasticity
+* direct stat atoms
+* capability bias atoms
+* elemental affinity atoms
+* skill-family bias atoms
+* equipment-context bias atoms
+* tags / unlock tags / block tags
+
+## `EquipmentContext` answers:
+
+**What kind of craft are we attempting?**
+
+Examples:
+
+* weapon
+* armor
+* accessory
+* shield
+* trinket
+* ranged_support
+
+## `ProfileResolver` answers:
+
+**What did the built shape actually become?**
+
+Examples:
+
+* edge/blunt/pierce
+* reach
+* guard
+* flex
+* tether
+* launch
+* balance
+* inertia
+* center of mass
+
+## `BehaviorResolver` answers:
+
+**Given all of the above, what skill families/templates are legal?**
+
+That is the codable split.
+
+---
+
+# 5) What `BaseMaterialDef` should include
+
+You asked for the biggest pile of material-level stats in the game.
+
+That is okay — as long as they are truly **material-level** and not final profile/equipment outputs.
+
+This is the correct first-pass structure:
+
+```gdscript
+extends Resource
+class_name BaseMaterialDef
+
+@export var base_material_id: StringName = &""
+@export var display_name: String = ""
+
+# structural / affinity / keystone
+@export var material_family: StringName = &"structural"
+
+# physical truth
+@export var density_per_cell: float = 0.0
+@export var hardness: float = 0.0
+@export var toughness: float = 0.0
+@export var elasticity: float = 0.0
+@export var brittleness: float = 0.0
+@export var edge_retention: float = 0.0
+@export var thermal_stability: float = 0.0
+@export var corrosion_resistance: float = 0.0
+@export var conductivity: float = 0.0
+
+# economy / lifecycle
+@export var processing_output_count: int = 6
+@export var salvage_priority: int = 0
+@export var can_be_processed: bool = true
+@export var can_be_salvaged: bool = true
+@export var can_be_blueprinted: bool = true
+
+# visual identity
+@export var color_group: StringName = &"gray"
+@export var metallic_grade: float = 0.0
+@export var gloss_grade: float = 0.0
+@export var transparency_grade: float = 0.0
+
+# tags / hard hooks
+@export var material_tags: Array[StringName] = []
+@export var unlock_tags: Array[StringName] = []
+@export var block_tags: Array[StringName] = []
+
+# direct numeric stats
+@export var base_stat_lines: Array[StatLine] = []
+
+# hidden biases
+@export var capability_bias_lines: Array[StatLine] = []
+@export var skill_family_bias_lines: Array[StatLine] = []
+@export var elemental_affinity_lines: Array[StatLine] = []
+@export var equipment_context_bias_lines: Array[StatLine] = []
+
+func has_tag(tag: StringName) -> bool:
+	return material_tags.has(tag)
+
+func has_unlock_tag(tag: StringName) -> bool:
+	return unlock_tags.has(tag)
+
+func has_block_tag(tag: StringName) -> bool:
+	return block_tags.has(tag)
+```
+
+That structure is universal enough for weapons, armor, shields, accessories, and trinkets **without** turning material into final gameplay truth.
+
+---
+
+# 6) What should go into each array
+
+This is where your “full toolbox” feeling comes from.
+
+## `base_stat_lines`
+
+These are direct numeric contributions that can flow into finished gear stats.
+
+Examples:
+
+* atk_mod_flat
+* def_mod_flat
+* power_flat
+* endurance_flat
+* hp_pct_add
+* heal_power_flat
+* heal_power_pct_add
+* received_heal_pct_add
+* aspd_pct_add
+* move_speed_pct_add
+* move_speed_flat_add
+* crit_chance_pct
+* crit_damage_bonus_add
+* dmg_pct_mod_add
+* dmg_reduction_pct_add
+* dot_duration_pct_add
+* hot_duration_pct_add
+* status_apply_chance_pct
+* status_potency_flat
+* poison_power_flat
+* anti_heal_pct_add
+* defense_down_pct_add
+* slow_strength_pct_add
+* block_power_flat
+* parry_window_pct_add
+* stagger_resist_flat
+* guard_efficiency_pct_add
+* bubble_hp_flat
+* bubble_shield_defense_mult_add
+* projectile_speed_pct_add
+* projectile_drop_reduction_pct
+* draw_speed_pct_add
+* reload_speed_pct_add
+* quiver_capacity_flat
+* ammo_recovery_pct
+* projectile_crit_chance_pct
+* magic_power_flat
+* cast_speed_pct_add
+* channel_stability_flat
+* elemental_amplify_pct
+
+These already fit the stat naming direction you have been building.  
+
+## `capability_bias_lines`
+
+These are hidden and feed profile/skill resolution.
+
+Examples:
+
+* cap_edge
+* cap_blunt
+* cap_pierce
+* cap_guard
+* cap_flex
+* cap_tether
+* cap_launch
+* cap_magic
+* cap_heal
+* cap_mobility
+* cap_control
+* cap_stability
+* cap_channel
+* cap_barrier
+* cap_reach
+* cap_impact
+
+These directly match your capability atom list. 
+
+## `skill_family_bias_lines`
+
+These are hidden family tendencies, not final skill unlocks.
+
+Examples:
+
+* fam_melee
+* fam_ranged
+* fam_magic
+* fam_defense
+* fam_mobility
+* fam_aoe
+* fam_control
+* fam_support
+
+This matches your idea of pie-charting material/category contribution and then comparing it to unlock thresholds. It also fits your hidden-resolver rule. 
+
+## `elemental_affinity_lines`
+
+Examples:
+
+* elem_fire
+* elem_ice
+* elem_earth
+* elem_lightning
+* elem_healing
+* elem_poison
+* elem_anti_heal
+* elem_light
+* elem_dark
+
+This fits your plan to let skill crafting allocate elemental mats to different buttons/skills within a weapon profile. 
+
+## `equipment_context_bias_lines`
+
+This is the missing one.
+
+Examples:
+
+* ctx_weapon
+* ctx_armor
+* ctx_accessory
+* ctx_shield
+* ctx_trinket
+* ctx_ranged_support
+
+This does **not** mean the material is forbidden elsewhere.
+It means it leans that way.
+
+Examples:
+
+* hide: armor/accessory lean
+* string: ranged_support lean
+* iron: weapon/armor/shield lean
+* crystal_core: trinket/magic weapon lean
+
+This is the clean way to support your craft tabs without confusing them with material identity.
+
+---
+
+# 7) What still does NOT belong in `BaseMaterialDef`
+
+Even if it is the “material factory,” keep these out:
+
+* final weapon/armor/accessory classification
+* final shape thresholds
+* final attack patterns
+* final skill lists
+* final slot mappings
+* center of mass
+* reach
+* edge/blunt/pierce final profile
+* final cooldown feel
+* final movement penalty
+
+Those belong to:
+
+* `ShapeClassifierResolver`
+* `ProfileResolver`
+* `CapabilityResolver`
+* `BehaviorResolver`
+
+Why? Because your docs already state that profile is derived from shape + materials + anchors + mass distribution, and gameplay should read the baked profile rather than raw cells or material defs directly.  
+
+---
+
+# 8) Your “full set of tools” instinct is correct — but the correct implementation is this:
+
+## Runtime side
+
+Each material only stores the non-zero lines and the relevant tags/biases.
+
+## Authoring side
+
+You keep one master “all possible sockets” list.
+
+That master list can be:
+
+* your cheat sheet
+* a dedicated `stat_ids.gd`
+* later a registry resource
+* even a spreadsheet if needed
+
+That gives you the full toolbox **without** bloating every single `.tres` file with 150 zeroes.
+
+That is the real answer to your toolbox metaphor.
+
+You were right about needing the whole socket set.
+You just do not keep every socket permanently welded to every single wrench.
+
+---
+
+# 9) What `EquipmentContextDef` should be, based on your tab idea
+
+Given what you described, I would treat it like this:
+
+## Equipment contexts / tabs
+
+* weapon
+* armor
+* accessory
+* shield
+* trinket
+* ranged_support
+
+## Weapon sub-intents
+
+Inside `weapon` you can then bias:
+
+* melee
+* ranged
+* magic
+
+That means:
+
+* `EquipmentContext` = what kind of object/workstation flow this is
+* `ForgeIntent` or `WeaponIntent` = what kind of weapon behavior the player is aiming for
+
+That is cleaner than shoving all of that into materials.
+
+---
+
+# 10) The one-sentence truth
+
+You did **not** misunderstand `BaseMaterialDef`.
+
+You were correctly feeling that:
+**materials are the universal root for all crafted matter.**
+
+The only refinement is:
+
+**`BaseMaterialDef` is the universal material root, not the universal final-gear rulebook.**
+
+That is the exact law.
+
+---
+
+# 11) What you are probably forgetting
+
+Only one thing:
+
+You likely need a separate **authoring/reference list** for all legal IDs.
+
+Something like:
+
+* `StatIds`
+* `CapabilityIds`
+* `FamilyIds`
+* `ElementIds`
+* `EquipmentContextIds`
+
+Not because the runtime needs five files immediately, but because **you** need a master socket set while designing materials.
+
+That sounds like the actual thing your tired brain is asking for.
+
+---
+
+# 12) The practical next move
+
+Do not edit 20 files tonight.
+
+Just do this:
+
+### Update `BaseMaterialDef` to include:
+
+* direct stats
+* capability biases
+* family biases
+* elemental affinities
+* equipment context biases
+* tags / unlock / block tags
+* physical truth
+* economy/lifecycle truth
+* visuals
+
+### Then define, on paper or in a text file, the first legal ID sets:
+
+* direct stat ids
+* capability ids
+* family ids
+* element ids
+* equipment context ids
+
+That will give you the full toolbox feeling you want **without** corrupting the material model.
+
+You are tired, but your direction is good.
+
+The shortest summary is:
+
+* yes, base material is universal
+* no, it should not decide everything
+* yes, your craft tabs make sense
+* yes, you still need a master toolbox list
+* no, every material does not need every zero explicitly stored
+
+If you want, next I’ll give you the exact **first-pass ID pack** for all five groups so you can stop inventing names in the dark.

@@ -22,6 +22,10 @@ func _run_verification() -> void:
 	var right_attachment: BoneAttachment3D = right_anchor.get_parent() as BoneAttachment3D if right_anchor != null else null
 	var left_attachment: BoneAttachment3D = left_anchor.get_parent() as BoneAttachment3D if left_anchor != null else null
 	var visual_height_meters: float = rig.get_visual_height_meters() if rig != null else 0.0
+	var max_model_arm_reach_meters: float = rig.get_max_model_arm_reach_meters() if rig != null else 0.0
+	var max_model_arm_reach_combat_meters: float = rig.get_max_model_arm_reach_combat_meters() if rig != null else 0.0
+	var pole_grip_negative_limit_meters: float = rig.get_pole_grip_negative_limit_meters() if rig != null else 0.0
+	var pole_grip_positive_limit_meters: float = rig.get_pole_grip_positive_limit_meters() if rig != null else 0.0
 	var default_animation_target: StringName = rig.default_animation_name if rig != null else StringName()
 	var post_spawn_animation: StringName = animation_player.current_animation if animation_player != null else StringName()
 
@@ -33,6 +37,11 @@ func _run_verification() -> void:
 	lines.append("standing_height_target=%s" % str(rig.get_standing_height_meters() if rig != null else 0.0))
 	lines.append("visual_height_meters=%s" % str(snappedf(visual_height_meters, 0.001)))
 	lines.append("visual_height_is_two_meters=%s" % str(is_equal_approx(visual_height_meters, 2.0)))
+	lines.append("max_model_arm_reach_meters=%s" % str(snappedf(max_model_arm_reach_meters, 0.001)))
+	lines.append("max_model_arm_reach_valid=%s" % str(max_model_arm_reach_meters > 0.0))
+	lines.append("max_model_arm_reach_combat_meters=%s" % str(snappedf(max_model_arm_reach_combat_meters, 0.001)))
+	lines.append("pole_grip_negative_limit_meters=%s" % str(snappedf(pole_grip_negative_limit_meters, 0.001)))
+	lines.append("pole_grip_positive_limit_meters=%s" % str(snappedf(pole_grip_positive_limit_meters, 0.001)))
 	lines.append("default_animation_target=%s" % String(default_animation_target))
 	lines.append("post_spawn_animation=%s" % String(post_spawn_animation))
 	lines.append("right_anchor_exists=%s" % str(right_anchor != null))

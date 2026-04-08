@@ -1,0 +1,7 @@
+option_count=3
+default_mode=stow_shoulder_hanging
+saved_mode_after_select=stow_side_hip
+tooltip_popup_visible=true
+tooltip_text=Recommended for short weapon builds.
+side_hip_label=Side Hip
+lower_back_label=Lower Back

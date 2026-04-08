@@ -2,110 +2,103 @@ extends RefCounted
 class_name TestPrintMeshBuilder
 
 const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://core/defs/forge/forge_view_tuning_default.tres")
+const CraftedItemCanonicalSolidResolverScript = preload("res://core/resolvers/crafted_item_canonical_solid_resolver.gd")
+const CraftedItemCanonicalGeometryResolverScript = preload("res://core/resolvers/crafted_item_canonical_geometry_resolver.gd")
 const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
 
 var forge_view_tuning: ForgeViewTuningDef = DEFAULT_FORGE_VIEW_TUNING_RESOURCE
+var canonical_solid_resolver = CraftedItemCanonicalSolidResolverScript.new()
+var canonical_geometry_resolver = CraftedItemCanonicalGeometryResolverScript.new()
 var material_runtime_resolver = MaterialRuntimeResolverScript.new()
 
 func set_view_tuning(value: ForgeViewTuningDef) -> void:
 	forge_view_tuning = value if value != null else DEFAULT_FORGE_VIEW_TUNING_RESOURCE
 
+func build_canonical_solid(cells: Array[CellAtom]):
+	return canonical_solid_resolver.call("resolve_from_cells", cells)
+
+func build_canonical_geometry(canonical_solid):
+	return canonical_geometry_resolver.call("resolve_from_solid", canonical_solid)
+
 func build_mesh(cells: Array[CellAtom], material_lookup: Dictionary = {}) -> ArrayMesh:
+	return build_mesh_from_canonical_geometry(
+		build_canonical_geometry(build_canonical_solid(cells)),
+		material_lookup
+	)
+
+func build_mesh_from_canonical_solid(canonical_solid, material_lookup: Dictionary = {}) -> ArrayMesh:
+	return build_mesh_from_canonical_geometry(build_canonical_geometry(canonical_solid), material_lookup)
+
+func build_mesh_from_canonical_geometry(canonical_geometry, material_lookup: Dictionary = {}) -> ArrayMesh:
+	if canonical_geometry == null or canonical_geometry.is_empty():
+		return ArrayMesh.new()
 	var surface_tool: SurfaceTool = SurfaceTool.new()
-	var occupied: Dictionary = {}
-	var emitted_vertex_count: int = 0
-
-	for cell: CellAtom in cells:
-		if cell == null:
-			continue
-		occupied[cell.grid_position] = true
-
 	surface_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for cell: CellAtom in cells:
-		if cell == null:
+	var next_vertex_index: int = 0
+	for surface_quad in canonical_geometry.surface_quads:
+		if surface_quad == null:
 			continue
-		var color: Color = _resolve_cell_color(cell.material_variant_id, material_lookup)
-		emitted_vertex_count += _append_visible_faces(surface_tool, cell, occupied, color)
+		next_vertex_index = _append_surface_quad(
+			surface_tool,
+			surface_quad,
+			material_lookup,
+			next_vertex_index
+		)
 
-	if emitted_vertex_count == 0:
+	if next_vertex_index == 0:
 		return ArrayMesh.new()
 
 	return surface_tool.commit()
 
-func _append_visible_faces(surface_tool: SurfaceTool, cell: CellAtom, occupied: Dictionary, color: Color) -> int:
-	var emitted_vertex_count: int = 0
-	var directions: Array[Vector3i] = [
-		Vector3i.RIGHT,
-		Vector3i.LEFT,
-		Vector3i.UP,
-		Vector3i.DOWN,
-		Vector3i.FORWARD,
-		Vector3i.BACK
-	]
+func build_bounds_data_from_canonical_solid(
+		canonical_solid,
+		grip_contact_position: Vector3,
+		cell_world_size: float,
+		padding_cells: int = 1
+	) -> Dictionary:
+	if canonical_solid == null or canonical_solid.is_empty():
+		return {"center_local": Vector3.ZERO, "size_meters": Vector3.ONE * cell_world_size}
+	return build_bounds_data_from_canonical_geometry(
+		build_canonical_geometry(canonical_solid),
+		grip_contact_position,
+		cell_world_size,
+		padding_cells
+	)
 
-	for direction: Vector3i in directions:
-		if occupied.has(cell.grid_position + direction):
-			continue
-		emitted_vertex_count += _append_face(surface_tool, cell.get_center_position(), direction, color)
+func build_bounds_data_from_canonical_geometry(
+		canonical_geometry,
+		grip_contact_position: Vector3,
+		cell_world_size: float,
+		padding_cells: int = 1
+	) -> Dictionary:
+	if canonical_geometry == null or canonical_geometry.source_solid == null or canonical_geometry.is_empty():
+		return {"center_local": Vector3.ZERO, "size_meters": Vector3.ONE * cell_world_size}
+	var padded_aabb: AABB = canonical_geometry.get_padded_local_aabb(padding_cells)
+	var local_center_cells: Vector3 = padded_aabb.get_center() - grip_contact_position
+	return {
+		"center_local": local_center_cells * cell_world_size,
+		"size_meters": padded_aabb.size * cell_world_size,
+	}
 
-	return emitted_vertex_count
-
-func _append_face(surface_tool: SurfaceTool, center: Vector3, direction: Vector3i, color: Color) -> int:
-	var corners: Array[Vector3] = _get_face_corners(direction)
-	var normal: Vector3 = Vector3(direction)
-	var indices: Array[int] = [0, 1, 2, 0, 2, 3]
-
-	for vertex_index: int in indices:
+func _append_surface_quad(
+		surface_tool: SurfaceTool,
+		surface_quad,
+		material_lookup: Dictionary,
+		start_vertex_index: int
+	) -> int:
+	var vertices: Array[Vector3] = surface_quad.get_vertices()
+	var color: Color = _resolve_cell_color(surface_quad.material_variant_id, material_lookup)
+	for vertex: Vector3 in vertices:
 		surface_tool.set_color(color)
-		surface_tool.set_normal(normal)
-		surface_tool.add_vertex(center + corners[vertex_index])
-
-	return 6
-
-func _get_face_corners(direction: Vector3i) -> Array[Vector3]:
-	match direction:
-		Vector3i.RIGHT:
-			return [
-				Vector3(0.5, -0.5, -0.5),
-				Vector3(0.5, -0.5, 0.5),
-				Vector3(0.5, 0.5, 0.5),
-				Vector3(0.5, 0.5, -0.5)
-			]
-		Vector3i.LEFT:
-			return [
-				Vector3(-0.5, -0.5, 0.5),
-				Vector3(-0.5, -0.5, -0.5),
-				Vector3(-0.5, 0.5, -0.5),
-				Vector3(-0.5, 0.5, 0.5)
-			]
-		Vector3i.UP:
-			return [
-				Vector3(-0.5, 0.5, -0.5),
-				Vector3(0.5, 0.5, -0.5),
-				Vector3(0.5, 0.5, 0.5),
-				Vector3(-0.5, 0.5, 0.5)
-			]
-		Vector3i.DOWN:
-			return [
-				Vector3(-0.5, -0.5, 0.5),
-				Vector3(0.5, -0.5, 0.5),
-				Vector3(0.5, -0.5, -0.5),
-				Vector3(-0.5, -0.5, -0.5)
-			]
-		Vector3i.FORWARD:
-			return [
-				Vector3(0.5, -0.5, 0.5),
-				Vector3(-0.5, -0.5, 0.5),
-				Vector3(-0.5, 0.5, 0.5),
-				Vector3(0.5, 0.5, 0.5)
-			]
-		_:
-			return [
-				Vector3(-0.5, -0.5, -0.5),
-				Vector3(0.5, -0.5, -0.5),
-				Vector3(0.5, 0.5, -0.5),
-				Vector3(-0.5, 0.5, -0.5)
-			]
+		surface_tool.set_normal(surface_quad.normal)
+		surface_tool.add_vertex(vertex)
+	surface_tool.add_index(start_vertex_index)
+	surface_tool.add_index(start_vertex_index + 1)
+	surface_tool.add_index(start_vertex_index + 2)
+	surface_tool.add_index(start_vertex_index)
+	surface_tool.add_index(start_vertex_index + 2)
+	surface_tool.add_index(start_vertex_index + 3)
+	return start_vertex_index + 4
 
 func _resolve_cell_color(material_variant_id: StringName, material_lookup: Dictionary) -> Color:
 	return material_runtime_resolver.resolve_material_color(

@@ -1,0 +1,413 @@
+================================================================================
+THE WILL - GODOT DEVELOPMENT IMPLEMENTATION GUIDE
+================================================================================
+
+PROJECT SCOPE SUMMARY
+=====================
+A seasonal, social dungeon crawler featuring:
+- Central hub (The City) for player gathering & reputation building
+- Instanced procedural floors (15-60min expeditions)
+- Weapon crafting from harvested materials (block-based system)
+- Phase-based ability system tied to equipment
+- Server-authoritative combat with knowledge/skill progression
+- Modding support via Thunderstore
+- Player-hosted or dedicated server architecture
+
+GODOT SUITABILITY: ✓ EXCELLENT FIT
+
+
+=== PHASE 1: FOUNDATION (Weeks 1-8) ===
+
+1.1 CORE SYSTEMS TO BUILD FIRST
+================================
+
+A) Player & Combat Foundation
+   - 3D character controller (OTS camera, movement, dodge)
+   - Hit detection & damage resolution
+   - Status effect system (poison, slow, stagger, shield)
+   - Durability tracking
+
+   Godot Components:
+   - CharacterBody3D for movement
+   - RayCasts/Areas for hit detection
+   - Signal system for damage events
+   - Custom StateMachine for character states
+
+B) Weapon Crafting & Profile System
+   - Block-based weapon builder (grid system)
+   - Material definitions (density, hardness, elemental affinity)
+   - Weapon profile generator (mass, reach, balance, flex)
+   - Profile → Ability mapping system
+
+   Godot Components:
+   - Custom Resource classes for weapon blocks
+   - Crafting calculator (shape + materials → stats)
+   - Ability factory that builds from templates
+   - Items system with durability
+
+C) Ability System (Phase-based)
+   - Windup → Active → Recovery phases
+   - Hit volume system (cone/box/sweep/projectile)
+   - Cooldown management
+   - Iframe windows & stagger resistance
+
+   Godot Components:
+   - Ability base class with phase manager
+   - Hitbox/hurtbox system
+   - Cooldown tracker
+   - Animation orchestration (can use simple primitives initially)
+
+D) Simple Enemy AI
+   - Pattern-based attacks
+   - Consistent behavior (not RNG-heavy)
+   - Scaling via numbers only (HP, damage, defense)
+   - Learning-friendly patterns
+
+   Godot Components:
+   - Enemy behavior tree or state machine
+   - Customizable attack patterns
+   - Aggro/detection systems
+   - Death/loot drop handlers
+
+E) First Vertical Slice
+   - Connect all above into 1 playable room
+   - 1 basic enemy with 2-3 phases
+   - Ability slots (4 fixed roles: Primary/Secondary/Mobility/Defense)
+   - Loot drop (2-3 materials)
+   - Simple craft at NPC
+   - Equipped weapon changes available abilities
+
+   Godot Components:
+   - UI for ability slots
+   - Inventory system
+   - NPC interaction handler
+   - Craft UI with preview
+
+
+1.2 GODOT PROJECT STRUCTURE
+============================
+
+res://
+├── core/                       # Pure rules kernel (GDScript classes)
+│   ├── systems/
+│   │   ├── combat/            # Hit resolution, damage calc
+│   │   ├── abilities/         # Ability templates, cooldowns
+│   │   ├── crafting/          # Shape → profile → stats
+│   │   ├── loot/              # Drop tables, rarity
+│   │   └── status/            # Status effects, conditions
+│   ├── definitions/           # Resource-based data
+│   │   ├── materials.gd       # MaterialDef resource
+│   │   ├── blocks.gd          # BlockTypeDef resource
+│   │   ├── abilities.gd       # AbilityTemplateDef
+│   │   ├── enemies.gd         # EnemyDef resource
+│   │   └── loot_tables.gd     # LootTableDef
+│   └── models/
+│       ├── character_state.gd
+│       ├── item_instance.gd
+│       ├── weapon_shape.gd
+│       └── floor_state.gd
+│
+├── runtime/                    # Game objects that use core/
+│   ├── player/
+│   │   ├── player.tscn
+│   │   ├── player.gd          # Main controller
+│   │   ├── movement.gd        # Movement component
+│   │   ├── combat.gd          # Combat component
+│   │   ├── abilities.gd       # Ability component
+│   │   ├── inventory.gd       # Inventory component
+│   │   └── equipment.gd       # Equipment & stats component
+│   ├── enemies/
+│   │   ├── enemy_base.gd
+│   │   ├── basic_enemy.tscn
+│   │   └── behavior_patterns.gd
+│   ├── world/
+│   │   ├── level_manager.gd   # Instance loading, spawning
+│   │   ├── hub_world.tscn
+│   │   └── floor_instance.tscn
+│   └── npcs/
+│       ├── npc_base.gd
+│       └── crafter_npc.tscn
+│
+├── services/                   # Game systems (not tied to nodes)
+│   ├── crafting_service.gd
+│   ├── loot_service.gd
+│   ├── progression_service.gd
+│   └── save_service.gd
+│
+├── ui/
+│   ├── hud/
+│   │   ├── ability_bar.tscn
+│   │   ├── health_bar.tscn
+│   │   └── cooldown_display.tscn
+│   ├── menus/
+│   │   ├── main_menu.tscn
+│   │   ├── inventory.tscn
+│   │   ├── character_sheet.tscn
+│   │   └── craft_ui.tscn
+│   ├── dialogs/
+│   │   └── npc_dialog.tscn
+│   └── hud_controller.gd      # UI event bus
+│
+├── data/                       # Resource definitions
+│   ├── materials/
+│   │   └── material_defs.tres
+│   ├── enemies/
+│   │   └── enemy_defs.tres
+│   ├── abilities/
+│   │   └── ability_templates.tres
+│   └── loot/
+│       └── loot_tables.tres
+│
+├── net/                        # Networking (Phase 2)
+│   ├── replication.gd
+│   ├── authority_validator.gd
+│   └── player_session.gd
+│
+├── scenes/
+│   ├── test_chamber.tscn       # First slice test room
+│   └── main.tscn
+│
+└── main.gd                     # Entry point
+
+
+1.3 CORE SYSTEMS - IMPLEMENTATION ORDER
+========================================
+
+Step 1: Define Core Data Models (2-3 days)
+  - Create Material, Block, ItemDefinition, AbilityTemplate Resources
+  - Weapon profile calculator
+  - Loot table definitions
+  
+Step 2: Build Stat System (3-4 days)
+  - Base stats: HP, Energy, Armor, Precision, Evasion, Magic Resistance
+  - Modifier application (gear + buffs)
+  - Scaling formulas
+  
+Step 3: Implement Combat Resolver (4-5 days)
+  - CombatResolver class (only source of truth for damage calc)
+  - Hit detection logic
+  - Mitigation calculations
+  - Durability loss tracking
+  
+Step 4: Build Ability System (5-7 days)
+  - Ability base class with phase system
+  - Cooldown manager
+  - Hitbox/hurtbox implementation
+  - Iframe window handler
+  
+Step 5: Crafting System (4-5 days)
+  - Block grid editor (in-game or editor-based initially)
+  - Shape → Profile converter
+  - Material + shape → Stats calculator
+  - Weapon instance creation
+
+Step 6: Loot & Economy (2-3 days)
+  - Drop resolver
+  - Inventory system
+  - Item durability & repair
+  
+Step 7: Player Movement & Camera (3-4 days)
+  - OTS camera system
+  - Character movement controller
+  - Dodge mechanic
+  - Collision handling
+  
+Step 8: First Enemy (2-3 days)
+  - Basic patrol/aggro
+  - Simple attack pattern (2-3 phase moves)
+  - Death & loot drop
+  
+Step 9: Connect All (3-4 days)
+  - First playable room
+  - Player spawning
+  - NPC interaction (craft UI)
+  - Re-equip weapons & see ability changes
+
+
+=== PHASE 2: MULTIPLAYER FOUNDATION (Weeks 9-14) ===
+
+2.1 NETWORKING ARCHITECTURE
+=============================
+
+Decision: Server-Authoritative Model
+  - Client sends inputs (move, cast, interact)
+  - Server runs all core systems
+  - Server sends results (position, hit, damage)
+  - Anti-cheat validation on server
+
+Godot Multiplayer Setup:
+  - Use built-in MultiplayerSynchronizer for position/animation replication
+  - Custom authority layer for combat/crafting validation
+  - Player-hosted: One player runs server instance
+  - Dedicated: Can run headless Godot server
+
+2.2 PLAYER SESSION SYSTEM
+  - Account data (character, inventory, progression)
+  - Session persistence (save/load between sessions)
+  - Character switching (optional for later)
+
+2.3 FLOOR INSTANTIATION
+  - Seed-based procedural generation
+  - Player can enter → creates floor instance
+  - Floor state managed by authority player or server
+  - 4-player capacity per instance
+
+2.4 PARTY SYSTEM
+  - Hub interaction creating parties
+  - Shared floor instances for party members
+  - Loot distribution (bid/pass system)
+
+
+=== PHASE 3: CONTENT & POLISH (Weeks 15+) ===
+
+3.1 PROCEDURAL GENERATION
+  - Tile-based floor generation
+  - Enemy spawning from seed
+  - Loot table seeding for consistency
+  - Dungeon code sharing (compress seed → code)
+
+3.2 ADDITIONAL FLOORS & ENEMIES
+  - Second floor type with new patterns
+  - 3-4 new enemy types
+  - Boss encounter logic
+
+3.3 MODDING SUPPORT
+  - Expose crafting recipes as .tres files
+  - Allow custom ability scripts
+  - Asset path abstraction (mod folders)
+  - Thunderstore integration (later phase)
+
+3.4 SEASONAL SYSTEM
+  - Floor rotation logic
+  - Leaderboard reset
+  - Progress preservation
+  - New difficulty bands
+
+
+=== CRITICAL DESIGN DECISIONS ===
+
+Combat Authority
+  - Server ALWAYS calculates damage
+  - Server validates hit timing
+  - Client cannot modify cooldowns
+  → Prevents speedhack + RMT dominance
+
+Crafting Authority
+  - Server validates block layout + materials
+  - Server generates stats from profile
+  - Client UI is preview only
+  → Prevents item duplication/illegal stats
+
+Movement Authority
+  - Server checks if movement is physically valid
+  - Server validates ability cast legality
+  - Snapshots sent to other players
+  → Prevents teleport hacks
+
+Loot Distribution
+  - Server rolls rarity & item type
+  - Players bid/pass → server processes results
+  - Inventory modified only by server
+  → Prevents loot theft in multiplayer
+
+
+=== GODOT-SPECIFIC IMPLEMENTATION NOTES ===
+
+3D vs 2D
+  - Recommended: Node3D with orthographic camera for "isometric-like" 3D feel
+  - Allows real 3D depth without full 3D complexity
+  - Can mix 2D UI over 3D world easily
+
+Performance Optimization
+  - Use spatial partitioning for enemies (Decals hidden if >500m away)
+  - Pool projectiles & VFX
+  - Disable physics for far players in multiplayer
+  - Instance LOD system for distant enemies
+
+Modding Hooks
+  - Use signals extensively (OnCraft, OnCombat, OnLevelLoad)
+  - Allow scripts in res://mods/ folder
+  - Data-driven ability system (no hardcoded skills)
+  - Color tags system for items (extensible)
+
+Save System
+  - Use Resource system for save data
+  - JSON export for backup/sharing seeds
+  - Version migration layer for updates
+
+
+=== GODOT PLUGIN RECOMMENDATIONS ===
+
+godot-netcode (ENet-based MP)
+  - For player-hosted multiplayer
+  
+godot-sqlite (local DB alternative)
+  - For offline progression tracking
+  
+godot-imguizmo (3D gizmo tools)
+  - For in-editor crafting preview
+  
+TileMeshBuilder (for procedural level gen)
+  - Creates tile-based dungeons from data
+
+
+=== ESTIMATED TIMELINE ===
+Phase 1 (Vertical Slice): 6-10 weeks
+Phase 2 (Multiplayer): 4-6 weeks
+Phase 3 (Content+Polish): 8-12 weeks
+Total: ~5-6 months for MVP (2 people, focused work)
+
+
+=== RISK FACTORS ===
+
+High Risk:
+  - Procedural generation complexity (test early)
+  - Networking sync with physics (requires careful design)
+  - Modding architecture (start simple)
+
+Medium Risk:
+  - 3D animation pipeline for enemies
+  - Performance optimization at scale
+  - Seasonal systems + leaderboards
+
+Low Risk:
+  - Core combat loop
+  - Crafting system
+  - Basic MP architecture
+
+
+=== SUCCESS METRICS (Early) ===
+
+Vertical Slice Playable:
+  ✓ Player enters chamber
+  ✓ Fights 1 enemy with 2 attacks
+  ✓ Loots 2 materials
+  ✓ Crafts weapon at NPC
+  ✓ Equips weapon, sees new abilities
+  ✓ Re-enters chamber, weapon works & affects gameplay
+  
+First Multiplayer Test:
+  ✓ 2 players in same room
+  ✓ Both see each other move
+  ✓ One player's damage affects shared enemy HP
+  ✓ Loot roll determined by server
+  
+Seed Export Test:
+  ✓ Floor generated from seed
+  ✓ Seed → code conversion works
+  ✓ Second playthrough with same code = identical layout
+
+
+=== NEXT IMMEDIATE ACTIONS ===
+
+1. Set up Godot project structure (copy structure above)
+2. Create Material, Block, Enemy resources (empty .tres files)
+3. Build basic player movement + camera
+4. Create single test room with 1 enemy
+5. Implement 1 ability (simple melee swing)
+6. Loot 1 material, test inventory
+7. Test craft, re-equip, ability changes
+
+This takes 1-2 weeks for 2 people, then you have a proof-of-concept.
+
+================================================================================

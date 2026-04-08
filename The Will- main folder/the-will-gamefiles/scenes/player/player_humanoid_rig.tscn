@@ -7,3 +7,13 @@
 script = ExtResource("1_player_humanoid_rig")
 
 [node name="JosieModel" parent="." instance=ExtResource("2_josie_model")]
+
+[node name="IkTargets" type="Node3D" parent="."]
+
+[node name="RightHandIkTarget" type="Node3D" parent="IkTargets"]
+
+[node name="LeftHandIkTarget" type="Node3D" parent="IkTargets"]
+
+[node name="RightHandPoleTarget" type="Node3D" parent="IkTargets"]
+
+[node name="LeftHandPoleTarget" type="Node3D" parent="IkTargets"]

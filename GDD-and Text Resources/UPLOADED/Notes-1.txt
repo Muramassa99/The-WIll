@@ -1,0 +1,60 @@
+i will transcribe  what i wrote down  in my notebook , might be rough to read but  will add it  as written ( was pen and paper on the  go  so.. yea.. ) 
+
+-map on floors  opens  based  on user  exploration 
+-word  lvl map opens only via  explorations  of ones movement (progressive  with pre-determined  visual range- to be decided how far when map  is created-
+-quest bord 
+  -  find "X" item 
+-Quest  ranking systems based  on reaching  thresholds  of  X amount  of quests  done , different  levels  of quests open diferent % lvl rewards 
+-Players  can put  up bounty  quests  to request  items  or escort / kill quests  for other players to fulfil 
+-Special  skills  that can be  considered  "classes" via in game "faction" association
+it's like being subscribed  to a certain group and benefit  from that via  some things 
+
+they are  as follows  for now :
+_ house of prayer ( give s mending /revive /healing )
+_ house of might (physical /pierce/ single target )
+_house of wisdom (magic /elemental / perception for traps and environmental markers  )
+_house of fortification (defence/stamina/anti-stagger/ agro management )
+
+then for items 
+scroll of resurrection (10 min cooldown  on recast )  
+potions = MANA / HP / STAMINA 
+scroll of return = AOE portal out  of the floor back to town  has a 15 sec  cast  time  up to 60 seconds  active  AOE zone  so people can walk in and have a common exit no need for individual  ones , people if in the area can decide to return  or not  with a popup when walking within bounds of the area. 
+ scroll of return  can be  used  only when out of combat  meaning  did not take any damage  for the last  30 seconds  and if that  condition is already met at least 15 seconds  since the caster has used  a  skill . that  means  to be out of combat  ( time to be adjusted during play test ) additionally  if the return  scroll was used  on a dead  body  they dead player gets  the same return /extraction notification as a live player  and can opt to teleport out  even if dead , upon returning   to town all will be spawned  alive  if they  decided  to take the teleport. the "do you want to return or not  message box " is persistent  for 3 minutes for all individuals  allowing some  tolerance  for people who have  died  due to AFK  and give them a chance to come back  but  also  have a sense of urgency  3 minutes  are enough 
+
+for the resurrection  scroll  the time will be 30 seconds  to accept  upon cast  
+the cd will be 10 min  / caster  limited  on how many one has   on them  and  IMPORTANT  the resurrection scroll has the same  AOE effect  as the Return  scroll just a lot smaller ,  4m area for resurect  15 m area for return 
+allows  a stack style gameplay  as well as the option for summoning  scrolls where one's party can summon to caster's location  2 min CD  / user  cap is  instance player limits .
+
+full dying means you loose durability on gear  components . not dying dose not come with this cost . gear  dose  not decay or deteriorate  if death is not involved. 
+accessories  do not  break. 
+getting to zero  durability  dose  not  destroy the gear, it just  makes it grayscale and the associated  stats are no longer granted , and the item is visually removed  form the character as well, in case of a weapon  the weapon will be unequipped an only basic attacks with  "unnamed" skill set will be usable ( to be determined  later what that  looks like and means )
+-looting things dose not require  a special Tier type item  to get it. that  means  any form of looting and harvesting dose not need  a toolset  to use it . at the equivalent  of day 1 of play if lucky you can  loot  the utmost rarest  materials in the game   if lucky,  i want RNG to be  a driver  not  double layer  the thing with RNG + having  the right  tool with you  and if not  then enjoy being frustrated because the game dev team didnt let u pick that thing  up because  u dun have  a dumb  purple tier  pickax . unnecessary  gating 
+-gear is cosmeting what's  on you in inventory is on you in game
+-database ->item -> instance  of item -> tied  to persons  account  via @ tag name -> auto populate listing -> traceable items  -> framework database  =>
+creation  by creator - item named  by creator  via name tag  system menu  thing - traded -> log  how many hands  did the item pass, proper  ownership  list  till destroyed
+can be traded  max  2 times 
+looks like this 
+creator ->recipient1 -> recipient2 ->recipient3  
+on recipient  3 item becomes bound  and can not be traded  any longer. 
+item shows  how many  trades  are available still  if not the text "bound  to @charactername " wil be shown . 
+
+-option to inspect  other peoples  gear  by selecting them  and using an inspect  character card  style  menu  people can see the equipped  items  and stats  of a player ( limited  stats  but  gear is visible )  can be set to private  via  a check mark .
+
+( next section is pure  thinking no longer notes ) 
+
+was thinking to do the crafting in layers 2d and stack the layers  to make 3d items  that might  work well for some things . and for armour  i can have  a hollow no items placed  zone on each layer to ensure  the player body form  is constant  so that  using an apply  for each section is relatively easy an have  an option to check  looks on mannequin in game  as a design before committing in using the materials  to  see how things look . a proper  fashionistas  dream playground . with options to save template  and options  to merge templates  in a "assembly" menu  for more complex  armour  and weapon design. do be determined on how many layers  and what the building block size  and style will be .
+also due to this  style of gearing  the game will be high pixel density  pixel  art style ( decided  just now  ) to keep things consistent  and not have some things look nice whilst other look ass . nor do i want to emulate and smoothen peoples  creations  just to get things to look uniform  across the world  . i'd be pissed  if i spend literal hours  design something then save it, farm what i need  to craft  it, then craft  it   and realise it looks like crap  because it  got smushed due to overall game visual choice consistency. 
+
+( at this point in time i will be reading the above message  you posted )
+
+found the things i was missing . 
+risk factor  in form of long cooldown resurrection ,
+
+and art style  in form of micro pixel art  due to weapons  and armour  being crafted  using micro blocks . 
+for context  if a player model is 2m tall  i'd use  a 1cm ³  building blocks to allow crafters to be artsy enough to craft whatever  they want  within a certain max  blocks  allowed , restrictions will make it  so that  the builds are not  just  nasty . constraints bring forth  creativity 
+
+
+
+elite 
+
+ with max 3 times  for the lifespan of the mob (until dead ) or resets  if the mob  is forced  to reset, resetting an elite  will cause over time healing  every 2 seconds for 5% of max hp.  once this self healing stat is triggered  and the elite is auto-pathing to own patrol rout  the stun restriction is reset, and can be stunned again  up to 3 times.  on elites  knock downs do not work .

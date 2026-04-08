@@ -1,0 +1,28 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+SCRIPT ERROR: Parse Error: Could not find type "PlayerController3D" in the current scope.
+   at: GDScript::reload (res://runtime/ui/system_menu_overlay.gd:93)
+ERROR: Failed to load script "res://runtime/ui/system_menu_overlay.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+SCRIPT ERROR: Parse Error: Could not find type "PlayerController3D" in the current scope.
+   at: GDScript::reload (res://runtime/forge/crafting_bench.gd:13)
+ERROR: Failed to load script "res://runtime/forge/crafting_bench.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+SCRIPT ERROR: Parse Error: Could not find type "PlayerController3D" in the current scope.
+   at: GDScript::reload (res://runtime/forge/crafting_bench_ui.gd:157)
+SCRIPT ERROR: Parse Error: Could not find type "PlayerController3D" in the current scope.
+   at: GDScript::reload (res://runtime/forge/crafting_bench_ui.gd:277)
+SCRIPT ERROR: Parse Error: Could not find type "PlayerController3D" in the current scope.
+   at: GDScript::reload (res://runtime/forge/crafting_bench_ui.gd:283)
+ERROR: Failed to load script "res://runtime/forge/crafting_bench_ui.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+SCRIPT ERROR: Parse Error: Could not find type "PlayerController3D" in the current scope.
+   at: GDScript::reload (res://runtime/disassembly/disassembly_bench.gd:12)
+ERROR: Failed to load script "res://runtime/disassembly/disassembly_bench.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+SCRIPT ERROR: Parse Error: Could not find type "PlayerController3D" in the current scope.
+   at: GDScript::reload (res://runtime/storage/storage_box.gd:10)
+ERROR: Failed to load script "res://runtime/storage/storage_box.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+ERROR: Can't load script: res://node_3d.tscn
+   at: start (main/main.cpp:4238)

@@ -2,6 +2,8 @@ extends RefCounted
 class_name ForgeService
 
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
+const CraftedItemCanonicalSolidResolverScript = preload("res://core/resolvers/crafted_item_canonical_solid_resolver.gd")
+const CraftedItemCanonicalGeometryResolverScript = preload("res://core/resolvers/crafted_item_canonical_geometry_resolver.gd")
 const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
 
 var forge_rules: ForgeRulesDef = DEFAULT_FORGE_RULES_RESOURCE
@@ -14,13 +16,16 @@ var bow_resolver: BowResolver
 var profile_resolver: ProfileResolver
 var capability_resolver: CapabilityResolver
 var material_runtime_resolver
+var canonical_solid_resolver
+var canonical_geometry_resolver
 
 func _init(rules: ForgeRulesDef = null) -> void:
 	tier_resolver = TierResolver.new()
 	process_resolver = ProcessResolver.new()
-	profile_resolver = ProfileResolver.new()
 	capability_resolver = CapabilityResolver.new()
 	material_runtime_resolver = MaterialRuntimeResolverScript.new()
+	canonical_solid_resolver = CraftedItemCanonicalSolidResolverScript.new()
+	canonical_geometry_resolver = CraftedItemCanonicalGeometryResolverScript.new()
 	set_forge_rules(rules)
 
 func set_forge_rules(rules: ForgeRulesDef) -> void:
@@ -29,6 +34,7 @@ func set_forge_rules(rules: ForgeRulesDef) -> void:
 	anchor_resolver = AnchorResolver.new(forge_rules)
 	joint_resolver = JointResolver.new(forge_rules)
 	bow_resolver = BowResolver.new(forge_rules)
+	profile_resolver = ProfileResolver.new(forge_rules)
 
 func bake_wip(
 		wip: CraftedItemWIP,
@@ -40,6 +46,7 @@ func bake_wip(
 	if wip == null:
 		return null
 
+	var authored_cells: Array[CellAtom] = _collect_authored_wip_cells(wip)
 	var cells: Array[CellAtom] = _collect_wip_cells(wip)
 	var segments: Array[SegmentAtom] = build_segments(cells, material_lookup)
 	segments = classify_joint_segments(segments, material_lookup)
@@ -49,9 +56,20 @@ func bake_wip(
 		segments,
 		material_lookup,
 		wip.forge_intent,
+		wip.equipment_context,
+		authored_cells
+	)
+	var profile: BakedProfile = bake_profile(
+		cells,
+		segments,
+		anchors,
+		material_lookup,
+		shape_data,
+		resolved_joint_data,
+		resolved_bow_data,
+		wip.forge_intent,
 		wip.equipment_context
 	)
-	var profile: BakedProfile = bake_profile(cells, segments, anchors, material_lookup, shape_data, resolved_joint_data, resolved_bow_data)
 	profile.profile_id = _build_profile_id(wip)
 	profile.material_variant_mix = _collect_material_variant_mix(cells)
 	profile.resolved_material_stat_lines = _collect_aggregated_material_lines(cells, material_lookup, &"material_stats")
@@ -61,7 +79,6 @@ func bake_wip(
 	profile.resolved_equipment_context_bias_lines = _collect_aggregated_material_lines(cells, material_lookup, &"equipment_context_bias")
 	profile.capability_scores = derive_capability_scores(profile, profile.resolved_capability_bias_lines)
 	wip.latest_baked_profile_snapshot = profile.duplicate(true) as BakedProfile
-	debug_print_profile(profile)
 	return profile
 
 func build_test_print_from_wip(
@@ -80,6 +97,22 @@ func build_test_print_from_wip(
 	test_print.source_wip_id = wip.wip_id
 	test_print.baked_profile = profile
 	test_print.display_cells = _collect_wip_cells(wip)
+	test_print.canonical_solid = canonical_solid_resolver.call("resolve_from_cells", test_print.display_cells)
+	var stage1_canonical_geometry = canonical_geometry_resolver.call("resolve_from_solid", test_print.canonical_solid)
+	var stage2_item_state = (
+		wip.stage2_item_state.duplicate(true)
+		if wip != null and wip.stage2_item_state != null
+		else null
+	)
+	var stage2_canonical_geometry = null
+	if stage2_item_state != null and stage2_item_state.has_current_shell():
+		stage2_canonical_geometry = stage2_item_state.build_current_canonical_geometry(test_print.canonical_solid)
+	test_print.stage2_item_state = stage2_item_state
+	test_print.canonical_geometry = (
+		stage2_canonical_geometry
+		if stage2_canonical_geometry != null and not stage2_canonical_geometry.is_empty()
+		else stage1_canonical_geometry
+	)
 	return test_print
 
 func build_material_variant(base_material: BaseMaterialDef, tier: TierDef) -> MaterialVariantDef:
@@ -119,8 +152,20 @@ func build_joint_data(segments: Array[SegmentAtom], material_lookup: Dictionary 
 		"validation_error": &"no_valid_joint_chain",
 	}
 
-func build_bow_data(segments: Array[SegmentAtom], material_lookup: Dictionary = {}, forge_intent: StringName = &"", equipment_context: StringName = &"") -> Dictionary:
-	return bow_resolver.validate_bow_structure(segments, material_lookup, forge_intent, equipment_context)
+func build_bow_data(
+	segments: Array[SegmentAtom],
+	material_lookup: Dictionary = {},
+	forge_intent: StringName = &"",
+	equipment_context: StringName = &"",
+	authored_cells: Array[CellAtom] = []
+) -> Dictionary:
+	return bow_resolver.validate_bow_structure(
+		segments,
+		material_lookup,
+		forge_intent,
+		equipment_context,
+		authored_cells
+	)
 
 func bake_profile(
 		cells: Array[CellAtom],
@@ -129,9 +174,21 @@ func bake_profile(
 		material_lookup: Dictionary = {},
 		shape_data: Dictionary = {},
 		joint_data: Dictionary = {},
-		bow_data: Dictionary = {}
+		bow_data: Dictionary = {},
+		forge_intent: StringName = &"",
+		equipment_context: StringName = &""
 	) -> BakedProfile:
-	return profile_resolver.bake_profile(cells, segments, anchors, material_lookup, shape_data, joint_data, bow_data)
+	return profile_resolver.bake_profile(
+		cells,
+		segments,
+		anchors,
+		material_lookup,
+		shape_data,
+		joint_data,
+		bow_data,
+		forge_intent,
+		equipment_context
+	)
 
 func derive_capability_scores(
 		profile: BakedProfile,
@@ -140,37 +197,11 @@ func derive_capability_scores(
 	) -> Dictionary[StringName, float]:
 	return capability_resolver.derive_capability_scores(profile, material_bias_lines, context_bias_lines)
 
-func debug_print_profile(profile: BakedProfile) -> void:
-	if profile == null:
-		print("ForgeService: no baked profile available")
-		return
-
-	print("ForgeService baked profile")
-	print("  total_mass=", profile.total_mass)
-	print("  center_of_mass=", profile.center_of_mass)
-	print("  reach=", profile.reach)
-	print("  front_heavy_score=", profile.front_heavy_score)
-	print("  balance_score=", profile.balance_score)
-	print("  edge_score=", profile.edge_score)
-	print("  blunt_score=", profile.blunt_score)
-	print("  pierce_score=", profile.pierce_score)
-	print("  guard_score=", profile.guard_score)
-	print("  flex_score=", profile.flex_score)
-	print("  launch_score=", profile.launch_score)
-	print("  resolved_material_stat_line_count=", profile.resolved_material_stat_lines.size())
-	print("  resolved_capability_bias_line_count=", profile.resolved_capability_bias_lines.size())
-	print("  capability_scores=", profile.capability_scores)
-
 func _collect_wip_cells(wip: CraftedItemWIP) -> Array[CellAtom]:
-	var cells: Array[CellAtom] = []
-	for layer in wip.layers:
-		if layer == null:
-			continue
-		for cell in layer.cells:
-			if cell == null:
-				continue
-			cells.append(cell)
-	return cells
+	return CraftedItemWIP.collect_bake_cells(wip)
+
+func _collect_authored_wip_cells(wip: CraftedItemWIP) -> Array[CellAtom]:
+	return CraftedItemWIP.collect_cells(wip, true)
 
 func _build_test_print_id(wip: CraftedItemWIP) -> StringName:
 	if wip == null or wip.wip_id == StringName():

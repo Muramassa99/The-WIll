@@ -1,0 +1,324 @@
+# THE WILL - NAMING LAW / QUICK LOOKUP
+
+## Use
+- `name = what it is`
+- `refs = where to look`
+- keep this file short, practical, and current
+
+## Core Rule
+- names must say layer + role + scope
+- if one word can mean two different gameplay things, tighten it first
+- if a legacy name stays for compatibility, document the exact meaning here
+- forwarded `Callable` parameters should end in `_callback` when they wrap/forward a same-class method name
+
+## Layer Suffix Lookup
+- `*Def` = authored definition/tuning data
+  - refs: `ForgeRulesDef`, `BaseMaterialDef`, `TierDef`
+- `*RegistryDef` = authored lookup/index of defs
+  - refs: `EquipmentSlotRegistryDef`, `TierRegistryDef`, `RawDropRegistryDef`
+- `*Atom` = smallest stored authored/baked unit
+  - refs: `CellAtom`, `LayerAtom`, `AnchorAtom`, `SegmentAtom`
+- `*State` = mutable runtime/save authority container
+  - refs: `PlayerBodyInventoryState`, `PlayerForgeInventoryState`, `UserSettingsState`
+- `*Instance` = owned/resolved concrete item container
+  - refs: `TestPrintInstance`, `StoredItemInstance`, `FinalizedItemInstance`
+- `*Profile` = baked gameplay-facing summary
+  - refs: `BakedProfile`
+- `*Resolver` = derivation/conversion logic
+  - refs: `ProfileResolver`, `CapabilityResolver`, `AnchorResolver`
+- `*Service` = orchestration across systems
+  - refs: `ForgeService`, `InventoryStorageService`, `SalvageService`
+- `*Builder` = constructs data/mesh/WIP/payload objects
+  - refs: `TestPrintMeshBuilder`, `ForgeWipBuilder`
+- `*Presenter` = one responsibility slice pulled out of a big owner
+  - refs: `PlayerMotionPresenter`, `ForgeBenchRefreshPresenter`, `SystemMenuSurfacePresenter`
+- `*Controller` = live scene/world owner
+  - refs: `ForgeGridController`, `PlayerController3D`
+- `*Overlay` = live UI owner
+  - refs: `PlayerInventoryOverlay`, `SystemMenuOverlay`
+- `*Preview` / `*Viewport` = visual surface, not authority
+  - refs: `ForgeWorkspacePreview`, `ForgePlaneViewport`
+- `*Support` = shared helper, no scene ownership
+  - refs: `ItemInstanceContainerSupport`
+
+## Common Compound Suffix Lookup
+- `*RulesDef` = subsystem laws / thresholds
+  - refs: `ForgeRulesDef`, `SalvageRulesDef`, `SkillCoreRulesDef`
+- `*SeedDef` = authored starter contents
+  - refs: `BodyInventorySeedDef`, `ForgeInventorySeedDef`
+- `*CatalogDef` = authored display/order list
+  - refs: `ForgeMaterialCatalogDef`
+- `*PresetDef` = authored starter/example configuration
+  - refs: `ForgeSamplePresetDef`
+  - wording: prefer `authoring preset` in docs/UI
+
+## Core Domain Lookup
+- `WIP` = editable forge draft
+  - refs: `CraftedItemWIP`
+- `TestPrint` = temporary forge-side playable copy
+  - refs: `TestPrintInstance`, `ForgeService`, `TestPrintMeshBuilder`
+- `FinalizedItem` = non-editable exported item
+  - refs: `FinalizedItemInstance`
+- `StoredItem` = inventory/storage wrapper
+  - refs: `StoredItemInstance`
+- `CanonicalSolid` = processed solid-stage truth from voxels
+  - refs: `CraftedItemCanonicalSolid`, `CraftedItemCanonicalSolidResolver`
+- `CanonicalGeometry` = processed geometry-stage truth from canonical solid
+  - refs: `CraftedItemCanonicalGeometry`, `CraftedItemCanonicalGeometryResolver`
+- `SurfaceQuad` = one generated canonical surface element
+  - refs: `CraftedItemCanonicalSurfaceQuad`
+- `Stage 2` = optional refinement substage between Stage 1 crafting and test print
+  - refs: `Adaptive Outer Shell - Refinement Envelope System 1.md`, `forge_stage2_service.gd`
+- `Refinement Envelope` = local inward shell clamp derived from Stage 1 thickness
+  - refs: `forge_rules_def.gd`, `forge_stage2_service.gd`
+- `Stage2ItemState` = saved Stage 2 shell section on a WIP or test print
+  - refs: `core/models/stage2_item_state.gd`, `core/models/crafted_item_wip.gd`, `core/models/test_print_instance.gd`
+- `Stage2PatchState` = one local Stage 2 shell patch record
+  - refs: `core/models/stage2_patch_state.gd`
+- `stage2_zone_general` = normal Stage 2 shell-edit zone
+  - refs: `core/models/stage2_patch_state.gd`, `services/forge_stage2_service.gd`
+- `stage2_zone_primary_grip_safe` = Stage 2 grip-safe zone; destructive carve blocked in first pass
+  - refs: `core/models/stage2_patch_state.gd`, `services/forge_stage2_service.gd`, `runtime/forge/forge_stage2_brush_presenter.gd`
+- `stage2_refinement_mode_active` = live bench submode for shell editing
+  - refs: `runtime/forge/crafting_bench_ui.gd`
+- `stage2_carve` / `stage2_fillet` / `stage2_chamfer` / `stage2_restore` = Stage 2 brush tool ids
+  - refs: `runtime/forge/forge_stage2_brush_presenter.gd`, `runtime/forge/crafting_bench_ui.gd`
+- `stage2_pointer_tool_*` = Stage 2 pointer-brush radius clamp knobs for the mouse-centered brush family only
+  - refs: `core/defs/forge_rules_def.gd`, `runtime/forge/crafting_bench_ui.gd`, `runtime/forge/forge_stage2_brush_presenter.gd`
+- `stage2_surface_face_fillet` / `stage2_surface_face_chamfer` = Stage 2 selection-first face tool ids
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/crafting_bench_ui.gd`
+- `surface_face` = current Stage 2 connected coplanar face-region target; apply resolves through that region's outer boundary loop
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/forge_stage2_brush_presenter.gd`
+- `stage2_surface_edge_fillet` / `stage2_surface_edge_chamfer` = Stage 2 selection-first edge-run tool ids
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/crafting_bench_ui.gd`
+- `stage2_surface_feature_edge_fillet` / `stage2_surface_feature_edge_chamfer` = Stage 2 selection-first internal feature-edge tool ids
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/crafting_bench_ui.gd`
+- `surface_feature_edge` = current Stage 2 internal shared-edge run target; applies to both patch sides along that run
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/forge_stage2_brush_presenter.gd`
+- `neighbor_patch_ids` = Stage 2 coplanar edge-neighbor graph for connected face-region resolution
+  - refs: `core/models/stage2_patch_state.gd`, `services/forge_stage2_service.gd`, `runtime/forge/forge_stage2_selection_presenter.gd`
+- `workspace_stage2_*` = Stage 2 preview / brush tuning knobs
+  - refs: `core/defs/forge_view_tuning_def.gd`
+- `max_fillet_offset_meters` = per-patch first-pass fillet depth cap inside the full refinement envelope
+  - refs: `core/models/stage2_patch_state.gd`, `services/forge_stage2_service.gd`
+- `max_chamfer_offset_meters` = per-patch first-pass chamfer depth cap inside the full refinement envelope
+  - refs: `core/models/stage2_patch_state.gd`, `services/forge_stage2_service.gd`
+- `stage2_fillet_max_inward_ratio` = first-pass Stage 2 fillet depth ratio of full patch envelope
+  - refs: `core/defs/forge_rules_def.gd`, `services/forge_stage2_service.gd`
+- `stage2_chamfer_max_inward_ratio` = first-pass Stage 2 chamfer depth ratio of full patch envelope
+  - refs: `core/defs/forge_rules_def.gd`, `services/forge_stage2_service.gd`
+- `stage2_primary_grip_safe_radius_voxels` = Stage 2 grip-span protection radius around baked primary grip
+  - refs: `core/defs/forge_rules_def.gd`, `services/forge_stage2_service.gd`
+- `workspace_stage2_blocked_brush_color` = blocked Stage 2 hover preview color
+  - refs: `core/defs/forge_view_tuning_def.gd`, `runtime/forge/forge_stage2_preview_presenter.gd`
+- `workspace_stage2_hover_face_color` = hovered Stage 2 face-selection preview color
+  - refs: `core/defs/forge_view_tuning_def.gd`, `runtime/forge/forge_stage2_preview_presenter.gd`
+- `workspace_stage2_selected_face_color` = selected Stage 2 face-selection preview color
+  - refs: `core/defs/forge_view_tuning_def.gd`, `runtime/forge/forge_stage2_preview_presenter.gd`
+- `ToolOverlayHost` = stable forge overlay host that stays above 2D-main / 3D-main workspace swaps
+  - refs: `scenes/ui/crafting_bench_ui.tscn`, `runtime/forge/crafting_bench_ui.gd`
+
+## Gameplay Umbrella Lookup
+- `Ranged Physical Weapon` = physical ranged umbrella
+  - refs: `RANGED_PHYSICAL_WEAPON_AND_SHIELD_FOUNDATION_SPEC_2026-04-02.md`
+- `bow` = bow component only, not the whole umbrella
+  - refs: same spec, `Bow  Ranged Specialization.md`
+- `quiver` = separate crafted back-slot component
+  - refs: same spec
+- `Ranged Magical Weapon` = separate magical ranged umbrella
+  - refs: same spec
+- `shield` = handle-first mannequin/restriction build family
+  - refs: same spec
+
+## Prefix / Token Lookup
+- `cap_` = normalized gameplay capability key
+  - refs: `BakedProfile.capability_scores`, `capability_resolver.gd`
+- `mat_` = material variant id
+  - refs: material `.tres`, `MaterialRuntimeResolver`
+- `intent_` = forge intent token
+  - refs: `forge_intent`, `profile_resolver.gd`
+- `ctx_` = equipment context token
+  - refs: `equipment_context`, `profile_resolver.gd`
+- `stow_` = authored carry/storage mode
+  - refs: `stow_position_mode`, player equipment/stow files
+- `grip_` = authored or resolved grip mode/token
+  - refs: `grip_style_mode`, grip UI and player hold files
+
+## Field / Value Suffix Lookup
+- `*_id` = stable identity token
+- `*_name` = display text
+- `*_kind` / `*_type` / `*_context` = classification token
+- `*_count` = whole-number quantity
+- `*_index` = position index
+- `*_order` / `*_priority` = ordering, not identity
+- `*_valid` = pass/fail result
+- `*_error` / `*_reason` = failure surface
+- `*_snapshot` = cached comparison/revalidation copy
+- `*_mix` = aggregate makeup
+- `*_lines` = `StatLine` list
+- `*_score` = derived rating, not direct measurement
+- `*_offset` = delta from reference
+- `*_position` = resolved point
+- `*_rotation_degrees` = rotation in degrees
+
+## Units Lookup
+- `*_meters` = world distance
+- `*_degrees` = angle in degrees
+- `*_seconds` = duration
+- `*_hz` = frequency
+- `*_voxels` = voxel/grid count or voxel-space length
+- `*_percent` = `0.0 -> 1.0` normalized percentage unless explicitly stated otherwise
+- `*_ratio` = normalized relation/proportion
+
+## Locked Ambiguous-Term Meanings
+- `forge_builder_path_id` = forge entry/build branch selector
+  - controls which authored craft path the WIP belongs to
+  - refs: `crafted_item_wip.gd`, `forge_wip_builder.gd`, `crafting_bench_ui.gd`
+- `forge_builder_component_id` = authored sub-part selector inside a builder path
+  - first live use is ranged physical `bow` vs `quiver`
+  - refs: `crafted_item_wip.gd`, `forge_rules_def.gd`, `forge_grid_controller.gd`
+- `builder marker` = non-inventory authoring-only placement entry
+  - current first live use is ranged bow string-anchor markers
+  - refs: `crafted_item_wip.gd`, `forge_material_catalog_presenter.gd`, `forge_workspace_edit_action_presenter.gd`
+- `string anchor pair` = authored bow string endpoint pair id
+  - current live order is `A -> F`
+  - refs: `crafted_item_wip.gd`, `bow_resolver.gd`, `bow_reference_geometry_resolver.gd`
+- `string_anchor_source` = where bow string endpoints came from
+  - `explicit_authored_pair` = authored marker pair
+  - `segment_inferred` = older heuristic fallback
+  - refs: `bow_resolver.gd`, `forge_workspace_presentation.gd`
+- `surface_face` = current first-pass Stage 2 selectable face target
+  - current live truth is a connected coplanar Stage 2 face region
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/forge_workspace_preview.gd`
+- `surface_edge` = current first-pass Stage 2 selectable boundary edge-run target
+  - current live truth is a contiguous run of coplanar Stage 2 patch boundary edges
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/forge_workspace_preview.gd`
+- `surface_feature_edge` = current first-pass Stage 2 selectable internal shared-edge run target
+  - current live truth is a contiguous run of coplanar Stage 2 internal shared edges with both patch sides selected
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/forge_workspace_preview.gd`
+- `surface_feature_region` = current first-pass Stage 2 selectable modified-region target
+  - current live truth is a connected coplanar Stage 2 patch region with shared current offset and shared zone mask
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/forge_stage2_brush_presenter.gd`
+- `surface_feature_band` = current first-pass Stage 2 selectable modified-region transition band target
+  - current live truth is the union of a connected coplanar same-offset Stage 2 feature region and its adjacent offset-change boundary loop
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/forge_stage2_brush_presenter.gd`
+- `stage2_surface_feature_band_restore` = current first-pass Stage 2 selection-first feature-band restore tool id
+  - current live truth is selected feature-band return toward baseline through the shared CAD apply path
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/forge_stage2_brush_presenter.gd`, `runtime/forge/crafting_bench_ui.gd`
+- `surface_feature_cluster` = current first-pass Stage 2 selectable higher-continuity modified-feature family target
+  - current live truth is the closure of connected coplanar same-zone offset-derived feature regions plus their adjacent transition bands across the same topology plane
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/forge_stage2_brush_presenter.gd`
+- `stage2_surface_feature_cluster_fillet` / `stage2_surface_feature_cluster_chamfer` / `stage2_surface_feature_cluster_restore` = current first-pass Stage 2 selection-first feature-cluster tool ids
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/crafting_bench_ui.gd`
+- `surface_feature_bridge` = current first-pass Stage 2 selectable cross-topology continuity family target
+  - current live truth is the closure of connected same-zone non-zero-offset feature clusters bridged across shared topology edges between different topology planes
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/forge_stage2_brush_presenter.gd`
+- `stage2_surface_feature_bridge_fillet` / `stage2_surface_feature_bridge_chamfer` / `stage2_surface_feature_bridge_restore` = current first-pass Stage 2 selection-first feature-bridge tool ids
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/crafting_bench_ui.gd`
+- `surface_feature_contour` = current first-pass Stage 2 selectable multi-plane transition-contour target
+  - current live truth is the per-topology-plane offset-transition contour inside a bridge-connected modified feature family
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/forge_stage2_brush_presenter.gd`
+- `stage2_surface_feature_contour_fillet` / `stage2_surface_feature_contour_chamfer` / `stage2_surface_feature_contour_restore` = current first-pass Stage 2 selection-first feature-contour tool ids
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/crafting_bench_ui.gd`
+- `layer sweep authoring` = simultaneous held structural authoring plus continuous held layer stepping
+  - current first-pass live truth is: apply the active plane-view structural footprint once per newly entered layer while mouse hold and `Q`/`E` layer hold are both active, across both freehand and current structural shape drag
+  - refs: `GDD-and Text Resources/Structural Volume Authoring System.md`, `runtime/forge/crafting_bench_ui.gd`, `runtime/forge/forge_workspace_interaction_presenter.gd`, `runtime/forge/forge_plane_viewport.gd`, `runtime/forge/forge_workspace_edit_action_presenter.gd`
+- `rectangle_place` / `rectangle_erase` = first live structural rectangle tool ids
+  - current first-pass live truth is: plane-view drag-defined axis-aligned rectangle add/remove using the same structural commit path as freehand
+  - refs: `GDD-and Text Resources/Structural Volume Authoring System.md`, `runtime/forge/forge_workspace_shape_tool_presenter.gd`, `runtime/forge/crafting_bench_ui.gd`, `runtime/forge/forge_plane_viewport.gd`
+- `circle_place` / `circle_erase` = first live structural circle tool ids
+  - current first-pass live truth is: plane-view drag-defined circle footprint add/remove using the same structural commit path as freehand
+  - refs: `GDD-and Text Resources/Structural Volume Authoring System.md`, `runtime/forge/forge_workspace_shape_tool_presenter.gd`, `runtime/forge/crafting_bench_ui.gd`, `runtime/forge/forge_plane_viewport.gd`
+- `oval_place` / `oval_erase` = first live structural oval tool ids
+  - current first-pass live truth is: plane-view drag-defined oval footprint add/remove using the same structural commit path as freehand
+  - refs: `GDD-and Text Resources/Structural Volume Authoring System.md`, `runtime/forge/forge_workspace_shape_tool_presenter.gd`, `runtime/forge/crafting_bench_ui.gd`, `runtime/forge/forge_plane_viewport.gd`
+- `triangle_place` / `triangle_erase` = first live structural triangle tool ids
+  - current first-pass live truth is: plane-view drag-defined triangle footprint add/remove using the same structural commit path as freehand
+  - refs: `GDD-and Text Resources/Structural Volume Authoring System.md`, `runtime/forge/forge_workspace_shape_tool_presenter.gd`, `runtime/forge/crafting_bench_ui.gd`, `runtime/forge/forge_plane_viewport.gd`
+- `structural shape rotation slot` = live shared quarter-turn rotation layer for structural shape tools
+  - current live truth is: one shared `0° / 90° / 180° / 270°` slot across rectangle/circle/oval/triangle instead of separate per-tool rotation logic
+  - refs: `GDD-and Text Resources/Structural Volume Authoring System.md`, `runtime/forge/crafting_bench_ui.gd`, `runtime/forge/forge_workspace_shape_tool_presenter.gd`, `runtime/forge/forge_bench_menu_presenter.gd`
+- `surface_feature_loop` = current first-pass Stage 2 selectable modified-region boundary target
+  - current live truth is the boundary loop around a connected coplanar same-offset Stage 2 feature region, including the adjacent offset-change seam patches
+  - refs: `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/forge_stage2_brush_presenter.gd`
+- `string_rest_path` = current resolved bow string rest polyline
+  - current first pass is `upper anchor -> rest pull point -> lower anchor`
+  - refs: `bow_resolver.gd`, `forge_workspace_preview.gd`
+- `string_pull_point_rest` = current resolved bow string rest pull point
+  - current first pass uses projectile pass point when available, midpoint fallback otherwise
+  - refs: `bow_resolver.gd`, `bow_reference_geometry_resolver.gd`, `forge_workspace_preview.gd`
+- `builder_marker_positions` = saved authored marker-position authority on the WIP
+  - current first live use is ranged bow string anchors stored outside material mass cells
+  - refs: `crafted_item_wip.gd`, `forge_grid_controller.gd`
+- `string_pull_point_draw_max` = first-pass maximum bow string draw pull point
+  - current first pass is `rest pull point + draw axis * bow_string_draw_distance_meters`
+  - refs: `bow_resolver.gd`, `forge_workspace_preview.gd`, `forge_rules_def.gd`
+- `string_draw_path` = first-pass maximum-draw bow string polyline
+  - current first pass is `upper anchor -> draw pull point -> lower anchor`
+  - refs: `bow_resolver.gd`, `forge_workspace_preview.gd`
+- `string_draw_distance_meters` = resolved rest-to-max-draw pull distance
+  - current first pass is normalized by the forge rule knob, not anchor spacing
+  - refs: `bow_resolver.gd`, `forge_rules_def.gd`, `forge_workspace_presentation.gd`
+- `reach` = current legacy grip-to-geometry extent
+  - not final melee strike distance
+  - refs: `baked_profile.gd`, `profile_primary_grip_resolver.gd`
+- `cap_reach` = current legacy normalized extension capability from `reach`
+  - not final attack distance
+  - refs: `capability_resolver.gd`, material `cap_reach` bias lines
+- `range` = reserve for actual gameplay distance when possible
+- `aim_max_range_meters` = aim/query/trace range
+  - refs: player aim settings / controller
+- preferred clearer future wording:
+  - `grip_extension_meters` = grip-to-geometry extent
+  - `strike_reach_meters` = melee strike distance
+  - `projectile_range_meters` = projectile effective range
+  - `max_attack_extent_meters` = hurtbox/damage outer extent
+
+## Knob / Search Index
+- full live knob/search registry now lives in `LIVE_EXPORTED_KNOB_REGISTRY.md`
+- use that file for search terms like `hurtbox`, `AoE`, `pierce`, `reach`, `grip`, `stow`, `bounds`
+- keep this file for naming meaning/law only
+
+## Current Hot References
+- builder path / station entry:
+  - refs: `core/models/crafted_item_wip.gd`, `runtime/forge/crafting_bench_ui.gd`, `runtime/forge/forge_bench_start_menu_presenter.gd`, `runtime/forge/forge_wip_builder.gd`
+- builder component / ranged split:
+  - refs: `core/models/crafted_item_wip.gd`, `core/defs/forge_rules_def.gd`, `runtime/forge/forge_grid_controller.gd`, `runtime/forge/forge_project_workflow.gd`
+- bow string anchor markers:
+  - refs: `core/models/crafted_item_wip.gd`, `runtime/forge/forge_material_catalog_presenter.gd`, `runtime/forge/forge_workspace_edit_action_presenter.gd`, `core/resolvers/bow_resolver.gd`
+- profile facts:
+  - refs: `core/models/baked_profile.gd`
+- capability derivation:
+  - refs: `core/resolvers/capability_resolver.gd`
+- grip/extension derivation:
+  - refs: `core/resolvers/profile_primary_grip_resolver.gd`
+- material capability bias lines:
+  - refs: `core/defs/materials/base/*.tres`
+- canonical crafted-item geometry:
+  - refs: `crafted_item_canonical_solid*.gd`, `crafted_item_canonical_geometry*.gd`
+- ranged/shield future foundation:
+  - refs: `RANGED_PHYSICAL_WEAPON_AND_SHIELD_FOUNDATION_SPEC_2026-04-02.md`
+
+## Update Rule
+- add new suffix families here when they appear
+- add ambiguous terms here before building more systems on top of them
+- keep entries short: `name = meaning`, then `refs`
+
+## Forge Tool State Law
+- `tool family` = the selected structural or Stage 2 operation family
+  - examples:
+    - Stage 1: `freehand`, `rectangle`, `circle`, `oval`, `triangle`
+    - Stage 2: `carve`, `fillet`, `chamfer`, selection families
+- `tool state` = the shared user-facing modifier applied on top of the family
+  - Stage 1:
+    - `Add`
+    - `Remove`
+    - `Pick`
+  - Stage 2:
+    - `Apply`
+    - `Revert`
+- do not expose duplicated user-facing entries like `rectangle draw`, `rectangle erase`, `feature region restore tool`
+- those can still exist as effective internal tool ids, but the visible/UI model should be:
+  - select family
+  - then switch modifier
+- user-facing material wording in forge HUD should use `Material`, not `Armed material`

@@ -1,0 +1,41 @@
+COMBAT LOOK & FEEL — WORKSHEET (v0.01)
+
+1) Camera / Readability
+- Default camera distance:
+- FOV:
+- Aim style: (soft lock / manual aim / hybrid)
+- How do I show hit confirmation? (sound, flash, stagger, numbers?)
+
+2) Tempo (seconds)
+- Typical “trash mob” time-to-kill:
+- Typical “elite” time-to-kill:
+- Boss fight length target:
+- Player time-to-die if disrespected:
+
+3) Player Kit Shape
+- Core resources: (HP / stamina / energy / mana?) + regen rules
+- How many abilities are “always available” vs cooldown-gated?
+- Do basic attacks exist? If yes, what do they do (build resource, apply pressure, etc.)?
+
+4) Hit Logic
+- Melee hit shapes: (cone / sweep / capsule)
+- Projectile: (hitscan / physical projectile / arcing)
+- I-frames: which skill-slot identities can have them?
+
+5) Control (CC)
+- List CC types (max 4–6):
+- “CC window” telegraph style:
+- Failure consequence for wrong CC type:
+
+6) Threat / Tanking
+- Threat sources: damage, heals, utility?
+- Aggro buff: exact multiplier concept:
+- “No drop aggro” rule: confirm edge cases (teleport, death, instance exit)
+
+7) Weapon Profile → Skill Slot Mapping
+- For each weapon tag (blade/blunt/pole/rope/ranged/magic):
+  Slot 1 does ____
+  Slot 2 does ____
+  Slot 3 does ____
+  Slot 4 does ____
+(Only the identity needs locking — numbers can be tuned later.)

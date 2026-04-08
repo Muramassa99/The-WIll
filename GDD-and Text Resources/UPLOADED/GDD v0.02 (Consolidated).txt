@@ -1,0 +1,581 @@
+THE WILL — Game Design Document (GDD)
+Version: v0.02 (Consolidated)
+Date: 2026-03-01
+Owner: (You)
+Contributors: (Friend names here)
+Engine Target: Godot 4.x (prototype in primitives)
+Scope Note: This document defines CORE rules + player-facing systems. Visuals/content are placeholders until core loop is proven.
+
+────────────────────────────────────────────────────────────
+1) HIGH CONCEPT
+────────────────────────────────────────────────────────────
+A hub-based, PvE-first, instanced “99-floor” dungeon expedition game with:
+- 3D skillshot combat (including melee), dodging, blocking, CC windows.
+- No hard classes: equipment + crafted weapon/gear defines playstyle.
+- Deep crafting via micro-block design: shape + materials create unique items and behavior.
+- Seasons reshuffle difficulty: each floor is a NAMED layout; its floor NUMBER changes (difficulty + drop mods).
+- Social hub + contracts board to form parties, trade, and commission crafting.
+
+Player fantasy:
+- “I craft something personal, learn the place when it’s safe, then return when it’s deadly.”
+- “People matter, knowledge matters, creation matters.”
+
+Core pillars:
+1) People matter (party coordination, contracts, reputation, crafting identity)
+2) Knowledge matters (map discovery, enemy patterns, floor mastery)
+3) Creation matters (crafted gear defines gameplay; provenance; templates)
+4) Seasons create memory (difficulty rotations change focus without wiping knowledge)
+
+Design stance:
+- Early development focuses on mechanics, movement, and systems (cubes/primitives).
+- Art polish comes later as a “skin” over a proven core.
+
+────────────────────────────────────────────────────────────
+2) CORE LOOP
+────────────────────────────────────────────────────────────
+Gather → Craft → Attempt Floor → Extract/Return → Refine Build → Climb Difficulty
+
+- Enter a floor instance from the hub.
+- Explore (personal fog-of-war), gather materials, fight mobs/bosses.
+- Return to hub; process materials; craft/upgrade gear; adjust build.
+- Re-run the same NAMED floors at higher difficulty (new season / new rotation).
+- Chase clears, titles, prestige, and better materials.
+
+────────────────────────────────────────────────────────────
+3) WORLD STRUCTURE & INSTANCING
+────────────────────────────────────────────────────────────
+Hub/Town:
+- Prototype hub is minimal: 4x4 platform + station placeholders.
+- Stations planned: entry portal, crafting/forge access, storage, vendor, cooking, repair.
+- Social: chat, mail, contracts board, party forming, inspection.
+
+Floors (99):
+- Each floor is a NAMED layout (e.g., “Grace’s Garden”) with a stable map/layout identity.
+- Seasonal rotation remaps NAMED floors to FLOOR NUMBERS (difficulty + drop quality).
+- Layout remains constant; difficulty and drop quality shift with floor number.
+- Higher difficulty may add extra enemies/events/mechanics (optional later).
+
+Instance model:
+- Client loads only the current scene (hub OR one floor OR instanced crafting zone).
+- Server-side instancing is planned later (authoritative outcomes, economy integrity).
+
+────────────────────────────────────────────────────────────
+4) EXPLORATION & MAP DISCOVERY
+────────────────────────────────────────────────────────────
+Fog-of-war:
+- Map reveal is PERSONAL and permanent once discovered for a NAMED floor.
+- Party members are always visible on the map as dot + name (even in fog).
+- Teleporting into unknown reveals a local “island bubble” around landing point.
+
+Party-size reveal bonus (low impact):
+- Reveal radius is centered on YOUR character.
+- If party members are physically within your reveal radius, you gain a small bonus (cap ~+20%).
+- Intended as a mild co-op quality-of-life, not a balance pillar.
+
+Design intent:
+- Easy difficulty versions emphasize discovery/navigation.
+- Hard difficulty versions emphasize combat mastery (not “being lost while in danger”).
+
+Landmarks.
+-Locations that allow extraction can must be atoned to be used. (comes with risks)
+
+────────────────────────────────────────────────────────────
+5) COMBAT OVERVIEW (PVE FIRST)
+────────────────────────────────────────────────────────────
+Core combat:
+- 3D OTS camera with zoom option.
+- All attacks are skillshots (including melee).
+- Hits require being inside the attack volume; misses are real.
+- I-frames exist only on dedicated skills (usually mobility type).
+
+Damage philosophy (PvE baseline):
+- Enemy NPC damage is “flat damage.” No damage flavor needed for the core PvE model.
+- Defense is a flat stat (“Armor” / “Defense”). Damage vs Defense reduces HP (and/or "Bubble shields").
+- (PvP is optional later; PvP zones may apply a global damage-vs-player reduction modifier.)
+
+────────────────────────────────────────────────────────────
+6) COMBAT RESOURCES (HP / BUBBLE-SHIELDS / ARMOUR & ENDURANCE / STAMINA / COOLDOWNS )
+────────────────────────────────────────────────────────────
+Resource model:
+- HP + Armor & Endurance + Stamina + cooldown-based skills (no mana/energy resource).
+
+HP:
+- Primary survivability pool (base HP + gear + buffs).
+- Displayed as numeric value + bar.
+
+Armor
+ - This is the sum of all defense stats listed on armor pieces, earrings, and other gear
+
+Endurance 
+ - This is the core stat, representing a character's basic ability to defend. It directly multiplies the defense value provided by armor. Higher endurance means greater damage reduction. tipically found on belts and armor pieces as sub stats 
+
+Bubble-Shield (Temporary HP):
+- Bubble-Shield is a flat-value temporary HP pool added on top of HP (not % based).
+- Bubble-Shield is visually displayed as an extension/overlay on the HP bar (distinct color).
+- Bubble-Shield is primarily granted by House of Prayer effects and select support skills.
+- Bubble-Shields can be abundant (can reach ~2x HP or more depending on build).
+- Bubble-Shield mitigation uses reduced defensive effectiveness:
+  - Bubble uses 50% of the defender’s effective Defense in mitigation calculations.
+  - Balancing knob: BUBBLE_SHIELD_DEFENSE_MULT (default 0.5; tunable).
+
+Stamina:
+- Displayed as a bar with NO numeric readout.
+- Consumed by: sprint (Shift), dodge/i-frame, and certain movement skills (e.g., dashes).
+- Regen rules:
+  - Regen delay: starts 2.0s after last stamina consumption.
+  - Regen rate: full refill in 10.0s (tunable).
+  - Food/buffs may increase max stamina and/or improve regen.
+
+Skills:
+- Skills are cooldown-driven.
+- Weapon weight/handling can influence cooldown feel and swing/projectile velocity  (heavy slower, light faster) (see Crafting).
+
+────────────────────────────────────────────────────────────
+7) COMBAT STATE, OUT-OF-COMBAT, AND DISPLACEMENT
+────────────────────────────────────────────────────────────
+Return Scroll eligibility depends on combat state.
+
+Hostile categories (combat-state relevance):
+- Hostile: mobs/bosses/traps caused by mobs.
+- Self-inflicted: e.g., fall damage (treated as non-hostile for combat-state unless specified).
+- Friendly: displacement from allies / objects / interactions.
+- Neutral: environmental hazards/factors with no owner (lava, glue, ice, swimming, etc.).
+
+Combat-state timestamps:
+- t_last_hostile_damage (default “calm” gate: 40.0s; tunable)
+- t_last_combat_action (default “calm” gate: 15.0s; tunable)
+- Optional: t_last_forced_displacement (if needed for specific hazards)
+
+Combat actions:
+- Any action tagged “in_combat_when_used” updates t_last_combat_action.
+- Movement, camera, and jump do NOT count as combat actions by default.
+- Tags control edge cases (consumables, utility skills, etc.).
+
+Displacement:
+- Only intentional combat actions, hostile damage, and forced displacement EVENTS can affect combat state.
+- Continuous passive motion (platform carrying you) does not repeatedly retrigger combat state.
+
+────────────────────────────────────────────────────────────
+8) DAMAGE, CRIT, AND DOTS
+────────────────────────────────────────────────────────────
+Base damage model (PvE):
+Core values  and how they come 
+
+(∑ Attack Mod) * (3+ 0.03(∑ Power)) + ( Base Attack) = Attack
+(Attack) * (Skill base) * (∑ %Damage Mod) = Raw Damage
+
+(∑ Defense Mod) * (3+(∑ Endurance/100)) + ( Base Defense) = Raw Defense
+(Raw Defense) * (1- ∑%Damage reduction Modifier) = True Defense
+
+(Raw Damage) / (Target True Defense) = True Damage
+
+Total Attack Damage Modifier = Weapons + Rings + Necklace + Gloves + Belt + Bracelet
+
+Total Defense Modifier = Helmet + Chest + Pants + Boots + Earrings + Belt + Shield  type weapons 
+
+Endurance = gear sub-stat + food + buffs 
+
+Power = Gear sub-stat + food + buffs
+
+Basic Attack =0.2 * (rank)
+Basic Defense =0.15 * (rank)
+Base HP = 0.1 * (rank)
+rank value :
+
+S= 1200
+A= 800
+B= 600
+C= 350
+D= 200
+E= 120
+F= 50
+
+
+TOTAL HP = (Base HP) * (1 + max HP stats) * (1+ 0.4 * max stamina )
+
+
+(Base ASPD) * (1 + ∑ %ASPD bonus) = True ASPD
+
+where ASPD = Attack Speed , that includes animation speed and cast speed Note: dose not apply to items like scrolls  only skills and animations unless speccified  otherwise 
+
+([Base Movement Speed] * [1+ ∑%Movement Speed bonus] ) + (∑#Movement Speed bonus) = True Movement Speed ≤ 240.
+
+Attack Damage x Skill Damage = Total Damage to target 
+
+Damage Taken Calculation = (Base Damage - Defense Reduction) * (1 + Damage Modifiers - Damage Reduction Modifiers
+
+Heal is calculated by
+
+(Skill Base) * (1+ [([∑ #Heal Bonus] + [1+ ∑ %Heal Bonus])/1000]) * (1+∑ %received heal bonus on target) = True Heal
+
+CRIT_BONUS = CRIT_MULT - 1
+HEAL_CRIT_SCALAR = 0.75   (tunable)
+HEAL_TRUE_CRIT = HEAL_TRUE * (1 + HEAL_CRIT_SCALAR * CRIT_BONUS)
+
+
+
+Crit (core scaling mechanic):
+- Crit Chance: 0–100% (100% = always crit).
+- Crit Damage: base is +100% (2x). Can scale very high (e.g., 10x+) via gear/food/buffs.
+- Crit applies to number-based outputs from SKILLS, not items.
+
+What can crit:
+- Direct heals (single hit, not HoT).
+- Stationary periodic healing zones (crit roll/bonus fixed at cast time).
+- Direct damage hits (multi-hit attacks roll per hit).
+- Magic hits and repeated ground-effect ticks, as long as they are skill-origin and not a persistent DoT attached to the target.
+
+What cannot crit:
+- DoTs (burn/poison/etc.).
+- Item damage.
+- Environmental damage (lava/fire) unless explicitly specified.
+
+DoTs:
+- DoTs are “fluff on top”: fixed damage over a few seconds; duration can be extended/reset.
+- DoTs do NOT crit.
+- For core calculations, treat DoTs as True Damage.
+- Rare special materials MAY allow % target max HP DoT (optional later).
+
+
+────────────────────────────────────────────────────────────
+9) THREAT / AGGRO
+────────────────────────────────────────────────────────────
+Threat exists and enemies maintain a threat table / target list.
+
+Threat sources:
+- Damage generates threat.
+- Healing generates threat equivalent to healing output (healers must throttle; no infinite spam).
+- Resurrection generates a large threat spike:
+  - Default: 250% “base damage equivalent” threat (tunable).
+
+Aggro/Tank buff:
+- Aggro is not a “taunt button.” It is a threat multiplier that mimics extra damage without reducing HP.
+- Current baseline: +150% virtual threat on top of real damage.
+  - If you deal D damage, threat counts as 2.5 * D while buffed.
+- DPS can pull aggro if played aggressively; aggro swaps are possible via coordinated throttling/burst.
+
+Design intent:
+- Tanking is an orchestrated fight for control, not a binary switch.
+- Threat buff numbers are a single tuning lever to match expected DPS outputs.
+
+────────────────────────────────────────────────────────────
+10) CC SYSTEM (WINDOWS + COOP COMBOS)
+────────────────────────────────────────────────────────────
+CC is a binary on/off rule:
+- 100% lands when allowed.
+- 0% lands when not allowed.
+
+CC types:
+- Stun
+- Knockdown
+- Snare (airborne stun variant)
+- Slow (airborne knockdown variant)
+
+Base CC duration:
+- 3.0 seconds (tunable; can be modified by gear/stats later)
+
+Normal mobs:
+- CC works freely (cooldowns and skillshots are the limiting factor).
+- Multi-user chains can perma-stun normal mobs if executed well.
+
+Elites:
+- Stun: can land up to 3 times total; then immune until reset/death.
+- Knockdown: immune (damage still applies).
+- Slow: reduced effectiveness compared to normals.
+
+Bosses:
+- CC only works inside explicit CC windows (mechanic phases).
+- Boss CC success requires multiple coordinated CC applications:
+  - e.g., 3 to 7 successful CC hits (tunable by floor difficulty and attack type).
+- Wrong CC type during the window resets progress.
+- Non-CC damage does NOT affect CC progress (so DPS can keep DPSing as long as they avoid the wrong CC inputs).
+
+Airborne CC variants:
+- Using a “stun skill” while airborne results in Snare (horizontal lock).
+- Using a “knockdown skill” while airborne results in Slow (daze).
+- UI support: skill icons can swap while airborne to communicate the alternate effect.
+
+────────────────────────────────────────────────────────────
+11) DOWNED / DEATH / RECOVERY (RUN RISK SYSTEM)
+────────────────────────────────────────────────────────────
+Downed:
+- HP hits zero.
+- Visual grayscale; camera look allowed; no movement/skills.
+- UI:
+  - “Give Up” button (surrender -> return to town)
+  - “Request Res” ping button (signals you are present and want resurrection)
+
+Bleedout / auto-return:
+- After 15 minutes downed, auto return to town.
+- Auto-return counts as full death (full durability penalty).
+
+Durability:
+- No durability decay unless death-related.
+- Downed: durability loss ~1.5% on equipped gear (tunable).
+- Full death/return (give up or auto-return): additional ~1.5% (total ~3%).
+- Accessories do not break.
+- At 0 durability:
+  - item grants no stats (grayscale)
+  - item visually removed from character
+  - weapons auto-unequip; player uses a basic “unnamed” kit (TBD)
+
+Scrolls (core risk tools):
+A) Return Scroll (Extraction to town)
+- Casting requires Return eligibility rules (Section 12).
+- Cast time: 15 seconds. Interrupted by:
+  - damage
+  - hard CC
+  - any movement input
+  - any ability use
+- On success: creates 15m extraction zone for 60 seconds.
+- Entering zone triggers “Return?” prompt.
+- Prompt persists up to 3 minutes (AFK tolerance).
+- Dead players can accept; on return, all spawn alive in town.
+
+B) Resurrection Scroll (Revive on location)
+- Not restricted by out-of-combat status; can be used under pressure.
+- 4m AOE revive at current coordinates.
+- Accept window: 30 seconds.
+- Cooldown starts on BUTTON PRESS (even if cast fails).
+- Base cooldown: 10 minutes.
+- House of Prayer reduces cooldown (target: -75% -> ~2m30s).
+
+────────────────────────────────────────────────────────────
+12) RETURN SCROLL ELIGIBILITY (LOCKED VALUES)
+────────────────────────────────────────────────────────────
+A player may START casting Return Scroll only if ALL are true:
+1) Primary Target Rule:
+   - The player is NOT the current “#1 active target” of ANY enemy.
+2) Hostile Damage Calm:
+   - now - t_last_hostile_damage >= 40.0 seconds (tunable)
+3) Combat Action Calm:
+   - now - t_last_combat_action >= 15.0 seconds (tunable)
+
+Notes:
+- Movement/jump do not count as combat actions by default.
+- Actions are controlled via “in_combat_when_used” tagging.
+
+────────────────────────────────────────────────────────────
+13) ENEMY CHASE / RESET (NO “MEMORY” ON RESET)
+────────────────────────────────────────────────────────────
+Chase is designed to prevent “dragging bosses across the floor” and to avoid “feels like a bug” aggro memory.
+
+- Enemies chase participants normally while within chase constraints.
+- If chase/pathing/resource constraints are exceeded, the enemy performs a CLEAN RESET:
+  - returns to zone
+  - clears aggro/target list (no remembered participants)
+  - HP/behavior reset rules TBD per enemy type (standard reset baseline)
+
+Budgets (design intent):
+- Normal mobs: long chase budget
+- Elites: longer chase budget
+- Bosses: short chase budget
+
+────────────────────────────────────────────────────────────
+14) QUESTS, CONTRACTS, & SOCIAL SYSTEMS
+────────────────────────────────────────────────────────────
+Quest board (NPC):
+- Quest ranks: F → E → D → C → B → A → S
+- Rank unlocks based on thresholds of completed quests.
+- Higher ranks grant better rewards/odds (tunable).
+
+Player contracts (matchmaking disguised as quests):
+- Players can post:
+  - “Help me kill X boss / clear objective”
+  - “Escort/Guide me (map exploration + protection)”
+  - “Bring X items/materials”
+  - “Commission craft” (design/service fee models)
+- Contracts can be used as party board / queue system for repeating farms.
+
+Escrow:
+- Contract rewards are deposited up-front into system escrow (items/currency).
+- Completion verification pays automatically.
+- If expired/cancelled, escrow returns minus fee (TBD).
+- Purpose: reduce scams; logs remain available for disputes.
+
+Reporting & moderation:
+- Report player via chat or character card.
+- Repeat offenders: warning → timed suspension on next login session (time starts when they attempt to play).
+
+Inspection:
+- Players can inspect gear via character card; privacy toggle exists.
+
+Mail:
+- Letter system (30-day expiry) for messages + item sending.
+- “Claim all” option planned.
+
+────────────────────────────────────────────────────────────
+15) ECONOMY & CURRENCY
+────────────────────────────────────────────────────────────
+Currency:
+- One currency with denominations: Copper / Silver / Gold (conversion like change).
+- Player-to-player barter is supported and encouraged culturally (materials-for-gear/services).
+
+NPC “daily limit” items:
+- Scrolls and potions sold by NPC are limited per day per character/account (scope TBD).
+- No banking: missed day = missed opportunity.
+- Restock resets daily (planned: fixed universal reset time).
+
+Prices (placeholder until economy metrics exist):
+- Resurrection scroll: 50 silver
+- Return scroll: 1 gold 80 silver
+- Repair: 1 gold per gear component repaired
+
+────────────────────────────────────────────────────────────
+16) CRAFTING & THE FORGE (CORE FEATURE)
+────────────────────────────────────────────────────────────
+Philosophy:
+- Power isn’t found; it’s made.
+- Weapons/armor are not stat sticks; they change gameplay behavior.
+- Constraints are deliberate; creativity comes from working within boundaries.
+
+The Forge (personal instanced workspace):
+- Accessed via hub portal/door.
+- Private to the player (optional: allow small group visitors for testing/showcase).
+- Contains:
+  0. Processing Station
+  1. Mats Storage (filtered search)
+  2. Weapon Crafting Station
+  3. Armor Crafting Station
+  4. Accessory Crafting Station
+  5. Skill Crafting Station
+  6. Testing Dummies
+  7. Semi-finished Storage
+  8. Naming Station (finalize & export item)
+
+Processing Station:
+- Converts raw drops into “material cubes” (mats).
+- Once processed, mats are UNTRADEABLE until they become a final item.
+- Processing options include:
+  - extract “as is”
+  - extract color separately (for dye systems)
+  - create raw stat mats (gray) that can be painted later
+- Higher quality mats have more gloss/metallic aesthetic (visual only).
+- Recycling: dismantle crafted items back into components at a loss.
+- Blueprint extraction: extract blueprint + skills + recipe/material list (used for replication/upgrading).
+
+Mats Storage:
+- Search/filter by:
+  - color
+  - bonus effects
+  - gear quality (gray/green/blue/purple/orange)
+
+Weapon Crafting Station (visual build):
+- Grid volume: 160 x 80 x 40 (stacked plates)
+- Maximum fill: 35% of grid volume (constraint).
+- Symmetry tools:
+  - mirror quarters
+  - mirror halves (top/bottom, left/right)
+- Bulk tools & brushes:
+  - ghost blocks + bucket fill
+  - spherical brush (multi-layer painting)
+  - single-face paint tool
+  - select-all recolor
+  - erase tools (single/multi, cut-through toggle)
+  - revert up to 30 steps
+  - edge tools (round bevel / 45-degree bevel)
+
+Armor/Accessory crafting:
+- Crafted around mannequin constraints (no placement inside body volume).
+- Same toolset; grid adapted per component.
+
+Skill Crafting Station (behavior design):
+- Allocate elements to buttons/skills based on mats in the weapon.
+- Choose grip points (1H/2H), balance points, swing arcs, trajectory behavior.
+- Support advanced behavior templates (saved to the weapon template).
+- Archetype selection is made here by the player (backend classification; not shown as “weapon types” to players).
+
+Naming Station:
+- Final step required before item can leave Forge, be equipped, or traded.
+- Crafter must finalize tooltips/descriptions before naming (to prevent “blank” items).
+
+Crafting budgets:
+- Each block carries values inherited from its drop.
+- Valid shapes must include a proper handle/grip system.
+- Weight/balance influences:
+  - damage potential
+  - attack speed/feel
+  - cooldown feel
+  - movement speed modifiers (sprint overrides for consistency)
+
+Shields:
+- Shields are crafted similarly to weapons but with fixed anchor constraints.
+- Shields have their own restricted behavior patterns and higher block/parry focus.
+- Shields can be main-hand or offhand; dual shields are possible (not optimal).
+
+────────────────────────────────────────────────────────────
+17) TRADING, PROVENANCE, AND BLUEPRINT OWNERSHIP
+────────────────────────────────────────────────────────────
+Trading tiers:
+- Raw drops: tradeable.
+- Processed mats (“material cubes”): untradeable until finalized into an item.
+- Final items: tradeable (rules may apply).
+
+Provenance:
+- Items are traceable: “designed by @playername” remains attached.
+- Ownership history can be recorded (handoffs count, previous owners list).
+
+Trade limits (crafted gear):
+- Crafted gear can have a limited number of trades before binding (exact count TBD).
+- Creator’s first sale does not count against trade limit (TBD as rule).
+
+Blueprint extraction & trademark design:
+- Any finished item can be sacrificed to extract a blueprint.
+- Extracted blueprint retains the original “designed by @playername” tag.
+- Blueprint skills cannot be modified; only material quality can be upgraded by following the stored recipe/material list.
+- Intent: creators sell “designs,” buyers invest their rare mats to craft high-quality versions.
+
+────────────────────────────────────────────────────────────
+18) HOUSES (FACTIONS / OATHS)
+────────────────────────────────────────────────────────────
+Purpose:
+- Opt-in identity layer (not locked at character creation).
+- Adds passive bonuses + dedicated house skill hotbar (limited set; exact skills TBD).
+- House effects are intentionally unrefined until full combat tuning.
+
+Current houses (draft):
+- House of Prayer: support/healing utility; Bubble focus; reduces resurrection scroll cooldown.
+- House of Might: physical single-target bias (stats + effects).
+- House of Wisdom: magic/elemental bias + perception (traps/markers).
+- House of Fortification: defense/stamina/anti-stagger + threat management.
+
+────────────────────────────────────────────────────────────
+19) UI & CONTROLS (TARGETS)
+────────────────────────────────────────────────────────────
+Combat hotbars:
+- Target: minimum 24 bindable combat buttons
+- Dedicated consumable slots (~12)
+- Additional house skills hotbar
+- UI modularity: move blocks, save presets, export/share presets.
+
+Settings:
+- Graphics, audio, keybinds, gameplay toggles.
+- Optional visibility toggles (e.g., hide other players; hide effects) (future).
+
+────────────────────────────────────────────────────────────
+20) PLATFORM, MONETIZATION, AND INTEGRITY (FUTURE-SAFE)
+────────────────────────────────────────────────────────────
+Steam:
+- Achievements and titles planned (e.g., crafting milestones).
+- Integrate via wrapper services so game logic doesn’t call Steam directly.
+
+Free-to-play model:
+- Premium feature bundle + battlepass are allowed (pay-for-convenience).
+- Coordinate-based teleport logbook + imprintable teleport scrolls are a premium feature candidate.
+- Pricing and exact premium contents TBD.
+
+Integrity:
+- Systems tied to money/premium features should be server-side validated to avoid cheating (future architecture).
+
+────────────────────────────────────────────────────────────
+21) OPEN QUESTIONS (Remaining TBD)
+────────────────────────────────────────────────────────────
+- Exact mitigation formula for Damage vs Defense (and Bubble’s 0.5 multiplier effect).
+- Scope of daily limits (per character vs per account) and global reset time.
+- Trade limit exact rule (count and what counts as a trade).
+- Boss design: CC windows per boss, required counts, and which mechanics are non-blockable/non-i-frameable.
+- Crafting: final block size (visual), LOD/silhouette rules, and performance constraints.
+- Full list of player stats used on materials (HP, defense, crit, durations, effects, etc.) and where they drop in the world.
+- PvP: whether it exists as optional zones only, with global damage modifiers.
+
+END OF GDD v0.02 (Consolidated)

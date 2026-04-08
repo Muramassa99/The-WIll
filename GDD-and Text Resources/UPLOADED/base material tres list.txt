@@ -1,0 +1,518 @@
+Absolutely. I’ll make this save-worthy and system-friendly.
+
+I’m going to treat these as **BaseMaterialDef `.tres` names** first, because that is the layer you’re populating right now: named substances and components that can later flow into raw drops, processed mats, and crafted profiles. That fits your current material pipeline and your rule that raw drops, processed mats, and finalized items are different object types.  
+
+Also, I’m grounding Batch 1 in what you already have in source material: mob externals/internals/cores, metals, and elemental substances like Terre, Life, Crystal, Frost, Aqua, Pyro, etc. 
+
+---
+
+# 1) Batch 1 — known / existing / already-relevant `.tres` names
+
+These are the ones that already make sense inside your current lore/material logic.
+
+## 1A. Structural natural materials
+
+These are the simple “this is matter” defs.
+
+* wood.tres
+* stone.tres
+* crystal.tres
+* bone.tres
+* hide.tres
+* scale.tres
+* feather.tres
+* tendon.tres
+* ligament.tres
+* fat.tres
+* carapace.tres
+* exoskeleton.tres
+
+These fit your current ingredient breakdown of externals, internals, and cores from enemies/material sources. 
+
+## 1B. Metals and dense structural materials
+
+* iron.tres
+* tin.tres
+* copper.tres
+* silver.tres
+* gold.tres
+* lead.tres
+* mercury.tres
+
+These are explicitly named in your current material notes. 
+
+## 1C. Core / catalytic / magic-bearing materials
+
+* mana_core.tres
+* healing_core.tres
+* crystal_core.tres
+* soul_core.tres
+* order_core.tres
+* fae_core.tres
+* astral_core.tres
+
+These make sense because your notes already include mana core and existential/material elements like Soul, Order, Fae, Astral, Healing, Crystal. 
+
+## 1D. Elemental material defs
+
+These are base elemental substances, not necessarily spells.
+
+* terre.tres
+* life.tres
+* spirit.tres
+* healing.tres
+* crystal_affinity.tres
+* frost.tres
+* caelus.tres
+* cloud.tres
+* astral.tres
+* aqua.tres
+* storm.tres
+* lightning.tres
+* pyro.tres
+* lava.tres
+* explosion.tres
+* light.tres
+* holy.tres
+
+These are all already present in your material notes, with some acting more like existential/elemental matter families than ordinary materials. 
+
+## 1E. Corruption / hostile / dark-aligned materials
+
+* malice.tres
+* undeath.tres
+* plague.tres
+* chaos.tres
+* corrupt.tres
+* death.tres
+* demon.tres
+
+Also directly grounded in your existing notes. 
+
+## 1F. Bow / ranged-support materials that already make sense from your system
+
+These are not all explicitly named in the files, but they are strongly implied by your ranged, rope/flex, and quiver logic.
+
+* string.tres
+* fiber.tres
+* sinew.tres
+* quill.tres
+* leather_strap.tres
+* resin.tres
+
+I’d still treat these as “safe knowns,” because your system already needs flex/tether/rope-like behavior and ranged builds, and your profile/capability model already includes `rope`, `ranged`, `launch`, `flex`, and bow-like clusters.  
+
+---
+
+# 2) Batch 2 — made-up / inspiration / good population material `.tres` names
+
+These are the fun ones. They are designed to feel like they belong in *The Will* and to give you lots of later build diversity.
+
+## 2A. Structural fantasy materials
+
+* ironbark.tres
+* frostwood.tres
+* blackbone.tres
+* titan_amber.tres
+* dusk_chitin.tres
+* grave_ivory.tres
+* star_glass.tres
+* pale_shell.tres
+* ember_stone.tres
+* storm_reed.tres
+* moon_slate.tres
+* thorn_resin.tres
+
+## 2B. Magical / affinity / catalyst materials
+
+* dawn_sap.tres
+* veil_silk.tres
+* echo_crystal.tres
+* heartglass.tres
+* mercy_salt.tres
+* oath_ash.tres
+* dream_ice.tres
+* soul_thread.tres
+* hymn_stone.tres
+* ember_bloom.tres
+* sky_tear.tres
+* faelight_pollen.tres
+
+## 2C. Corrupt / dangerous / high-risk materials
+
+* blight_bone.tres
+* rot_fiber.tres
+* void_glass.tres
+* plague_wax.tres
+* ashen_marrow.tres
+* malice_ore.tres
+* grave_pitch.tres
+* ruin_salt.tres
+* blood_coal.tres
+* demon_lacquer.tres
+
+## 2D. Rare chase / keystone materials
+
+These are the ones that can later justify weird signature behaviors.
+
+* kingsteel.tres
+* prayerglass.tres
+* worldspine.tres
+* gate_shard.tres
+* covenant_gold.tres
+* saintbone.tres
+* stormheart.tres
+* first_flame.tres
+* astral_sinew.tres
+* oathsilver.tres
+* harmony_crystal.tres
+* calamity_core.tres
+
+## 2E. Archer / projectile-specialty inspirations
+
+These are useful because you already know ranged is going to be its own headache.
+
+* windfletch.tres
+* hollow_reed.tres
+* ironquill.tres
+* spark_sinew.tres
+* cloud_fiber.tres
+* thornquill.tres
+* ember_string.tres
+* glass_fletch.tres
+* skybone.tres
+* ghost_feather.tres
+
+---
+
+# A) Stats that are relevant and should be allocatable across both lists
+
+I’m splitting this into **direct stat atoms** and **material-derived profile/capability values**.
+
+That split matters because not every material property should become a player-sheet stat directly. Your own docs already separate direct stat lines from profile/capability outputs like mass, reach, balance, flex, edge, guard, magic, launch, etc.  
+
+## A1. Direct stat atoms
+
+These are the ones that can live as `StatLine`s on materials or their resolved variants.
+
+Core combat stats from your cheat sheet:
+
+* atk_mod_flat
+* def_mod_flat
+* power
+* endurance
+* hp_pct_bonus_sum
+* heal_flat_bonus_sum
+* heal_pct_bonus_sum
+* received_heal_pct_sum
+* aspd_pct_bonus_sum
+* move_pct_bonus_sum
+* move_flat_bonus_sum
+* crit_chance
+* crit_mult
+* dmg_pct_mod_sum
+* dmg_reduction_pct_sum 
+
+Practical crafting/material-facing variants of those names:
+
+* atk_mod_flat
+* def_mod_flat
+* power_flat
+* endurance_flat
+* hp_pct_add
+* heal_power_flat
+* heal_power_pct_add
+* received_heal_pct_add
+* aspd_pct_add
+* move_speed_pct_add
+* move_speed_flat_add
+* crit_chance_pct
+* crit_damage_bonus_add
+* dmg_pct_mod_add
+* dmg_reduction_pct_add
+
+Status/duration-related direct stats, already implied by your material notes:
+
+* dot_duration_pct_add
+* hot_duration_pct_add
+* status_apply_chance_pct
+* status_potency_flat
+* poison_power_flat
+* anti_heal_pct_add
+* defense_down_pct_add
+* slow_strength_pct_add 
+
+Block/parry/defense-facing direct stats, already relevant to shields and defense-oriented gear:
+
+* block_power_flat
+* parry_window_pct_add
+* stagger_resist_flat
+* guard_efficiency_pct_add
+* bubble_hp_flat
+* bubble_shield_defense_mult_add  
+
+Ranged-specific direct stats:
+
+* projectile_speed_pct_add
+* projectile_drop_reduction_pct
+* draw_speed_pct_add
+* reload_speed_pct_add
+* quiver_capacity_flat
+* ammo_recovery_pct
+* projectile_crit_chance_pct
+
+Magic-facing direct stats:
+
+* magic_power_flat
+* cast_speed_pct_add
+* channel_stability_flat
+* elemental_amplify_pct
+* mana_free_system_placeholder
+  You do not have mana as a player resource right now, so I would not make “mana cost reduction” core. Your combat resource model is HP + Armor/Endurance + Stamina + cooldowns, no mana/energy. 
+
+## A2. Material/profile values that should **not** just be ordinary StatLines
+
+These are the things your bake/profile system should derive and then hand to skill/combat systems.
+
+From your crafting/profile law:
+
+* total_mass
+* center_of_mass
+* reach
+* balance_score
+* inertia_score
+* flex_score
+* guard_score
+* launch_score
+* damage_flavor_weights
+* capability_scores
+* backend_tags 
+
+The capability layer you already defined:
+
+* reach
+* impact
+* edge
+* pierce
+* blunt
+* guard
+* flex
+* tether
+* launch
+* magic
+* heal
+* mobility
+* control
+* stability
+* channel
+* barrier 
+
+These should be fed by materials and shape, not just stapled on as ordinary “+5 stat” lines.
+
+---
+
+# B) Extra datapoints I strongly recommend attaching to materials
+
+This is the part where I add useful things beyond the obvious direct stats.
+
+These are not all player-facing tooltip stats. Many of them are **resolver-facing datapoints** that make the forge smarter.
+
+## B1. Physical / structural datapoints
+
+These should exist on nearly all materials:
+
+* density
+* hardness
+* toughness
+* elasticity
+* brittleness
+* compressive_strength
+* tensile_strength
+* edge_retention
+* resonance
+* thermal_stability
+* corrosion_resistance
+* durability_bias
+
+Why:
+because your forge/profile system is supposed to derive handling, damage flavor, and skill legality from matter and structure, not just from “weapon class.” 
+
+## B2. Crafting/forge datapoints
+
+These are extremely useful and easy to overlook:
+
+* processing_output_count
+* salvage_priority
+* salvage_recovery_bias
+* anchor_grip_affinity
+* anchor_offhand_affinity
+* edge_candidate_affinity
+* blunt_candidate_affinity
+* plate_candidate_affinity
+* shaft_candidate_affinity
+* rope_candidate_affinity
+* decorative_affinity
+* color_group
+* gloss_grade
+* opacity_grade
+
+These tie directly into your processing station, filter/storage logic, anchor legality, and “thin enough = cutter / thick enough = blunt / otherwise decorative” vision.  
+
+## B3. Magic / affinity datapoints
+
+These help avoid making magic a vague yes/no switch.
+
+* magic_affinity
+* heal_affinity
+* elemental_affinities
+* elemental_capacity
+* channel_stability
+* spellshape_bias
+* ritual_affinity
+* curse_affinity
+* purification_affinity
+* summon_affinity
+* barrier_affinity
+* catalyst_efficiency
+
+These fit your “materials unlock what is allowed” philosophy very well. 
+
+## B4. Ranged / projectile datapoints
+
+These will help a lot later with bow/quiver weirdness.
+
+* draw_flex_affinity
+* string_compatibility
+* projectile_launch_affinity
+* quiver_synergy
+* arrow_hold_stability
+* recoil_transfer
+* fletch_synergy
+* projectile_guidance_affinity
+* multishot_stability
+* charge_retention
+
+These are resolver datapoints, not necessarily tooltip stats.
+
+## B5. Economy / provenance / lifecycle datapoints
+
+These are useful because your game cares about processing, refund, naming, salvage, and trade state.
+
+* trade_state_default
+* can_be_processed
+* can_be_salvaged
+* can_be_blueprinted
+* rarity_tier
+* provenance_grade
+* crafting_xp_value
+* vendor_value_base
+* rarity_weight
+* source_tags
+
+Your current docs already care about tradeability differences between raw drops, processed mats, and finalized items, plus blueprint extraction and partial salvage.  
+
+## B6. Visual identity datapoints
+
+These will save you pain later.
+
+* color_group
+* secondary_color_group
+* emissive_color_group
+* metallic_grade
+* gloss_grade
+* transparency_grade
+* particle_hint
+* trail_hint
+* sound_material_tag
+
+That ties neatly into your notes about extracted color elements, gloss/metallic grading, and aesthetics being separable from raw stat material when needed. 
+
+---
+
+# My recommendation for immediate practical use
+
+For now, do **not** try to give every material 50 fields.
+
+Start with a first-pass material schema like this:
+
+* base_material_id
+* display_name
+* material_family
+* density
+* hardness
+* toughness
+* elasticity
+* processing_output_count
+* material_tags
+* base_stat_lines
+* color_group
+* magic_affinity
+* heal_affinity
+* defense_affinity
+* mobility_affinity
+* elemental_affinities
+* salvage_priority
+
+That already matches your Crafting Atoms minimum field idea for material atoms and keeps things sane for v0.1. 
+
+Then later you can expand into the B-list datapoints without breaking naming law.
+
+---
+
+# My strongest recommendation on file population order
+
+Populate materials in this order:
+
+1. wood.tres
+2. iron.tres
+3. bone.tres
+4. hide.tres
+5. crystal.tres
+6. mana_core.tres
+7. healing.tres
+8. pyro.tres
+9. frost.tres
+10. aqua.tres
+
+That gives you:
+
+* one light structural
+* one heavy structural
+* one organic rigid
+* one organic flexible
+* one catalyst
+* one generic magic core
+* one heal-affinity
+* three easy elemental anchors
+
+That is enough to start seeing the system breathe.
+
+---
+
+# Short version
+
+## Batch 1
+
+Use grounded materials already implied by your current docs and lore:
+wood, iron, bone, hide, crystal, mana_core, healing, pyro, frost, aqua, scale, tendon, carapace, silver, gold, copper, etc. 
+
+## Batch 2
+
+Use inspired materials for flavor and later population:
+ironbark, star_glass, soul_thread, prayerglass, kingsteel, blight_bone, void_glass, windfletch, ghost_feather, etc.
+
+## A
+
+Allocate direct stat atoms plus profile/capability-driving values:
+attack/defense/power/endurance/crit/move/aspd/heal/status/duration on the direct side; mass/balance/reach/edge/blunt/guard/flex/launch/magic/heal/control/stability on the profile side.  
+
+## B
+
+Attach extra material datapoints for physics, forge logic, magic affinity, ranged behavior, salvage/economy, and visual identity.
+
+If you want next, I can turn this into a **ready-to-save filename pack** grouped by folder, like:
+
+* `data/defs/materials/base/...`
+* `data/defs/materials/variants/...`
+* `data/defs/drops/raw/...`
+  so you can start creating the actual `.tres` files without naming drift.

@@ -1,0 +1,10 @@
+player_loaded=true
+rig_loaded=true
+skeleton_loaded=true
+right_foot_bone_exists=true
+right_foot_position=(-0.104066, -0.25132, -0.013141)
+right_leg_ik_exists=false
+right_foot_target_exists=false
+foot_ik_present_in_current_baseline=false
+baseline_expected_to_have_runtime_foot_ik=false
+verifier_aligned_to_current_baseline=true

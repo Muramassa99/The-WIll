@@ -1,0 +1,9 @@
+equip_success=true
+held_item_exists=true
+mesh_instance_exists=true
+material_override_exists=true
+material_override_uses_vertex_color=true
+material_override_cull_disabled=true
+vertex_color_count=56
+unique_vertex_color_count=2
+multiple_visible_material_colors=true

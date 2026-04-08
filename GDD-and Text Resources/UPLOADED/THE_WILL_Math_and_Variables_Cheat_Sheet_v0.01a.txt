@@ -1,0 +1,398 @@
+THE WILL — Combat Math & Variables Cheat Sheet
+Version: v0.01 (export)
+Date: 2026-03-15
+Purpose:
+- Single reference page-set for: stat names, definitions, formulas, and “what can crit / what cannot”.
+- Intended to prevent keyword mismatch and reduce future refactors.
+Primary Sources:
+- GDD v0.02 (Consolidated): combat math block + systems rules.
+- systems demo-1 / crafting and other / notes (CC + threat + economy notes).
+
+────────────────────────────────────────────────────────────
+0) Conventions
+────────────────────────────────────────────────────────────
+Percent values:
+- Use one of these formats consistently in code/data:
+  A) “decimal” (0.15 = +15%)
+  B) “percent” (15 = +15%)
+This cheat sheet writes % as decimals unless stated otherwise.
+
+Stat aggregation:
+- “Σ FlatX” = sum of flat values from all sources (gear + buffs + food + passives).
+- “Σ %X” = sum of percent modifiers from all sources.
+- If not specified otherwise, % modifiers are additive inside their bucket.
+
+Tunable constants:
+- Anything marked (TUNABLE) is expected to change during playtests.
+
+────────────────────────────────────────────────────────────
+1) Core Base Stats (raw values you store)
+────────────────────────────────────────────────────────────
+Rank (RANK_VALUE)
+- Used as a baseline scaler for “BaseAttack / BaseDefense / BaseHP”.
+- Intended use: NPC ranks, gear ranks, or difficulty bands.
+- Current rank values:
+  F=50, E=120, D=200, C=350, B=600, A=800, S=1200
+
+BaseAttack (BASE_ATK)
+- Formula: BASE_ATK = 0.2 * RANK_VALUE
+
+BaseDefense (BASE_DEF)
+- Formula: BASE_DEF = 0.15 * RANK_VALUE
+
+BaseHP (BASE_HP)
+- Formula: BASE_HP = 0.1 * RANK_VALUE
+
+Power (POWER)
+- “Offense core stat”.
+- Defined as: POWER = gear sub-stat + food + buffs
+- Used to scale Attack via multiplier term (3 + 0.03*POWER).
+
+Endurance (ENDURANCE)
+- “Defense core stat”.
+- Defined as: ENDURANCE = gear sub-stat + food + buffs
+- Used to scale Defense via multiplier term (3 + ENDURANCE/100).
+
+Armor / Defense Mod (DEF_MOD_FLAT, a.k.a. ΣDefenseMod)
+- Flat defense value from gear pieces that contribute defense.
+- Current gear sources listed for defense:
+  Helmet + Chest + Pants + Boots + Earrings + Belt + Shield-type weapons
+
+Attack Mod (ATK_MOD_FLAT, a.k.a. ΣAttackMod)
+- Flat attack value from gear pieces that contribute attack.
+- Current gear sources listed for attack:
+  Weapon + Rings + Necklace + Gloves + Belt + Bracelet
+
+MaxHP% modifiers (HP_PCT_BONUS)
+- “max HP stats” bucket used in TOTAL_HP.
+
+MaxStamina (STAMINA_MAX)
+- Stamina resource pool (not displayed numerically to player).
+- Stamina affects TOTAL_HP via an HP multiplier term.
+
+BaseAttackSpeed (ASPD_BASE)
+- Base animation/cast speed stat for the character or weapon template.
+
+BaseMoveSpeed (MOVE_BASE)
+- Base movement speed (character baseline).
+
+────────────────────────────────────────────────────────────
+2) Derived Stats (computed outputs)
+────────────────────────────────────────────────────────────
+Attack (ATK)
+- Formula:
+  ATK = (ΣATK_MOD_FLAT) * (3 + 0.03 * POWER) + BASE_ATK
+
+RawDamage (DMG_RAW)
+- Per hit (before target defense division):
+  DMG_RAW = ATK * SKILL_BASE * (1 + ΣDMG_PCT_MOD)
+
+RawDefense (DEF_RAW)
+- Formula:
+  DEF_RAW = (ΣDEF_MOD_FLAT) * (3 + (ENDURANCE / 100)) + BASE_DEF
+
+TrueDefense (DEF_TRUE)
+- Apply damage reduction modifiers to raw defense:
+  DEF_TRUE = DEF_RAW * (1 - ΣDMG_REDUCTION_PCT)
+
+TrueDamage (DMG_TRUE)
+- Final damage (before crit / bubble routing):
+  DMG_TRUE = DMG_RAW / TARGET_DEF_TRUE
+
+TOTAL_HP (HP_TOTAL)
+- Current formula:
+  HP_TOTAL = BASE_HP * (1 + ΣHP_PCT_BONUS) * (1 + 0.4 * STAMINA_MAX)
+
+TrueAttackSpeed (ASPD_TRUE)
+- Formula:
+  ASPD_TRUE = ASPD_BASE * (1 + ΣASPD_PCT_BONUS)
+- Note: applies to skills/animations unless explicitly specified. Scroll items excluded by default.
+
+TrueMoveSpeed (MOVE_TRUE)
+- Formula:
+  MOVE_TRUE = (MOVE_BASE * (1 + ΣMOVE_PCT_BONUS)) + (ΣMOVE_FLAT_BONUS)
+- Cap:
+  MOVE_TRUE ≤ 240 (TUNABLE)
+
+────────────────────────────────────────────────────────────
+3) Bubble-Shield (Temporary HP extension)
+────────────────────────────────────────────────────────────
+BubbleHP (BUBBLE_HP)
+- Flat temporary HP that stacks on top of HP.
+- Can be abundant (target design: can reach 2x HP or more in some builds).
+
+Bubble defense effectiveness:
+- Bubble uses reduced defensive effectiveness:
+  BUBBLE_SHIELD_DEFENSE_MULT = 0.5 (TUNABLE)
+
+How to apply this inside the current “damage / TrueDefense” model:
+Option (recommended for consistency):
+- When damage is absorbed by Bubble, treat the target’s TrueDefense as:
+  DEF_TRUE_BUBBLE = DEF_TRUE * BUBBLE_SHIELD_DEFENSE_MULT
+- Then:
+  DMG_TRUE_TO_BUBBLE = DMG_RAW / DEF_TRUE_BUBBLE
+  (With mult=0.5, bubble takes ~2× damage compared to HP at same defense.)
+
+Routing rule:
+- By default: damage is applied to Bubble first, then spills into HP.
+- (Any exceptions should be explicit per effect/mechanic.)
+
+────────────────────────────────────────────────────────────
+4) Crit System (core scaling axis)
+────────────────────────────────────────────────────────────
+CritChance (CRIT_CHANCE)
+- Range: 0% to 100% (100% = always crit).
+
+CritDamageMultiplier (CRIT_MULT)
+
+- Current gear sources listed for CRIT_MULT:
+  Weapon + Rings + Necklace + Gloves + Belt + Bracelet
+
+
+- CRIT_MULT_TOTAL = (summ of CRIT_MULT)
+
+- HEAL_CRIT_SCALAR = 0.75 
+- DMG_CRIT_SCALER = 1.0
+- CRIT_BONUS = CRIT_MULT_TOTAL - 1
+- DMG_CRIT_MULT  = 1 + DMG_CRIT_SCALER * CRIT_BONUS
+- HEAL_CRIT_MULT = 1 + HEAL_CRIT_SCALAR * CRIT_BONUS  
+
+- Can scale very high (10×+ allowed by design).
+
+What can crit:
+- Direct damage hits (including multi-hit attacks: roll per hit).
+- Magic hits and repeated ground-effect “ticks” IF they are skill-origin and not an attached DoT.
+- Direct heals (single hit, not HoT).
+- Stationary periodic healing zones: crit roll/bonus is fixed at cast time (snapshot behavior).
+
+What cannot crit (by default):
+- DoTs (burn/poison/etc.).
+- HoTs (healing via buffs, items, skill passive effects or overtime food/potion effects as well as self tick healing built in the character)
+- Item damage.
+- Environmental damage (lava/fire).
+- (Exceptions must be explicitly stated on the skill/effect.)
+
+Crit application:
+- If a hit crits:
+  DMG_TRUE_CRIT  = DMG_TRUE  * DMG_CRIT_MULT
+- For healing:
+  HEAL_TRUE_CRIT = HEAL_TRUE * HEAL_CRIT_MULT
+ 
+
+────────────────────────────────────────────────────────────
+5) Damage Forms (with outcomes)
+────────────────────────────────────────────────────────────
+A) Direct Hit (single instance)
+- Uses full damage formula.
+- Can crit.
+
+B) Multi-Hit (combo / flurry)
+- Each hit is its own roll for crit.
+- Uses full damage formula per hit.
+
+C) Ground Effect Ticks (standing in an area)
+- Treated as repeated direct hits (skill-origin).
+- Can crit (snapshot rules apply if you want stability).
+
+D) DoT (attached to target)
+- “Fluff on top”: fixed damage over a duration; can be reset/extended.
+- Does NOT crit.
+- Treated as TrueDamage for simplicity (ignores defense calculation), unless later specified otherwise.
+- Optional rare: % target max HP DoT from special materials (future).
+
+E) Item/Environment Damage
+- By default: does NOT crit.
+- Typically does not use player Attack; it uses fixed values.
+
+────────────────────────────────────────────────────────────
+6) Healing Forms (with math)
+────────────────────────────────────────────────────────────
+Heal formula (HEAL_TRUE):
+- HEAL_TRUE = (SKILL_BASE) *
+              (1 + ((ΣHEAL_FLAT_BONUS + (1 + ΣHEAL_PCT_BONUS)) / 1000)) *
+              (1 + ΣRECEIVED_HEAL_PCT_ON_TARGET)
+
+Crit Heal:
+-see above in crit 
+
+
+Direct Heal:
+- Single instance; can crit.
+
+Stationary Healing Zone:
+- Snapshot behavior: crit chance/damage is locked at cast time for the duration of the zone.
+- (Prevents “stat swapping” mid-duration changing the field.)
+
+HoT (heal-over-time attached to target):
+- Not explicitly defined yet.
+- Recommended default: does NOT crit (for consistency with DoTs), unless you want it to.
+
+Worked numeric example (healing):
+- SKILL_BASE = 1000
+- ΣHEAL_FLAT_BONUS = 50
+- ΣHEAL_PCT_BONUS = 0.20
+- ΣRECEIVED_HEAL_PCT_ON_TARGET = 0.10
+
+factor1 = 1 + ((50 + (1 + 0.20)) / 1000) = 1 + (51.2/1000) = 1.0512
+factor2 = 1 + 0.10 = 1.10
+HEAL_TRUE = 1000 * 1.0512 * 1.10 = 1156.32
+HEAL_CRIT = 1156.32 * 1.75 = 2023.56
+
+────────────────────────────────────────────────────────────
+7) Threat / Aggro (math + knobs)
+────────────────────────────────────────────────────────────
+Threat Table:
+- Enemies maintain a threat table and pick a current “#1 active target”.
+
+Threat sources:
+A) Damage Threat
+- Base: THREAT += DMG_DONE
+
+B) Tank Threat Buff (“virtual damage”)
+- Adds virtual threat without extra HP damage.
+- Current baseline: +150% virtual threat.
+  If damage per window is D:
+    THREAT += D * 2.5    (i.e., D + D*1.5)
+
+C) Healing Threat
+- Healing generates threat equivalent to healing output:
+  THREAT += HEAL_DONE   (TUNABLE coefficient later if needed)
+
+D) Resurrection Threat
+- Resurrection generates a spike:
+  THREAT += BASE_DAMAGE_EQUIV * 2.5   (250% of base damage equivalent, TUNABLE)
+
+────────────────────────────────────────────────────────────
+8) CC System (types + rules)
+────────────────────────────────────────────────────────────
+CC types:
+- Stun
+- Knockdown
+- Snare (airborne stun variant)
+- Slow (airborne knockdown variant)
+
+Base CC duration:
+- 3.0 seconds (TUNABLE)
+
+Normal mobs:
+- CC can be chained; perma-CC is possible with coordination.
+
+Elites:
+- Stun: max 3 successful stuns; then immune until reset/death.
+- Knockdown: immune (damage still applies).
+- Slow: reduced effectiveness vs normals.
+
+Bosses:
+- CC only works in explicit CC windows.
+- Boss CC requires combos: e.g., 3–7 successful CC hits in the window (TUNABLE; scales with difficulty).
+- Wrong CC type during the window resets progress.
+- Non-CC damage does not affect CC progress.
+
+────────────────────────────────────────────────────────────
+9) Combat State Timers (Return Scroll eligibility)
+────────────────────────────────────────────────────────────
+Timestamps:
+- t_last_hostile_damage  (default calm gate: 40s)
+- t_last_combat_action   (default calm gate: 15s)
+- optional: t_last_forced_displacement
+
+Combat action tagging:
+- Any action tagged “in_combat_when_used” updates t_last_combat_action.
+- Movement/camera/jump do not count by default.
+
+Return Scroll gate (all must be true):
+1) Player is NOT the current #1 active target of any enemy.
+2) now - t_last_hostile_damage >= 40s
+3) now - t_last_combat_action >= 15s
+
+────────────────────────────────────────────────────────────
+10) Floor Difficulty Profile (modular scaling layer)
+────────────────────────────────────────────────────────────
+Principle:
+- Player sheet math stays pure.
+- Difficulty modifies NPC effective stats and drop logic via a profile object.
+
+Recommended difficulty profile keys:
+- enemy_hp_mult
+- enemy_atk_mult
+- enemy_def_mult
+- enemy_power_bonus (optional)
+- enemy_endurance_bonus (optional)
+- drop_quality_bias
+- cc_requirement_mult (optional)
+- extra_elite_chance (optional)
+
+Application points:
+- On enemy spawn (or when computing effective stats):
+  HP_eff  = HP_base  * enemy_hp_mult
+  ATK_eff = ATK_base * enemy_atk_mult
+  DEF_eff = DEF_base * enemy_def_mult
+
+────────────────────────────────────────────────────────────
+11) Gear Tiers + Stat Quality
+────────────────────────────────────────────────────────────
+Material/Gear tiers:
+- Gray → Green → Blue → Purple → Orange
+- Same named material can exist in multiple tiers (same function; stronger numeric stats).
+- Higher floors increase chance for higher-tier drops.
+
+────────────────────────────────────────────────────────────
+12) Keyword / Identifier Reference (recommended naming)
+────────────────────────────────────────────────────────────
+Core:
+- rank_value
+- base_atk, base_def, base_hp
+- power, endurance
+- atk_mod_flat, def_mod_flat
+- atk, def_raw, def_true
+- dmg_raw, dmg_true
+
+HP/Bubble:
+- hp_total
+- bubble_hp
+- bubble_shield_defense_mult
+
+Crit:
+- crit_chance
+- crit_mult
+- crit_heal_mult
+
+Modifiers:
+- dmg_pct_mod_sum
+- dmg_reduction_pct_sum
+- hp_pct_bonus_sum
+- heal_flat_bonus_sum
+- heal_pct_bonus_sum
+- received_heal_pct_sum
+
+Speed:
+- aspd_base, aspd_pct_bonus_sum, aspd_true
+- move_base, move_pct_bonus_sum, move_flat_bonus_sum, move_true
+
+Threat:
+- threat_value
+- threat_virtual_mult
+- threat_heal_coeff
+- threat_res_coeff
+
+Combat state:
+- t_last_hostile_damage
+- t_last_combat_action
+- t_last_forced_displacement
+- is_primary_target_any_enemy
+
+CC:
+- cc_type
+- cc_duration_base
+- elite_stun_cap
+- boss_cc_window_active
+- boss_cc_progress
+- boss_cc_required_hits
+
+Difficulty profile:
+- difficulty_profile.enemy_hp_mult
+- difficulty_profile.enemy_atk_mult
+- difficulty_profile.enemy_def_mult
+- difficulty_profile.drop_quality_bias
+
+END OF CHEAT SHEET v0.01

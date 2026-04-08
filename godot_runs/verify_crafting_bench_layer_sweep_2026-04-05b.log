@@ -1,0 +1,62 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+WARNING: Material uses a specular and glossiness workflow. Textures will be converted to roughness and metallic workflow, which may not be 100% accurate.
+   at: _parse_materials (modules/gltf/gltf_document.cpp:2963)
+   GDScript backtrace (most recent call first):
+       [0] _load_gltf_scene_root (res://runtime/forge/forge_workspace_axis_indicator.gd:126)
+       [1] _instantiate_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:111)
+       [2] _ensure_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:92)
+       [3] _ready (res://runtime/forge/forge_workspace_axis_indicator.gd:23)
+       [4] _run_verification (res://tools/verify_crafting_bench_layer_sweep_authoring.gd:20)
+WARNING: Material uses a specular and glossiness workflow. Textures will be converted to roughness and metallic workflow, which may not be 100% accurate.
+   at: _parse_materials (modules/gltf/gltf_document.cpp:2963)
+   GDScript backtrace (most recent call first):
+       [0] _load_gltf_scene_root (res://runtime/forge/forge_workspace_axis_indicator.gd:126)
+       [1] _instantiate_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:111)
+       [2] _ensure_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:92)
+       [3] _ready (res://runtime/forge/forge_workspace_axis_indicator.gd:23)
+       [4] _run_verification (res://tools/verify_crafting_bench_layer_sweep_authoring.gd:20)
+WARNING: Material uses a specular and glossiness workflow. Textures will be converted to roughness and metallic workflow, which may not be 100% accurate.
+   at: _parse_materials (modules/gltf/gltf_document.cpp:2963)
+   GDScript backtrace (most recent call first):
+       [0] _load_gltf_scene_root (res://runtime/forge/forge_workspace_axis_indicator.gd:126)
+       [1] _instantiate_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:111)
+       [2] _ensure_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:92)
+       [3] _ready (res://runtime/forge/forge_workspace_axis_indicator.gd:23)
+       [4] _run_verification (res://tools/verify_crafting_bench_layer_sweep_authoring.gd:20)
+WARNING: Material uses a specular and glossiness workflow. Textures will be converted to roughness and metallic workflow, which may not be 100% accurate.
+   at: _parse_materials (modules/gltf/gltf_document.cpp:2963)
+   GDScript backtrace (most recent call first):
+       [0] _load_gltf_scene_root (res://runtime/forge/forge_workspace_axis_indicator.gd:126)
+       [1] _instantiate_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:111)
+       [2] _ensure_gizmo_scene (res://runtime/forge/forge_workspace_axis_indicator.gd:92)
+       [3] _ready (res://runtime/forge/forge_workspace_axis_indicator.gd:23)
+       [4] _run_verification (res://tools/verify_crafting_bench_layer_sweep_authoring.gd:20)
+ERROR: Cannot save file 'user://forge/player_wip_library_state.tres'.
+   at: save (scene/resources/resource_format_text.cpp:1756)
+   GDScript backtrace (most recent call first):
+       [0] persist_resource (res://core/models/persistent_resource_state_io.gd:24)
+       [1] persist (res://core/models/player_forge_wip_library_state.gd:91)
+       [2] save_wip (res://core/models/player_forge_wip_library_state.gd:54)
+       [3] save_current_project (res://runtime/forge/forge_project_workflow.gd:224)
+       [4] autosave_current_project_if_needed (res://runtime/forge/forge_project_workflow.gd:241)
+       [5] autosave_current_project_if_needed (res://runtime/forge/forge_project_action_presenter.gd:144)
+       [6] _autosave_current_wip_if_needed (res://runtime/forge/crafting_bench_ui.gd:1689)
+       [7] _create_new_blank_project_for_builder_path (res://runtime/forge/crafting_bench_ui.gd:1748)
+       [8] _create_new_blank_project (res://runtime/forge/crafting_bench_ui.gd:1739)
+       [9] _run_verification (res://tools/verify_crafting_bench_layer_sweep_authoring.gd:28)
+ERROR: Cannot save file 'C:/Users/ixro1/AppData/Roaming/Godot/app_userdata/The Will-Gamefiles/forge/player_wip_library_state.tres'.
+   at: save (scene/resources/resource_format_text.cpp:1756)
+   GDScript backtrace (most recent call first):
+       [0] persist_resource (res://core/models/persistent_resource_state_io.gd:27)
+       [1] persist (res://core/models/player_forge_wip_library_state.gd:91)
+       [2] save_wip (res://core/models/player_forge_wip_library_state.gd:54)
+       [3] save_current_project (res://runtime/forge/forge_project_workflow.gd:224)
+       [4] autosave_current_project_if_needed (res://runtime/forge/forge_project_workflow.gd:241)
+       [5] autosave_current_project_if_needed (res://runtime/forge/forge_project_action_presenter.gd:144)
+       [6] _autosave_current_wip_if_needed (res://runtime/forge/crafting_bench_ui.gd:1689)
+       [7] _create_new_blank_project_for_builder_path (res://runtime/forge/crafting_bench_ui.gd:1748)
+       [8] _create_new_blank_project (res://runtime/forge/crafting_bench_ui.gd:1739)
+       [9] _run_verification (res://tools/verify_crafting_bench_layer_sweep_authoring.gd:28)

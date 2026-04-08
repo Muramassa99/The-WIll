@@ -1,0 +1,12 @@
+ranged_bow_component=builder_component_bow
+ranged_bow_component_is_default=true
+ranged_bow_grid=(160, 80, 30)
+bow_source_mentions_bow=true
+ranged_quiver_component=builder_component_quiver
+ranged_quiver_grid=(70, 30, 30)
+ranged_quiver_grid_is_correct=true
+quiver_source_mentions_quiver=true
+reset_quiver_grid=(70, 30, 30)
+reset_kept_ranged_quiver=true
+legacy_ranged_grid=(160, 80, 30)
+legacy_saved_defaulted_to_bow=true

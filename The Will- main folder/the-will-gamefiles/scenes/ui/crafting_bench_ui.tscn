@@ -1,7 +1,8 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://runtime/forge/crafting_bench_ui.gd" id="1_ui"]
 [ext_resource type="Script" path="res://runtime/forge/forge_plane_viewport.gd" id="2_plane_viewport"]
+[ext_resource type="Script" path="res://runtime/forge/forge_workspace_axis_indicator.gd" id="3_axis_indicator"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
 bg_color = Color(0.0823529, 0.0901961, 0.109804, 0.96)
@@ -26,6 +27,18 @@ corner_radius_top_left = 8
 corner_radius_top_right = 8
 corner_radius_bottom_right = 8
 corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_overlay_gizmo"]
+bg_color = Color(0, 0, 0, 0)
+border_width_left = 0
+border_width_top = 0
+border_width_right = 0
+border_width_bottom = 0
+border_color = Color(0, 0, 0, 0)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
 
 [node name="CraftingBenchUI" type="CanvasLayer"]
 script = ExtResource("1_ui")
@@ -62,11 +75,65 @@ text = "Forge workstation"
 autowrap_mode = 3
 theme_override_font_sizes/font_size = 13
 
+[node name="StartMenuPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox"]
+visible = false
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="StartMenuMargin" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/StartMenuPanel"]
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="StartMenuVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin"]
+size_flags_vertical = 4
+theme_override_constants/separation = 12
+
+[node name="StartMenuTitle" type="Label" parent="Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox"]
+text = "Select Crafting Path"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 20
+
+[node name="StartMenuSubtitle" type="Label" parent="Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox"]
+text = "Continue the last forge state or start a new crafting path."
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="StartMenuButtonVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox"]
+size_flags_horizontal = 4
+theme_override_constants/separation = 10
+
+[node name="ContinueLastButton" type="Button" parent="Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox/StartMenuButtonVBox"]
+custom_minimum_size = Vector2(0, 42)
+text = "Continue Last"
+
+[node name="ProjectListButton" type="Button" parent="Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox/StartMenuButtonVBox"]
+custom_minimum_size = Vector2(0, 42)
+text = "Project List"
+
+[node name="NewMeleeWeaponButton" type="Button" parent="Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox/StartMenuButtonVBox"]
+custom_minimum_size = Vector2(0, 42)
+text = "New Melee Weapon"
+
+[node name="NewRangedPhysicalWeaponButton" type="Button" parent="Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox/StartMenuButtonVBox"]
+custom_minimum_size = Vector2(0, 42)
+text = "New Ranged Physical Weapon"
+
+[node name="NewShieldButton" type="Button" parent="Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox/StartMenuButtonVBox"]
+custom_minimum_size = Vector2(0, 42)
+text = "New Shield"
+
+[node name="NewMagicWeaponButton" type="Button" parent="Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox/StartMenuButtonVBox"]
+custom_minimum_size = Vector2(0, 42)
+text = "New Magic Weapon"
+
 [node name="MainHBox" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox"]
 size_flags_vertical = 3
 theme_override_constants/separation = 12
 
 [node name="LeftPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox"]
+visible = false
 custom_minimum_size = Vector2(250, 0)
 theme_override_styles/panel = SubResource("StyleBoxFlat_section")
 
@@ -121,6 +188,22 @@ theme_override_font_sizes/font_size = 15
 [node name="ProjectSourceLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
 text = "Current project source"
 autowrap_mode = 3
+
+[node name="BuilderComponentTabs" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
+visible = false
+theme_override_constants/separation = 6
+
+[node name="BuilderComponentBowButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/BuilderComponentTabs"]
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Bow"
+tooltip_text = "Open or continue the bow component draft for the ranged physical path."
+
+[node name="BuilderComponentQuiverButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/BuilderComponentTabs"]
+size_flags_horizontal = 3
+toggle_mode = true
+text = "Quiver"
+tooltip_text = "Open or continue the quiver component draft for the ranged physical path."
 
 [node name="ProjectNameEdit" type="LineEdit" parent="Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox"]
 placeholder_text = "Temporary forge project name"
@@ -258,6 +341,14 @@ theme_override_constants/separation = 10
 [node name="ActionHostRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox"]
 theme_override_constants/separation = 8
 
+[node name="ProjectMenuButton" type="MenuButton" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow"]
+custom_minimum_size = Vector2(160, 34)
+text = "Project"
+
+[node name="StatusMenuButton" type="MenuButton" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow"]
+custom_minimum_size = Vector2(140, 34)
+text = "Status"
+
 [node name="ViewMenuButton" type="MenuButton" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow"]
 custom_minimum_size = Vector2(140, 34)
 text = "View"
@@ -285,6 +376,12 @@ text = "Debug"
 clip_contents = true
 size_flags_horizontal = 3
 size_flags_vertical = 3
+
+[node name="ToolOverlayHost" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage"]
+z_index = 4
+mouse_filter = 2
+anchor_right = 1.0
+anchor_bottom = 1.0
 
 [node name="MainViewportHost" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage"]
 clip_contents = true
@@ -318,6 +415,123 @@ size = Vector2i(500, 620)
 transparent_bg = false
 handle_input_locally = false
 render_target_update_mode = 4
+
+[node name="AxisIndicatorPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost"]
+z_index = 2
+mouse_filter = 2
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -98.0
+offset_top = -98.0
+offset_right = -12.0
+offset_bottom = -12.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_overlay_gizmo")
+
+[node name="AxisIndicatorMargin" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/AxisIndicatorPanel"]
+mouse_filter = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 6
+
+[node name="AxisIndicatorVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/AxisIndicatorPanel/AxisIndicatorMargin"]
+mouse_filter = 2
+theme_override_constants/separation = 1
+
+[node name="AxisIndicatorCenter" type="CenterContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/AxisIndicatorPanel/AxisIndicatorMargin/AxisIndicatorVBox"]
+mouse_filter = 2
+
+[node name="AxisIndicatorControl" type="Control" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/AxisIndicatorPanel/AxisIndicatorMargin/AxisIndicatorVBox/AxisIndicatorCenter"]
+custom_minimum_size = Vector2(59, 59)
+script = ExtResource("3_axis_indicator")
+
+[node name="ToolOverlayPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost"]
+z_index = 2
+mouse_filter = 2
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -332.0
+offset_top = -146.0
+offset_right = -106.0
+offset_bottom = -12.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_overlay_gizmo")
+
+[node name="ToolOverlayMargin" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel"]
+mouse_filter = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 6
+
+[node name="ToolOverlayVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin"]
+mouse_filter = 2
+alignment = 1
+theme_override_constants/separation = 4
+
+[node name="DrawToolButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox"]
+custom_minimum_size = Vector2(92, 26)
+mouse_filter = 1
+toggle_mode = true
+flat = true
+text = "Draw"
+tooltip_text = "Switch to the draw tool."
+
+[node name="EraseToolButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox"]
+custom_minimum_size = Vector2(92, 26)
+mouse_filter = 1
+toggle_mode = true
+flat = true
+text = "Erase"
+tooltip_text = "Switch to the erase tool."
+
+[node name="ToolStateLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox"]
+mouse_filter = 2
+text = "Tool State: Add"
+horizontal_alignment = 2
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 12
+
+[node name="ActiveToolLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox"]
+mouse_filter = 2
+text = "Active Tool: Freehand"
+horizontal_alignment = 2
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 12
+
+[node name="ShapeSizeStatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox"]
+visible = false
+mouse_filter = 2
+text = "Size: Drag Footprint"
+horizontal_alignment = 2
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 12
+
+[node name="RotationStatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox"]
+visible = false
+mouse_filter = 2
+text = "Rotation: 0°"
+horizontal_alignment = 2
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 12
+
+[node name="MaterialStatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox"]
+mouse_filter = 2
+text = "Select Material"
+horizontal_alignment = 2
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 12
+
+[node name="RadiusStatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox"]
+visible = false
+mouse_filter = 2
+text = "Radius: 0.12 m"
+horizontal_alignment = 2
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 12
 
 [node name="OrientationLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/FreeViewPanel/FreeVBox"]
 text = "Free View"
@@ -425,6 +639,19 @@ theme_override_font_sizes/normal_font_size = 12
 [node name="DebugPopup" type="PopupPanel" parent="."]
 visible = false
 theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="ProjectManagerPopup" type="PopupPanel" parent="."]
+visible = false
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="ProjectManagerMargin" type="MarginContainer" parent="ProjectManagerPopup"]
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="ProjectManagerHost" type="VBoxContainer" parent="ProjectManagerPopup/ProjectManagerMargin"]
+custom_minimum_size = Vector2(540, 620)
 
 [node name="StowHintPopup" type="PopupPanel" parent="."]
 visible = false

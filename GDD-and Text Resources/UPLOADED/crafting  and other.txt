@@ -1,0 +1,231 @@
+Then Return Scroll check is: good Displacement rule is : good Combat resources - 1 Option D: HP+ Stamina + cooldown based skills where HP is HP (possible use for shielding as a 2nd hp pool that will be essentially a house of prayer modifier on some skills and allow for max HP expansion via temporary Heath pool . essentially a shield . the shield will act as HP with the difference of taking in consideration only 50% of whatever defensive attributes the main HP calculations will have meaning if you have for example 100 armor (total calculation of basic defense and gear sum as well as external factors like food or similar can include player given buffs by 3rd party layers outside of the player itself or self inflicted by self) to 1000 HP ( in this example that will be the total hp displayed based on the player base HP+ other factors like gear and if used food as well as possible given buffs by self or 3rd party player skill usage making it a temporary HP buff but in this scenario we just take the end product of 1000 HP static with out taking in consideration how it got there ) the shield applied in this example will be a fixed amount so not % based off current target hp or target max hp. so it will be a flat amount of 100 shield making the character have 1100 hit points worth of HP pool stats . the 1000 will be calculated with a defense modifier of 100 armor . whilst the 100 shield will take half of that. so 50 armor. meaning you in essence would take double damage to shields using this system if on 1100 hp scenario we take 300 dmg the result of that will be 850 hp left ( these calculations might be wrong but i want the math to be sound on shields being half as resilient as the actual HP . it will be visually defined on the characters hp bar as an extension within the frame available to display hp meaning if 1000 hp and 1000 shield the like will look half green and the other half a pasty white color so it will look like 50%hp and 50%shield visually . numerically it will be displayed as HP:1000 (1000) as a text on top of the color hp bar as mentioned the text will be center to the hp bar and will expand left and right as needed based on the text displayed . mathematically it will be calculated in the back based on the defense factors and type of damage taken . ( this is the same for the normal hp but like i mentioned the shields will have a 50% of the defense numbers applied and balancing this number later in playtest phase will allow strength balancing on those defense interpretations when it comes to shields . Stamina - will be a non displayed stat value but a start bar will be displayed with out numerical indicators on how much there is of it . this resource will be consumed via running ( with shift ) , dodging (i-frame) and certain movement skills like dashes will contribute on depleting this resource . for the sake of explanation. Stamina will be 100 . running for 1 minute will burn 100 stamina . stamina will re-generate automatically when not being consumed after 2 seconds of it no longer being consumed ( stop using run 2 seconds later it starts to charge back up . or used an iframe 2 seconds later it starts to charge . u use iframe 1 second after the previous iframe it will not charge . if you run iframe run iframe it will not charge unless there was a 2 second window of stamina not being used for it to start charging . the charging rate will be "fixed" but food can allow the regeneration and pool size to be increased in form of a buff regeneration will be 10 seconds to get back 100 . meaning if you used 80 it will get back to 100 in 2 seconds this 10 seconds to 100 value can be changed on the 10 part . if the stamina is to quick to regen it will feel like not a problem to use always if the stamina is to slow it will feel to frustrating to use . it will need a balance and boss attack patterns and need to dodge will determinate how often one can use the stamina and based on how much that stamina needs to be used in repetition will determinate what the regen time will be . so testing and other elements of the game will influence how quick this resource will be regenerated cooldowns on skills are self explanatory
+
+
+CRIT. Will be an essential thing for everyone. there will be 2 things 
+crit chance  % where 100% will always crit  
+and crit damage  where the base + 100% ( double dmg ) can be modded and added on to that  values that come from food and gear  . as well as potential personal or 3rd party buffs. like the houses  passive buffs. upper limit on this can get to 10x base damage or more depending on the synergy and combinations one might decide to get  for ones build. 
+critical will apply to number based outputs . but not damage over time,  so burn and things like that  will not apply crit 
+what can crit  will be listed below.
+healing ( flat single hit  no lingering or over time )
+healing zones ( on ground dedicated periodic healing  but not a heal over time, this is more like a stationary healing source  that can heal over time . the amount of healing for stationary healing like that is calculated on cast  and for the duration it will output  periodically if within range  to all within range ( no unit limit as long as the unit  inside it  has a party status attached  to the target that is being healed  or self) the calculation on the crit for this will be calculated on cast . keeping  in mind casters  critical rate  and critical damage  modifiers, so changes  in those stats  post cast  will not change  the % chance or % boost  of the used  skill whilst it lingers . this means  if a combo is being performed  where the caster gains temporarily  for a short duration an boost in critical rate  or critical damage and uses this form of stationary on ground healing  area, then during it's active lifetime of this area the user looses the extra stats, this will not change how the healing area behaves  since the effect  and chances of the area are set  the moment it was successfully  cast  by the user.  this makes things predictable  and stable  also involves  mindful skill order with out over complicating things. )
+damage ( flat single hit  no lingering  effects  like bleeding or similar, multiple hits  have  their own  roll for critical and the bonus  critical damage  boost  is applied  in calculation  even form multiple hits as long as it is not a lingering effect  like a bleed/ poison/ burn  and similar )
+magic damage ( is the same as normal damage  no lingering effects . for fire related  damage  or multi tick damage  that can happen from ground effects  like example a spiked  area that deals damage  whilst moving  in it . that dose count as single hits just  repeated . as long as it is not an attacked  to the character  and is persistent  damage  form it will be able to crit and be amped  by the critical damage boost  effects . 
+same rules apply for other damage sources  as long as those  come from skills not items.)
+items  can not crit . nor can environmental  explosions or effects like lava damage  for example or open flame fire . those remain static. unless explicitly specified 
+
+CC exists as an "on /off" thing  it is a state change it has 100% chance to land when it is supposed to land  and 0 chance when it is not supposed to land .  damage  element on CC skills is considered damage and follows damage rules 
+To clarify CC skills in general , they are primarily  DAMAGE skills  with CC effects  attacked  to them  not CC skills with damage. more easy to classify and have  order in what can and can not pass a state check  when it comes  to various  things  that can be hit. dmg will always be primary CC will be secondary  i do not want to see a case scenario where CC immune causes dmg to not pass because the line of code  get's skipped  due to conditioning of an IF statement  or something like that 
+boss CC windows, a reset is enough because  the punishment  for not managing  the CC is equivalent  of doing nothing and doing nothing = allowing the boss to do it's thing  meaning . full room wipe , enjoy being sent back to town  and having to do all the running back  and re-plan, re-engage , and hope people do their thing. the punishment is logistics . not directly tied to what the boss is doing. you can get people to literally quit , party will need to shuffle roles  and or bring more people in  to do the fight , so yea.. a reset on a progression bar  is enough  to cause up to 2 hours of real life wasted time  XD, bin there , done that, it's either find a cheese mechanic to avoid wipes  or  do the CC mechanic correctly . people will do path of least resistance so no need to add more things  to it simple reset will be enough.
+ condition again is match CC type  getting hit by non  CC attacks will not change  the progression  of the bar . if the boss needs  airborne knockdown hits  they will only need to do that  and if they do a normal knockdown with out jumping  -resets  progress. or some one uses a stun instead . reset progress but other attacks  do not change  anything. i dont want people to stop dps  because  of a mechanic  that is counter productive for what people want to do . they will have dedicated  people to do mechanics the rest will just know not to press certain buttons  at certain times . it's monkey brain proof. ( also do not mention anywhere in the documents  the monkey brain proof  bit . not professional )
+economy bit 
+scrolls and potions are limited amount / day that you can get from NPC, NON craftable  items. what people can craft is something else . they will be crafting teleportation scrolls  that will allow them to go to a certain location  that they where in already as long as they have  done the correct  steps  to prepare for that . it's like going somewhere and  saving  the character's xyz coordinates in a log book . and they can use the log book to return  to that location ( same code as the return scroll just destination will change  to whatever saved  xyz coordinate the player decided  to get . i will add a casting  state  for that  so i dont get people to save things off a cliff or free falling  to troll other people if they decide to sell that  location scroll . this teleportation scroll will tie in with the contract/bounty systems so that you can remote  ask for help  if already exploring and you  mail your helper  the scroll so you can get them to come help u . as well as  being like a handout  thing for a guild if the guild decides to go fight a floor boss . they can distribute  the scrolls to people who want to go and fight and then they mass teleport skipping the time needed to get there, and having multiple of them, ties into the full wipe and sent back to town mechanics , allowing a cleaner reset . because you can fix gear in town empty what u need to empty restock and then use the teleport scroll to get back at the outskirts  of the fight  and re- engage  the boss as a group with little to no downtime . i dont really want to create  a map and teleport system i dont want a beacon system . i want it to be player to player driven  making it as socially bound as possible . and this sole item will make sure  to give the game that  need  of community  for it to survive .
+When downed, can allies revive without a scroll?
+no that is not possible . but , i will add a secret  function  where if pressing the ping  for resurrect  button  at a high enough rate  (clicks per minute  needs to be "desperation  level clicking " ) the character will self cast a resurrection circle if in inventory with the center of the circle being the dead caster that is spamming. this form of resurrection will not set any scrolls in inventory on cooldown nor will it cause the AOE resurrection. it will be personal. with a text  box  asking if they want to resurrect  like a normal resurrect  message popup . so that will be same code . and the rest  will stay the same . 
+this is there to have  a fun thing that will probably be tied  to an achievement on steam with something like "i see you, stop spamming", and yes this can be repeated  multiple times   as long as people know how to do it . i'd put 25 pings  within 5 seconds a good margin . i can click up to 53 times  within 5 seconds  so half of that seems reasonable. condition is pressing the ping button . will start an internal timer  for 5 seconds  counting how many pings  where done . the ping count exceeds or is equal to 25 pings  within those timed 5 seconds then the auto res sequence will play out . and steam achievement  if the clicking gets  to 35 or more pings /5 seconds ( i do not know to code this counter thing but  i will figure it out when i get there this is not that important at the moment, more of a Easteregg that can become a META thing  later but for now it will be a hidden feature . and a nice metric to see on steam how many people raged  at  other people when dying  XD  
+Option C: yes only if House of Prayer is present, yes this is good but and probably will be the thing,  but  it can be used only once  every 30 minutes . if not there is no  pressure and is one of the 4 special ability things. 
+
+crafting  and how that works 
+next section will be dedicated to the crafting bit this will probably be a huge rant  but i will try to make it somewhat coherent 
+
+
+the general idea is that  we have materials 
+in this example i will be using a multitude of elements  and systems  that tie to each other 
+i will be talking about  gear and materials 
+meaning i will be by proxy involving loot drops  form various  sources  including materials from gathering, killing  mobs  and or elite /bosses . material source will not be a 1 to 1 with real game this is mostly an example the same as the grace's garden is an example name but for reference reasons it can be used to describe things  in GDD  and future content  ideas  and progression .
+
+the description will be a bit of a back and fourth  in the process but try to keep things linear from a potential opening of the menu to the end product and how that might look like .
+this might be the most text  intense  and key defining bit of the game  since it has things  that might have never bin attempted before.
+
+in the beginning we start with materials in the dropped from . 
+for this example we will be using multiple crafting stations. 
+
+0- the crafting and material processing is done within an instanced location called the "the forge" this forge location will be essentially entered via a door/portal that will create a personal "workspace" that will be uniform for all but only the user can use it that (unless we add the same code that we use for instanced floors to allow small groups of people to be within the instance to show off crafted items during the test phase since there will be dummy targets there for them to test their creations) will contain the following elements ( more to be added later if missed during 1st iteration )
+
+0.1-"processing station" where the materials that are drops ( will use "drops" as a general word for all things  that can be acquired  from the various floors including gathering materials and kill drops form all possible sources) can be converted to crafting ready materials. once the conversion takes place the items  that where converted can no longer be traded until they reach a final end product form ( the new converted items will be called "material cubes" or "materials" /"mats" from now on)
+0.1.1 - the processing station can extract the element as is  and convert as is , extract only the color element ( once a color is extracted  it can be used to die  parts  but  needs to be unlocked  from a pre defined table  and the table  resembles  all the available elements and should be coded so that it auto populates  when adding new enemy entity with their drops)
+or make a raw stat material cube with out color that can be painted later in the crafting process with a different color
+the raw stat mats  will have the default "gray" color to it and yes it can be used as gray in the final product and can show under gray in the below mentioned filter 
+0.1.2
+the higher the drop quality  the more gloss/ metallic effect it will have  on the material lowest will be matted (to unlock different shine grades of a specific color) this is pure esthetics.
+0.1.3 
+the value of each material cube is defined by the drop it came from, inheriting values are
+- stats ( like character HP+, elemental effects, critical chance/damage bonuses, flat damage, armor, status effects like poison/curse/anti-heal/defense down/healing modifiers and so on)
+0.1.4
+additionally the processing station can be used to recycle crafted  gear into original components at a loss . allowing to extract only a few materials  that can be re-used  whilst loosing the rest  in the process 
+0.1.5 
+the processing station can extract the blueprint of a weapon, and with it comes  the skills and a recipe/material list to recreate  it so that people can redistribute builds  and or upgrade the material quality if needed.
+
+0.2- "storage" where the mats will be stored with a search system based on a category type  filter.  the filters will allow users  to category select :
+-color ( each one will have a color or predominant color tag for visual crafters  that do not care about  stats  and want to make designs look nice)
+-bonus effects (self explanatory will put things in a category  where the mats will have a certain attribute attached to it
+-gear quality ( gray blue orange etc etc)
+
+0.3 the actual crafting station for weapons - visually crafting weapons based on templates  or free hand builds under certain categories  ( own design can be saved as a template for later use)
+0.3.1
+weapon crafting grid will be 160 x 80 x 40 so 512000 grid volume of witch can be used max 35% of this so 179200 grid volume. so that means 160x80 work plates stacked 40 times.
+the plates will start from plate 20 so middle of the grid layer wise with options for symmetry tools 
+0.3.2
+crafting menu tools list ( will use "blocks" to define material cubes)
+mirror quarters on off mirror half ( top and down) mirror  half (left and right)
+mirroring will be in the equivalent of the XY plane where Z axis is the height of the weapon
+so mirroring will allow X+ Y+ working area to mirror to the other 3 regions  if quarter mirroring is on  if not it will mirror  in the selected half , disabling mirroring  will make material placement local.
+building bulk tools . different pre determined segments that can be placed and rotated  to form larger multi layer elements. (pre determined rectangles for example, or pre-determined  shapes for handles /hand position anchor points on the weapons, these will have a ghost block effect  that can be filled in with a bucket  tool)
+bucket tool option  build- can fill in ghost  blocks with pre-determined  material
+bucket tool option decoration/painting - fills the layer that is visible  with color respecting cutoffs and other blocks that stick out from the layer it will only paint the face that is selected not the cube itself on all sides  
+paint  tools=
+variable size spherical brush that will allow painting on multiple layers selecting the tool will provide a slider to adjust  size
+single block face painting tool - self explanatory 
+select all tool to change the color  to whatever  all at once. 
+revert button  where you can revert  the changes  up to  30 times 
+delete block button. selectable multi block tool that will allow on a 2nd press of the button to erase unwanted  blocks.
+cut throw all mode for erase block button on toggle on/off
+round edge tool will create a beveling like effect bridging 90 degree angles in a convex or concave  way depending on the position where it is applied
+45 degree angle edge tool  like the round edge tool  but 45 degrees
+
+note : all forms  of additive or subtractive  modifications can be mirrored  if the mirroring  is  active. 
+note : select type tools for painting  or shaping  can be done by simple selecting the areas that need change then hit the apply button .
+note: selecting an already selected  section will remove the selection. 
+
+
+0.4 the actual crafting station for armor - visually crafting armor around a mannequin , will not allow placement within the mannequin model, has default  templates  to work with as well as option to make own via free hand creation 
+will use the same tools as the weapon crafting station but  around a pre determined mannequin frame. and the size grid size will be adapted  to the size of the gear component that is created 
+
+0.5 the actual crafting station for accessories - visually crafting accessories around a mannequin, will not allow placement within the mannequin model, has default  templates  to work with as well as option to make own via free hand creation 
+will use the same tools as the weapon crafting station but  around a pre determined mannequin frame. and the size grid size will be adapted  to the size of the gear component that is created 
+
+0.6 testing dummies -place to test out the weapons during and after the skill crafting part of the crafting process 
+
+0.7 skill crafting station - where skills can be determined and allocated  to each button based on the weapon component  materials .
+this can look like  having fire elemental mats, wind elemental mats ice elemental mats poison elemental mats and anti- heal elemental mats  within a certain weapon profile the skill crafting station will allow to allocate what element to what button to allow fire spells on mid range but close range are wind  ice for long range , movement can have ice as well making dashes  for example longer range, and some skills or all skills have anti-heal  and some things have poison  on them .
+within the skill crafter you can also determine how the attack will look by selecting the weapons grip position (single hand - 2 handed ) that will determine balance point attack speed and overall way it feels . can customize  skills  on swapping from a single hand grip to a 2 hand grip  mid swing,  can determine if character spins  with the hit  or if the weapon moves  only , can determine the trajectory  and how much that  weapon will swing  and based on the material used  it will calculate the damage. it will be physics based  and a wiggle  motion will do little to no damage some builds will be wacky but that will also mean not optimal.
+some restrictions on how the character will perform attacks  will be applied  to have a somewhat coherent  combat system across the board.
+in essence i will be allowing people to use almost  dev level tools to create their own personal weapon and how they envision it should be used. 
+the skill crater  can save template of the way the weapon behaves  and the data will be saved  to the weapon template. building it again will bring with it the already pre-set skills  that where decided on 1st build of that weapon.
+
+0.8 not finished items storage - place where semi finished products  can be stored  if missing materials or just not named, or not finished 
+ during the crafting process the items  will be created and stored  in this "storage" even when actively working on it and changing it once the menu is closed it will auto save to storage. leaving the area and returning will allow players  to open this storage and select what component  they wish to continue working on  and then interacting  with the appropriate crafting station the item will be there ready to continue from the last modification made .  it will save last orientation  and what last selected  tool was used ( will define tools in the in depth crafting section of this message )
+
+0.9 naming station -final destination before it can be equipped and taken out of the instanced  crafting area then used outside in floors or traded.
+
+note: when crafting a certain amount of completed  items /type titles will be awarded to the character as well as Steam achievements with the same title name ( TBD title wordings and conditions . but it will be something along the lines of making 1 full set of components = "Crafting Apprentice"
+having 50 weapons  fully crafted = "Weapon master" but that is just an example still to be determined)
+
+1
+budgeting for crafting.
+each block has it's won values based on the drop it came from. 
+the system will allow  any shape as long as it has a proper  handle "grip system"
+2
+archetype selection is made by the player within the skill crafting station . 
+note: there will not be any archetype weapons visible  to the end user. if really needed it will be a backend  classification  only. 
+3
+skill tooltips can be edited  by the crafter  before naming . not adding descriptions  will not allow finalizing the weapon via naming. 
+damage profile for the skills will be given in an automated manner based on the material used, shape and center of gravity  as well as anchor points. physics sound weapons will do more damage if front heavy, but slower 
+well balanced will have optimal damage with optimal speed
+and light weapons will have less damage but grater speed . this will directly influence skill cooldowns as well making light weapons more spammable, heavy weapons less spammable and middle in the middle.
+for bows and projectile  weapons the "heavier" the bow the more damage  it will do but  draw time will be increased,  "lighter" bows  will have  less damage but options  for quicker  draws  and overall making the character more nimble 
+overall weight of the weapons will determine  character movement speed  in and out of combat 
+sprint  will override  the weapon movement speed modifier making everyone sprint at the same speed for consistency  during mechanics and general mobility feel 
+magic type weapons will be more complicated, heavy builds will be more damage oriented 
+lighter builds will be more healing oriented.  because healing materials will have a lower weight coefficient allowing nimbleness for healing builds 
+4
+offhand
+dual wielding is possible if 2 weapons that have 1 single grip/hand anchor  point available
+shields  can be primary hand  or offhand bringing same benefits  with just the character being right or left handed. dual wielding shields (2 of them) is possible  but not optimal 
+
+5 shields are crafted in the same manner as weapons but with a fixed anchor point  for handles and that can not be changed.
+the shape of the shield can be change. same tools can be used  for crating shields 
+
+like  for weapons, shields have their own shield type attack patterns that can be modified  within the skill crafting station.
+ shield type weapons have additional stats  that benefit  block and parry  even if all weapons have a block and parry modifier. shield have a bonus  to it that comes from the defense oriented house oath.
+shield attack patterns will be more restrictive  vs  weapon  attack patterns following a more stable animation line. since it is a board and not much can be changed there .
+
+also having shields equipped will allow  full blocking for the team behind the user for wave type attacks  or  continuous beams  or flames ( lasers  or flame thrower type attacks from enemies or terrain / traps )
+
+6
+review of durability consumption for  
+downed  state = 1.5%  of total durability allowing 66 down states and on the 67th it will break
+death/surrender state = 3%  of total durability 
+total 4.5%  of total durability on 1 death cycle allowing 22 death cycles and having it break on the 23rd.
+the amount can vary  due to scenario specific durability states  but  that seems to be a min and max amount  and seems reasonable  enough to not worry about  it  to much and focus on the fights  rather then remembering to repair  the gear. 
+repair npc will have  options to repair all equipped. or select what exactly to repair manually 
+and repair kits  that are portable repair options are to be used 1 kit  / 1 item  repairing to full but consuming the kit. 
+as mentioned repair kits  can be bought  from a sundries merchant with a limited amount / day available to buy 
+and the tutorial/apprenticeship sages of the game will award  50 of them  for personal use
+
+note: global NPC stock resets will be held at the same time every day (9AM UTC)
+
+the top 3 gold sinks you commit to long-term are 
+
+repairs-yes 
+
+scrolls- yes
+
+contract posting fees- yes 
+
+the balance will be having  not that many forms  of income and the global money will be something you can not get via farming. currency hand outs will happen occasionally as contract rewards and have a modifier tied  to the rank FEDCBAS of the quest  as well as own character ranking . the higher the ranking  the more advanced quests  one can take and the amount of money that you get for the quest will be primarily be spent  on repairs. there will be the cheaper option that will be on a daily limit but for people who play a lot there will be a so called on demand repair with it's own price on the repair station NPC and that will cost enough to consider waiting until tomorrow to repair the gear when it is cheaper.
+
+players will get an allowance from time to time for maintenance downtime . and that  will provide enough sustenance for the upcoming week. (yes spoon feeding enough to not let them die, yes logging in and getting daily NPC rotation cheep stuff will be mandatory for good personal economy, yes  logging in each week to get the maintenance rewards  will need to become habit all in the scope of having habit building behaviors that will make people want to log in for a sense of duty even if they do not intend to play for much time . that alone is enough for me to keep the game population high enough on a daily basis and that will look good on Steam,  adding indirectly to marketing  because  active game = good game  => let's try it out => keep logging in turnover => bigger daily number => more let's try this game out people=  longevity 
+economy done smart = good for the game and outside of the game
+
+
+ 
+ Floors & rotation 
+
+Party size target for content tuning: 
+
+max 6 can have a raid frame with up to 5 parties  bringing a total to 30 people in 1 group having 5 raid frames  brings  the total to 150 people  about the amount i was looking for 150-200 units add in small parties that want to associate but not be in a raid group and you get to the 200 amount. 
+so that is my group framework 
+guild cap can be up to 150 people under 1 guild name  with own guild progression system allowing it to grow . 1 building will be dedicated  as a guild hall with some benefits  there including access to a guild NPC that will sell you things with guild currency  that you get for doing guild related  contracts  that the guild master will be posting. once the task has been completed  the guild will distribute  gear to participants (each participant  will have own contribution  based  loot and the kill itself will drop materials  that the guild will get for opening the contract  it's the equivalent  of the world  rewarding the guild for doing the task  this reward will come from the system  not an individual . this reward can be stored  in the guild bank and can be distributed  according to internal rules. eligibility for this kind of rewards  will be participation based  if a character did not participate  in the event  and did not contribute  to it's success the game will not allow resource transfer from that reward pool.
+u dont show up u dont get shit. 
+items will be distributable within 30 days after witch they will disappear from the guild bank.  
+the guild bank will have logs  showing each transaction  in and out and this can be seen by all members  within the guild tab menu selecting the appropriate  logs  tab .
+some materials  will be marketable to generate  funds for the guild , for guild upgrading/leveling up 
+opening more slots (up to 150 max starts with 50 slots slot upgrading will be  75-100-125-150 upgrade and unlock criteria TBD ) 
+
+Do floors have “extraction points” or extraction is only via scrolls?
+next  to the entrance there will be an exit teleportation beacon as well as after the floor boss is defeated  3 more teleportation  device will be available for use scattered  around the map for a total of 4. they will usually correspond to landmarks  and be somewhat visible  from a distance.   . this will be a 2 way teleport and unlocking it requires interaction in order to teleport to it ( this will tie in the escort  quest requests ) can be used  to go back to town from it  using this has no restrictions  can be in combat  and being actively hit  as long as in range to interact with it and not die  in the process of pressing return  on a popup  you are golden . there will be no invulnerability  bubble  around  this location. and since it is a landmark their will be mobs  around  it by default  so not a safe zone .
+atoning will require a charge time . death within this timeframe is possible if the atonement  is not completed the process will need to be reset  getting hit will not interrupt  atonement but  getting downed  will 
+atonement  time 15 seconds fixed stat . on initializing atonement  mobs within the area will target the atoning player.
+atonement can be done only 1 time / player/ beacon.  it can not be used  to pull mobs  with  for farming purposes. in order to use it for farming people need to "know" that it can be used like that  and i will allow it because tactically cancelling  the atonement  to pull mobs  but not getting the beacon atoned  on a character  is a strategic use of the beacon  and i will respect system abuses like that in fact  i will attach a Steam achievement  to that  called "carrot on a stick"  and people will have the chance on different floors  to not open a beacon and tap it  15 times  to get the achievement . the 15 times count on each mob group pull when the area mobs respawn. so killing 15 waves  will count towards  that  achievement because i consider it as intentional  at that point.
+
+getting around the place  will allow coordinate based teleportation with teleport scrolls
+saves  up to 10 spots  / character  in a log, the spots  can be re-written
+in order to write the spot the character needs to be in the location  where the coordinates will lead to . and press a button in the log book (UI Element ) to channel for 5 seconds and save the location . same channeling rules apply as for the return scroll  stationary not in combat  not airborne etc etc . once having a location saved in the log book  teleportation scrolls can be imprinted  with that  location information and be traded to allow mass teleport of many people ( this will be a costly shortcut  to get back to the boss area after a wipe . will need preparation thinking ahead  and planning as well as a social net  to get the scrolls from some one  so inter player communication will be needed, going all in on guild play and organization as well as an additional  value on why to buy this premium feature  to allow time saving via transportation )
+this is a premium feature (monthly payment  for this bonus thing as well as other bonuses that still need to be determined in a packet format the scrolls to be imprinted will be in part given for free there. and probably in a battlepass system  as well . i mean i am making a free to play game  money needs to come from somewhere  and battlepass and premium features  are now socially accepted and sometimes expected  for free to play titles so i do not foresee problems  if the price is fair. price to be determined  not important whatsoever at this stage. but systems  need to be put in place the data  about all of this will probably need to be server side to avoid  cheating since this is where the money comes from . i will not use any within game currency that is equivalent with in real life money. i will have direct  prices  for things in the cash shop if anything will be sold there outside of the premium feature bundle (name to be changed ) and battlepass (side note battlepass will have a daily reward system)
+
+
+Only intentional combat actions, hostile damage, and forced displacement events can affect combat state.
+
+Continuous passive motion (platform carrying you) does not repeatedly retrigger.
+
+Contradiction #1: “Hunted forever across the floor” vs chase sanity
+
+You already accepted Pursue/Hunt states. Great.
+Lock this sentence:
+
+“Enemies never forget participants, but they do stop active pursuit when pursuit becomes unreasonable; they return to zone while keeping targets flagged.”
+
+That preserves your “no drop aggro” philosophy and prevents boss dragging.
+i agree with the above statements for combat state and aggro flagging 
+with the exception  that  in practice this will be verry counter  intuitive . once the return  to zone is engaged  due to pathing or resource exhaustion it will be a simple reset no remembering  no noting because that might come across as buggy  rather then a feature .  "why is that mob from miles away still locked on me  an why can i see it's hp bar  still  when i am so far away  makes no sense" also that can become unnecessary processing  since the "combat" state was decided to be null by the player  by avoiding  fighting  or in any case  just simply transitioning  from one side of the map to a different location with a different scope other then combat  there  that might be uber frustrating for people  so certain chase ranges will be large enough to matter  and at the same time exceeding  it  the reset will happen fully when it comes to aggro states. this seems to be more clean. reward avoidance properly. and not have features  seem to be bugs  from the end user perspective. 
+
+armor  will be a flat defensive thing  no sub stats and will probably be called armor  or defense. 
+
+
+Damage type model
+
+Tight: Physical / Elemental Magic / True / DoT's
+
+
+to answer  to " Once that’s chosen, we can lock:
+
+armor/resist structure
+
+shield mitigation behaving at 50% defenses (your design)
+
+threat coefficients for heals/res "
+
+armor  will be a general stat single thing 
+shield  mitigation of 50% is for what the healer  will cast  on self or friendly targets is displayed  as a bubble  around the character. in the 50% mitigation  context  it refers  to that  not the shield item/ offhand-main hand crafted  thing. for coherence we will be calling that  "bubble" so the shield is the in hand item  the bubble is the effect that changes  total hit points  and is an addon to current hp, and this addon is half as resilient  as the actual hp and is on a timer  based on the skills  used to create  it .( to be determined when we do fine tuning of skills at a later date for context  we can call it  active for just  6 seconds, and duration can be changed  via "buff duration" stats  from materials and those come with a % value and change the base value by adding the corresponding % value  so +100% will make it 12 seconds )
+
+also important  take note of all the examples of different types of materials and take in consideration  all the stats  i am talking about  because  they will need to be listed  as materials  and from those materials we will need to manufacture a source within the world  of  "the Will"  to be collected from . will get to that  in a bit.

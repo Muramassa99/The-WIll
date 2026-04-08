@@ -1,4 +1,4 @@
-extends CanvasLayer
+﻿extends CanvasLayer
 class_name CraftingBenchUI
 
 signal closed
@@ -10,6 +10,9 @@ const PAGE_WEAPON: StringName = &"weapon"
 const TOOL_PLACE: StringName = &"place"
 const TOOL_ERASE: StringName = &"erase"
 const TOOL_PICK: StringName = &"pick"
+const DEFAULT_STAGE2_POINTER_TOOL_MIN_RADIUS_METERS: float = 0.0125
+const DEFAULT_STAGE2_POINTER_TOOL_MAX_RADIUS_METERS: float = 0.375
+const DEFAULT_STAGE2_POINTER_TOOL_RADIUS_STEP_METERS: float = 0.0125
 
 const PLANE_XY: StringName = &"xy"
 const PLANE_ZX: StringName = &"zx"
@@ -17,24 +20,92 @@ const PLANE_ZY: StringName = &"zy"
 const WORKSPACE_VIEW_FREE: StringName = &"free"
 const WORKSPACE_VIEW_PLANE: StringName = &"plane"
 
-const FREE_VIEW_DRAG_NONE := 0
-const FREE_VIEW_DRAG_PAN := 1
-const FREE_VIEW_DRAG_ORBIT := 2
-
 const MENU_VIEW_FIT := 100
 const MENU_VIEW_TOGGLE_BOUNDS := 101
 const MENU_VIEW_TOGGLE_SLICE := 102
 const MENU_GEOMETRY_TOOL_PLACE := 200
 const MENU_GEOMETRY_TOOL_ERASE := 201
-const MENU_GEOMETRY_PLANE_XY := 202
-const MENU_GEOMETRY_PLANE_ZX := 203
-const MENU_GEOMETRY_PLANE_ZY := 204
+const MENU_GEOMETRY_TOOL_PICK := 202
+const MENU_GEOMETRY_TOOL_FILLET := 208
+const MENU_GEOMETRY_TOOL_CHAMFER := 209
+const MENU_GEOMETRY_TOOL_SURFACE_FACE_FILLET := 210
+const MENU_GEOMETRY_TOOL_SURFACE_FACE_CHAMFER := 211
+const MENU_GEOMETRY_TOOL_SURFACE_EDGE_FILLET := 212
+const MENU_GEOMETRY_TOOL_SURFACE_EDGE_CHAMFER := 213
+const MENU_GEOMETRY_SELECTION_APPLY := 214
+const MENU_GEOMETRY_SELECTION_CLEAR := 215
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_EDGE_FILLET := 216
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_EDGE_CHAMFER := 217
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_REGION_FILLET := 218
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_REGION_CHAMFER := 219
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_LOOP_FILLET := 220
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_LOOP_CHAMFER := 221
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_REGION_RESTORE := 222
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_LOOP_RESTORE := 223
+const MENU_GEOMETRY_TOOL_SURFACE_FACE_RESTORE := 224
+const MENU_GEOMETRY_TOOL_SURFACE_EDGE_RESTORE := 225
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_EDGE_RESTORE := 226
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_BAND_FILLET := 227
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_BAND_CHAMFER := 228
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_BAND_RESTORE := 229
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_CLUSTER_FILLET := 230
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_CLUSTER_CHAMFER := 231
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_CLUSTER_RESTORE := 232
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_BRIDGE_FILLET := 233
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_BRIDGE_CHAMFER := 234
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_BRIDGE_RESTORE := 235
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_CONTOUR_FILLET := 236
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_CONTOUR_CHAMFER := 237
+const MENU_GEOMETRY_TOOL_SURFACE_FEATURE_CONTOUR_RESTORE := 238
+const MENU_GEOMETRY_TOOL_RECTANGLE_PLACE := 239
+const MENU_GEOMETRY_TOOL_RECTANGLE_ERASE := 240
+const MENU_GEOMETRY_TOOL_CIRCLE_PLACE := 241
+const MENU_GEOMETRY_TOOL_CIRCLE_ERASE := 242
+const MENU_GEOMETRY_TOOL_OVAL_PLACE := 243
+const MENU_GEOMETRY_TOOL_OVAL_ERASE := 244
+const MENU_GEOMETRY_TOOL_TRIANGLE_PLACE := 245
+const MENU_GEOMETRY_TOOL_TRIANGLE_ERASE := 246
+const MENU_GEOMETRY_SHAPE_ROTATE_LEFT := 247
+const MENU_GEOMETRY_SHAPE_ROTATE_RIGHT := 248
+const MENU_GEOMETRY_PLANE_XY := 203
+const MENU_GEOMETRY_PLANE_ZX := 204
+const MENU_GEOMETRY_PLANE_ZY := 205
+const MENU_GEOMETRY_LAYER_DOWN := 206
+const MENU_GEOMETRY_LAYER_UP := 207
 const MENU_WORKFLOW_BAKE := 300
 const MENU_WORKFLOW_RESET := 301
 const MENU_WORKFLOW_CLOSE := 302
+const MENU_WORKFLOW_STAGE2_INITIALIZE := 303
+const MENU_WORKFLOW_STAGE2_TOGGLE_MODE := 304
+const MENU_PROJECT_MANAGER := 400
+const MENU_PROJECT_SAVE := 401
+const MENU_PROJECT_NEW := 402
+const MENU_PROJECT_LOAD_SELECTED := 403
+const MENU_PROJECT_RESUME_LAST := 404
+const MENU_PROJECT_DUPLICATE := 405
+const MENU_PROJECT_DELETE := 406
+const MENU_PROJECT_SHOW_PATHS := 407
 
 const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://core/defs/forge/forge_view_tuning_default.tres")
-const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
+const ForgeMaterialCatalogPresenterScript = preload("res://runtime/forge/forge_material_catalog_presenter.gd")
+const ForgeWorkspaceEditFlowScript = preload("res://runtime/forge/forge_workspace_edit_flow.gd")
+const ForgeWorkspaceEditActionPresenterScript = preload("res://runtime/forge/forge_workspace_edit_action_presenter.gd")
+const ForgeWorkspaceInteractionPresenterScript = preload("res://runtime/forge/forge_workspace_interaction_presenter.gd")
+const ForgeWorkspaceLayoutPresenterScript = preload("res://runtime/forge/forge_workspace_layout_presenter.gd")
+const ForgeWorkspacePlanePresenterScript = preload("res://runtime/forge/forge_workspace_plane_presenter.gd")
+const ForgeProjectActionPresenterScript = preload("res://runtime/forge/forge_project_action_presenter.gd")
+const ForgeProjectPanelPresenterScript = preload("res://runtime/forge/forge_project_panel_presenter.gd")
+const ForgeWorkspacePresentationScript = preload("res://runtime/forge/forge_workspace_presentation.gd")
+const ForgeBenchPanelPresenterScript = preload("res://runtime/forge/forge_bench_panel_presenter.gd")
+const ForgeBenchRefreshPresenterScript = preload("res://runtime/forge/forge_bench_refresh_presenter.gd")
+const ForgeBenchDebugPresenterScript = preload("res://runtime/forge/forge_bench_debug_presenter.gd")
+const ForgeBenchSessionPresenterScript = preload("res://runtime/forge/forge_bench_session_presenter.gd")
+const ForgeBenchMaterialStatePresenterScript = preload("res://runtime/forge/forge_bench_material_state_presenter.gd")
+const ForgeBenchMenuPresenterScript = preload("res://runtime/forge/forge_bench_menu_presenter.gd")
+const ForgeBenchStartMenuPresenterScript = preload("res://runtime/forge/forge_bench_start_menu_presenter.gd")
+const ForgeStage2BrushPresenterScript = preload("res://runtime/forge/forge_stage2_brush_presenter.gd")
+const ForgeStage2SelectionPresenterScript = preload("res://runtime/forge/forge_stage2_selection_presenter.gd")
+const ForgeWorkspaceShapeToolPresenterScript = preload("res://runtime/forge/forge_workspace_shape_tool_presenter.gd")
 
 @export_category("Responsive Layout")
 @export var compact_width_breakpoint: int = 1360
@@ -92,18 +163,29 @@ const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_run
 @onready var right_panel: PanelContainer = $Panel/MarginContainer/RootVBox/MainHBox/RightPanel
 @onready var project_panel: PanelContainer = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel
 @onready var workspace_stage: Control = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage
+@onready var tool_overlay_host: Control = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost
 @onready var main_viewport_host: Control = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost
 @onready var inset_viewport_host: Control = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/InsetViewportHost
 @onready var plane_view_panel: PanelContainer = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/InsetViewportHost/PlaneViewPanel
 @onready var free_view_panel: PanelContainer = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/FreeViewPanel
 @onready var title_label: Label = $Panel/MarginContainer/RootVBox/HeaderBox/TitleLabel
 @onready var subtitle_label: Label = $Panel/MarginContainer/RootVBox/HeaderBox/SubtitleLabel
+@onready var start_menu_panel: PanelContainer = $Panel/MarginContainer/RootVBox/StartMenuPanel
+@onready var start_menu_continue_last_button: Button = $Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox/StartMenuButtonVBox/ContinueLastButton
+@onready var start_menu_project_list_button: Button = $Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox/StartMenuButtonVBox/ProjectListButton
+@onready var start_menu_new_melee_button: Button = $Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox/StartMenuButtonVBox/NewMeleeWeaponButton
+@onready var start_menu_new_ranged_physical_button: Button = $Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox/StartMenuButtonVBox/NewRangedPhysicalWeaponButton
+@onready var start_menu_new_shield_button: Button = $Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox/StartMenuButtonVBox/NewShieldButton
+@onready var start_menu_new_magic_button: Button = $Panel/MarginContainer/RootVBox/StartMenuPanel/StartMenuMargin/StartMenuVBox/StartMenuButtonVBox/NewMagicWeaponButton
 @onready var layer_status_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/LayerStatusLabel
 @onready var plane_status_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/PlaneStatusLabel
 @onready var armed_material_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ArmedMaterialLabel
 @onready var capacity_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/CapacityLabel
 @onready var capacity_bar: ProgressBar = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/CapacityBar
 @onready var project_source_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectSourceLabel
+@onready var builder_component_tabs: HBoxContainer = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/BuilderComponentTabs
+@onready var builder_component_bow_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/BuilderComponentTabs/BuilderComponentBowButton
+@onready var builder_component_quiver_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/BuilderComponentTabs/BuilderComponentQuiverButton
 @onready var project_name_edit: LineEdit = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectNameEdit
 @onready var project_stow_position_option_button: OptionButton = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectStowPositionOptionButton
 @onready var project_grip_style_option_button: OptionButton = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectGripStyleOptionButton
@@ -124,6 +206,8 @@ const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_run
 @onready var zy_plane_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/PlaneSelectorRow/ZYPlaneButton
 @onready var layer_down_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/LayerStepRow/LayerDownButton
 @onready var layer_up_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/LayerStepRow/LayerUpButton
+@onready var project_menu_button: MenuButton = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow/ProjectMenuButton
+@onready var status_menu_button: MenuButton = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow/StatusMenuButton
 @onready var view_menu_button: MenuButton = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow/ViewMenuButton
 @onready var geometry_menu_button: MenuButton = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow/GeometryMenuButton
 @onready var workflow_menu_button: MenuButton = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow/WorkflowMenuButton
@@ -134,12 +218,24 @@ const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_run
 @onready var plane_viewport: ForgePlaneViewport = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/InsetViewportHost/PlaneViewPanel/PlaneVBox/PlaneViewport
 @onready var free_view_container: SubViewportContainer = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/FreeViewPanel/FreeVBox/FreeViewContainer
 @onready var free_subviewport: SubViewport = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/FreeViewPanel/FreeVBox/FreeViewContainer/FreeSubViewport
+@onready var axis_indicator_control = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/AxisIndicatorPanel/AxisIndicatorMargin/AxisIndicatorVBox/AxisIndicatorCenter/AxisIndicatorControl
+@onready var tool_overlay_panel: PanelContainer = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel
+@onready var draw_tool_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/DrawToolButton
+@onready var erase_tool_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/EraseToolButton
+@onready var tool_state_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ToolStateLabel
+@onready var active_tool_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ActiveToolLabel
+@onready var shape_size_status_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ShapeSizeStatusLabel
+@onready var rotation_status_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/RotationStatusLabel
+@onready var material_status_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/MaterialStatusLabel
+@onready var radius_status_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/RadiusStatusLabel
 @onready var orientation_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/FreeViewPanel/FreeVBox/OrientationLabel
 @onready var stow_hint_popup: PopupPanel = $StowHintPopup
 @onready var stow_hint_label: Label = $StowHintPopup/StowHintMargin/StowHintLabel
 @onready var grip_hint_popup: PopupPanel = $GripHintPopup
 @onready var grip_hint_label: Label = $GripHintPopup/GripHintMargin/GripHintLabel
 @onready var debug_popup: PopupPanel = $DebugPopup
+@onready var project_manager_popup: PopupPanel = $ProjectManagerPopup
+@onready var project_manager_host: VBoxContainer = $ProjectManagerPopup/ProjectManagerMargin/ProjectManagerHost
 @onready var debug_close_button: Button = $DebugPopup/DebugMargin/DebugVBox/DebugHeaderRow/DebugCloseButton
 @onready var status_text: RichTextLabel = $DebugPopup/DebugMargin/DebugVBox/DebugScroll/DebugText
 @onready var owned_tab_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/RightPanel/MarginContainer/RightScroll/RightVBox/InventoryPageTabs/OwnedTabButton
@@ -166,42 +262,68 @@ var material_catalog: Array[Dictionary] = []
 var visible_inventory_entries: Array[Dictionary] = []
 var project_catalog: Array[Dictionary] = []
 var free_workspace_preview: ForgeWorkspacePreview
-var material_runtime_resolver = MaterialRuntimeResolverScript.new()
-var free_view_drag_active: bool = false
-var free_view_drag_mode: int = FREE_VIEW_DRAG_NONE
-var free_view_restore_mouse_position: Vector2 = Vector2.ZERO
-var free_view_previous_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_VISIBLE
-var free_view_paint_active: bool = false
-var free_view_paint_has_last_grid: bool = false
-var free_view_paint_last_grid_position: Vector3i = Vector3i.ZERO
+var material_catalog_presenter = ForgeMaterialCatalogPresenterScript.new()
+var workspace_layout_presenter = ForgeWorkspaceLayoutPresenterScript.new()
+var workspace_plane_presenter = ForgeWorkspacePlanePresenterScript.new()
+var project_panel_presenter = ForgeProjectPanelPresenterScript.new()
+var workspace_presentation = ForgeWorkspacePresentationScript.new()
+var bench_panel_presenter = ForgeBenchPanelPresenterScript.new()
+var bench_refresh_presenter = ForgeBenchRefreshPresenterScript.new()
+var bench_debug_presenter = ForgeBenchDebugPresenterScript.new()
+var bench_session_presenter = ForgeBenchSessionPresenterScript.new()
+var bench_material_state_presenter = ForgeBenchMaterialStatePresenterScript.new()
+var bench_menu_presenter = ForgeBenchMenuPresenterScript.new()
+var bench_start_menu_presenter = ForgeBenchStartMenuPresenterScript.new()
 var show_grid_bounds: bool = true
 var show_active_slice: bool = true
 var main_workspace_mode: StringName = WORKSPACE_VIEW_FREE
 var suppress_active_wip_refresh: bool = false
 var cached_material_lookup: Dictionary = {}
 var debug_status_dirty: bool = true
-var held_layer_direction: int = 0
-var held_layer_delay_remaining: float = 0.0
-var held_layer_repeat_accumulator: float = 0.0
 var layout_refresh_queued: bool = false
 var last_layout_compact_mode: bool = false
 var last_layout_viewport_size: Vector2 = Vector2.ZERO
 var last_debug_text: String = ""
-var pending_edit_visual_refresh: bool = false
-var pending_edit_panel_refresh: bool = false
-var pending_edit_preserve_workspace_view: bool = true
-var pending_edit_panel_refresh_elapsed: float = 0.0
+var last_left_panel_state: Dictionary = {}
+var start_menu_visible: bool = false
+var current_bench_name: String = ""
+var workspace_edit_flow = ForgeWorkspaceEditFlowScript.new()
+var workspace_edit_action_presenter = ForgeWorkspaceEditActionPresenterScript.new()
+var workspace_interaction_presenter = ForgeWorkspaceInteractionPresenterScript.new()
+var project_action_presenter = ForgeProjectActionPresenterScript.new()
+var stage2_brush_presenter = ForgeStage2BrushPresenterScript.new()
+var stage2_selection_presenter = ForgeStage2SelectionPresenterScript.new()
+var workspace_shape_tool_presenter = ForgeWorkspaceShapeToolPresenterScript.new()
+var stage2_refinement_mode_active: bool = false
+var stage1_active_tool_before_stage2_refinement: StringName = TOOL_PLACE
+var structural_shape_drag_active: bool = false
+var structural_shape_drag_anchor_grid_position: Vector3i = Vector3i.ZERO
+var structural_shape_drag_current_grid_position: Vector3i = Vector3i.ZERO
+var structural_shape_preview_grid_positions: Array[Vector3i] = []
+var structural_shape_preview_dirty: bool = false
+var structural_shape_last_committed_layer: int = -1
+var structural_shape_last_committed_plane: StringName = StringName()
+var structural_shape_rotation_quadrant: int = 0
+var stage2_brush_radius_meters: float = 0.0
+var stage2_hover_patch_ids: PackedStringArray = PackedStringArray()
+var stage2_selected_patch_ids: PackedStringArray = PackedStringArray()
+var tool_state_modifier: StringName = ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD
+var stage1_tool_family: StringName = ForgeWorkspaceShapeToolPresenterScript.FAMILY_FREEHAND
+var stage2_tool_family: StringName = ForgeStage2BrushPresenterScript.FAMILY_STAGE2_CARVE
 
 func _ready() -> void:
 	panel.visible = false
 	stow_hint_popup.hide()
 	grip_hint_popup.hide()
+	project_manager_popup.hide()
 	free_subviewport.own_world_3d = true
+	_configure_project_manager_popup()
 	_configure_action_menus()
 	_connect_ui_signals()
 	_populate_stow_position_options()
 	_populate_grip_style_options()
 	_ensure_free_workspace_preview()
+	stage2_brush_radius_meters = _get_view_tuning().workspace_stage2_default_brush_radius_meters
 	plane_viewport.set_view_tuning(_get_view_tuning())
 	_sync_workspace_hosts()
 	if not get_viewport().size_changed.is_connected(_queue_layout_refresh):
@@ -213,64 +335,81 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if not panel.visible:
 		return
+	if start_menu_visible:
+		return
 	_process_layer_hold_repeat(delta)
 	_process_pending_edit_refresh(delta)
+	_refresh_axis_indicator()
 
 func _unhandled_input(event: InputEvent) -> void:
-	if free_view_drag_active:
+	if workspace_edit_flow.is_free_view_drag_active():
 		if event is InputEventMouseMotion:
-			_handle_free_view_drag_motion((event as InputEventMouseMotion).relative)
+			workspace_interaction_presenter.handle_free_view_drag_motion_state(
+				workspace_edit_flow,
+				(event as InputEventMouseMotion).relative,
+				free_workspace_preview,
+				_get_view_tuning().workspace_pan_modifier_keycode
+			)
 			get_viewport().set_input_as_handled()
 			return
 		if event is InputEventMouseButton:
 			var drag_button_event: InputEventMouseButton = event
-			if drag_button_event.button_index == _get_workspace_orbit_mouse_button() and not drag_button_event.pressed:
-				_end_free_view_drag()
+			if drag_button_event.button_index == workspace_interaction_presenter.get_workspace_orbit_mouse_button(_get_view_tuning().workspace_orbit_mouse_button) and not drag_button_event.pressed:
+				workspace_interaction_presenter.end_free_view_drag(
+					workspace_edit_flow,
+					get_viewport(),
+					_get_view_tuning().workspace_capture_mouse_during_drag
+				)
 				get_viewport().set_input_as_handled()
 				return
-	if free_view_paint_active and event is InputEventMouseButton:
+	if workspace_edit_flow.is_free_view_paint_active() and event is InputEventMouseButton:
 		var paint_button_event: InputEventMouseButton = event
 		if paint_button_event.button_index == MOUSE_BUTTON_LEFT and not paint_button_event.pressed:
-			_end_free_view_paint()
+			workspace_interaction_presenter.end_free_view_paint(
+				workspace_edit_flow,
+				Callable(self, "_flush_pending_edit_refresh")
+			)
 	if not panel.visible:
 		return
 	if event.is_action_pressed(&"ui_cancel"):
 		close_ui()
 		get_viewport().set_input_as_handled()
 		return
-	if _is_action_pressed_if_available(event, &"forge_bake"):
+	if start_menu_visible:
+		return
+	if workspace_interaction_presenter.is_action_pressed_if_available(event, &"forge_bake"):
 		_bake_active_wip()
 		get_viewport().set_input_as_handled()
 		return
-	if _is_action_pressed_if_available(event, &"forge_reset"):
+	if workspace_interaction_presenter.is_action_pressed_if_available(event, &"forge_reset"):
 		_reset_active_wip()
 		get_viewport().set_input_as_handled()
 		return
-	if _is_initial_action_press(event, &"forge_layer_down"):
+	if workspace_interaction_presenter.is_initial_action_press(event, &"forge_layer_down"):
 		_begin_layer_hold(-1)
 		_step_layer(-1)
 		get_viewport().set_input_as_handled()
 		return
-	if _is_initial_action_press(event, &"forge_layer_up"):
+	if workspace_interaction_presenter.is_initial_action_press(event, &"forge_layer_up"):
 		_begin_layer_hold(1)
 		_step_layer(1)
 		get_viewport().set_input_as_handled()
 		return
-	if _is_action_released_if_available(event, &"forge_layer_down") and held_layer_direction < 0:
+	if workspace_interaction_presenter.is_action_released_if_available(event, &"forge_layer_down") and workspace_interaction_presenter.held_layer_direction < 0:
 		_clear_layer_hold()
 		return
-	if _is_action_released_if_available(event, &"forge_layer_up") and held_layer_direction > 0:
+	if workspace_interaction_presenter.is_action_released_if_available(event, &"forge_layer_up") and workspace_interaction_presenter.held_layer_direction > 0:
 		_clear_layer_hold()
 		return
-	if _is_action_pressed_if_available(event, &"forge_plane_xy"):
+	if workspace_interaction_presenter.is_action_pressed_if_available(event, &"forge_plane_xy"):
 		_set_active_plane(PLANE_XY)
 		get_viewport().set_input_as_handled()
 		return
-	if _is_action_pressed_if_available(event, &"forge_plane_zx"):
+	if workspace_interaction_presenter.is_action_pressed_if_available(event, &"forge_plane_zx"):
 		_set_active_plane(PLANE_ZX)
 		get_viewport().set_input_as_handled()
 		return
-	if _is_action_pressed_if_available(event, &"forge_plane_zy"):
+	if workspace_interaction_presenter.is_action_pressed_if_available(event, &"forge_plane_zy"):
 		_set_active_plane(PLANE_ZY)
 		get_viewport().set_input_as_handled()
 
@@ -280,65 +419,161 @@ func toggle_for(player: PlayerController3D, controller: ForgeGridController, ben
 		return
 	open_for(player, controller, bench_name)
 
+func toggle_start_menu_for(player: PlayerController3D, controller: ForgeGridController, bench_name: String) -> void:
+	if panel.visible:
+		close_ui()
+		return
+	open_start_menu_for(player, controller, bench_name)
+
 func open_for(player: PlayerController3D, controller: ForgeGridController, bench_name: String) -> void:
+	_set_stage2_refinement_mode(false, false)
 	active_player = player
 	forge_controller = controller
-	_reset_material_lookup_cache()
-	debug_status_dirty = true
-	_clear_layer_hold()
-	title_label.text = "%s Forge Station" % bench_name
-	subtitle_label.text = "Author matter on the full forge work area. The right side manages processed material stacks, the center edits one shared WIP, and the left side controls layer, plane, tool, and capacity state."
-	panel.visible = true
-	_hide_stow_position_hint()
-	debug_popup.hide()
-	_queue_layout_refresh()
-	if active_player != null:
-		active_player.set_ui_mode_enabled(true)
-	if forge_controller != null:
-		if not forge_controller.active_wip_changed.is_connected(_on_active_wip_changed):
-			forge_controller.active_wip_changed.connect(_on_active_wip_changed)
-		if not forge_controller.active_test_print_changed.is_connected(_on_active_test_print_changed):
-			forge_controller.active_test_print_changed.connect(_on_active_test_print_changed)
-	var current_wip: CraftedItemWIP = forge_controller.active_wip if forge_controller != null else null
-	if current_wip == null:
-		current_wip = _restore_preferred_player_project_if_available()
-	if current_wip == null:
-		current_wip = _ensure_wip_for_editing()
-	active_plane = PLANE_XY
-	active_layer = _get_default_layer_for_plane(active_plane)
-	if current_wip != null and forge_controller != null:
-		active_layer = clampi(forge_controller.get_active_layer_index(), 0, _get_max_layer_for_plane(active_plane))
-	if active_player != null and forge_controller != null:
-		active_player.ensure_forge_inventory_seeded(
-			forge_controller.build_default_material_lookup(),
-			forge_controller.get_inventory_seed_def(),
-			forge_controller.get_debug_inventory_seed_quantity(),
-			forge_controller.get_debug_inventory_bonus_quantity()
-		)
-	_rebuild_workflow_menu()
-	_build_material_catalog()
-	_refresh_all(false)
+	current_bench_name = bench_name
+	var session_state: Dictionary = bench_session_presenter.open_session(
+		active_player,
+		forge_controller,
+		bench_name,
+		title_label,
+		subtitle_label,
+		panel,
+		debug_popup,
+		Callable(self, "_hide_stow_position_hint"),
+		Callable(self, "_hide_grip_style_hint"),
+		Callable(self, "_queue_layout_refresh"),
+		Callable(self, "_reset_material_lookup_cache"),
+		Callable(self, "_clear_layer_hold"),
+		Callable(self, "_restore_preferred_player_project_if_available"),
+		Callable(self, "_ensure_wip_for_editing"),
+		Callable(self, "_get_default_layer_for_plane"),
+		Callable(self, "_get_max_layer_for_plane"),
+		Callable(self, "_rebuild_workflow_menu"),
+		Callable(self, "_build_material_catalog"),
+		Callable(self, "_refresh_all"),
+		Callable(self, "_on_active_wip_changed"),
+		Callable(self, "_on_active_test_print_changed")
+	)
+	debug_status_dirty = bool(session_state.get("debug_status_dirty", true))
+	active_plane = session_state.get("active_plane", PLANE_XY)
+	active_layer = int(session_state.get("active_layer", _get_default_layer_for_plane(active_plane)))
+	_show_editor_surface_for_current_wip()
+
+func open_start_menu_for(player: PlayerController3D, controller: ForgeGridController, bench_name: String) -> void:
+	open_for(player, controller, bench_name)
+	_show_start_menu()
 
 func close_ui() -> void:
-	if not panel.visible:
+	_set_stage2_refinement_mode(false, false)
+	_autosave_current_wip_if_needed()
+	project_manager_popup.hide()
+	var close_state: Dictionary = bench_session_presenter.close_session(
+		active_player,
+		panel,
+		debug_popup,
+		Callable(self, "_end_free_view_drag"),
+		Callable(self, "_end_free_view_paint"),
+		Callable(self, "_clear_layer_hold"),
+		Callable(self, "_reset_pending_edit_refresh"),
+		Callable(self, "_reset_material_lookup_cache"),
+		Callable(self, "_hide_stow_position_hint"),
+		Callable(self, "_hide_grip_style_hint")
+	)
+	if not bool(close_state.get("closed", false)):
 		return
-	_end_free_view_drag(false)
-	_end_free_view_paint()
-	_clear_layer_hold()
-	_reset_pending_edit_refresh()
-	_reset_material_lookup_cache()
-	_hide_stow_position_hint()
-	debug_popup.hide()
-	panel.visible = false
-	if active_player != null:
-		active_player.set_ui_mode_enabled(false)
-	active_player = null
+	active_player = close_state.get("active_player", null)
+	start_menu_visible = false
+	current_bench_name = ""
 	emit_signal("closed")
 
 func is_open() -> bool:
 	return panel.visible
 
+func _show_start_menu() -> void:
+	start_menu_visible = true
+	project_manager_popup.hide()
+	bench_start_menu_presenter.apply_menu_surface(
+		current_bench_name,
+		title_label,
+		subtitle_label
+	)
+	bench_start_menu_presenter.apply_menu_visibility(
+		true,
+		start_menu_panel,
+		main_hbox
+	)
+	bench_start_menu_presenter.apply_continue_last_button_state(
+		_get_player_forge_wip_library_state(),
+		start_menu_continue_last_button
+	)
+	debug_popup.hide()
+	_hide_stow_position_hint()
+	_hide_grip_style_hint()
+	_end_free_view_drag(false)
+	_end_free_view_paint()
+	_clear_layer_hold()
+	_queue_layout_refresh()
+
+func _show_editor_surface_for_current_wip() -> void:
+	start_menu_visible = false
+	project_manager_popup.hide()
+	bench_start_menu_presenter.apply_menu_visibility(
+		false,
+		start_menu_panel,
+		main_hbox
+	)
+	bench_start_menu_presenter.apply_editor_surface(
+		current_bench_name,
+		_get_current_builder_path_id(),
+		title_label,
+		subtitle_label
+	)
+	_queue_layout_refresh()
+
+func _show_start_menu_from_editor() -> void:
+	_autosave_current_wip_if_needed()
+	_set_stage2_refinement_mode(false, false)
+	_show_start_menu()
+
+func _get_current_builder_path_id() -> StringName:
+	var current_wip: CraftedItemWIP = forge_controller.active_wip if forge_controller != null else null
+	if current_wip == null:
+		return CraftedItemWIP.BUILDER_PATH_MELEE
+	return CraftedItemWIP.normalize_builder_path_id(current_wip.forge_builder_path_id)
+
+func _get_current_builder_component_id() -> StringName:
+	var current_wip: CraftedItemWIP = forge_controller.active_wip if forge_controller != null else null
+	var builder_path_id: StringName = _get_current_builder_path_id()
+	if current_wip == null:
+		return CraftedItemWIP.get_default_builder_component_id(builder_path_id)
+	return CraftedItemWIP.normalize_builder_component_id(
+		builder_path_id,
+		current_wip.forge_builder_component_id
+	)
+
+func _configure_project_manager_popup() -> void:
+	left_panel.visible = false
+	left_panel.custom_minimum_size = Vector2.ZERO
+	var project_button_rows: Array[NodePath] = [
+		NodePath("ProjectMargin/ProjectVBox/ProjectButtonRow"),
+		NodePath("ProjectMargin/ProjectVBox/ProjectButtonRowSecondary"),
+		NodePath("ProjectMargin/ProjectVBox/ProjectButtonRowTertiary"),
+	]
+	for row_path: NodePath in project_button_rows:
+		var row_node: Control = project_panel.get_node_or_null(row_path) as Control
+		if row_node != null:
+			row_node.visible = false
+	if project_panel.get_parent() != project_manager_host:
+		project_panel.reparent(project_manager_host)
+
 func _connect_ui_signals() -> void:
+	start_menu_continue_last_button.pressed.connect(_on_start_menu_continue_last_pressed)
+	start_menu_project_list_button.pressed.connect(_on_start_menu_project_list_pressed)
+	start_menu_new_melee_button.pressed.connect(_on_start_menu_new_melee_pressed)
+	start_menu_new_ranged_physical_button.pressed.connect(_on_start_menu_new_ranged_physical_pressed)
+	start_menu_new_shield_button.pressed.connect(_on_start_menu_new_shield_pressed)
+	start_menu_new_magic_button.pressed.connect(_on_start_menu_new_magic_pressed)
+	draw_tool_button.pressed.connect(_on_primary_overlay_tool_pressed)
+	erase_tool_button.pressed.connect(_on_secondary_overlay_tool_pressed)
 	place_category_button.pressed.connect(func() -> void: _set_active_tool(TOOL_PLACE))
 	erase_category_button.pressed.connect(func() -> void: _set_active_tool(TOOL_ERASE))
 	single_tool_button.pressed.connect(func() -> void: _set_active_tool(TOOL_PLACE))
@@ -357,6 +592,8 @@ func _connect_ui_signals() -> void:
 	delete_project_button.pressed.connect(_on_delete_project_pressed)
 	load_project_button.pressed.connect(_on_load_project_pressed)
 	resume_last_project_button.pressed.connect(_on_resume_last_project_pressed)
+	builder_component_bow_button.pressed.connect(_on_builder_component_bow_pressed)
+	builder_component_quiver_button.pressed.connect(_on_builder_component_quiver_pressed)
 	project_name_edit.text_submitted.connect(_on_project_name_submitted)
 	project_name_edit.focus_exited.connect(_on_project_name_focus_exited)
 	project_stow_position_option_button.item_selected.connect(_on_project_stow_position_selected)
@@ -372,150 +609,79 @@ func _connect_ui_signals() -> void:
 	project_list.item_selected.connect(_on_project_list_item_selected)
 	search_box.text_changed.connect(func(_new_text: String) -> void: _refresh_inventory())
 	inventory_list.item_clicked.connect(_on_inventory_item_clicked)
+	project_menu_button.get_popup().about_to_popup.connect(_rebuild_project_menu)
+	status_menu_button.get_popup().about_to_popup.connect(_rebuild_status_menu)
+	geometry_menu_button.get_popup().about_to_popup.connect(_rebuild_geometry_menu)
 	flip_view_button.pressed.connect(_on_flip_view_pressed)
 	debug_info_button.pressed.connect(_open_debug_popup)
 	debug_close_button.pressed.connect(func() -> void: debug_popup.hide())
 	plane_viewport.cell_place_requested.connect(_on_plane_cell_place_requested)
 	plane_viewport.cell_remove_requested.connect(_on_plane_cell_remove_requested)
 	plane_viewport.cell_pick_requested.connect(_on_plane_cell_pick_requested)
+	plane_viewport.drag_started.connect(_on_plane_drag_started)
+	plane_viewport.drag_updated.connect(_on_plane_drag_updated)
 	plane_viewport.stroke_finished.connect(_on_plane_stroke_finished)
 	free_view_panel.gui_input.connect(_on_free_view_panel_gui_input)
 	free_view_container.gui_input.connect(_on_free_view_gui_input)
 
 func _configure_action_menus() -> void:
-	var view_popup: PopupMenu = view_menu_button.get_popup()
-	view_popup.add_item("Fit View", MENU_VIEW_FIT)
-	view_popup.add_item("Toggle Grid Bounds", MENU_VIEW_TOGGLE_BOUNDS)
-	view_popup.add_item("Toggle Active Slice", MENU_VIEW_TOGGLE_SLICE)
-	view_popup.id_pressed.connect(_on_action_menu_id_pressed)
-
-	var geometry_popup: PopupMenu = geometry_menu_button.get_popup()
-	geometry_popup.add_item("Place Tool", MENU_GEOMETRY_TOOL_PLACE)
-	geometry_popup.add_item("Erase Tool", MENU_GEOMETRY_TOOL_ERASE)
-	geometry_popup.add_separator()
-	geometry_popup.add_item("Plane XY", MENU_GEOMETRY_PLANE_XY)
-	geometry_popup.add_item("Plane ZX", MENU_GEOMETRY_PLANE_ZX)
-	geometry_popup.add_item("Plane ZY", MENU_GEOMETRY_PLANE_ZY)
-	geometry_popup.id_pressed.connect(_on_action_menu_id_pressed)
-
-	var workflow_popup: PopupMenu = workflow_menu_button.get_popup()
-	workflow_popup.id_pressed.connect(_on_action_menu_id_pressed)
+	bench_menu_presenter.configure_action_menus(
+		project_menu_button,
+		status_menu_button,
+		view_menu_button,
+		geometry_menu_button,
+		workflow_menu_button,
+		Callable(self, "_on_action_menu_id_pressed"),
+		_get_action_menu_ids()
+	)
+	_rebuild_project_menu()
+	_rebuild_status_menu()
+	_rebuild_geometry_menu()
 
 func _populate_stow_position_options() -> void:
-	project_stow_position_option_button.clear()
-	var stow_popup: PopupMenu = project_stow_position_option_button.get_popup()
-	for popup_item_index: int in range(stow_popup.get_item_count()):
-		stow_popup.remove_item(0)
-	for stow_index: int in range(CraftedItemWIP.get_stow_position_modes().size()):
-		var stow_mode: StringName = CraftedItemWIP.get_stow_position_modes()[stow_index]
-		project_stow_position_option_button.add_item(CraftedItemWIP.get_stow_position_label(stow_mode), stow_index)
-		project_stow_position_option_button.set_item_metadata(stow_index, stow_mode)
-		stow_popup.set_item_tooltip(stow_index, CraftedItemWIP.get_stow_position_note(stow_mode))
-	_select_project_stow_position(CraftedItemWIP.STOW_SHOULDER_HANGING)
+	project_panel_presenter.populate_stow_position_options(project_stow_position_option_button)
 
 func _populate_grip_style_options() -> void:
-	project_grip_style_option_button.clear()
-	var grip_popup: PopupMenu = project_grip_style_option_button.get_popup()
-	for popup_item_index: int in range(grip_popup.get_item_count()):
-		grip_popup.remove_item(0)
-	for grip_index: int in range(CraftedItemWIP.get_grip_style_modes().size()):
-		var grip_mode: StringName = CraftedItemWIP.get_grip_style_modes()[grip_index]
-		project_grip_style_option_button.add_item(CraftedItemWIP.get_grip_style_label(grip_mode), grip_index)
-		project_grip_style_option_button.set_item_metadata(grip_index, grip_mode)
-		grip_popup.set_item_tooltip(grip_index, CraftedItemWIP.get_grip_style_note(grip_mode))
-	_select_project_grip_style(CraftedItemWIP.GRIP_NORMAL)
+	project_panel_presenter.populate_grip_style_options(project_grip_style_option_button)
 
 func _select_project_stow_position(stow_mode: StringName) -> void:
-	var normalized_mode: StringName = CraftedItemWIP.normalize_stow_position_mode(stow_mode)
-	for stow_index: int in range(project_stow_position_option_button.get_item_count()):
-		if project_stow_position_option_button.get_item_metadata(stow_index) == normalized_mode:
-			project_stow_position_option_button.select(stow_index)
-			return
-	if project_stow_position_option_button.get_item_count() > 0:
-		project_stow_position_option_button.select(0)
+	project_panel_presenter.select_project_stow_position(project_stow_position_option_button, stow_mode)
 
 func _get_selected_project_stow_position() -> StringName:
-	var selected_index: int = project_stow_position_option_button.selected
-	if selected_index < 0 or selected_index >= project_stow_position_option_button.get_item_count():
-		return CraftedItemWIP.STOW_SHOULDER_HANGING
-	return CraftedItemWIP.normalize_stow_position_mode(project_stow_position_option_button.get_item_metadata(selected_index))
+	return project_panel_presenter.get_selected_project_stow_position(project_stow_position_option_button)
 
 func _select_project_grip_style(grip_mode: StringName, current_wip: CraftedItemWIP = null) -> void:
-	var normalized_mode: StringName = CraftedItemWIP.normalize_grip_style_mode(grip_mode)
-	if current_wip != null:
-		normalized_mode = CraftedItemWIP.resolve_supported_grip_style(
-			normalized_mode,
-			current_wip.forge_intent,
-			current_wip.equipment_context
-		)
-	for grip_index: int in range(project_grip_style_option_button.get_item_count()):
-		if project_grip_style_option_button.get_item_metadata(grip_index) == normalized_mode:
-			project_grip_style_option_button.select(grip_index)
-			return
-	if project_grip_style_option_button.get_item_count() > 0:
-		project_grip_style_option_button.select(0)
+	project_panel_presenter.select_project_grip_style(project_grip_style_option_button, grip_mode, current_wip)
 
 func _get_selected_project_grip_style() -> StringName:
-	var selected_index: int = project_grip_style_option_button.selected
-	if selected_index < 0 or selected_index >= project_grip_style_option_button.get_item_count():
-		return CraftedItemWIP.GRIP_NORMAL
-	return CraftedItemWIP.normalize_grip_style_mode(project_grip_style_option_button.get_item_metadata(selected_index))
+	return project_panel_presenter.get_selected_project_grip_style(project_grip_style_option_button)
 
 func _refresh_grip_style_option_availability(current_wip: CraftedItemWIP) -> void:
-	var grip_popup: PopupMenu = project_grip_style_option_button.get_popup()
-	var reverse_supported: bool = current_wip != null and CraftedItemWIP.supports_reverse_grip_for_context(current_wip.forge_intent, current_wip.equipment_context)
-	for grip_index: int in range(project_grip_style_option_button.get_item_count()):
-		var grip_mode: StringName = project_grip_style_option_button.get_item_metadata(grip_index)
-		var is_disabled: bool = grip_mode == CraftedItemWIP.GRIP_REVERSE and not reverse_supported
-		grip_popup.set_item_disabled(grip_index, is_disabled)
+	project_panel_presenter.refresh_grip_style_option_availability(project_grip_style_option_button, current_wip)
 
 func _show_stow_position_hint(stow_mode: StringName) -> void:
-	var tooltip_text: String = CraftedItemWIP.get_stow_position_note(stow_mode)
-	if tooltip_text.is_empty():
-		_hide_stow_position_hint()
-		return
-	stow_hint_label.text = tooltip_text
-	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
-	var mouse_position: Vector2 = get_viewport().get_mouse_position()
-	var popup_size: Vector2 = Vector2(260.0, 80.0)
-	var popup_position: Vector2 = mouse_position + Vector2(24.0, -8.0)
-	if popup_position.x + popup_size.x > viewport_size.x - 8.0:
-		popup_position.x = mouse_position.x - popup_size.x - 24.0
-	if popup_position.y + popup_size.y > viewport_size.y - 8.0:
-		popup_position.y = viewport_size.y - popup_size.y - 8.0
-	popup_position.x = clampf(popup_position.x, 8.0, maxf(8.0, viewport_size.x - popup_size.x - 8.0))
-	popup_position.y = clampf(popup_position.y, 8.0, maxf(8.0, viewport_size.y - popup_size.y - 8.0))
-	stow_hint_popup.position = popup_position
-	stow_hint_popup.size = popup_size
-	stow_hint_popup.popup()
+	project_panel_presenter.show_stow_position_hint(
+		stow_hint_popup,
+		stow_hint_label,
+		stow_mode,
+		get_viewport().get_visible_rect().size,
+		get_viewport().get_mouse_position()
+	)
 
 func _hide_stow_position_hint() -> void:
-	if stow_hint_popup.visible:
-		stow_hint_popup.hide()
+	project_panel_presenter.hide_hint(stow_hint_popup)
 
 func _show_grip_style_hint(grip_mode: StringName) -> void:
-	var tooltip_text: String = CraftedItemWIP.get_grip_style_note(grip_mode)
-	if tooltip_text.is_empty():
-		_hide_grip_style_hint()
-		return
-	grip_hint_label.text = tooltip_text
-	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
-	var mouse_position: Vector2 = get_viewport().get_mouse_position()
-	var popup_size: Vector2 = Vector2(300.0, 96.0)
-	var popup_position: Vector2 = mouse_position + Vector2(24.0, -8.0)
-	if popup_position.x + popup_size.x > viewport_size.x - 8.0:
-		popup_position.x = mouse_position.x - popup_size.x - 24.0
-	if popup_position.y + popup_size.y > viewport_size.y - 8.0:
-		popup_position.y = viewport_size.y - popup_size.y - 8.0
-	popup_position.x = clampf(popup_position.x, 8.0, maxf(8.0, viewport_size.x - popup_size.x - 8.0))
-	popup_position.y = clampf(popup_position.y, 8.0, maxf(8.0, viewport_size.y - popup_size.y - 8.0))
-	grip_hint_popup.position = popup_position
-	grip_hint_popup.size = popup_size
-	grip_hint_popup.popup()
+	project_panel_presenter.show_grip_style_hint(
+		grip_hint_popup,
+		grip_hint_label,
+		grip_mode,
+		get_viewport().get_visible_rect().size,
+		get_viewport().get_mouse_position()
+	)
 
 func _hide_grip_style_hint() -> void:
-	if grip_hint_popup.visible:
-		grip_hint_popup.hide()
+	project_panel_presenter.hide_hint(grip_hint_popup)
 
 func _ensure_free_workspace_preview() -> void:
 	if is_instance_valid(free_workspace_preview):
@@ -524,40 +690,35 @@ func _ensure_free_workspace_preview() -> void:
 	free_workspace_preview.name = "ForgeWorkspacePreview"
 	free_workspace_preview.set_view_tuning(_get_view_tuning())
 	free_subviewport.add_child(free_workspace_preview)
+	_refresh_axis_indicator()
 
 func _build_material_catalog() -> void:
-	material_catalog.clear()
-	if forge_controller == null:
-		return
-	var material_lookup: Dictionary = _get_material_lookup()
-	var inventory_state: PlayerForgeInventoryState = _get_player_forge_inventory_state()
-	var material_ids: Array[StringName] = _collect_material_catalog_ids(inventory_state)
-	for material_id: StringName in material_ids:
-		var material_entry: Variant = _resolve_material_entry(material_id, material_lookup)
-		var base_material: BaseMaterialDef = material_runtime_resolver.resolve_base_material_for_material_id(material_id, material_lookup)
-		if base_material == null:
-			continue
-		var quantity: int = inventory_state.get_quantity(material_id) if inventory_state != null else 0
-		material_catalog.append({
-			"material_id": material_id,
-			"material_entry": material_entry,
-			"base_material": base_material,
-			"quantity": quantity,
-			"display_name": _resolve_material_display_name(base_material, material_entry),
-		})
-	_reconcile_material_selection_state()
+	var material_state: Dictionary = bench_material_state_presenter.build_material_catalog(
+		material_catalog_presenter,
+		forge_controller,
+		_get_player_forge_inventory_state(),
+		selected_material_variant_id,
+		armed_material_variant_id,
+		_get_material_lookup()
+	)
+	material_catalog = material_state.get("material_catalog", [])
+	selected_material_variant_id = material_state.get("selected_material_variant_id", StringName())
+	armed_material_variant_id = material_state.get("armed_material_variant_id", StringName())
 
 func _refresh_all(preserve_workspace_view: bool = true) -> void:
-	_reset_pending_edit_refresh()
-	_rebuild_workflow_menu()
-	_refresh_project_panel()
-	_build_material_catalog()
-	_refresh_inventory()
-	_refresh_material_panels()
-	_refresh_plane_and_preview(preserve_workspace_view)
-	_refresh_left_panel()
-	_refresh_status_text()
-	_queue_layout_refresh()
+	bench_refresh_presenter.refresh_all(
+		Callable(self, "_reset_pending_edit_refresh"),
+		Callable(self, "_rebuild_workflow_menu"),
+		Callable(self, "_refresh_project_panel"),
+		Callable(self, "_build_material_catalog"),
+		Callable(self, "_refresh_inventory"),
+		Callable(self, "_refresh_material_panels"),
+		Callable(self, "_refresh_plane_and_preview"),
+		Callable(self, "_refresh_left_panel"),
+		Callable(self, "_refresh_status_text"),
+		Callable(self, "_queue_layout_refresh"),
+		preserve_workspace_view
+	)
 
 func _refresh_after_edit(preserve_workspace_view: bool = true) -> void:
 	_queue_edit_refresh(preserve_workspace_view)
@@ -573,40 +734,41 @@ func _apply_responsive_layout() -> void:
 	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
 	if viewport_size.x <= 0.0 or viewport_size.y <= 0.0:
 		return
-	var compact_mode: bool = viewport_size.x <= float(compact_width_breakpoint) or viewport_size.y <= float(compact_height_breakpoint)
+	var layout_config: Dictionary = _get_layout_config()
+	var compact_mode: bool = workspace_layout_presenter.apply_root_layout(
+		viewport_size,
+		layout_config,
+		panel,
+		main_hbox,
+		left_panel,
+		right_panel,
+		workspace_stage
+	)
 	last_layout_compact_mode = compact_mode
 	last_layout_viewport_size = viewport_size
-	var smaller_axis: int = mini(int(round(viewport_size.x)), int(round(viewport_size.y)))
-	var margin_ratio: float = compact_outer_margin_ratio if compact_mode else wide_outer_margin_ratio
-	var resolved_margin: float = float(clampi(int(round(float(smaller_axis) * margin_ratio)), minimum_outer_margin_px, maximum_outer_margin_px))
-	panel.offset_left = resolved_margin
-	panel.offset_top = resolved_margin
-	panel.offset_right = -resolved_margin
-	panel.offset_bottom = -resolved_margin
-
-	main_hbox.add_theme_constant_override("separation", compact_panel_separation if compact_mode else wide_panel_separation)
-
-	left_panel.custom_minimum_size.x = compact_left_panel_min_width if compact_mode else wide_left_panel_min_width
-	right_panel.custom_minimum_size.x = compact_right_panel_min_width if compact_mode else wide_right_panel_min_width
-	workspace_stage.custom_minimum_size.y = compact_workspace_stage_min_height if compact_mode else wide_workspace_stage_min_height
 	_sync_workspace_hosts()
 	_apply_workspace_layout(compact_mode)
-
-	project_panel.custom_minimum_size.y = compact_project_panel_min_height if compact_mode else wide_project_panel_min_height
-	project_notes_edit.custom_minimum_size.y = compact_project_notes_min_height if compact_mode else wide_project_notes_min_height
-	project_list.custom_minimum_size.y = compact_project_list_min_height if compact_mode else wide_project_list_min_height
-	inventory_list.custom_minimum_size.y = compact_inventory_list_min_height if compact_mode else wide_inventory_list_min_height
-	description_panel.custom_minimum_size.y = compact_description_panel_min_height if compact_mode else wide_description_panel_min_height
-	stats_panel.custom_minimum_size.y = compact_stats_panel_min_height if compact_mode else wide_stats_panel_min_height
-
-	var resolved_action_button_width: int = compact_action_button_min_width if compact_mode else wide_action_button_min_width
-	var resolved_action_button_height: int = compact_action_button_min_height if compact_mode else wide_action_button_min_height
-	for button: BaseButton in _get_action_buttons():
-		button.custom_minimum_size = Vector2(resolved_action_button_width, resolved_action_button_height)
-	(debug_popup.get_node("DebugMargin/DebugVBox") as Control).custom_minimum_size = Vector2(compact_debug_popup_min_size if compact_mode else wide_debug_popup_min_size)
+	workspace_layout_presenter.apply_detail_panel_layout(
+		compact_mode,
+		layout_config,
+		project_panel,
+		project_notes_edit,
+		project_list,
+		inventory_list,
+		description_panel,
+		stats_panel
+	)
+	workspace_layout_presenter.apply_action_button_layout(
+		compact_mode,
+		layout_config,
+		_get_action_buttons(),
+		debug_popup.get_node("DebugMargin/DebugVBox") as Control
+	)
 
 func _get_action_buttons() -> Array[BaseButton]:
 	return [
+		project_menu_button,
+		status_menu_button,
 		view_menu_button,
 		geometry_menu_button,
 		workflow_menu_button,
@@ -614,467 +776,906 @@ func _get_action_buttons() -> Array[BaseButton]:
 		debug_info_button,
 	]
 
+func _get_layout_config() -> Dictionary:
+	return {
+		"compact_width_breakpoint": compact_width_breakpoint,
+		"compact_height_breakpoint": compact_height_breakpoint,
+		"wide_outer_margin_ratio": wide_outer_margin_ratio,
+		"compact_outer_margin_ratio": compact_outer_margin_ratio,
+		"minimum_outer_margin_px": minimum_outer_margin_px,
+		"maximum_outer_margin_px": maximum_outer_margin_px,
+		"wide_left_panel_min_width": wide_left_panel_min_width,
+		"compact_left_panel_min_width": compact_left_panel_min_width,
+		"wide_right_panel_min_width": wide_right_panel_min_width,
+		"compact_right_panel_min_width": compact_right_panel_min_width,
+		"wide_workspace_stage_min_height": wide_workspace_stage_min_height,
+		"compact_workspace_stage_min_height": compact_workspace_stage_min_height,
+		"wide_project_panel_min_height": wide_project_panel_min_height,
+		"compact_project_panel_min_height": compact_project_panel_min_height,
+		"wide_project_notes_min_height": wide_project_notes_min_height,
+		"compact_project_notes_min_height": compact_project_notes_min_height,
+		"wide_project_list_min_height": wide_project_list_min_height,
+		"compact_project_list_min_height": compact_project_list_min_height,
+		"wide_inventory_list_min_height": wide_inventory_list_min_height,
+		"compact_inventory_list_min_height": compact_inventory_list_min_height,
+		"wide_description_panel_min_height": wide_description_panel_min_height,
+		"compact_description_panel_min_height": compact_description_panel_min_height,
+		"wide_stats_panel_min_height": wide_stats_panel_min_height,
+		"compact_stats_panel_min_height": compact_stats_panel_min_height,
+		"wide_action_button_min_width": wide_action_button_min_width,
+		"compact_action_button_min_width": compact_action_button_min_width,
+		"wide_action_button_min_height": wide_action_button_min_height,
+		"compact_action_button_min_height": compact_action_button_min_height,
+		"wide_workspace_inset_size": wide_workspace_inset_size,
+		"compact_workspace_inset_size": compact_workspace_inset_size,
+		"wide_workspace_inset_margin_px": wide_workspace_inset_margin_px,
+		"compact_workspace_inset_margin_px": compact_workspace_inset_margin_px,
+		"wide_plane_main_viewport_min_size": wide_plane_main_viewport_min_size,
+		"compact_plane_main_viewport_min_size": compact_plane_main_viewport_min_size,
+		"wide_plane_inset_viewport_min_size": wide_plane_inset_viewport_min_size,
+		"compact_plane_inset_viewport_min_size": compact_plane_inset_viewport_min_size,
+		"wide_free_main_viewport_min_size": wide_free_main_viewport_min_size,
+		"compact_free_main_viewport_min_size": compact_free_main_viewport_min_size,
+		"wide_free_inset_viewport_min_size": wide_free_inset_viewport_min_size,
+		"compact_free_inset_viewport_min_size": compact_free_inset_viewport_min_size,
+		"wide_debug_popup_min_size": wide_debug_popup_min_size,
+		"compact_debug_popup_min_size": compact_debug_popup_min_size,
+		"wide_panel_separation": wide_panel_separation,
+		"compact_panel_separation": compact_panel_separation,
+	}
+
 func _sync_workspace_hosts() -> void:
-	var primary_panel: Control = free_view_panel if main_workspace_mode == WORKSPACE_VIEW_FREE else plane_view_panel
-	var inset_panel: Control = plane_view_panel if main_workspace_mode == WORKSPACE_VIEW_FREE else free_view_panel
-	if primary_panel.get_parent() != main_viewport_host:
-		primary_panel.reparent(main_viewport_host)
-	if inset_panel.get_parent() != inset_viewport_host:
-		inset_panel.reparent(inset_viewport_host)
-	_prepare_workspace_panel(primary_panel)
-	_prepare_workspace_panel(inset_panel)
-	free_title_label.text = "Free 3D Workspace" if main_workspace_mode == WORKSPACE_VIEW_FREE else "3D Inset View"
-	plane_title_label.text = "2D Layer Map" if main_workspace_mode == WORKSPACE_VIEW_PLANE else "2D Layer Minimap"
-	flip_view_button.text = "2D Main" if main_workspace_mode == WORKSPACE_VIEW_FREE else "3D Main"
+	workspace_layout_presenter.sync_workspace_hosts(
+		main_workspace_mode,
+		WORKSPACE_VIEW_FREE,
+		WORKSPACE_VIEW_PLANE,
+		main_viewport_host,
+		inset_viewport_host,
+		free_view_panel,
+		plane_view_panel,
+		free_title_label,
+		plane_title_label,
+		flip_view_button
+	)
+	if is_instance_valid(tool_overlay_host):
+		tool_overlay_host.move_to_front()
 
 func _prepare_workspace_panel(panel_node: Control) -> void:
-	panel_node.anchor_left = 0.0
-	panel_node.anchor_top = 0.0
-	panel_node.anchor_right = 1.0
-	panel_node.anchor_bottom = 1.0
-	panel_node.offset_left = 0.0
-	panel_node.offset_top = 0.0
-	panel_node.offset_right = 0.0
-	panel_node.offset_bottom = 0.0
-	panel_node.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel_node.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	workspace_layout_presenter.prepare_workspace_panel(panel_node)
 
 func _apply_workspace_layout(compact_mode: bool) -> void:
-	var inset_size: Vector2 = Vector2(compact_workspace_inset_size if compact_mode else wide_workspace_inset_size)
-	var inset_margin: float = float(compact_workspace_inset_margin_px if compact_mode else wide_workspace_inset_margin_px)
-	var stage_size: Vector2 = workspace_stage.size
-	if stage_size.x <= 0.0 or stage_size.y <= 0.0:
-		stage_size = workspace_stage.get_combined_minimum_size()
-	var max_inset_size: Vector2 = Vector2(maxf(stage_size.x * 0.46, 160.0), maxf(stage_size.y * 0.46, 120.0))
-	inset_size.x = minf(inset_size.x, max_inset_size.x)
-	inset_size.y = minf(inset_size.y, max_inset_size.y)
-	inset_viewport_host.position = Vector2(inset_margin, inset_margin)
-	inset_viewport_host.size = inset_size
-	main_viewport_host.position = Vector2.ZERO
-	main_viewport_host.size = stage_size
-
-	var plane_main_size: Vector2 = Vector2(compact_plane_main_viewport_min_size if compact_mode else wide_plane_main_viewport_min_size)
-	var plane_inset_size: Vector2 = Vector2(compact_plane_inset_viewport_min_size if compact_mode else wide_plane_inset_viewport_min_size)
-	var free_main_size: Vector2 = Vector2(compact_free_main_viewport_min_size if compact_mode else wide_free_main_viewport_min_size)
-	var free_inset_size: Vector2 = Vector2(compact_free_inset_viewport_min_size if compact_mode else wide_free_inset_viewport_min_size)
-	plane_viewport.custom_minimum_size = plane_main_size if main_workspace_mode == WORKSPACE_VIEW_PLANE else plane_inset_size
-	free_view_container.custom_minimum_size = free_main_size if main_workspace_mode == WORKSPACE_VIEW_FREE else free_inset_size
-	free_view_panel.custom_minimum_size = Vector2.ZERO
-	plane_view_panel.custom_minimum_size = Vector2.ZERO
+	workspace_layout_presenter.apply_workspace_layout(
+		compact_mode,
+		_get_layout_config(),
+		workspace_stage,
+		inset_viewport_host,
+		main_viewport_host,
+		plane_viewport,
+		free_view_container,
+		free_view_panel,
+		plane_view_panel,
+		main_workspace_mode,
+		WORKSPACE_VIEW_FREE,
+		WORKSPACE_VIEW_PLANE
+	)
 	call_deferred("_sync_free_subviewport_size")
+	if is_instance_valid(tool_overlay_host):
+		tool_overlay_host.move_to_front()
 
 func _sync_free_subviewport_size() -> void:
-	var target_size: Vector2i = Vector2i(
-		maxi(int(round(free_view_container.size.x)), 1),
-		maxi(int(round(free_view_container.size.y)), 1)
-	)
-	if free_subviewport.size != target_size:
-		free_subviewport.size = target_size
+	workspace_layout_presenter.sync_free_subviewport_size(free_view_container, free_subviewport)
 
 func _reset_material_lookup_cache() -> void:
-	cached_material_lookup.clear()
+	bench_material_state_presenter.reset_material_lookup_cache(cached_material_lookup)
 
 func _get_material_lookup() -> Dictionary:
-	if forge_controller == null:
-		return {}
-	if cached_material_lookup.is_empty():
-		cached_material_lookup = forge_controller.build_default_material_lookup()
-	return cached_material_lookup
+	return bench_material_state_presenter.get_material_lookup(forge_controller, cached_material_lookup)
 
 func _refresh_inventory() -> void:
-	visible_inventory_entries.clear()
-	inventory_list.clear()
-	var search_text: String = search_box.text.strip_edges().to_lower()
-	for entry: Dictionary in material_catalog:
-		var quantity: int = int(entry.get("quantity", 0))
-		var display_name: String = String(entry.get("display_name", ""))
-		var base_material: BaseMaterialDef = entry.get("base_material") as BaseMaterialDef
-		if current_inventory_page == PAGE_OWNED and quantity <= 0:
-			continue
-		if current_inventory_page == PAGE_WEAPON and not _supports_weapon_context(base_material):
-			continue
-		if not search_text.is_empty():
-			var haystack: String = "%s %s" % [display_name.to_lower(), String(entry.get("material_id", &"")).to_lower()]
-			if not haystack.contains(search_text):
-				continue
-		visible_inventory_entries.append(entry)
-
-	for entry: Dictionary in visible_inventory_entries:
-		var quantity: int = int(entry.get("quantity", 0))
-		var display_name: String = String(entry.get("display_name", ""))
-		var material_id: StringName = entry.get("material_id", &"")
-		var status_suffix: String = " x%d" % quantity if quantity > 0 else " (0)"
-		var item_index: int = inventory_list.add_item(display_name + status_suffix)
-		inventory_list.set_item_custom_fg_color(item_index, _get_view_tuning().ui_inventory_owned_color if quantity > 0 else _get_view_tuning().ui_inventory_empty_color)
-		inventory_list.set_item_metadata(item_index, material_id)
-		if material_id == selected_material_variant_id:
-			inventory_list.select(item_index)
-
-	_apply_tab_button_state(owned_tab_button, current_inventory_page == PAGE_OWNED)
-	_apply_tab_button_state(all_tab_button, current_inventory_page == PAGE_ALL)
-	_apply_tab_button_state(weapon_tab_button, current_inventory_page == PAGE_WEAPON)
-
-func _collect_material_catalog_ids(inventory_state: PlayerForgeInventoryState) -> Array[StringName]:
-	var ordered_material_ids: Array[StringName] = []
-	if forge_controller != null:
-		ordered_material_ids = forge_controller.get_material_catalog_ids()
-	var extra_material_ids: Array[StringName] = []
-	if inventory_state == null:
-		return ordered_material_ids
-	for stack: ForgeMaterialStack in inventory_state.material_stacks:
-		if stack == null or stack.material_variant_id == StringName() or stack.quantity <= 0:
-			continue
-		if ordered_material_ids.has(stack.material_variant_id) or extra_material_ids.has(stack.material_variant_id):
-			continue
-		extra_material_ids.append(stack.material_variant_id)
-	extra_material_ids.sort()
-	ordered_material_ids.append_array(extra_material_ids)
-	return ordered_material_ids
-
-func _resolve_material_entry(material_id: StringName, material_lookup: Dictionary) -> Variant:
-	var material_entry: Variant = material_lookup.get(material_id)
-	if material_entry != null:
-		return material_entry
-	return material_runtime_resolver.resolve_material_variant_for_material_id(material_id, material_lookup)
+	visible_inventory_entries = bench_panel_presenter.refresh_inventory(
+		material_catalog_presenter,
+		material_catalog,
+		current_inventory_page,
+		search_box.text,
+		selected_material_variant_id,
+		_get_view_tuning(),
+		inventory_list,
+		owned_tab_button,
+		all_tab_button,
+		weapon_tab_button,
+		PAGE_OWNED,
+		PAGE_ALL,
+		PAGE_WEAPON
+	)
 
 func _refresh_material_panels() -> void:
-	var entry: Dictionary = _get_material_entry(selected_material_variant_id)
-	if entry.is_empty():
-		material_description_text.text = "Select a material entry to inspect it."
-		material_stats_text.text = ""
-		return
-	var base_material: BaseMaterialDef = entry.get("base_material") as BaseMaterialDef
-	var material_variant: MaterialVariantDef = entry.get("material_entry") as MaterialVariantDef
-	var quantity: int = int(entry.get("quantity", 0))
-	var lines: PackedStringArray = []
-	lines.append("[b]%s[/b]" % String(entry.get("display_name", "Unknown Material")))
-	lines.append("Material id: %s" % String(entry.get("material_id", &"")))
-	lines.append("Owned quantity: %d" % quantity)
-	lines.append("Family: %s" % String(base_material.material_family if base_material != null else &"unknown"))
-	if material_variant != null:
-		lines.append("Quality: %s" % _format_tier_display_name(material_variant.tier_id))
-	lines.append("")
-	lines.append("Processed forge material for the weapon station.")
-	lines.append("Readable even when quantity is zero; placeable only when owned.")
-	if base_material != null:
-		lines.append("Good at: %s" % _describe_material_strengths(base_material))
-		lines.append("Tradeoffs: %s" % _describe_material_tradeoffs(base_material))
-		lines.append("Source note: processed from world drops through Forge material conversion.")
-	material_description_text.text = "\n".join(lines)
-
-	var stat_lines: PackedStringArray = []
-	if base_material != null:
-		if material_variant != null:
-			stat_lines.append("[b]Resolved Variant Stats[/b]")
-			stat_lines.append("tier = %s" % _format_tier_display_name(material_variant.tier_id))
-			stat_lines.append("resolved_density_per_cell = %.3f" % material_variant.resolved_density_per_cell)
-			stat_lines.append("resolved_value_multiplier = %.3f" % material_variant.resolved_value_score)
-			stat_lines.append("resolved_processing_output_count = %d" % material_variant.resolved_processing_output_count)
-			stat_lines.append("")
-			if not material_variant.variant_stats.is_empty():
-				stat_lines.append("[b]Resolved Material Stat Lines[/b]")
-				for stat_line: StatLine in material_variant.variant_stats:
-					if stat_line == null:
-						continue
-					stat_lines.append(_format_stat_line(stat_line))
-				stat_lines.append("")
-			if not material_variant.resolved_capability_bias_lines.is_empty():
-				stat_lines.append("[b]Resolved Capability Bias Lines[/b]")
-				for stat_line: StatLine in material_variant.resolved_capability_bias_lines:
-					if stat_line == null:
-						continue
-					stat_lines.append(_format_stat_line(stat_line))
-				stat_lines.append("")
-			if not material_variant.resolved_skill_family_bias_lines.is_empty():
-				stat_lines.append("[b]Resolved Skill Family Bias Lines[/b]")
-				for stat_line: StatLine in material_variant.resolved_skill_family_bias_lines:
-					if stat_line == null:
-						continue
-					stat_lines.append(_format_stat_line(stat_line))
-				stat_lines.append("")
-			if not material_variant.resolved_elemental_affinity_lines.is_empty():
-				stat_lines.append("[b]Resolved Elemental Affinity Lines[/b]")
-				for stat_line: StatLine in material_variant.resolved_elemental_affinity_lines:
-					if stat_line == null:
-						continue
-					stat_lines.append(_format_stat_line(stat_line))
-				stat_lines.append("")
-			if not material_variant.resolved_equipment_context_bias_lines.is_empty():
-				stat_lines.append("[b]Resolved Equipment Context Bias Lines[/b]")
-				for stat_line: StatLine in material_variant.resolved_equipment_context_bias_lines:
-					if stat_line == null:
-						continue
-					stat_lines.append(_format_stat_line(stat_line))
-				stat_lines.append("")
-		stat_lines.append("[b]Base Physical Truth[/b]")
-		stat_lines.append("density_per_cell = %.3f" % base_material.density_per_cell)
-		stat_lines.append("hardness = %.3f" % base_material.hardness)
-		stat_lines.append("toughness = %.3f" % base_material.toughness)
-		stat_lines.append("elasticity = %.3f" % base_material.elasticity)
-		stat_lines.append("")
-		stat_lines.append("[b]Base Support Flags[/b]")
-		stat_lines.append("anchor=%s edge=%s blunt=%s guard=%s plate=%s" % [
-			_format_bool(base_material.can_be_anchor_material),
-			_format_bool(base_material.can_be_beveled_edge),
-			_format_bool(base_material.can_be_blunt_surface),
-			_format_bool(base_material.can_be_guard_surface),
-			_format_bool(base_material.can_be_plate_surface)
-		])
-		stat_lines.append("joint=%s bow_limb=%s bow_string=%s projectile=%s" % [
-			_format_bool(base_material.can_be_joint_support or base_material.can_be_joint_membrane),
-			_format_bool(base_material.can_be_bow_limb),
-			_format_bool(base_material.can_be_bow_string),
-			_format_bool(base_material.can_be_projectile_support)
-		])
-	material_stats_text.text = "\n".join(stat_lines)
+	bench_panel_presenter.refresh_material_panels(
+		material_catalog_presenter,
+		material_catalog,
+		selected_material_variant_id,
+		material_description_text,
+		material_stats_text
+	)
 
 func _refresh_plane_and_preview(preserve_workspace_view: bool = true) -> void:
 	_refresh_workspace_visuals(preserve_workspace_view, true)
 
 func _refresh_workspace_visuals(preserve_workspace_view: bool = true, force_full_sync: bool = false) -> void:
 	var current_wip: CraftedItemWIP = _ensure_wip_for_editing()
-	if forge_controller == null:
-		return
-	var material_lookup: Dictionary = _get_material_lookup()
-	if force_full_sync or plane_viewport.grid_size != forge_controller.grid_size:
-		plane_viewport.set_grid_size(forge_controller.grid_size)
-	plane_viewport.set_active_plane(active_plane)
-	plane_viewport.set_active_layer(active_layer)
-	plane_viewport.set_active_wip(current_wip)
-	plane_viewport.set_material_lookup(material_lookup)
-	if force_full_sync:
-		plane_viewport.set_view_tuning(_get_view_tuning())
 	_ensure_free_workspace_preview()
-	if force_full_sync:
-		free_workspace_preview.set_view_tuning(_get_view_tuning())
-		free_workspace_preview.configure(forge_controller.grid_size, forge_controller.get_cell_world_size_meters(), preserve_workspace_view)
-	free_workspace_preview.set_active_slice(active_plane, active_layer)
-	free_workspace_preview.set_material_lookup(material_lookup)
-	free_workspace_preview.sync_from_wip(current_wip)
-	free_workspace_preview.grid_bounds_instance.visible = show_grid_bounds
-	free_workspace_preview.active_plane_instance.visible = show_active_slice
-	orientation_label.text = "%s\nPlane %s / Layer %d" % [
-		"3D Workspace" if main_workspace_mode == WORKSPACE_VIEW_FREE else "3D Inset",
-		String(active_plane).to_upper(),
+	orientation_label.text = workspace_presentation.refresh_workspace_visuals(
+		forge_controller,
+		current_wip,
+		active_plane,
 		active_layer,
-	]
+		plane_viewport,
+		free_workspace_preview,
+		_get_material_lookup(),
+		_get_view_tuning(),
+		preserve_workspace_view,
+		force_full_sync,
+		show_grid_bounds,
+		show_active_slice,
+		main_workspace_mode,
+		stage2_refinement_mode_active
+	)
+	_sync_structural_shape_preview()
+	_refresh_stage2_selection_preview()
+	_refresh_axis_indicator()
+
+func _refresh_stage2_selection_preview() -> void:
+	if not is_instance_valid(free_workspace_preview) or forge_controller == null:
+		return
+	var current_wip: CraftedItemWIP = forge_controller.active_wip
+	if (
+		not stage2_refinement_mode_active
+		or not _is_stage2_selection_tool(active_tool)
+		or current_wip == null
+		or current_wip.stage2_item_state == null
+	):
+		free_workspace_preview.clear_stage2_selection_preview()
+		return
+	free_workspace_preview.set_stage2_selection_preview_state(
+		current_wip.stage2_item_state,
+		stage2_hover_patch_ids,
+		stage2_selected_patch_ids,
+		forge_controller.test_print_mesh_builder
+	)
+
+func _refresh_axis_indicator() -> void:
+	if axis_indicator_control == null:
+		return
+	if not is_instance_valid(free_workspace_preview):
+		axis_indicator_control.clear_state()
+		return
+	axis_indicator_control.sync_from_preview(free_workspace_preview)
+
+func _sync_structural_shape_preview() -> void:
+	if plane_viewport == null:
+		return
+	if structural_shape_preview_grid_positions.is_empty():
+		plane_viewport.clear_structural_shape_preview_state()
+		if is_instance_valid(free_workspace_preview):
+			free_workspace_preview.clear_structural_shape_preview()
+		return
+	var remove_mode: bool = tool_state_modifier == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_REMOVE
+	plane_viewport.set_structural_shape_preview_state(
+		structural_shape_preview_grid_positions,
+		armed_material_variant_id,
+		remove_mode
+	)
+	if is_instance_valid(free_workspace_preview):
+		free_workspace_preview.set_structural_shape_preview_state(
+			structural_shape_preview_grid_positions,
+			armed_material_variant_id,
+			remove_mode
+		)
+
+func _clear_structural_shape_preview() -> void:
+	structural_shape_drag_active = false
+	structural_shape_drag_anchor_grid_position = Vector3i.ZERO
+	structural_shape_drag_current_grid_position = Vector3i.ZERO
+	structural_shape_preview_grid_positions.clear()
+	structural_shape_preview_dirty = false
+	structural_shape_last_committed_layer = -1
+	structural_shape_last_committed_plane = StringName()
+	_sync_structural_shape_preview()
+
+func _update_structural_shape_preview() -> void:
+	if not structural_shape_drag_active:
+		_clear_structural_shape_preview()
+		return
+	if workspace_shape_tool_presenter.is_shape_tool(active_tool) and forge_controller != null:
+		structural_shape_preview_grid_positions = workspace_shape_tool_presenter.build_shape_footprint(
+			active_tool,
+			structural_shape_drag_anchor_grid_position,
+			structural_shape_drag_current_grid_position,
+			active_plane,
+			active_layer,
+			forge_controller.grid_size,
+			structural_shape_rotation_quadrant
+		)
+	else:
+		structural_shape_preview_grid_positions.clear()
+	_mark_structural_shape_preview_dirty()
+	_sync_structural_shape_preview()
+
+func _commit_structural_shape_preview(clear_after_commit: bool = true) -> void:
+	if structural_shape_preview_grid_positions.is_empty():
+		if clear_after_commit:
+			_clear_structural_shape_preview()
+			_flush_pending_edit_refresh(true)
+		else:
+			_mark_current_structural_shape_layer_committed()
+		return
+	var result: Dictionary = {}
+	suppress_active_wip_refresh = true
+	if workspace_shape_tool_presenter.is_subtractive_shape_tool(active_tool):
+		result = workspace_edit_action_presenter.remove_cells(
+			forge_controller,
+			_get_player_forge_inventory_state(),
+			structural_shape_preview_grid_positions
+		)
+	else:
+		result = workspace_edit_action_presenter.apply_material_cells(
+			forge_controller,
+			_get_player_forge_inventory_state(),
+			armed_material_variant_id,
+			structural_shape_preview_grid_positions,
+			Callable(self, "_ensure_wip_for_editing")
+		)
+	suppress_active_wip_refresh = false
+	var should_refresh_after_edit: bool = bool(result.get("queue_edit_refresh", false))
+	if bool(result.get("debug_status_dirty", false)):
+		debug_status_dirty = true
+	_mark_current_structural_shape_layer_committed()
+	if clear_after_commit:
+		_clear_structural_shape_preview()
+		if should_refresh_after_edit:
+			_refresh_after_edit()
+		else:
+			_flush_pending_edit_refresh(true)
+	elif should_refresh_after_edit:
+		_refresh_after_edit()
+
+func _mark_structural_shape_preview_dirty() -> void:
+	structural_shape_preview_dirty = true
+
+func _mark_current_structural_shape_layer_committed() -> void:
+	structural_shape_preview_dirty = false
+	structural_shape_last_committed_layer = active_layer
+	structural_shape_last_committed_plane = active_plane
+
+func _has_pending_structural_shape_commit_for_current_layer() -> bool:
+	return (
+		structural_shape_preview_dirty
+		or structural_shape_last_committed_layer != active_layer
+		or structural_shape_last_committed_plane != active_plane
+	)
 
 func _queue_edit_refresh(preserve_workspace_view: bool = true) -> void:
-	if pending_edit_visual_refresh:
-		pending_edit_preserve_workspace_view = pending_edit_preserve_workspace_view and preserve_workspace_view
-	else:
-		pending_edit_preserve_workspace_view = preserve_workspace_view
-	pending_edit_visual_refresh = true
-	pending_edit_panel_refresh = true
+	workspace_edit_flow.queue_edit_refresh(preserve_workspace_view)
 	debug_status_dirty = true
 
 func _process_pending_edit_refresh(delta: float) -> void:
-	if pending_edit_visual_refresh:
-		_refresh_workspace_visuals(pending_edit_preserve_workspace_view, false)
-		pending_edit_visual_refresh = false
-		pending_edit_preserve_workspace_view = true
-	if not pending_edit_panel_refresh:
-		return
-	pending_edit_panel_refresh_elapsed += maxf(delta, 0.0)
-	if pending_edit_panel_refresh_elapsed < maxf(edit_panel_refresh_interval_seconds, 0.0):
-		return
-	_flush_pending_edit_panels()
+	workspace_edit_flow.process_pending_edit_refresh(
+		delta,
+		edit_panel_refresh_interval_seconds,
+		Callable(self, "_refresh_workspace_visuals_for_pending_edit"),
+		Callable(self, "_flush_pending_edit_panels")
+	)
 
 func _flush_pending_edit_refresh(force: bool = false) -> void:
-	if pending_edit_visual_refresh:
-		_refresh_workspace_visuals(pending_edit_preserve_workspace_view, false)
-		pending_edit_visual_refresh = false
-		pending_edit_preserve_workspace_view = true
-	if force:
-		_flush_pending_edit_panels()
+	workspace_edit_flow.flush_pending_edit_refresh(
+		force,
+		Callable(self, "_refresh_workspace_visuals_for_pending_edit"),
+		Callable(self, "_flush_pending_edit_panels")
+	)
 
 func _flush_pending_edit_panels() -> void:
-	if not pending_edit_panel_refresh:
-		return
-	_build_material_catalog()
-	_refresh_inventory()
-	_refresh_material_panels()
-	_refresh_left_panel()
-	pending_edit_panel_refresh = false
-	pending_edit_panel_refresh_elapsed = 0.0
+	bench_refresh_presenter.refresh_pending_edit_panels(
+		Callable(self, "_build_material_catalog"),
+		Callable(self, "_refresh_inventory"),
+		Callable(self, "_refresh_material_panels"),
+		Callable(self, "_refresh_left_panel"),
+		Callable(workspace_edit_flow, "clear_pending_panel_refresh")
+	)
 
 func _reset_pending_edit_refresh() -> void:
-	pending_edit_visual_refresh = false
-	pending_edit_panel_refresh = false
-	pending_edit_preserve_workspace_view = true
-	pending_edit_panel_refresh_elapsed = 0.0
+	workspace_edit_flow.reset_pending_edit_refresh()
+
+func _refresh_workspace_visuals_for_pending_edit(preserve_workspace_view: bool) -> void:
+	_refresh_workspace_visuals(preserve_workspace_view, false)
 
 func _refresh_left_panel() -> void:
+	last_left_panel_state = {}
 	if forge_controller == null:
+		_refresh_tool_overlay()
+		_rebuild_status_menu()
 		return
-	layer_status_label.text = "Active layer: %d / %d" % [active_layer, _get_max_layer_for_plane(active_plane)]
-	plane_status_label.text = "Plane: %s" % String(active_plane).to_upper()
-	armed_material_label.text = "Armed material: %s" % _get_armed_material_display_name()
-	var current_wip: CraftedItemWIP = _ensure_wip_for_editing()
-	var used_cells: int = _count_cells(current_wip)
-	var max_fill_cells: int = forge_controller.get_max_fill_cells()
-	var fill_ratio: float = float(used_cells) / maxf(float(max_fill_cells), 1.0)
-	capacity_label.text = "Capacity: %d / %d cells (%.1f%% of allowed fill)" % [used_cells, max_fill_cells, fill_ratio * 100.0]
-	capacity_bar.max_value = 1.0
-	capacity_bar.value = fill_ratio
-	_apply_button_state(place_category_button, active_tool == TOOL_PLACE)
-	_apply_button_state(erase_category_button, active_tool == TOOL_ERASE)
-	_apply_button_state(single_tool_button, active_tool == TOOL_PLACE)
-	_apply_button_state(pick_tool_button, active_tool == TOOL_PICK)
-	_apply_button_state(xy_plane_button, active_plane == PLANE_XY)
-	_apply_button_state(zx_plane_button, active_plane == PLANE_ZX)
-	_apply_button_state(zy_plane_button, active_plane == PLANE_ZY)
+	bench_panel_presenter.refresh_left_panel(
+		workspace_presentation,
+		forge_controller,
+		_ensure_wip_for_editing(),
+		active_plane,
+		active_layer,
+		_get_max_layer_for_plane(active_plane),
+		active_tool,
+		_get_armed_material_display_name(),
+		stage2_refinement_mode_active,
+		workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_quadrant),
+		_get_view_tuning(),
+		layer_status_label,
+		plane_status_label,
+		armed_material_label,
+		capacity_label,
+		capacity_bar,
+		place_category_button,
+		erase_category_button,
+		single_tool_button,
+		pick_tool_button,
+		xy_plane_button,
+		zx_plane_button,
+		zy_plane_button
+	)
+	_refresh_tool_overlay()
+	last_left_panel_state = workspace_presentation.build_left_panel_state(
+		forge_controller,
+		_ensure_wip_for_editing(),
+		active_plane,
+		active_layer,
+		_get_max_layer_for_plane(active_plane),
+		active_tool,
+		_get_armed_material_display_name(),
+		stage2_refinement_mode_active,
+		workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_quadrant)
+	)
+	_rebuild_status_menu()
+
+func _refresh_tool_overlay() -> void:
+	var view_tuning: ForgeViewTuningDef = _get_view_tuning()
+	var draw_active: bool = tool_state_modifier == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD
+	var erase_active: bool = tool_state_modifier == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_REMOVE
+	draw_tool_button.text = "Apply" if stage2_refinement_mode_active else "Draw"
+	erase_tool_button.text = "Revert" if stage2_refinement_mode_active else "Erase"
+	draw_tool_button.set_pressed_no_signal(draw_active)
+	erase_tool_button.set_pressed_no_signal(erase_active)
+	draw_tool_button.modulate = view_tuning.ui_button_active_color if draw_active else view_tuning.ui_button_inactive_color
+	erase_tool_button.modulate = view_tuning.ui_button_active_color if erase_active else view_tuning.ui_button_inactive_color
+	tool_state_label.text = "Tool State: %s" % _get_overlay_tool_state_text()
+	active_tool_label.text = "Active Tool: %s" % _get_overlay_active_tool_text()
+	var show_shape_status: bool = (
+		not stage2_refinement_mode_active
+		and workspace_shape_tool_presenter.is_shape_family(stage1_tool_family)
+	)
+	shape_size_status_label.visible = show_shape_status
+	rotation_status_label.visible = show_shape_status
+	if show_shape_status:
+		shape_size_status_label.text = "Size: Drag Footprint"
+		rotation_status_label.text = "Rotation: %d°" % workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_quadrant)
+	var show_material_status: bool = _should_show_overlay_material_status()
+	material_status_label.visible = show_material_status
+	if show_material_status:
+		material_status_label.text = _get_overlay_material_status_text()
+	var show_radius_status: bool = _should_show_overlay_radius_status()
+	radius_status_label.visible = show_radius_status
+	if show_radius_status:
+		radius_status_label.text = "Radius: %s m" % _format_overlay_radius_text(stage2_brush_radius_meters)
+
+func _on_primary_overlay_tool_pressed() -> void:
+	_set_tool_state_modifier(ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD)
+
+func _on_secondary_overlay_tool_pressed() -> void:
+	_set_tool_state_modifier(ForgeWorkspaceShapeToolPresenterScript.MODIFIER_REMOVE)
+
+func _get_overlay_tool_state_text() -> String:
+	match tool_state_modifier:
+		ForgeWorkspaceShapeToolPresenterScript.MODIFIER_PICK:
+			return "Pick"
+		ForgeWorkspaceShapeToolPresenterScript.MODIFIER_REMOVE:
+			return "Remove"
+		_:
+			return "Add"
+
+func _get_overlay_active_tool_text() -> String:
+	if tool_state_modifier == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_PICK:
+		return "Pick Material"
+	if stage2_refinement_mode_active:
+		if stage2_selection_presenter.is_selection_family(stage2_tool_family):
+			return stage2_selection_presenter.get_selection_tool_display_name(stage2_tool_family)
+		return stage2_brush_presenter.get_pointer_tool_display_name(stage2_tool_family)
+	return workspace_shape_tool_presenter.get_stage1_tool_display_name(stage1_tool_family)
+
+func _should_show_overlay_material_status() -> bool:
+	return (
+		not stage2_refinement_mode_active
+		and tool_state_modifier != ForgeWorkspaceShapeToolPresenterScript.MODIFIER_PICK
+	)
+
+func _get_overlay_material_status_text() -> String:
+	var material_entry: Dictionary = _get_overlay_material_entry()
+	if material_entry.is_empty():
+		return "Select Material"
+	var display_name: String = String(material_entry.get("display_name", "")).strip_edges()
+	if display_name.is_empty():
+		return "Select Material"
+	if bool(material_entry.get("is_placeable_without_inventory", false)):
+		return display_name
+	return "%s - %d" % [display_name, int(material_entry.get("quantity", 0))]
+
+func _get_overlay_material_entry() -> Dictionary:
+	var material_id: StringName = (
+		armed_material_variant_id
+		if armed_material_variant_id != StringName()
+		else selected_material_variant_id
+	)
+	return material_catalog_presenter.get_material_entry(material_catalog, material_id)
+
+func _should_show_overlay_radius_status() -> bool:
+	return (
+		stage2_refinement_mode_active
+		and stage2_brush_presenter.is_pointer_radius_family(stage2_tool_family)
+	)
+
+func _format_overlay_radius_text(radius_meters: float) -> String:
+	return ("%.4f" % snappedf(radius_meters, 0.0001)).rstrip("0").rstrip(".")
 
 func _refresh_status_text() -> void:
-	if forge_controller == null:
-		last_debug_text = "Forge controller missing."
-		status_text.text = last_debug_text
-		debug_status_dirty = false
-		return
-	var current_wip: CraftedItemWIP = _ensure_wip_for_editing()
-	var lines: PackedStringArray = []
-	lines.append("[b]Forge Workstation State[/b]")
-	if current_wip == null:
-		lines.append("No active WIP loaded.")
-		last_debug_text = "\n".join(lines)
-		status_text.text = last_debug_text
-		debug_status_dirty = false
-		return
-	lines.append("WIP id: %s" % String(current_wip.wip_id))
-	lines.append("Project: %s" % _get_active_project_display_name(current_wip))
-	if not current_wip.forge_project_notes.strip_edges().is_empty():
-		lines.append("Forge notes: %s" % current_wip.forge_project_notes.strip_edges())
-	lines.append("Final item name: not assigned here")
-	lines.append("Grid: %d x %d x %d" % [forge_controller.grid_size.x, forge_controller.grid_size.y, forge_controller.grid_size.z])
-	lines.append("Cell scale: %.3fm" % forge_controller.get_cell_world_size_meters())
-	lines.append("Plane / layer: %s / %d" % [String(active_plane).to_upper(), active_layer])
-	lines.append("Tool: %s" % String(active_tool))
-	lines.append("Selected material: %s" % _get_selected_material_display_name())
-	lines.append("Armed material: %s" % _get_armed_material_display_name())
-	lines.append("")
-
-	var profile: BakedProfile = forge_controller.get_active_baked_profile()
-	var material_lookup: Dictionary = _get_material_lookup()
-	var cells: Array[CellAtom] = _collect_wip_cells(current_wip)
-	var segments: Array[SegmentAtom] = forge_controller.forge_service.build_segments(cells, material_lookup)
-	segments = forge_controller.forge_service.classify_joint_segments(segments, material_lookup)
-	var joint_data: Dictionary = forge_controller.forge_service.build_joint_data(segments, material_lookup)
-	var bow_data: Dictionary = forge_controller.forge_service.build_bow_data(segments, material_lookup, current_wip.forge_intent, current_wip.equipment_context)
-	lines.append("Segments: %d" % segments.size())
-	lines.append("Joint valid: %s" % _format_bool(bool(joint_data.get("joint_chain_valid", false))))
-	lines.append("Bow valid: %s" % _format_bool(bool(bow_data.get("bow_valid", false))))
-	if profile == null:
-		lines.append("No baked profile yet. Use Workflow -> Bake WIP or press Enter.")
-	else:
-		lines.append("Validation: %s" % _format_validation(profile))
-		lines.append("Primary grip valid: %s" % _format_bool(profile.primary_grip_valid))
-		lines.append("Primary grip span: %d" % profile.primary_grip_span_length_voxels)
-		lines.append("Primary grip contact: %s" % str(profile.primary_grip_contact_position))
-		lines.append("Total mass: %.3f" % profile.total_mass)
-		lines.append("Balance score: %.3f" % profile.balance_score)
-		lines.append("Flex score: %.3f" % profile.flex_score)
-		lines.append("Launch score: %.3f" % profile.launch_score)
-	if forge_controller.active_test_print != null:
-		lines.append("Test print id: %s" % String(forge_controller.active_test_print.test_id))
-	last_debug_text = "\n".join(lines)
-	status_text.text = last_debug_text
+	last_debug_text = bench_panel_presenter.refresh_status_text(
+		workspace_presentation,
+		forge_controller,
+		_ensure_wip_for_editing(),
+		active_plane,
+		active_layer,
+		active_tool,
+		_get_active_project_display_name(_ensure_wip_for_editing()),
+		_get_selected_material_display_name(),
+		_get_armed_material_display_name(),
+		_get_material_lookup(),
+		stage2_refinement_mode_active,
+		workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_quadrant),
+		status_text
+	)
 	debug_status_dirty = false
 
 func _set_inventory_page(page_id: StringName) -> void:
-	current_inventory_page = page_id
+	current_inventory_page = workspace_interaction_presenter.resolve_inventory_page(page_id)
 	_refresh_inventory()
 
-func _set_active_tool(tool_id: StringName) -> void:
-	active_tool = tool_id
+func _set_tool_state_modifier(modifier_id: StringName, refresh_ui: bool = true) -> void:
+	if stage2_refinement_mode_active and modifier_id == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_PICK:
+		modifier_id = ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD
+	if not stage2_refinement_mode_active and modifier_id == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_PICK:
+		stage1_tool_family = ForgeWorkspaceShapeToolPresenterScript.FAMILY_FREEHAND
+	tool_state_modifier = modifier_id
+	_apply_active_tool_change(refresh_ui)
+
+func _sync_stage1_tool_state_from_effective_tool(tool_id: StringName) -> void:
+	stage1_tool_family = workspace_shape_tool_presenter.resolve_stage1_tool_family(tool_id)
+	tool_state_modifier = workspace_shape_tool_presenter.resolve_stage1_modifier(tool_id)
+
+func _sync_stage2_tool_state_from_effective_tool(tool_id: StringName) -> void:
+	if stage2_selection_presenter.is_selection_tool(tool_id):
+		stage2_tool_family = stage2_selection_presenter.resolve_selection_family(tool_id, stage2_tool_family)
+		tool_state_modifier = (
+			ForgeWorkspaceShapeToolPresenterScript.MODIFIER_REMOVE
+			if String(tool_id).ends_with("_restore")
+			else ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD
+		)
+		return
+	stage2_tool_family = stage2_brush_presenter.resolve_pointer_tool_family(tool_id, stage2_tool_family)
+	tool_state_modifier = (
+		ForgeWorkspaceShapeToolPresenterScript.MODIFIER_REMOVE
+		if tool_id == ForgeStage2BrushPresenterScript.TOOL_STAGE2_RESTORE
+		else ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD
+	)
+
+func _compose_effective_active_tool_from_state() -> StringName:
+	if stage2_refinement_mode_active:
+		var stage2_modifier: StringName = (
+			ForgeStage2BrushPresenterScript.MODIFIER_REMOVE
+			if tool_state_modifier == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_REMOVE
+			else ForgeStage2BrushPresenterScript.MODIFIER_ADD
+		)
+		if stage2_selection_presenter.is_selection_family(stage2_tool_family):
+			return stage2_selection_presenter.compose_selection_tool_id(stage2_tool_family, stage2_modifier)
+		return stage2_brush_presenter.compose_pointer_tool_id(stage2_tool_family, stage2_modifier)
+	return workspace_shape_tool_presenter.compose_stage1_tool_id(stage1_tool_family, tool_state_modifier)
+
+func _apply_active_tool_change(refresh_ui: bool = true) -> void:
+	active_tool = workspace_interaction_presenter.resolve_active_tool(_compose_effective_active_tool_from_state())
+	if not workspace_shape_tool_presenter.is_shape_tool(active_tool):
+		_clear_structural_shape_preview()
+	stage2_hover_patch_ids = PackedStringArray()
+	_rebuild_geometry_menu()
+	if is_instance_valid(free_workspace_preview):
+		if _is_stage2_selection_tool(active_tool):
+			free_workspace_preview.clear_stage2_brush_preview()
+			_refresh_stage2_selection_preview()
+		else:
+			free_workspace_preview.clear_stage2_selection_preview()
+	if refresh_ui:
+		_refresh_left_panel()
+		_refresh_status_text()
+
+func _set_active_tool(tool_id: StringName, refresh_ui: bool = true) -> void:
+	if stage2_refinement_mode_active:
+		if tool_id == TOOL_PLACE:
+			tool_state_modifier = ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD
+		elif tool_id == TOOL_ERASE:
+			tool_state_modifier = ForgeWorkspaceShapeToolPresenterScript.MODIFIER_REMOVE
+		elif tool_id == TOOL_PICK:
+			tool_state_modifier = ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD
+		elif stage2_selection_presenter.is_selection_family(tool_id):
+			stage2_tool_family = tool_id
+			if tool_state_modifier == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_PICK:
+				tool_state_modifier = ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD
+		elif stage2_selection_presenter.is_selection_tool(tool_id):
+			_sync_stage2_tool_state_from_effective_tool(tool_id)
+		elif stage2_brush_presenter.is_pointer_radius_family(tool_id):
+			stage2_tool_family = tool_id
+			if tool_state_modifier == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_PICK:
+				tool_state_modifier = ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD
+		elif stage2_brush_presenter.is_pointer_radius_tool(tool_id):
+			_sync_stage2_tool_state_from_effective_tool(tool_id)
+	else:
+		if tool_id == TOOL_PICK:
+			stage1_tool_family = ForgeWorkspaceShapeToolPresenterScript.FAMILY_FREEHAND
+			tool_state_modifier = ForgeWorkspaceShapeToolPresenterScript.MODIFIER_PICK
+		elif tool_id == ForgeWorkspaceShapeToolPresenterScript.FAMILY_FREEHAND:
+			stage1_tool_family = ForgeWorkspaceShapeToolPresenterScript.FAMILY_FREEHAND
+			if tool_state_modifier == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_PICK:
+				tool_state_modifier = ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD
+		elif workspace_shape_tool_presenter.is_stage1_tool_family(tool_id):
+			stage1_tool_family = tool_id
+			if tool_state_modifier == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_PICK:
+				tool_state_modifier = ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD
+		elif tool_id == TOOL_PLACE or tool_id == TOOL_ERASE or workspace_shape_tool_presenter.is_shape_tool(tool_id):
+			_sync_stage1_tool_state_from_effective_tool(tool_id)
+		elif _is_stage2_refinement_tool(tool_id):
+			_sync_stage1_tool_state_from_effective_tool(stage1_active_tool_before_stage2_refinement)
+		else:
+			_sync_stage1_tool_state_from_effective_tool(tool_id)
+	_apply_active_tool_change(refresh_ui)
+
+func _step_structural_shape_rotation(delta_quadrants: int) -> void:
+	structural_shape_rotation_quadrant = posmod(structural_shape_rotation_quadrant + delta_quadrants, 4)
+	if structural_shape_drag_active and workspace_shape_tool_presenter.is_shape_tool(active_tool):
+		_update_structural_shape_preview()
+	_rebuild_geometry_menu()
 	_refresh_left_panel()
+	_refresh_status_text()
+
+func _is_stage2_refinement_tool(tool_id: StringName) -> bool:
+	return (
+		tool_id == ForgeStage2BrushPresenterScript.TOOL_STAGE2_CARVE
+		or tool_id == ForgeStage2BrushPresenterScript.TOOL_STAGE2_CHAMFER
+		or tool_id == ForgeStage2BrushPresenterScript.TOOL_STAGE2_FILLET
+		or tool_id == ForgeStage2BrushPresenterScript.TOOL_STAGE2_RESTORE
+		or _is_stage2_selection_tool(tool_id)
+	)
+
+func _is_stage2_selection_tool(tool_id: StringName) -> bool:
+	return stage2_selection_presenter.is_selection_tool(tool_id)
+
+func _get_stage2_item_state():
+	var current_wip: CraftedItemWIP = forge_controller.active_wip if forge_controller != null else null
+	return current_wip.stage2_item_state if current_wip != null else null
+
+func _can_enter_stage2_refinement_mode() -> bool:
+	var stage2_item_state = _get_stage2_item_state()
+	return stage2_item_state != null and stage2_item_state.has_current_shell()
+
+func _get_stage2_pointer_tool_min_radius_meters() -> float:
+	var rules: ForgeRulesDef = forge_controller.forge_rules if forge_controller != null else null
+	return (
+		float(rules.stage2_pointer_tool_min_radius_meters)
+		if rules != null
+		else DEFAULT_STAGE2_POINTER_TOOL_MIN_RADIUS_METERS
+	)
+
+func _get_stage2_pointer_tool_max_radius_meters() -> float:
+	var rules: ForgeRulesDef = forge_controller.forge_rules if forge_controller != null else null
+	return (
+		float(rules.stage2_pointer_tool_max_radius_meters)
+		if rules != null
+		else DEFAULT_STAGE2_POINTER_TOOL_MAX_RADIUS_METERS
+	)
+
+func _get_stage2_pointer_tool_radius_step_meters() -> float:
+	var rules: ForgeRulesDef = forge_controller.forge_rules if forge_controller != null else null
+	return (
+		float(rules.stage2_pointer_tool_radius_step_meters)
+		if rules != null
+		else DEFAULT_STAGE2_POINTER_TOOL_RADIUS_STEP_METERS
+	)
+
+func _clamp_stage2_pointer_tool_radius_meters(radius_meters: float) -> float:
+	var min_radius_meters: float = _get_stage2_pointer_tool_min_radius_meters()
+	var max_radius_meters: float = maxf(
+		_get_stage2_pointer_tool_max_radius_meters(),
+		min_radius_meters
+	)
+	return clampf(radius_meters, min_radius_meters, max_radius_meters)
+
+func _step_stage2_pointer_tool_radius(step_direction: int, hover_screen_position: Vector2 = Vector2.ZERO) -> void:
+	if not stage2_brush_presenter.is_pointer_radius_tool(active_tool):
+		return
+	var next_radius_meters: float = _clamp_stage2_pointer_tool_radius_meters(
+		stage2_brush_radius_meters + (float(step_direction) * _get_stage2_pointer_tool_radius_step_meters())
+	)
+	if is_equal_approx(next_radius_meters, stage2_brush_radius_meters):
+		return
+	stage2_brush_radius_meters = next_radius_meters
+	_refresh_tool_overlay()
+	_refresh_status_text()
+	if hover_screen_position != Vector2.ZERO:
+		_update_stage2_brush_hover(hover_screen_position)
+
+func _get_stage2_brush_step_meters() -> float:
+	var cell_world_size_meters: float = (
+		forge_controller.get_cell_world_size_meters()
+		if forge_controller != null
+		else 0.025
+	)
+	return maxf(
+		cell_world_size_meters * _get_view_tuning().workspace_stage2_brush_step_ratio,
+		0.0005
+	)
+
+func _toggle_stage2_refinement_mode() -> void:
+	_set_stage2_refinement_mode(not stage2_refinement_mode_active)
+
+func _set_stage2_refinement_mode(next_active: bool, refresh_ui: bool = true) -> void:
+	if structural_shape_drag_active:
+		_clear_structural_shape_preview()
+	if next_active and not _can_enter_stage2_refinement_mode():
+		next_active = false
+	if stage2_refinement_mode_active == next_active:
+		if not next_active and is_instance_valid(free_workspace_preview):
+			free_workspace_preview.clear_stage2_brush_preview()
+			free_workspace_preview.clear_stage2_selection_preview()
+		return
+	stage2_refinement_mode_active = next_active
+	stage2_hover_patch_ids = PackedStringArray()
+	stage2_selected_patch_ids = PackedStringArray()
+	if stage2_refinement_mode_active:
+		if not _is_stage2_refinement_tool(active_tool):
+			stage1_active_tool_before_stage2_refinement = active_tool
+		if tool_state_modifier == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_PICK:
+			tool_state_modifier = ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD
+		if not (
+			stage2_brush_presenter.is_pointer_radius_family(stage2_tool_family)
+			or stage2_selection_presenter.is_selection_family(stage2_tool_family)
+		):
+			stage2_tool_family = ForgeStage2BrushPresenterScript.FAMILY_STAGE2_CARVE
+		stage2_brush_radius_meters = _clamp_stage2_pointer_tool_radius_meters(
+			maxf(
+				stage2_brush_radius_meters,
+				_get_view_tuning().workspace_stage2_default_brush_radius_meters
+			)
+		)
+		if is_instance_valid(free_workspace_preview):
+			free_workspace_preview.clear_stage2_brush_preview()
+			free_workspace_preview.clear_stage2_selection_preview()
+	else:
+		_sync_stage1_tool_state_from_effective_tool(stage1_active_tool_before_stage2_refinement)
+		if is_instance_valid(free_workspace_preview):
+			free_workspace_preview.clear_stage2_brush_preview()
+			free_workspace_preview.clear_stage2_selection_preview()
+	_apply_active_tool_change(false)
+	if refresh_ui:
+		_rebuild_geometry_menu()
+		_refresh_left_panel()
+		_refresh_status_text()
+		_rebuild_workflow_menu()
+		_refresh_workspace_visuals()
 
 func _set_active_plane(plane_id: StringName) -> void:
-	active_plane = plane_id
-	active_layer = clampi(active_layer, 0, _get_max_layer_for_plane(active_plane))
-	if forge_controller != null:
-		active_layer = _get_default_layer_for_plane(active_plane)
+	if structural_shape_drag_active:
+		_clear_structural_shape_preview()
+	var plane_state: Dictionary = workspace_interaction_presenter.resolve_active_plane_state(
+		active_layer,
+		plane_id,
+		forge_controller,
+		Callable(self, "_get_default_layer_for_plane"),
+		Callable(self, "_get_max_layer_for_plane")
+	)
+	active_plane = plane_state.get("active_plane", plane_id)
+	active_layer = int(plane_state.get("active_layer", active_layer))
 	_refresh_plane_and_preview()
 	_refresh_left_panel()
 	_refresh_status_text()
 
 func _step_layer(delta: int) -> void:
-	active_layer = clampi(active_layer + delta, 0, _get_max_layer_for_plane(active_plane))
-	if forge_controller != null and active_plane == PLANE_XY:
-		forge_controller.set_active_layer_index(active_layer)
+	var previous_active_layer: int = active_layer
+	var next_active_layer: int = workspace_interaction_presenter.resolve_stepped_layer(
+		active_layer,
+		active_plane,
+		delta,
+		forge_controller,
+		PLANE_XY,
+		Callable(self, "_get_max_layer_for_plane")
+	)
+	if (
+		next_active_layer != active_layer
+		and structural_shape_drag_active
+		and workspace_shape_tool_presenter.is_shape_tool(active_tool)
+		and _has_pending_structural_shape_commit_for_current_layer()
+	):
+		_commit_structural_shape_preview(false)
+	active_layer = next_active_layer
 	_refresh_plane_and_preview()
+	if active_layer != previous_active_layer:
+		if structural_shape_drag_active and workspace_shape_tool_presenter.is_shape_tool(active_tool):
+			_update_structural_shape_preview()
+		_apply_plane_layer_sweep_after_step()
 	_refresh_left_panel()
 	_refresh_status_text()
+
+func _apply_plane_layer_sweep_after_step() -> void:
+	if stage2_refinement_mode_active:
+		return
+	if active_tool == TOOL_PICK:
+		return
+	if workspace_shape_tool_presenter.is_shape_tool(active_tool):
+		if structural_shape_drag_active and _has_pending_structural_shape_commit_for_current_layer():
+			_commit_structural_shape_preview(false)
+		return
+	if plane_viewport == null or not plane_viewport.has_active_drag_action():
+		return
+	plane_viewport.emit_active_drag_action_for_current_layer()
 
 func _on_inventory_item_clicked(index: int, _at_position: Vector2, _mouse_button_index: int) -> void:
-	if index < 0 or index >= visible_inventory_entries.size():
+	var selection_state: Dictionary = workspace_interaction_presenter.resolve_inventory_selection(
+		index,
+		visible_inventory_entries,
+		selected_material_variant_id,
+		armed_material_variant_id
+	)
+	var material_selection_state: Dictionary = bench_refresh_presenter.apply_material_selection_state(
+		selection_state,
+		selected_material_variant_id,
+		armed_material_variant_id,
+		Callable(self, "_refresh_inventory"),
+		Callable(self, "_refresh_material_panels"),
+		Callable(self, "_refresh_left_panel"),
+		Callable(self, "_refresh_status_text")
+	)
+	if not bool(material_selection_state.get("applied", false)):
 		return
-	var entry: Dictionary = visible_inventory_entries[index]
-	var material_id: StringName = entry.get("material_id", &"")
-	var quantity: int = int(entry.get("quantity", 0))
-	if material_id == selected_material_variant_id:
-		if quantity > 0:
-			armed_material_variant_id = StringName() if armed_material_variant_id == material_id else material_id
-	else:
-		selected_material_variant_id = material_id
-		armed_material_variant_id = material_id if quantity > 0 else StringName()
-	_refresh_inventory()
-	_refresh_material_panels()
-	_refresh_left_panel()
-	_refresh_status_text()
+	selected_material_variant_id = material_selection_state.get("selected_material_variant_id", StringName())
+	armed_material_variant_id = material_selection_state.get("armed_material_variant_id", StringName())
 
 func _on_flip_view_pressed() -> void:
-	main_workspace_mode = WORKSPACE_VIEW_PLANE if main_workspace_mode == WORKSPACE_VIEW_FREE else WORKSPACE_VIEW_FREE
+	main_workspace_mode = workspace_interaction_presenter.toggle_workspace_mode(
+		main_workspace_mode,
+		WORKSPACE_VIEW_FREE,
+		WORKSPACE_VIEW_PLANE
+	)
 	_sync_workspace_hosts()
 	_refresh_plane_and_preview()
 	_queue_layout_refresh()
 
 func _open_debug_popup() -> void:
-	if not panel.visible:
-		return
-	_flush_pending_edit_refresh(true)
-	if debug_status_dirty or status_text.text.strip_edges().is_empty():
-		_refresh_status_text()
-	var popup_size: Vector2i = compact_debug_popup_min_size if last_layout_compact_mode else wide_debug_popup_min_size
-	debug_popup.popup_centered(popup_size)
+	bench_debug_presenter.open_debug_popup(
+		panel.visible,
+		Callable(self, "_flush_pending_edit_refresh"),
+		debug_status_dirty,
+		status_text.text,
+		Callable(self, "_refresh_status_text"),
+		last_layout_compact_mode,
+		compact_debug_popup_min_size,
+		wide_debug_popup_min_size,
+		debug_popup
+	)
 
 func _on_plane_cell_place_requested(grid_position: Vector3i) -> void:
-	if active_tool == TOOL_PICK:
-		_pick_material_from_grid(grid_position)
+	if stage2_refinement_mode_active:
 		return
-	if active_tool == TOOL_ERASE:
-		_remove_cell(grid_position)
+	if workspace_shape_tool_presenter.is_shape_tool(active_tool):
 		return
-	_place_material_cell(grid_position)
+	workspace_interaction_presenter.handle_plane_cell_place_requested(
+		active_tool,
+		TOOL_PICK,
+		TOOL_ERASE,
+		grid_position,
+		Callable(self, "_pick_material_from_grid"),
+		Callable(self, "_remove_cell"),
+		Callable(self, "_place_material_cell")
+	)
 
 func _on_plane_cell_remove_requested(grid_position: Vector3i) -> void:
+	if stage2_refinement_mode_active:
+		return
+	if workspace_shape_tool_presenter.is_shape_tool(active_tool):
+		return
 	_remove_cell(grid_position)
 
 func _on_plane_cell_pick_requested(grid_position: Vector3i) -> void:
+	if stage2_refinement_mode_active:
+		return
 	_pick_material_from_grid(grid_position)
 
+func _on_plane_drag_started(grid_position: Vector3i, button_index: MouseButton) -> void:
+	if stage2_refinement_mode_active:
+		return
+	if not workspace_shape_tool_presenter.is_shape_tool(active_tool):
+		return
+	if button_index != MOUSE_BUTTON_LEFT:
+		return
+	structural_shape_drag_active = true
+	structural_shape_drag_anchor_grid_position = grid_position
+	structural_shape_drag_current_grid_position = grid_position
+	_update_structural_shape_preview()
+
+func _on_plane_drag_updated(grid_position: Vector3i, button_index: MouseButton) -> void:
+	if stage2_refinement_mode_active:
+		return
+	if not structural_shape_drag_active:
+		return
+	if not workspace_shape_tool_presenter.is_shape_tool(active_tool):
+		return
+	if button_index != MOUSE_BUTTON_LEFT:
+		return
+	structural_shape_drag_current_grid_position = grid_position
+	_update_structural_shape_preview()
+
 func _on_plane_stroke_finished() -> void:
+	if structural_shape_drag_active and workspace_shape_tool_presenter.is_shape_tool(active_tool):
+		if _has_pending_structural_shape_commit_for_current_layer():
+			_commit_structural_shape_preview()
+		else:
+			_clear_structural_shape_preview()
+			_flush_pending_edit_refresh(true)
+		return
 	_flush_pending_edit_refresh(true)
 
 func _on_free_view_panel_gui_input(event: InputEvent) -> void:
-	if forge_controller == null or not is_instance_valid(free_workspace_preview):
-		return
-	if event is not InputEventMouseButton:
-		return
-	var mouse_button: InputEventMouseButton = event
-	if not mouse_button.pressed:
-		return
-	if mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP:
-		free_workspace_preview.zoom_by(-_get_view_tuning().workspace_zoom_step)
-		return
-	if mouse_button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-		free_workspace_preview.zoom_by(_get_view_tuning().workspace_zoom_step)
-		return
+	workspace_interaction_presenter.handle_free_view_panel_gui_input(
+		event,
+		forge_controller,
+		free_workspace_preview,
+		_get_view_tuning().workspace_zoom_step
+	)
 
 func _on_free_view_gui_input(event: InputEvent) -> void:
+	if stage2_refinement_mode_active:
+		_handle_stage2_free_view_gui_input(event)
+		return
+	workspace_interaction_presenter.handle_free_view_gui_input(
+		event,
+		forge_controller,
+		free_workspace_preview,
+		active_tool,
+		TOOL_PICK,
+		workspace_edit_flow,
+		_get_workspace_orbit_mouse_button(),
+		_get_view_tuning().workspace_zoom_step,
+		Callable(self, "_pick_material_from_screen_position"),
+		Callable(self, "_begin_free_view_drag"),
+		Callable(self, "_end_free_view_drag"),
+		Callable(self, "_begin_free_view_paint"),
+		Callable(self, "_end_free_view_paint"),
+		Callable(self, "_paint_free_view_at_screen_position"),
+		Callable(self, "_handle_free_view_drag_motion")
+	)
+
+func _handle_stage2_free_view_gui_input(event: InputEvent) -> void:
 	if forge_controller == null or not is_instance_valid(free_workspace_preview):
+		return
+	if _is_stage2_selection_tool(active_tool):
+		_handle_stage2_selection_free_view_gui_input(event)
 		return
 	if event is InputEventMouseButton:
 		var mouse_button: InputEventMouseButton = event
+		if mouse_button.ctrl_pressed and mouse_button.pressed:
+			if mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP:
+				_step_stage2_pointer_tool_radius(1, mouse_button.position)
+				return
+			if mouse_button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				_step_stage2_pointer_tool_radius(-1, mouse_button.position)
+				return
 		if mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP and mouse_button.pressed:
 			free_workspace_preview.zoom_by(-_get_view_tuning().workspace_zoom_step)
 			return
@@ -1089,524 +1690,652 @@ func _on_free_view_gui_input(event: InputEvent) -> void:
 			return
 		if mouse_button.button_index == MOUSE_BUTTON_LEFT and not mouse_button.pressed:
 			_end_free_view_paint()
+			_update_stage2_brush_hover(mouse_button.position)
 			return
-		if not mouse_button.pressed:
-			return
-		if mouse_button.ctrl_pressed and mouse_button.button_index == MOUSE_BUTTON_LEFT:
-			var pick_grid_position: Variant = free_workspace_preview.screen_to_grid(mouse_button.position)
-			if pick_grid_position != null:
-				_pick_material_from_grid(pick_grid_position)
-			_end_free_view_paint()
-			return
-		if mouse_button.button_index == MOUSE_BUTTON_LEFT:
-			if active_tool == TOOL_PICK:
-				var pick_tool_grid_position: Variant = free_workspace_preview.screen_to_grid(mouse_button.position)
-				if pick_tool_grid_position != null:
-					_pick_material_from_grid(pick_tool_grid_position)
-				_end_free_view_paint()
-			else:
-				_begin_free_view_paint()
-				_paint_free_view_at_screen_position(mouse_button.position)
+		if mouse_button.button_index == MOUSE_BUTTON_LEFT and mouse_button.pressed:
+			_begin_free_view_paint()
+			_apply_stage2_brush_at_screen_position(mouse_button.position)
 			return
 	if event is InputEventMouseMotion:
 		var motion_event: InputEventMouseMotion = event
-		if free_view_drag_active:
+		if workspace_edit_flow.is_free_view_drag_active():
 			_handle_free_view_drag_motion(motion_event.relative)
 			return
-		if free_view_paint_active:
-			_paint_free_view_at_screen_position(motion_event.position)
+		_update_stage2_brush_hover(motion_event.position)
+		if workspace_edit_flow.is_free_view_paint_active():
+			_apply_stage2_brush_at_screen_position(motion_event.position)
+
+func _handle_stage2_selection_free_view_gui_input(event: InputEvent) -> void:
+	if forge_controller == null or not is_instance_valid(free_workspace_preview):
+		return
+	if event is InputEventMouseButton:
+		var mouse_button: InputEventMouseButton = event
+		if mouse_button.ctrl_pressed and mouse_button.pressed and (
+			mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP
+			or mouse_button.button_index == MOUSE_BUTTON_WHEEL_DOWN
+		):
+			return
+		if mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP and mouse_button.pressed:
+			free_workspace_preview.zoom_by(-_get_view_tuning().workspace_zoom_step)
+			return
+		if mouse_button.button_index == MOUSE_BUTTON_WHEEL_DOWN and mouse_button.pressed:
+			free_workspace_preview.zoom_by(_get_view_tuning().workspace_zoom_step)
+			return
+		if mouse_button.button_index == _get_workspace_orbit_mouse_button():
+			if mouse_button.pressed:
+				_begin_free_view_drag()
+			else:
+				_end_free_view_drag()
+			return
+		if mouse_button.button_index == MOUSE_BUTTON_LEFT and mouse_button.pressed:
+			_toggle_stage2_patch_selection_at_screen_position(mouse_button.position)
+			return
+		if mouse_button.button_index == MOUSE_BUTTON_LEFT and not mouse_button.pressed:
+			_update_stage2_selection_hover(mouse_button.position)
+			return
+	if event is InputEventMouseMotion:
+		var motion_event: InputEventMouseMotion = event
+		if workspace_edit_flow.is_free_view_drag_active():
+			_handle_free_view_drag_motion(motion_event.relative)
+			return
+		_update_stage2_selection_hover(motion_event.position)
+
+func _update_stage2_brush_hover(screen_position: Vector2) -> void:
+	if not stage2_refinement_mode_active or not is_instance_valid(free_workspace_preview):
+		return
+	var current_wip: CraftedItemWIP = forge_controller.active_wip if forge_controller != null else null
+	var hit_data: Dictionary = free_workspace_preview.resolve_stage2_brush_hit(screen_position, current_wip)
+	if hit_data.is_empty():
+		free_workspace_preview.clear_stage2_brush_preview()
+		return
+	var brush_blocked: bool = stage2_brush_presenter.is_zone_mask_blocked(
+		StringName(hit_data.get("zone_mask_id", StringName())),
+		active_tool
+	)
+	free_workspace_preview.set_stage2_brush_preview_hit(
+		hit_data.get("hit_point_canonical_local", null),
+		stage2_brush_radius_meters,
+		brush_blocked
+	)
+
+func _apply_stage2_brush_at_screen_position(screen_position: Vector2) -> void:
+	if not stage2_refinement_mode_active or forge_controller == null or not is_instance_valid(free_workspace_preview):
+		return
+	var current_wip: CraftedItemWIP = forge_controller.active_wip
+	if current_wip == null or current_wip.stage2_item_state == null:
+		return
+	var hit_data: Dictionary = free_workspace_preview.resolve_stage2_brush_hit(screen_position, current_wip)
+	if hit_data.is_empty():
+		free_workspace_preview.clear_stage2_brush_preview()
+		return
+	var hit_point_canonical_local: Variant = hit_data.get("hit_point_canonical_local", null)
+	var brush_blocked: bool = stage2_brush_presenter.is_zone_mask_blocked(
+		StringName(hit_data.get("zone_mask_id", StringName())),
+		active_tool
+	)
+	free_workspace_preview.set_stage2_brush_preview_hit(
+		hit_point_canonical_local,
+		stage2_brush_radius_meters,
+		brush_blocked
+	)
+	if stage2_brush_presenter.apply_brush(
+		current_wip.stage2_item_state,
+		active_tool,
+		hit_point_canonical_local,
+		stage2_brush_radius_meters,
+		_get_stage2_brush_step_meters()
+	):
+		forge_controller.clear_active_baked_profile()
+		forge_controller.clear_active_test_print()
+		_refresh_workspace_visuals(true, false)
+		_refresh_status_text()
+
+func _update_stage2_selection_hover(screen_position: Vector2) -> void:
+	if not stage2_refinement_mode_active or not is_instance_valid(free_workspace_preview):
+		return
+	var current_wip: CraftedItemWIP = forge_controller.active_wip if forge_controller != null else null
+	var hit_data: Dictionary = free_workspace_preview.resolve_stage2_brush_hit(screen_position, current_wip)
+	var hover_selection_data: Dictionary = stage2_selection_presenter.resolve_hover_selection_data(
+		current_wip.stage2_item_state if current_wip != null else null,
+		hit_data,
+		active_tool
+	)
+	stage2_hover_patch_ids = PackedStringArray(hover_selection_data.get("patch_ids", PackedStringArray()))
+	_refresh_stage2_selection_preview()
+
+func _toggle_stage2_patch_selection_at_screen_position(screen_position: Vector2) -> void:
+	if not stage2_refinement_mode_active or not is_instance_valid(free_workspace_preview):
+		return
+	var current_wip: CraftedItemWIP = forge_controller.active_wip if forge_controller != null else null
+	var hit_data: Dictionary = free_workspace_preview.resolve_stage2_brush_hit(screen_position, current_wip)
+	var hover_selection_data: Dictionary = stage2_selection_presenter.resolve_hover_selection_data(
+		current_wip.stage2_item_state if current_wip != null else null,
+		hit_data,
+		active_tool
+	)
+	var hovered_patch_ids: PackedStringArray = PackedStringArray(hover_selection_data.get("patch_ids", PackedStringArray()))
+	stage2_hover_patch_ids = hovered_patch_ids
+	stage2_selected_patch_ids = stage2_selection_presenter.toggle_patch_selection(stage2_selected_patch_ids, hovered_patch_ids)
+	_rebuild_geometry_menu()
+	_refresh_stage2_selection_preview()
+
+func _apply_stage2_selection_tool() -> void:
+	if (
+		not stage2_refinement_mode_active
+		or forge_controller == null
+		or forge_controller.active_wip == null
+		or forge_controller.active_wip.stage2_item_state == null
+		or not _is_stage2_selection_tool(active_tool)
+		or stage2_selected_patch_ids.is_empty()
+	):
+		return
+	var selection_apply_patch_ids: PackedStringArray = stage2_selection_presenter.resolve_selection_apply_patch_ids(
+		forge_controller.active_wip.stage2_item_state,
+		stage2_selected_patch_ids,
+		active_tool
+	)
+	if selection_apply_patch_ids.is_empty():
+		return
+	if stage2_brush_presenter.apply_selection_tool(
+		forge_controller.active_wip.stage2_item_state,
+		stage2_selected_patch_ids,
+		active_tool,
+		selection_apply_patch_ids
+	):
+		forge_controller.clear_active_baked_profile()
+		forge_controller.clear_active_test_print()
+		_refresh_workspace_visuals(true, false)
+		_refresh_status_text()
+
+func _clear_stage2_selection() -> void:
+	stage2_hover_patch_ids = PackedStringArray()
+	stage2_selected_patch_ids = stage2_selection_presenter.clear_selection()
+	_rebuild_geometry_menu()
+	_refresh_stage2_selection_preview()
 
 func _on_action_menu_id_pressed(action_id: int) -> void:
-	match action_id:
-		MENU_VIEW_FIT:
-			if is_instance_valid(free_workspace_preview):
-				free_workspace_preview.fit_view()
-		MENU_VIEW_TOGGLE_BOUNDS:
-			show_grid_bounds = not show_grid_bounds
-			_refresh_plane_and_preview()
-		MENU_VIEW_TOGGLE_SLICE:
-			show_active_slice = not show_active_slice
-			_refresh_plane_and_preview()
-		MENU_GEOMETRY_TOOL_PLACE:
-			_set_active_tool(TOOL_PLACE)
-		MENU_GEOMETRY_TOOL_ERASE:
-			_set_active_tool(TOOL_ERASE)
-		MENU_GEOMETRY_PLANE_XY:
-			_set_active_plane(PLANE_XY)
-		MENU_GEOMETRY_PLANE_ZX:
-			_set_active_plane(PLANE_ZX)
-		MENU_GEOMETRY_PLANE_ZY:
-			_set_active_plane(PLANE_ZY)
-		MENU_WORKFLOW_BAKE:
-			_bake_active_wip()
-		MENU_WORKFLOW_RESET:
-			_reset_active_wip()
-		MENU_WORKFLOW_CLOSE:
-			close_ui()
-
-func _load_sample_preset(sample_preset_id: StringName) -> void:
-	if forge_controller == null:
+	var menu_ids: Dictionary = _get_action_menu_ids()
+	if action_id == int(menu_ids.get("geometry_selection_apply", -1)):
+		_apply_stage2_selection_tool()
 		return
-	forge_controller.load_debug_sample_preset(sample_preset_id)
-	var current_wip: CraftedItemWIP = forge_controller.active_wip
-	if current_wip != null and current_wip.forge_project_name.strip_edges().is_empty():
-		current_wip.forge_project_name = _format_sample_preset(sample_preset_id)
-	active_layer = _get_default_layer_for_plane(active_plane)
-	_refresh_all(false)
-
-func _create_new_blank_project() -> void:
-	if forge_controller == null:
+	if action_id == int(menu_ids.get("geometry_selection_clear", -1)):
+		_clear_stage2_selection()
 		return
-	forge_controller.load_new_blank_wip(_build_default_forge_project_name())
-	active_layer = _get_default_layer_for_plane(active_plane)
-	_refresh_all(false)
+	var menu_state: Dictionary = bench_menu_presenter.handle_action_menu_id_pressed(
+		action_id,
+		menu_ids,
+		show_grid_bounds,
+		show_active_slice,
+		Callable(self, "_fit_free_workspace_preview"),
+		Callable(self, "_refresh_plane_and_preview"),
+		Callable(self, "_set_active_tool"),
+		Callable(self, "_step_structural_shape_rotation"),
+		Callable(self, "_set_active_plane"),
+		Callable(self, "_step_layer"),
+		Callable(self, "_open_project_manager_popup"),
+		Callable(self, "_save_current_wip_to_player_library"),
+		Callable(self, "_create_new_blank_project"),
+		Callable(self, "_load_selected_project_from_list"),
+		Callable(self, "_resume_last_saved_project"),
+		Callable(self, "_duplicate_current_project"),
+		Callable(self, "_delete_current_project"),
+		Callable(self, "_show_start_menu_from_editor"),
+		Callable(self, "_bake_active_wip"),
+		Callable(self, "_initialize_stage2_for_active_wip"),
+		Callable(self, "_toggle_stage2_refinement_mode"),
+		Callable(self, "_reset_active_wip"),
+		Callable(self, "close_ui")
+	)
+	show_grid_bounds = bool(menu_state.get("show_grid_bounds", show_grid_bounds))
+	show_active_slice = bool(menu_state.get("show_active_slice", show_active_slice))
 
-func _save_current_wip_to_player_library() -> void:
-	var current_wip: CraftedItemWIP = _ensure_wip_for_editing()
-	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
-	if current_wip == null or wip_library == null or forge_controller == null:
-		return
-	_apply_project_metadata_from_editor()
-	current_wip = forge_controller.active_wip
-	var saved_wip: CraftedItemWIP = wip_library.save_wip(current_wip)
-	if saved_wip == null:
-		return
-	forge_controller.load_player_saved_wip(saved_wip)
-	active_layer = _get_default_layer_for_plane(active_plane)
-	_refresh_all(false)
+func _fit_free_workspace_preview() -> void:
+	if is_instance_valid(free_workspace_preview):
+		free_workspace_preview.fit_view()
 
-func _load_selected_project_from_list() -> void:
+func _open_project_manager_popup() -> void:
+	_refresh_project_panel()
+	project_manager_popup.popup_centered(Vector2i(620, 760))
+
+func _get_selected_project_catalog_entry() -> Dictionary:
 	if project_list.get_selected_items().is_empty():
-		return
+		return {}
 	var selected_index: int = project_list.get_selected_items()[0]
 	if selected_index < 0 or selected_index >= project_catalog.size():
-		return
-	var entry: Dictionary = project_catalog[selected_index]
+		return {}
+	return project_catalog[selected_index]
+
+func _autosave_current_wip_if_needed() -> bool:
+	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
+	var result: Dictionary = project_action_presenter.autosave_current_project_if_needed(
+		forge_controller,
+		wip_library,
+		project_name_edit.text,
+		project_notes_edit.text,
+		_get_selected_project_stow_position(),
+		_get_selected_project_grip_style(),
+		_build_default_forge_project_name(),
+		Callable(self, "_get_default_layer_for_plane"),
+		active_plane
+	)
+	return project_action_presenter.apply_project_action_result_to_layer(
+		result,
+		active_layer,
+		Callable(self, "_refresh_all"),
+		Callable(self, "_set_active_layer_value"),
+		false
+	)
+
+func _load_project_catalog_entry(entry: Dictionary, autosave_first: bool = true) -> bool:
+	if entry.is_empty():
+		return false
+	if autosave_first:
+		_autosave_current_wip_if_needed()
 	var entry_type: StringName = entry.get("entry_type", &"")
-	if entry_type == &"sample":
-		_load_sample_preset(entry.get("sample_preset_id", &""))
-		return
+	if entry_type == &"authoring_preset":
+		_load_sample_preset(entry.get("sample_preset_id", &""), false)
+		return true
 	if entry_type == &"saved":
-		_load_saved_wip_by_id(entry.get("saved_wip_id", &""))
+		return _load_saved_wip_by_id(entry.get("saved_wip_id", &""), false)
+	return false
+
+func _load_sample_preset(sample_preset_id: StringName, autosave_first: bool = true) -> void:
+	if autosave_first:
+		_autosave_current_wip_if_needed()
+	var result: Dictionary = project_action_presenter.load_sample_preset(
+		forge_controller,
+		sample_preset_id,
+		Callable(self, "_get_default_layer_for_plane"),
+		active_plane
+	)
+	project_action_presenter.apply_project_action_result_to_layer(
+		result,
+		active_layer,
+		Callable(self, "_refresh_all"),
+		Callable(self, "_set_active_layer_value"),
+		false
+	)
+
+func _create_new_blank_project() -> void:
+	_create_new_blank_project_for_builder_path(
+		_get_current_builder_path_id(),
+		_get_current_builder_component_id()
+	)
+
+func _create_new_blank_project_for_builder_path(
+	builder_path_id: StringName,
+	builder_component_id: StringName = StringName()
+) -> void:
+	_autosave_current_wip_if_needed()
+	project_manager_popup.hide()
+	var result: Dictionary = project_action_presenter.create_new_blank_project_for_builder_path(
+		forge_controller,
+		_build_default_forge_project_name(),
+		builder_path_id,
+		Callable(self, "_get_default_layer_for_plane"),
+		active_plane,
+		builder_component_id
+	)
+	project_action_presenter.apply_project_action_result_to_layer(
+		result,
+		active_layer,
+		Callable(self, "_refresh_all"),
+		Callable(self, "_set_active_layer_value"),
+		false
+	)
+	if not result.is_empty():
+		_show_editor_surface_for_current_wip()
+
+func _save_current_wip_to_player_library() -> void:
+	project_manager_popup.hide()
+	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
+	var result: Dictionary = project_action_presenter.save_current_project(
+		forge_controller,
+		wip_library,
+		project_name_edit.text,
+		project_notes_edit.text,
+		_get_selected_project_stow_position(),
+		_get_selected_project_grip_style(),
+		_build_default_forge_project_name(),
+		Callable(self, "_get_default_layer_for_plane"),
+		active_plane
+	)
+	project_action_presenter.apply_project_action_result_to_layer(
+		result,
+		active_layer,
+		Callable(self, "_refresh_all"),
+		Callable(self, "_set_active_layer_value"),
+		false
+	)
+
+func _load_selected_project_from_list() -> void:
+	var entry: Dictionary = _get_selected_project_catalog_entry()
+	if entry.is_empty():
+		return
+	project_manager_popup.hide()
+	_load_project_catalog_entry(entry)
 
 func _resume_last_saved_project() -> void:
-	var resumed_wip: CraftedItemWIP = _restore_preferred_player_project_if_available(true)
-	if resumed_wip != null:
-		_refresh_all(false)
-
-func _restore_preferred_player_project_if_available(force_reload: bool = false) -> CraftedItemWIP:
-	if forge_controller == null:
-		return null
-	if not force_reload and forge_controller.active_wip != null:
-		return forge_controller.active_wip
+	project_manager_popup.hide()
 	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
-	if wip_library == null:
-		return null
-	if wip_library.selected_wip_id != StringName():
-		var selected_saved_wip: CraftedItemWIP = wip_library.get_saved_wip_clone(wip_library.selected_wip_id)
-		if selected_saved_wip != null:
-			forge_controller.load_player_saved_wip(selected_saved_wip)
-			active_layer = _get_default_layer_for_plane(active_plane)
-			return forge_controller.active_wip
-	for saved_wip: CraftedItemWIP in wip_library.get_saved_wips():
-		if saved_wip == null:
-			continue
-		wip_library.set_selected_wip_id(saved_wip.wip_id)
-		forge_controller.load_player_saved_wip(saved_wip.duplicate(true) as CraftedItemWIP)
-		active_layer = _get_default_layer_for_plane(active_plane)
-		return forge_controller.active_wip
-	return null
+	var target_saved_wip_id: StringName = StringName()
+	if wip_library != null:
+		target_saved_wip_id = wip_library.selected_wip_id
+		if target_saved_wip_id == StringName():
+			for saved_wip: CraftedItemWIP in wip_library.get_saved_wips():
+				if saved_wip != null:
+					target_saved_wip_id = saved_wip.wip_id
+					break
+	if target_saved_wip_id != StringName():
+		_load_saved_wip_by_id(target_saved_wip_id)
+		return
+	var result: Dictionary = _restore_preferred_player_project_if_available(true)
+	project_action_presenter.apply_project_action_result_to_layer(
+		result,
+		active_layer,
+		Callable(self, "_refresh_all"),
+		Callable(self, "_set_active_layer_value"),
+		false
+	)
 
-func _load_saved_wip_by_id(saved_wip_id: StringName) -> bool:
-	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
-	if wip_library == null or forge_controller == null or saved_wip_id == StringName():
-		return false
-	var saved_wip: CraftedItemWIP = wip_library.get_saved_wip_clone(saved_wip_id)
-	if saved_wip == null:
-		return false
-	wip_library.set_selected_wip_id(saved_wip_id)
-	forge_controller.load_player_saved_wip(saved_wip)
-	active_layer = _get_default_layer_for_plane(active_plane)
-	_refresh_all(false)
-	return true
+func _restore_preferred_player_project_if_available(force_reload: bool = false) -> Dictionary:
+	var result: Dictionary = project_action_presenter.restore_preferred_project(
+		forge_controller,
+		_get_player_forge_wip_library_state(),
+		Callable(self, "_get_default_layer_for_plane"),
+		active_plane,
+		force_reload
+	)
+	if result.is_empty():
+		return {}
+	active_layer = int(result.get("active_layer", active_layer))
+	return result
 
-func _refresh_project_action_buttons(current_wip: CraftedItemWIP) -> void:
-	load_project_button.disabled = project_list.get_selected_items().is_empty()
-	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
-	var has_saved_projects: bool = wip_library != null and wip_library.has_saved_wips()
-	var has_selected_saved_project: bool = wip_library != null and wip_library.selected_wip_id != StringName() and wip_library.get_saved_wip(wip_library.selected_wip_id) != null
-	resume_last_project_button.disabled = not has_saved_projects and not has_selected_saved_project
-	save_project_button.disabled = current_wip == null
-	duplicate_project_button.disabled = current_wip == null
-	delete_project_button.disabled = not _is_saved_player_project(current_wip)
+func _load_saved_wip_by_id(saved_wip_id: StringName, autosave_first: bool = true) -> bool:
+	if autosave_first:
+		_autosave_current_wip_if_needed()
+	var result: Dictionary = project_action_presenter.load_saved_project_by_id(
+		saved_wip_id,
+		forge_controller,
+		_get_player_forge_wip_library_state(),
+		Callable(self, "_get_default_layer_for_plane"),
+		active_plane
+	)
+	return project_action_presenter.apply_project_action_result_to_layer(
+		result,
+		active_layer,
+		Callable(self, "_refresh_all"),
+		Callable(self, "_set_active_layer_value"),
+		false
+	)
 
 func _bake_active_wip() -> void:
-	if forge_controller == null:
+	if not project_action_presenter.bake_active_wip(forge_controller):
 		return
-	forge_controller.bake_active_wip_with_defaults()
+	_refresh_all()
+
+func _initialize_stage2_for_active_wip() -> void:
+	if not project_action_presenter.initialize_stage2_refinement(forge_controller):
+		return
+	stage2_brush_radius_meters = _clamp_stage2_pointer_tool_radius_meters(
+		_get_view_tuning().workspace_stage2_default_brush_radius_meters
+	)
 	_refresh_all()
 
 func _reset_active_wip() -> void:
-	if forge_controller == null:
-		return
-	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
-	if forge_controller.get_active_sample_preset_id() == StringName() and wip_library != null and not wip_library.selected_wip_id.is_empty():
-		var saved_wip_clone: CraftedItemWIP = wip_library.get_saved_wip_clone(wip_library.selected_wip_id)
-		if saved_wip_clone != null:
-			forge_controller.load_player_saved_wip(saved_wip_clone)
-			active_layer = _get_default_layer_for_plane(active_plane)
-			_refresh_all(false)
-			return
-	forge_controller.reset_debug_sample_wip()
-	active_layer = _get_default_layer_for_plane(active_plane)
-	_refresh_all(false)
+	var result: Dictionary = project_action_presenter.reset_active_project(
+		forge_controller,
+		_get_player_forge_wip_library_state(),
+		_build_default_forge_project_name(),
+		Callable(self, "_get_default_layer_for_plane"),
+		active_plane
+	)
+	project_action_presenter.apply_project_action_result_to_layer(
+		result,
+		active_layer,
+		Callable(self, "_refresh_all"),
+		Callable(self, "_set_active_layer_value"),
+		false
+	)
 
 func _place_material_cell(grid_position: Vector3i) -> void:
-	if forge_controller == null or armed_material_variant_id == StringName():
-		debug_status_dirty = true
-		return
-	var current_wip: CraftedItemWIP = _ensure_wip_for_editing()
-	if current_wip == null:
-		return
-	var existing_material_id: StringName = forge_controller.get_material_id_at(grid_position)
-	if existing_material_id == armed_material_variant_id:
-		return
-	if not _try_apply_inventory_swap(existing_material_id, armed_material_variant_id):
-		_refresh_after_edit()
-		return
 	suppress_active_wip_refresh = true
-	forge_controller.set_material_at(grid_position, armed_material_variant_id)
+	var result: Dictionary = workspace_edit_action_presenter.place_material_cell(
+		forge_controller,
+		_get_player_forge_inventory_state(),
+		armed_material_variant_id,
+		grid_position,
+		Callable(self, "_ensure_wip_for_editing")
+	)
 	suppress_active_wip_refresh = false
-	_refresh_after_edit()
+	if bool(result.get("debug_status_dirty", false)):
+		debug_status_dirty = true
+	if bool(result.get("queue_edit_refresh", false)):
+		_refresh_after_edit()
 
 func _remove_cell(grid_position: Vector3i) -> void:
-	if forge_controller == null:
-		return
 	suppress_active_wip_refresh = true
-	var removed_material_id: StringName = forge_controller.remove_material_at(grid_position)
+	var result: Dictionary = workspace_edit_action_presenter.remove_cell(
+		forge_controller,
+		_get_player_forge_inventory_state(),
+		grid_position
+	)
 	suppress_active_wip_refresh = false
-	if removed_material_id == StringName():
-		return
-	_refund_inventory_material(removed_material_id, 1)
-	_refresh_after_edit()
+	if bool(result.get("queue_edit_refresh", false)):
+		_refresh_after_edit()
 
 func _begin_free_view_paint() -> void:
-	free_view_paint_active = true
-	free_view_paint_has_last_grid = false
+	workspace_interaction_presenter.begin_free_view_paint(workspace_edit_flow)
 
 func _end_free_view_paint() -> void:
-	free_view_paint_active = false
-	free_view_paint_has_last_grid = false
-	_flush_pending_edit_refresh(true)
+	workspace_interaction_presenter.end_free_view_paint(
+		workspace_edit_flow,
+		Callable(self, "_flush_pending_edit_refresh")
+	)
 
 func _paint_free_view_at_screen_position(screen_position: Vector2) -> void:
-	if not free_view_paint_active or forge_controller == null or not is_instance_valid(free_workspace_preview):
-		return
-	var grid_position_variant: Variant = free_workspace_preview.screen_to_grid(screen_position)
-	if grid_position_variant == null:
-		return
-	var grid_position: Vector3i = grid_position_variant
-	if free_view_paint_has_last_grid and grid_position == free_view_paint_last_grid_position:
-		return
-	free_view_paint_has_last_grid = true
-	free_view_paint_last_grid_position = grid_position
-	if active_tool == TOOL_ERASE:
-		_remove_cell(grid_position)
-	else:
-		_place_material_cell(grid_position)
+	workspace_interaction_presenter.paint_free_view_at_screen_position_state(
+		workspace_edit_flow,
+		screen_position,
+		forge_controller,
+		free_workspace_preview,
+		active_tool,
+		TOOL_ERASE,
+		Callable(self, "_place_material_cell"),
+		Callable(self, "_remove_cell")
+	)
 
 func _pick_material_from_grid(grid_position: Vector3i) -> void:
-	if forge_controller == null:
+	var result: Dictionary = workspace_edit_action_presenter.pick_material_from_grid(
+		forge_controller,
+		material_catalog,
+		grid_position
+	)
+	var pick_state: Dictionary = bench_refresh_presenter.apply_material_selection_state(
+		result,
+		selected_material_variant_id,
+		armed_material_variant_id,
+		Callable(self, "_refresh_inventory"),
+		Callable(self, "_refresh_material_panels"),
+		Callable(self, "_refresh_left_panel"),
+		Callable(self, "_refresh_status_text")
+	)
+	if not bool(pick_state.get("applied", false)):
 		return
-	var material_id: StringName = forge_controller.get_material_id_at(grid_position)
-	if material_id == StringName():
+	selected_material_variant_id = pick_state.get("selected_material_variant_id", StringName())
+	armed_material_variant_id = pick_state.get("armed_material_variant_id", StringName())
+
+func _pick_material_from_screen_position(screen_position: Vector2) -> void:
+	var result: Dictionary = workspace_edit_action_presenter.pick_material_from_screen_position(
+		free_workspace_preview,
+		forge_controller,
+		material_catalog,
+		screen_position
+	)
+	var pick_state: Dictionary = bench_refresh_presenter.apply_material_selection_state(
+		result,
+		selected_material_variant_id,
+		armed_material_variant_id,
+		Callable(self, "_refresh_inventory"),
+		Callable(self, "_refresh_material_panels"),
+		Callable(self, "_refresh_left_panel"),
+		Callable(self, "_refresh_status_text")
+	)
+	if not bool(pick_state.get("applied", false)):
 		return
-	selected_material_variant_id = material_id
-	var entry: Dictionary = _get_material_entry(selected_material_variant_id)
-	armed_material_variant_id = selected_material_variant_id if int(entry.get("quantity", 0)) > 0 else StringName()
-	_refresh_inventory()
-	_refresh_material_panels()
-	_refresh_left_panel()
-	_refresh_status_text()
+	selected_material_variant_id = pick_state.get("selected_material_variant_id", StringName())
+	armed_material_variant_id = pick_state.get("armed_material_variant_id", StringName())
 
 func _ensure_wip_for_editing() -> CraftedItemWIP:
-	if forge_controller == null:
-		return null
-	return forge_controller.ensure_debug_sample_wip()
-
-func _count_cells(wip: CraftedItemWIP) -> int:
-	if wip == null:
-		return 0
-	var total: int = 0
-	for layer_atom: LayerAtom in wip.layers:
-		if layer_atom == null:
-			continue
-		total += layer_atom.cells.size()
-	return total
+	return project_action_presenter.ensure_wip_for_editing(
+		forge_controller,
+		_get_player_forge_wip_library_state()
+	)
 
 func _collect_wip_cells(wip: CraftedItemWIP) -> Array[CellAtom]:
-	var cells: Array[CellAtom] = []
-	if wip == null:
-		return cells
-	for layer_atom: LayerAtom in wip.layers:
-		if layer_atom == null:
-			continue
-		for cell: CellAtom in layer_atom.cells:
-			if cell != null:
-				cells.append(cell)
-	return cells
+	return workspace_presentation.collect_wip_cells(wip)
 
 func _get_material_entry(material_id: StringName) -> Dictionary:
-	for entry: Dictionary in material_catalog:
-		if entry.get("material_id", &"") == material_id:
-			return entry
-	return {}
+	return material_catalog_presenter.get_material_entry(material_catalog, material_id)
 
 func _get_default_layer_for_plane(plane_id: StringName) -> int:
-	if forge_controller == null:
-		return 0
-	match plane_id:
-		PLANE_ZX:
-			return forge_controller.grid_size.y >> 1
-		PLANE_ZY:
-			return forge_controller.grid_size.x >> 1
-		_:
-			return forge_controller.get_default_active_layer()
+	return workspace_plane_presenter.get_default_layer_for_plane(
+		forge_controller,
+		plane_id,
+		PLANE_ZX,
+		PLANE_ZY
+	)
 
 func _get_max_layer_for_plane(plane_id: StringName) -> int:
-	if forge_controller == null:
-		return 0
-	match plane_id:
-		PLANE_ZX:
-			return forge_controller.grid_size.y - 1
-		PLANE_ZY:
-			return forge_controller.grid_size.x - 1
-		_:
-			return forge_controller.grid_size.z - 1
-
-func _supports_weapon_context(base_material: BaseMaterialDef) -> bool:
-	if base_material == null:
-		return false
-	for stat_line: StatLine in base_material.equipment_context_bias_lines:
-		if stat_line == null:
-			continue
-		if stat_line.stat_id == &"ctx_weapon":
-			return true
-	return false
-
-func _resolve_material_display_name(base_material: BaseMaterialDef, material_entry: Variant = null) -> String:
-	if base_material == null:
-		return "Unknown Material"
-	var base_name: String = base_material.display_name
-	if base_name.is_empty():
-		var raw_text: String = String(base_material.base_material_id).replace("mat_", "").replace("_base", "").replace("_", " ")
-		base_name = raw_text.capitalize()
-	if material_entry is MaterialVariantDef:
-		var material_variant: MaterialVariantDef = material_entry as MaterialVariantDef
-		var tier_display_name: String = _format_tier_display_name(material_variant.tier_id)
-		if not tier_display_name.is_empty():
-			return "%s (%s)" % [base_name, tier_display_name]
-	return base_name
-
-func _format_tier_display_name(tier_id: StringName) -> String:
-	var tier_id_text: String = String(tier_id)
-	if tier_id_text.begins_with("tier_"):
-		tier_id_text = tier_id_text.trim_prefix("tier_")
-	return tier_id_text.capitalize()
-
-func _resolve_base_material_from_entry(material_entry: Variant, material_lookup: Dictionary) -> BaseMaterialDef:
-	if material_entry is BaseMaterialDef:
-		return material_entry as BaseMaterialDef
-	if material_entry is MaterialVariantDef:
-		var material_variant: MaterialVariantDef = material_entry as MaterialVariantDef
-		return material_lookup.get(material_variant.base_material_id) as BaseMaterialDef
-	return null
-
-func _describe_material_strengths(base_material: BaseMaterialDef) -> String:
-	var strengths: PackedStringArray = []
-	if base_material.can_be_anchor_material:
-		strengths.append("anchor stability")
-	if base_material.can_be_bow_limb:
-		strengths.append("limb flex")
-	if base_material.can_be_bow_string:
-		strengths.append("string support")
-	if base_material.can_be_beveled_edge:
-		strengths.append("edge shaping")
-	if base_material.can_be_blunt_surface:
-		strengths.append("blunt impact")
-	if strengths.is_empty():
-		return "general structural use"
-	return ", ".join(strengths)
-
-func _describe_material_tradeoffs(base_material: BaseMaterialDef) -> String:
-	if base_material == null:
-		return "unknown"
-	if base_material.elasticity < 0.3:
-		return "low flex compared to lighter materials"
-	if base_material.hardness < 0.5:
-		return "lower hardness than heavy structural metals"
-	return "balanced first-slice baseline tradeoffs"
-
-func _format_stat_line(stat_line: StatLine) -> String:
-	if stat_line == null:
-		return ""
-	var suffix: String = ""
-	if stat_line.value_kind == StatLine.ValueKind.PCT_ADD:
-		suffix = " (pct)"
-	return "%s = %.3f%s" % [String(stat_line.stat_id), stat_line.value, suffix]
-
-func _format_bool(value: bool) -> String:
-	return "true" if value else "false"
-
-func _format_validation(profile: BakedProfile) -> String:
-	if profile == null:
-		return "no_profile"
-	return "ok" if profile.validation_error.is_empty() else profile.validation_error
+	return workspace_plane_presenter.get_max_layer_for_plane(
+		forge_controller,
+		plane_id,
+		PLANE_ZX,
+		PLANE_ZY
+	)
 
 func _format_sample_preset(sample_preset_id: StringName) -> String:
-	if forge_controller == null:
-		return String(sample_preset_id)
-	return forge_controller.get_sample_preset_display_name(sample_preset_id)
-
-func _apply_button_state(button: BaseButton, is_active: bool) -> void:
-	button.modulate = _get_view_tuning().ui_button_active_color if is_active else _get_view_tuning().ui_button_inactive_color
-
-func _apply_tab_button_state(button: BaseButton, is_active: bool) -> void:
-	button.modulate = _get_view_tuning().ui_tab_active_color if is_active else _get_view_tuning().ui_tab_inactive_color
+	return project_action_presenter.format_sample_preset_name(forge_controller, sample_preset_id)
 
 func _get_selected_material_display_name() -> String:
-	var entry: Dictionary = _get_material_entry(selected_material_variant_id)
-	if entry.is_empty():
-		return "none"
-	return String(entry.get("display_name", "none"))
+	return material_catalog_presenter.get_selected_display_name(material_catalog, selected_material_variant_id)
 
 func _get_armed_material_display_name() -> String:
-	var entry: Dictionary = _get_material_entry(armed_material_variant_id)
-	if entry.is_empty():
-		return "none"
-	return String(entry.get("display_name", "none"))
+	return material_catalog_presenter.get_armed_display_name(material_catalog, armed_material_variant_id)
 
 func _get_active_project_display_name(current_wip: CraftedItemWIP) -> String:
-	if current_wip == null:
-		return "none"
-	if not current_wip.forge_project_name.strip_edges().is_empty():
-		return current_wip.forge_project_name.strip_edges()
-	if forge_controller != null and forge_controller.get_active_sample_preset_id() != StringName():
-		return _format_sample_preset(forge_controller.get_active_sample_preset_id())
-	return _format_saved_wip_name(current_wip)
+	return project_action_presenter.resolve_active_project_display_name(current_wip, forge_controller)
 
 func _get_forge_project_name(current_wip: CraftedItemWIP) -> String:
-	if current_wip == null:
-		return ""
-	if not current_wip.forge_project_name.strip_edges().is_empty():
-		return current_wip.forge_project_name.strip_edges()
-	if forge_controller != null and forge_controller.get_active_sample_preset_id() != StringName():
-		return _format_sample_preset(forge_controller.get_active_sample_preset_id())
-	return _build_default_forge_project_name()
+	return project_action_presenter.resolve_editor_project_name(
+		current_wip,
+		forge_controller,
+		_get_player_forge_wip_library_state()
+	)
 
 func _format_saved_wip_name(saved_wip: CraftedItemWIP) -> String:
-	if saved_wip == null:
-		return "Unnamed Player WIP"
-	if not saved_wip.forge_project_name.strip_edges().is_empty():
-		return saved_wip.forge_project_name.strip_edges()
-	if not saved_wip.wip_id.is_empty():
-		return String(saved_wip.wip_id)
-	return "Unnamed Player WIP"
+	return project_action_presenter.format_saved_project_name(saved_wip)
 
 func _get_project_source_text(current_wip: CraftedItemWIP) -> String:
-	if current_wip == null:
-		return "Current project source: none"
-	if forge_controller != null and forge_controller.get_active_sample_preset_id() != StringName():
-		return "Current project source: sample preset. Temporary forge label only."
-	if _is_saved_player_project(current_wip):
-		return "Current project source: saved player forge project. Final item naming happens later."
-	return "Current project source: unsaved forge draft. Final item naming happens later."
+	return project_action_presenter.resolve_project_source_text(
+		current_wip,
+		forge_controller,
+		_get_player_forge_wip_library_state()
+	)
 
 func _build_default_forge_project_name() -> String:
-	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
-	var project_count: int = wip_library.get_saved_wips().size() if wip_library != null else 0
-	return "Forge Project %03d" % (project_count + 1)
+	return project_action_presenter.build_default_project_name(_get_player_forge_wip_library_state())
 
 func _apply_project_metadata_from_editor() -> void:
-	var current_wip: CraftedItemWIP = _ensure_wip_for_editing()
-	if current_wip == null or forge_controller == null:
-		return
-	var submitted_name: String = project_name_edit.text.strip_edges()
-	current_wip.forge_project_name = submitted_name if not submitted_name.is_empty() else _build_default_forge_project_name()
-	current_wip.forge_project_notes = project_notes_edit.text.strip_edges()
-	current_wip.stow_position_mode = _get_selected_project_stow_position()
-	current_wip.grip_style_mode = CraftedItemWIP.resolve_supported_grip_style(
-		_get_selected_project_grip_style(),
-		current_wip.forge_intent,
-		current_wip.equipment_context
+	project_action_presenter.apply_current_project_metadata_from_editor(
+		forge_controller,
+		_get_player_forge_wip_library_state(),
+		project_name_edit.text,
+		project_notes_edit.text,
+		_get_selected_project_stow_position(),
+		_get_selected_project_grip_style()
 	)
-	forge_controller.set_active_wip(current_wip)
-
-func _is_saved_player_project(current_wip: CraftedItemWIP) -> bool:
-	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
-	if current_wip == null or wip_library == null:
-		return false
-	return wip_library.get_saved_wip(current_wip.wip_id) != null
 
 func _duplicate_current_project() -> void:
-	var current_wip: CraftedItemWIP = _ensure_wip_for_editing()
+	project_manager_popup.hide()
 	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
-	if current_wip == null or wip_library == null or forge_controller == null:
-		return
-	_apply_project_metadata_from_editor()
-	current_wip = forge_controller.active_wip
-	var duplicated_wip: CraftedItemWIP = null
-	if _is_saved_player_project(current_wip):
-		var refreshed_saved_wip: CraftedItemWIP = wip_library.save_wip(current_wip)
-		if refreshed_saved_wip != null:
-			duplicated_wip = wip_library.duplicate_saved_wip(refreshed_saved_wip.wip_id)
-	else:
-		var clone_wip: CraftedItemWIP = current_wip.duplicate(true) as CraftedItemWIP
-		clone_wip.wip_id = StringName("draft_%s_copy" % str(Time.get_unix_time_from_system()))
-		clone_wip.forge_project_name = "%s Copy" % _get_forge_project_name(current_wip)
-		duplicated_wip = wip_library.save_wip(clone_wip)
-	if duplicated_wip == null:
-		return
-	forge_controller.load_player_saved_wip(duplicated_wip)
-	active_layer = _get_default_layer_for_plane(active_plane)
-	_refresh_all(false)
+	var result: Dictionary = project_action_presenter.duplicate_current_project(
+		forge_controller,
+		wip_library,
+		project_name_edit.text,
+		project_notes_edit.text,
+		_get_selected_project_stow_position(),
+		_get_selected_project_grip_style(),
+		_build_default_forge_project_name(),
+		Callable(self, "_get_default_layer_for_plane"),
+		active_plane
+	)
+	project_action_presenter.apply_project_action_result_to_layer(
+		result,
+		active_layer,
+		Callable(self, "_refresh_all"),
+		Callable(self, "_set_active_layer_value"),
+		false
+	)
 
 func _delete_current_project() -> void:
-	var current_wip: CraftedItemWIP = _ensure_wip_for_editing()
+	project_manager_popup.hide()
 	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
-	if current_wip == null or wip_library == null or forge_controller == null:
-		return
-	if not _is_saved_player_project(current_wip):
-		return
-	var deleted_wip_id: StringName = current_wip.wip_id
-	if not wip_library.delete_saved_wip(deleted_wip_id):
-		return
-	var fallback_wip: CraftedItemWIP = wip_library.get_saved_wip_clone(wip_library.selected_wip_id)
-	if fallback_wip != null:
-		forge_controller.load_player_saved_wip(fallback_wip)
-	else:
-		forge_controller.load_new_blank_wip(_build_default_forge_project_name())
-	active_layer = _get_default_layer_for_plane(active_plane)
-	_refresh_all(false)
+	var result: Dictionary = project_action_presenter.delete_current_project(
+		forge_controller,
+		wip_library,
+		_build_default_forge_project_name(),
+		Callable(self, "_get_default_layer_for_plane"),
+		active_plane
+	)
+	project_action_presenter.apply_project_action_result_to_layer(
+		result,
+		active_layer,
+		Callable(self, "_refresh_all"),
+		Callable(self, "_set_active_layer_value"),
+		false
+	)
 
-func _sync_project_list_selection(current_wip: CraftedItemWIP) -> void:
-	project_list.deselect_all()
-	if current_wip == null:
-		return
-	for project_index: int in range(project_catalog.size()):
-		var entry: Dictionary = project_catalog[project_index]
-		var entry_type: StringName = entry.get("entry_type", &"")
-		if entry_type == &"sample":
-			if forge_controller != null and entry.get("sample_preset_id", &"") == forge_controller.get_active_sample_preset_id():
-				project_list.select(project_index)
-				return
-		elif entry_type == &"saved":
-			if current_wip.wip_id == entry.get("saved_wip_id", &""):
-				project_list.select(project_index)
-				return
+func _on_start_menu_continue_last_pressed() -> void:
+	var result: Dictionary = _restore_preferred_player_project_if_available(true)
+	if project_action_presenter.apply_project_action_result_to_layer(
+		result,
+		active_layer,
+		Callable(self, "_refresh_all"),
+		Callable(self, "_set_active_layer_value"),
+		false
+	):
+		_show_editor_surface_for_current_wip()
+
+func _on_start_menu_project_list_pressed() -> void:
+	_show_editor_surface_for_current_wip()
+	_refresh_project_panel()
+	_refresh_status_text()
+	_open_project_manager_popup()
+
+func _on_start_menu_new_melee_pressed() -> void:
+	_create_new_blank_project_for_builder_path(CraftedItemWIP.BUILDER_PATH_MELEE)
+
+func _on_start_menu_new_ranged_physical_pressed() -> void:
+	_create_new_blank_project_for_builder_path(
+		CraftedItemWIP.BUILDER_PATH_RANGED_PHYSICAL,
+		CraftedItemWIP.BUILDER_COMPONENT_BOW
+	)
+
+func _on_start_menu_new_shield_pressed() -> void:
+	_create_new_blank_project_for_builder_path(CraftedItemWIP.BUILDER_PATH_SHIELD)
+
+func _on_start_menu_new_magic_pressed() -> void:
+	_create_new_blank_project_for_builder_path(CraftedItemWIP.BUILDER_PATH_MAGIC)
 
 func _on_new_project_pressed() -> void:
 	_create_new_blank_project()
+
+func _on_builder_component_bow_pressed() -> void:
+	_open_ranged_builder_component(CraftedItemWIP.BUILDER_COMPONENT_BOW)
+
+func _on_builder_component_quiver_pressed() -> void:
+	_open_ranged_builder_component(CraftedItemWIP.BUILDER_COMPONENT_QUIVER)
 
 func _on_save_project_pressed() -> void:
 	_save_current_wip_to_player_library()
@@ -1623,78 +2352,85 @@ func _on_duplicate_project_pressed() -> void:
 func _on_delete_project_pressed() -> void:
 	_delete_current_project()
 
+func _commit_project_metadata_if_visible() -> void:
+	project_panel_presenter.commit_project_metadata_if_visible(
+		panel.visible,
+		Callable(self, "_apply_project_metadata_from_editor"),
+		Callable(self, "_refresh_project_panel"),
+		Callable(self, "_refresh_status_text")
+	)
+
 func _on_project_name_submitted(_new_text: String) -> void:
-	_apply_project_metadata_from_editor()
-	_refresh_project_panel()
-	_refresh_status_text()
+	_commit_project_metadata_if_visible()
 
 func _on_project_name_focus_exited() -> void:
-	if not panel.visible:
-		return
-	_apply_project_metadata_from_editor()
-	_refresh_project_panel()
-	_refresh_status_text()
+	_commit_project_metadata_if_visible()
 
 func _on_project_stow_position_selected(_index: int) -> void:
-	if not panel.visible:
-		return
-	_apply_project_metadata_from_editor()
-	_refresh_project_panel()
-	_refresh_status_text()
+	_commit_project_metadata_if_visible()
 
 func _on_project_grip_style_selected(_index: int) -> void:
-	if not panel.visible:
-		return
-	_apply_project_metadata_from_editor()
-	_refresh_project_panel()
-	_refresh_status_text()
+	_commit_project_metadata_if_visible()
 
 func _on_stow_position_popup_id_focused(focused_id: int) -> void:
-	if focused_id < 0 or focused_id >= project_stow_position_option_button.get_item_count():
-		_hide_stow_position_hint()
-		return
-	var stow_mode: StringName = project_stow_position_option_button.get_item_metadata(focused_id)
-	_show_stow_position_hint(stow_mode)
+	project_panel_presenter.handle_stow_position_popup_focus(
+		focused_id,
+		project_stow_position_option_button,
+		Callable(self, "_show_stow_position_hint"),
+		Callable(self, "_hide_stow_position_hint")
+	)
 
 func _on_grip_style_popup_id_focused(focused_id: int) -> void:
-	if focused_id < 0 or focused_id >= project_grip_style_option_button.get_item_count():
-		_hide_grip_style_hint()
-		return
-	var grip_mode: StringName = project_grip_style_option_button.get_item_metadata(focused_id)
-	_show_grip_style_hint(grip_mode)
+	project_panel_presenter.handle_grip_style_popup_focus(
+		focused_id,
+		project_grip_style_option_button,
+		Callable(self, "_show_grip_style_hint"),
+		Callable(self, "_hide_grip_style_hint")
+	)
 
 func _on_project_notes_focus_exited() -> void:
-	if not panel.visible:
-		return
-	_apply_project_metadata_from_editor()
-	_refresh_project_panel()
-	_refresh_status_text()
+	_commit_project_metadata_if_visible()
 
 func _on_project_list_item_clicked(index: int, _at_position: Vector2, _mouse_button_index: int) -> void:
-	if index < 0 or index >= project_catalog.size():
-		return
-	var entry: Dictionary = project_catalog[index]
-	var entry_type: StringName = entry.get("entry_type", &"")
-	if entry_type == &"sample":
-		_load_sample_preset(entry.get("sample_preset_id", &""))
-		return
-	if entry_type == &"saved":
-		_load_saved_wip_by_id(entry.get("saved_wip_id", &""))
+	project_panel_presenter.handle_project_list_item_clicked(
+		index,
+		project_catalog,
+		project_list,
+		Callable(self, "_load_selected_project_from_list")
+	)
 
 func _on_project_list_item_selected(_index: int) -> void:
-	_refresh_project_action_buttons(_ensure_wip_for_editing())
+	project_action_presenter.apply_project_action_button_state(
+		project_list,
+		_ensure_wip_for_editing(),
+		_get_player_forge_wip_library_state(),
+		load_project_button,
+		resume_last_project_button,
+		save_project_button,
+		duplicate_project_button,
+		delete_project_button
+	)
+	_rebuild_project_menu()
 
 func _on_active_wip_changed(_wip: CraftedItemWIP) -> void:
-	if not panel.visible or suppress_active_wip_refresh:
-		return
-	_refresh_all()
+	if stage2_refinement_mode_active and not _can_enter_stage2_refinement_mode():
+		_set_stage2_refinement_mode(false, false)
+	if not start_menu_visible:
+		_show_editor_surface_for_current_wip()
+	bench_debug_presenter.handle_active_wip_changed(
+		panel.visible,
+		suppress_active_wip_refresh,
+		Callable(self, "_refresh_all")
+	)
 
 func _on_active_test_print_changed(_test_print: TestPrintInstance) -> void:
-	if not panel.visible:
+	if not bench_debug_presenter.handle_active_test_print_changed(
+		panel.visible,
+		debug_popup.visible,
+		Callable(self, "_refresh_status_text")
+	):
 		return
 	debug_status_dirty = true
-	if debug_popup.visible:
-		_refresh_status_text()
 
 func _get_player_forge_inventory_state() -> PlayerForgeInventoryState:
 	if active_player == null:
@@ -1706,188 +2442,204 @@ func _get_player_forge_wip_library_state() -> PlayerForgeWipLibraryState:
 		return null
 	return active_player.get_forge_wip_library_state()
 
+func _set_active_layer_value(next_active_layer: int) -> void:
+	active_layer = next_active_layer
+
 func _rebuild_workflow_menu() -> void:
-	var workflow_popup: PopupMenu = workflow_menu_button.get_popup()
-	workflow_popup.clear()
-	workflow_popup.add_item("Bake WIP", MENU_WORKFLOW_BAKE)
-	workflow_popup.add_item("Reset Current WIP", MENU_WORKFLOW_RESET)
-	workflow_popup.add_separator()
-	workflow_popup.add_item("Close Forge", MENU_WORKFLOW_CLOSE)
+	bench_menu_presenter.rebuild_workflow_menu(
+		workflow_menu_button,
+		_get_action_menu_ids(),
+		_can_enter_stage2_refinement_mode(),
+		stage2_refinement_mode_active
+	)
+
+func _get_action_menu_ids() -> Dictionary:
+	return {
+		"project_manager": MENU_PROJECT_MANAGER,
+		"project_save": MENU_PROJECT_SAVE,
+		"project_new": MENU_PROJECT_NEW,
+		"project_load_selected": MENU_PROJECT_LOAD_SELECTED,
+		"project_resume_last": MENU_PROJECT_RESUME_LAST,
+		"project_duplicate": MENU_PROJECT_DUPLICATE,
+		"project_delete": MENU_PROJECT_DELETE,
+		"project_show_paths": MENU_PROJECT_SHOW_PATHS,
+		"view_fit": MENU_VIEW_FIT,
+		"view_toggle_bounds": MENU_VIEW_TOGGLE_BOUNDS,
+		"view_toggle_slice": MENU_VIEW_TOGGLE_SLICE,
+		"geometry_tool_place": MENU_GEOMETRY_TOOL_PLACE,
+		"geometry_tool_erase": MENU_GEOMETRY_TOOL_ERASE,
+		"geometry_tool_pick": MENU_GEOMETRY_TOOL_PICK,
+		"geometry_tool_fillet": MENU_GEOMETRY_TOOL_FILLET,
+		"geometry_tool_chamfer": MENU_GEOMETRY_TOOL_CHAMFER,
+		"geometry_tool_surface_face_fillet": MENU_GEOMETRY_TOOL_SURFACE_FACE_FILLET,
+		"geometry_tool_surface_face_chamfer": MENU_GEOMETRY_TOOL_SURFACE_FACE_CHAMFER,
+		"geometry_tool_surface_face_restore": MENU_GEOMETRY_TOOL_SURFACE_FACE_RESTORE,
+		"geometry_tool_surface_edge_fillet": MENU_GEOMETRY_TOOL_SURFACE_EDGE_FILLET,
+		"geometry_tool_surface_edge_chamfer": MENU_GEOMETRY_TOOL_SURFACE_EDGE_CHAMFER,
+		"geometry_tool_surface_edge_restore": MENU_GEOMETRY_TOOL_SURFACE_EDGE_RESTORE,
+		"geometry_tool_surface_feature_edge_fillet": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_EDGE_FILLET,
+		"geometry_tool_surface_feature_edge_chamfer": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_EDGE_CHAMFER,
+		"geometry_tool_surface_feature_edge_restore": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_EDGE_RESTORE,
+		"geometry_tool_surface_feature_region_fillet": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_REGION_FILLET,
+		"geometry_tool_surface_feature_region_chamfer": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_REGION_CHAMFER,
+		"geometry_tool_surface_feature_loop_fillet": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_LOOP_FILLET,
+		"geometry_tool_surface_feature_loop_chamfer": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_LOOP_CHAMFER,
+		"geometry_tool_surface_feature_region_restore": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_REGION_RESTORE,
+		"geometry_tool_surface_feature_loop_restore": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_LOOP_RESTORE,
+		"geometry_tool_surface_feature_band_fillet": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_BAND_FILLET,
+		"geometry_tool_surface_feature_band_chamfer": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_BAND_CHAMFER,
+		"geometry_tool_surface_feature_band_restore": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_BAND_RESTORE,
+		"geometry_tool_surface_feature_cluster_fillet": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_CLUSTER_FILLET,
+		"geometry_tool_surface_feature_cluster_chamfer": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_CLUSTER_CHAMFER,
+		"geometry_tool_surface_feature_cluster_restore": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_CLUSTER_RESTORE,
+		"geometry_tool_surface_feature_bridge_fillet": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_BRIDGE_FILLET,
+		"geometry_tool_surface_feature_bridge_chamfer": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_BRIDGE_CHAMFER,
+		"geometry_tool_surface_feature_bridge_restore": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_BRIDGE_RESTORE,
+		"geometry_tool_surface_feature_contour_fillet": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_CONTOUR_FILLET,
+		"geometry_tool_surface_feature_contour_chamfer": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_CONTOUR_CHAMFER,
+		"geometry_tool_surface_feature_contour_restore": MENU_GEOMETRY_TOOL_SURFACE_FEATURE_CONTOUR_RESTORE,
+		"geometry_tool_rectangle_place": MENU_GEOMETRY_TOOL_RECTANGLE_PLACE,
+		"geometry_tool_rectangle_erase": MENU_GEOMETRY_TOOL_RECTANGLE_ERASE,
+		"geometry_tool_circle_place": MENU_GEOMETRY_TOOL_CIRCLE_PLACE,
+		"geometry_tool_circle_erase": MENU_GEOMETRY_TOOL_CIRCLE_ERASE,
+		"geometry_tool_oval_place": MENU_GEOMETRY_TOOL_OVAL_PLACE,
+		"geometry_tool_oval_erase": MENU_GEOMETRY_TOOL_OVAL_ERASE,
+		"geometry_tool_triangle_place": MENU_GEOMETRY_TOOL_TRIANGLE_PLACE,
+		"geometry_tool_triangle_erase": MENU_GEOMETRY_TOOL_TRIANGLE_ERASE,
+		"geometry_shape_rotate_left": MENU_GEOMETRY_SHAPE_ROTATE_LEFT,
+		"geometry_shape_rotate_right": MENU_GEOMETRY_SHAPE_ROTATE_RIGHT,
+		"geometry_selection_apply": MENU_GEOMETRY_SELECTION_APPLY,
+		"geometry_selection_clear": MENU_GEOMETRY_SELECTION_CLEAR,
+		"geometry_plane_xy": MENU_GEOMETRY_PLANE_XY,
+		"geometry_plane_zx": MENU_GEOMETRY_PLANE_ZX,
+		"geometry_plane_zy": MENU_GEOMETRY_PLANE_ZY,
+		"geometry_layer_down": MENU_GEOMETRY_LAYER_DOWN,
+		"geometry_layer_up": MENU_GEOMETRY_LAYER_UP,
+		"workflow_bake": MENU_WORKFLOW_BAKE,
+		"workflow_stage2_initialize": MENU_WORKFLOW_STAGE2_INITIALIZE,
+		"workflow_stage2_toggle_mode": MENU_WORKFLOW_STAGE2_TOGGLE_MODE,
+		"workflow_reset": MENU_WORKFLOW_RESET,
+		"workflow_close": MENU_WORKFLOW_CLOSE,
+	}
+
+func _rebuild_project_menu() -> void:
+	var button_state: Dictionary = project_action_presenter.build_project_action_button_state(
+		project_list,
+		forge_controller.active_wip if forge_controller != null else null,
+		_get_player_forge_wip_library_state()
+	)
+	bench_menu_presenter.rebuild_project_menu(
+		project_menu_button,
+		_get_action_menu_ids(),
+		button_state
+	)
+
+func _rebuild_status_menu() -> void:
+	bench_menu_presenter.rebuild_status_menu(status_menu_button, last_left_panel_state)
+
+func _rebuild_geometry_menu() -> void:
+	bench_menu_presenter.rebuild_geometry_menu(
+		geometry_menu_button,
+		_get_action_menu_ids(),
+		stage2_refinement_mode_active,
+		active_tool,
+		workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_quadrant),
+		not stage2_selected_patch_ids.is_empty(),
+		not stage2_selected_patch_ids.is_empty()
+	)
 
 func _refresh_project_panel() -> void:
-	project_catalog.clear()
-	project_list.clear()
 	var current_wip: CraftedItemWIP = _ensure_wip_for_editing()
-	if current_wip != null:
-		current_wip.grip_style_mode = CraftedItemWIP.resolve_supported_grip_style(
-			current_wip.grip_style_mode,
-			current_wip.forge_intent,
-			current_wip.equipment_context
-		)
-	project_name_edit.editable = current_wip != null
-	project_notes_edit.editable = current_wip != null
-	project_stow_position_option_button.disabled = current_wip == null
-	project_grip_style_option_button.disabled = current_wip == null
-	project_name_edit.text = _get_forge_project_name(current_wip)
-	project_notes_edit.text = current_wip.forge_project_notes if current_wip != null else ""
-	_select_project_stow_position(current_wip.stow_position_mode if current_wip != null else CraftedItemWIP.STOW_SHOULDER_HANGING)
-	_refresh_grip_style_option_availability(current_wip)
-	_select_project_grip_style(current_wip.grip_style_mode if current_wip != null else CraftedItemWIP.GRIP_NORMAL, current_wip)
-	_hide_stow_position_hint()
-	_hide_grip_style_hint()
-	project_source_label.text = _get_project_source_text(current_wip)
-	new_project_button.disabled = forge_controller == null
-	if forge_controller != null:
-		for sample_preset_id: StringName in forge_controller.get_sample_preset_ids():
-			project_catalog.append({
-				"entry_type": &"sample",
-				"sample_preset_id": sample_preset_id,
-				"display_name": "[Sample] %s" % _format_sample_preset(sample_preset_id),
-			})
-	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
-	var saved_wips: Array[CraftedItemWIP] = []
-	if wip_library != null:
-		saved_wips = wip_library.get_saved_wips()
-	for saved_wip: CraftedItemWIP in saved_wips:
-		var saved_description: String = saved_wip.forge_project_notes.strip_edges()
-		var stow_summary: String = "Stowed: %s" % CraftedItemWIP.get_stow_position_label(saved_wip.stow_position_mode)
-		var grip_summary: String = "Grip: %s" % CraftedItemWIP.get_grip_style_label(saved_wip.grip_style_mode)
-		saved_description = "%s\n%s" % [saved_description, stow_summary] if not saved_description.is_empty() else stow_summary
-		saved_description = "%s\n%s" % [saved_description, grip_summary] if not saved_description.is_empty() else grip_summary
-		project_catalog.append({
-			"entry_type": &"saved",
-			"saved_wip_id": saved_wip.wip_id,
-			"display_name": "[Saved] %s" % _format_saved_wip_name(saved_wip),
-			"description": saved_description,
-		})
-	for entry: Dictionary in project_catalog:
-		var item_index: int = project_list.add_item(String(entry.get("display_name", "Project")))
-		project_list.set_item_metadata(item_index, entry)
-		var description: String = String(entry.get("description", "")).strip_edges()
-		if not description.is_empty():
-			project_list.set_item_tooltip(item_index, description)
-	_sync_project_list_selection(current_wip)
-	_refresh_project_action_buttons(current_wip)
+	project_catalog = bench_refresh_presenter.refresh_project_panel(
+		project_panel_presenter,
+		project_action_presenter,
+		forge_controller,
+		current_wip,
+		_get_player_forge_wip_library_state(),
+		_get_view_tuning(),
+		project_name_edit,
+		project_notes_edit,
+		project_stow_position_option_button,
+		project_grip_style_option_button,
+		project_source_label,
+		new_project_button,
+		builder_component_tabs,
+		builder_component_bow_button,
+		builder_component_quiver_button,
+		project_list,
+		load_project_button,
+		resume_last_project_button,
+		save_project_button,
+		duplicate_project_button,
+		delete_project_button,
+		Callable(self, "_hide_stow_position_hint"),
+		Callable(self, "_hide_grip_style_hint")
+	)
+	_rebuild_project_menu()
 
-func _try_apply_inventory_swap(refund_material_id: StringName, consume_material_id: StringName) -> bool:
-	if consume_material_id == StringName():
-		return true
-	var inventory_state: PlayerForgeInventoryState = _get_player_forge_inventory_state()
-	if inventory_state == null:
-		return false
-	if refund_material_id != StringName() and refund_material_id != consume_material_id:
-		inventory_state.add_quantity(refund_material_id, 1)
-	if inventory_state.try_consume(consume_material_id, 1):
-		return true
-	if refund_material_id != StringName() and refund_material_id != consume_material_id:
-		inventory_state.try_consume(refund_material_id, 1)
-	return false
-
-func _refund_inventory_material(material_id: StringName, amount: int) -> void:
-	if material_id == StringName() or amount <= 0:
+func _open_ranged_builder_component(builder_component_id: StringName) -> void:
+	var current_wip: CraftedItemWIP = forge_controller.active_wip if forge_controller != null else null
+	var current_is_same_ranged_component: bool = (
+		current_wip != null
+		and CraftedItemWIP.normalize_builder_path_id(current_wip.forge_builder_path_id) == CraftedItemWIP.BUILDER_PATH_RANGED_PHYSICAL
+		and CraftedItemWIP.normalize_builder_component_id(current_wip.forge_builder_path_id, current_wip.forge_builder_component_id) == builder_component_id
+	)
+	if current_is_same_ranged_component:
 		return
-	var inventory_state: PlayerForgeInventoryState = _get_player_forge_inventory_state()
-	if inventory_state == null:
-		return
-	inventory_state.add_quantity(material_id, amount)
-
-func _reconcile_material_selection_state() -> void:
-	if material_catalog.is_empty():
-		selected_material_variant_id = StringName()
-		armed_material_variant_id = StringName()
-		return
-	var selected_entry: Dictionary = _get_material_entry(selected_material_variant_id)
-	if selected_entry.is_empty():
-		selected_material_variant_id = material_catalog[0].get("material_id", &"")
-		selected_entry = _get_material_entry(selected_material_variant_id)
-	if int(selected_entry.get("quantity", 0)) <= 0 and armed_material_variant_id == selected_material_variant_id:
-		armed_material_variant_id = StringName()
-	if armed_material_variant_id != StringName() and int(_get_material_entry(armed_material_variant_id).get("quantity", 0)) <= 0:
-		armed_material_variant_id = StringName()
-	if armed_material_variant_id == StringName() and int(selected_entry.get("quantity", 0)) > 0:
-		armed_material_variant_id = selected_material_variant_id
+	_create_new_blank_project_for_builder_path(
+		CraftedItemWIP.BUILDER_PATH_RANGED_PHYSICAL,
+		builder_component_id
+	)
 
 func _begin_free_view_drag() -> void:
-	_end_free_view_paint()
-	free_view_drag_active = true
-	free_view_drag_mode = _resolve_free_view_drag_mode()
-	free_view_restore_mouse_position = get_viewport().get_mouse_position()
-	free_view_previous_mouse_mode = Input.get_mouse_mode()
-	if _get_view_tuning().workspace_capture_mouse_during_drag:
-		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	workspace_interaction_presenter.begin_free_view_drag(
+		workspace_edit_flow,
+		get_viewport(),
+		_get_view_tuning().workspace_capture_mouse_during_drag,
+		_get_view_tuning().workspace_pan_modifier_keycode,
+		Callable(self, "_end_free_view_paint")
+	)
 
 func _end_free_view_drag(restore_mouse_position: bool = true) -> void:
-	if not free_view_drag_active and Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
-		return
-	free_view_drag_active = false
-	free_view_drag_mode = FREE_VIEW_DRAG_NONE
-	var previous_mouse_mode: Input.MouseMode = free_view_previous_mouse_mode
-	if _get_view_tuning().workspace_capture_mouse_during_drag and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
-		Input.set_mouse_mode(previous_mouse_mode)
-		if restore_mouse_position:
-			get_viewport().warp_mouse(free_view_restore_mouse_position)
-	else:
-		Input.set_mouse_mode(previous_mouse_mode)
+	workspace_interaction_presenter.end_free_view_drag(
+		workspace_edit_flow,
+		get_viewport(),
+		_get_view_tuning().workspace_capture_mouse_during_drag,
+		restore_mouse_position
+	)
 
 func _handle_free_view_drag_motion(relative: Vector2) -> void:
-	if not free_view_drag_active or not is_instance_valid(free_workspace_preview):
-		return
-	free_view_drag_mode = _resolve_free_view_drag_mode()
-	if free_view_drag_mode == FREE_VIEW_DRAG_PAN:
-		free_workspace_preview.pan_by(relative)
-	else:
-		free_workspace_preview.orbit_by(relative)
-
-func _resolve_free_view_drag_mode() -> int:
-	return FREE_VIEW_DRAG_PAN if Input.is_key_pressed(_get_view_tuning().workspace_pan_modifier_keycode) else FREE_VIEW_DRAG_ORBIT
+	workspace_interaction_presenter.handle_free_view_drag_motion_state(
+		workspace_edit_flow,
+		relative,
+		free_workspace_preview,
+		_get_view_tuning().workspace_pan_modifier_keycode
+	)
 
 func _get_workspace_orbit_mouse_button() -> MouseButton:
-	return _get_view_tuning().workspace_orbit_mouse_button
+	return workspace_interaction_presenter.get_workspace_orbit_mouse_button(_get_view_tuning().workspace_orbit_mouse_button)
 
 func _is_action_pressed_if_available(event: InputEvent, action_name: StringName) -> bool:
-	return InputMap.has_action(action_name) and event.is_action_pressed(action_name)
+	return workspace_interaction_presenter.is_action_pressed_if_available(event, action_name)
 
 func _is_initial_action_press(event: InputEvent, action_name: StringName) -> bool:
-	if not _is_action_pressed_if_available(event, action_name):
-		return false
-	if event is InputEventKey and (event as InputEventKey).echo:
-		return false
-	return true
+	return workspace_interaction_presenter.is_initial_action_press(event, action_name)
 
 func _is_action_released_if_available(event: InputEvent, action_name: StringName) -> bool:
-	return InputMap.has_action(action_name) and event.is_action_released(action_name)
+	return workspace_interaction_presenter.is_action_released_if_available(event, action_name)
 
 func _begin_layer_hold(direction: int) -> void:
-	held_layer_direction = 1 if direction > 0 else -1 if direction < 0 else 0
-	held_layer_delay_remaining = maxf(layer_hold_repeat_delay_seconds, 0.0)
-	held_layer_repeat_accumulator = 0.0
+	workspace_interaction_presenter.begin_layer_hold(direction, layer_hold_repeat_delay_seconds)
 
 func _clear_layer_hold() -> void:
-	held_layer_direction = 0
-	held_layer_delay_remaining = 0.0
-	held_layer_repeat_accumulator = 0.0
+	workspace_interaction_presenter.clear_layer_hold()
 
 func _process_layer_hold_repeat(delta: float) -> void:
-	if held_layer_direction == 0:
-		return
-	var action_name: StringName = &"forge_layer_up" if held_layer_direction > 0 else &"forge_layer_down"
-	if not InputMap.has_action(action_name) or not Input.is_action_pressed(action_name):
-		_clear_layer_hold()
-		return
-	if held_layer_delay_remaining > 0.0:
-		held_layer_delay_remaining -= delta
-		if held_layer_delay_remaining > 0.0:
-			return
-		delta = -held_layer_delay_remaining
-		held_layer_delay_remaining = 0.0
-	var repeat_interval: float = 1.0 / maxf(layer_hold_repeat_rate_hz, 0.001)
-	held_layer_repeat_accumulator += delta
-	var repeat_step_count: int = int(floor((held_layer_repeat_accumulator + 0.0001) / repeat_interval))
-	if repeat_step_count <= 0:
-		return
-	held_layer_repeat_accumulator -= repeat_interval * float(repeat_step_count)
-	for _repeat_index in range(repeat_step_count):
-		_step_layer(held_layer_direction)
+	workspace_interaction_presenter.process_layer_hold_repeat(
+		delta,
+		layer_hold_repeat_rate_hz,
+		Callable(self, "_step_layer")
+	)
 
 func _get_view_tuning() -> ForgeViewTuningDef:
 	return forge_view_tuning if forge_view_tuning != null else DEFAULT_FORGE_VIEW_TUNING_RESOURCE

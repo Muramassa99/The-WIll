@@ -51,14 +51,14 @@ func _initialize() -> void:
 	player._sync_equipped_test_meshes()
 
 	overlay.open_page_for(player, &"inventory", "Verify Inventory")
-	overlay.selected_body_item_id = stored_item.item_instance_id
+	overlay.set_selected_body_item_id(stored_item.item_instance_id)
 	overlay._on_move_to_storage_pressed()
 
 	var moved_to_storage: bool = personal_state.get_stored_items().size() == 1 and body_state.get_owned_items().is_empty()
 
 	overlay.open_page_for(player, &"storage", "Verify Storage")
 	var stored_transfer_id: StringName = personal_state.get_stored_items()[0].item_instance_id if not personal_state.get_stored_items().is_empty() else StringName()
-	overlay.selected_storage_item_id = stored_transfer_id
+	overlay.set_selected_storage_item_id(stored_transfer_id)
 	overlay._on_move_to_inventory_pressed()
 
 	var moved_back_to_inventory: bool = body_state.get_owned_items().size() == 1 and personal_state.get_stored_items().is_empty()

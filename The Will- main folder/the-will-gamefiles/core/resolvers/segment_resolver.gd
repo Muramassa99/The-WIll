@@ -28,7 +28,6 @@ func resolve_segments(cells: Array[CellAtom], material_lookup: Dictionary = {}) 
 		segment.member_cells = member_cells
 		segment.material_mix = _build_material_mix(member_cells)
 		_populate_segment_metadata(segment, material_lookup)
-		# TODO: NEEDS_DECISION - lock segment role derivation rules.
 		resolved_segments.append(segment)
 
 	return resolved_segments
@@ -109,6 +108,13 @@ func _populate_segment_metadata(segment: SegmentAtom, material_lookup: Dictionar
 	)
 	segment.profile_state = _resolve_profile_state(cross_section_data)
 	segment.has_opposing_bevel_pair = cross_section_data.get("all_slices_have_opposing_bevel_pairs", false)
+	_apply_first_pass_role_hints(segment, material_lookup)
+
+func _apply_first_pass_role_hints(segment: SegmentAtom, material_lookup: Dictionary) -> void:
+	if segment == null:
+		return
+	# Current first-pass rule: SegmentResolver only emits broad bow-related role hints here.
+	# Limb assignment and any later non-bow role system remain separate follow-on resolvers.
 	segment.edge_span_overlap = false
 	segment.is_riser_candidate = _is_riser_candidate(segment, material_lookup)
 	segment.is_bow_string_candidate = _is_bow_string_candidate(segment, material_lookup)

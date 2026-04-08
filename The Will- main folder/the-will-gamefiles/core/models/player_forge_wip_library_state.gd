@@ -2,19 +2,14 @@ extends Resource
 class_name PlayerForgeWipLibraryState
 
 const DEFAULT_SAVE_FILE_PATH := "user://forge/player_wip_library_state.tres"
+const PersistentResourceStateIOScript = preload("res://core/models/persistent_resource_state_io.gd")
 
 @export var saved_wips: Array[CraftedItemWIP] = []
 @export var selected_wip_id: StringName = &""
 @export var save_file_path: String = DEFAULT_SAVE_FILE_PATH
 
 static func load_or_create(save_path: String = DEFAULT_SAVE_FILE_PATH):
-	var loaded_state: Resource = null
-	if FileAccess.file_exists(save_path):
-		loaded_state = ResourceLoader.load(save_path)
-	if loaded_state == null:
-		loaded_state = load("res://core/models/player_forge_wip_library_state.gd").new()
-	loaded_state.save_file_path = save_path
-	return loaded_state
+	return PersistentResourceStateIOScript.load_or_create(save_path, "res://core/models/player_forge_wip_library_state.gd")
 
 func has_saved_wips() -> bool:
 	return not saved_wips.is_empty()
@@ -93,8 +88,7 @@ func set_selected_wip_id(saved_wip_id: StringName) -> void:
 	persist()
 
 func persist() -> bool:
-	_ensure_save_directory()
-	return ResourceSaver.save(self, save_file_path) == OK
+	return PersistentResourceStateIOScript.persist_resource(self, save_file_path)
 
 func _find_saved_wip_index(saved_wip_id: StringName) -> int:
 	for index: int in range(saved_wips.size()):
@@ -138,19 +132,3 @@ func _build_duplicate_project_name(project_name: String) -> String:
 		cleaned_name = _build_generated_project_name()
 	return "%s Copy" % cleaned_name
 
-func _ensure_save_directory() -> void:
-	var normalized_save_path: String = save_file_path.replace("\\", "/")
-	if normalized_save_path.begins_with("user://"):
-		var relative_save_path: String = normalized_save_path.trim_prefix("user://")
-		var last_separator_index: int = relative_save_path.rfind("/")
-		if last_separator_index < 0:
-			return
-		var relative_directory_path: String = relative_save_path.substr(0, last_separator_index)
-		if relative_directory_path.is_empty():
-			return
-		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("user://%s" % relative_directory_path))
-		return
-	var save_directory_path: String = normalized_save_path.get_base_dir()
-	if save_directory_path.is_empty():
-		return
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(save_directory_path))

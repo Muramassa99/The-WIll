@@ -2,7 +2,14 @@ extends CanvasLayer
 class_name SystemMenuOverlay
 
 const UserSettingsStateScript = preload("res://core/models/user_settings_state.gd")
-const UserSettingsRuntimeScript = preload("res://runtime/system/user_settings_runtime.gd")
+const SystemMenuControlsPresenterScript = preload("res://runtime/ui/system_menu_controls_presenter.gd")
+const SystemMenuInputPresenterScript = preload("res://runtime/ui/system_menu_input_presenter.gd")
+const SystemMenuLayoutPresenterScript = preload("res://runtime/ui/system_menu_layout_presenter.gd")
+const SystemMenuPagePresenterScript = preload("res://runtime/ui/system_menu_page_presenter.gd")
+const SystemMenuSessionPresenterScript = preload("res://runtime/ui/system_menu_session_presenter.gd")
+const SystemMenuStateFlowPresenterScript = preload("res://runtime/ui/system_menu_state_flow_presenter.gd")
+const SystemMenuSurfacePresenterScript = preload("res://runtime/ui/system_menu_surface_presenter.gd")
+const SystemMenuSettingsPresenterScript = preload("res://runtime/ui/system_menu_settings_presenter.gd")
 
 const PAGE_SETTINGS := &"settings"
 const PAGE_CONTROLS := &"controls"
@@ -43,7 +50,6 @@ const MAX_FPS_OPTIONS := [0, 30, 60, 120, 144, 240]
 
 @onready var backdrop: ColorRect = $Backdrop
 @onready var panel: PanelContainer = $Panel
-@onready var main_hbox: HBoxContainer = $Panel/MarginContainer/RootVBox/MainHBox
 @onready var nav_panel: PanelContainer = $Panel/MarginContainer/RootVBox/MainHBox/NavPanel
 @onready var page_title_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageHeader/PageTitleLabel
 @onready var page_subtitle_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageHeader/PageSubtitleLabel
@@ -90,13 +96,21 @@ const MAX_FPS_OPTIONS := [0, 30, 60, 120, 144, 240]
 @onready var ui_scale_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/InterfacePage/MarginContainer/InterfaceVBox/UIScaleRow/UIScaleLabel
 @onready var text_scale_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/InterfacePage/MarginContainer/InterfaceVBox/TextScaleRow/TextScaleLabel
 
-var active_player: PlayerController3D
+var active_player = null
 var settings_state: UserSettingsState = null
 var selected_controls_category: String = ""
 var pending_rebind_action: StringName = StringName()
 var current_page: StringName = PAGE_SETTINGS
 var is_refreshing_ui: bool = false
 var layout_refresh_queued: bool = false
+var controls_presenter = SystemMenuControlsPresenterScript.new()
+var input_presenter = SystemMenuInputPresenterScript.new()
+var layout_presenter = SystemMenuLayoutPresenterScript.new()
+var page_presenter = SystemMenuPagePresenterScript.new()
+var session_presenter = SystemMenuSessionPresenterScript.new()
+var state_flow_presenter = SystemMenuStateFlowPresenterScript.new()
+var surface_presenter = SystemMenuSurfacePresenterScript.new()
+var settings_presenter = SystemMenuSettingsPresenterScript.new()
 
 func _ready() -> void:
 	visible = false
@@ -114,14 +128,14 @@ func _ready() -> void:
 	_queue_layout_refresh()
 
 func configure(player, state) -> void:
-	active_player = player
-	settings_state = state as UserSettingsState if state != null else UserSettingsStateScript.load_or_create()
+	var session_state: Dictionary = session_presenter.configure(player, state, footer_status_label, FOOTER_STATUS_DEFAULT)
+	active_player = session_state.get("active_player", null)
+	settings_state = session_state.get("settings_state", null)
 	return_to_title_button.disabled = true
-	footer_status_label.text = FOOTER_STATUS_DEFAULT
 	_refresh_from_state()
 
 func is_open() -> bool:
-	return panel.visible
+	return session_presenter.is_open(panel)
 
 func toggle_menu() -> void:
 	if panel.visible:
@@ -137,22 +151,22 @@ func open_page(page_id: StringName) -> void:
 	open_menu()
 
 func reset_active_page_to_defaults() -> void:
-	if settings_state == null:
+	var reset_result: Dictionary = state_flow_presenter.reset_active_page_to_defaults(
+		current_page,
+		settings_state,
+		selected_controls_category,
+		controls_presenter,
+		_build_surface_controls_payload()
+	)
+	if not bool(reset_result.get("handled", false)):
 		return
-	match current_page:
-		PAGE_SETTINGS:
-			settings_state.reset_display_to_defaults()
-			settings_state.reset_audio_to_defaults()
-			_apply_and_persist_settings("Display and audio settings restored to defaults.")
-			_refresh_from_state()
-		PAGE_INTERFACE:
-			settings_state.reset_interface_to_defaults()
-			_apply_and_persist_settings("Interface scale restored to defaults.")
-			_refresh_from_state()
-		PAGE_CONTROLS:
-			_restore_selected_category_defaults()
-		_:
-			footer_status_label.text = "This page does not have resettable live settings yet."
+	var status_message: String = String(reset_result.get("status_message", ""))
+	if bool(reset_result.get("apply_and_refresh", false)):
+		_apply_and_persist_settings(status_message)
+		_refresh_from_state()
+		return
+	if not status_message.is_empty():
+		footer_status_label.text = status_message
 
 func get_current_page_id() -> StringName:
 	return current_page
@@ -164,77 +178,52 @@ func open_menu() -> void:
 	_select_page(current_page)
 	_queue_layout_refresh()
 	visible = true
-	backdrop.visible = true
-	panel.visible = true
-	if active_player != null:
-		active_player.set_ui_mode_enabled(true)
+	session_presenter.open_menu(active_player, backdrop, panel)
 
 func close_menu() -> void:
 	pending_rebind_action = StringName()
 	visible = false
-	backdrop.visible = false
-	panel.visible = false
-	if active_player != null:
-		active_player.set_ui_mode_enabled(false)
+	session_presenter.close_menu(active_player, backdrop, panel)
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not panel.visible:
+	var input_result: Dictionary = input_presenter.handle_unhandled_input(
+		panel.visible,
+		pending_rebind_action,
+		event,
+		PAGE_SETTINGS,
+		PAGE_SOCIAL
+	)
+	if not bool(input_result.get("handled", false)):
 		return
-	if pending_rebind_action != StringName() and event is InputEventKey:
-		var pending_key_event: InputEventKey = event
-		if pending_key_event.pressed and not pending_key_event.echo:
-			if pending_key_event.keycode == KEY_ESCAPE:
-				pending_rebind_action = StringName()
-				bindings_status_label.text = "Rebind cancelled."
-			else:
-				_commit_key_rebind(pending_rebind_action, pending_key_event)
-			get_viewport().set_input_as_handled()
-			return
-	if event.is_action_pressed(&"ui_settings"):
-		open_page(PAGE_SETTINGS)
-		get_viewport().set_input_as_handled()
-		return
-	if event.is_action_pressed(&"ui_social"):
-		open_page(PAGE_SOCIAL)
-		get_viewport().set_input_as_handled()
-		return
-	if event.is_action_pressed(&"menu_toggle"):
+	if bool(input_result.get("cancel_rebind", false)):
+		pending_rebind_action = StringName()
+		bindings_status_label.text = String(input_result.get("bindings_status_text", "Rebind cancelled."))
+	elif bool(input_result.get("commit_rebind", false)):
+		_commit_key_rebind(
+			input_result.get("action_name", pending_rebind_action),
+			input_result.get("key_event", null)
+		)
+	elif bool(input_result.get("close_menu", false)):
 		close_menu()
-		get_viewport().set_input_as_handled()
+	else:
+		var page_id: StringName = input_result.get("open_page", StringName())
+		if page_id != StringName():
+			open_page(page_id)
+	get_viewport().set_input_as_handled()
 
 func _configure_static_options() -> void:
-	window_mode_option.clear()
-	window_mode_option.add_item("Windowed")
-	window_mode_option.add_item("Borderless")
-	window_mode_option.add_item("Fullscreen")
-
-	monitor_option.clear()
-	var screen_count: int = maxi(DisplayServer.get_screen_count(), 1)
-	for display_index in range(screen_count):
-		monitor_option.add_item("Monitor %d" % (display_index + 1))
-
-	render_scale_option.clear()
-	render_scale_option.add_item("Performance")
-	render_scale_option.add_item("Balanced")
-	render_scale_option.add_item("Quality")
-
-	max_fps_option.clear()
-	for fps_value in MAX_FPS_OPTIONS:
-		max_fps_option.add_item("Unlimited" if fps_value == 0 else "%d FPS" % fps_value)
-
-	resolution_option.clear()
-	for resolution: Vector2i in RESOLUTION_OPTIONS:
-		resolution_option.add_item("%d x %d" % [resolution.x, resolution.y])
-
-	ui_scale_option.clear()
-	text_scale_option.clear()
-	for label_text: String in ["Small", "Normal", "Large"]:
-		ui_scale_option.add_item(label_text)
-		text_scale_option.add_item(label_text)
-
-	controls_category_option.clear()
-	for category_name: String in UserSettingsRuntimeScript.get_categories():
-		controls_category_option.add_item(UserSettingsRuntimeScript.get_category_display_name(category_name))
+	settings_presenter.configure_static_options(
+		window_mode_option,
+		monitor_option,
+		render_scale_option,
+		max_fps_option,
+		resolution_option,
+		ui_scale_option,
+		text_scale_option,
+		controls_category_option,
+		RESOLUTION_OPTIONS,
+		MAX_FPS_OPTIONS
+	)
 
 func _connect_signals() -> void:
 	resume_button.pressed.connect(close_menu)
@@ -261,28 +250,21 @@ func _connect_signals() -> void:
 	close_button.pressed.connect(close_menu)
 
 func _refresh_from_state() -> void:
-	if settings_state == null:
-		return
 	is_refreshing_ui = true
-	window_mode_option.select(_find_window_mode_index(settings_state.window_mode))
-	if monitor_option.item_count > 0:
-		monitor_option.select(clampi(settings_state.display_index, 0, maxi(monitor_option.item_count - 1, 0)))
-	resolution_option.select(_find_resolution_index(settings_state.resolution))
-	vsync_check_box.button_pressed = settings_state.vsync_enabled
-	render_scale_option.select(_scale_preset_to_index(settings_state.render_scale_preset))
-	max_fps_option.select(_find_max_fps_index(settings_state.max_fps))
-	master_volume_slider.value = settings_state.master_volume_linear
-	master_mute_check_box.button_pressed = settings_state.master_muted
-	master_volume_value_label.text = "%d%%" % int(round(settings_state.master_volume_linear * 100.0))
-	ui_scale_option.select(_scale_preset_to_index(settings_state.ui_scale_preset))
-	text_scale_option.select(_scale_preset_to_index(settings_state.text_scale_preset))
-	if controls_category_option.item_count > 0:
-		if selected_controls_category.is_empty():
-			selected_controls_category = UserSettingsRuntimeScript.get_categories()[0]
-		controls_category_option.select(_find_category_index(selected_controls_category))
+	var refresh_result: Dictionary = state_flow_presenter.refresh_from_state(
+		settings_state,
+		selected_controls_category,
+		settings_presenter,
+		controls_presenter,
+		_build_surface_option_payload(),
+		_build_surface_controls_payload(),
+		RESOLUTION_OPTIONS,
+		MAX_FPS_OPTIONS
+	)
+	selected_controls_category = String(refresh_result.get("selected_controls_category", selected_controls_category))
 	is_refreshing_ui = false
-	_refresh_bindings_list()
-	_queue_layout_refresh()
+	if bool(refresh_result.get("refreshed", false)):
+		_queue_layout_refresh()
 
 func _queue_layout_refresh() -> void:
 	if layout_refresh_queued:
@@ -293,42 +275,163 @@ func _queue_layout_refresh() -> void:
 func _apply_responsive_layout() -> void:
 	layout_refresh_queued = false
 	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
-	if viewport_size.x <= 0.0 or viewport_size.y <= 0.0:
-		return
-	var compact_mode: bool = viewport_size.x < float(compact_width_breakpoint) or viewport_size.y < float(compact_height_breakpoint)
-	var margin_ratio: float = compact_outer_margin_ratio if compact_mode else wide_outer_margin_ratio
-	var smaller_axis: int = mini(int(round(viewport_size.x)), int(round(viewport_size.y)))
-	var resolved_margin: float = float(clampi(int(round(float(smaller_axis) * margin_ratio)), minimum_outer_margin_px, maximum_outer_margin_px))
-	backdrop.position = Vector2.ZERO
-	backdrop.size = viewport_size
-	panel.offset_left = resolved_margin
-	panel.offset_top = resolved_margin
-	panel.offset_right = -resolved_margin
-	panel.offset_bottom = -resolved_margin
-	panel.position = Vector2(resolved_margin, resolved_margin)
-	panel.size = Vector2(
-		maxf(viewport_size.x - (resolved_margin * 2.0), 1.0),
-		maxf(viewport_size.y - (resolved_margin * 2.0), 1.0)
+	layout_presenter.apply_responsive_layout(
+		viewport_size,
+		_build_surface_layout_config(),
+		backdrop,
+		panel,
+		nav_panel,
+		reset_page_button,
+		restore_defaults_button,
+		close_button,
+		page_scroll,
+		page_stack,
+		_build_surface_navigation_buttons(),
+		_build_surface_form_labels()
 	)
 
-	nav_panel.custom_minimum_size.x = compact_navigation_panel_min_width if compact_mode else wide_navigation_panel_min_width
-	var resolved_navigation_button_height: int = compact_navigation_button_min_height if compact_mode else wide_navigation_button_min_height
-	for button: Button in _get_navigation_buttons():
-		button.custom_minimum_size.y = resolved_navigation_button_height
-	var resolved_label_width: int = compact_form_label_min_width if compact_mode else wide_form_label_min_width
-	for label: Label in _get_form_labels():
-		label.custom_minimum_size.x = resolved_label_width
+func _begin_rebind(action_name: StringName) -> void:
+	pending_rebind_action = state_flow_presenter.begin_rebind(
+		action_name,
+		controls_presenter,
+		bindings_status_label,
+		footer_status_label
+	)
 
-	var resolved_footer_button_height: int = compact_footer_button_min_height if compact_mode else wide_footer_button_min_height
-	var resolved_footer_button_width: int = compact_footer_button_min_width if compact_mode else wide_footer_button_min_width
-	reset_page_button.custom_minimum_size = Vector2(resolved_footer_button_width, resolved_footer_button_height)
-	restore_defaults_button.custom_minimum_size = Vector2(resolved_footer_button_width, resolved_footer_button_height)
-	close_button.custom_minimum_size = Vector2(compact_close_button_min_width if compact_mode else wide_close_button_min_width, resolved_footer_button_height)
+func _commit_key_rebind(action_name: StringName, key_event: InputEventKey) -> void:
+	if key_event == null:
+		return
+	var commit_result: Dictionary = state_flow_presenter.commit_key_rebind(
+		settings_state,
+		action_name,
+		key_event,
+		controls_presenter,
+		_build_surface_controls_payload()
+	)
+	_apply_and_persist_settings(String(commit_result.get("status_message", "")))
+	pending_rebind_action = StringName()
 
-	page_stack.custom_minimum_size.x = maxf(page_scroll.size.x - float(page_scroll_width_padding), 0.0)
+func _apply_and_persist_settings(status_message: String = "") -> void:
+	state_flow_presenter.apply_and_persist_settings(
+		settings_state,
+		get_tree().root,
+		footer_status_label,
+		status_message
+	)
+	_queue_layout_refresh()
 
-func _get_navigation_buttons() -> Array[Button]:
-	return [
+func _on_window_mode_selected(index: int) -> void:
+	_apply_live_settings_change(settings_presenter.apply_window_mode_selection(settings_state, index))
+
+func _on_monitor_selected(index: int) -> void:
+	_apply_live_settings_change(settings_presenter.apply_monitor_selection(settings_state, index))
+
+func _on_resolution_selected(index: int) -> void:
+	_apply_live_settings_change(settings_presenter.apply_resolution_selection(settings_state, index, RESOLUTION_OPTIONS))
+
+func _on_vsync_toggled(enabled: bool) -> void:
+	_apply_live_settings_change(settings_presenter.apply_vsync_toggle(settings_state, enabled))
+
+func _on_render_scale_selected(index: int) -> void:
+	_apply_live_settings_change(settings_presenter.apply_render_scale_selection(settings_state, index))
+
+func _on_max_fps_selected(index: int) -> void:
+	_apply_live_settings_change(settings_presenter.apply_max_fps_selection(settings_state, index, MAX_FPS_OPTIONS))
+
+func _on_master_volume_changed(value: float) -> void:
+	_apply_live_settings_change(settings_presenter.apply_master_volume_change(settings_state, value, master_volume_value_label))
+
+func _on_master_mute_toggled(enabled: bool) -> void:
+	_apply_live_settings_change(settings_presenter.apply_master_mute_toggle(settings_state, enabled))
+
+func _on_ui_scale_selected(index: int) -> void:
+	_apply_live_settings_change(settings_presenter.apply_ui_scale_selection(settings_state, index))
+
+func _on_text_scale_selected(index: int) -> void:
+	_apply_live_settings_change(settings_presenter.apply_text_scale_selection(settings_state, index))
+
+func _on_controls_category_selected(index: int) -> void:
+	var category_result: Dictionary = state_flow_presenter.handle_controls_category_selected(
+		is_refreshing_ui,
+		index,
+		controls_presenter,
+		settings_state,
+		_build_surface_controls_payload()
+	)
+	if not bool(category_result.get("changed", false)):
+		return
+	selected_controls_category = String(category_result.get("selected_controls_category", selected_controls_category))
+	_refresh_page_actions()
+
+func _restore_selected_category_defaults() -> void:
+	var restore_result: Dictionary = state_flow_presenter.restore_selected_category_defaults(
+		settings_state,
+		selected_controls_category,
+		controls_presenter,
+		_build_surface_controls_payload()
+	)
+	if not bool(restore_result.get("restored", false)):
+		return
+	var status_message: String = String(restore_result.get("status_message", ""))
+	_apply_and_persist_settings(status_message)
+
+func _select_page(page_id: StringName) -> void:
+	current_page = page_id
+	page_presenter.apply_page_selection(
+		page_id,
+		surface_presenter.get_page_id_map(),
+		settings_page,
+		controls_page,
+		interface_page,
+		social_page,
+		help_page,
+		page_title_label,
+		page_subtitle_label,
+		reset_page_button,
+		selected_controls_category,
+		footer_status_label,
+		FOOTER_STATUS_DEFAULT
+	)
+
+func _refresh_page_actions() -> void:
+	page_presenter.refresh_page_actions(current_page, surface_presenter.get_page_id_map(), selected_controls_category, reset_page_button)
+
+func _apply_live_settings_change(status_message: String) -> void:
+	if is_refreshing_ui:
+		return
+	_apply_and_persist_settings(status_message)
+
+func _on_return_to_title_pressed() -> void:
+	footer_status_label.text = "Return to Title is not available yet because this workspace has no title scene."
+
+func _on_quit_game_pressed() -> void:
+	get_tree().quit()
+
+func _build_surface_layout_config() -> Dictionary:
+	return surface_presenter.build_layout_config(
+		compact_width_breakpoint,
+		compact_height_breakpoint,
+		wide_outer_margin_ratio,
+		compact_outer_margin_ratio,
+		minimum_outer_margin_px,
+		maximum_outer_margin_px,
+		wide_navigation_panel_min_width,
+		compact_navigation_panel_min_width,
+		wide_navigation_button_min_height,
+		compact_navigation_button_min_height,
+		wide_form_label_min_width,
+		compact_form_label_min_width,
+		wide_footer_button_min_width,
+		compact_footer_button_min_width,
+		wide_close_button_min_width,
+		compact_close_button_min_width,
+		wide_footer_button_min_height,
+		compact_footer_button_min_height,
+		page_scroll_width_padding
+	)
+
+func _build_surface_navigation_buttons() -> Array[Button]:
+	return surface_presenter.get_navigation_buttons(
 		resume_button,
 		settings_button,
 		controls_button,
@@ -336,11 +439,11 @@ func _get_navigation_buttons() -> Array[Button]:
 		social_button,
 		help_button,
 		return_to_title_button,
-		quit_game_button,
-	]
+		quit_game_button
+	)
 
-func _get_form_labels() -> Array[Label]:
-	return [
+func _build_surface_form_labels() -> Array[Label]:
+	return surface_presenter.get_form_labels(
 		window_mode_label,
 		monitor_label,
 		resolution_label,
@@ -349,230 +452,29 @@ func _get_form_labels() -> Array[Label]:
 		master_volume_label,
 		category_label,
 		ui_scale_label,
-		text_scale_label,
-	]
+		text_scale_label
+	)
 
-func _refresh_bindings_list() -> void:
-	for child: Node in bindings_container.get_children():
-		child.queue_free()
-	if selected_controls_category.is_empty():
-		bindings_status_label.text = "No input category selected."
-		return
-	bindings_status_label.text = "Pick a binding and press a new key. Escape cancels the rebind prompt."
-	for action_name: StringName in UserSettingsRuntimeScript.get_actions_for_category(selected_controls_category):
-		var row: HBoxContainer = HBoxContainer.new()
-		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+func _build_surface_option_payload() -> Dictionary:
+	return surface_presenter.build_option_payload(
+		window_mode_option,
+		monitor_option,
+		resolution_option,
+		vsync_check_box,
+		render_scale_option,
+		max_fps_option,
+		master_volume_slider,
+		master_volume_value_label,
+		master_mute_check_box,
+		ui_scale_option,
+		text_scale_option,
+		controls_category_option
+	)
 
-		var action_label: Label = Label.new()
-		action_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		action_label.text = UserSettingsRuntimeScript.get_action_display_name(action_name)
-		row.add_child(action_label)
-
-		var binding_button: Button = Button.new()
-		binding_button.custom_minimum_size = Vector2(180.0, 0.0)
-		binding_button.text = UserSettingsRuntimeScript.get_keybinding_label(settings_state.get_keybinding_data(action_name, UserSettingsRuntimeScript.get_default_binding_data(action_name)))
-		binding_button.pressed.connect(_begin_rebind.bind(action_name))
-		row.add_child(binding_button)
-
-		bindings_container.add_child(row)
-
-func _begin_rebind(action_name: StringName) -> void:
-	pending_rebind_action = action_name
-	bindings_status_label.text = "Press a new key for %s." % UserSettingsRuntimeScript.get_action_display_name(action_name)
-	footer_status_label.text = "Listening for a new key on %s. Escape cancels." % UserSettingsRuntimeScript.get_action_display_name(action_name)
-
-func _commit_key_rebind(action_name: StringName, key_event: InputEventKey) -> void:
-	settings_state.set_keybinding_event(action_name, key_event)
-	_apply_and_persist_settings("Saved controls for %s." % UserSettingsRuntimeScript.get_action_display_name(action_name))
-	pending_rebind_action = StringName()
-	bindings_status_label.text = "%s is now bound to %s." % [UserSettingsRuntimeScript.get_action_display_name(action_name), UserSettingsRuntimeScript.get_keybinding_label(settings_state.get_keybinding_data(action_name))]
-	_refresh_bindings_list()
-
-func _apply_and_persist_settings(status_message: String = "") -> void:
-	if settings_state == null:
-		return
-	UserSettingsRuntimeScript.ensure_input_actions(settings_state)
-	UserSettingsRuntimeScript.apply_settings(settings_state, get_tree().root)
-	_queue_layout_refresh()
-	var persisted_ok: bool = settings_state.persist()
-	if not status_message.is_empty():
-		footer_status_label.text = status_message if persisted_ok else "%s Saving failed." % status_message
-		return
-	if not persisted_ok:
-		footer_status_label.text = "Settings could not be saved."
-
-func _find_resolution_index(target_resolution: Vector2i) -> int:
-	for index in range(RESOLUTION_OPTIONS.size()):
-		if RESOLUTION_OPTIONS[index] == target_resolution:
-			return index
-	return 1
-
-func _find_window_mode_index(window_mode: StringName) -> int:
-	match window_mode:
-		UserSettingsStateScript.BORDERLESS:
-			return 1
-		UserSettingsStateScript.FULLSCREEN:
-			return 2
-		_:
-			return 0
-
-func _find_max_fps_index(target_fps: int) -> int:
-	for index in range(MAX_FPS_OPTIONS.size()):
-		if MAX_FPS_OPTIONS[index] == target_fps:
-			return index
-	return 3
-
-func _find_category_index(category_name: String) -> int:
-	var categories: Array[String] = UserSettingsRuntimeScript.get_categories()
-	for index in range(categories.size()):
-		if categories[index] == category_name:
-			return index
-	return 0
-
-func _scale_preset_to_index(scale_preset: StringName) -> int:
-	match scale_preset:
-		UserSettingsStateScript.SCALE_SMALL:
-			return 0
-		UserSettingsStateScript.SCALE_LARGE:
-			return 2
-		_:
-			return 1
-
-func _index_to_scale_preset(index: int) -> StringName:
-	match index:
-		0:
-			return UserSettingsStateScript.SCALE_SMALL
-		2:
-			return UserSettingsStateScript.SCALE_LARGE
-		_:
-			return UserSettingsStateScript.SCALE_NORMAL
-
-func _on_window_mode_selected(index: int) -> void:
-	if is_refreshing_ui:
-		return
-	match index:
-		1:
-			settings_state.window_mode = UserSettingsStateScript.BORDERLESS
-		2:
-			settings_state.window_mode = UserSettingsStateScript.FULLSCREEN
-		_:
-			settings_state.window_mode = UserSettingsStateScript.WINDOWED
-	_apply_and_persist_settings("Window mode updated.")
-
-func _on_monitor_selected(index: int) -> void:
-	if is_refreshing_ui:
-		return
-	settings_state.display_index = index
-	_apply_and_persist_settings("Monitor target updated.")
-
-func _on_resolution_selected(index: int) -> void:
-	if is_refreshing_ui:
-		return
-	settings_state.resolution = RESOLUTION_OPTIONS[index]
-	_apply_and_persist_settings("Resolution updated.")
-
-func _on_vsync_toggled(enabled: bool) -> void:
-	if is_refreshing_ui:
-		return
-	settings_state.vsync_enabled = enabled
-	_apply_and_persist_settings("V-Sync preference updated.")
-
-func _on_render_scale_selected(index: int) -> void:
-	if is_refreshing_ui:
-		return
-	settings_state.render_scale_preset = _index_to_scale_preset(index)
-	_apply_and_persist_settings("3D render scale updated.")
-
-func _on_max_fps_selected(index: int) -> void:
-	if is_refreshing_ui:
-		return
-	settings_state.max_fps = MAX_FPS_OPTIONS[index]
-	_apply_and_persist_settings("Max FPS updated.")
-
-func _on_master_volume_changed(value: float) -> void:
-	if is_refreshing_ui:
-		return
-	settings_state.master_volume_linear = value
-	master_volume_value_label.text = "%d%%" % int(round(value * 100.0))
-	_apply_and_persist_settings("Master volume updated.")
-
-func _on_master_mute_toggled(enabled: bool) -> void:
-	if is_refreshing_ui:
-		return
-	settings_state.master_muted = enabled
-	_apply_and_persist_settings("Master mute updated.")
-
-func _on_ui_scale_selected(index: int) -> void:
-	if is_refreshing_ui:
-		return
-	settings_state.ui_scale_preset = _index_to_scale_preset(index)
-	_apply_and_persist_settings("UI scale updated.")
-
-func _on_text_scale_selected(index: int) -> void:
-	if is_refreshing_ui:
-		return
-	settings_state.text_scale_preset = _index_to_scale_preset(index)
-	_apply_and_persist_settings("Text scale updated.")
-
-func _on_controls_category_selected(index: int) -> void:
-	if is_refreshing_ui:
-		return
-	selected_controls_category = UserSettingsRuntimeScript.get_categories()[index]
-	_refresh_bindings_list()
-	_refresh_page_actions()
-
-func _restore_selected_category_defaults() -> void:
-	if selected_controls_category.is_empty():
-		return
-	settings_state.reset_keybindings_for_actions(UserSettingsRuntimeScript.get_actions_for_category(selected_controls_category))
-	_apply_and_persist_settings("%s bindings restored to defaults." % UserSettingsRuntimeScript.get_category_display_name(selected_controls_category))
-	bindings_status_label.text = "%s bindings restored to defaults." % UserSettingsRuntimeScript.get_category_display_name(selected_controls_category)
-	_refresh_bindings_list()
-
-func _select_page(page_id: StringName) -> void:
-	current_page = page_id
-	settings_page.visible = page_id == PAGE_SETTINGS
-	controls_page.visible = page_id == PAGE_CONTROLS
-	interface_page.visible = page_id == PAGE_INTERFACE
-	social_page.visible = page_id == PAGE_SOCIAL
-	help_page.visible = page_id == PAGE_HELP
-	match page_id:
-		PAGE_CONTROLS:
-			page_title_label.text = "Controls"
-			page_subtitle_label.text = "Per-user keybindings grouped by movement, combat, camera, UI/menu, and forge contexts."
-		PAGE_INTERFACE:
-			page_title_label.text = "Interface"
-			page_subtitle_label.text = "Adjust global UI and text scaling while preserving relative size hierarchy."
-		PAGE_SOCIAL:
-			page_title_label.text = "Social"
-			page_subtitle_label.text = "Privacy, request filtering, and social-clutter controls will expand here next."
-		PAGE_HELP:
-			page_title_label.text = "Help"
-			page_subtitle_label.text = "Use this overlay as a control room for active expeditions. World simulation continues while it is open."
-		_:
-			page_title_label.text = "Settings"
-			page_subtitle_label.text = "Display and audio settings apply immediately and persist per user across boots."
-	_refresh_page_actions()
-	if footer_status_label.text.is_empty() or footer_status_label.text == FOOTER_STATUS_DEFAULT:
-		footer_status_label.text = FOOTER_STATUS_DEFAULT
-
-func _refresh_page_actions() -> void:
-	match current_page:
-		PAGE_SETTINGS:
-			reset_page_button.disabled = false
-			reset_page_button.text = "Reset Display / Audio"
-		PAGE_CONTROLS:
-			reset_page_button.disabled = selected_controls_category.is_empty()
-			reset_page_button.text = "Reset Controls"
-		PAGE_INTERFACE:
-			reset_page_button.disabled = false
-			reset_page_button.text = "Reset Interface"
-		_:
-			reset_page_button.disabled = true
-			reset_page_button.text = "No Reset Available"
-
-func _on_return_to_title_pressed() -> void:
-	footer_status_label.text = "Return to Title is not available yet because this workspace has no title scene."
-
-func _on_quit_game_pressed() -> void:
-	get_tree().quit()
+func _build_surface_controls_payload() -> Dictionary:
+	return surface_presenter.build_controls_payload(
+		bindings_container,
+		bindings_status_label,
+		Callable(self, "_begin_rebind"),
+		selected_controls_category
+	)

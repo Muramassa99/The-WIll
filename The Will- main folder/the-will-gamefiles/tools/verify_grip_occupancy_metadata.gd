@@ -74,14 +74,14 @@ func _build_front_heavy_sword_wip() -> CraftedItemWIP:
 	wip.equipment_context = &"ctx_weapon"
 
 	var layer_map: Dictionary = {}
-	for x: int in range(40, 52):
+	for x: int in range(32, 58):
 		for y: int in range(24, 27):
 			for z: int in range(18, 20):
 				_add_cell(layer_map, Vector3i(x, y, z), &"mat_wood_gray")
 
-	for x: int in range(52, 65):
-		for y: int in range(22, 29):
-			for z: int in range(17, 22):
+	for x: int in range(58, 65):
+		for y: int in range(23, 28):
+			for z: int in range(17, 21):
 				_add_cell(layer_map, Vector3i(x, y, z), &"mat_iron_gray")
 
 	var ordered_layers: Array = layer_map.keys()

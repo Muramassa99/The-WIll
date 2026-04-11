@@ -1,22 +1,8 @@
-[gd_resource type="Resource" script_class="ForgeViewTuningDef" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="ForgeViewTuningDef" format=3 uid="uid://cgntng5whplqq"]
 
-[ext_resource type="Script" path="res://core/defs/forge_view_tuning_def.gd" id="1_gw9tk"]
+[ext_resource type="Script" uid="uid://cxlrhx2e6j4k0" path="res://core/defs/forge_view_tuning_def.gd" id="1_gw9tk"]
 
 [resource]
 script = ExtResource("1_gw9tk")
-plane_zoom_step = 0.2
-plane_zoom_max_scale = 4.0
-workspace_pitch_max_degrees = 80.0
-workspace_orbit_mouse_button = 2
-workspace_pan_modifier_keycode = 67
-workspace_capture_mouse_during_drag = true
-workspace_pan_sensitivity = 0.0025
-workspace_pan_min_distance = 0.25
-workspace_stage2_blocked_brush_color = Color(0.780392, 0.25098, 0.309804, 0.18)
 workspace_stage2_hover_face_color = Color(0.392157, 0.176471, 0.568627, 0.2)
 workspace_stage2_selected_face_color = Color(0.392157, 0.176471, 0.568627, 0.3)
-workspace_stage2_brush_step_ratio = 0.25
-workspace_light_follows_camera = true
-workspace_light_follow_offset_degrees = Vector3(0, 0, 0)
-workspace_voxel_inset_factor = 1.0
-workspace_zoom_min_distance = 0.1

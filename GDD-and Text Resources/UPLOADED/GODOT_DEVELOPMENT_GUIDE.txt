@@ -16,6 +16,23 @@ A seasonal, social dungeon crawler featuring:
 GODOT SUITABILITY: ✓ EXCELLENT FIT
 
 
+GODOT DOCUMENTATION RESEARCH LAW
+================================
+
+Before implementing any Godot code change, do topic-specific online documentation research first.
+This applies even to trivial engine tasks.
+
+Authority order for Godot work:
+1. Official Godot documentation for the active engine branch/version.
+2. Official documented native tools and workflows combined where needed.
+3. Custom project-side solutions only after confirming the official documented path does not fully cover the need.
+
+Practical rule:
+- Do not start from chat memory when Godot behavior or API details matter.
+- Look up the exact Godot topic first.
+- Then decide whether native tools already solve it.
+- Only after that should custom implementation begin.
+
 === PHASE 1: FOUNDATION (Weeks 1-8) ===
 
 1.1 CORE SYSTEMS TO BUILD FIRST

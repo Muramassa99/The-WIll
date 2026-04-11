@@ -1,6 +1,7 @@
 extends SceneTree
 
 const ForgeGridControllerScript = preload("res://runtime/forge/forge_grid_controller.gd")
+const WOOD_MATERIAL_ID := &"mat_wood_gray"
 
 func _init() -> void:
 	call_deferred("_run_verification")
@@ -17,7 +18,18 @@ func _run_verification() -> void:
 	root_node.add_child(controller)
 	await process_frame
 
-	controller.load_sample_preset_wip(controller.get_default_sample_preset_id())
+	var wip: CraftedItemWIP = controller.load_new_blank_wip("Preview Verification Draft")
+	if wip != null:
+		var layer: LayerAtom = LayerAtom.new()
+		layer.layer_index = 0
+		layer.cells = []
+		var cell: CellAtom = CellAtom.new()
+		cell.grid_position = Vector3i.ZERO
+		cell.layer_index = 0
+		cell.material_variant_id = WOOD_MATERIAL_ID
+		layer.cells.append(cell)
+		wip.layers = [layer]
+		controller.set_active_wip(wip)
 	var material_lookup: Dictionary = controller.build_default_material_lookup()
 	var test_print: TestPrintInstance = controller.spawn_test_print_from_active_wip(material_lookup)
 	await process_frame

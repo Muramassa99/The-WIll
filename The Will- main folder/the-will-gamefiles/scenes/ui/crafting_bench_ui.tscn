@@ -357,6 +357,10 @@ text = "View"
 custom_minimum_size = Vector2(140, 34)
 text = "Geometry"
 
+[node name="ToolMenuButton" type="MenuButton" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow"]
+custom_minimum_size = Vector2(140, 34)
+text = "Tool"
+
 [node name="WorkflowMenuButton" type="MenuButton" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow"]
 custom_minimum_size = Vector2(160, 34)
 text = "Workflow"
@@ -455,7 +459,7 @@ anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = -332.0
-offset_top = -146.0
+offset_top = -170.0
 offset_right = -106.0
 offset_bottom = -12.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_overlay_gizmo")
@@ -529,6 +533,14 @@ theme_override_font_sizes/font_size = 12
 visible = false
 mouse_filter = 2
 text = "Radius: 0.12 m"
+horizontal_alignment = 2
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 12
+
+[node name="ToolAmountStatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox"]
+visible = false
+mouse_filter = 2
+text = "Amount: 100%"
 horizontal_alignment = 2
 autowrap_mode = 3
 theme_override_font_sizes/font_size = 12

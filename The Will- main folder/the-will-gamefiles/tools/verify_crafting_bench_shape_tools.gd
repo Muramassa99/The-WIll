@@ -54,7 +54,8 @@ func _run_verification() -> void:
 		Vector2i(2, 1),
 		Vector2i(6, 5),
 		initial_material_id,
-		21
+		2,
+		0
 	)
 	var oval_result: Dictionary = await _run_shape_case(
 		crafting_ui,
@@ -66,7 +67,8 @@ func _run_verification() -> void:
 		Vector2i(2, 2),
 		Vector2i(7, 4),
 		initial_material_id,
-		14
+		4,
+		2
 	)
 	var triangle_result: Dictionary = await _run_shape_case(
 		crafting_ui,
@@ -78,7 +80,8 @@ func _run_verification() -> void:
 		Vector2i(2, 1),
 		Vector2i(6, 5),
 		initial_material_id,
-		13
+		2,
+		2
 	)
 
 	crafting_ui.call("_set_active_tool", ForgeWorkspaceShapeToolPresenterScript.TOOL_OVAL_PLACE)
@@ -98,18 +101,21 @@ func _run_verification() -> void:
 	lines.append("geometry_menu_has_oval_erase_entry=%s" % str(geometry_menu_has_oval_erase_entry))
 	lines.append("geometry_menu_has_triangle_erase_entry=%s" % str(geometry_menu_has_triangle_erase_entry))
 	lines.append("circle_preview_count=%d" % int(circle_result.get("preview_count", 0)))
+	lines.append("circle_drag_motion_did_not_resize_shape=%s" % str(bool(circle_result.get("drag_motion_did_not_resize_shape", false))))
 	lines.append("circle_preview_3d_visible=%s" % str(bool(circle_result.get("preview_3d_visible", false))))
 	lines.append("circle_place_count=%d" % int(circle_result.get("placed_count", 0)))
 	lines.append("circle_place_expected_count_ok=%s" % str(bool(circle_result.get("expected_count_ok", false))))
 	lines.append("circle_place_expected_cells_ok=%s" % str(bool(circle_result.get("expected_cells_ok", false))))
 	lines.append("circle_erase_success=%s" % str(bool(circle_result.get("erase_success", false))))
 	lines.append("oval_preview_count=%d" % int(oval_result.get("preview_count", 0)))
+	lines.append("oval_drag_motion_did_not_resize_shape=%s" % str(bool(oval_result.get("drag_motion_did_not_resize_shape", false))))
 	lines.append("oval_preview_3d_visible=%s" % str(bool(oval_result.get("preview_3d_visible", false))))
 	lines.append("oval_place_count=%d" % int(oval_result.get("placed_count", 0)))
 	lines.append("oval_place_expected_count_ok=%s" % str(bool(oval_result.get("expected_count_ok", false))))
 	lines.append("oval_place_expected_cells_ok=%s" % str(bool(oval_result.get("expected_cells_ok", false))))
 	lines.append("oval_erase_success=%s" % str(bool(oval_result.get("erase_success", false))))
 	lines.append("triangle_preview_count=%d" % int(triangle_result.get("preview_count", 0)))
+	lines.append("triangle_drag_motion_did_not_resize_shape=%s" % str(bool(triangle_result.get("drag_motion_did_not_resize_shape", false))))
 	lines.append("triangle_preview_3d_visible=%s" % str(bool(triangle_result.get("preview_3d_visible", false))))
 	lines.append("triangle_place_count=%d" % int(triangle_result.get("placed_count", 0)))
 	lines.append("triangle_place_expected_count_ok=%s" % str(bool(triangle_result.get("expected_count_ok", false))))
@@ -135,7 +141,8 @@ func _run_shape_case(
 	start_plane_position: Vector2i,
 	end_plane_position: Vector2i,
 	material_id: StringName,
-	expected_count: int
+	primary_size_steps: int,
+	secondary_size_steps: int
 ) -> Dictionary:
 	crafting_ui.call("_set_active_plane", &"xy")
 	await process_frame
@@ -143,18 +150,26 @@ func _run_shape_case(
 	crafting_ui.armed_material_variant_id = material_id
 	crafting_ui.call("_set_active_tool", place_tool_id)
 	await process_frame
+	for _step_index in range(primary_size_steps):
+		crafting_ui.call("_step_stage1_shape_primary_size", 1)
+	for _step_index in range(secondary_size_steps):
+		crafting_ui.call("_step_stage1_shape_secondary_size", 1)
+	await process_frame
 
 	var start_position: Vector2 = _build_plane_position(plane_viewport, start_plane_position.x, start_plane_position.y)
 	var end_position: Vector2 = _build_plane_position(plane_viewport, end_plane_position.x, end_plane_position.y)
 	var start_grid: Vector3i = plane_viewport.call("_screen_to_grid", start_position)
-	var end_grid: Vector3i = plane_viewport.call("_screen_to_grid", end_position)
+	var shape_settings: Dictionary = crafting_ui.call("_get_stage1_shape_settings")
+	shape_settings["use_fixed_size"] = true
 	var expected_cells: Array[Vector3i] = shape_presenter.build_shape_footprint(
 		place_tool_id,
 		start_grid,
-		end_grid,
+		start_grid,
 		&"xy",
 		crafting_ui.active_layer,
-		forge_controller.grid_size
+		forge_controller.grid_size,
+		int(crafting_ui.get("structural_shape_rotation_quadrant")),
+		shape_settings
 	)
 
 	var press: InputEventMouseButton = InputEventMouseButton.new()
@@ -170,6 +185,7 @@ func _run_shape_case(
 	await process_frame
 
 	var preview_count: int = plane_viewport.structural_shape_preview_cells.size()
+	var drag_motion_did_not_resize_shape: bool = preview_count == expected_cells.size()
 	var preview_3d_visible: bool = (
 		crafting_ui.free_workspace_preview != null
 		and crafting_ui.free_workspace_preview.structural_shape_preview_instance != null
@@ -213,9 +229,10 @@ func _run_shape_case(
 	var remaining_count: int = _count_cells(crafting_ui.call("_ensure_wip_for_editing"))
 	return {
 		"preview_count": preview_count,
+		"drag_motion_did_not_resize_shape": drag_motion_did_not_resize_shape,
 		"preview_3d_visible": preview_3d_visible,
 		"placed_count": placed_count,
-		"expected_count_ok": placed_count == expected_count and expected_cells.size() == expected_count,
+		"expected_count_ok": placed_count == expected_cells.size(),
 		"expected_cells_ok": expected_cells_ok,
 		"erase_success": remaining_count == 0,
 	}

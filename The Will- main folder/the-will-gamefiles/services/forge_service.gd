@@ -4,6 +4,7 @@ class_name ForgeService
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
 const CraftedItemCanonicalSolidResolverScript = preload("res://core/resolvers/crafted_item_canonical_solid_resolver.gd")
 const CraftedItemCanonicalGeometryResolverScript = preload("res://core/resolvers/crafted_item_canonical_geometry_resolver.gd")
+const ForgeStage2ServiceScript = preload("res://services/forge_stage2_service.gd")
 const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
 
 var forge_rules: ForgeRulesDef = DEFAULT_FORGE_RULES_RESOURCE
@@ -18,6 +19,7 @@ var capability_resolver: CapabilityResolver
 var material_runtime_resolver
 var canonical_solid_resolver
 var canonical_geometry_resolver
+var stage2_service
 
 func _init(rules: ForgeRulesDef = null) -> void:
 	tier_resolver = TierResolver.new()
@@ -27,6 +29,7 @@ func _init(rules: ForgeRulesDef = null) -> void:
 	canonical_solid_resolver = CraftedItemCanonicalSolidResolverScript.new()
 	canonical_geometry_resolver = CraftedItemCanonicalGeometryResolverScript.new()
 	set_forge_rules(rules)
+	stage2_service = ForgeStage2ServiceScript.new(forge_rules)
 
 func set_forge_rules(rules: ForgeRulesDef) -> void:
 	forge_rules = rules if rules != null else DEFAULT_FORGE_RULES_RESOURCE
@@ -35,6 +38,8 @@ func set_forge_rules(rules: ForgeRulesDef) -> void:
 	joint_resolver = JointResolver.new(forge_rules)
 	bow_resolver = BowResolver.new(forge_rules)
 	profile_resolver = ProfileResolver.new(forge_rules)
+	if stage2_service != null and stage2_service.has_method("set_forge_rules"):
+		stage2_service.call("set_forge_rules", forge_rules)
 
 func bake_wip(
 		wip: CraftedItemWIP,
@@ -57,7 +62,8 @@ func bake_wip(
 		material_lookup,
 		wip.forge_intent,
 		wip.equipment_context,
-		authored_cells
+		authored_cells,
+		anchors
 	)
 	var profile: BakedProfile = bake_profile(
 		cells,
@@ -104,6 +110,18 @@ func build_test_print_from_wip(
 		if wip != null and wip.stage2_item_state != null
 		else null
 	)
+	if (
+		stage2_item_state == null or not stage2_item_state.has_current_shell()
+	) and stage2_service != null:
+		stage2_item_state = stage2_service.build_stage2_item_state_from_stage1(
+			wip,
+			test_print.canonical_solid,
+			stage1_canonical_geometry,
+			profile,
+			material_lookup
+		)
+		if wip != null and stage2_item_state != null:
+			wip.stage2_item_state = stage2_item_state.duplicate(true)
 	var stage2_canonical_geometry = null
 	if stage2_item_state != null and stage2_item_state.has_current_shell():
 		stage2_canonical_geometry = stage2_item_state.build_current_canonical_geometry(test_print.canonical_solid)
@@ -112,6 +130,15 @@ func build_test_print_from_wip(
 		stage2_canonical_geometry
 		if stage2_canonical_geometry != null and not stage2_canonical_geometry.is_empty()
 		else stage1_canonical_geometry
+	)
+	test_print.visual_mesh_source = (
+		&"editable_mesh"
+		if (
+			stage2_item_state != null
+			and stage2_item_state.has_current_editable_mesh()
+			and bool(stage2_item_state.get("editable_mesh_visual_authority"))
+		)
+		else &"canonical_geometry"
 	)
 	return test_print
 
@@ -157,14 +184,26 @@ func build_bow_data(
 	material_lookup: Dictionary = {},
 	forge_intent: StringName = &"",
 	equipment_context: StringName = &"",
-	authored_cells: Array[CellAtom] = []
+	authored_cells: Array[CellAtom] = [],
+	anchors: Array[AnchorAtom] = []
 ) -> Dictionary:
+	var resolved_anchors: Array[AnchorAtom] = anchors
+	if resolved_anchors.is_empty():
+		resolved_anchors = build_anchors(segments, material_lookup)
+	var primary_grip_valid: bool = false
+	for anchor: AnchorAtom in resolved_anchors:
+		if anchor == null:
+			continue
+		if anchor.anchor_type == "primary_grip":
+			primary_grip_valid = true
+			break
 	return bow_resolver.validate_bow_structure(
 		segments,
 		material_lookup,
 		forge_intent,
 		equipment_context,
-		authored_cells
+		authored_cells,
+		primary_grip_valid
 	)
 
 func bake_profile(

@@ -1,7 +1,13 @@
 stage2_initialized=true
 stage2_patch_count=40
+stage2_unified_shell_quad_count=6
+stage2_unified_shell_simpler_than_patch_grid=true
 stage2_source_cell_count=16
 stage2_current_aabb_size=(4.0, 2.0, 2.0)
+stage2_editable_mesh_exists=true
+stage2_editable_mesh_vertex_count=42
+stage2_editable_mesh_index_count=240
+stage2_editable_mesh_meshdatatool_ready=true
 stage2_has_positive_patch_depth=true
 stage2_has_positive_envelope=true
 test_print_exists=true

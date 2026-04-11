@@ -1,7 +1,7 @@
 extends RefCounted
 class_name ForgeStage2BrushPresenter
 
-const Stage2PatchStateScript = preload("res://core/models/stage2_patch_state.gd")
+const Stage2ShellApplyResolverScript = preload("res://core/resolvers/stage2_shell_apply_resolver.gd")
 const ForgeStage2SelectionPresenterScript = preload("res://runtime/forge/forge_stage2_selection_presenter.gd")
 
 const TOOL_STAGE2_CARVE: StringName = &"stage2_carve"
@@ -15,6 +15,8 @@ const FAMILY_STAGE2_CHAMFER: StringName = TOOL_STAGE2_CHAMFER
 
 const MODIFIER_ADD: StringName = &"add"
 const MODIFIER_REMOVE: StringName = &"remove"
+
+var shell_apply_resolver = Stage2ShellApplyResolverScript.new()
 
 func is_pointer_radius_tool(tool_id: StringName) -> bool:
 	return (
@@ -64,7 +66,9 @@ func apply_selection_tool(
 	stage2_item_state: Resource,
 	selected_patch_ids: PackedStringArray,
 	tool_id: StringName,
-	apply_patch_ids: PackedStringArray = PackedStringArray()
+	apply_patch_ids: PackedStringArray = PackedStringArray(),
+	amount_ratio: float = 1.0,
+	editable_mesh_vertex_indices: PackedInt32Array = PackedInt32Array()
 ) -> bool:
 	var target_patch_ids: PackedStringArray = (
 		apply_patch_ids
@@ -78,142 +82,43 @@ func apply_selection_tool(
 		return false
 	if _should_block_entire_selection(tool_id, stage2_item_state, target_patch_ids, effective_tool_id):
 		return false
-	var selected_lookup: Dictionary = {}
-	for patch_id: String in target_patch_ids:
-		selected_lookup[StringName(patch_id)] = true
-	var changed: bool = false
-	for patch_state in stage2_item_state.patch_states:
-		if patch_state == null or not patch_state.has_current_quad() or not selected_lookup.has(patch_state.patch_id):
-			continue
-		if is_patch_tool_blocked(patch_state, effective_tool_id):
-			continue
-		if _apply_selection_patch_delta(patch_state, effective_tool_id, maxf(float(stage2_item_state.cell_world_size_meters), 0.0001)):
-			changed = true
-	if not changed:
-		return false
-	stage2_item_state.dirty = true
-	stage2_item_state.last_active_tool_id = tool_id
-	stage2_item_state.refresh_current_local_aabb_from_patches()
-	return true
+	return shell_apply_resolver.apply_selection_patch_ids(
+		stage2_item_state,
+		target_patch_ids,
+		effective_tool_id,
+		tool_id,
+		amount_ratio,
+		editable_mesh_vertex_indices
+	)
 
 func apply_brush(
 	stage2_item_state: Resource,
 	tool_id: StringName,
 	hit_point_local: Vector3,
 	radius_meters: float,
-	step_meters: float
+	step_meters: float,
+	amount_ratio: float = 1.0,
+	hit_face_id: StringName = StringName(),
+	tool_axis_local: Vector3 = Vector3.ZERO
 ) -> bool:
 	if stage2_item_state == null or not stage2_item_state.has_current_shell():
 		return false
-	var cell_world_size_meters: float = maxf(float(stage2_item_state.cell_world_size_meters), 0.0001)
-	var radius_cells: float = radius_meters / cell_world_size_meters
-	var step_cells: float = step_meters / cell_world_size_meters
-	if radius_cells <= 0.0 or step_cells <= 0.0:
-		return false
-	var changed: bool = false
-	for patch_state in stage2_item_state.patch_states:
-		if patch_state == null or not patch_state.has_current_quad() or patch_state.baseline_quad == null:
-			continue
-		var patch_center: Vector3 = _get_quad_center_local(patch_state.current_quad)
-		var distance_to_hit: float = patch_center.distance_to(hit_point_local)
-		if distance_to_hit > radius_cells:
-			continue
-		var falloff: float = _resolve_brush_falloff(tool_id, distance_to_hit, radius_cells)
-		if falloff <= 0.0:
-			continue
-		if is_patch_tool_blocked(patch_state, tool_id):
-			continue
-		if _apply_patch_delta(patch_state, tool_id, step_cells * falloff, cell_world_size_meters):
-			changed = true
-	if not changed:
-		return false
-	stage2_item_state.dirty = true
-	stage2_item_state.last_active_tool_id = tool_id
-	stage2_item_state.refresh_current_local_aabb_from_patches()
-	return true
-
-func _apply_patch_delta(
-	patch_state: Resource,
-	tool_id: StringName,
-	step_cells: float,
-	cell_world_size_meters: float
-) -> bool:
-	var baseline_quad: Resource = patch_state.baseline_quad
-	var current_quad: Resource = patch_state.current_quad
-	var normal: Vector3 = current_quad.normal.normalized()
-	if normal == Vector3.ZERO:
-		return false
-	var max_offset_cells: float = float(patch_state.max_inward_offset_meters) / cell_world_size_meters
-	var max_fillet_offset_cells: float = float(patch_state.max_fillet_offset_meters) / cell_world_size_meters
-	var max_chamfer_offset_cells: float = float(patch_state.max_chamfer_offset_meters) / cell_world_size_meters
-	var current_offset_cells: float = (baseline_quad.origin_local - current_quad.origin_local).dot(normal)
-	var next_offset_cells: float = current_offset_cells
-	match tool_id:
-		TOOL_STAGE2_CARVE:
-			next_offset_cells = minf(max_offset_cells, current_offset_cells + step_cells)
-		TOOL_STAGE2_RESTORE:
-			next_offset_cells = maxf(0.0, current_offset_cells - step_cells)
-		TOOL_STAGE2_FILLET:
-			var target_offset_cells: float = maxf(0.0, max_fillet_offset_cells)
-			next_offset_cells = minf(target_offset_cells, current_offset_cells + step_cells)
-		TOOL_STAGE2_CHAMFER:
-			var chamfer_target_offset_cells: float = maxf(0.0, max_chamfer_offset_cells)
-			next_offset_cells = minf(chamfer_target_offset_cells, current_offset_cells + step_cells)
-		_:
-			return false
-	if is_equal_approx(next_offset_cells, current_offset_cells):
-		return false
-	current_quad.origin_local = baseline_quad.origin_local - (normal * next_offset_cells)
-	patch_state.dirty = true
-	return true
-
-func _apply_selection_patch_delta(
-	patch_state: Resource,
-	tool_id: StringName,
-	cell_world_size_meters: float
-) -> bool:
-	var baseline_quad: Resource = patch_state.baseline_quad
-	var current_quad: Resource = patch_state.current_quad
-	var normal: Vector3 = current_quad.normal.normalized()
-	if normal == Vector3.ZERO:
-		return false
-	var target_offset_cells: float = 0.0
-	match tool_id:
-		TOOL_STAGE2_FILLET:
-			target_offset_cells = float(patch_state.max_fillet_offset_meters) / cell_world_size_meters
-		TOOL_STAGE2_CHAMFER:
-			target_offset_cells = float(patch_state.max_chamfer_offset_meters) / cell_world_size_meters
-		TOOL_STAGE2_RESTORE:
-			target_offset_cells = 0.0
-		_:
-			return false
-	var current_offset_cells: float = (baseline_quad.origin_local - current_quad.origin_local).dot(normal)
-	if is_equal_approx(target_offset_cells, current_offset_cells):
-		return false
-	current_quad.origin_local = baseline_quad.origin_local - (normal * maxf(target_offset_cells, 0.0))
-	patch_state.dirty = true
-	return true
+	return shell_apply_resolver.apply_pointer_brush(
+		stage2_item_state,
+		tool_id,
+		hit_point_local,
+		radius_meters,
+		step_meters,
+		amount_ratio,
+		hit_face_id,
+		tool_axis_local
+	)
 
 func is_patch_tool_blocked(patch_state: Resource, tool_id: StringName) -> bool:
-	if patch_state == null:
-		return false
-	return is_zone_mask_blocked(patch_state.zone_mask_id, tool_id)
+	return shell_apply_resolver.is_patch_tool_blocked(patch_state, tool_id)
 
 func is_zone_mask_blocked(zone_mask_id: StringName, tool_id: StringName) -> bool:
-	match tool_id:
-		TOOL_STAGE2_CARVE:
-			return zone_mask_id == Stage2PatchStateScript.ZONE_PRIMARY_GRIP_SAFE
-		TOOL_STAGE2_CHAMFER:
-			return zone_mask_id == Stage2PatchStateScript.ZONE_PRIMARY_GRIP_SAFE
-		_:
-			return false
-
-func _resolve_brush_falloff(tool_id: StringName, distance_to_hit: float, radius_cells: float) -> float:
-	match tool_id:
-		TOOL_STAGE2_CHAMFER:
-			return 1.0
-		_:
-			return 1.0 - clampf(distance_to_hit / radius_cells, 0.0, 1.0)
+	return shell_apply_resolver.is_zone_mask_blocked(zone_mask_id, tool_id)
 
 func _resolve_effective_selection_tool_id(tool_id: StringName) -> StringName:
 	match tool_id:
@@ -297,18 +202,8 @@ func _should_block_entire_selection(
 		return false
 	if stage2_item_state == null or target_patch_ids.is_empty():
 		return false
-	var patch_lookup: Dictionary = {}
-	for patch_state in stage2_item_state.patch_states:
-		if patch_state == null:
-			continue
-		patch_lookup[patch_state.patch_id] = patch_state
-	for patch_id: String in target_patch_ids:
-		var patch_state: Resource = patch_lookup.get(StringName(patch_id), null)
-		if patch_state == null:
-			continue
-		if is_patch_tool_blocked(patch_state, effective_tool_id):
-			return true
-	return false
-
-func _get_quad_center_local(quad_state: Resource) -> Vector3:
-	return quad_state.origin_local + (quad_state.edge_u_local * 0.5) + (quad_state.edge_v_local * 0.5)
+	return shell_apply_resolver.selection_target_set_has_blocked_patch(
+		stage2_item_state,
+		target_patch_ids,
+		effective_tool_id
+	)

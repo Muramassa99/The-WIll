@@ -39,7 +39,7 @@ func _run_verification() -> void:
 	var ranged_bow_component_ok: bool = (
 		ranged_bow_wip != null
 		and ranged_bow_wip.forge_builder_component_id == CraftedItemWIPScript.BUILDER_COMPONENT_BOW
-		and forge_controller.grid_size == Vector3i(160, 80, 30)
+		and forge_controller.grid_size == Vector3i(320, 160, 60)
 	)
 
 	crafting_ui.builder_component_quiver_button.emit_signal("pressed")
@@ -52,7 +52,7 @@ func _run_verification() -> void:
 	var ranged_quiver_component_ok: bool = (
 		ranged_quiver_wip != null
 		and ranged_quiver_wip.forge_builder_component_id == CraftedItemWIPScript.BUILDER_COMPONENT_QUIVER
-		and forge_controller.grid_size == Vector3i(70, 30, 30)
+		and forge_controller.grid_size == Vector3i(140, 60, 60)
 		and crafting_ui.project_source_label.text.to_lower().contains("quiver")
 	)
 
@@ -64,7 +64,7 @@ func _run_verification() -> void:
 		forge_controller.active_wip != null
 		and forge_controller.active_wip.forge_builder_path_id == CraftedItemWIPScript.BUILDER_PATH_RANGED_PHYSICAL
 		and forge_controller.active_wip.forge_builder_component_id == CraftedItemWIPScript.BUILDER_COMPONENT_QUIVER
-		and forge_controller.grid_size == Vector3i(70, 30, 30)
+		and forge_controller.grid_size == Vector3i(140, 60, 60)
 	)
 
 	crafting_ui.close_ui()

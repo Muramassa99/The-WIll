@@ -174,6 +174,10 @@ func _is_primary_grip_two_hand_eligible(
 ) -> bool:
 	if primary_grip == null:
 		return false
-	if forge_intent != &"intent_melee" or equipment_context != &"ctx_weapon":
+	var branch_allows_two_hand: bool = (
+		(forge_intent == &"intent_melee" and equipment_context == &"ctx_weapon")
+		or (forge_intent == &"intent_magic" and equipment_context == &"ctx_focus")
+	)
+	if not branch_allows_two_hand:
 		return false
 	return primary_grip.span_length >= forge_rules.primary_grip_two_hand_min_length_voxels

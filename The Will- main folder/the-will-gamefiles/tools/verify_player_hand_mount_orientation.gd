@@ -116,7 +116,7 @@ func _build_valid_test_wip(wip_id: StringName, grip_style_mode: StringName) -> C
 
 func _build_handle_cells(layer_index: int) -> Array[CellAtom]:
 	var cells: Array[CellAtom] = []
-	for x in range(20, 32):
+	for x in range(20, 48):
 		for y in range(10, 13):
 			var cell: CellAtom = CellAtom.new()
 			cell.grid_position = Vector3i(x, y, layer_index)

@@ -1,0 +1,11 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+SCRIPT ERROR: Invalid type in function '_build_edge_segment' in base 'RefCounted (ForgeStage2SelectionPresenter)'. The Object-derived class of argument 1 (RefCounted (CraftedItemCanonicalSurfaceQuad)) is not a subclass of the expected argument class.
+   at: ForgeStage2SelectionPresenter._resolve_nearest_shell_boundary_edge_id (res://runtime/forge/forge_stage2_selection_presenter.gd:534)
+   GDScript backtrace (most recent call first):
+       [0] _resolve_nearest_shell_boundary_edge_id (res://runtime/forge/forge_stage2_selection_presenter.gd:534)
+       [1] resolve_hover_selection_data (res://runtime/forge/forge_stage2_selection_presenter.gd:242)
+       [2] _resolve_visible_edge_target (res://tools/verify_stage2_selection_restore_tools.gd:237)
+       [3] _run_verification (res://tools/verify_stage2_selection_restore_tools.gd:54)

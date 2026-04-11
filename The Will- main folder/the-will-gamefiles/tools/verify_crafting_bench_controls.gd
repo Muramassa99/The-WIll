@@ -29,6 +29,7 @@ func _run_verification() -> void:
 	var left_panel_hidden: bool = not crafting_ui.left_panel.visible
 	var project_menu_exists: bool = crafting_ui.project_menu_button != null
 	var status_menu_exists: bool = crafting_ui.status_menu_button != null
+	var tool_menu_exists: bool = crafting_ui.tool_menu_button != null
 	var draw_overlay_exists: bool = crafting_ui.draw_tool_button != null
 	var erase_overlay_exists: bool = crafting_ui.erase_tool_button != null
 
@@ -91,6 +92,7 @@ func _run_verification() -> void:
 	lines.append("left_panel_hidden=%s" % str(left_panel_hidden))
 	lines.append("project_menu_exists=%s" % str(project_menu_exists))
 	lines.append("status_menu_exists=%s" % str(status_menu_exists))
+	lines.append("tool_menu_exists=%s" % str(tool_menu_exists))
 	lines.append("draw_overlay_exists=%s" % str(draw_overlay_exists))
 	lines.append("erase_overlay_exists=%s" % str(erase_overlay_exists))
 	lines.append("offgrid_top_left_rejected=%s" % str(offgrid_top_left_rejected))

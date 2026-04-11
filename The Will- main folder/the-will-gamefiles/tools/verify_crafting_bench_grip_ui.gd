@@ -32,7 +32,11 @@ func _run_verification() -> void:
 	var grip_tooltip_popup_visible: bool = crafting_ui.grip_hint_popup.visible
 	var grip_tooltip_text: String = crafting_ui.grip_hint_label.text
 
-	forge_controller.load_sample_preset_wip(forge_controller.get_sample_bow_preset_id())
+	forge_controller.load_new_blank_wip_for_builder_path(
+		"Verify Bow Grip UI",
+		CraftedItemWIP.BUILDER_PATH_RANGED_PHYSICAL,
+		CraftedItemWIP.BUILDER_COMPONENT_BOW
+	)
 	await process_frame
 	await process_frame
 

@@ -1,0 +1,14 @@
+combat_animation_station_exists=true
+combat_animation_station_schema_id=combat_animation_creator_v1
+idle_draft_count=2
+skill_draft_count=2
+default_skill_package_initialized=true
+combat_idle_point_count=1
+noncombat_idle_point_count=1
+saved_clone_exists=true
+saved_station_exists=true
+saved_skill_draft_count=2
+material_effect_stub_base_count=1
+material_effect_stub_variant_count=1
+material_effect_stub_runtime_count=1
+material_effect_stub_runtime_threshold=0.65

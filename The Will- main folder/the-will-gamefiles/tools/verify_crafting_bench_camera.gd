@@ -28,6 +28,7 @@ func _run_verification() -> void:
 	var axis_panel: Control = crafting_ui.get_node("Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/AxisIndicatorPanel")
 	var axis_stylebox: StyleBoxFlat = axis_panel.get_theme_stylebox("panel") as StyleBoxFlat if axis_panel is PanelContainer else null
 	var preview_box_mesh: BoxMesh = preview.occupied_cells_instance.multimesh.mesh as BoxMesh if preview != null and preview.occupied_cells_instance != null and preview.occupied_cells_instance.multimesh != null else null
+	var view_tuning: ForgeViewTuningDef = crafting_ui.call("_get_view_tuning")
 	var initial_distance: float = preview.camera.position.z if preview != null and preview.camera != null else -1.0
 	var initial_pivot: Vector3 = preview.camera_pivot.position if preview != null and preview.camera_pivot != null else Vector3.ZERO
 	var initial_rotation_y: float = preview.camera_pivot.rotation.y if preview != null and preview.camera_pivot != null else 0.0
@@ -50,6 +51,13 @@ func _run_verification() -> void:
 	await process_frame
 
 	var distance_after_panel_zoom: float = preview.camera.position.z if preview != null and preview.camera != null else initial_distance
+
+	if preview != null:
+		preview.zoom_by(100.0)
+	await process_frame
+
+	var far_distance: float = preview.camera.position.z if preview != null and preview.camera != null else -1.0
+	var max_zoom_clamped_to_tuning: bool = view_tuning != null and is_equal_approx(far_distance, view_tuning.workspace_zoom_max_distance)
 
 	if preview != null:
 		preview.zoom_by(-100.0)
@@ -166,6 +174,11 @@ func _run_verification() -> void:
 	lines.append("preview_cells_touching=%s" % str(preview_cells_touching))
 	lines.append("panel_wheel_zoom_changed_distance=%s" % str(distance_after_panel_zoom < initial_distance))
 	lines.append("initial_distance=%s" % str(initial_distance))
+	lines.append("workspace_zoom_step=%s" % str(view_tuning.workspace_zoom_step if view_tuning != null else -1.0))
+	lines.append("workspace_zoom_max_distance=%s" % str(view_tuning.workspace_zoom_max_distance if view_tuning != null else -1.0))
+	lines.append("default_camera_closer_than_zoom_cap=%s" % str(view_tuning != null and initial_distance <= view_tuning.workspace_zoom_max_distance))
+	lines.append("far_distance=%s" % str(far_distance))
+	lines.append("max_zoom_clamped_to_tuning=%s" % str(max_zoom_clamped_to_tuning))
 	lines.append("edited_distance=%s" % str(edited_distance))
 	lines.append("distance_after_refresh=%s" % str(distance_after_refresh))
 	lines.append("zoom_persisted_after_refresh=%s" % str(is_equal_approx(distance_after_refresh, edited_distance)))

@@ -8,6 +8,10 @@ var normal: Vector3 = Vector3.ZERO
 var material_variant_id: StringName = &""
 var width_voxels: int = 0
 var height_voxels: int = 0
+var stage2_face_id: StringName = &""
+var stage2_target_kind: StringName = &""
+var stage2_shell_quad_id: StringName = &""
+var stage2_patch_ids: PackedStringArray = PackedStringArray()
 
 func get_vertices() -> Array[Vector3]:
 	if normal.dot(edge_u_local.cross(edge_v_local)) >= 0.0:

@@ -1,0 +1,34 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+SCRIPT ERROR: Trying to return value of type "RefCounted" from a function whose return type is "Resource".
+   at: ForgeStage2Service._build_stage2_tagged_canonical_geometry (res://services/forge_stage2_service.gd:126)
+   GDScript backtrace (most recent call first):
+       [0] _build_stage2_tagged_canonical_geometry (res://services/forge_stage2_service.gd:126)
+       [1] build_stage2_item_state_from_stage1 (res://services/forge_stage2_service.gd:48)
+       [2] ensure_stage2_item_state_for_wip (res://services/forge_stage2_service.gd:30)
+       [3] ensure_stage2_item_state_for_active_wip (res://runtime/forge/forge_grid_controller.gd:158)
+       [4] _run (res://tools/verify_stage2_refinement_foundation.gd:16)
+SCRIPT ERROR: Invalid access to property or key 'surface_quads' on a base object of type 'Nil'.
+   at: ForgeStage2Service.build_stage2_item_state_from_stage1 (res://services/forge_stage2_service.gd:74)
+   GDScript backtrace (most recent call first):
+       [0] build_stage2_item_state_from_stage1 (res://services/forge_stage2_service.gd:74)
+       [1] ensure_stage2_item_state_for_wip (res://services/forge_stage2_service.gd:30)
+       [2] ensure_stage2_item_state_for_active_wip (res://runtime/forge/forge_grid_controller.gd:158)
+       [3] _run (res://tools/verify_stage2_refinement_foundation.gd:16)
+SCRIPT ERROR: Trying to return value of type "RefCounted" from a function whose return type is "Resource".
+   at: ForgeStage2Service._build_stage2_tagged_canonical_geometry (res://services/forge_stage2_service.gd:126)
+   GDScript backtrace (most recent call first):
+       [0] _build_stage2_tagged_canonical_geometry (res://services/forge_stage2_service.gd:126)
+       [1] build_stage2_item_state_from_stage1 (res://services/forge_stage2_service.gd:48)
+       [2] build_test_print_from_wip (res://services/forge_service.gd:115)
+       [3] spawn_test_print_from_active_wip (res://runtime/forge/forge_grid_controller.gd:346)
+       [4] _run (res://tools/verify_stage2_refinement_foundation.gd:19)
+SCRIPT ERROR: Invalid access to property or key 'surface_quads' on a base object of type 'Nil'.
+   at: ForgeStage2Service.build_stage2_item_state_from_stage1 (res://services/forge_stage2_service.gd:74)
+   GDScript backtrace (most recent call first):
+       [0] build_stage2_item_state_from_stage1 (res://services/forge_stage2_service.gd:74)
+       [1] build_test_print_from_wip (res://services/forge_service.gd:115)
+       [2] spawn_test_print_from_active_wip (res://runtime/forge/forge_grid_controller.gd:346)
+       [3] _run (res://tools/verify_stage2_refinement_foundation.gd:19)

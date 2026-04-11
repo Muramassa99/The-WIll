@@ -6,6 +6,7 @@ func configure_action_menus(
 	status_menu_button: MenuButton,
 	view_menu_button: MenuButton,
 	geometry_menu_button: MenuButton,
+	tool_menu_button: MenuButton,
 	workflow_menu_button: MenuButton,
 	id_pressed_target: Callable,
 	menu_ids: Dictionary
@@ -27,6 +28,10 @@ func configure_action_menus(
 	var geometry_popup: PopupMenu = geometry_menu_button.get_popup()
 	geometry_popup.clear()
 	_connect_popup(geometry_popup, id_pressed_target)
+
+	var tool_popup: PopupMenu = tool_menu_button.get_popup()
+	tool_popup.clear()
+	_connect_popup(tool_popup, id_pressed_target)
 
 	var workflow_popup: PopupMenu = workflow_menu_button.get_popup()
 	workflow_popup.clear()
@@ -89,7 +94,8 @@ func rebuild_geometry_menu(
 	active_tool: StringName = StringName(),
 	shape_rotation_degrees: int = 0,
 	stage2_selection_apply_enabled: bool = false,
-	stage2_selection_clear_enabled: bool = false
+	stage2_selection_clear_enabled: bool = false,
+	handle_presets_available: bool = false
 ) -> void:
 	var geometry_popup: PopupMenu = geometry_menu_button.get_popup()
 	geometry_popup.clear()
@@ -127,10 +133,17 @@ func rebuild_geometry_menu(
 			geometry_popup.set_item_disabled(geometry_popup.get_item_count() - 1, not stage2_selection_apply_enabled)
 			geometry_popup.add_item("Clear Target Selection", int(menu_ids.get("geometry_selection_clear", 0)))
 			geometry_popup.set_item_disabled(geometry_popup.get_item_count() - 1, not stage2_selection_clear_enabled)
+		geometry_popup.add_separator()
+		geometry_popup.add_item("Refinement Space: Full 3D Model")
+		geometry_popup.set_item_disabled(geometry_popup.get_item_count() - 1, true)
+		geometry_popup.add_item("Layer Rules: Inactive")
+		geometry_popup.set_item_disabled(geometry_popup.get_item_count() - 1, true)
 	else:
 		geometry_popup.add_item("Freehand Tool", int(menu_ids.get("geometry_tool_place", 0)))
 		geometry_popup.add_item("Pick Material", int(menu_ids.get("geometry_tool_pick", 0)))
 		geometry_popup.add_separator()
+		if handle_presets_available:
+			geometry_popup.add_item("Handles", int(menu_ids.get("geometry_handles_panel", 0)))
 		geometry_popup.add_item("Rectangle Tool", int(menu_ids.get("geometry_tool_rectangle_place", 0)))
 		geometry_popup.add_item("Circle Tool", int(menu_ids.get("geometry_tool_circle_place", 0)))
 		geometry_popup.add_item("Oval Tool", int(menu_ids.get("geometry_tool_oval_place", 0)))
@@ -141,13 +154,108 @@ func rebuild_geometry_menu(
 			geometry_popup.set_item_disabled(geometry_popup.get_item_count() - 1, true)
 			geometry_popup.add_item("Rotate Shape -90°", int(menu_ids.get("geometry_shape_rotate_left", 0)))
 			geometry_popup.add_item("Rotate Shape +90°", int(menu_ids.get("geometry_shape_rotate_right", 0)))
-	geometry_popup.add_separator()
-	geometry_popup.add_item("Plane XY", int(menu_ids.get("geometry_plane_xy", 0)))
-	geometry_popup.add_item("Plane ZX", int(menu_ids.get("geometry_plane_zx", 0)))
-	geometry_popup.add_item("Plane ZY", int(menu_ids.get("geometry_plane_zy", 0)))
-	geometry_popup.add_separator()
-	geometry_popup.add_item("Layer -", int(menu_ids.get("geometry_layer_down", 0)))
-	geometry_popup.add_item("Layer +", int(menu_ids.get("geometry_layer_up", 0)))
+	if not stage2_refinement_mode_active:
+		geometry_popup.add_separator()
+		geometry_popup.add_item("Plane XY", int(menu_ids.get("geometry_plane_xy", 0)))
+		geometry_popup.add_item("Plane ZX", int(menu_ids.get("geometry_plane_zx", 0)))
+		geometry_popup.add_item("Plane ZY", int(menu_ids.get("geometry_plane_zy", 0)))
+		geometry_popup.add_separator()
+		geometry_popup.add_item("Layer -", int(menu_ids.get("geometry_layer_down", 0)))
+		geometry_popup.add_item("Layer +", int(menu_ids.get("geometry_layer_up", 0)))
+
+func rebuild_tool_menu(
+	tool_menu_button: MenuButton,
+	menu_ids: Dictionary,
+	tool_state: Dictionary
+) -> void:
+	var tool_popup: PopupMenu = tool_menu_button.get_popup()
+	tool_popup.clear()
+	tool_popup.add_item("Tool Settings")
+	tool_popup.set_item_disabled(tool_popup.get_item_count() - 1, true)
+	var has_runtime_adjustments: bool = false
+	if bool(tool_state.get("shape_adjustments_visible", false)):
+		tool_popup.add_separator()
+		tool_popup.add_item(String(tool_state.get("shape_tool_text", "Shape Tool")))
+		tool_popup.set_item_disabled(tool_popup.get_item_count() - 1, true)
+		tool_popup.add_item(String(tool_state.get("shape_size_text", "Sizing")))
+		tool_popup.set_item_disabled(tool_popup.get_item_count() - 1, true)
+		if bool(tool_state.get("shape_size_controls_visible", true)):
+			tool_popup.add_item(String(tool_state.get("shape_primary_text", "Size A: 1")))
+			tool_popup.set_item_disabled(tool_popup.get_item_count() - 1, true)
+			tool_popup.add_item(String(tool_state.get("shape_primary_down_text", "Size A -")), int(menu_ids.get("tool_shape_primary_down", 0)))
+			tool_popup.set_item_disabled(
+				tool_popup.get_item_count() - 1,
+				not bool(tool_state.get("shape_primary_decrease_enabled", true))
+			)
+			tool_popup.add_item(String(tool_state.get("shape_primary_up_text", "Size A +")), int(menu_ids.get("tool_shape_primary_up", 0)))
+			tool_popup.set_item_disabled(
+				tool_popup.get_item_count() - 1,
+				not bool(tool_state.get("shape_primary_increase_enabled", true))
+			)
+			if bool(tool_state.get("shape_secondary_visible", false)):
+				tool_popup.add_item(String(tool_state.get("shape_secondary_text", "Size B: 1")))
+				tool_popup.set_item_disabled(tool_popup.get_item_count() - 1, true)
+				tool_popup.add_item(String(tool_state.get("shape_secondary_down_text", "Size B -")), int(menu_ids.get("tool_shape_secondary_down", 0)))
+				tool_popup.set_item_disabled(
+					tool_popup.get_item_count() - 1,
+					not bool(tool_state.get("shape_secondary_decrease_enabled", true))
+				)
+				tool_popup.add_item(String(tool_state.get("shape_secondary_up_text", "Size B +")), int(menu_ids.get("tool_shape_secondary_up", 0)))
+				tool_popup.set_item_disabled(
+					tool_popup.get_item_count() - 1,
+					not bool(tool_state.get("shape_secondary_increase_enabled", true))
+				)
+		tool_popup.add_item(String(tool_state.get("shape_mode_text", "Mode: Draw")))
+		tool_popup.set_item_disabled(tool_popup.get_item_count() - 1, true)
+		tool_popup.add_item("Set Shape to Draw", int(menu_ids.get("tool_shape_mode_draw", 0)))
+		tool_popup.set_item_disabled(
+			tool_popup.get_item_count() - 1,
+			not bool(tool_state.get("shape_draw_enabled", true))
+		)
+		tool_popup.add_item("Set Shape to Erase", int(menu_ids.get("tool_shape_mode_erase", 0)))
+		tool_popup.set_item_disabled(
+			tool_popup.get_item_count() - 1,
+			not bool(tool_state.get("shape_erase_enabled", true))
+		)
+		tool_popup.add_item(String(tool_state.get("shape_rotation_text", "Rotation: 0 deg")))
+		tool_popup.set_item_disabled(tool_popup.get_item_count() - 1, true)
+		tool_popup.add_item("Rotate Shape -90 deg", int(menu_ids.get("tool_shape_rotate_left", 0)))
+		tool_popup.add_item("Rotate Shape +90 deg", int(menu_ids.get("tool_shape_rotate_right", 0)))
+		has_runtime_adjustments = true
+	if bool(tool_state.get("stage2_radius_visible", false)):
+		tool_popup.add_separator()
+		tool_popup.add_item(String(tool_state.get("stage2_radius_text", "Radius: 0.0125 m")))
+		tool_popup.set_item_disabled(tool_popup.get_item_count() - 1, true)
+		tool_popup.add_item("Radius -", int(menu_ids.get("tool_radius_down", 0)))
+		tool_popup.set_item_disabled(
+			tool_popup.get_item_count() - 1,
+			not bool(tool_state.get("stage2_radius_decrease_enabled", true))
+		)
+		tool_popup.add_item("Radius +", int(menu_ids.get("tool_radius_up", 0)))
+		tool_popup.set_item_disabled(
+			tool_popup.get_item_count() - 1,
+			not bool(tool_state.get("stage2_radius_increase_enabled", true))
+		)
+		has_runtime_adjustments = true
+	if bool(tool_state.get("stage2_amount_visible", false)):
+		tool_popup.add_separator()
+		tool_popup.add_item(String(tool_state.get("stage2_amount_text", "Amount: 100%")))
+		tool_popup.set_item_disabled(tool_popup.get_item_count() - 1, true)
+		tool_popup.add_item("Amount -", int(menu_ids.get("tool_amount_down", 0)))
+		tool_popup.set_item_disabled(
+			tool_popup.get_item_count() - 1,
+			not bool(tool_state.get("stage2_amount_decrease_enabled", true))
+		)
+		tool_popup.add_item("Amount +", int(menu_ids.get("tool_amount_up", 0)))
+		tool_popup.set_item_disabled(
+			tool_popup.get_item_count() - 1,
+			not bool(tool_state.get("stage2_amount_increase_enabled", true))
+		)
+		has_runtime_adjustments = true
+	if not has_runtime_adjustments:
+		tool_popup.add_separator()
+		tool_popup.add_item("No runtime adjustments")
+		tool_popup.set_item_disabled(tool_popup.get_item_count() - 1, true)
 
 func rebuild_workflow_menu(
 	workflow_menu_button: MenuButton,
@@ -407,4 +515,6 @@ func _is_stage1_shape_tool(tool_id: StringName) -> bool:
 		or tool_id == &"oval_erase"
 		or tool_id == &"triangle_place"
 		or tool_id == &"triangle_erase"
+		or tool_id == &"handle_place"
+		or tool_id == &"handle_erase"
 	)

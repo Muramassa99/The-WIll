@@ -35,6 +35,9 @@ func _run_verification() -> void:
 	player._sync_equipped_test_meshes()
 
 	var saved_wip: CraftedItemWIP = wip_library.save_wip(_build_mixed_material_wip())
+	var runtime_wip: CraftedItemWIP = saved_wip.duplicate(true) as CraftedItemWIP
+	var runtime_stage2_missing_before_build: bool = runtime_wip != null and runtime_wip.stage2_item_state == null
+	var runtime_test_print: TestPrintInstance = player.forge_service.build_test_print_from_wip(runtime_wip, {})
 	var equip_result: Dictionary = player.equip_saved_wip_to_hand(saved_wip.wip_id, &"hand_right")
 	await process_frame
 	await process_frame
@@ -51,17 +54,64 @@ func _run_verification() -> void:
 		vertex_color_count = colors.size()
 		for color: Color in colors:
 			unique_colors[_color_key(color)] = true
+	var canonical_mesh: ArrayMesh = (
+		player.held_item_mesh_builder.build_mesh_from_canonical_geometry(runtime_test_print.canonical_geometry, player._get_material_lookup())
+		if runtime_test_print != null and runtime_test_print.canonical_geometry != null
+		else null
+	)
+	var canonical_unique_colors: Dictionary = {}
+	var canonical_vertex_color_count: int = 0
+	if canonical_mesh != null and canonical_mesh.get_surface_count() > 0:
+		var canonical_surface_arrays: Array = canonical_mesh.surface_get_arrays(0)
+		var canonical_colors: PackedColorArray = canonical_surface_arrays[Mesh.ARRAY_COLOR]
+		canonical_vertex_color_count = canonical_colors.size()
+		for color: Color in canonical_colors:
+			canonical_unique_colors[_color_key(color)] = true
+	var runtime_stage2_exists_after_build: bool = runtime_wip != null and runtime_wip.stage2_item_state != null
+	var runtime_unified_shell_quad_count: int = (
+		runtime_wip.stage2_item_state.get_unified_shell_quad_count()
+		if runtime_wip != null and runtime_wip.stage2_item_state != null
+		else 0
+	)
+	var runtime_patch_count: int = (
+		runtime_wip.stage2_item_state.get_patch_count()
+		if runtime_wip != null and runtime_wip.stage2_item_state != null
+		else 0
+	)
 
 	var lines: PackedStringArray = []
+	lines.append("runtime_stage2_missing_before_build=%s" % str(runtime_stage2_missing_before_build))
+	lines.append("runtime_stage2_exists_after_build=%s" % str(runtime_stage2_exists_after_build))
+	lines.append("runtime_stage2_unified_shell_quad_count=%d" % runtime_unified_shell_quad_count)
+	lines.append("runtime_stage2_patch_count=%d" % runtime_patch_count)
+	lines.append("runtime_stage2_unified_shell_simpler_than_patch_grid=%s" % str(
+		runtime_unified_shell_quad_count > 0 and runtime_unified_shell_quad_count < runtime_patch_count
+	))
+	lines.append("runtime_test_print_exists=%s" % str(runtime_test_print != null))
+	lines.append("runtime_test_print_visual_mesh_source=%s" % str(
+		runtime_test_print.visual_mesh_source if runtime_test_print != null else StringName()
+	))
+	lines.append("runtime_test_print_uses_stage2_geometry=%s" % str(
+		runtime_test_print != null
+		and runtime_test_print.stage2_item_state != null
+		and runtime_test_print.canonical_geometry != null
+		and runtime_test_print.stage2_item_state.get_unified_shell_quad_count() == runtime_test_print.canonical_geometry.get_quad_count()
+	))
 	lines.append("equip_success=%s" % str(bool(equip_result.get("success", false))))
 	lines.append("held_item_exists=%s" % str(held_item != null))
 	lines.append("mesh_instance_exists=%s" % str(mesh_instance != null))
+	lines.append("mesh_instance_visual_mesh_source=%s" % str(
+		mesh_instance.get_meta("visual_mesh_source", StringName()) if mesh_instance != null else StringName()
+	))
 	lines.append("material_override_exists=%s" % str(override_material != null))
 	lines.append("material_override_uses_vertex_color=%s" % str(override_material != null and override_material.vertex_color_use_as_albedo))
 	lines.append("material_override_cull_disabled=%s" % str(override_material != null and override_material.cull_mode == BaseMaterial3D.CULL_DISABLED))
 	lines.append("vertex_color_count=%d" % vertex_color_count)
 	lines.append("unique_vertex_color_count=%d" % unique_colors.size())
 	lines.append("multiple_visible_material_colors=%s" % str(unique_colors.size() > 1))
+	lines.append("canonical_vertex_color_count=%d" % canonical_vertex_color_count)
+	lines.append("canonical_unique_vertex_color_count=%d" % canonical_unique_colors.size())
+	lines.append("canonical_multiple_visible_material_colors=%s" % str(canonical_unique_colors.size() > 1))
 
 	var file := FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)
 	if file != null:

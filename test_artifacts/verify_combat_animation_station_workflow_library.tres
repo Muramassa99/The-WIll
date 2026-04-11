@@ -1,0 +1,185 @@
+[gd_resource type="Resource" script_class="PlayerForgeWipLibraryState" format=3]
+
+[ext_resource type="Script" path="res://core/models/crafted_item_wip.gd" id="1_3by55"]
+[ext_resource type="Script" path="res://core/models/combat_animation_point.gd" id="2_imge2"]
+[ext_resource type="Script" path="res://core/models/combat_animation_draft.gd" id="3_7ys56"]
+[ext_resource type="Script" path="res://core/models/combat_animation_station_state.gd" id="4_pl4bg"]
+[ext_resource type="Script" path="res://core/atoms/stat_line.gd" id="5_7um2h"]
+[ext_resource type="Script" path="res://core/atoms/layer_atom.gd" id="5_mqayq"]
+[ext_resource type="Script" path="res://core/models/player_forge_wip_library_state.gd" id="6_7um2h"]
+[ext_resource type="Script" path="res://core/models/baked_profile.gd" id="6_v67la"]
+[ext_resource type="Script" path="res://core/models/stage2_editable_mesh_state.gd" id="8_bsgfa"]
+[ext_resource type="Script" path="res://core/models/stage2_shell_mesh_state.gd" id="9_hto06"]
+[ext_resource type="Script" path="res://core/models/stage2_item_state.gd" id="10_v4xx6"]
+
+[sub_resource type="Resource" id="Resource_7um2h"]
+script = ExtResource("2_imge2")
+point_id = &"point_00"
+
+[sub_resource type="Resource" id="Resource_v67la"]
+script = ExtResource("3_7ys56")
+draft_id = &"idle_combat_draft"
+display_name = "Combat Idle"
+draft_kind = &"draft_idle"
+context_id = &"idle_combat"
+point_chain = Array[Resource]([SubResource("Resource_7um2h")])
+preview_loop_enabled = true
+
+[sub_resource type="Resource" id="Resource_bsgfa"]
+script = ExtResource("2_imge2")
+point_id = &"point_00"
+
+[sub_resource type="Resource" id="Resource_hto06"]
+script = ExtResource("3_7ys56")
+draft_id = &"idle_noncombat_draft"
+display_name = "Noncombat Idle"
+draft_kind = &"draft_idle"
+context_id = &"idle_noncombat"
+point_chain = Array[Resource]([SubResource("Resource_bsgfa")])
+preview_loop_enabled = true
+
+[sub_resource type="Resource" id="Resource_v4xx6"]
+script = ExtResource("2_imge2")
+point_id = &"point_00"
+curve_out_handle_local = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_y3vg4"]
+script = ExtResource("2_imge2")
+point_id = &"point_01"
+point_index = 1
+local_target_position = Vector3(0, 0, -0.12)
+local_target_rotation_degrees = Vector3(-8, 0, 0)
+curve_in_handle_local = Vector3(0, 0, 0.04)
+active_plane_origin_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_fgu71"]
+script = ExtResource("3_7ys56")
+draft_id = &"melee_baseline_a_draft"
+display_name = "Melee Baseline A"
+owning_skill_id = &"melee_baseline_a"
+point_chain = Array[Resource]([SubResource("Resource_v4xx6"), SubResource("Resource_y3vg4")])
+
+[sub_resource type="Resource" id="Resource_oygju"]
+script = ExtResource("2_imge2")
+point_id = &"point_00"
+curve_out_handle_local = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_o7e0h"]
+script = ExtResource("2_imge2")
+point_id = &"point_01"
+point_index = 1
+local_target_position = Vector3(0, 0, -0.12)
+local_target_rotation_degrees = Vector3(-8, 0, 0)
+curve_in_handle_local = Vector3(0, 0, 0.04)
+active_plane_origin_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_baxro"]
+script = ExtResource("3_7ys56")
+draft_id = &"melee_baseline_b_draft"
+display_name = "Melee Baseline B"
+owning_skill_id = &"melee_baseline_b"
+point_chain = Array[Resource]([SubResource("Resource_oygju"), SubResource("Resource_o7e0h")])
+
+[sub_resource type="Resource" id="Resource_3w5v6"]
+script = ExtResource("2_imge2")
+point_id = &"point_00"
+curve_out_handle_local = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_lp05d"]
+script = ExtResource("2_imge2")
+point_id = &"point_00"
+point_index = 1
+local_target_position = Vector3(0.15, 0.02, -0.21)
+local_target_rotation_degrees = Vector3(-12, 6, 18)
+curve_out_handle_local = Vector3(0, 0, -0.04)
+active_plane_origin_local = Vector3(0.15, 0.02, -0.21)
+transition_duration_seconds = 0.44
+body_support_blend = 0.35
+two_hand_state = &"two_hand_two_hand"
+committed = false
+
+[sub_resource type="Resource" id="Resource_xixft"]
+script = ExtResource("2_imge2")
+point_id = &"point_01"
+point_index = 2
+local_target_position = Vector3(0, 0, -0.12)
+local_target_rotation_degrees = Vector3(-8, 0, 0)
+curve_in_handle_local = Vector3(0, 0, 0.04)
+active_plane_origin_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_mntac"]
+script = ExtResource("3_7ys56")
+draft_id = &"skill_custom_alpha_draft"
+display_name = "Custom Alpha"
+owning_skill_id = &"skill_custom_alpha"
+point_chain = Array[Resource]([SubResource("Resource_3w5v6"), SubResource("Resource_lp05d"), SubResource("Resource_xixft")])
+selected_point_index = 1
+draft_notes = "Verifier notes"
+
+[sub_resource type="Resource" id="Resource_gyclh"]
+script = ExtResource("4_pl4bg")
+selected_skill_id = &"skill_custom_alpha"
+idle_drafts = Array[Resource]([SubResource("Resource_v67la"), SubResource("Resource_hto06")])
+skill_drafts = Array[Resource]([SubResource("Resource_fgu71"), SubResource("Resource_baxro"), SubResource("Resource_mntac")])
+default_skill_package_initialized = true
+
+[sub_resource type="Resource" id="Resource_5dqn8"]
+script = ExtResource("6_v67la")
+profile_id = &"profile_player_wip_1775931229.957_1"
+capability_scores = Dictionary[StringName, float]({
+&"cap_blunt": 0.0,
+&"cap_edge": 0.0,
+&"cap_flex": 0.0,
+&"cap_guard": 0.0,
+&"cap_launch": 0.0,
+&"cap_pierce": 0.0,
+&"cap_reach": 0.0,
+&"cap_stability": 0.0
+})
+validation_error = "no_primary_grip_candidate"
+
+[sub_resource type="Resource" id="Resource_lmyqt"]
+script = ExtResource("8_bsgfa")
+triangle_patch_keys = PackedStringArray()
+triangle_face_ids = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_mabpd"]
+script = ExtResource("9_hto06")
+shared_vertex_keys = PackedStringArray()
+shared_vertex_baseline_positions_local = PackedVector3Array()
+shared_vertex_current_positions_local = PackedVector3Array()
+
+[sub_resource type="Resource" id="Resource_e0npq"]
+script = ExtResource("8_bsgfa")
+triangle_patch_keys = PackedStringArray()
+triangle_face_ids = PackedStringArray()
+
+[sub_resource type="Resource" id="Resource_0rh26"]
+script = ExtResource("9_hto06")
+shared_vertex_keys = PackedStringArray()
+shared_vertex_baseline_positions_local = PackedVector3Array()
+shared_vertex_current_positions_local = PackedVector3Array()
+
+[sub_resource type="Resource" id="Resource_seyoe"]
+script = ExtResource("10_v4xx6")
+source_wip_id = &"player_wip_1775931229.957_1"
+baseline_editable_mesh_state = SubResource("Resource_lmyqt")
+current_editable_mesh_state = SubResource("Resource_e0npq")
+baseline_shell_mesh_state = SubResource("Resource_mabpd")
+current_shell_mesh_state = SubResource("Resource_0rh26")
+
+[sub_resource type="Resource" id="Resource_e6qay"]
+script = ExtResource("1_3by55")
+wip_id = &"player_wip_1775931229.957_1"
+forge_project_name = "Combat Editor Test WIP"
+stage2_item_state = SubResource("Resource_seyoe")
+combat_animation_station_state = SubResource("Resource_gyclh")
+forge_intent = &"intent_melee"
+equipment_context = &"ctx_weapon"
+latest_baked_profile_snapshot = SubResource("Resource_5dqn8")
+
+[resource]
+script = ExtResource("6_7um2h")
+saved_wips = Array[ExtResource("1_3by55")]([SubResource("Resource_e6qay")])
+selected_wip_id = &"player_wip_1775931229.957_1"
+save_file_path = "C:/WORKSPACE/test_artifacts/verify_combat_animation_station_workflow_library.tres"

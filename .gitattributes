@@ -1,0 +1,2 @@
+Godot_v4.6.1/Godot_v4.6.1-stable_win64.exe filter=lfs diff=lfs merge=lfs -text
+godot_info/official_docs/godot-docs-html-stable.zip filter=lfs diff=lfs merge=lfs -text

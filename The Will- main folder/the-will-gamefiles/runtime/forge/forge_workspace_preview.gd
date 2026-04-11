@@ -42,11 +42,15 @@ var stage2_hover_face_instance: MeshInstance3D
 var stage2_selected_faces_instance: MeshInstance3D
 var view_initialized: bool = false
 var stage2_shell_preview_visible: bool = false
+var stage2_shell_preview_source: StringName = StringName()
 var stage2_brush_preview_hit_local = null
 var stage2_brush_preview_radius_meters: float = 0.0
 var stage2_brush_preview_blocked: bool = false
+var stage2_hover_face_ids: PackedStringArray = PackedStringArray()
+var stage2_selected_face_ids: PackedStringArray = PackedStringArray()
 var stage2_hover_patch_ids: PackedStringArray = PackedStringArray()
 var stage2_selected_patch_ids: PackedStringArray = PackedStringArray()
+var stage2_selection_target_kind: StringName = StringName()
 var structural_shape_preview_cells: Array[Vector3i] = []
 var structural_shape_preview_material_id: StringName = StringName()
 var structural_shape_preview_remove_mode: bool = false
@@ -96,10 +100,11 @@ func sync_from_wip(
 	_sync_builder_markers_from_wip(wip)
 	_sync_generated_string_from_wip(wip, forge_service)
 	stage2_shell_preview_visible = show_stage2_shell_preview
-	stage2_preview_presenter.sync_stage2_shell_preview(
+	stage2_shell_preview_source = stage2_preview_presenter.sync_stage2_shell_preview(
 		stage2_shell_instance,
 		wip.stage2_item_state if wip != null else null,
 		test_print_mesh_builder,
+		material_lookup,
 		grid_size,
 		cell_world_size,
 		_get_view_tuning(),
@@ -119,13 +124,16 @@ func sync_from_wip(
 		stage2_hover_face_instance,
 		stage2_selected_faces_instance,
 		wip.stage2_item_state if wip != null else null,
+		stage2_hover_face_ids,
+		stage2_selected_face_ids,
 		stage2_hover_patch_ids,
 		stage2_selected_patch_ids,
 		test_print_mesh_builder,
 		grid_size,
 		cell_world_size,
 		_get_view_tuning(),
-		stage2_shell_preview_visible
+		stage2_shell_preview_visible,
+		stage2_selection_target_kind
 	)
 	_sync_structural_shape_preview_mesh()
 	_apply_stage2_display_priority()
@@ -226,39 +234,54 @@ func clear_stage2_brush_preview() -> void:
 
 func set_stage2_selection_preview_state(
 	stage2_item_state: Resource,
+	hovered_face_ids: PackedStringArray,
+	selected_face_ids: PackedStringArray,
 	hovered_patch_ids: PackedStringArray,
 	selected_patch_ids: PackedStringArray,
-	test_print_mesh_builder: TestPrintMeshBuilder
+	test_print_mesh_builder: TestPrintMeshBuilder,
+	selection_target_kind: StringName = StringName()
 ) -> void:
+	stage2_hover_face_ids = PackedStringArray(hovered_face_ids)
+	stage2_selected_face_ids = PackedStringArray(selected_face_ids)
 	stage2_hover_patch_ids = PackedStringArray(hovered_patch_ids)
 	stage2_selected_patch_ids = PackedStringArray(selected_patch_ids)
+	stage2_selection_target_kind = selection_target_kind
 	stage2_preview_presenter.sync_stage2_selection_preview(
 		stage2_hover_face_instance,
 		stage2_selected_faces_instance,
 		stage2_item_state,
+		stage2_hover_face_ids,
+		stage2_selected_face_ids,
 		stage2_hover_patch_ids,
 		stage2_selected_patch_ids,
 		test_print_mesh_builder,
 		grid_size,
 		cell_world_size,
 		_get_view_tuning(),
-		stage2_shell_preview_visible
+		stage2_shell_preview_visible,
+		selection_target_kind
 	)
 
 func clear_stage2_selection_preview() -> void:
+	stage2_hover_face_ids = PackedStringArray()
+	stage2_selected_face_ids = PackedStringArray()
 	stage2_hover_patch_ids = PackedStringArray()
 	stage2_selected_patch_ids = PackedStringArray()
+	stage2_selection_target_kind = StringName()
 	stage2_preview_presenter.sync_stage2_selection_preview(
 		stage2_hover_face_instance,
 		stage2_selected_faces_instance,
 		null,
+		stage2_hover_face_ids,
+		stage2_selected_face_ids,
 		stage2_hover_patch_ids,
 		stage2_selected_patch_ids,
 		null,
 		grid_size,
 		cell_world_size,
 		_get_view_tuning(),
-		false
+		false,
+		StringName()
 	)
 
 func set_structural_shape_preview_state(
@@ -391,10 +414,11 @@ func _apply_view_tuning() -> void:
 		_sync_light_anchor()
 		light.light_energy = tuning.workspace_light_energy
 	_refresh_generated_string_materials()
-	stage2_preview_presenter.sync_stage2_shell_preview(
+	stage2_shell_preview_source = stage2_preview_presenter.sync_stage2_shell_preview(
 		stage2_shell_instance,
 		null,
 		null,
+		{},
 		grid_size,
 		cell_world_size,
 		tuning,
@@ -414,13 +438,16 @@ func _apply_view_tuning() -> void:
 		stage2_hover_face_instance,
 		stage2_selected_faces_instance,
 		null,
+		stage2_hover_face_ids,
+		stage2_selected_face_ids,
 		stage2_hover_patch_ids,
 		stage2_selected_patch_ids,
 		null,
 		grid_size,
 		cell_world_size,
 		tuning,
-		false
+		false,
+		stage2_selection_target_kind
 	)
 	geometry_presenter.refresh_visuals(occupied_cells_instance, active_plane_instance, grid_bounds_instance)
 	_sync_structural_shape_preview_mesh()
@@ -491,9 +518,16 @@ func _build_structural_shape_preview_material() -> StandardMaterial3D:
 	return material
 
 func _apply_stage2_display_priority() -> void:
-	var show_stage1_authoring_mass: bool = not stage2_shell_preview_visible
+	var stage2_shell_ready: bool = (
+		stage2_shell_preview_visible
+		and stage2_shell_instance != null
+		and stage2_shell_instance.visible
+		and stage2_shell_instance.mesh != null
+	)
+	var show_stage1_authoring_mass: bool = not stage2_shell_ready
 	if occupied_cells_instance != null:
 		occupied_cells_instance.visible = show_stage1_authoring_mass
+		occupied_cells_instance.material_override = geometry_presenter.build_voxel_material()
 	if structural_shape_preview_instance != null:
 		structural_shape_preview_instance.visible = show_stage1_authoring_mass and not structural_shape_preview_cells.is_empty()
 	if builder_marker_root != null:

@@ -14,6 +14,7 @@ func build_variant(base_material: BaseMaterialDef, tier: TierDef) -> MaterialVar
 	variant.resolved_skill_family_bias_lines = _scale_stat_lines(base_material.skill_family_bias_lines, tier.stat_multiplier)
 	variant.resolved_elemental_affinity_lines = _scale_stat_lines(base_material.elemental_affinity_lines, tier.stat_multiplier)
 	variant.resolved_equipment_context_bias_lines = _scale_stat_lines(base_material.equipment_context_bias_lines, tier.stat_multiplier)
+	variant.resolved_animation_effect_stubs = _duplicate_animation_effect_stubs(base_material.animation_effect_stubs)
 	return variant
 
 func _scale_stat_lines(stat_lines: Array[StatLine], stat_multiplier: float) -> Array[StatLine]:
@@ -36,3 +37,15 @@ func _build_variant_id(base_material: BaseMaterialDef, tier: TierDef) -> StringN
 	if tier_id_text.is_empty():
 		return StringName(base_material_id_text)
 	return StringName("%s_%s" % [base_material_id_text, tier_id_text])
+
+func _duplicate_animation_effect_stubs(effect_stubs: Array[Resource]) -> Array[Resource]:
+	var duplicated_effect_stubs: Array[Resource] = []
+	for effect_stub: Resource in effect_stubs:
+		if effect_stub == null:
+			continue
+		var effect_copy: Resource = effect_stub.duplicate(true)
+		if effect_copy != null:
+			if effect_copy.has_method("normalize"):
+				effect_copy.call("normalize")
+			duplicated_effect_stubs.append(effect_copy)
+	return duplicated_effect_stubs

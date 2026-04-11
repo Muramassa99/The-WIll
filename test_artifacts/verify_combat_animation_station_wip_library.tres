@@ -1,0 +1,93 @@
+[gd_resource type="Resource" script_class="PlayerForgeWipLibraryState" format=3]
+
+[ext_resource type="Script" path="res://core/models/crafted_item_wip.gd" id="1_if2lj"]
+[ext_resource type="Script" path="res://core/models/combat_animation_point.gd" id="2_0e8x7"]
+[ext_resource type="Script" path="res://core/models/combat_animation_draft.gd" id="3_ww4cm"]
+[ext_resource type="Script" path="res://core/models/combat_animation_station_state.gd" id="4_6mv1k"]
+[ext_resource type="Script" path="res://core/atoms/layer_atom.gd" id="5_uf2ih"]
+[ext_resource type="Script" path="res://core/models/player_forge_wip_library_state.gd" id="6_my4tn"]
+
+[sub_resource type="Resource" id="Resource_7mfht"]
+script = ExtResource("2_0e8x7")
+point_id = &"point_00"
+
+[sub_resource type="Resource" id="Resource_uph1q"]
+script = ExtResource("3_ww4cm")
+draft_id = &"idle_combat_draft"
+display_name = "Combat Idle"
+draft_kind = &"draft_idle"
+context_id = &"idle_combat"
+point_chain = Array[Resource]([SubResource("Resource_7mfht")])
+preview_loop_enabled = true
+
+[sub_resource type="Resource" id="Resource_5y6a7"]
+script = ExtResource("2_0e8x7")
+point_id = &"point_00"
+
+[sub_resource type="Resource" id="Resource_1mhh0"]
+script = ExtResource("3_ww4cm")
+draft_id = &"idle_noncombat_draft"
+display_name = "Noncombat Idle"
+draft_kind = &"draft_idle"
+context_id = &"idle_noncombat"
+point_chain = Array[Resource]([SubResource("Resource_5y6a7")])
+preview_loop_enabled = true
+
+[sub_resource type="Resource" id="Resource_3o84h"]
+script = ExtResource("2_0e8x7")
+point_id = &"point_00"
+
+[sub_resource type="Resource" id="Resource_2wenk"]
+script = ExtResource("2_0e8x7")
+point_id = &"point_01"
+point_index = 1
+local_target_position = Vector3(0, 0, -0.12)
+local_target_rotation_degrees = Vector3(-8, 0, 0)
+active_plane_origin_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_7oqd0"]
+script = ExtResource("3_ww4cm")
+draft_id = &"melee_baseline_a_draft"
+display_name = "Melee Baseline A"
+owning_skill_id = &"melee_baseline_a"
+point_chain = Array[Resource]([SubResource("Resource_3o84h"), SubResource("Resource_2wenk")])
+
+[sub_resource type="Resource" id="Resource_0f2qk"]
+script = ExtResource("2_0e8x7")
+point_id = &"point_00"
+
+[sub_resource type="Resource" id="Resource_f67c4"]
+script = ExtResource("2_0e8x7")
+point_id = &"point_01"
+point_index = 1
+local_target_position = Vector3(0, 0, -0.12)
+local_target_rotation_degrees = Vector3(-8, 0, 0)
+active_plane_origin_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_v4qoq"]
+script = ExtResource("3_ww4cm")
+draft_id = &"melee_baseline_b_draft"
+display_name = "Melee Baseline B"
+owning_skill_id = &"melee_baseline_b"
+point_chain = Array[Resource]([SubResource("Resource_0f2qk"), SubResource("Resource_f67c4")])
+
+[sub_resource type="Resource" id="Resource_lg7ft"]
+script = ExtResource("4_6mv1k")
+selected_skill_id = &"melee_baseline_a"
+idle_drafts = Array[Resource]([SubResource("Resource_uph1q"), SubResource("Resource_1mhh0")])
+skill_drafts = Array[Resource]([SubResource("Resource_7oqd0"), SubResource("Resource_v4qoq")])
+default_skill_package_initialized = true
+
+[sub_resource type="Resource" id="Resource_kghf7"]
+script = ExtResource("1_if2lj")
+wip_id = &"player_wip_1775929838.881_1"
+forge_project_name = "Combat Animation Foundation Test"
+combat_animation_station_state = SubResource("Resource_lg7ft")
+forge_intent = &"intent_melee"
+equipment_context = &"ctx_weapon"
+
+[resource]
+script = ExtResource("6_my4tn")
+saved_wips = Array[ExtResource("1_if2lj")]([SubResource("Resource_kghf7")])
+selected_wip_id = &"player_wip_1775929838.881_1"
+save_file_path = "C:/WORKSPACE/test_artifacts/verify_combat_animation_station_wip_library.tres"

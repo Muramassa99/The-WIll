@@ -4,6 +4,7 @@ stage2_geometry_menu_feature_contour_restore_hidden=true
 feature_contour_tool_apply_visible=true
 feature_contour_tool_clear_visible=true
 synthetic_bridge_selected_count=12
+selected_contour_count=1
 synthetic_contour_selected_count=8
 synthetic_contour_non_empty=true
 synthetic_contour_smaller_than_bridge=true

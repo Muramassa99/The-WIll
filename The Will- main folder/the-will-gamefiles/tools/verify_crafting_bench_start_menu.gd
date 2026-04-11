@@ -44,14 +44,14 @@ func _run_verification() -> void:
 	var project_list_enabled: bool = not crafting_ui.start_menu_project_list_button.disabled
 	var background_saved_wip_loaded: bool = forge_controller.active_wip != null and forge_controller.active_wip.wip_id == persisted_saved_wip.wip_id
 	var background_saved_wip_is_shield: bool = forge_controller.active_wip != null and forge_controller.active_wip.forge_builder_path_id == CraftedItemWIPScript.BUILDER_PATH_SHIELD
-	var background_saved_wip_grid_ok: bool = forge_controller.grid_size == Vector3i(100, 80, 30)
+	var background_saved_wip_grid_ok: bool = forge_controller.grid_size == Vector3i(200, 160, 60)
 
 	crafting_ui.start_menu_continue_last_button.emit_signal("pressed")
 	await process_frame
 	await process_frame
 
 	var continue_last_loaded_shield: bool = forge_controller.active_wip != null and forge_controller.active_wip.forge_builder_path_id == CraftedItemWIPScript.BUILDER_PATH_SHIELD
-	var continue_last_grid_ok: bool = forge_controller.grid_size == Vector3i(100, 80, 30)
+	var continue_last_grid_ok: bool = forge_controller.grid_size == Vector3i(200, 160, 60)
 
 	crafting_ui.close_ui()
 	await process_frame
@@ -81,7 +81,7 @@ func _run_verification() -> void:
 	var ranged_path_ok: bool = ranged_wip != null and ranged_wip.forge_builder_path_id == CraftedItemWIPScript.BUILDER_PATH_RANGED_PHYSICAL
 	var ranged_intent_ok: bool = ranged_wip != null and ranged_wip.forge_intent == &"intent_ranged"
 	var ranged_context_ok: bool = ranged_wip != null and ranged_wip.equipment_context == &"ctx_weapon"
-	var ranged_grid_ok: bool = forge_controller.grid_size == Vector3i(160, 80, 30)
+	var ranged_grid_ok: bool = forge_controller.grid_size == Vector3i(320, 160, 60)
 	var menu_hidden_after_ranged: bool = not crafting_ui.start_menu_panel.visible and crafting_ui.main_hbox.visible
 
 	crafting_ui.new_project_button.emit_signal("pressed")
@@ -105,7 +105,7 @@ func _run_verification() -> void:
 	var shield_path_ok: bool = shield_wip != null and shield_wip.forge_builder_path_id == CraftedItemWIPScript.BUILDER_PATH_SHIELD
 	var shield_intent_ok: bool = shield_wip != null and shield_wip.forge_intent == &"intent_shield"
 	var shield_context_ok: bool = shield_wip != null and shield_wip.equipment_context == &"ctx_shield"
-	var shield_grid_ok: bool = forge_controller.grid_size == Vector3i(100, 80, 30)
+	var shield_grid_ok: bool = forge_controller.grid_size == Vector3i(200, 160, 60)
 
 	crafting_ui.close_ui()
 	await process_frame
@@ -119,7 +119,7 @@ func _run_verification() -> void:
 
 	var melee_wip: CraftedItemWIP = forge_controller.active_wip
 	var melee_path_ok: bool = melee_wip != null and melee_wip.forge_builder_path_id == CraftedItemWIPScript.BUILDER_PATH_MELEE
-	var melee_grid_ok: bool = forge_controller.grid_size == Vector3i(240, 80, 40)
+	var melee_grid_ok: bool = forge_controller.grid_size == Vector3i(480, 160, 80)
 
 	crafting_ui.close_ui()
 	await process_frame
@@ -135,7 +135,7 @@ func _run_verification() -> void:
 	var magic_path_ok: bool = magic_wip != null and magic_wip.forge_builder_path_id == CraftedItemWIPScript.BUILDER_PATH_MAGIC
 	var magic_intent_ok: bool = magic_wip != null and magic_wip.forge_intent == &"intent_magic"
 	var magic_context_ok: bool = magic_wip != null and magic_wip.equipment_context == &"ctx_focus"
-	var magic_grid_ok: bool = forge_controller.grid_size == Vector3i(100, 30, 30)
+	var magic_grid_ok: bool = forge_controller.grid_size == Vector3i(200, 60, 60)
 
 	var lines: PackedStringArray = []
 	lines.append("start_menu_visible_on_open=%s" % str(start_menu_visible_on_open))

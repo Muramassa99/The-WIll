@@ -60,6 +60,7 @@ func _run_verification() -> void:
 		_build_patch_hit_data(grip_safe_patch),
 		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_REGION_FILLET
 	)
+	var grip_safe_region_ids: PackedStringArray = PackedStringArray(grip_safe_selection_data.get("region_ids", PackedStringArray()))
 	var grip_safe_patch_ids: PackedStringArray = PackedStringArray(grip_safe_selection_data.get("patch_ids", PackedStringArray()))
 	var grip_safe_selected_count: int = grip_safe_patch_ids.size()
 	var grip_safe_apply_patch_ids: PackedStringArray = selection_presenter.resolve_selection_apply_patch_ids(
@@ -79,6 +80,8 @@ func _run_verification() -> void:
 		origins_before_safe_feature_region_fillet,
 		_collect_patch_origins(stage2_item_state)
 	)
+	var grip_safe_feature_region_fillet_editable_mesh_vertex_count: int = stage2_item_state.resolve_editable_mesh_vertex_indices_for_patch_ids(grip_safe_apply_patch_ids).size()
+	var grip_safe_feature_region_fillet_editable_mesh_delta: bool = stage2_item_state.has_editable_mesh_delta_for_patch_ids(grip_safe_apply_patch_ids)
 	var grip_safe_feature_region_changed_patch_count: int = _count_changed_patch_origins(
 		origins_before_safe_feature_region_fillet,
 		_collect_patch_origins(stage2_item_state)
@@ -109,6 +112,11 @@ func _run_verification() -> void:
 		origins_before_safe_feature_region_chamfer,
 		_collect_patch_origins(stage2_item_state)
 	)
+	var grip_safe_feature_region_chamfer_editable_mesh_vertex_count: int = stage2_item_state.resolve_editable_mesh_vertex_indices_for_patch_ids(grip_safe_chamfer_apply_patch_ids).size()
+	var grip_safe_feature_region_chamfer_editable_mesh_delta: bool = stage2_item_state.has_editable_mesh_delta_for_patch_ids(grip_safe_chamfer_apply_patch_ids)
+
+	_build_offset_cluster(stage2_item_state, general_patch, 5, -0.25)
+	stage2_item_state.refresh_current_local_aabb_from_patches()
 
 	var general_chamfer_patch_ids: PackedStringArray = PackedStringArray(selection_presenter.resolve_hover_selection_data(
 		stage2_item_state,
@@ -131,6 +139,8 @@ func _run_verification() -> void:
 		origins_before_general_feature_region_chamfer,
 		_collect_patch_origins(stage2_item_state)
 	)
+	var general_feature_region_chamfer_editable_mesh_vertex_count: int = stage2_item_state.resolve_editable_mesh_vertex_indices_for_patch_ids(general_chamfer_apply_patch_ids).size()
+	var general_feature_region_chamfer_editable_mesh_delta: bool = stage2_item_state.has_editable_mesh_delta_for_patch_ids(general_chamfer_apply_patch_ids)
 	var general_feature_region_changed_patch_count: int = _count_changed_patch_origins(
 		origins_before_general_feature_region_chamfer,
 		_collect_patch_origins(stage2_item_state)
@@ -143,15 +153,22 @@ func _run_verification() -> void:
 	lines.append("feature_region_tool_clear_visible=%s" % str(feature_region_tool_clear_visible))
 	lines.append("hover_preview_visible=%s" % str(hover_preview_visible))
 	lines.append("selected_preview_visible=%s" % str(selected_preview_visible))
+	lines.append("grip_safe_selected_region_count=%d" % grip_safe_region_ids.size())
 	lines.append("grip_safe_selected_count=%d" % grip_safe_selected_count)
 	lines.append("grip_safe_apply_target_count=%d" % grip_safe_apply_patch_ids.size())
 	lines.append("grip_safe_feature_region_fillet_changed_shell=%s" % str(grip_safe_feature_region_fillet_changed_shell))
+	lines.append("grip_safe_feature_region_fillet_editable_mesh_vertex_count=%d" % grip_safe_feature_region_fillet_editable_mesh_vertex_count)
+	lines.append("grip_safe_feature_region_fillet_editable_mesh_delta=%s" % str(grip_safe_feature_region_fillet_editable_mesh_delta))
 	lines.append("grip_safe_feature_region_changed_patch_count=%d" % grip_safe_feature_region_changed_patch_count)
 	lines.append("selected_count_after_clear=%d" % selected_count_after_clear)
 	lines.append("grip_safe_feature_region_chamfer_changed_shell=%s" % str(grip_safe_feature_region_chamfer_changed_shell))
+	lines.append("grip_safe_feature_region_chamfer_editable_mesh_vertex_count=%d" % grip_safe_feature_region_chamfer_editable_mesh_vertex_count)
+	lines.append("grip_safe_feature_region_chamfer_editable_mesh_delta=%s" % str(grip_safe_feature_region_chamfer_editable_mesh_delta))
 	lines.append("general_selected_count=%d" % general_selected_count)
 	lines.append("general_apply_target_count=%d" % general_chamfer_apply_patch_ids.size())
 	lines.append("general_feature_region_chamfer_changed_shell=%s" % str(general_feature_region_chamfer_changed_shell))
+	lines.append("general_feature_region_chamfer_editable_mesh_vertex_count=%d" % general_feature_region_chamfer_editable_mesh_vertex_count)
+	lines.append("general_feature_region_chamfer_editable_mesh_delta=%s" % str(general_feature_region_chamfer_editable_mesh_delta))
 	lines.append("general_feature_region_changed_patch_count=%d" % general_feature_region_changed_patch_count)
 
 	var file: FileAccess = FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)
@@ -171,13 +188,13 @@ func _build_front_heavy_sword_wip() -> CraftedItemWIP:
 	wip.forge_builder_path_id = CraftedItemWIP.BUILDER_PATH_MELEE
 
 	var layer_map: Dictionary = {}
-	for x: int in range(40, 52):
+	for x: int in range(32, 58):
 		for y: int in range(24, 27):
 			for z: int in range(18, 20):
 				_add_cell(layer_map, Vector3i(x, y, z), &"mat_wood_gray")
-	for x: int in range(52, 65):
-		for y: int in range(22, 29):
-			for z: int in range(17, 22):
+	for x: int in range(58, 65):
+		for y: int in range(23, 28):
+			for z: int in range(17, 21):
 				_add_cell(layer_map, Vector3i(x, y, z), &"mat_iron_gray")
 
 	var ordered_layers: Array = layer_map.keys()
@@ -254,19 +271,24 @@ func _build_offset_cluster(stage2_item_state, anchor_patch, desired_count: int, 
 		if not patch_state.current_quad.normal.normalized().is_equal_approx(anchor_normal):
 			continue
 		cluster_patch_ids.append(String(patch_id))
-		_set_patch_offset_cells(patch_state, offset_cells)
+		_set_patch_offset_cells(stage2_item_state, patch_state, offset_cells)
 		for neighbor_patch_id_string: String in patch_state.neighbor_patch_ids:
 			var neighbor_patch_id: StringName = StringName(neighbor_patch_id_string)
 			if not visited_lookup.has(neighbor_patch_id):
 				pending_patch_ids.append(neighbor_patch_id)
 	return cluster_patch_ids
 
-func _set_patch_offset_cells(patch_state, offset_cells: float) -> void:
+func _set_patch_offset_cells(stage2_item_state, patch_state, offset_cells: float) -> void:
 	if patch_state == null or patch_state.baseline_quad == null or patch_state.current_quad == null:
 		return
 	var normal: Vector3 = patch_state.current_quad.normal.normalized()
 	patch_state.current_quad.origin_local = patch_state.baseline_quad.origin_local - (normal * offset_cells)
+	patch_state.current_offset_cells = offset_cells
 	patch_state.dirty = true
+	if stage2_item_state != null:
+		stage2_item_state.editable_mesh_visual_authority = true
+		if stage2_item_state.current_editable_mesh_state != null:
+			stage2_item_state.current_editable_mesh_state.dirty = true
 
 func _build_patch_hit_data(patch_state) -> Dictionary:
 	if patch_state == null or patch_state.current_quad == null:

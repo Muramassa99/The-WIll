@@ -225,3 +225,14 @@ func move_ik_target_toward(target_node: Node3D, desired_global_position: Vector3
 		return
 	var blend_factor: float = clampf(smoothing_speed * delta, 0.0, 1.0)
 	target_node.global_position = target_node.global_position.lerp(desired_global_position, blend_factor)
+
+func apply_solved_arm_targets(
+	target_node: Node3D,
+	pole_node: Node3D,
+	corrected_target_world: Vector3,
+	pole_target_world: Vector3,
+	smoothing_speed: float,
+	delta: float
+) -> void:
+	move_ik_target_toward(target_node, corrected_target_world, smoothing_speed, delta)
+	move_ik_target_toward(pole_node, pole_target_world, smoothing_speed, delta)

@@ -31,6 +31,20 @@ It also does double duty:
 - as the live implementation-memory note used during work
 - as a status-export note that can be handed to third parties so they can understand the current state without reading the full codebase
 
+## Godot documentation research law
+
+Locked in docs:
+- For any Godot implementation task, topic-specific online documentation research must happen before code implementation starts, even for trivial changes.
+- Official Godot documentation is the first technical authority for engine behavior, APIs, supported workflows, and engine limitations.
+- Built-in Godot tools and documented engine workflows must be preferred before custom engine-side replacements are introduced.
+- Custom Godot-side solutions are allowed only after checking whether the official documented path can already solve the problem alone or by combining native tools.
+
+Implemented in code:
+- Not applicable as runtime code behavior; this is a process and implementation law.
+
+Still pending:
+- This law must continue to be reflected in future Godot implementation passes, specs, and review decisions.
+
 ## Quick export read
 
 If someone needs the short version first, the current state is:
@@ -2584,3 +2598,3210 @@ Verified:
 - `stage2_selection_restore_results.txt`
   - `stage2_geometry_menu_face_restore_hidden=true`
   - `restore_tool_revert_visible=true`
+
+## 63. 2026-04-08 forge runtime tool menu + Stage 2 amount control pass
+
+The forge bench now has a dedicated runtime `Tool` menu in the top action row.
+
+What exists now:
+- `Geometry` remains the active tool-family selector surface
+- `Tool` is now the live adjustment surface for the currently selected family
+- current first-pass runtime adjustment coverage is:
+  - Stage 1 shape families:
+    - read current drag-footprint sizing mode
+    - read current shared rotation
+    - rotate shape `-90 deg / +90 deg`
+  - Stage 2 pointer-radius brush families:
+    - read current brush radius
+    - step radius down/up from the menu
+    - read current tool amount
+    - step tool amount down/up from the menu
+  - Stage 2 selection families:
+    - read current tool amount
+    - step tool amount down/up from the menu
+- the overlay HUD now also shows Stage 2 `Amount: <percent>` alongside the existing radius row
+- Stage 2 overlay/state wording now matches the modifier contract more truthfully:
+  - Stage 1 uses `Add / Remove / Pick`
+  - Stage 2 uses `Apply / Revert`
+
+Current Stage 2 amount law:
+- current first-pass Stage 2 amount is a shared runtime ratio
+- current clamp comes from `ForgeRulesDef`:
+  - `stage2_tool_min_amount_ratio = 0.05`
+  - `stage2_tool_max_amount_ratio = 1.0`
+  - `stage2_tool_amount_ratio_step = 0.05`
+- current behavioral meaning:
+  - pointer `carve / restore` use amount as pass strength / max-depth scaling
+  - pointer `fillet / chamfer` use amount as target envelope scaling
+  - selection `fillet / chamfer` use amount as target envelope scaling
+  - selection `restore / revert` uses amount as partial-to-full revert scaling
+
+Current ownership:
+- `scenes/ui/crafting_bench_ui.tscn`
+  - new `Tool` menu button and overlay amount label
+- `runtime/forge/crafting_bench_ui.gd`
+  - runtime tool-menu state, Stage 2 amount state, menu actions, overlay sync
+- `runtime/forge/forge_bench_menu_presenter.gd`
+  - tool menu build path
+- `runtime/forge/forge_stage2_brush_presenter.gd`
+  - Stage 2 amount scaling in brush and selection apply paths
+- `core/defs/forge_rules_def.gd`
+  - Stage 2 amount clamp exports
+- `core/defs/forge/forge_rules_default.tres`
+  - default Stage 2 amount tuning values
+
+Important boundary:
+- Stage 1 structural shape size is still drag-defined footprint sizing
+- Stage 1 does not yet have a separate scalar size panel
+- Stage 1 rotation is still the current shared quarter-turn slot, not the later full `0..360` per-degree system
+- Stage 2 amount is now runtime-adjustable, but deeper per-tool specialized modifier families still remain later work
+
+Verified:
+- `crafting_bench_controls_results.txt`
+  - `tool_menu_exists=true`
+- `crafting_bench_overlay_hud_results.txt`
+  - `amount_visible_in_stage2=true`
+  - `stage2_tool_state_apply_ok=true`
+  - `amount_label_prefix_ok=true`
+- `crafting_bench_tool_menu_results.txt`
+  - `freehand_has_no_runtime_adjustments=true`
+  - `rectangle_tool_menu_has_rotate_left=true`
+  - `rectangle_rotation_changed_to_ninety=true`
+  - `stage2_pointer_tool_menu_has_radius_line=true`
+  - `stage2_pointer_tool_menu_has_amount_line=true`
+  - `tool_amount_decreased_via_menu=true`
+  - `tool_radius_increased_via_menu=true`
+  - `stage2_selection_tool_menu_has_amount_line=true`
+  - `stage2_selection_tool_menu_hides_radius_line=true`
+- regression checks stayed green:
+  - `stage2_refinement_mode_results.txt`
+  - `stage2_selection_restore_results.txt`
+
+## 64. 2026-04-08 Stage 2 refinement full-3D lock + model-visibility correction
+
+Stage 2 refinement now behaves as a full-model 3D workspace instead of a hidden layer-bound submode.
+
+What changed:
+- entering Stage 2 now forces the forge workspace into `free` / main 3D view
+- the 2D inset workspace is hidden while Stage 2 is active
+- `Flip View` is disabled and relabeled to `3D Locked` during Stage 2
+- active slice rendering is suppressed during Stage 2
+- plane switching and layer stepping are ignored during Stage 2
+- if the Stage 2 shell is not actually ready/visible, the workspace now falls back to showing Stage 1 occupied mass instead of appearing empty
+
+Current law:
+- Stage 1 placement remains layer-bound structural authoring
+- Stage 2 refinement is full 3D model interaction
+- Stage 2 interaction is resolved against the shell/model geometry, not against the active plane/layer cursor
+- only the pre-defined protected grip zones still restrict allowed modification types inside Stage 2
+
+Current ownership:
+- `runtime/forge/crafting_bench_ui.gd`
+  - Stage 2 entry/exit workspace lock
+  - plane/layer input suppression during Stage 2
+  - hidden inset / locked free-view presentation during Stage 2
+- `runtime/forge/forge_workspace_preview.gd`
+  - Stage 2 display-priority fallback so the workspace never appears empty if the shell fails to show
+- `runtime/forge/forge_workspace_presentation.gd`
+  - Stage 2 status wording changed to `Full 3D` / `Layer rules inactive`
+- `runtime/forge/forge_bench_menu_presenter.gd`
+  - geometry menu no longer shows plane/layer controls during Stage 2
+
+Verified:
+- `stage2_refinement_mode_results.txt`
+  - `refinement_model_visible=true`
+  - `free_workspace_locked=true`
+  - `inset_hidden=true`
+  - `active_slice_hidden=true`
+  - `plane_unchanged_in_stage2=true`
+  - `layer_unchanged_in_stage2=true`
+  - `hover_hit_resolved=true`
+  - `carve_changed_shell=true`
+
+Visibility correction follow-up:
+- the Stage 2 shell/hit data was already alive, but the shell render was too faint to read clearly once the normal structural mass was suppressed
+- corrected rendering rule:
+  - purple transparency is preview language only
+  - the committed Stage 2 shell must render as opaque reference geometry using the actual material-color path
+  - no shell transparency should appear unless the source material itself later supports transparency
+- Stage 2 shell now uses the same opaque vertex-color material logic as the normal test-print / held-item path
+- Stage 2 shell mesh now receives the active material lookup when building canonical geometry preview
+- current verified result now also shows:
+  - `stage2_shell_visible=true`
+  - `stage2_shell_material_uses_vertex_color=true`
+  - `stage2_shell_material_opaque=true`
+
+## 65. 2026-04-09 Stage 2 unified visual shell implementation lock
+
+A new authoritative execution spec now exists for the real Stage 2 direction:
+- `STAGE 2 - UNIFIED VISUAL SHELL IMPLEMENTATION SPEC 2026-04-09.md`
+
+What this locks:
+- Stage 1 remains the parent gameplay/backend/material/grip authority
+- Stage 2 remains the child visual-shell authority
+- Stage 2 must become a welded unified outer shell, not a drifting quad-offset plate system
+- zero-edit Stage 2 baseline shell must still become the visible runtime item mesh
+- zero-edit Stage 2 baseline should already be optimized for flat untouched forms instead of preserving dense prototype subdivision
+- later Stage 1 edits should propagate locally into Stage 2 rather than forcing blind full resets where local reconciliation is possible
+- Stage 2 topology economy is now explicitly two-tier:
+  - light continuous cleanup after local edits
+  - stronger simplification/cleanup on save/finalize
+- save/finalize cleanup is now explicitly intended as a conservative three-pass simplification chain
+- Stage 2 tool modifier channels are now conceptually split as:
+  - `Ctrl + Scroll` = footprint/radius
+  - `V + Scroll` = intensity / fillet radius / chamfer depth, depending on tool family
+- protected handle/grip regions exported from Stage 1 should become cylindrical Stage 2 restriction zones where only fillet remains allowed
+- Phase 4 selection rollout is now intentionally staged:
+  - start with the most useful families first
+  - expand later only if the additional topology families still prove valuable
+- purple transparency is preview language only, never the committed Stage 2 shell by default
+- cutting-edge/blunt-zone classifier expansion is dropped
+- melee/shield backend collision/hurt logic should stay Stage 1-derived and simple later
+- preferred later backend split is one Stage 1-derived geometric basis branching into:
+  - visual base for Stage 2
+  - collision shape
+  - hurt shape
+- ranged physical and magic hurt delivery remains a later projectile/effect concern
+
+Important architecture correction:
+- the current `Stage2PatchState` / `Stage2ShellQuadState` system is now treated as a prototype interaction shell, not the final Stage 2 geometry authority
+- the next real implementation branch must be:
+  - unified shell generation
+  - unified shell saved state
+  - local remesh / retriangulation on edits
+  - topology-aware future targeting from the altered shell
+
+## 66. 2026-04-09 Stage 2 unified shell Phase 1 baseline now live
+
+The first live implementation slice of the unified-shell Stage 2 rewrite is now in.
+
+What is now true in code:
+- a new `Stage2ShellMeshState` resource exists as the saved unified-shell baseline state
+- `ForgeStage2Service` now builds and stores a unified shell baseline from Stage 1 canonical geometry during Stage 2 initialization
+- `Stage2ItemState` now carries:
+  - `baseline_shell_mesh_state`
+  - `current_shell_mesh_state`
+- zero-edit Stage 2 geometry now prefers the unified shell instead of the dense patch grid
+- the foundation verifier now checks that the unified shell has fewer quads than the patch grid and that test-print handoff uses the unified shell in the untouched case
+
+Current confirmed behavior:
+- the sample Stage 2 foundation case now resolves from `40` patch quads down to `6` unified shell quads
+- the zero-edit test print uses the unified shell geometry
+- refinement mode still enters and renders correctly after the Phase 1 baseline change
+
+Important current boundary:
+- the existing `Stage2PatchState` patch grid still exists under the hood as the current local edit substrate
+- if Stage 2 patch edits diverge from the baseline shell, `Stage2ItemState` currently falls back to patch-derived geometry for the visible edited result
+- this means:
+  - zero-edit Stage 2 now follows the new unified-shell path
+  - true local unified-shell remesh / retriangulation after edits is still not done yet
+- that later work belongs to the next implementation phases, not to Phase 1
+
+Verification now on record:
+- `stage2_refinement_foundation_results.txt`
+  - `stage2_unified_shell_quad_count=6`
+  - `stage2_unified_shell_simpler_than_patch_grid=true`
+  - `test_print_uses_stage2_geometry=true`
+- `stage2_refinement_mode_results.txt`
+  - refinement mode still enters correctly
+  - shell remains visible and interactable
+- `crafting_bench_controls_results.txt`
+  - bench-level controls still pass after the Phase 1 Stage 2 changes
+
+## 67. 2026-04-09 Stage 2 zero-edit runtime handoff now auto-generates
+
+The next unified-shell contract gap is now closed:
+- runtime visual generation no longer depends on the user manually initializing Stage 2 first
+
+What changed:
+- `ForgeService.build_test_print_from_wip()` now auto-builds a Stage 2 baseline shell when a WIP has no Stage 2 state yet, or when the current Stage 2 state has no shell
+- that auto-generated Stage 2 shell is then used for:
+  - test-print canonical geometry
+  - forge preview/test-print visual handoff
+  - player-held runtime mesh handoff through the normal test-print path
+- the generated Stage 2 baseline is also written back onto the WIP resource so the parent/child Stage 1 -> Stage 2 relationship remains coherent
+
+What this means now:
+- zero-edit Stage 2 is truly optional as an editor action
+- zero-edit Stage 2 is no longer optional as the default visual output layer
+- untouched crafted items now still receive the unified Stage 2 shell as their visible mesh in runtime paths
+
+Verification on record:
+- `player_held_item_materials_results.txt`
+  - `runtime_stage2_missing_before_build=true`
+  - `runtime_stage2_exists_after_build=true`
+  - `runtime_stage2_unified_shell_simpler_than_patch_grid=true`
+  - `runtime_test_print_uses_stage2_geometry=true`
+  - player-held mesh still builds and shows multiple visible material colors correctly
+- `stage2_refinement_foundation_results.txt`
+  - still green after the ForgeService auto-generation change
+- `player_weapon_guidance_results.txt`
+  - equip/runtime guidance path still passes after the Stage 2 auto-generation change
+
+Important current boundary remains unchanged:
+- once the user starts editing Stage 2, visible geometry still falls back to the current prototype patch-derived path
+- true local unified-shell remesh / retriangulation is still the next major implementation branch
+
+## 68. 2026-04-09 Stage 2 localized shell-retention bridge now live
+
+The next coherent bridge slice is now in between zero-edit unified shell and the later true local remesh phases.
+
+What changed:
+- `Stage2PatchState` now records which unified shell quad it belongs to
+- `Stage2ShellQuadState` now also carries a stable `shell_quad_id`
+- `Stage2ItemState.build_current_canonical_geometry()` no longer drops the entire visible shell back to the dense patch grid as soon as any patch changes
+- instead:
+  - untouched shell quad regions stay unified
+  - only shell quad regions whose child patches actually changed are rebuilt from their local patch grid
+
+What this means in practice:
+- zero-edit Stage 2 still uses the fully unified shell
+- after a local edit, the whole model no longer needs to visually explode back to the full patch grid
+- only the edited shell face family decomposes into local patch geometry while the untouched shell regions stay simplified
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_quad_count=13`
+  - `post_carve_localized_geometry_retained=true`
+- reference comparison for the same sample:
+  - unified shell baseline = `6` quads
+  - dense patch grid = `40` quads
+  - post-edit localized result = `13` quads
+
+Important honesty boundary:
+- this is still not the final unified-shell remesh system
+- the edited shell region is currently represented by localized patch geometry, not by new topology-aware retriangulated surface generation
+- this is a deliberate bridge step that preserves more unified-shell value while the real local remesh/retriangulation phases are still ahead
+
+## 69. 2026-04-09 Stage 2 local transition-wall continuity bridge now live
+
+The next Stage 2 bridge slice is now in for edited shell coherence.
+
+What changed:
+- when a localized Stage 2 shell region is rebuilt from patch geometry, the system now also generates transition wall quads:
+  - between neighboring patches with different offsets
+  - along shell-boundary edges where a patch is offset inward from its baseline shell position
+- these wall quads inherit the same material color path as the edited shell region instead of falling back to a generic color
+
+What this means:
+- edited Stage 2 regions are no longer just disconnected inset top plates
+- the edited region now starts reading as a more coherent contained shell volume
+- zero-edit Stage 2 remains on the same unified-shell path as before
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_quad_count=17`
+  - `localized_surface_only_quad_count=13`
+  - `post_carve_transition_geometry_present=true`
+  - `post_carve_localized_geometry_retained=true`
+- `stage2_refinement_foundation_results.txt`
+  - zero-edit unified shell baseline remains green and unchanged
+
+Important honesty boundary:
+- this is still a bridge step
+- the system is now generating local transition wall quads for offset continuity, but it is still not doing the final intended topology-aware local remesh / retriangulation / smoothing behavior
+- the next real implementation branch remains:
+  - true local unified-shell edit core
+  - topology-aware new triangle generation on edited regions
+
+## 70. 2026-04-09 Stage 2 localized triangle-surface bridge now live
+
+The next Stage 2 bridge slice is now in and it is the first one to move edited shell regions onto actual local triangle surfaces.
+
+What changed:
+- canonical geometry now supports both:
+  - `surface_quads`
+  - `surface_triangles`
+- edited Stage 2 shell regions now rebuild their local top surface as a continuous triangle field across the affected shell face instead of only re-emitting one flat top quad per patch
+- boundary wall strips for the edited shell face are now emitted as triangles too
+- untouched shell faces still remain unified shell quads
+
+What this means:
+- an edited shell face now reads more like one continuous local surface and less like a pile of inset plates
+- the shell is still not at the final intended remesh stage, but the edited-region geometry is now materially closer to the intended local remesh direction
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_quad_count=5`
+  - `post_carve_triangle_count=20`
+  - `post_carve_surface_primitive_count=25`
+  - `localized_surface_only_primitive_count=21`
+  - `post_carve_transition_geometry_present=true`
+  - `post_carve_localized_geometry_retained=true`
+- `stage2_refinement_foundation_results.txt`
+  - zero-edit unified shell baseline still remains green and unchanged
+- `crafting_bench_controls_results.txt`
+  - bench-level controls still remain green after the triangle-surface bridge change
+
+Important honesty boundary:
+- this is still a bridge, not the final local remesh system
+- the localized edited shell face is now rebuilt as a continuous triangle surface, but the triangulation is still generated from the current patch-grid substrate rather than from the final intended topology-aware edit/remesh pipeline
+- the next real implementation branch is still:
+  - true local unified-shell edit core
+  - smarter triangle generation / retriangulation rules
+  - later smoothing / cleanup passes on those edited regions
+
+## 71. 2026-04-09 Stage 2 localized smooth-normal bridge now live
+
+The next Stage 2 bridge slice is now in on top of the localized triangle-surface pass.
+
+What changed:
+- localized Stage 2 shell-face triangles now carry per-vertex normals
+- those vertex normals are derived from the local edited shell-face vertex grid instead of using only one flat face normal per triangle
+- runtime mesh building now respects triangle vertex normals when present
+
+What this means:
+- edited shell regions can now shade as one smoother local surface instead of reading only as flat faceted triangles
+- this is still not the final cleanup/simplification/remesh end state, but it materially improves how localized edits read visually
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_triangles_have_vertex_normals=true`
+  - `post_carve_smoothed_vertex_normals_present=true`
+  - `post_carve_triangle_count=20`
+  - `post_carve_surface_primitive_count=25`
+- `stage2_refinement_foundation_results.txt`
+  - zero-edit unified baseline remains green and unchanged
+- `crafting_bench_controls_results.txt`
+  - bench-level controls remain green after the smooth-normal bridge change
+
+Important honesty boundary:
+- this is still a bridge, not the final topology-aware local remesh system
+- the edited shell face is now a continuous local triangle surface with smoothed normals, but it is still generated from the current patch-grid-driven bridge layer
+- later smarter retriangulation, cleanup, and simplification passes are still required
+
+## 72. 2026-04-09 Stage 2 localized-region rebuild bounds now live
+
+The next Stage 2 bridge slice is now in for local rebuild scope reduction.
+
+What changed:
+- localized Stage 2 shell rebuilding no longer automatically rebuilds the entire parent shell face when only a small region was edited
+- the rebuilt region is now limited to:
+  - the changed patch area
+  - plus a one-cell safety ring around that changed area
+- the untouched remainder of the parent shell face now stays as baseline shell quads outside that localized rebuild window
+
+What this means:
+- local edits now stay more local in the visible shell rebuild
+- the bridge layer now wastes less geometry on untouched parts of the same shell face
+- this is a meaningful step toward the later local cleanup/topology-economy goals
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_quad_count=6`
+  - `post_carve_triangle_count=16`
+  - `post_carve_surface_primitive_count=22`
+  - `post_carve_triangles_have_vertex_normals=true`
+  - `post_carve_smoothed_vertex_normals_present=true`
+  - `post_carve_transition_geometry_present=true`
+- comparison against the prior bridge state:
+  - previous localized smooth-normal bridge = `25` surface primitives after the same sample carve
+  - localized-region rebuild bounds = `22` surface primitives after the same sample carve
+- `stage2_refinement_foundation_results.txt`
+  - zero-edit unified baseline still remains green and unchanged
+- `crafting_bench_controls_results.txt`
+  - bench-level controls remain green after the localized-region rebuild change
+
+Important honesty boundary:
+- this is still not the final topology-aware remesh system
+- the edited region is now more local and more economical, but it is still generated from the patch-grid-driven bridge layer rather than the final intended unified-shell remesh core
+
+Practical law:
+- do not continue extending the current quad-offset Stage 2 prototype as if it will naturally become the final clay-like visual shell system
+- use the new implementation spec as the execution reference for the Stage 2 rewrite branch
+
+## 73. 2026-04-09 Stage 2 localized planar-cell quad cleanup bridge now live
+
+The next Stage 2 bridge slice is now in for light local topology economy on edited shell regions.
+
+What changed:
+- localized edited shell cells are no longer forced into two top-surface triangles when that cell remains perfectly planar after the edit
+- planar localized cells now stay as one quad on the rebuilt shell surface
+- a new Stage 2 geometry path now exists to rebuild the same localized shell region without transition walls, so continuity verification can compare the actual generated surface against the full rebuilt result instead of relying on old triangle-count assumptions
+
+What this means:
+- local edited regions now keep fewer surface primitives when parts of the edited area remain flat
+- the bridge layer is slightly more economical without losing continuity walls on the edited perimeter
+- the continuity proof is now based on real generated geometry rather than the older `2 triangles per localized cell` assumption
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_quad_count=8`
+  - `post_carve_triangle_count=12`
+  - `post_carve_surface_primitive_count=20`
+  - `localized_surface_only_primitive_count=16`
+  - `post_carve_transition_geometry_present=true`
+- comparison against the prior bridge state:
+  - previous localized-region rebuild bounds bridge = `22` surface primitives after the same sample carve
+  - localized planar-cell quad cleanup bridge = `20` surface primitives after the same sample carve
+- `stage2_refinement_foundation_results.txt`
+  - zero-edit unified baseline still remains green and unchanged
+- `crafting_bench_controls_results.txt`
+  - bench-level controls remain green after the planar-cell cleanup change
+
+Important honesty boundary:
+- this is still not the final topology-aware remesh system
+- the edited region is now slightly more economical and still continuous, but it is still generated from the current patch-grid-driven bridge layer rather than the final intended unified-shell local remesh/retriangulation core
+
+## 74. 2026-04-09 Stage 2 adaptive local cell retriangulation bridge now live
+
+The next Stage 2 bridge slice is now in for smarter local retriangulation on non-planar edited shell cells.
+
+What changed:
+- localized edited shell cells no longer always use the same fixed diagonal when they cannot stay as planar quads
+- non-planar localized cells now evaluate both valid triangle splits and choose the better local diagonal based on:
+  - expected shell-face normal alignment
+  - local vertex-normal alignment
+  - consistency between the two resulting triangle normals
+- Stage 2 state now also exposes a focused introspection path to count how many localized edited cells preferred the secondary diagonal during the current rebuild
+
+What this means:
+- the bridge layer now uses a smarter local triangulation rule on edited shell regions instead of forcing one diagonal everywhere
+- this improves local triangle layout quality on curved or saddle-like edited cells without changing the unified-shell baseline contract
+- this is still not the final topology-aware remesh system, but it is a real step toward better local retriangulation behavior
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_surface_primitive_count=20`
+  - `post_carve_secondary_diagonal_cell_count=2`
+  - `post_carve_transition_geometry_present=true`
+  - `post_carve_smoothed_vertex_normals_present=true`
+- `stage2_refinement_foundation_results.txt`
+  - zero-edit unified baseline still remains green and unchanged
+- `crafting_bench_controls_results.txt`
+  - bench-level controls remain green after the adaptive retriangulation bridge change
+
+Important honesty boundary:
+- this is still a bridge on top of the current patch-grid-derived localized shell rebuild
+- true topology-aware local remesh, cleanup, and later stronger simplification/finalization passes are still the next real implementation branches
+
+## 75. 2026-04-09 Stage 2 merged planar-region quad cleanup bridge now live
+
+The next Stage 2 bridge slice is now in for stronger local topology economy on edited shell surfaces.
+
+What changed:
+- localized edited shell cells that remain planar are no longer only preserved as separate `1x1` quads
+- neighboring planar localized cells on the same plane now merge into larger rectangular quads before triangle fallback is used
+- non-planar cells still use the adaptive diagonal retriangulation rule from the previous bridge step
+
+What this means:
+- the localized edited shell surface now wastes less geometry on flat regions inside the edited area
+- the bridge layer is a little closer to the intended continuous cleanup behavior while still staying safe and local
+- the unified-shell baseline and localized transition-wall continuity behavior both remain unchanged
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_quad_count=7`
+  - `post_carve_triangle_count=12`
+  - `post_carve_surface_primitive_count=19`
+  - `localized_surface_only_primitive_count=15`
+  - `post_carve_secondary_diagonal_cell_count=2`
+  - `post_carve_transition_geometry_present=true`
+- comparison against the prior adaptive retriangulation bridge:
+  - previous bridge = `20` surface primitives after the same sample carve
+  - merged planar-region quad cleanup bridge = `19` surface primitives after the same sample carve
+- `stage2_refinement_foundation_results.txt`
+  - zero-edit unified baseline still remains green and unchanged
+- `crafting_bench_controls_results.txt`
+  - bench-level controls remain green after the planar-region merge cleanup change
+
+Important honesty boundary:
+- this is still a bridge on top of the patch-grid-derived localized shell rebuild
+- true topology-aware local remesh, stronger cleanup, and later finalization simplification passes are still the next real implementation branches
+
+## 106. 2026-04-09 Stage 2 runtime/test-print visual authority now follows editable mesh when Stage 2 owns the visual truth
+
+The next Stage 2 replacement seam is now live outside the forge workspace as well.
+
+What changed:
+- Stage 2 editable mesh creation now receives real material lookup data in the call sites that already have it:
+  - forge bench Stage 2 initialization
+  - ForgeService runtime/test-print build path
+- TestPrintInstance now carries a `visual_mesh_source` flag
+- TestPrintMeshBuilder now has a first-class `build_mesh_from_test_print(...)` path
+- forge spawned test-print preview now honors editable-mesh visual authority instead of always rebuilding from canonical geometry
+- player-held/equipped weapon visuals now honor editable-mesh visual authority instead of always rebuilding from canonical geometry
+
+What this means:
+- zero-edit and edited Stage 2 visual authority can now stay on the editable mesh beyond the forge preview
+- runtime/test-print/player-held visuals no longer silently fall back to the legacy canonical mesh path when Stage 2 explicitly owns the visual truth
+- Stage 1/canonical geometry can remain available for compatibility and bounds while visible mesh authority follows the new Stage 2 editable mesh path
+
+Verification now on record:
+- `player_held_item_materials_results.txt`
+  - `runtime_test_print_visual_mesh_source=editable_mesh`
+  - `mesh_instance_visual_mesh_source=editable_mesh`
+  - `multiple_visible_material_colors=true`
+  - `canonical_multiple_visible_material_colors=true`
+- `stage2_refinement_mode_results.txt`
+  - `stage2_shell_preview_source=editable_mesh`
+  - `hover_hit_source=editable_mesh`
+  - `post_carve_hit_source=editable_mesh`
+- `stage2_refinement_foundation_results.txt`
+  - editable mesh state still exists and remains MeshDataTool-ready after the runtime handoff changes
+
+Important honesty boundary:
+- selection-family apply and several compatibility systems still retain legacy shell/patch bridges underneath
+- this seam moves visible runtime authority forward, but it does not yet remove every old Stage 2 compatibility path
+
+## 107. 2026-04-09 Editable-mesh canonical compatibility bridge now emits triangle geometry from editable mesh after live edits
+
+The next Stage 2 compatibility seam is now live for downstream consumers that still ask Stage2ItemState for canonical geometry.
+
+What changed:
+- `build_current_canonical_geometry()` in Stage2ItemState now switches to an editable-mesh-derived triangle geometry path when:
+  - editable mesh has visual authority
+  - editable mesh exists
+  - editable mesh has actually been edited (`dirty=true`)
+- zero-edit Stage 2 still keeps the unified-shell canonical handoff for the clean baseline case
+- after a real editable-mesh carve/revert, canonical-geometry consumers now see triangle geometry emitted from the editable mesh instead of stale legacy shell output
+
+What this means:
+- downstream compatibility consumers can begin seeing the new Stage 2 surface truth without a full rewrite in one pass
+- editable mesh is no longer only a preview/runtime mesh path; after a live edit it also becomes the canonical-geometry compatibility source
+- this is a safer migration seam than trying to remove the legacy shell bridge everywhere at once
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_hit_source=editable_mesh`
+  - `post_carve_quad_count=0`
+  - `post_carve_triangle_count=80`
+  - `post_carve_surface_primitive_count=80`
+- `player_held_item_materials_results.txt`
+  - runtime visual source remains `editable_mesh`
+  - material colors remain preserved after the compatibility-geometry shift
+- `stage2_refinement_foundation_results.txt`
+  - zero-edit baseline still stays on the intended unified-shell contract
+
+Important honesty boundary:
+- filtered geometry helpers such as face/edge/region-specific compatibility builds are still legacy shell-focused
+- this seam upgrades the full edited canonical handoff first, not every filtered helper yet
+
+## 108. 2026-04-09 Edited pointer-brush candidate acquisition now follows editable-mesh geometry instead of legacy shell patch quads
+
+The next Stage 2 replacement seam is now live for edited pointer-brush targeting.
+
+What changed:
+- once Stage 2 editable mesh has visual authority and has actually been edited, brush candidate acquisition no longer derives its local patch set from legacy shell patch quads
+- Stage2ItemState now resolves brush candidate records from the edited editable-mesh triangle surface itself
+- candidate records still resolve nearest patch metadata for zone restrictions and current compatibility rules, but the spatial brush region now follows the edited mesh surface
+
+What this means:
+- further carve/revert passes now target the live edited surface more truthfully instead of drifting back toward old shell-patch distances
+- patch metadata remains available for grip-safe blocking and envelope limits without staying the live spatial source of the brush region
+- this is a replacement seam, not a parallel add-on, because edited candidate acquisition no longer depends on the old shell patch surface path in the edited state
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `hover_hit_source=editable_mesh`
+  - `brush_candidate_face_count=2`
+  - `brush_candidate_patch_count=4`
+  - `carve_changed_shell=true`
+- `stage2_grip_safe_zone_results.txt`
+  - grip-safe blocking still holds
+  - general carve still reaches editable-mesh change after the follow-up direct-call axis fix
+
+Important honesty boundary:
+- patch metadata is still used for restriction rules and some compatibility logic
+- full selection/apply ownership migration away from patch metadata is still later work
+
+## 109. 2026-04-09 Successful editable carve/revert no longer mutates the legacy shell brush path in parallel
+
+The next Stage 2 replacement seam is now live for pointer carve/revert ownership.
+
+What changed:
+- when editable-mesh carve/revert succeeds, the old shell-local brush deformation and legacy patch-delta deformation no longer run in parallel for that same brush pass
+- a safe fallback carve axis from surface normals was also added for direct brush-presenter calls that do not come from the camera-hit path
+
+What this means:
+- successful editable carve/revert is now a real replacement path instead of double-duty deformation across two systems
+- this reduces hidden dual-truth artifacts while keeping compatibility bridges available only when the editable path itself does not take ownership
+- direct non-UI carve calls no longer silently no-op just because they were missing an explicit camera/tool axis
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `carve_changed_shell=true`
+  - `post_carve_hit_source=editable_mesh`
+  - `post_carve_triangle_count=80`
+- `stage2_grip_safe_zone_results.txt`
+  - `grip_safe_carve_changed_shell=false`
+  - `general_carve_changed_shell=true`
+  - `general_chamfer_changed_shell=true`
+- `player_held_item_materials_results.txt`
+  - runtime visual authority remains `editable_mesh`
+  - material colors remain preserved
+
+Important honesty boundary:
+- fillet/chamfer application still retain older compatibility layers underneath
+- a later full system pass should remove remaining double-duty paths once the editable-mesh geometry endpoint owns the full Stage 2 tool stack
+
+## 104. 2026-04-09 Stage 2 zero-edit preview/hit handoff now uses editable mesh authority first
+
+The next Godot-native Stage 2 replacement seam is now in.
+
+What changed:
+- the forge Stage 2 preview shell no longer always renders from the legacy shell/canonical geometry path
+- when the Stage 2 item is still unedited (`dirty == false`) and an editable mesh state exists, the Stage 2 preview now renders directly from:
+  - `Stage2EditableMeshState`
+  - through `Stage2EditableMeshBuilder.build_array_mesh_from_state(...)`
+- Stage 2 brush hover hit acquisition also now resolves against the editable mesh triangles first in that same zero-edit state
+- once Stage 2 has been edited and the current editable-mesh edit path is not yet migrated, the preview/hit flow intentionally falls back to the older canonical/shell path
+- `ForgeWorkspacePreview` now records the active Stage 2 preview source for verification
+
+Main files changed:
+- `res://runtime/forge/forge_stage2_preview_presenter.gd`
+- `res://runtime/forge/forge_workspace_preview.gd`
+- `res://tools/verify_stage2_refinement_mode.gd`
+
+What this means against the Stage 2 refoundation path:
+- the Stage 1 -> Stage 2 zero-edit handoff is now materially more correct
+- the editable mesh resource is no longer just parallel scaffolding; it is now the first-class zero-edit model basis for:
+  - Stage 2 visible shell preview
+  - Stage 2 initial hover hit acquisition
+- edited Stage 2 still falls back to the legacy shell/canonical path on purpose until carve itself is migrated onto editable-mesh ownership
+
+Verification now on record:
+- `stage2_refinement_foundation_results.txt`
+  - `stage2_editable_mesh_exists=true`
+  - `stage2_editable_mesh_vertex_count=24`
+  - `stage2_editable_mesh_index_count=36`
+  - `stage2_editable_mesh_meshdatatool_ready=true`
+- `stage2_refinement_mode_results.txt`
+  - `stage2_shell_preview_source=editable_mesh`
+  - `hover_hit_source=editable_mesh`
+  - `carve_changed_shell=true`
+  - `post_carve_hit_source=canonical_geometry`
+  - `refinement_model_visible=true`
+- `stage2_selection_restore_results.txt`
+  - face/edge/feature-edge restore remained green
+- `crafting_bench_controls_results.txt`
+  - forge bench controls remained green
+
+Important honesty boundary:
+- this is a zero-edit handoff replacement seam, not the full editable-mesh edit migration
+- once edits begin, Stage 2 still falls back to the legacy shell/canonical path because the live carve/chamfer/fillet effect stack is not yet fully owned by `MeshDataTool`/editable-mesh state
+- the next correct implementation branch is to migrate the first real edit path, starting with carve, onto the editable mesh state itself instead of only using it for baseline preview/hit authority
+
+## 105. 2026-04-09 Stage 2 editable mesh is now denser and carve/revert stay on editable-mesh visual authority
+
+The next Godot-native Stage 2 replacement slice is now in.
+
+What changed:
+- `Stage2EditableMeshBuilder` no longer emits the baseline editable mesh as one coarse quad per canonical face
+- canonical surface quads are now subdivided across their `width_voxels x height_voxels` grid before commit
+- the builder now uses:
+  - `SurfaceTool.index()`
+  - `SurfaceTool.generate_normals()`
+  so the editable mesh has welded indexed topology and refreshed normals
+- pointer `carve` / `revert` now also apply directly to `Stage2EditableMeshState` through:
+  - `MeshDataTool`
+  - editable mesh vertex moves
+  - normal rebuild
+  - commit back into stored surface arrays
+- the old shell path is still updated underneath as a compatibility bridge for the unfinished Stage 2 systems
+- editable-mesh visual authority now remains active after editable-mesh carve/revert instead of dropping preview/hit back to the legacy model immediately
+
+Main files changed:
+- `res://core/resolvers/stage2_editable_mesh_builder.gd`
+- `res://core/resolvers/stage2_shell_apply_resolver.gd`
+- `res://core/models/stage2_item_state.gd`
+- `res://services/forge_stage2_service.gd`
+- `res://runtime/forge/forge_stage2_preview_presenter.gd`
+
+What this means against the Stage 2 refoundation path:
+- the Stage 1 -> Stage 2 prep model is now materially better suited for real refinement work
+- the baseline editable mesh carries more usable topology than the earlier coarse six-face version
+- the first real live edit path (`carve` / `revert`) now touches the editable mesh itself instead of only touching the legacy shell bridge
+- this is still not the full retirement of legacy shell compatibility, but the visible Stage 2 model path is now more truly owned by the editable mesh
+
+Verification now on record:
+- `stage2_refinement_foundation_results.txt`
+  - `stage2_editable_mesh_vertex_count=42`
+  - `stage2_editable_mesh_index_count=240`
+  - `stage2_editable_mesh_meshdatatool_ready=true`
+- `stage2_refinement_mode_results.txt`
+  - `stage2_shell_preview_source=editable_mesh`
+  - `hover_hit_source=editable_mesh`
+  - `post_carve_hit_primitive_type=editable_triangle`
+  - `post_carve_hit_source=editable_mesh`
+  - `carve_changed_shell=true`
+- `stage2_selection_restore_results.txt`
+  - face/edge/feature-edge restore remained green
+- `crafting_bench_controls_results.txt`
+  - forge bench controls remained green
+- fresh focused logs for this seam showed no new script parse/compile/warning matches beyond the existing Windows certificate-store warning
+
+Important honesty boundary:
+- the legacy shell/canonical path still exists underneath as compatibility support for unfinished selection/family/edit systems
+- the separate grip-safe verifier still reports `general_carve_changed_shell=false`, so that sample/path mismatch remains unresolved and should be reviewed as its own targeted follow-up
+- the next correct implementation branch is to keep moving effect ownership away from the legacy shell bridge and deeper into editable-mesh / `MeshDataTool` truth
+
+## 101. 2026-04-09 Stage 2 carve continuity now follows shared shell vertices, dense edited-face topology, and shared-vertex rebuild detection
+
+The next meaningful unified-shell continuity pass is now live.
+
+What changed:
+- pointer `carve` / `restore` now deform shared shell vertices first and batch them by unique shared vertex keys instead of letting neighboring shell faces behave like separate sheets
+- edited shell faces now stay dense during refinement rebuilds instead of collapsing planar edited regions back into large blocky quads
+- generated edge midpoints and center points for subdivided shell cells now come from the actual live shell vertices instead of patch-depth guesses
+- a first shared-vertex neighbor-ring relaxation pass now softens carve into surrounding shared shell vertices so the surface stretches outward from the hit instead of stopping as a hard local dent
+- changed-cell detection for shell rebuilds now follows current-vs-baseline shared shell vertex truth instead of old patch-offset bookkeeping
+- the selection-restore verifier scaffold was updated to seed restore through shell-owned offset setters instead of directly mutating patch quads
+
+What this means:
+- the Stage 2 shell is materially closer to one continuous editable surface during carve
+- continuity decisions now follow shared shell vertex state, not a patch-only shadow of that state
+- additive edit-time topology is now favored on changed faces, which aligns with the current Stage 2 law that forge-side refinement should be dense and edit-ready rather than prematurely simplified
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `carve_changed_shell=true`
+  - `post_carve_quad_count=2`
+  - `post_carve_triangle_count=138`
+  - `post_carve_surface_primitive_count=140`
+  - `post_carve_hit_primitive_type=triangle`
+  - `post_carve_localized_geometry_retained=true`
+  - `post_carve_transition_geometry_present=true`
+- `stage2_selection_restore_results.txt`
+  - `face_restore_changed_shell=true`
+  - `edge_restore_changed_shell=true`
+  - `feature_edge_restore_changed_shell=true`
+- `stage2_grip_safe_zone_results.txt`
+  - grip-safe carve still blocked
+  - grip-safe fillet still allowed
+  - grip-safe chamfer still blocked
+- `crafting_bench_controls_results.txt`
+  - bench-level controls remain green after the shared-shell continuity pass
+
+Important honesty boundary:
+- Stage 2 carve is now substantially more shell-local and continuity-aware than the earlier patch-sheet behavior
+- but fillet / chamfer effect logic still lean on patch compatibility beneath the shell-owned selection and rebuild layers
+- full persistent triangle-topology editing and final export-only simplification remain later implementation branches
+
+## 102. 2026-04-09 Stage 2 shared-shell performance bottlenecks reduced with cached shared-vertex topology lookups
+
+The latest Stage 2 runtime-stability pass targeted a likely freeze source rather than another compile issue.
+
+What changed:
+- repeated whole-shell scans for shared-vertex owners, neighbor keys, and per-vertex max-offset limits were replaced with cached lookups on the current shell mesh state
+- changed-region detection for shell rebuilds now uses shell-synchronized patch offset storage again, instead of re-reading shared current-vs-baseline vertices for every cell on every rebuild
+- the restore verifier scaffold remains on the shell-owned offset path, so the verification layer stays aligned with the live Stage 2 authority
+
+What this means:
+- the shared-shell continuity work remains live
+- but the brush/apply and rebuild path now avoid the obvious repeated full-mesh walks that could stall interactive refinement on larger items
+- this is a runtime-cost reduction pass, not a rollback of the shared-shell continuity direction
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `carve_changed_shell=true`
+  - `post_carve_quad_count=3`
+  - `post_carve_triangle_count=102`
+  - `post_carve_surface_primitive_count=105`
+- `stage2_selection_restore_results.txt`
+  - face / edge / feature-edge restore all remain `true`
+- `stage2_grip_safe_zone_results.txt`
+  - grip-safe restrictions remain intact
+
+Important honesty boundary:
+- this materially lowers the cost of the current shared-shell path, but it is still not the final persistent triangle-topology editor
+- if the user still experiences a hard freeze after this pass, the next likely place to investigate is the live preview/render refresh cadence under large real items rather than the already-optimized shared-vertex owner/neighbor scans
+
+## 103. 2026-04-09 Stage 2 Godot-native refoundation phase 1 now generates persistent editable mesh state from canonical geometry
+
+The first additive slice of the Godot-native Stage 2 refoundation is now live.
+
+What changed:
+- a new persisted editable mesh resource now exists:
+  - `res://core/models/stage2_editable_mesh_state.gd`
+- a new builder grounded in the official Godot mesh stack now exists:
+  - `res://core/resolvers/stage2_editable_mesh_builder.gd`
+- the builder uses:
+  - `SurfaceTool` to construct triangle surfaces from canonical geometry
+  - `ArrayMesh` surface arrays as the committed editable mesh representation
+  - `MeshDataTool.create_from_surface(...)` as the first topology-readiness proof
+- `Stage2ItemState` now stores:
+  - `baseline_editable_mesh_state`
+  - `current_editable_mesh_state`
+- `ForgeStage2Service` now generates that editable mesh state during Stage 2 initialization in parallel with the existing live shell path
+
+What this means:
+- Stage 2 now has the first real official-tool-backed editable mesh foundation in the repo
+- this does not replace the live shell path yet
+- it gives the project a stable handhold for the later replacement steps:
+  - topology-aware mesh editing
+  - cleaner mesh-owned Stage 2 state
+  - eventual retirement of the patch/shell bridge
+
+Verification now on record:
+- `stage2_refinement_foundation_results.txt`
+  - `stage2_editable_mesh_exists=true`
+  - `stage2_editable_mesh_vertex_count=24`
+  - `stage2_editable_mesh_index_count=36`
+  - `stage2_editable_mesh_meshdatatool_ready=true`
+- `stage2_refinement_mode_results.txt`
+  - Stage 2 refinement still remains green after the additive editable-mesh initialization slice
+- `crafting_bench_controls_results.txt`
+  - bench controls remain green after the new Stage 2 editable mesh state wiring
+
+Important honesty boundary:
+- this is the first official-stack foundation slice, not the replacement of live Stage 2 editing yet
+- active carve / fillet / chamfer still use the older live shell path today
+- the next correct step is to migrate the first real edit path onto the editable mesh state instead of adding more complexity to the legacy bridge
+
+## 94. 2026-04-09 Stage 2 patch offset truth now has a clean single owner
+
+The next real Stage 2 implementation seam is now in, and it was done as a clean replacement rather than another layered fallback.
+
+What changed:
+- `Stage2PatchState` now carries explicit `current_offset_cells`
+- `Stage2ItemState` now owns:
+  - reading current patch offset truth
+  - migrating older deformed patch geometry into stored offset truth when needed
+  - syncing `current_quad.origin_local` from stored offset truth
+- `Stage2ShellApplyResolver` no longer treats quad-origin delta as the active deformation authority in its live path
+- `forge_stage2_selection_presenter.gd` no longer re-derives current offset from quad-origin delta in parallel with the model layer
+
+What this means:
+- Stage 2 patch deformation now has one active owner instead of two parallel interpretations
+- the apply path and the selection-family path now read the same offset truth
+- old saved / already-deformed patch geometry is still respected because `Stage2ItemState` migrates non-zero geometry deltas into stored offset state the first time it resolves them
+- this removes one of the bigger “bridge artifacts” that would have made later unified-shell edit replacement messier
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `brush_candidate_face_count=2`
+  - `brush_candidate_patch_count=4`
+  - `carve_changed_shell=true`
+  - `post_carve_hit_primitive_type=triangle`
+  - `post_carve_surface_primitive_count=120`
+- `stage2_selection_restore_results.txt`
+  - `face_restore_changed_shell=true`
+  - `edge_restore_changed_shell=true`
+  - `feature_edge_restore_changed_shell=true`
+- `crafting_bench_controls_results.txt`
+  - forge bench controls remained green after the offset-owner replacement
+
+Important honesty boundary:
+- the active deformation truth is now cleaner and more centralized
+- but the actual deformation model is still patch-local offset state underneath
+- the next real replacement seam is still moving deformation behavior itself further away from patch-local assumptions and deeper into unified-shell local edit truth
+
+## 95. 2026-04-09 Stage 2 unified-shell rebuild now consumes shell-owned offset storage
+
+The next real unified-shell seam is now in on top of the offset-owner replacement.
+
+What changed:
+- `Stage2ShellQuadState` now carries per-cell `patch_offset_cells`
+- `Stage2PatchState` now carries stable `grid_u_index` / `grid_v_index`
+- Stage 2 initialization now creates shell-face-local offset storage for every shell face
+- `Stage2ItemState` now keeps that shell-face-local storage synced when patch offsets change
+- the localized Stage 2 geometry rebuild now consumes shell-owned offset storage directly
+- the geometry path no longer needs active patch-group ownership in order to rebuild edited shell regions
+
+What this means:
+- the visible Stage 2 shell is now rebuilt from shell-owned local edit data, not from patch-state groups as its primary source
+- patches still exist as the compatibility bridge for selection/apply and other still-migrating logic
+- this is a real move toward the spec's unified-shell local edit direction rather than another patch-grid cleanup loop
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `brush_candidate_face_count=2`
+  - `brush_candidate_patch_count=4`
+  - `carve_changed_shell=true`
+  - `post_carve_surface_primitive_count=120`
+- `stage2_selection_restore_results.txt`
+  - `face_restore_changed_shell=true`
+  - `edge_restore_changed_shell=true`
+  - `feature_edge_restore_changed_shell=true`
+- `stage2_feature_loop_results.txt`
+  - `grip_safe_feature_loop_fillet_changed_shell=true`
+  - `general_feature_loop_chamfer_changed_shell=true`
+- `crafting_bench_controls_results.txt`
+  - forge controls stayed green after the shell-owned rebuild shift
+
+Important honesty boundary:
+- the rebuilt shell now owns the local offset field that drives visible geometry
+- but edit application still resolves target regions through patch compatibility today
+- the next real seam is pushing edit application itself deeper into shell-local data instead of patch-local records
+
+## 96. 2026-04-09 Stage 2 pointer-brush candidate acquisition now uses shell-local cell surfaces
+
+The next unified-shell seam is now in for live Stage 2 brush behavior.
+
+What changed:
+- pointer-brush write ownership was already moved to shell-local offset storage
+- now pointer-brush candidate acquisition also resolves against shell-owned per-cell surface quads
+- those per-cell quads are built directly from:
+  - shell face baseline geometry
+  - shell-local `patch_offset_cells`
+- the live brush path no longer needs patch `current_quad` geometry as the active source for local candidate surfaces
+
+What this means:
+- rebuilt shell geometry, live brush write path, and live brush candidate acquisition are now moving in the same architectural direction
+- patch state still exists as the compatibility carrier for:
+  - tool limits
+  - zone masking
+  - selection/apply bridges that have not been fully retired yet
+- but the pointer-brush path is now materially closer to unified-shell local edit truth than the earlier patch-quad bridge
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `brush_candidate_face_count=2`
+  - `brush_candidate_patch_count=4`
+  - `carve_changed_shell=true`
+  - `post_carve_hit_primitive_type=triangle`
+- `stage2_selection_restore_results.txt`
+  - face / edge / feature-edge restore remained green
+- `stage2_feature_loop_results.txt`
+  - grip-safe fillet and general chamfer loop behavior remained green
+- `crafting_bench_controls_results.txt`
+  - forge controls remained green after the shell-cell brush candidate shift
+
+Important honesty boundary:
+- pointer brushes now acquire local candidate cells from shell-owned surface data and write back into shell-owned offset data
+- but the system still relies on patch compatibility records for some metadata and downstream tool routing
+- the next real seam is reducing those remaining patch compatibility dependencies in effect logic itself
+
+## 84. 2026-04-09 Stage 2 surface_feature_region shell-region ownership seam now live
+
+The next real Stage 2 ownership migration is now in for `surface_feature_region`.
+
+What changed:
+- `surface_feature_region` no longer needs to exist only as a raw patch-set selection
+- hover selection now resolves a stable shell-region identifier first:
+  - `shell_face_id::region::anchor_patch_id`
+- the UI now stores `stage2_hover_region_ids` / `stage2_selected_region_ids`
+- patch ids are still derived from those region ids for preview/apply compatibility, but region ids are now the actual user-facing Stage 2 ownership layer for this family
+- `Stage2ItemState` now contains its own local region-resolution helpers so the region-id resolver no longer depends on selection-presenter-only functions
+
+What this means:
+- the compile break from the first region-id pass is gone
+- `surface_face`, `surface_edge`, `surface_feature_edge`, and now `surface_feature_region` are all on shell-owned selection ids first
+- apply logic still bridges through patch ids for now, which keeps the existing edit path stable while ownership continues migrating upward
+
+Verification now on record:
+- `stage2_feature_region_results.txt`
+  - `grip_safe_selected_region_count=1`
+  - `grip_safe_selected_count=4`
+  - `grip_safe_feature_region_fillet_changed_shell=true`
+  - `general_feature_region_chamfer_changed_shell=true`
+- `stage2_feature_restore_results.txt`
+  - `grip_safe_feature_region_restore_changed_shell=true`
+- `stage2_feature_band_results.txt`
+  - remained green after the region seam landed
+- `stage2_refinement_mode_results.txt`
+  - remained green after the region seam landed
+- `crafting_bench_controls_results.txt`
+  - remained green after the region seam landed
+
+Important honesty boundary:
+- `surface_feature_region` ownership is now shell-first
+- but preview/apply still consume derived patch ids
+- higher families above region were still pending at this point
+
+## 85. 2026-04-09 Stage 2 surface_feature_band and surface_feature_cluster shell-owned selection seams now live
+
+The next higher-order Stage 2 ownership migrations are now in for `surface_feature_band` and `surface_feature_cluster`.
+
+What changed:
+- `surface_feature_band` hover selection now resolves a stable band identifier first:
+  - `shell_face_id::band::anchor_patch_id`
+- the UI now stores `stage2_hover_band_ids` / `stage2_selected_band_ids`
+- `surface_feature_cluster` hover selection now resolves a stable cluster identifier first:
+  - `shell_face_id::cluster::anchor_patch_id`
+- the UI now stores `stage2_hover_cluster_ids` / `stage2_selected_cluster_ids`
+- patch ids are still derived from those shell-owned ids for preview/apply compatibility, but they are no longer the primary owned target for these two families
+
+What this means:
+- the higher-order selection ladder is now materially in place instead of stopping at local regions
+- current live ownership ladder is now:
+  - `surface_face`
+  - `surface_edge`
+  - `surface_feature_edge`
+  - `surface_feature_region`
+  - `surface_feature_band`
+  - `surface_feature_cluster`
+- this is a better match for the Stage 2 implementation spec direction: shell-owned targets first, patch ids only as the current apply bridge
+
+Verification now on record:
+- `stage2_feature_band_results.txt`
+  - `grip_safe_selected_band_count=1`
+  - `grip_safe_band_selected_count=10`
+  - `grip_safe_feature_band_fillet_changed_shell=true`
+  - `general_selected_band_count=1`
+  - `general_feature_band_chamfer_changed_shell=true`
+- `stage2_feature_cluster_results.txt`
+  - `selected_cluster_count=1`
+  - `cluster_selected_count=288`
+  - `feature_cluster_chamfer_changed_shell=true`
+  - `feature_cluster_restore_changed_shell=true`
+- `stage2_selection_restore_results.txt`
+  - face/edge/feature-edge restore path remained green
+- `crafting_bench_controls_results.txt`
+  - remained green after the band/cluster seams landed
+
+Important honesty boundary:
+- these families are now shell-owned for selection state
+- but the actual effect application still derives and uses patch ids as the compatibility bridge
+- `surface_feature_bridge`, `surface_feature_contour`, and `surface_feature_loop` are still later migrations beyond this point
+
+## 86. 2026-04-09 Stage 2 surface_feature_bridge shell-bridge ownership seam now live
+
+The next higher-order Stage 2 ownership migration is now in for `surface_feature_bridge`.
+
+What changed:
+- `surface_feature_bridge` hover selection now resolves a stable bridge identifier first:
+  - `shell_face_id::bridge::anchor_patch_id`
+- the UI now stores `stage2_hover_bridge_ids` / `stage2_selected_bridge_ids`
+- patch ids are still derived from those bridge ids for preview/apply compatibility, but they are no longer the primary owned target for this family
+
+What this means:
+- the shell-owned selection ladder now extends beyond local region/band/cluster grouping into the first cross-plane bridge family
+- current live ownership ladder is now:
+  - `surface_face`
+  - `surface_edge`
+  - `surface_feature_edge`
+  - `surface_feature_region`
+  - `surface_feature_band`
+  - `surface_feature_cluster`
+  - `surface_feature_bridge`
+- this continues the Stage 2 implementation-spec direction of shell-owned targets first, with patch ids retained only as the current effect-application bridge
+
+Verification now on record:
+- `stage2_feature_bridge_results.txt`
+  - `selected_bridge_count=1`
+  - `synthetic_bridge_selected_count=12`
+  - `synthetic_bridge_larger_than_cluster=true`
+  - `feature_bridge_chamfer_changed_shell=true`
+  - `feature_bridge_restore_changed_shell=true`
+  - `grip_safe_feature_bridge_fillet_changed_shell=true`
+  - `grip_safe_feature_bridge_chamfer_changed_shell=false`
+- `stage2_refinement_mode_results.txt`
+  - remained green after the bridge seam landed
+- `crafting_bench_controls_results.txt`
+  - remained green after the bridge seam landed
+
+Important honesty boundary:
+- `surface_feature_bridge` is now shell-owned for selection state
+- but the actual effect application still derives and uses patch ids as the compatibility bridge
+- `surface_feature_contour` and `surface_feature_loop` remain the next higher-family ownership migrations
+
+## 87. 2026-04-09 Stage 2 surface_feature_contour and surface_feature_loop shell-owned seams now live
+
+The next higher-order Stage 2 ownership migrations are now in for `surface_feature_contour` and `surface_feature_loop`.
+
+What changed:
+- `surface_feature_contour` hover selection now resolves a stable contour identifier first:
+  - `shell_face_id::contour::anchor_patch_id`
+- the UI now stores `stage2_hover_contour_ids` / `stage2_selected_contour_ids`
+- `surface_feature_loop` hover selection now resolves a stable loop identifier first:
+  - `shell_face_id::loop::anchor_patch_id`
+- the UI now stores `stage2_hover_loop_ids` / `stage2_selected_loop_ids`
+- patch ids are still derived from those shell-owned ids for preview/apply compatibility, but they are no longer the primary owned target for these families
+
+What this means:
+- the current Stage 2 family ladder now has shell-owned selection across the whole active continuity/topology stack:
+  - `surface_face`
+  - `surface_edge`
+  - `surface_feature_edge`
+  - `surface_feature_region`
+  - `surface_feature_band`
+  - `surface_feature_cluster`
+  - `surface_feature_bridge`
+  - `surface_feature_contour`
+  - `surface_feature_loop`
+- this completes the current shell-owned selection migration for the live Stage 2 family set while still preserving the patch-id compatibility bridge for apply logic
+
+Verification now on record:
+- `stage2_feature_contour_results.txt`
+  - `selected_contour_count=1`
+  - `synthetic_contour_selected_count=8`
+  - `synthetic_contour_smaller_than_bridge=true`
+  - `feature_contour_chamfer_changed_shell=true`
+  - `feature_contour_restore_changed_shell=true`
+- `stage2_feature_loop_results.txt`
+  - `selected_loop_count=1`
+  - `grip_safe_selected_count=5`
+  - `grip_safe_feature_loop_fillet_changed_shell=true`
+  - `general_feature_loop_chamfer_changed_shell=true`
+- `crafting_bench_controls_results.txt`
+  - remained green after both seams landed
+
+Important honesty boundary:
+- selection ownership is now shell-first across the current live Stage 2 family stack
+- but actual effect application still derives and uses patch ids as the compatibility bridge
+- the next real implementation branch beyond this is not “more ownership migration”; it is continuing the unified-shell edit/application core so that the patch bridge itself can eventually be retired
+
+## 88. 2026-04-09 Stage 2 selection apply/preview now derive patch targets from owned ids at use time
+
+The next real Stage 2 implementation seam is now in on the apply side, not the ownership side.
+
+What changed:
+- selection preview and selection apply no longer treat `stage2_selected_patch_ids` as the authoritative state for shell-owned Stage 2 tools
+- `ForgeStage2SelectionPresenter` now exposes a shared resolver that derives patch ids from the owned shell ids for the active tool family:
+  - face ids
+  - edge ids
+  - region ids
+  - band ids
+  - cluster ids
+  - bridge ids
+  - contour ids
+  - loop ids
+- `CraftingBenchUI` now uses that shared resolver at preview/apply time instead of trusting cached patch selections for shell-owned tools
+- for shell-owned selection tools, the UI now clears cached selected patch ids and derives patch targets on demand instead
+
+What this means:
+- the current Stage 2 shell-owned selection ladder is now also the live UI authority for preview/apply
+- cached patch ids still exist as a compatibility path for patch-first cases, but they are no longer the source of truth for the shell-owned selection stack
+- this is the first real move past “selection ownership migration only” into reducing the actual patch bridge in the live editing workflow
+
+Verification now on record:
+- `stage2_selection_feature_results.txt`
+  - `selected_face_count_after_pick=1`
+  - `selected_count_after_pick=36`
+  - `selected_patch_cache_after_pick=0`
+  - `grip_safe_face_fillet_changed_shell=true`
+- `stage2_edge_selection_feature_results.txt`
+  - `selected_edge_count_after_pick=1`
+  - `selected_count_after_pick=3`
+  - `selected_patch_cache_after_pick=0`
+  - `grip_safe_edge_fillet_changed_shell=true`
+- `stage2_internal_feature_edge_results.txt`
+  - `selected_edge_count_after_pick=1`
+  - `grip_safe_selected_count=24`
+  - `selected_patch_cache_after_pick=0`
+  - `grip_safe_feature_edge_fillet_changed_shell=true`
+- `stage2_feature_loop_results.txt`
+  - remained green after the decouple change
+- `stage2_refinement_mode_results.txt`
+  - remained green after the decouple change
+- `crafting_bench_controls_results.txt`
+  - remained green after the decouple change
+
+Important honesty boundary:
+- effect application still ultimately applies through derived patch sets
+- but shell-owned ids are now the real UI-side selection authority for preview/apply across the migrated Stage 2 families
+- the next deeper implementation branch is moving more of the effect logic itself away from patch-local offset assumptions and toward the unified-shell edit core
+
+## 81. 2026-04-09 Stage 2 face-tool selection now uses shell-face ownership first
+
+What changed:
+- Stage 2 face-tool hover/selection now carries `face_ids` based on the current shell-face owner instead of only storing patch-id selection truth
+- the current shell interaction hit still resolves the nearest patch as a compatibility bridge, but now also exposes the owning `face_id`
+- face preview rendering now uses shell-face geometry through `build_current_canonical_geometry_for_face_ids(...)` instead of only `build_current_canonical_geometry_for_patch_ids(...)`
+- patch ids are still derived from selected face ids at apply time so the existing Stage 2 brush/zone logic stays stable while the interaction path moves forward
+
+What this means:
+- we finally moved one real Stage 2 selection family off patch-first truth and onto unified-shell ownership
+- face hover/selection/preview is now aligned with the shell-facing implementation direction from the Stage 2 unified-shell spec
+- edge/feature families still use patch-first compatibility paths for now
+
+Verification now on record:
+- `stage2_selection_feature_results.txt`
+  - `selected_count_after_pick=36`
+  - `selected_face_count_after_pick=1`
+  - `grip_safe_face_fillet_changed_shell=true`
+  - `general_face_chamfer_changed_shell=true`
+- `stage2_selection_restore_results.txt`
+  - face/edge/feature-edge restore paths stayed green
+- `stage2_refinement_mode_results.txt`
+  - `hover_hit_resolved=true`
+  - `post_carve_hit_primitive_type=quad`
+- `crafting_bench_controls_results.txt`
+  - bench-level controls remained green
+
+Important honesty boundary:
+- this is the first shell-face ownership slice, not the full Stage 2 topology-selection rewrite
+- face tools now lead the shell-first path
+- edge, feature-edge, region, band, cluster, bridge, contour, and loop still need their own later migration off pure patch-id ownership
+
+## 82. 2026-04-09 Stage 2 surface-edge selection now uses shell-edge ownership first
+
+What changed:
+- `surface_edge` hover/selection now carries shell-edge ids derived from the current shell face owner plus the nearest shell boundary edge
+- patch ids are still derived from those selected shell-edge ids for preview/apply, so the existing Stage 2 patch-based apply path remains stable
+- this moves `surface_edge` to the same shell-first ownership pattern that `surface_face` now uses, while keeping feature-edge and the higher families on their current compatibility path
+
+What this means:
+- face and boundary-edge tools now both start from unified-shell ownership instead of raw patch-first selection truth
+- the selected edge state is now a real shell-edge id set, not just a patch-id proxy
+- feature-edge, region, band, cluster, bridge, contour, and loop still remain later migration targets
+
+Verification now on record:
+- `stage2_edge_selection_feature_results.txt`
+  - `selected_count_after_pick=3`
+  - `selected_edge_count_after_pick=1`
+  - `grip_safe_edge_fillet_changed_shell=true`
+  - `general_edge_chamfer_changed_shell=true`
+- `stage2_internal_feature_edge_results.txt`
+  - internal feature-edge path stayed green
+- `stage2_selection_restore_results.txt`
+  - face/edge/feature-edge restore paths stayed green
+- `stage2_refinement_mode_results.txt`
+  - refinement mode remained green after the edge-ownership shift
+- `crafting_bench_controls_results.txt`
+  - bench controls remained green
+
+Important honesty boundary:
+- this is still an ownership migration slice, not the final topology-aware edge system
+- `surface_edge` now uses shell-edge ownership first
+- `surface_feature_edge` and the larger derived selection families still need later migration off patch-first ownership
+
+## 83. 2026-04-09 Stage 2 feature-edge selection now uses shell-internal-edge ownership first
+
+What changed:
+- `surface_feature_edge` hover/selection now carries shell-internal-edge ids derived from the current shell face plus the nearest internal shell grid line
+- patch ids are still derived from those selected internal-edge ids for preview/apply, keeping the current Stage 2 apply path stable
+- the UI now treats `surface_edge` and `surface_feature_edge` as shell-owned edge-id families while still previewing their selected patch result as a compatibility bridge
+
+What this means:
+- face, boundary-edge, and internal-feature-edge tools now all start from unified-shell ownership instead of raw patch-first selection truth
+- the selected internal feature-edge state is now a real shell-internal-edge id set, not only a patch-id proxy
+- region, band, cluster, bridge, contour, and loop still remain later migration targets
+
+Verification now on record:
+- `stage2_internal_feature_edge_results.txt`
+  - `selected_edge_count_after_pick=1`
+  - `grip_safe_feature_edge_fillet_changed_shell=true`
+  - `general_feature_edge_chamfer_changed_shell=true`
+- `stage2_edge_selection_feature_results.txt`
+  - boundary-edge path remained green after the feature-edge shift
+- `stage2_selection_restore_results.txt`
+  - face/edge/feature-edge restore paths stayed green
+- `stage2_refinement_mode_results.txt`
+  - refinement mode remained green after the internal-edge ownership shift
+- `crafting_bench_controls_results.txt`
+  - bench controls remained green
+
+Important honesty boundary:
+- this is still an ownership migration slice, not the final topology-aware feature-edge system
+- `surface_feature_edge` now uses shell-internal-edge ownership first
+- region, band, cluster, bridge, contour, and loop still need later migration off patch-first ownership
+
+## 77. 2026-04-09 Stage 2 center-vertex local subdivision bridge now live
+
+The next Stage 2 bridge slice is now in for the first real new-point generation step on edited shell cells.
+
+What changed:
+- non-planar localized shell cells that already prove they need the secondary diagonal now qualify for center-vertex subdivision
+- those cells no longer rely only on a two-triangle diagonal split
+- instead, they now add a new center point and emit a four-triangle fan across that edited cell
+- the Stage 2 verifier now records how many localized cells actually took this center-subdivision path during the sample carve
+
+What this means:
+- this is the first bridge step that genuinely creates new local edit-surface points instead of only rearranging the existing corner lattice
+- the bridge layer has now started moving from pure triangle-choice cleanup toward actual local remesh-style behavior
+- this does raise local primitive count in the exercised sample, but that is expected because this step prioritizes better local shape representation over more cleanup
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_quad_count=8`
+  - `post_carve_triangle_count=14`
+  - `post_carve_surface_primitive_count=22`
+  - `localized_surface_only_primitive_count=19`
+  - `post_carve_secondary_diagonal_cell_count=2`
+  - `post_carve_center_subdivided_cell_count=2`
+  - `post_carve_transition_geometry_present=true`
+- `stage2_refinement_foundation_results.txt`
+  - zero-edit unified baseline still remains green and unchanged
+- `crafting_bench_controls_results.txt`
+  - bench-level controls remain green after the center-subdivision bridge change
+
+Important honesty boundary:
+- this is still a bridge on top of the patch-grid-derived localized shell rebuild
+- however, it is the first bridge slice that clearly crosses from cleanup-only behavior into true local point generation on edited shell geometry
+- true topology-aware local remesh, stronger cleanup, and later finalization simplification passes are still the next real implementation branches
+
+## 78. 2026-04-09 Stage 2 exact patch-depth center-point bridge now live
+
+The next Stage 2 bridge refinement is now in on top of the center-subdivision step.
+
+What changed:
+- center-subdivided localized shell cells no longer place their new center point by only averaging the four corner positions
+- the new center point is now placed from:
+  - the true localized shell cell center on the baseline shell
+  - plus the exact stored patch-depth offset for that cell when available
+  - with fallback to averaged neighboring offsets only when the exact cell offset is unavailable
+
+What this means:
+- the first new-point generation bridge step is now driven by the actual edited cell depth instead of only by corner interpolation
+- this makes the local subdivided geometry more truthful to the Stage 2 edit data even when the exercised sample keeps the same primitive counts
+- this is still not the final topology-aware remesh system, but it is a better data source for the first live center-point generation step
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_surface_primitive_count=22`
+  - `post_carve_secondary_diagonal_cell_count=2`
+  - `post_carve_center_subdivided_cell_count=2`
+  - `post_carve_transition_geometry_present=true`
+- `stage2_refinement_foundation_results.txt`
+  - zero-edit unified baseline still remains green and unchanged
+- `crafting_bench_controls_results.txt`
+  - bench-level controls remain green after the exact center-point refinement change
+
+Important honesty boundary:
+- this refinement improves where new local center points come from
+- it does not yet introduce the final topology-aware local remesh or later cleanup/finalization simplification passes
+
+## 79. 2026-04-09 Stage 2 edge-midpoint subdivision bridge now live
+
+The next Stage 2 bridge refinement is now in on top of the exact center-point pass.
+
+What changed:
+- center-subdivided localized shell cells no longer jump directly from each corner to the center point
+- those subdivided cells now also generate four edge-midpoint vertices:
+  - each edge midpoint is placed from the baseline shell edge midpoint
+  - then pushed by an averaged offset from the current cell and its adjacent neighbor across that edge
+- the local subdivided cell is now emitted as an eight-triangle fan around the exact-depth center point instead of the older four-triangle fan
+- Stage 2 verifier output now explicitly records how many localized cells took this edge-midpoint subdivision path
+
+What this means:
+- this is a stronger local remesh-style bridge step than the earlier center-only subdivision
+- the subdivided edited shell cells now have more local control points and can express a richer curved form than the earlier corner-to-center fan
+- this is heavier on primitive count, but that is expected because this bridge step prioritizes shape representation over cleanup
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_quad_count=8`
+  - `post_carve_triangle_count=22`
+  - `post_carve_surface_primitive_count=30`
+  - `localized_surface_only_primitive_count=27`
+  - `post_carve_secondary_diagonal_cell_count=2`
+  - `post_carve_center_subdivided_cell_count=2`
+  - `post_carve_edge_midpoint_subdivided_cell_count=2`
+  - `post_carve_transition_geometry_present=true`
+- `stage2_refinement_foundation_results.txt`
+  - zero-edit unified baseline still remains green and unchanged
+- `crafting_bench_controls_results.txt`
+  - bench-level controls remain green after the edge-midpoint subdivision change
+
+Important honesty boundary:
+- this is still a bridge on top of the current patch-grid-derived localized shell rebuild
+- however, it is a more explicit move toward local remesh behavior because subdivided cells now use:
+  - exact cell center depth
+  - edge midpoint control points
+  - a richer local triangle fan
+- later true topology-aware local remesh and later cleanup/finalization simplification are still the next real implementation branches
+
+## 89. 2026-04-09 Stage 2 apply ownership now routes through the shell apply resolver
+
+The next Stage 2 architecture seam is now in for the actual effect-application path.
+
+What changed:
+- `res://core/resolvers/stage2_shell_apply_resolver.gd` is now the real owner of:
+  - pointer-brush apply behavior
+  - selection patch-set apply behavior
+  - zone-mask blocking checks
+  - selection blocked-target checks
+- `res://runtime/forge/forge_stage2_brush_presenter.gd` no longer owns duplicate inline apply math
+- the brush presenter now acts as an orchestration layer:
+  - pointer family composition
+  - selection-family-to-effective-tool mapping
+  - delegation into the shared shell apply resolver
+
+What this means against the Stage 2 reference/spec:
+- this directly closes part of the `File Ownership Decision` gap from `STAGE 2 - UNIFIED VISUAL SHELL IMPLEMENTATION SPEC 2026-04-09.md`
+- this is a real Phase 3 architecture move because the apply path is no longer trapped inside the forge presenter layer
+- it does not yet complete Phase 3, because the resolver still applies the existing patch-local offset model underneath
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `carve_changed_shell=true`
+  - `post_carve_transition_geometry_present=true`
+  - `post_carve_center_subdivided_cell_count=2`
+  - `post_carve_edge_midpoint_subdivided_cell_count=2`
+- `stage2_selection_feature_results.txt`
+  - `selected_patch_cache_after_pick=0`
+  - `grip_safe_face_fillet_changed_shell=true`
+  - `general_face_chamfer_changed_shell=true`
+- `stage2_feature_loop_results.txt`
+  - `grip_safe_feature_loop_fillet_changed_shell=true`
+  - `general_feature_loop_chamfer_changed_shell=true`
+- `stage2_selection_restore_results.txt`
+  - `face_restore_changed_shell=true`
+  - `edge_restore_changed_shell=true`
+  - `feature_edge_restore_changed_shell=true`
+- `stage2_edge_selection_feature_results.txt`
+  - `selected_patch_cache_after_pick=0`
+  - `grip_safe_edge_fillet_changed_shell=true`
+  - `general_edge_chamfer_changed_shell=true`
+- `crafting_bench_controls_results.txt`
+  - forge bench controls remain green after the apply-owner refactor
+
+Important honesty boundary:
+- this is an ownership/architecture correction, not yet the final unified-shell local remesh core
+- the current apply resolver still drives the existing patch-local offset behavior underneath
+- the next real implementation step is to evolve the resolver itself away from patch-local offset assumptions and toward unified-shell local edit/remesh truth
+
+## 90. 2026-04-09 Stage 2 density-vs-simplification law corrected
+
+The Stage 2 implementation direction is now corrected on one important point:
+- the editable Stage 2 shell should not chase low triangle count while it is still inside forge editing
+- the editable Stage 2 shell should carry enough surface density to make later shaping, curvature, and local remesh work possible
+
+What is now locked:
+- Stage 2 should generally expose more usable outer-surface topology than the raw Stage 1 face output while the item remains editable
+- the goal during editing is:
+  - better local manipulation
+  - better curvature potential
+  - better remesh flexibility
+  - not early export/runtime triangle reduction
+- simplification belongs to the later export/finalization side of the process:
+  - after a future engraving/naming lock stage
+  - when the item leaves editable forge ownership and becomes an equip-ready/export-ready asset
+
+What this corrects:
+- older wording that implied zero-edit Stage 2 should be aggressively simplified up front is no longer the right target
+- older wording that implied live continuous cleanup should reduce the working shell during editing is also no longer the right target
+
+The correct split now is:
+- Stage 2 in forge = dense edit-ready shell
+- final export/equip-ready item = conservative simplification at the end
+
+Future workflow note:
+- the exact engraving/naming lock workflow does not exist yet in code
+- later workflow can still decide the precise moment when:
+  - test-print output
+  - storage export
+  - equip-ready output
+  begin using the final simplified shell
+- but the architectural law is now fixed: simplification is an end-of-process export concern, not a live Stage 2 authoring concern
+
+## 91. 2026-04-09 Stage 2 pointer brush targeting now resolves shell-face candidates first
+
+The next Stage 2 implementation seam is now in for pointer-brush targeting.
+
+What changed:
+- `Stage2ItemState` now exposes `resolve_shell_face_ids_for_brush_sphere(...)`
+- that method resolves candidate shell face ids from:
+  - hit point
+  - brush radius
+  - preferred hit face owner when available
+- `Stage2ShellApplyResolver` now uses those shell-face candidates first and only then derives candidate patch ids from those shell faces as the compatibility bridge
+- `CraftingBenchUI` now passes the resolved `face_id` from Stage 2 hit data into pointer-brush apply
+
+What this means against the Stage 2 reference/spec:
+- this moves the pointer brush path closer to the spec's Phase 3 `local hit region acquisition on unified shell`
+- the current apply model is still patch-local underneath, but candidate acquisition is no longer just a blind whole-item patch scan
+- the shell owner is now part of the live brush-apply path, not only the preview/hit path
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `hover_hit_resolved=true`
+  - `brush_candidate_face_count=2`
+  - `brush_candidate_patch_count=16`
+  - `carve_changed_shell=true`
+- `stage2_grip_safe_zone_results.txt`
+  - `grip_safe_carve_changed_shell=false`
+  - `grip_safe_fillet_changed_shell=true`
+  - `grip_safe_chamfer_changed_shell=false`
+  - `general_carve_changed_shell=true`
+  - `general_chamfer_changed_shell=true`
+- `stage2_selection_feature_results.txt`
+  - remained green after the pointer-brush candidate shift
+- `crafting_bench_controls_results.txt`
+  - remained green after the pointer-brush candidate shift
+
+Important honesty boundary:
+- pointer brushes now resolve candidate shell faces first
+- but actual deformation is still applied through derived patch ids and the current patch-local offset model underneath
+- the next real Phase 3 step is to make the shell apply resolver mutate unified-shell local edit state more directly instead of only patch-local offset state
+
+## 92. 2026-04-09 Stage 2 brush region acquisition now resolves local patch sets from shell-owned context
+
+The next Stage 2 Phase 3-aligned seam is now in for pointer-brush region acquisition.
+
+What changed:
+- `Stage2ItemState` now exposes `resolve_patch_ids_for_brush_sphere(...)`
+- that method resolves the local patch set from:
+  - shell-owned brush-face candidates
+  - current patch quad distance to the brush sphere
+  - preferred hit face owner when available
+- `Stage2ShellApplyResolver` now asks `Stage2ItemState` for the local brush patch set directly instead of:
+  - resolving shell faces in one place
+  - then broad-deriving all face patches
+  - then filtering again later in the apply loop
+
+What this means against the Stage 2 reference/spec:
+- brush region acquisition is now more local and more truthfully owned by Stage 2 shell state itself
+- this is a better fit for Phase 3 `local hit region acquisition on unified shell`
+- the working shell data model is starting to own more of the real edit-region solve, instead of leaving that logic diffused across the presenter/resolver loop
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `hover_hit_resolved=true`
+  - `brush_candidate_face_count=2`
+  - `brush_candidate_patch_count=4`
+  - previous comparable brush-candidate bridge value was `16`
+  - `carve_changed_shell=true`
+- `stage2_grip_safe_zone_results.txt`
+  - `grip_safe_carve_changed_shell=false`
+  - `grip_safe_fillet_changed_shell=true`
+  - `grip_safe_chamfer_changed_shell=false`
+  - `general_carve_changed_shell=true`
+  - `general_chamfer_changed_shell=true`
+- `crafting_bench_controls_results.txt`
+  - forge bench controls remained green after the local patch-region acquisition shift
+
+Important honesty boundary:
+- the apply resolver still ultimately mutates patch-local offset state
+- but the local patch region for pointer tools is now acquired from shell-owned context in `Stage2ItemState`
+- the next real Phase 3 step is still to replace patch-local deformation as the underlying edit truth
+
+## 97. 2026-04-09 Stage 2 live runtime gap addendum locked into the implementation authority
+
+The latest live validation added a few important Stage 2 correctness notes that now count as active implementation targets, not optional polish.
+
+Locked observations:
+- the protected grip/handle restriction is behaving correctly and must be preserved
+- after a Stage 2 edit, the local shell must not leave a ghosted remnant of the original shell silhouette visible behind the altered zone
+- the live shell still needs to move further away from block-shaped local plate behavior and further toward one coherent many-polygon surface
+- carve must become camera/tool-axis directed instead of behaving like a generic contact-surface inset
+- the `Ctrl + Scroll` and `V + Scroll` modifier channels remain part of the required Stage 2 runtime contract until the live editor fully matches the spec
+
+Implementation consequence:
+- future Phase 3 work should favor shell-first deformation truth, camera-directed carve behavior, and clean shell-face replacement over more local bridge cleanup
+
+## 98. 2026-04-09 Stage 2 edited shell faces now rebuild full-face and the first camera-directed carve weighting pass is live
+
+The next Stage 2 Phase 3 seam moved the implementation away from local bridge cleanup and toward the runtime gaps found in live validation.
+
+What changed:
+- deformed shell faces now rebuild as whole shell-face surfaces instead of keeping untouched baseline outer strips inside the same face as the active edited region
+- this is intended to stop leaving a ghosted original local face state behind when the edited shell face is rebuilt
+- pointer-brush candidate records now carry shell-surface center and normal data
+- carve now applies a first camera/tool-axis weighting pass:
+  - lateral influence is measured from the camera/tool axis through the hit point
+  - facing alignment with the camera/tool axis now affects carve influence
+- `V + Scroll` is now handled in Stage 2 free-view input as the live amount/intensity channel without falling through to camera zoom
+
+What this means:
+- edited shell faces are now treated more like whole shell-owned surfaces during rebuild instead of mixed baseline-plus-local strips inside the same face
+- carve is no longer purely a contact-surface-only inset heuristic; it now has a first camera-axis-directed influence layer
+- the runtime interaction contract is closer to the Stage 2 spec while keeping grip-safe restrictions intact
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `stage2_shell_visible=true`
+  - `refinement_model_visible=true`
+  - `hover_hit_resolved=true`
+  - `brush_candidate_face_count=2`
+  - `brush_candidate_patch_count=4`
+  - `carve_changed_shell=true`
+  - `post_carve_surface_primitive_count=18`
+- `stage2_grip_safe_zone_results.txt`
+  - `grip_safe_carve_changed_shell=false`
+  - `grip_safe_fillet_changed_shell=true`
+  - `grip_safe_chamfer_changed_shell=false`
+- `stage2_selection_restore_results.txt`
+  - face/edge/feature-edge restore still green
+- `stage2_feature_loop_results.txt`
+  - grip-safe loop fillet and general loop chamfer still green
+- `crafting_bench_controls_results.txt`
+  - forge controls remained green after the Stage 2 input change
+
+Important honesty boundary:
+- the carve direction is now camera-axis weighted, but the underlying deformation still resolves through patch offset state
+- the shell is moving closer to unified-shell behavior, but it is not yet full direct vertex/topology editing
+
+## 99. 2026-04-09 Stage 2 pointer carve/revert now writes shell-local vertex offsets as the live deformation path
+
+The next unified-shell topology seam is now in.
+
+What changed:
+- `Stage2ShellQuadState` now carries `vertex_offset_cells` in addition to patch offset storage
+- Stage 2 shell rebuild now reads shell-local vertex offsets when rebuilding edited shell faces and when resolving current shell patch surfaces for brush targeting
+- pointer carve/revert no longer depend only on uniform per-patch inset writes
+- pointer carve/revert now deform the four shell vertices around each affected patch with per-vertex brush weighting inside the brush support radius
+- after shell-local vertex writes, patch offset storage is synchronized from the resulting vertex field as a compatibility layer for the remaining patch-based systems
+- patch-driven fillet/chamfer/restore compatibility still remains live, with patch writes rebuilding shell vertex offsets from patch storage when needed
+
+What this means:
+- the live Stage 2 shell now has a real shell-local deformation field instead of only patch-local inset truth
+- pointer carve/revert are materially closer to direct unified-shell topology editing
+- the editable shell can now form non-uniform local surface change inside a single affected region instead of only moving whole local cell plates in lockstep
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `carve_changed_shell=true`
+  - `post_carve_quad_count=7`
+  - `post_carve_triangle_count=32`
+  - `post_carve_surface_primitive_count=39`
+  - `post_carve_hit_primitive_type=triangle`
+  - `post_carve_triangles_have_vertex_normals=true`
+  - `post_carve_smoothed_vertex_normals_present=true`
+  - `post_carve_localized_geometry_retained=true`
+  - `post_carve_secondary_diagonal_cell_count=3`
+  - `post_carve_center_subdivided_cell_count=3`
+  - `post_carve_edge_midpoint_subdivided_cell_count=3`
+- `stage2_grip_safe_zone_results.txt`
+  - `grip_safe_carve_changed_shell=false`
+  - `general_carve_changed_shell=true`
+- `stage2_selection_restore_results.txt`
+  - face/edge/feature-edge restore remained green
+- `stage2_feature_loop_results.txt`
+  - feature-loop fillet/chamfer remained green
+- `crafting_bench_controls_results.txt`
+  - forge bench controls remained green
+
+Important honesty boundary:
+- this is a real topology move, but not yet full direct mesh-topology editing with persistent explicit triangle connectivity ownership
+- patch compatibility storage still exists and still matters for some Stage 2 systems
+
+## 100. 2026-04-09 Stage 2 pointer carve/revert now batch by unique shell vertices across the brush region
+
+The next shell-local topology seam is now in on top of the shell vertex offset path.
+
+What changed:
+- the pointer carve/revert path no longer applies shell-local vertex deformation one patch at a time
+- candidate patch records are now collapsed into a unique shell-vertex target set across the whole brush region
+- each unique shell vertex now receives one resolved delta from the strongest contributing brush influence in that local region
+- after the unique shell-vertex pass completes, patch compatibility offsets are synchronized from the resulting shell vertex field
+- the Stage 2 warning cleanup for the shell-local pass is also in:
+  - the earlier `SHADOWED_VARIABLE`, `SHADOWED_VARIABLE_BASE_CLASS`, and `UNUSED_PARAMETER` warnings in `stage2_item_state.gd` were removed during this pass
+
+What this means:
+- pointer carve/revert is now less patch-iterative and more truly shell-owned
+- shared vertices between neighboring affected cells are updated as one shell-local target instead of being repeatedly rewritten per patch
+- this reduces another layer of patch-first behavior in the live Stage 2 edit path
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `carve_changed_shell=true`
+  - `post_carve_quad_count=7`
+  - `post_carve_triangle_count=32`
+  - `post_carve_surface_primitive_count=39`
+  - `post_carve_hit_primitive_type=triangle`
+  - `post_carve_localized_geometry_retained=true`
+- `stage2_grip_safe_zone_results.txt`
+  - `grip_safe_carve_changed_shell=false`
+  - `general_carve_changed_shell=true`
+- `stage2_selection_restore_results.txt`
+  - face/edge/feature-edge restore remained green
+- `stage2_feature_loop_results.txt`
+  - feature-loop fillet/chamfer remained green
+- `crafting_bench_controls_results.txt`
+  - forge bench controls remained green
+- fresh focused logs for this seam no longer reported the earlier shadowed/unused Stage 2 warnings
+
+Important honesty boundary:
+- pointer carve/revert is now more shell-local than before, but fillet/chamfer/selection-family application still rely on patch compatibility logic underneath
+- full persistent shell-topology ownership beyond the current shell vertex field is still the next deeper branch
+
+## 93. 2026-04-09 Stage 2 pointer-brush falloff now uses shell-surface distance instead of patch-center distance
+
+The next Stage 2 Phase 3 seam is now in for pointer-brush influence calculation.
+
+What changed:
+- pointer-brush candidate region acquisition now remains local in `Stage2ItemState`
+- the Stage 2 apply resolver now uses per-patch shell-surface distance values from:
+  - `Stage2ItemState.resolve_patch_distance_cells_for_brush_sphere(...)`
+- pointer-brush falloff is no longer based on patch-center distance
+- pointer-brush application now iterates the local distance-resolved patch set directly instead of scanning the whole patch list
+
+What this means against the Stage 2 reference/spec:
+- the brush influence calculation is now materially closer to shell-space editing behavior
+- this is a better fit for the Phase 3 requirement that local shell editing be driven by the unified-shell hit region, not by broad patch-center heuristics
+- the apply path is still patch-local underneath, but both:
+  - candidate region acquisition
+  - falloff strength
+  are now more shell-driven than before
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `hover_hit_resolved=true`
+  - `brush_candidate_face_count=2`
+  - `brush_candidate_patch_count=4`
+  - `carve_changed_shell=true`
+  - `post_carve_hit_primitive_type=triangle`
+  - `post_carve_triangle_count=116`
+  - `post_carve_surface_primitive_count=120`
+- `stage2_grip_safe_zone_results.txt`
+  - `grip_safe_carve_changed_shell=false`
+  - `grip_safe_fillet_changed_shell=true`
+  - `grip_safe_chamfer_changed_shell=false`
+  - `general_carve_changed_shell=true`
+  - `general_chamfer_changed_shell=true`
+- `crafting_bench_controls_results.txt`
+  - forge bench controls remained green after the shell-surface-distance brush change
+
+Important honesty boundary:
+- this seam changed live edit behavior noticeably
+- the exercised sample carve now produces much denser local triangle output than the earlier patch-center falloff step
+- under the corrected Stage 2 law, that is acceptable while the item remains forge-editable
+- but the underlying deformation truth is still patch-local offset state, not yet final unified-shell direct edit state
+
+## 80. 2026-04-09 Stage 2 unified-shell brush-hit bridge now live
+
+The next Stage 2 bridge slice is now in for interaction alignment with the rebuilt shell.
+
+What changed:
+- Stage 2 brush hit acquisition no longer ray-tests only against the old per-patch quad layer
+- the brush hit path now ray-tests against the current rebuilt Stage 2 shell geometry itself:
+  - shell quads
+  - shell triangles
+- after resolving the shell hit point, the system still bridges back to the nearest patch record only for compatibility with the current patch-based apply logic and zone checks
+
+What this means:
+- Stage 2 interaction is now materially closer to the spec's Phase 3 requirement that local hit acquisition happen on the unified shell
+- the rebuilt shell is no longer only a render target; it is now also the interactive hit surface for brush targeting
+- this is still not the final topology-aware selection/apply architecture, because patch ids remain the compatibility bridge for actual edit ownership
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `hover_hit_resolved=true`
+  - `post_carve_hit_primitive_type=quad`
+  - `post_carve_transition_geometry_present=true`
+  - `post_carve_center_subdivided_cell_count=2`
+  - `post_carve_edge_midpoint_subdivided_cell_count=2`
+- `stage2_refinement_foundation_results.txt`
+  - zero-edit unified baseline still remains green and unchanged
+- `crafting_bench_controls_results.txt`
+  - bench-level controls remain green after the unified-shell hit-path change
+
+Important honesty boundary:
+- the hit point is now resolved from the rebuilt shell geometry itself
+- but the current brush apply and selection logic still map that hit back to patch ownership for compatibility
+- true topology-aware surface ownership and selection remain later implementation branches
+
+## 76. 2026-04-09 Stage 2 merged transition-wall run cleanup bridge now live
+
+The next Stage 2 bridge slice is now in for local transition-wall cleanup.
+
+What changed:
+- localized transition walls are no longer always emitted as one strip per edited boundary cell
+- flat adjacent wall strips on the same side now merge into larger planar wall quads
+- non-mergeable wall spans still fall back to the existing triangle-strip path
+
+What this means:
+- transition geometry is still preserved around edited regions
+- the bridge layer now spends fewer primitives on flat wall runs instead of fragmenting them into repeated small strips
+- this is another local topology-economy improvement without changing the zero-edit unified-shell baseline contract
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_quad_count=8`
+  - `post_carve_triangle_count=10`
+  - `post_carve_surface_primitive_count=18`
+  - `localized_surface_only_primitive_count=15`
+  - `post_carve_secondary_diagonal_cell_count=2`
+  - `post_carve_transition_geometry_present=true`
+- comparison against the prior merged planar-region cleanup bridge:
+  - previous bridge = `19` surface primitives after the same sample carve
+  - merged transition-wall run cleanup bridge = `18` surface primitives after the same sample carve
+- `stage2_refinement_foundation_results.txt`
+  - zero-edit unified baseline still remains green and unchanged
+- `crafting_bench_controls_results.txt`
+  - bench-level controls remain green after the transition-wall merge cleanup change
+
+Important honesty boundary:
+- this is still a bridge on top of the patch-grid-derived localized shell rebuild
+- true topology-aware local remesh, stronger cleanup, and later finalization simplification passes are still the next real implementation branches
+
+## 110. 2026-04-09 Stage 2 editable-mesh selection fillet/chamfer now use mesh-owned triangle metadata instead of legacy patch-offset apply
+
+The next real Stage 2 replacement seam is now in on the Godot-native editable-mesh path.
+
+What changed:
+- `Stage2EditableMeshState` now stores per-triangle metadata:
+  - `triangle_patch_keys`
+  - `triangle_face_ids`
+- `Stage2EditableMeshBuilder` now emits that metadata while subdividing canonical shell quads into editable triangles
+- editable-mesh brush candidate resolution now prefers triangle metadata -> patch mapping instead of only nearest-patch guessing
+- selection `fillet` / `chamfer` now deform the editable mesh directly through `MeshDataTool` for the selected patch region
+- after editable-mesh commits, Stage 2 now derives compatibility patch offsets/current quads back from the editable mesh so patch-owned selection grouping stays coherent
+
+What this means:
+- pointer `carve` / `restore` were already on editable mesh
+- now selection `fillet` / `chamfer` are also on editable mesh ownership instead of the old patch-offset apply path
+- this is a true replacement seam, not a second parallel deformation owner
+- patch states remain as compatibility metadata/selection carriers, but the live edited surface is the editable mesh
+
+Verification now on record:
+- `stage2_selection_restore_results.txt`
+  - `face_restore_changed_shell=true`
+  - `edge_restore_changed_shell=true`
+  - `feature_edge_restore_changed_shell=true`
+- `stage2_selection_feature_results.txt`
+  - `grip_safe_face_fillet_changed_shell=true`
+  - `grip_safe_face_chamfer_changed_shell=false`
+  - `general_face_chamfer_changed_shell=true`
+- `stage2_feature_loop_results.txt`
+  - `selected_loop_count=1`
+  - `grip_safe_feature_loop_fillet_changed_shell=true`
+  - `general_feature_loop_chamfer_changed_shell=true`
+- `stage2_feature_region_results.txt`
+  - `grip_safe_feature_region_fillet_changed_shell=true`
+  - `grip_safe_feature_region_chamfer_changed_shell=false`
+  - `general_feature_region_chamfer_changed_shell=true`
+- `stage2_feature_band_results.txt`
+  - `grip_safe_feature_band_fillet_changed_shell=true`
+  - `grip_safe_feature_band_chamfer_changed_shell=false`
+  - `general_feature_band_chamfer_changed_shell=true`
+- `stage2_grip_safe_zone_results.txt`
+  - grip-safe carve/chamfer remain blocked
+  - general carve/fillet/chamfer remain active
+- `stage2_refinement_mode_results.txt`
+  - Stage 2 preview/hit/render remain on editable-mesh authority after live carve
+
+Important honesty boundary:
+- higher-family `restore` flows that are seeded by synthetic negative patch offsets in verifiers are still not fully ported to editable-mesh restore truth
+- for now, selection `restore` remains intentionally on the compatibility path while editable-mesh `fillet` / `chamfer` continue the replacement rollout
+
+2026-04-09 - Modifier scroll conflict fixed and higher-family restore now follows the active deformation owner.
+
+What changed:
+- Stage 2 `V + Mouse Wheel` now uses the same suppression rule as `Ctrl + Mouse Wheel`
+- the forge free-view controls now consume modifier-wheel input at the `Control` level before camera zoom can react to it
+- `KEY_V` tracking is now updated in `_input()` as well as `_unhandled_input()` so Stage 2 amount-scroll does not depend on a later propagation phase
+- higher-family selection `restore` no longer blindly tries editable-mesh restore when the current deformation was actually created on the compatibility path
+- Stage 2 now checks whether the target patch set has a real editable-mesh delta before choosing editable-mesh restore
+- if the editable mesh has no live delta for the selected target set, restore intentionally falls back to the compatibility patch path
+
+What this means:
+- `Ctrl + Scroll` still changes radius without camera zoom
+- `V + Scroll` now changes amount without camera zoom
+- face / edge / feature-edge restore remain green
+- higher-family region / band / loop restore now behave coherently with the path that created the current edit instead of forcing an unfinished editable-mesh restore path
+
+Verification now on record:
+- `crafting_bench_overlay_hud_results.txt`
+  - `amount_increased_with_v_scroll=true`
+  - `camera_zoom_suppressed_with_v_scroll=true`
+  - `radius_increased_with_ctrl_scroll=true`
+  - `camera_zoom_suppressed_with_ctrl_scroll=true`
+- `stage2_selection_restore_results.txt`
+  - `face_restore_changed_shell=true`
+  - `edge_restore_changed_shell=true`
+  - `feature_edge_restore_changed_shell=true`
+- `stage2_feature_restore_results.txt`
+  - `grip_safe_feature_region_restore_changed_shell=true`
+  - `general_feature_loop_restore_changed_shell=true`
+  - both currently report `restore_uses_editable_mesh=false`, meaning they are correctly restoring through the compatibility path for now
+- `stage2_feature_band_restore_results.txt`
+  - `grip_safe_feature_band_restore_changed_shell=true`
+  - `general_feature_band_restore_changed_shell=true`
+  - both currently report `restore_uses_editable_mesh=false`, meaning they are also correctly restoring through the compatibility path for now
+- `stage2_feature_region_results.txt`
+  - `grip_safe_feature_region_fillet_changed_shell=true`
+  - `general_feature_region_chamfer_changed_shell=true`
+- `stage2_feature_band_results.txt`
+  - `grip_safe_feature_band_fillet_changed_shell=true`
+  - `general_feature_band_chamfer_changed_shell=true`
+- `stage2_feature_loop_results.txt`
+  - `grip_safe_feature_loop_fillet_changed_shell=true`
+  - `general_feature_loop_chamfer_changed_shell=true`
+- `stage2_refinement_mode_results.txt`
+  - Stage 2 preview / hit / carve remain on editable-mesh authority
+
+Important honesty boundary:
+- higher-family `fillet` / `chamfer` can still seed edits on the compatibility path in some flat-surface cases, which is why higher-family `restore` is still correctly routing there today
+- the next real replacement step is not another input tweak; it is continuing the effect-port so higher-family selection edits stop needing the compatibility deformation path at all
+
+2026-04-09 - Stage 2 editable-mesh selection ownership advanced and the general-case synthetic restore seam was corrected.
+
+What changed:
+- Stage 1 -> Stage 2 editable-mesh build now tags the canonical shell geometry with Stage 2 shell face ids before editable-mesh generation, so triangle patch metadata lines up with the Stage 2 patch grid
+- this fixed the earlier higher-family mapping problem where grip-safe feature region could see editable-mesh vertices but later synthetic general region/band/loop cases lost their target mapping
+- the feature region / band / loop verifiers were corrected to reseed their synthetic general-case offsets after the earlier grip-safe editable-mesh pass, so the verifier state now matches the new editable-mesh ownership model instead of mixing old patch-only seed state with later mesh-owned edits
+- selection `fillet` / `chamfer` now explicitly treat editable-mesh vertex ownership as authoritative when target vertices exist
+- in that owned case, Stage 2 no longer falls through into the legacy patch deformation path if the editable-mesh apply path was the correct owner
+
+What this means:
+- higher-family grip-safe and general feature selections now resolve real editable-mesh vertices consistently
+- higher-family `fillet` / `chamfer` are further off the old double-duty path and more cleanly committed to editable-mesh ownership
+- higher-family `restore` synthetic cases are green again after reseeding the verifier state correctly
+- Stage 2 refinement preview / hit / carve remain on editable-mesh authority
+
+Verification now on record:
+- `stage2_feature_region_results.txt`
+  - `grip_safe_feature_region_fillet_editable_mesh_vertex_count=10`
+  - `grip_safe_feature_region_fillet_editable_mesh_delta=true`
+  - `general_feature_region_chamfer_changed_shell=true`
+- `stage2_feature_band_results.txt`
+  - `grip_safe_feature_band_fillet_changed_shell=true`
+  - `general_feature_band_chamfer_changed_shell=true`
+- `stage2_feature_loop_results.txt`
+  - `grip_safe_feature_loop_fillet_changed_shell=true`
+  - `general_feature_loop_chamfer_changed_shell=true`
+- `stage2_feature_restore_results.txt`
+  - `grip_safe_feature_region_restore_uses_editable_mesh=true`
+  - `general_feature_loop_restore_uses_editable_mesh=true`
+  - `general_feature_loop_restore_changed_shell=true`
+- `stage2_feature_band_restore_results.txt`
+  - `grip_safe_feature_band_restore_uses_editable_mesh=true`
+  - `general_feature_band_restore_uses_editable_mesh=true`
+  - `general_feature_band_restore_changed_shell=true`
+- `stage2_refinement_mode_results.txt`
+  - `stage2_shell_preview_source=editable_mesh`
+  - `post_carve_hit_source=editable_mesh`
+- `stage2_selection_restore_results.txt`
+  - `face_restore_changed_shell=true`
+  - `edge_restore_changed_shell=true`
+  - `feature_edge_restore_changed_shell=true`
+- `crafting_bench_controls_results.txt`
+  - forge control regression stayed green
+
+Important honesty boundary:
+- selection families still resolve their targets through patch ids as an interoperability layer even though the editable mesh now owns more of the actual deformation work
+- the next real replacement step is to keep moving effect ownership and selection targeting off that remaining compatibility layer instead of letting both systems share responsibility indefinitely
+
+2026-04-09 - Stage 2 selection apply state is now centralized and the editable-mesh path no longer depends on the UI patch contract as its primary targeting input.
+
+What changed:
+- Stage 2 selection apply now resolves a single apply-state bundle in `forge_stage2_selection_presenter.gd`
+- that bundle now carries:
+  - selected patch ids
+  - apply patch ids
+  - editable-mesh vertex indices for the same target set
+- `crafting_bench_ui.gd` now asks the presenter for that apply state instead of manually resolving patch ids and apply ids as separate UI-side steps
+- `forge_stage2_brush_presenter.gd` now forwards editable-mesh vertex indices into the Stage 2 apply resolver
+- `stage2_shell_apply_resolver.gd` now accepts explicit selection vertex indices and uses them directly for editable-mesh-owned selection deformation before any fallback patch resolution
+
+What this means:
+- the UI is no longer the main owner of editable-mesh selection targeting for Stage 2
+- the editable-mesh apply path now consumes a direct mesh-target set for selection families instead of re-deriving everything only from UI patch arrays
+- this is still not the final removal of patch interoperability, but it is a cleaner contract boundary:
+  - UI selection state -> presenter apply state
+  - presenter apply state -> editable mesh vertex targets
+  - compatibility patch ids remain for blocking rules and unfinished legacy seams
+
+Verification now on record:
+- `stage2_feature_region_results.txt`
+  - `general_feature_region_chamfer_changed_shell=true`
+- `stage2_feature_band_results.txt`
+  - `general_feature_band_chamfer_changed_shell=true`
+- `stage2_feature_loop_results.txt`
+  - `general_feature_loop_chamfer_changed_shell=true`
+- `stage2_feature_restore_results.txt`
+  - `grip_safe_feature_region_restore_changed_shell=true`
+  - `general_feature_loop_restore_changed_shell=true`
+- `stage2_feature_band_restore_results.txt`
+  - `grip_safe_feature_band_restore_changed_shell=true`
+  - `general_feature_band_restore_changed_shell=true`
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_hit_source=editable_mesh`
+- `stage2_selection_restore_results.txt`
+  - face / edge / feature-edge restore remained green
+- `crafting_bench_controls_results.txt`
+  - forge control regression remained green
+
+Important honesty boundary:
+- selection-family apply now reaches editable-mesh targets through a cleaner contract, but the target-building logic still internally depends on patch-derived grouping rules for region / band / cluster / bridge / contour / loop
+- the next real replacement step is reducing that remaining grouping dependence, not reintroducing UI-side patch ownership
+
+2026-04-10 - Deprecated Stage 2 bench-side patch selection state was removed after the editable-mesh selection contract fully replaced it.
+
+What changed:
+- `crafting_bench_ui.gd` no longer carries `stage2_hover_patch_ids` or `stage2_selected_patch_ids` as parallel Stage 2 selection state
+- Stage 2 selection hover and toggle flow now only track the live family identifiers that are actually used:
+  - face
+  - edge
+  - region
+  - band
+  - cluster
+  - bridge
+  - contour
+  - loop
+- the old bench-side fallback branch that toggled generic patch selection during Stage 2 selection mode was removed
+- `forge_stage2_selection_presenter.gd` no longer exposes the now-dead `toggle_patch_selection()` and `clear_selection()` helpers
+
+What this means:
+- the bench no longer pretends patch selection is a first-class Stage 2 UI selection mode
+- there is less duplicate ownership between:
+  - UI patch arrays
+  - UI identifier arrays
+  - presenter apply-state resolution
+- Stage 2 selection mode is now more honest about its current contract:
+  - selection UI owns identifiers
+  - presenter resolves apply state
+  - editable mesh owns deformation
+
+Verification now on record:
+- grep over `crafting_bench_ui.gd` and `forge_stage2_selection_presenter.gd` now returns no remaining references to:
+  - `stage2_hover_patch_ids`
+  - `stage2_selected_patch_ids`
+  - `toggle_patch_selection(`
+  - `clear_selection(`
+- `stage2_feature_region_results.txt`
+  - `general_feature_region_chamfer_changed_shell=true`
+- `stage2_feature_band_results.txt`
+  - `general_feature_band_chamfer_changed_shell=true`
+- `stage2_feature_loop_results.txt`
+  - `general_feature_loop_chamfer_changed_shell=true`
+- `stage2_feature_restore_results.txt`
+  - `general_feature_loop_restore_changed_shell=true`
+- `stage2_feature_band_restore_results.txt`
+  - `general_feature_band_restore_changed_shell=true`
+- `stage2_selection_restore_results.txt`
+  - face / edge / feature-edge restore remained green
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_hit_source=editable_mesh`
+- `crafting_bench_controls_results.txt`
+  - forge control regression remained green
+
+Important honesty boundary:
+- deprecated UI patch selection state is gone, but patch-derived grouping logic still exists inside the current region / band / cluster / bridge / contour / loop target builders
+- that grouping layer is the next remaining compatibility seam to reduce
+
+2026-04-10 - Additional Stage 2 redundant selection work removed.
+
+What changed:
+- the generic `patch_ids` fallback was removed from the public Stage 2 selection presenter APIs used by the bench
+- `resolve_patch_ids_for_selection_identifiers()` now resolves only the real live Stage 2 identifier families
+- `resolve_selection_apply_state()` now computes editable-mesh vertex indices directly from its already-resolved target patch ids instead of calling a second helper that repeated the same selection resolution pass
+- the old helper `resolve_editable_mesh_vertex_indices_for_selection_identifiers()` was removed
+
+What this means:
+- Stage 2 selection apply now performs one presenter-side target-resolution pass instead of two
+- the public bench-facing selection contract is tighter and no longer suggests a generic patch-selection mode that no longer exists in the UI
+- this removes another small but real source of parallel backend work
+
+Verification now on record:
+- grep now returns no remaining references to:
+  - `resolve_editable_mesh_vertex_indices_for_selection_identifiers(`
+  - `stage2_hover_patch_ids`
+  - `stage2_selected_patch_ids`
+- `stage2_feature_region_results.txt`
+  - `general_feature_region_chamfer_changed_shell=true`
+- `stage2_feature_band_results.txt`
+  - `general_feature_band_chamfer_changed_shell=true`
+- `stage2_feature_restore_results.txt`
+  - `general_feature_loop_restore_changed_shell=true`
+- `crafting_bench_controls_results.txt`
+  - forge control regression remained green
+
+Important honesty boundary:
+- the next remaining nontrivial compatibility seam is not bench state anymore
+- it is the patch-derived grouping logic that still defines higher feature families before editable-mesh deformation begins
+
+2026-04-10 - Stage 2 edge-family topology ownership tightened again.
+
+What changed:
+- `stage2_item_state.gd` now owns the remaining boundary-loop and patch-edge run topology helpers that were still duplicated in `forge_stage2_selection_presenter.gd`
+- new public Stage 2 state entry points now cover:
+  - patch lookup by id
+  - boundary-loop apply target resolution for face tools
+  - nearest boundary-edge resolution for patch-owned edge tools
+  - nearest internal feature-edge resolution for patch-owned feature-edge tools
+  - boundary-edge run expansion from an anchor patch
+  - internal feature-edge run expansion from an anchor patch
+- `forge_stage2_selection_presenter.gd` no longer carries a second copy of that topology math; the old presenter-side helper slab was reduced to thin delegation and dead helper code was removed
+
+What this means:
+- Stage 2 selection/backend ownership is tighter again:
+  - `Stage2ItemState` owns topology grouping
+  - `ForgeStage2SelectionPresenter` orchestrates identifiers and apply flow
+- the presenter is no longer acting as a shadow topology backend for:
+  - face boundary-loop apply targets
+  - boundary-edge run targets
+  - internal feature-edge run targets
+- this removes another real source of parallel logic while keeping the external selection flow stable
+
+Verification now on record:
+- grep over `forge_stage2_selection_presenter.gd` now returns no remaining copies of the old helper block:
+  - `_resolve_connected_face_region_patch_ids`
+  - `_is_boundary_edge`
+  - `_is_internal_feature_edge`
+  - `_patch_has_selection_boundary_edge`
+  - `_resolve_internal_edge_adjacent_patch_ids`
+  - `_resolve_boundary_neighbor_patch_ids`
+  - `_build_patch_lookup`
+  - `_append_unique_patch_id`
+  - `_build_edge_segment_key`
+  - `_resolve_edge_interval`
+- `stage2_feature_region_results.txt`
+  - `general_feature_region_chamfer_changed_shell=true`
+- `stage2_feature_band_results.txt`
+  - `general_feature_band_chamfer_changed_shell=true`
+- `stage2_feature_loop_results.txt`
+  - `general_feature_loop_chamfer_changed_shell=true`
+- `stage2_feature_restore_results.txt`
+  - `general_feature_loop_restore_changed_shell=true`
+- `stage2_feature_band_restore_results.txt`
+  - `general_feature_band_restore_changed_shell=true`
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_hit_source=editable_mesh`
+- `crafting_bench_controls_results.txt`
+  - forge control regression remained green
+
+Important honesty boundary:
+- higher-family grouping is now owned by `Stage2ItemState`, and edge-family topology ownership is tighter there too
+- the main remaining compatibility seam is the underlying patch-derived grouping model itself, not duplicate presenter-vs-state ownership of that logic
+
+2026-04-10 - Stage 2 selection/apply backend unification pass completed for the current live family set.
+
+What changed:
+- the generic Stage 2 selection backend is now owned by `Stage2ItemState`
+  - hover resolution
+  - identifier-to-patch resolution
+  - apply-target resolution
+  - apply-state resolution
+- `ForgeStage2SelectionPresenter` now acts as a thin presenter/API surface instead of duplicating the Stage 2 grouping backend
+- the remaining synthetic bridge / contour / cluster verifiers were aligned with the current positive `current_offset_cells` law
+- temporary Stage 2 debug probes used during the unification pass were removed once the regressions were resolved
+
+What this means:
+- there is no longer a second presenter-owned backend copy for the Stage 2 selection family ladder
+- `surface_face`
+- `surface_edge`
+- `surface_feature_edge`
+- `surface_feature_region`
+- `surface_feature_band`
+- `surface_feature_cluster`
+- `surface_feature_bridge`
+- `surface_feature_contour`
+- `surface_feature_loop`
+  all now resolve through the same state-owned backend contract before deformation/apply
+- the remaining Stage 2 compatibility seam is now about target-model representation, not duplicate ownership of selection/apply backend logic
+
+Verification now on record:
+- `stage2_feature_cluster_results.txt`
+  - `selected_cluster_count=1`
+  - `cluster_selected_count=288`
+  - `feature_cluster_chamfer_changed_shell=true`
+  - `feature_cluster_restore_changed_shell=true`
+- `stage2_feature_bridge_results.txt`
+  - `selected_bridge_count=1`
+  - `feature_bridge_chamfer_changed_shell=true`
+  - `feature_bridge_restore_changed_shell=true`
+- `stage2_feature_contour_results.txt`
+  - `selected_contour_count=1`
+  - `feature_contour_chamfer_changed_shell=true`
+  - `feature_contour_restore_changed_shell=true`
+- `stage2_selection_restore_results.txt`
+  - `face_restore_changed_shell=true`
+  - `edge_restore_changed_shell=true`
+  - `feature_edge_restore_changed_shell=true`
+- `stage2_refinement_mode_results.txt`
+  - `post_carve_hit_source=editable_mesh`
+  - `carve_changed_shell=true`
+- `crafting_bench_controls_results.txt`
+  - forge control regression remained green
+
+Docs checked first for this pass:
+- Godot 4.6 `Resource`
+- Godot 4.6 `MeshDataTool`
+
+2026-04-10 - Stage 2 editable-mesh carve received its first predictability/locality control pass.
+
+What changed:
+- pointer carve on the editable-mesh path no longer scans the whole mesh as the primary influence set
+- it now resolves the local editable-mesh vertex set from the candidate patch set first
+- editable-mesh pointer vertex weighting now includes:
+  - radial brush falloff
+  - forward depth gating along the tool/camera axis
+  - small backward tolerance only near the hit plane
+  - baseline normal facing weighting
+- editable-mesh carve now prevents outward escape beyond the baseline shell by removing positive outward displacement against the baseline vertex normal before the max-distance clamp is finalized
+
+What this means:
+- carve is more local to the actually hit region
+- opposite-side bleed is reduced
+- carve is less likely to push vertices outside the original shell in unpredictable ways
+- this is a control pass, not the final carve tuning pass
+
+Verification now on record:
+- `stage2_refinement_mode_results.txt`
+  - `carve_changed_shell=true`
+  - `post_carve_hit_source=editable_mesh`
+- `stage2_grip_safe_zone_results.txt`
+  - `grip_safe_carve_changed_shell=false`
+  - `general_carve_changed_shell=true`
+- `crafting_bench_controls_results.txt`
+  - forge control regression remained green
+
+Important honesty boundary:
+- carve locality and baseline containment are better now, but the tool still needs later tuning for feel/predictability
+- visual clarity / linework / neutral detail-light ideas remain parked for later research and are not part of this implementation slice
+
+---
+
+2026-04-10 - Grip law migration pass
+
+What changed:
+- Stage 1 grip validation no longer relies on the older whole-slice width/thickness/profile shortcut as the main truth.
+- `AnchorResolver` now resolves per-slice connected components, then validates handle candidates from:
+  - anchor/grip-valid material ratio
+  - full `1`-cell clearance ring in the cross-section plane, including diagonals
+  - contiguous slice-chain continuity with up to `1` cell of lateral drift between adjacent slices
+  - a stricter large-profile rule that rejects oversized solid rectangular handle slices while still allowing the smaller solid core shapes and smoother/tapered profiles
+- global grip minimum length is now `20` slices
+- two-hand threshold is now `26` slices
+- branch two-hand rule is now:
+  - melee weapon = allowed
+  - magic focus = allowed
+  - shield = forced one-hand
+  - ranged bow/body = forced one-hand
+- bow validity now also stays tied to shared primary-grip legality, so `bow_valid` can no longer return true while `primary_grip_valid` is false
+
+Focused verification now on record:
+- `branch_grip_validity_results.txt`
+  - shield valid `26x2x2` grip = valid, one-hand only
+  - magic valid `26x2x2` grip = valid, two-hand eligible
+  - ranged grip-only test = valid grip, still one-hand only
+  - sample bow still invalid under the new longer grip law because it has no legal primary grip
+- `primary_grip_clearance_and_drift_results.txt`
+  - straight `20`-slice melee handle = valid
+  - diagonal-drift melee handle = valid
+  - clearanced shield handle = valid
+  - blocked shield handle with no cross-plane air gap = invalid
+- `crafting_bench_grip_ui_results.txt`
+  - reverse-grip UI rule still behaves correctly: melee can use it, bow cannot
+
+Important honesty boundary:
+- the new grip detector is now operating on slice components, clearance, and drift, which fixes the main shield/bow handle problem
+- the exact red image family is approximated through the new stricter slice-shape rules, but this mask family may still need later tuning/expansion if a desired handle profile from the reference image is not yet accepted
+
+---
+
+2026-04-10 - Full cell-size/grid-resolution migration baseline landed
+
+What changed:
+- default forge cell size is now `0.0125 m`
+- builder workspaces now use doubled voxel resolution while preserving the same overall physical build volume
+- the new default builder grids are now:
+  - melee = `480 x 160 x 80`
+  - ranged physical bow = `320 x 160 x 60`
+  - shield = `200 x 160 x 60`
+  - magic = `200 x 60 x 60`
+  - ranged physical quiver = `140 x 60 x 60`
+- Stage 2 default cell-size fallback was also moved to `0.0125 m`
+- the remaining bench fallback that still assumed `0.025` was removed
+- resolution-sensitive physical voxel thresholds that should preserve old world-space size were doubled in the default forge rules:
+  - joint minimum cross/length rules
+  - riser compactness span/length rules
+  - bow string cross-span/length rules
+  - bow limb minimum cross/length rules
+  - bow limb flex-length reference
+  - Stage 2 primary-grip safe radius in voxels
+
+Focused verification now on record:
+- `crafting_bench_start_menu_results.txt`
+  - all builder-path grid checks passed on the new doubled-resolution sizes
+- `ranged_physical_component_foundation_results.txt`
+  - bow and quiver component switching/reset logic passed on the new ranged grids
+- `ranged_physical_component_tabs_results.txt`
+  - ranged component tab behavior passed on the new ranged/quiver grids
+- `branch_grip_validity_results.txt`
+  - shared grip law still passed after the resolution migration
+- `primary_grip_clearance_and_drift_results.txt`
+  - new grip clearance/drift law still passed after the resolution migration
+- `crafting_bench_controls_results.txt`
+  - forge controls regression remained green
+- `stage2_refinement_mode_results.txt`
+  - Stage 2 refinement mode remained green at the new default cell size
+
+Important honesty boundary:
+- the default-resolution migration is now live in rules, builder grids, Stage 2 defaults, and the focused verifiers
+- pre-existing saved docs/spec lines may still mention the older `0.025` / old-grid numbers and should be treated as stale unless explicitly updated
+
+---
+
+2026-04-10 - Legacy authoring presets and stale forge saves were removed
+
+What changed:
+- the old sample preset resources were removed:
+  - `sample_grip`
+  - `sample_flex`
+  - `sample_bow`
+- the authoring sandbox resource now keeps the preset plumbing but exposes no active presets:
+  - `default_sample_preset_id = ""`
+  - all sample-preset id fields cleared
+  - `sample_presets = []`
+- stale workspace test save files were removed
+- stale Godot `app_userdata` forge/inventory save files tied to the older ruleset were removed
+
+Focused verification now on record:
+- `godot_m2_results.txt`
+  - `preset_count=0`
+  - `has_presets=false`
+- `branch_grip_validity_results.txt`
+  - shared branch grip law still passes without preset resources
+- `crafting_bench_grip_ui_results.txt`
+  - bow reverse-grip restriction still passes using a blank ranged-bow branch WIP instead of a sample preset
+- `forge_test_print_preview_results.txt`
+  - preview still renders correctly using a tiny authored verification WIP instead of a sample preset
+
+Important honesty boundary:
+- preset plumbing still exists in code on purpose for later reuse
+- only the current preset content and stale save data were removed
+
+---
+
+2026-04-10 - Stage 1 structural shape tools now have real click-size settings
+
+What changed:
+- Stage 1 shape tools no longer expose only a fake `drag footprint` size label in the runtime `Tool` menu
+- the live Stage 1 shape families now carry real runtime size state:
+  - rectangle = `Size A`, `Size B`
+  - circle = `Radius`
+  - oval = `Size A`, `Size B`
+  - triangle = `Side A`, `Side B`
+- the `Tool` menu now exposes real size step actions for those fields instead of only rotation/mode
+- the current shape sizing truth is now:
+  - click / same-cell press-release uses the configured fixed footprint
+  - drag still overrides that fixed footprint and continues to use drag-defined bounds
+- shape preview and commit both read the same fixed-size settings when the drag has not expanded beyond the anchor cell
+- this keeps the older drag workflow alive while finally making the long-intended preconfigured shape footprint path real
+
+Focused verification now on record:
+- `crafting_bench_tool_menu_results.txt`
+  - rectangle tool menu now exposes `Click Size`, `Size A`, `Size B`, and real step actions
+- `crafting_bench_shape_size_settings_results.txt`
+  - fixed-size click placement and erase passed for rectangle, circle, and triangle
+- `crafting_bench_shape_tools_results.txt`
+  - older drag-defined shape tool behavior remained green
+- `crafting_bench_shape_rotation_results.txt`
+  - shared quarter-turn rotation still behaved correctly after the sizing pass
+- `crafting_bench_controls_results.txt`
+  - forge controls regression remained green
+- `stage2_refinement_mode_results.txt`
+  - Stage 2 refinement remained green after the Stage 1 sizing pass
+
+Important honesty boundary:
+- Stage 1 shape sizing is now real in the menu/backend, but it is not yet on a dedicated scroll-channel control path
+- current live truth is:
+  - fixed-size click footprint
+  - drag override footprint
+- later if desired, Stage 1 can still gain a faster modifier-channel sizing path on top of this without needing another backend rewrite
+
+---
+
+2026-04-10 - Stage 1 shape tools now show truthful pre-click footprint markers for fixed-size stamping
+
+What changed:
+- Stage 1 shape tools no longer wait until click/drag to show their footprint
+- when a Stage 1 shape family is active and the cursor hovers over the plane viewport while idle, the existing structural shape preview system now shows the exact fixed-size stamp footprint before commit
+- that hover marker uses the same backend footprint builder and the same preview state used by the actual commit path
+- the same preview is mirrored into the workspace 3D structural preview layer, so the footprint is visible in both plane view and workspace view
+- click stamping still uses the configured fixed-size footprint
+- drag still overrides the fixed-size footprint and expands into the older drag-defined bounds path
+
+Focused verification now on record:
+- `crafting_bench_shape_size_settings_results.txt`
+  - `rectangle_fixed_hover_preview_present=true`
+  - `circle_fixed_hover_preview_present=true`
+  - `triangle_fixed_hover_preview_present=true`
+  - fixed-size click commit/erase still passed for those tools
+- `crafting_bench_shape_tools_results.txt`
+  - older drag-shape behavior remained green
+- `crafting_bench_controls_results.txt`
+  - forge controls regression remained green
+
+Important honesty boundary:
+- the preview marker is now truthful and useful for fixed-size stamping
+- but there is still not yet a dedicated Stage 1 `Ctrl + Scroll` footprint-size channel; size currently changes through the tool menu while hover/click/drag consume the resulting settings
+
+---
+
+2026-04-10 - Stage 1 multi-cell placement now batches data mutation instead of repeating full dirty work per cell
+
+What changed:
+- Stage 1 multi-placement no longer routes every stamped cell through a full `set_material_at()` / `remove_material_at()` dirty cycle
+- the forge placement backend now batches cell mutations per stamp:
+  - active cell lookup uses `Vector3i` keys directly instead of string-built lookup keys
+  - multi-place mutates all target cells first, sorts touched layers once, and marks the WIP dirty once
+  - multi-remove clears the lookup first, rebuilds only the touched layer cell lists, and marks the WIP dirty once
+  - multi-place inventory consumption is now applied once per accepted stamp set instead of once per cell
+  - multi-remove inventory refund is now aggregated by material instead of refunded one cell at a time
+- this keeps the visible placement behavior the same while removing the heaviest repeated backend work from larger shape stamps
+
+Focused verification now on record:
+- `crafting_bench_shape_size_settings_results.txt`
+  - fixed-size hover preview and click stamping remained green
+- `crafting_bench_shape_tools_results.txt`
+  - rectangle/circle/oval/triangle drag-defined placement remained green
+- `crafting_bench_controls_results.txt`
+  - forge controls regression remained green
+
+Important honesty boundary:
+- this is the first real placement performance pass, not the final one
+- the biggest repeated dirty/sort churn is gone for multi-placement, but very large stamps can still feel heavy because the workspace visual refresh and preview sync still happen after the batch completes
+- if more speed is still needed later, the next best gains are likely:
+  - reducing post-stamp visual rebuild cost
+  - isolating expensive test-print / preview invalidation from ordinary placement
+  - optionally moving pure data prep off the scene-tree path where Godot’s threading rules allow it
+
+---
+
+2026-04-11 - Stage 1 shape stamps now lock to the press cell instead of live-resizing while held
+
+What changed:
+- Stage 1 rectangle/circle/oval/triangle tools no longer resize their footprint during a held left-click when the mouse moves
+- press now establishes the stamp anchor and preview footprint once
+- drag motion while still holding the mouse no longer changes `structural_shape_drag_current_grid_position` for Stage 1 shape tools
+- release still commits the currently shown fixed-size stamp footprint
+- this keeps Stage 1 shape stamping aligned with the intended click-place / Q-E stack workflow and removes the old micro-movement footprint recalculation loop
+
+Focused verification now on record:
+- `crafting_bench_shape_tools_results.txt`
+  - `circle_drag_motion_did_not_resize_shape=true`
+  - `oval_drag_motion_did_not_resize_shape=true`
+  - `triangle_drag_motion_did_not_resize_shape=true`
+  - shape placement/erase remained green
+- `crafting_bench_shape_size_settings_results.txt`
+  - fixed-size hover/click/erase remained green
+- `crafting_bench_controls_results.txt`
+  - forge controls regression remained green
+
+Important honesty boundary:
+- this removes the live-resize drag behavior for Stage 1 shape tools on purpose
+- freehand placement remains its own separate behavior
+- if later desired, a different explicit resize gesture could still be added, but ordinary held-click shape stamping is now intentionally stable instead of deforming with mouse motion
+
+---
+
+2026-04-11 - Geometry now exposes a 4-wide Handles image grid backed by valid grip-profile stamp presets
+
+What changed:
+- Stage 1 now has a dedicated `handle` stamp family alongside rectangle/circle/oval/triangle
+- `Geometry -> Handles` opens a side popup panel with a `4`-column self-populating image grid of valid grip-profile presets
+- selecting a handle preset activates the Stage 1 handle stamp tool directly
+- handle presets reuse the existing Stage 1 hover preview / click stamp / erase / rotation / plane-lock path instead of creating a second placement system
+- each handle entry now shows a rasterized example icon of the preset shape instead of only a text row, making the accepted grip-profile families visually explicit inside the menu
+- the tool menu now shows the selected handle preset as the active shape tool and hides size controls for handles because those presets are fixed masks, not resizable primitives
+
+Current preset set now exposed in the geometry handles panel:
+- `Grip 2x3`
+- `Grip 2x4`
+- `Rounded 8`
+- `Grip 3x3`
+- `Rounded 11`
+- `Rounded 12`
+- `Diamond 13`
+- `Offset 14`
+- `Rounded 16`
+- `Rounded 21`
+- `Diamond 21`
+- `Hex 24`
+
+Focused verification now on record:
+- `crafting_bench_handle_presets_results.txt`
+  - `geometry_menu_has_handles_entry=true`
+  - `handle_popup_visible=true`
+  - `handle_popup_has_four_columns=true`
+  - `handle_popup_button_count=12`
+  - `handle_popup_has_icons=true`
+  - `handle_tool_selected=true`
+  - `selected_handle_is_diamond_13=true`
+  - `tool_menu_hides_size_controls_for_handle=true`
+  - `handle_stamp_expected_cells_ok=true`
+  - `handle_erase_success=true`
+- `crafting_bench_tool_menu_results.txt`
+  - standard Stage 1 and Stage 2 tool menu behavior remained green
+- `crafting_bench_shape_size_settings_results.txt`
+  - fixed-size shape stamping remained green
+- `crafting_bench_controls_results.txt`
+  - forge controls regression remained green
+
+Important honesty boundary:
+- the handle preset list is now data-backed and extensible, and the current exposed set was updated from the user-provided unique reference-image masks
+- it is still a curated exposed set, not an automatic dump of every mathematically valid grip slice the backend could recognize
+
+2026-04-11 - Workspace camera and plane navigation were tightened for finer control
+
+What changed:
+- free-view 3D zoom now uses finer wheel increments
+- free-view maximum zoom distance was reduced from the previous `12.0`-meter cap to `6.0`
+- default free-view start distance now resolves closer because fit-view now clamps to the tighter zoom cap and lower fit multiplier
+- plane viewport now supports `C + RMB` panning, matching the 3D view pan modifier instead of relying only on zoom-focus repositioning
+- plain `RMB` erase in the plane view remains unchanged; only `C + RMB` diverts to panning
+
+Focused verification now on record:
+- `crafting_bench_camera_results.txt`
+  - `workspace_zoom_step=0.1`
+  - `workspace_zoom_max_distance=6.0`
+  - `initial_distance=6.0`
+  - `max_zoom_clamped_to_tuning=true`
+- `crafting_bench_layout_results.txt`
+  - `plane_pan_shifted_view=true`
+  - `main_workspace_mode_after_flip=plane`
+- `crafting_bench_controls_results.txt`
+  - main bench controls remained green
+- `crafting_bench_shape_tools_results.txt`
+  - Stage 1 shape placement behavior remained green after the plane input change
+
+2026-04-11 - Handle presets and grip validation were aligned onto the same exact mask truth
+
+What changed:
+- the live handle preset library was moved into a shared grip-profile definition file so runtime handle stamps and backend grip validation no longer drift independently
+- primary-grip slice validation now resolves against the exact allowed handle-mask family from the shared profile library, including rotation and mirrored equivalents
+- the old general slice-shape heuristic was retired from the grip-validity path
+- outdated grip verifiers were updated off the old `2x2` assumption and onto valid current-profile cases
+- the two reported UI warnings were also fixed:
+  - `_on_plane_drag_updated(_grid_position, ...)`
+  - explicit integer conversion for the handle popup screen position
+
+Focused verification now on record:
+- `handle_preset_grip_validity_results.txt`
+  - `all_handle_presets_valid=true`
+  - all `12` exposed handle presets bake as valid straight `20`-slice grips
+- `branch_grip_validity_results.txt`
+  - shield / magic / ranged grip branch checks remained green under the new profile truth
+- `primary_grip_clearance_and_drift_results.txt`
+  - straight, diagonal, clearanced, and blocked handle cases remained green
+- `crafting_bench_handle_presets_results.txt`
+  - handle panel UI and stamping still remained green after the backend alignment
+- if later more of the red reference-image variants need to be surfaced, that is now a straightforward preset-data extension instead of a UI/backend redesign
+
+2026-04-11 - Stage 2 grip-safe pathing was remapped to the editable-mesh surface truth
+
+What changed:
+- editable-mesh brush-hit resolution no longer throws away the hit triangle metadata and falls back directly to nearest patch center
+- Stage 2 now resolves editable-mesh hit targets through the stored triangle patch/face metadata first, then only falls back locally if metadata is missing
+- this means `patch_id`, `zone_mask_id`, and `face_id` now follow the actual visible editable-mesh surface much more faithfully for grip-safe blocking and Stage 2 selection hover
+- the stale Stage 2 front-heavy melee verifier sample was also replaced with a grip-valid melee test shape under the current `20`-slice grip law, so grip-safe Stage 2 checks now exercise a real valid handle again instead of an obsolete invalid sample
+
+Focused verification now on record:
+- `stage2_grip_safe_zone_results.txt`
+  - `profile_primary_grip_valid=true`
+  - `grip_safe_patch_count_positive=true`
+  - `grip_hover_blocked=true`
+  - `grip_safe_carve_changed_shell=false`
+  - `grip_safe_fillet_changed_shell=true`
+  - `grip_safe_chamfer_changed_shell=false`
+- `stage2_selection_feature_results.txt`
+  - grip-safe face selection and fillet stayed green on the remapped surface path
+- `stage2_internal_feature_edge_results.txt`
+  - grip-safe internal feature-edge selection and fillet stayed green on the remapped surface path
+- `stage2_feature_region_results.txt`
+  - grip-safe feature-region fillet remained green while grip-safe chamfer stayed blocked as intended
+- `stage2_feature_band_results.txt`
+  - grip-safe feature-band fillet remained green while grip-safe chamfer stayed blocked as intended
+- `stage2_feature_loop_results.txt`
+  - grip-safe feature-loop fillet remained green while grip-safe chamfer stayed blocked as intended
+- `stage2_feature_restore_results.txt`
+  - grip-safe region restore remained green
+- `stage2_feature_band_restore_results.txt`
+  - grip-safe band restore remained green
+- `stage2_selection_restore_results.txt`
+  - face / edge / feature-edge restore remained green
+- `stage2_refinement_mode_results.txt`
+  - editable-mesh Stage 2 preview and carve path remained green after the grip-path remap
+
+2026-04-11 - Player grip contact shell and finger-wrap backend were added on the live held-item path
+
+What changed:
+- held items now expose grip-contact shell metadata from the actual validated grip slice family instead of relying only on a generic weapon bounds box
+- `PrimaryGripGuide` and `SecondaryGripGuide` now get a `GripShellCenter` child with local shell-profile metadata and a local `GripContactArea`
+- the player rig now has a dedicated finger-grip presenter path that creates live per-finger grip targets and runs finger chain modifiers against those targets
+- support-arm IK stayed in place for the off-hand, but finger targets now also follow the active support grip guide when a two-hand weapon is character-eligible
+- this is a first-pass local grip contact solution, not full body-shell-vs-weapon-shell collision yet
+
+Focused verification now on record:
+- `player_finger_grip_ik_results.txt`
+  - `primary_shell_center_exists=true`
+  - `primary_contact_area_exists=true`
+  - `secondary_shell_center_exists=true`
+  - right and left finger grip targets exist
+  - right and left finger grip IK modifiers are active on a valid two-hand melee sample
+  - right / left fingertip world positions move under the new grip solver
+- `player_weapon_guidance_results.txt`
+  - two-hand melee sample now resolves `primary_grip_span_length_voxels=28`
+  - `secondary_guide_exists=true`
+  - `left_guidance_target_exists=true`
+  - `left_support_active=true`
+- `player_hand_mount_orientation_results.txt`
+  - right/left normal and reverse held-item mount cases remained green after the grip-shell addition
+- `player_finger_skin_results.txt`
+  - finger skin weighting remained present across all right/left finger chains, so the new grip path still rides on skinned finger bones rather than detached helper geometry
+
+2026-04-11 - Player finger grip now samples the real Run / SlowRun hand pose as the baseline instead of only procedural closure guesses
+
+What changed:
+- the finger-grip presenter now instantiates the Josie rig off-line, samples `SlowRun` and `Run`, and caches the resulting finger baseline in hand-relative space
+- cached baseline data now includes:
+  - root / mid finger-bone rotations for both hands
+  - fingertip positions relative to each hand
+- during live grip, the sampled baseline is reapplied before contact snapping, so the hold path now starts from the existing locomotion hand shape instead of inventing a fresh finger spread every frame
+- fingertip target solving still uses grip-shell contact queries, but those targets are now biased from the sampled run-pose hand shape
+
+Focused verification now on record:
+- `player_finger_grip_ik_results.txt`
+  - `right_index_tip_distance_to_target=0.0321`
+  - `right_thumb_tip_distance_to_target=0.0273`
+  - those are materially tighter than the earlier first-pass contact-only numbers
+- `player_weapon_guidance_results.txt`
+  - support-hand guidance stayed green while the new sampled grip baseline was added
+
+2026-04-11 - Index finger grip path was replaced with an idle-to-run trajectory curl test
+
+What changed:
+- the old shared shell-chasing logic is no longer the active path for the index test
+- index now samples:
+  - `Idle` as the open pose
+  - averaged `SlowRun` / `Run` as the closed pose
+- the index tip travels on a bounded cubic trajectory between those two sampled states
+- the first shell collision along that curve becomes the curl stop point
+- `Index1` and `Index2` now interpolate between the sampled open/closed rotations before CCDIK finishes the tip fit
+- non-index fingers currently stay on the sampled grip baseline so the test stays focused on one chain first
+
+Focused verification now on record:
+- `player_finger_grip_ik_results.txt`
+  - `right_index_tip_distance_to_target=0.0013`
+  - `right_thumb_tip_distance_to_target=0.0002`
+  - finger-tip fit is now substantially tighter than the previous sampled-baseline pass
+
+2026-04-11 - Held-weapon arm pose now borrows the slow-run upperarm / forearm chain, and pinky got a first collision-aware clamp
+
+What changed:
+- while a hand is actively gripping, the rig now applies a sampled `SlowRun` arm-chain baseline on:
+  - `CC_Base_R_Upperarm`
+  - `CC_Base_R_Forearm`
+  - `CC_Base_L_Upperarm`
+  - `CC_Base_L_Forearm`
+- this uses a global pose override path so the hold-pose arm orientation is not immediately flattened by the normal locomotion animation update
+- pinky target resolution now does a first baseline-to-shell contact clamp instead of trusting the raw sampled baseline tip when that baseline sits inside the weapon shell
+
+Focused verification now on record:
+- `player_finger_grip_ik_results.txt`
+  - `right_upperarm_rotation_changed=true`
+  - `right_forearm_rotation_changed=true`
+  - `right_pinky_tip_moved=true`
+  - `right_pinky_tip_distance_to_target=0.0863`
+- `player_weapon_guidance_results.txt`
+  - support-hand guidance remained green after the new arm-chain override path
+
+2026-04-11 - Pinky moved off the grip-center chase path and onto the same idle-to-run curl-plane logic as the index
+
+What changed:
+- the old pinky fallback that cast from the sampled baseline tip toward the grip center is no longer the active pinky path
+- pinky now samples:
+  - `Idle` as the open pose
+  - averaged `SlowRun` / `Run` as the closed pose
+- the pinky tip now follows a bounded cubic trajectory in that sampled motion plane, stopping on the first shell collision instead of aiming at the blade/grip attachment point
+- pinky curl is intentionally capped below the full run pose so it stays in the user-requested partial-close range instead of over-folding
+- the temporary slow-run arm override is still parked as a later revert, not removed in this pass
+
+Focused verification now on record:
+- `player_finger_grip_ik_results.txt`
+  - `right_pinky_tip_distance_to_target=0.0113`
+  - pinky tip fit is now substantially tighter than the first collision-clamp pass
+- `player_weapon_guidance_results.txt`
+  - weapon guidance stayed green after the pinky-path replacement
+
+2026-04-11 - Middle and ring were moved onto the same idle-to-run curl-plane solver as index/pinky
+
+What changed:
+- middle and ring no longer stay on the passive sampled-baseline tip path
+- both chains now use:
+  - `Idle` as the open pose
+  - averaged `SlowRun` / `Run` as the closed pose
+  - bounded cubic tip travel in the sampled motion plane
+  - first shell collision as the curl stop
+- this keeps the non-thumb fingers on the same grip logic family instead of mixing one plane-driven path with two passive baseline followers
+- the parked arm-revert request is still untouched in this pass
+
+Focused verification now on record:
+- `player_finger_grip_ik_results.txt`
+  - `right_middle_tip_distance_to_target=0.0009`
+  - `right_ring_tip_distance_to_target=0.0008`
+  - `right_pinky_tip_distance_to_target=0.0113`
+- `player_weapon_guidance_results.txt`
+  - guidance stayed green after widening the curl-plane path
+
+2026-04-11 - Reverted the temporary slow-run upperarm / forearm hold override
+
+What changed:
+- removed the sampled `SlowRun` global-pose override layer from `PlayerHumanoidRig`
+- upperarm / forearm orientation now comes back from the normal runtime stack again:
+  - locomotion animation
+  - support arm IK
+  - finger grip solver
+- this was reverted because the borrowed arm pose broke the hold model visually and the original intent was only to improve view readability, not to become the live hold owner
+
+Focused verification now on record:
+- `player_finger_grip_ik_results.txt`
+  - `right_upperarm_rotation_changed=false`
+  - `right_forearm_rotation_changed=false`
+  - finger target fit remained live:
+    - `right_index_tip_distance_to_target=0.0013`
+    - `right_middle_tip_distance_to_target=0.0009`
+    - `right_ring_tip_distance_to_target=0.0008`
+    - `right_pinky_tip_distance_to_target=0.0113`
+- `player_weapon_guidance_results.txt`
+  - guidance stayed green after removing the override
+
+2026-04-11 - Two-hand grip runtime law updated from user architecture dump
+
+Authority correction now parked for the next grip phase:
+- solve this as a legal-target generation problem first, then IK
+- dominant hand owns weapon seat from weapon grip anchor
+- support hand joins the already seated weapon from the secondary grip anchor
+- both targets must be projected into legal space before IK:
+  - outside body restriction volumes
+  - outside illegal weapon/body overlap space
+  - biased toward front-of-body valid space
+  - allowed to orbit around torso space instead of clipping through it
+- future module split to prefer:
+  - `weapon_grip_anchor_provider.gd`
+  - `hand_target_constraint_solver.gd`
+  - `two_hand_pose_solver.gd`
+  - `arm_ik_driver.gd`
+  - `grip_debug_draw.gd`
+- this is the new architectural direction for the two-hand runtime solve; ad hoc hand-chasing is no longer the intended law
+
+2026-04-11 - First-scope two-hand grip constraint spine is now integrated into runtime
+
+What changed:
+- equipped weapons now expose explicit runtime grip anchors:
+  - `PrimaryGripAnchor`
+  - `SupportGripAnchor`
+  - `PrimaryGripBasisAnchor`
+  - `SupportGripBasisAnchor`
+- `PlayerHumanoidRig` now owns:
+  - `BodyRestrictionRoot`
+  - `GripSolveRoot`
+  - a dominant-grip slot state for deterministic solve ordering
+- body restriction volumes now exist as dedicated runtime nodes around:
+  - chest
+  - abdomen
+  - hips
+  - both shoulders
+- support/dominant arm target generation now passes through a legal-target projector before arm IK target nodes are moved
+- the legal-target projector now does:
+  - path legality check against body restriction areas
+  - final-point legality check against body restriction volumes
+  - front-of-body bias
+  - orbit candidate correction if the raw target is illegal
+- debug markers now exist for:
+  - dominant desired target
+  - dominant corrected target
+  - support desired target
+  - support corrected target
+  - dominant elbow pole
+  - support elbow pole
+  - chest forward marker
+
+Focused verification now on record:
+- `player_weapon_guidance_results.txt`
+  - `primary_anchor_exists=true`
+  - `support_anchor_exists=true`
+  - `body_restriction_root_exists=true`
+  - `grip_solve_root_exists=true`
+  - `dominant_desired_marker_exists=true`
+  - `support_corrected_marker_exists=true`
+  - `left_guidance_target_name=SupportGripAnchor`
+  - `left_support_target_matches_support_anchor=true`
+- `player_finger_grip_ik_results.txt`
+  - finger solver remained alive after the new arm-target projection layer
+
+Honest boundary:
+- this is the first-scope legal-target spine, not the finished two-hand stance system
+- support-hand seating is still not visually solved to the grip yet in the verifier sample (`left_hand_near_support=false`)
+- weapon-body legality correction and wrist-basis beauty passes are still future work on top of this spine
+
+2026-04-11 - Narrowed the new two-hand grip spine so it only drives the support arm for now
+
+What changed:
+- fixed the `two_hand_pose_solver.gd` unused-parameter warning by marking the torso-frame skeleton input as intentionally unused
+- stopped the new legal-target spine from actively driving the dominant arm while the weapon is still seated through the older dominant-hand path
+- dominant side still contributes guidance/debug data, but only the support side is allowed to move the arm IK targets right now
+- this was needed because letting the new spine drive both sides too early pulled the arms/fingers backward and undid visible progress
+
+Focused verification now on record:
+- `player_finger_grip_ik_results.txt`
+  - `right_upperarm_rotation_changed=false`
+  - `right_forearm_rotation_changed=false`
+ - pre-existing finger tip fit returned to the prior stable values:
+    - `right_index_tip_distance_to_target=0.0013`
+    - `right_middle_tip_distance_to_target=0.0009`
+    - `right_ring_tip_distance_to_target=0.0008`
+    - `right_pinky_tip_distance_to_target=0.0113`
+- `player_weapon_guidance_results.txt`
+  - new anchor/restriction/debug spine remains present while dominant overreach is suppressed
+
+2026-04-11 - Added grip-basis data and weapon-body proxy debug visibility on the new two-hand spine
+
+What changed:
+- reverted a short-lived offhand palm-center target experiment because it pulled the support seat farther away from the support grip anchor instead of closer
+- `PrimaryGripBasisAnchor` and `SupportGripBasisAnchor` now carry a real handle/profile basis derived from the grip shell metadata instead of staying as empty identity placeholders
+- `TwoHandPoseSolver` now records per-slot `weapon_body_proxy_samples` and `weapon_body_illegal` state in the live solve result
+- `GripDebugDraw` now exposes support-side weapon proxy sample markers so torso/weapon legality can be tuned from visible runtime data instead of guesswork
+- support-side anchor targeting remains on the restored stable path while these new data/debug layers are added underneath
+
+Focused verification now on record:
+- `player_weapon_guidance_results.txt`
+  - `primary_basis_anchor_exists=true`
+  - `support_basis_anchor_exists=true`
+  - `primary_basis_anchor_valid=true`
+  - `support_basis_anchor_valid=true`
+  - `weapon_body_proxy_exists=true`
+  - `weapon_body_proxy_sample_count=3`
+  - `support_weapon_proxy_marker_exists=true`
+  - support baseline stayed stable:
+    - `left_anchor_distance_to_support=0.0991`
+    - `left_hand_near_support=true`
+- `player_finger_grip_ik_results.txt`
+  - dominant arm remained untouched:
+    - `right_upperarm_rotation_changed=false`
+    - `right_forearm_rotation_changed=false`
+  - finger fit remained on the prior stable values
+
+Honest boundary:
+- the new grip basis anchors and proxy debug markers are foundation work for later wrist-alignment and weapon-body correction passes
+- support-hand seating is improved in authority/debug terms, but the two-hand beauty pass is still not finished
+
+2026-04-11 - Hid two-hand debug markers by default and confirmed the next real blocker is dominant-seat authority
+
+What changed:
+- `GripSolveRoot` debug markers and weapon-body proxy balls are now opt-in through `show_two_hand_grip_debug_markers` on `PlayerHumanoidRig`, so they no longer pollute the live character view by default
+- tested a stronger front-space clamp on the support target projector and rejected it after verification because it pulled the offhand away from the support grip instead of improving the stance
+- this confirmed the current runtime truth:
+  - support-side legality/projected targeting alone cannot fully solve the pose while the dominant hand/weapon seat is still largely following the old animation-authored path
+  - stronger front bias on support only is not the correct next move
+
+Focused verification now on record:
+- `player_weapon_guidance_results.txt`
+  - support seating restored after backing out the aggressive front clamp:
+    - `left_anchor_distance_to_support=0.1`
+    - `left_hand_near_support=true`
+  - grip basis / proxy foundation still present:
+    - `primary_basis_anchor_valid=true`
+    - `support_basis_anchor_valid=true`
+    - `weapon_body_proxy_exists=true`
+- `player_finger_grip_ik_results.txt`
+  - dominant arm still not re-broken:
+    - `right_upperarm_rotation_changed=false`
+    - `right_forearm_rotation_changed=false`
+  - finger tip fit remained stable
+
+Honest boundary:
+- the next meaningful two-hand improvement is no longer “push support harder to the front”
+- it is a small, controlled dominant-side weapon-seat correction around the primary grip/basis so the already-validated support target has something truthful to join
+
+2026-04-11 - Split two-hand stance routing away from the normal one-hand / dual-wield idle path
+
+What changed:
+- `PlayerHumanoidRig` now has a dedicated `enable_two_hand_idle_upper_body_override` lane that only activates when the rig is actually in a two-hand support state
+- one-hand and dual-wield continue to use the pre-existing locomotion/idle animation path untouched because the override lane never activates without a live support hand
+- first tried a full upper-body override including upperarm / forearm / hand bones and rejected it because it tore the support hand off the grip
+- narrowed the two-hand override set to the safer structural bones:
+  - `CC_Base_Spine01`
+  - `CC_Base_Spine02`
+  - `CC_Base_R_Clavicle`
+  - `CC_Base_L_Clavicle`
+- this gives two-hand stance its own upper-body authority lane without re-breaking the offhand seating path
+- debug markers remain hidden by default; they are now opt-in only
+
+Focused verification now on record:
+- `player_weapon_guidance_results.txt`
+  - `two_hand_idle_upper_body_override_active=true`
+  - support seat remained good:
+    - `left_anchor_distance_to_support=0.089`
+    - `left_hand_near_support=true`
+- `player_finger_grip_ik_results.txt`
+  - finger target fit remained stable
+  - upperarm / forearm rotation deltas now move under the separated two-hand lane instead of only the plain idle animation path
+- `player_locomotion_animation_results.txt`
+  - base one-hand locomotion clips still exist and resolve correctly:
+    - `Idle`
+    - `Walk`
+    - `SlowRun`
+    - `Run`
+    - `Jump(Pose)`
+    - `Fall(Pose)`
+
+Honest boundary:
+- this is the stance-routing split and safer upper-body authority handoff, not the finished two-hand beauty solve
+- dominant-hand weapon seating still needs its own controlled correction layer on top of this
+- arms are no longer meant to share the plain idle upper-body lock when in two-hand stance, but the dominant-side seat still needs the next pass
+
+2026-04-11 - Disabled the live two-hand upper-body override after visual regression
+
+What changed:
+- the active `enable_two_hand_idle_upper_body_override` path was switched back off after a live visual test showed the character was fully broken from the waist up
+- the override scaffolding remains parked in code for later rework, but it is no longer part of the active runtime path
+- this restores the stable one-hand / dual-wield baseline and removes the broken live two-hand upper-body override from current truth
+
+Focused verification now on record:
+- `player_weapon_guidance_results.txt`
+  - `two_hand_idle_upper_body_override_active=false`
+  - support seat returned to the stable path:
+    - `left_anchor_distance_to_support=0.0755`
+    - `left_hand_near_support=true`
+- `player_finger_grip_ik_results.txt`
+  - upperarm / forearm rotation deltas returned to stable:
+    - `right_upperarm_rotation_changed=false`
+    - `right_forearm_rotation_changed=false`
+  - finger target fit remained stable
+
+Honest boundary:
+- the idea of a separate two-hand idle lane is still valid
+- the specific live implementation attempt was not ready and is now disabled
+- the next real path forward is a cleaner dominant-seat / torso solve, not re-enabling this override as-is
+
+2026-04-11 - Added a dedicated `2 Hand Idle` animation entry as the next authoring baseline
+
+What changed:
+- `PlayerHumanoidRig` now duplicates the existing `Idle` animation into a real `AnimationPlayer` clip named `2 Hand Idle` if it is missing
+- this is intentionally a baseline duplication only; it does not yet drive runtime stance behavior by itself
+- the broken live upper-body override remains disabled, so current character behavior stays on the stable path
+- this gives the next pass a clean named clip to edit against instead of overloading the default `Idle`
+
+Focused verification now on record:
+- `player_locomotion_animation_results.txt`
+  - `has_two_hand_idle=true`
+  - base locomotion clips still resolve normally
+- `player_weapon_guidance_results.txt`
+  - stable support seating remained intact
+- `player_finger_grip_ik_results.txt`
+  - dominant arm and finger stability remained intact
+
+Honest boundary:
+- `2 Hand Idle` currently starts as a duplicate of `Idle`
+- the next step is authoring/using that clip intentionally for the two-hand stance, not just having the name available
+
+2026-04-11 - Moved `2 Hand Idle` into the real Josie scene resource and removed the runtime duplication fallback
+
+What changed:
+- `2 Hand Idle` is now serialized inside `Josie/josie.tscn` as a real animation resource owned by the scene
+- the `AnimationPlayer` library in `josie.tscn` now includes a real `&"2 Hand Idle"` entry
+- the temporary runtime-only duplication logic was removed from `PlayerHumanoidRig`
+- the temporary migration tool was deleted after the scene save succeeded
+
+Focused verification now on record:
+- `josie.tscn`
+  - `resource_name = "2 Hand Idle"` exists as a real animation resource
+  - `&"2 Hand Idle": SubResource(...)` exists in the animation library table
+- `player_locomotion_animation_results.txt`
+  - `has_two_hand_idle=true`
+
+Honest boundary:
+- `2 Hand Idle` is now file-backed and editor-editable
+- it still starts as a duplicate of `Idle` until it is manually authored into the real two-hand stance
+
+2026-04-11 - Ported two-hand idle state selection onto the real animation pipeline and removed the dead upper-body override lane
+
+What changed:
+- `PlayerHumanoidRig` no longer carries the disabled two-hand upper-body override cache/bone path
+- two-hand idle selection now flows through the locomotion config into `PlayerRigLocomotionPresenter`
+- grounded idle now resolves to `2 Hand Idle` when a dominant grip is present and a support hand is active
+- the old verifier field `two_hand_idle_upper_body_override_active` was replaced with animation-pipeline reporting
+
+Focused verification now on record:
+- `player_locomotion_animation_results.txt`
+  - `idle_state_animation=2 Hand Idle`
+  - `has_two_hand_idle=true`
+- `player_weapon_guidance_results.txt`
+  - support guidance remains stable on `SupportGripAnchor`
+  - the scene still tends to report `Fall(Pose)` because that verifier sample starts in falling locomotion
+- `player_finger_grip_ik_results.txt`
+  - finger stability stayed on the pre-port baseline
+
+Honest boundary:
+- the two-hand idle selection is now on the real animation path
+- the support-side grip logic is still the active two-hand runtime layer
+- a separate authored `2 Hand Idle` pose is still needed for the final visual stance
+
+2026-04-11 - Added the first persisted foundation for the general combat animation creator branch
+
+What changed:
+- the new branch was explicitly corrected in scope:
+  - this is the overall runtime combat animation creator branch for the whole game
+  - it is not a two-hand-only weapon fix
+  - it is meant to sit alongside the forge crafter, disassembly bench, and inventory system as a separate runtime authoring system
+- grounded the implementation again on the official Godot 4.6 docs before writing code:
+  - `Resources`
+  - `AnimationPlayer`
+  - `AnimationLibrary`
+- added a new weapon-owned combat animation creator resource stack:
+  - `core/models/combat_animation_point.gd`
+  - `core/models/combat_animation_draft.gd`
+  - `core/models/combat_animation_station_state.gd`
+- added forward-compatible material effect stub support for later runtime animation/VFX/SFX expansion:
+  - `core/defs/material_animation_effect_stub.gd`
+  - `core/defs/base_material_def.gd`
+  - `core/defs/material_variant_def.gd`
+  - `core/resolvers/tier_resolver.gd`
+  - `core/resolvers/material_runtime_resolver.gd`
+- wired the new branch into weapon-owned WIP truth:
+  - `core/models/crafted_item_wip.gd` now carries `combat_animation_station_state`
+  - `apply_builder_path_defaults(...)` now guarantees the combat animation station exists
+  - `core/models/player_forge_wip_library_state.gd` now keeps the combat animation station alive through save/clone flows
+- default baseline content now initializes as:
+  - combat idle draft
+  - noncombat idle draft
+  - builder-path-aware baseline skill package
+  - grip-style propagation into the created drafts
+- the foundation is intentionally resource-first:
+  - point-chain authoring data
+  - idle vs skill draft ownership
+  - continuity cursor / playback-speed / loop flags
+  - stage1/stage2 usage flags
+  - future material animation effect stubs
+
+Focused verification now on record:
+- `combat_animation_station_foundation_results.txt`
+  - `combat_animation_station_exists=true`
+  - `combat_animation_station_schema_id=combat_animation_creator_v1`
+  - `idle_draft_count=2`
+  - `skill_draft_count=2`
+  - `default_skill_package_initialized=true`
+  - `saved_station_exists=true`
+  - `material_effect_stub_runtime_count=1`
+  - `material_effect_stub_runtime_threshold=0.65`
+- `material_variant_carrythrough_results.txt`
+  - existing material resolver behavior stayed green after adding animation-effect stub carrythrough
+- `player_weapon_guidance_results.txt`
+  - existing player/weapon guidance path stayed green after the new branch was attached to the weapon WIP
+- `verify_forge_wip_library.gd`
+  - persistence also rechecked successfully through `user://forge/test_player_wip_library_state.tres` when rerun outside the workspace sandbox
+  - result snapshot:
+    - `saved_count=1`
+    - `reloaded_project_name=Forge Temp Alpha`
+    - `reloaded_project_notes=initial notes`
+    - `duplicate_deleted=true`
+    - `post_delete_saved_count=1`
+
+Important implementation notes:
+- a few first-pass assumptions had to be corrected during implementation:
+  - preloaded script resources were not treated like full static utility classes in this branch
+  - default draft/point creation was stabilized by switching to explicit `Script` loads for resource instantiation
+  - the focused verifier was also corrected to stop using `Resource.get(name, default)` because Godot only accepts one argument there
+- this leaves the foundation in a stable resource/persistence state instead of a half-static helper state
+
+Honest boundary:
+- this pass builds the persisted shared data foundation and material stub hooks
+- it does not yet build the runtime editor scene / UI station itself
+- it does not yet build the full curve/Bezier authoring surface
+- it does not yet build per-skill playback, station UI, or runtime save-menu flow
+- next correct work should build the actual combat animation creator station on top of this foundation rather than adding more ad-hoc weapon-grip fixes
+
+2026-04-11 - Added the first real combat animation station UI/workflow on top of the new weapon-owned resource layer
+
+What changed:
+- confirmed `Jolt Physics` is already the active project-wide 3D physics backend in `project.godot`, so no extra Jolt enablement pass was needed for this branch
+- grounded this pass again on official Godot 4.6 docs before implementation:
+  - `Control` / runtime UI input handling
+  - `ItemList`
+  - `OptionButton`
+  - `CanvasLayer`
+- added a real interactable station scene:
+  - `runtime/combat/combat_animation_station.gd`
+  - `scenes/world/combat_animation_station.tscn`
+- added the first actual station UI/workflow layer:
+  - `runtime/combat/combat_animation_station_ui.gd`
+  - `scenes/ui/combat_animation_station_ui.tscn`
+- this first workflow slice now supports:
+  - saved weapon WIP selection from the forge WIP library
+  - authoring mode selection (`Idle Drafts` vs `Skill Drafts`)
+  - draft selection inside the selected weapon-owned station state
+  - new skill-draft creation
+  - point-chain selection
+  - add / duplicate / remove point
+  - continuity-point reassignment
+  - point local position / local rotation editing
+  - transition duration editing
+  - body-support blend editing
+  - per-point two-hand-state editing
+  - per-point grip-preference editing
+  - draft display-name / skill-slot / preview-speed / preview-loop / notes editing
+  - persistence back into the owning saved WIP through the forge WIP library
+- the station is intentionally workflow-first:
+  - it is the first live authoring surface for the combat animation creator branch
+  - it does not yet try to fake the full 3D Bezier/actor preview layer before the station workflow exists cleanly
+
+Focused verification now on record:
+- `combat_animation_station_workflow_results.txt`
+  - `station_opened=true`
+  - `player_ui_mode_enabled=true`
+  - `skill_draft_created=true`
+  - `insert_point_ok=true`
+  - `position_update_ok=true`
+  - `rotation_update_ok=true`
+  - `transition_update_ok=true`
+  - `support_blend_ok=true`
+  - `two_hand_ok=true`
+  - `notes_ok=true`
+  - `reloaded_point_position=(0.15, 0.02, -0.21)`
+  - `reloaded_point_rotation=(-12.0, 6.0, 18.0)`
+  - `reloaded_point_transition=0.44`
+  - `reloaded_point_support_blend=0.35`
+  - `reloaded_point_two_hand_state=two_hand_two_hand`
+  - `reloaded_notes=Verifier notes`
+- `combat_animation_station_foundation_results.txt`
+  - rerun after the UI pass stayed green
+  - the original resource foundation remained stable underneath the new station surface
+
+Honest boundary:
+- this is now a real combat animation creator station workflow, not just a resource stub
+- but it is still the first authoring shell, not the finished runtime combat editor
+- the full preview actor / selected weapon / Bezier trajectory / onion-skin / editable control-handle layer from the spec still needs to be built on top of this station
+- the current station is therefore the correct workflow spine and persistence authority, not yet the final authored-motion visual workspace
+
+2026-04-11 - Added the first live preview actor / selected weapon / Bezier trajectory layer on top of the combat animation station workflow
+
+What changed:
+- grounded this pass again on official Godot 4.6 docs before implementation:
+  - `Curve3D`
+  - `ImmediateMesh`
+  - `SubViewport`
+  - `SubViewportContainer`
+- extended `core/models/combat_animation_point.gd` with authored Bezier handle offsets:
+  - `curve_in_handle_local`
+  - `curve_out_handle_local`
+- updated `core/models/combat_animation_draft.gd` default baseline points so the first skill draft path now seeds simple handle offsets instead of a purely linear chain
+- added a dedicated preview presenter:
+  - `runtime/combat/combat_animation_station_preview_presenter.gd`
+- the station UI now includes:
+  - embedded 3D preview viewport
+  - live preview actor using `player_humanoid_rig.tscn`
+  - selected-weapon preview built from the owning saved WIP through the live equipped-item path
+  - live `Curve3D` trajectory rendering
+  - point markers
+  - curve in/out control-handle markers
+  - point curve-handle spinbox editing in the station UI
+- important preview-space law now live:
+  - the trajectory layer reparents under the weapon primary grip anchor when a real preview weapon exists
+  - this keeps authored motion truth relative to the grip seat instead of leaving the curve stranded in world space
+
+Focused verification now on record:
+- `combat_animation_station_preview_results.txt`
+  - `preview_actor_exists=true`
+  - `preview_weapon_exists=true`
+  - `primary_grip_anchor_exists=true`
+  - `ui_selected_point_index=1`
+  - `ui_point_count=3`
+  - `preview_draft_point_count=3`
+  - `curve_baked_point_count=22`
+  - `point_marker_count=3`
+  - `control_handle_marker_count=6`
+  - `selected_point_index=1`
+  - `marker_root_exists=true`
+- `combat_animation_station_workflow_results.txt`
+  - rerun after the preview pass stayed green
+
+Honest boundary:
+- this is now the first truthful visual authoring layer for the combat animation creator station
+- but control handles are still edited through station fields, not yet dragged directly in the 3D viewport
+- onion-skin pose history and a fuller preview-control/gizmo layer are still pending on top of this live preview spine
+
+2026-04-11 - Hooked the combat animation station into the live runtime world the same way the forge and disassembly benches already enter play
+
+What changed:
+- no new docs-research pass was done for this slice by request, because this was a known repeated world-entry pattern already used by the existing forge/disassembly/runtime UI surfaces
+- the missing problem was not the station primitive itself:
+  - `scenes/world/combat_animation_station.tscn` already existed
+  - `runtime/combat/combat_animation_station.gd` already exposed the correct `interact(player)` entry path
+- the actual missing step was world placement in the main traversal sandbox scene
+- `node_3d.tscn` now instantiates the live combat animation station beside the other runtime stations
+- the world-load verifier now also checks:
+  - main-scene presence of the combat animation station
+  - presence of the station UI under that world node
+  - successful open through the normal runtime `interact` path
+
+Focused verification now on record:
+- `disassembly_world_results.txt`
+  - `main_scene_loaded=true`
+  - `crafting_bench_present=true`
+  - `disassembly_bench_present=true`
+  - `combat_animation_station_present=true`
+  - `combat_animation_ui_present=true`
+  - `combat_animation_station_open=true`
+
+Honest boundary:
+- the combat animation station is now reachable in the live world through the same runtime interaction path as the other stations
+- this pass did not add new editor capabilities inside the station; it only fixed the missing world access point

@@ -46,6 +46,9 @@ class_name BaseMaterialDef
 @export var elemental_affinity_lines: Array[StatLine] = []
 @export var equipment_context_bias_lines: Array[StatLine] = []
 
+# future combat-animation-driven material hooks
+@export var animation_effect_stubs: Array[Resource] = []
+
 # hard support flags
 @export var can_be_anchor_material: bool = false
 @export var can_be_beveled_edge: bool = false

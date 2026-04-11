@@ -29,7 +29,10 @@ func get_saved_wip_clone(saved_wip_id: StringName) -> CraftedItemWIP:
 	var saved_wip: CraftedItemWIP = get_saved_wip(saved_wip_id)
 	if saved_wip == null:
 		return null
-	return saved_wip.duplicate(true) as CraftedItemWIP
+	var saved_clone: CraftedItemWIP = saved_wip.duplicate(true) as CraftedItemWIP
+	if saved_clone != null and saved_clone.has_method("ensure_combat_animation_station_state"):
+		saved_clone.call("ensure_combat_animation_station_state")
+	return saved_clone
 
 func save_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 	if source_wip == null:
@@ -45,6 +48,8 @@ func save_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 		saved_clone.forge_intent,
 		saved_clone.equipment_context
 	)
+	if saved_clone.has_method("ensure_combat_animation_station_state"):
+		saved_clone.call("ensure_combat_animation_station_state")
 	var existing_index: int = _find_saved_wip_index(resolved_wip_id)
 	if existing_index >= 0:
 		saved_wips[existing_index] = saved_clone
@@ -68,6 +73,8 @@ func duplicate_saved_wip(saved_wip_id: StringName) -> CraftedItemWIP:
 		duplicate_wip.forge_intent,
 		duplicate_wip.equipment_context
 	)
+	if duplicate_wip.has_method("ensure_combat_animation_station_state"):
+		duplicate_wip.call("ensure_combat_animation_station_state")
 	saved_wips.append(duplicate_wip)
 	selected_wip_id = duplicate_wip.wip_id
 	persist()
@@ -131,4 +138,3 @@ func _build_duplicate_project_name(project_name: String) -> String:
 	if cleaned_name.is_empty():
 		cleaned_name = _build_generated_project_name()
 	return "%s Copy" % cleaned_name
-

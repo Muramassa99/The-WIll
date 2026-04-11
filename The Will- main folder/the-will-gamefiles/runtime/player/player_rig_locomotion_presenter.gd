@@ -53,6 +53,8 @@ func resolve_locomotion_animation_name(
 
 	var idle_horizontal_speed_threshold: float = float(config.get("idle_horizontal_speed_threshold", 0.08))
 	if horizontal_speed <= idle_horizontal_speed_threshold:
+		if bool(config.get("two_hand_idle_requested", false)) and bool(config.get("two_hand_idle_available", false)):
+			return config.get("two_hand_idle_animation_name", &"2 Hand Idle")
 		return config.get("default_animation_name", &"Idle")
 
 	var resolved_target_speed: float = maxf(target_horizontal_speed, 0.001)

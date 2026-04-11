@@ -168,13 +168,13 @@ func _build_front_heavy_sword_wip() -> CraftedItemWIP:
 	wip.forge_builder_path_id = CraftedItemWIP.BUILDER_PATH_MELEE
 
 	var layer_map: Dictionary = {}
-	for x: int in range(40, 52):
+	for x: int in range(32, 58):
 		for y: int in range(24, 27):
 			for z: int in range(18, 20):
 				_add_cell(layer_map, Vector3i(x, y, z), &"mat_wood_gray")
-	for x: int in range(52, 65):
-		for y: int in range(22, 29):
-			for z: int in range(17, 22):
+	for x: int in range(58, 65):
+		for y: int in range(23, 28):
+			for z: int in range(17, 21):
 				_add_cell(layer_map, Vector3i(x, y, z), &"mat_iron_gray")
 
 	var ordered_layers: Array = layer_map.keys()
@@ -270,17 +270,11 @@ func _resolve_visible_internal_feature_edge_target(preview: ForgeWorkspacePrevie
 func _offset_patch_ids(stage2_item_state, patch_ids: PackedStringArray, offset_cells: float) -> void:
 	if stage2_item_state == null or patch_ids.is_empty():
 		return
-	var selected_lookup: Dictionary = {}
+	var target_offset_cells: float = maxf(absf(offset_cells), 0.0)
 	for patch_id: String in patch_ids:
-		selected_lookup[StringName(patch_id)] = true
-	for patch_state in stage2_item_state.patch_states:
-		if patch_state == null or patch_state.current_quad == null or patch_state.baseline_quad == null:
+		if not stage2_item_state.has_method("set_shell_patch_offset_cells_for_patch_id"):
 			continue
-		if not selected_lookup.has(patch_state.patch_id):
-			continue
-		var normal: Vector3 = patch_state.current_quad.normal.normalized()
-		patch_state.current_quad.origin_local = patch_state.baseline_quad.origin_local - (normal * offset_cells)
-		patch_state.dirty = true
+		stage2_item_state.set_shell_patch_offset_cells_for_patch_id(StringName(patch_id), target_offset_cells)
 	stage2_item_state.refresh_current_local_aabb_from_patches()
 
 func _collect_patch_origins(stage2_item_state) -> Array[Vector3]:

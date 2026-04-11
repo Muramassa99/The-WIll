@@ -6,7 +6,7 @@
 
 [sub_resource type="Resource" id="Resource_xo0d3"]
 script = ExtResource("1_7k6v3")
-wip_id = &"player_wip_1775340502.376_1"
+wip_id = &"player_wip_1775834808.869_1"
 forge_project_name = "Menu Beta"
 creator_id = &"start_menu_verifier"
 forge_builder_path_id = &"builder_path_shield"
@@ -16,5 +16,5 @@ equipment_context = &"ctx_shield"
 [resource]
 script = ExtResource("2_xo0d3")
 saved_wips = Array[ExtResource("1_7k6v3")]([SubResource("Resource_xo0d3")])
-selected_wip_id = &"player_wip_1775340502.376_1"
+selected_wip_id = &"player_wip_1775834808.869_1"
 save_file_path = "c:/WORKSPACE/test_start_menu_state.tres"

@@ -20,45 +20,82 @@ const TWO_HAND_STATE_LABELS := {
 	CombatAnimationMotionNodeScript.TWO_HAND_STATE_TWO_HAND: "Two Hand",
 }
 
-@onready var backdrop: ColorRect = $Backdrop
-@onready var panel: PanelContainer = $Panel
-@onready var title_label: Label = $Panel/MarginContainer/RootVBox/HeaderBox/TitleLabel
-@onready var subtitle_label: Label = $Panel/MarginContainer/RootVBox/HeaderBox/SubtitleLabel
-@onready var project_list: ItemList = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/WeaponPanel/MarginContainer/WeaponVBox/ProjectList
-@onready var authoring_mode_option_button: OptionButton = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/WeaponPanel/MarginContainer/WeaponVBox/AuthoringModeOptionButton
-@onready var draft_list: ItemList = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/WeaponPanel/MarginContainer/WeaponVBox/DraftList
-@onready var new_skill_draft_button: Button = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/WeaponPanel/MarginContainer/WeaponVBox/DraftHeaderRow/NewSkillDraftButton
-@onready var point_list: ItemList = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/TimelinePanel/MarginContainer/TimelineVBox/PointList
-@onready var add_point_button: Button = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/TimelinePanel/MarginContainer/TimelineVBox/PointActionRow/AddPointButton
-@onready var duplicate_point_button: Button = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/TimelinePanel/MarginContainer/TimelineVBox/PointActionRow/DuplicatePointButton
-@onready var remove_point_button: Button = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/TimelinePanel/MarginContainer/TimelineVBox/PointActionRow/RemovePointButton
-@onready var set_continuity_button: Button = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/TimelinePanel/MarginContainer/TimelineVBox/SecondaryActionRow/SetContinuityButton
-@onready var draft_name_edit: LineEdit = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/TimelinePanel/MarginContainer/TimelineVBox/DraftSettingsPanel/MarginContainer/DraftSettingsVBox/DraftNameEdit
-@onready var skill_slot_edit: LineEdit = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/TimelinePanel/MarginContainer/TimelineVBox/DraftSettingsPanel/MarginContainer/DraftSettingsVBox/SkillSlotEdit
-@onready var preview_speed_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/TimelinePanel/MarginContainer/TimelineVBox/DraftSettingsPanel/MarginContainer/DraftSettingsVBox/PreviewSpeedSpinBox
-@onready var preview_loop_check_box: CheckBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/TimelinePanel/MarginContainer/TimelineVBox/DraftSettingsPanel/MarginContainer/DraftSettingsVBox/PreviewLoopCheckBox
-@onready var position_x_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/PositionRow/PositionXSpinBox
-@onready var position_y_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/PositionRow/PositionYSpinBox
-@onready var position_z_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/PositionRow/PositionZSpinBox
-@onready var rotation_x_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/RotationRow/RotationXSpinBox
-@onready var rotation_y_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/RotationRow/RotationYSpinBox
-@onready var rotation_z_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/RotationRow/RotationZSpinBox
-@onready var transition_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/TransitionSpinBox
-@onready var body_support_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/BodySupportSpinBox
-@onready var two_hand_state_option_button: OptionButton = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/TwoHandStateOptionButton
-@onready var grip_mode_option_button: OptionButton = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/GripModeOptionButton
-@onready var preview_view_container: SubViewportContainer = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/PreviewPanel/MarginContainer/PreviewVBox/PreviewViewContainer
-@onready var preview_subviewport: SubViewport = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/PreviewPanel/MarginContainer/PreviewVBox/PreviewViewContainer/PreviewSubViewport
-@onready var curve_in_x_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/CurveInRow/CurveInXSpinBox
-@onready var curve_in_y_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/CurveInRow/CurveInYSpinBox
-@onready var curve_in_z_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/CurveInRow/CurveInZSpinBox
-@onready var curve_out_x_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/CurveOutRow/CurveOutXSpinBox
-@onready var curve_out_y_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/CurveOutRow/CurveOutYSpinBox
-@onready var curve_out_z_spin_box: SpinBox = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/CurveOutRow/CurveOutZSpinBox
-@onready var draft_notes_edit: TextEdit = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/DraftNotesEdit
-@onready var summary_label: Label = $Panel/MarginContainer/RootVBox/MainScroll/MainHBox/DetailPanel/MarginContainer/DetailVBox/SummaryPanel/MarginContainer/SummaryLabel
-@onready var footer_status_label: Label = $Panel/MarginContainer/RootVBox/FooterRow/FooterStatusLabel
-@onready var close_button: Button = $Panel/MarginContainer/RootVBox/FooterRow/CloseButton
+const COLOR_BG_ROOT := Color(0.055, 0.063, 0.098, 0.97)
+const COLOR_BG_SECTION := Color(0.078, 0.086, 0.125, 1.0)
+const COLOR_BG_PREVIEW := Color(0.035, 0.040, 0.065, 1.0)
+const COLOR_BG_INPUT := Color(0.065, 0.073, 0.11, 1.0)
+const COLOR_BORDER := Color(0.16, 0.18, 0.25, 0.7)
+const COLOR_BORDER_ACCENT := Color(0.58, 0.48, 0.22, 0.6)
+const COLOR_TEXT := Color(0.78, 0.80, 0.86, 1.0)
+const COLOR_TEXT_DIM := Color(0.45, 0.48, 0.56, 1.0)
+const COLOR_TEXT_HEADER := Color(0.76, 0.65, 0.32, 1.0)
+const COLOR_TEXT_TITLE := Color(0.88, 0.78, 0.38, 1.0)
+const COLOR_BUTTON_NORMAL := Color(0.10, 0.11, 0.16, 1.0)
+const COLOR_BUTTON_HOVER := Color(0.14, 0.15, 0.22, 1.0)
+const COLOR_BUTTON_PRESSED := Color(0.18, 0.16, 0.12, 1.0)
+const COLOR_BACKDROP := Color(0.02, 0.02, 0.04, 0.82)
+const COLOR_SEPARATOR := Color(0.18, 0.20, 0.28, 0.5)
+const FONT_TITLE := 20
+const FONT_SECTION := 13
+const FONT_BODY := 12
+const FONT_HINT := 11
+
+var backdrop: ColorRect = null
+var panel: PanelContainer = null
+var title_label: Label = null
+var subtitle_label: Label = null
+var shortcut_hint_label: Label = null
+var project_list: ItemList = null
+var authoring_mode_option_button: OptionButton = null
+var draft_list: ItemList = null
+var new_skill_draft_button: Button = null
+var point_list: ItemList = null
+var add_point_button: Button = null
+var duplicate_point_button: Button = null
+var remove_point_button: Button = null
+var set_continuity_button: Button = null
+var play_preview_button: Button = null
+var draft_name_edit: LineEdit = null
+var skill_name_edit: LineEdit = null
+var skill_slot_edit: LineEdit = null
+var skill_description_edit: TextEdit = null
+var preview_speed_spin_box: SpinBox = null
+var preview_loop_check_box: CheckBox = null
+var position_x_spin_box: SpinBox = null
+var position_y_spin_box: SpinBox = null
+var position_z_spin_box: SpinBox = null
+var rotation_x_spin_box: SpinBox = null
+var rotation_y_spin_box: SpinBox = null
+var rotation_z_spin_box: SpinBox = null
+var plane_vertical_spin_box: SpinBox = null
+var transition_spin_box: SpinBox = null
+var body_support_spin_box: SpinBox = null
+var two_hand_state_option_button: OptionButton = null
+var grip_mode_option_button: OptionButton = null
+var preview_view_container: SubViewportContainer = null
+var preview_subviewport: SubViewport = null
+var curve_in_x_spin_box: SpinBox = null
+var curve_in_y_spin_box: SpinBox = null
+var curve_in_z_spin_box: SpinBox = null
+var curve_out_x_spin_box: SpinBox = null
+var curve_out_y_spin_box: SpinBox = null
+var curve_out_z_spin_box: SpinBox = null
+var pommel_x_spin_box: SpinBox = null
+var pommel_y_spin_box: SpinBox = null
+var pommel_z_spin_box: SpinBox = null
+var pommel_curve_in_x_spin_box: SpinBox = null
+var pommel_curve_in_y_spin_box: SpinBox = null
+var pommel_curve_in_z_spin_box: SpinBox = null
+var pommel_curve_out_x_spin_box: SpinBox = null
+var pommel_curve_out_y_spin_box: SpinBox = null
+var pommel_curve_out_z_spin_box: SpinBox = null
+var weapon_roll_spin_box: SpinBox = null
+var axial_reposition_spin_box: SpinBox = null
+var grip_seat_slide_spin_box: SpinBox = null
+var draft_notes_edit: TextEdit = null
+var summary_label: Label = null
+var footer_status_label: Label = null
+var close_button: Button = null
 
 var active_player = null
 var active_wip_library: PlayerForgeWipLibraryState = null
@@ -68,9 +105,8 @@ var refreshing_controls: bool = false
 var preview_presenter = CombatAnimationStationPreviewPresenterScript.new()
 
 func _ready() -> void:
+	_build_ui()
 	visible = false
-	backdrop.visible = false
-	panel.visible = false
 	project_list.item_clicked.connect(_on_project_item_clicked)
 	draft_list.item_clicked.connect(_on_draft_item_clicked)
 	point_list.item_clicked.connect(_on_motion_node_item_clicked)
@@ -80,10 +116,14 @@ func _ready() -> void:
 	duplicate_point_button.pressed.connect(_on_duplicate_motion_node_pressed)
 	remove_point_button.pressed.connect(_on_remove_motion_node_pressed)
 	set_continuity_button.pressed.connect(_on_set_continuity_pressed)
+	play_preview_button.pressed.connect(_on_play_preview_pressed)
 	draft_name_edit.text_submitted.connect(_on_draft_name_submitted)
 	draft_name_edit.focus_exited.connect(_on_draft_name_focus_exited)
+	skill_name_edit.text_submitted.connect(_on_skill_name_submitted)
+	skill_name_edit.focus_exited.connect(_on_skill_name_focus_exited)
 	skill_slot_edit.text_submitted.connect(_on_skill_slot_submitted)
 	skill_slot_edit.focus_exited.connect(_on_skill_slot_focus_exited)
+	skill_description_edit.focus_exited.connect(_on_skill_description_focus_exited)
 	preview_speed_spin_box.value_changed.connect(_on_preview_speed_changed)
 	preview_loop_check_box.toggled.connect(_on_preview_loop_toggled)
 	position_x_spin_box.value_changed.connect(_on_tip_position_component_changed.bind(0))
@@ -92,6 +132,7 @@ func _ready() -> void:
 	rotation_x_spin_box.value_changed.connect(_on_plane_orientation_component_changed.bind(0))
 	rotation_y_spin_box.value_changed.connect(_on_plane_orientation_component_changed.bind(1))
 	rotation_z_spin_box.value_changed.connect(_on_plane_orientation_component_changed.bind(2))
+	plane_vertical_spin_box.value_changed.connect(_on_plane_vertical_changed)
 	transition_spin_box.value_changed.connect(_on_transition_changed)
 	body_support_spin_box.value_changed.connect(_on_body_support_changed)
 	two_hand_state_option_button.item_selected.connect(_on_two_hand_state_selected)
@@ -103,6 +144,18 @@ func _ready() -> void:
 	curve_out_x_spin_box.value_changed.connect(_on_tip_curve_out_component_changed.bind(0))
 	curve_out_y_spin_box.value_changed.connect(_on_tip_curve_out_component_changed.bind(1))
 	curve_out_z_spin_box.value_changed.connect(_on_tip_curve_out_component_changed.bind(2))
+	pommel_x_spin_box.value_changed.connect(_on_pommel_position_component_changed.bind(0))
+	pommel_y_spin_box.value_changed.connect(_on_pommel_position_component_changed.bind(1))
+	pommel_z_spin_box.value_changed.connect(_on_pommel_position_component_changed.bind(2))
+	pommel_curve_in_x_spin_box.value_changed.connect(_on_pommel_curve_in_component_changed.bind(0))
+	pommel_curve_in_y_spin_box.value_changed.connect(_on_pommel_curve_in_component_changed.bind(1))
+	pommel_curve_in_z_spin_box.value_changed.connect(_on_pommel_curve_in_component_changed.bind(2))
+	pommel_curve_out_x_spin_box.value_changed.connect(_on_pommel_curve_out_component_changed.bind(0))
+	pommel_curve_out_y_spin_box.value_changed.connect(_on_pommel_curve_out_component_changed.bind(1))
+	pommel_curve_out_z_spin_box.value_changed.connect(_on_pommel_curve_out_component_changed.bind(2))
+	weapon_roll_spin_box.value_changed.connect(_on_weapon_roll_changed)
+	axial_reposition_spin_box.value_changed.connect(_on_axial_reposition_changed)
+	grip_seat_slide_spin_box.value_changed.connect(_on_grip_seat_slide_changed)
 	draft_notes_edit.focus_exited.connect(_on_draft_notes_focus_exited)
 	close_button.pressed.connect(close_ui)
 	_register_station_input_actions()
@@ -150,8 +203,8 @@ func toggle_for(player, bench_name: String) -> void:
 func open_for(player, bench_name: String) -> void:
 	active_player = player
 	active_wip_library = _get_forge_wip_library_state()
-	title_label.text = "%s Combat Animation Station" % bench_name
-	subtitle_label.text = "Weapon selection -> draft selection -> motion-node authoring. This station saves runtime combat idle and skill motion truth back into the owning weapon WIP."
+	title_label.text = "SKILL CRAFTER"
+	subtitle_label.text = bench_name
 	if active_player != null and active_player.has_method("set_ui_mode_enabled"):
 		active_player.call("set_ui_mode_enabled", true)
 	visible = true
@@ -488,6 +541,493 @@ func get_selected_motion_node_index() -> int:
 func get_preview_debug_state() -> Dictionary:
 	return preview_presenter.get_debug_state(preview_subviewport)
 
+func _build_ui() -> void:
+	backdrop = ColorRect.new()
+	backdrop.name = "Backdrop"
+	backdrop.visible = false
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.color = COLOR_BACKDROP
+	add_child(backdrop)
+	panel = PanelContainer.new()
+	panel.name = "Panel"
+	panel.visible = false
+	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var root_style := StyleBoxFlat.new()
+	root_style.bg_color = COLOR_BG_ROOT
+	root_style.set_border_width_all(0)
+	root_style.set_corner_radius_all(0)
+	panel.add_theme_stylebox_override("panel", root_style)
+	add_child(panel)
+	var root_margin := MarginContainer.new()
+	root_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for side: String in ["margin_left", "margin_right"]:
+		root_margin.add_theme_constant_override(side, 14)
+	for side: String in ["margin_top", "margin_bottom"]:
+		root_margin.add_theme_constant_override(side, 10)
+	panel.add_child(root_margin)
+	var root_vbox := VBoxContainer.new()
+	root_vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root_vbox.add_theme_constant_override("separation", 6)
+	root_margin.add_child(root_vbox)
+	_build_header(root_vbox)
+	var header_sep := HSeparator.new()
+	header_sep.add_theme_constant_override("separation", 2)
+	header_sep.add_theme_stylebox_override("separator", _make_separator_style())
+	root_vbox.add_child(header_sep)
+	var content_hbox := HBoxContainer.new()
+	content_hbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content_hbox.add_theme_constant_override("separation", 6)
+	root_vbox.add_child(content_hbox)
+	_build_left_sidebar(content_hbox)
+	_build_center_column(content_hbox)
+	_build_right_inspector(content_hbox)
+	_build_footer(root_vbox)
+
+func _build_header(parent: VBoxContainer) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	parent.add_child(row)
+	title_label = Label.new()
+	title_label.text = "SKILL CRAFTER"
+	title_label.add_theme_font_size_override("font_size", FONT_TITLE)
+	title_label.add_theme_color_override("font_color", COLOR_TEXT_TITLE)
+	row.add_child(title_label)
+	var divider := Label.new()
+	divider.text = "—"
+	divider.add_theme_color_override("font_color", COLOR_BORDER_ACCENT)
+	row.add_child(divider)
+	subtitle_label = Label.new()
+	subtitle_label.text = ""
+	subtitle_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	subtitle_label.add_theme_font_size_override("font_size", FONT_BODY)
+	subtitle_label.add_theme_color_override("font_color", COLOR_TEXT_DIM)
+	subtitle_label.clip_text = true
+	row.add_child(subtitle_label)
+	shortcut_hint_label = Label.new()
+	shortcut_hint_label.text = "Q/E nav  R copy  T del  Space cycle  F preview"
+	shortcut_hint_label.add_theme_font_size_override("font_size", FONT_HINT)
+	shortcut_hint_label.add_theme_color_override("font_color", Color(0.55, 0.48, 0.32, 0.7))
+	row.add_child(shortcut_hint_label)
+	close_button = _build_styled_button(row, "✕")
+	close_button.custom_minimum_size = Vector2(32, 0)
+	close_button.size_flags_horizontal = Control.SIZE_SHRINK_END
+
+func _build_left_sidebar(parent: HBoxContainer) -> void:
+	var sidebar := VBoxContainer.new()
+	sidebar.custom_minimum_size = Vector2(230, 0)
+	sidebar.add_theme_constant_override("separation", 6)
+	parent.add_child(sidebar)
+	var w_vbox := _build_section_panel(sidebar, true)
+	_build_section_header(w_vbox, "WEAPONS")
+	project_list = ItemList.new()
+	project_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	project_list.allow_reselect = true
+	_style_item_list(project_list)
+	w_vbox.add_child(project_list)
+	var m_vbox := _build_section_panel(sidebar, false)
+	_build_section_header(m_vbox, "AUTHORING MODE")
+	authoring_mode_option_button = OptionButton.new()
+	_style_option_button(authoring_mode_option_button)
+	m_vbox.add_child(authoring_mode_option_button)
+	var d_vbox := _build_section_panel(sidebar, true)
+	var d_row := HBoxContainer.new()
+	d_row.add_theme_constant_override("separation", 4)
+	d_vbox.add_child(d_row)
+	var d_label := Label.new()
+	d_label.text = "DRAFTS"
+	d_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	d_label.add_theme_font_size_override("font_size", FONT_SECTION)
+	d_label.add_theme_color_override("font_color", COLOR_TEXT_HEADER)
+	d_row.add_child(d_label)
+	new_skill_draft_button = _build_styled_button(d_row, "+ New")
+	new_skill_draft_button.size_flags_horizontal = Control.SIZE_SHRINK_END
+	draft_list = ItemList.new()
+	draft_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	draft_list.allow_reselect = true
+	_style_item_list(draft_list)
+	d_vbox.add_child(draft_list)
+	var s_vbox := _build_section_panel(sidebar, false)
+	_build_section_header(s_vbox, "SUMMARY")
+	summary_label = Label.new()
+	summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	summary_label.add_theme_font_size_override("font_size", FONT_HINT)
+	summary_label.add_theme_color_override("font_color", COLOR_TEXT_DIM)
+	summary_label.text = "No weapon selected."
+	s_vbox.add_child(summary_label)
+
+func _build_center_column(parent: HBoxContainer) -> void:
+	var center := VBoxContainer.new()
+	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	center.add_theme_constant_override("separation", 6)
+	parent.add_child(center)
+	var preview_panel := PanelContainer.new()
+	preview_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var pv_style := _make_panel_style(COLOR_BG_PREVIEW, COLOR_BORDER_ACCENT, 2, 4)
+	preview_panel.add_theme_stylebox_override("panel", pv_style)
+	center.add_child(preview_panel)
+	var pv_vbox := VBoxContainer.new()
+	pv_vbox.add_theme_constant_override("separation", 0)
+	preview_panel.add_child(pv_vbox)
+	preview_view_container = SubViewportContainer.new()
+	preview_view_container.custom_minimum_size = Vector2(480, 320)
+	preview_view_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	preview_view_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	preview_view_container.stretch = true
+	pv_vbox.add_child(preview_view_container)
+	preview_subviewport = SubViewport.new()
+	preview_subviewport.size = Vector2i(480, 320)
+	preview_subviewport.transparent_bg = false
+	preview_subviewport.handle_input_locally = false
+	preview_subviewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	preview_view_container.add_child(preview_subviewport)
+	var tl_vbox := _build_section_panel(center, false)
+	_build_section_header(tl_vbox, "MOTION NODE CHAIN")
+	point_list = ItemList.new()
+	point_list.custom_minimum_size = Vector2(0, 64)
+	point_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	point_list.allow_reselect = true
+	_style_item_list(point_list)
+	tl_vbox.add_child(point_list)
+	var action_row := HBoxContainer.new()
+	action_row.add_theme_constant_override("separation", 4)
+	tl_vbox.add_child(action_row)
+	add_point_button = _build_styled_button(action_row, "+ Add")
+	duplicate_point_button = _build_styled_button(action_row, "Copy [R]")
+	remove_point_button = _build_styled_button(action_row, "Delete [T]")
+	set_continuity_button = _build_styled_button(action_row, "Continuity")
+	play_preview_button = _build_styled_button(action_row, "▶ Play [F]")
+	var ds_vbox := _build_section_panel(center, false)
+	_build_section_header(ds_vbox, "DRAFT SETTINGS")
+	var ds_cols := HBoxContainer.new()
+	ds_cols.add_theme_constant_override("separation", 12)
+	ds_vbox.add_child(ds_cols)
+	var ds_left := VBoxContainer.new()
+	ds_left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ds_left.add_theme_constant_override("separation", 3)
+	ds_cols.add_child(ds_left)
+	_build_field_label(ds_left, "Draft Name")
+	draft_name_edit = LineEdit.new()
+	draft_name_edit.placeholder_text = "Unnamed Draft"
+	_style_line_edit(draft_name_edit)
+	ds_left.add_child(draft_name_edit)
+	_build_field_label(ds_left, "Skill Name")
+	skill_name_edit = LineEdit.new()
+	skill_name_edit.placeholder_text = "Display name"
+	_style_line_edit(skill_name_edit)
+	ds_left.add_child(skill_name_edit)
+	_build_field_label(ds_left, "Skill Slot")
+	skill_slot_edit = LineEdit.new()
+	skill_slot_edit.placeholder_text = "slot_damage / slot_block"
+	_style_line_edit(skill_slot_edit)
+	ds_left.add_child(skill_slot_edit)
+	var ds_right := VBoxContainer.new()
+	ds_right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ds_right.add_theme_constant_override("separation", 3)
+	ds_cols.add_child(ds_right)
+	var speed_row := HBoxContainer.new()
+	speed_row.add_theme_constant_override("separation", 8)
+	ds_right.add_child(speed_row)
+	var speed_lbl := Label.new()
+	speed_lbl.text = "Speed"
+	speed_lbl.add_theme_font_size_override("font_size", FONT_BODY)
+	speed_lbl.add_theme_color_override("font_color", COLOR_TEXT_DIM)
+	speed_row.add_child(speed_lbl)
+	preview_speed_spin_box = SpinBox.new()
+	preview_speed_spin_box.min_value = 0.01
+	preview_speed_spin_box.max_value = 3.0
+	preview_speed_spin_box.step = 0.05
+	preview_speed_spin_box.value = 1.0
+	preview_speed_spin_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_style_spinbox(preview_speed_spin_box)
+	speed_row.add_child(preview_speed_spin_box)
+	preview_loop_check_box = CheckBox.new()
+	preview_loop_check_box.text = "Loop Preview"
+	preview_loop_check_box.add_theme_color_override("font_color", COLOR_TEXT)
+	preview_loop_check_box.add_theme_font_size_override("font_size", FONT_BODY)
+	ds_right.add_child(preview_loop_check_box)
+	_build_field_label(ds_right, "Description")
+	skill_description_edit = TextEdit.new()
+	skill_description_edit.custom_minimum_size = Vector2(0, 42)
+	skill_description_edit.placeholder_text = "Skill description..."
+	_style_text_edit(skill_description_edit)
+	ds_right.add_child(skill_description_edit)
+	_build_field_label(ds_right, "Notes")
+	draft_notes_edit = TextEdit.new()
+	draft_notes_edit.custom_minimum_size = Vector2(0, 42)
+	_style_text_edit(draft_notes_edit)
+	ds_right.add_child(draft_notes_edit)
+
+func _build_right_inspector(parent: HBoxContainer) -> void:
+	var inspector_panel := PanelContainer.new()
+	inspector_panel.custom_minimum_size = Vector2(270, 0)
+	inspector_panel.add_theme_stylebox_override("panel", _make_panel_style(COLOR_BG_SECTION, COLOR_BORDER, 1, 4))
+	parent.add_child(inspector_panel)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	inspector_panel.add_child(scroll)
+	var vbox := VBoxContainer.new()
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 3)
+	scroll.add_child(vbox)
+	_build_section_header(vbox, "TIP POSITION")
+	_build_field_label(vbox, "Position (X / Y / Z)")
+	var tip_pos: Array[SpinBox] = _build_vec3_row(vbox, -4.0, 4.0, 0.01)
+	position_x_spin_box = tip_pos[0]
+	position_y_spin_box = tip_pos[1]
+	position_z_spin_box = tip_pos[2]
+	_build_field_label(vbox, "Curve In (X / Y / Z)")
+	var tip_ci: Array[SpinBox] = _build_vec3_row(vbox, -2.0, 2.0, 0.01)
+	curve_in_x_spin_box = tip_ci[0]
+	curve_in_y_spin_box = tip_ci[1]
+	curve_in_z_spin_box = tip_ci[2]
+	_build_field_label(vbox, "Curve Out (X / Y / Z)")
+	var tip_co: Array[SpinBox] = _build_vec3_row(vbox, -2.0, 2.0, 0.01)
+	curve_out_x_spin_box = tip_co[0]
+	curve_out_y_spin_box = tip_co[1]
+	curve_out_z_spin_box = tip_co[2]
+	_build_inspector_separator(vbox)
+	_build_section_header(vbox, "TRAJECTORY PLANE")
+	_build_field_label(vbox, "Orientation (X / Y / Z)")
+	var plane: Array[SpinBox] = _build_vec3_row(vbox, -360.0, 360.0, 0.5)
+	rotation_x_spin_box = plane[0]
+	rotation_y_spin_box = plane[1]
+	rotation_z_spin_box = plane[2]
+	plane_vertical_spin_box = _build_labeled_spinbox(vbox, "Vertical Offset", -2.0, 2.0, 0.01)
+	_build_inspector_separator(vbox)
+	_build_section_header(vbox, "POMMEL POSITION")
+	_build_field_label(vbox, "Position (X / Y / Z)")
+	var pom_pos: Array[SpinBox] = _build_vec3_row(vbox, -4.0, 4.0, 0.01)
+	pommel_x_spin_box = pom_pos[0]
+	pommel_y_spin_box = pom_pos[1]
+	pommel_z_spin_box = pom_pos[2]
+	_build_field_label(vbox, "Curve In (X / Y / Z)")
+	var pom_ci: Array[SpinBox] = _build_vec3_row(vbox, -2.0, 2.0, 0.01)
+	pommel_curve_in_x_spin_box = pom_ci[0]
+	pommel_curve_in_y_spin_box = pom_ci[1]
+	pommel_curve_in_z_spin_box = pom_ci[2]
+	_build_field_label(vbox, "Curve Out (X / Y / Z)")
+	var pom_co: Array[SpinBox] = _build_vec3_row(vbox, -2.0, 2.0, 0.01)
+	pommel_curve_out_x_spin_box = pom_co[0]
+	pommel_curve_out_y_spin_box = pom_co[1]
+	pommel_curve_out_z_spin_box = pom_co[2]
+	_build_inspector_separator(vbox)
+	_build_section_header(vbox, "WEAPON ORIENTATION")
+	weapon_roll_spin_box = _build_labeled_spinbox(vbox, "Weapon Roll (°)", -120.0, 120.0, 1.0)
+	axial_reposition_spin_box = _build_labeled_spinbox(vbox, "Axial Reposition", -1.0, 1.0, 0.01)
+	grip_seat_slide_spin_box = _build_labeled_spinbox(vbox, "Grip Seat Slide", -1.0, 1.0, 0.01)
+	_build_inspector_separator(vbox)
+	_build_section_header(vbox, "TIMING & BEHAVIOR")
+	transition_spin_box = _build_labeled_spinbox(vbox, "Transition (s)", 0.0, 2.0, 0.01)
+	body_support_spin_box = _build_labeled_spinbox(vbox, "Body Support", 0.0, 1.0, 0.05)
+	_build_field_label(vbox, "Two-Hand State")
+	two_hand_state_option_button = OptionButton.new()
+	_style_option_button(two_hand_state_option_button)
+	vbox.add_child(two_hand_state_option_button)
+	_build_field_label(vbox, "Grip Mode")
+	grip_mode_option_button = OptionButton.new()
+	_style_option_button(grip_mode_option_button)
+	vbox.add_child(grip_mode_option_button)
+
+func _build_footer(parent: VBoxContainer) -> void:
+	var sep := HSeparator.new()
+	sep.add_theme_constant_override("separation", 2)
+	sep.add_theme_stylebox_override("separator", _make_separator_style())
+	parent.add_child(sep)
+	footer_status_label = Label.new()
+	footer_status_label.text = "Select a saved weapon WIP to begin authoring."
+	footer_status_label.add_theme_font_size_override("font_size", FONT_BODY)
+	footer_status_label.add_theme_color_override("font_color", COLOR_TEXT_DIM)
+	footer_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	parent.add_child(footer_status_label)
+
+func _build_section_panel(parent: Control, expand: bool) -> VBoxContainer:
+	var section := PanelContainer.new()
+	section.add_theme_stylebox_override("panel", _make_panel_style(COLOR_BG_SECTION, COLOR_BORDER, 1, 4))
+	if expand:
+		section.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	parent.add_child(section)
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 4)
+	section.add_child(vbox)
+	return vbox
+
+func _build_section_header(parent: Control, text: String) -> Label:
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.add_theme_font_size_override("font_size", FONT_SECTION)
+	lbl.add_theme_color_override("font_color", COLOR_TEXT_HEADER)
+	parent.add_child(lbl)
+	return lbl
+
+func _build_field_label(parent: Control, text: String) -> Label:
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.add_theme_font_size_override("font_size", FONT_BODY)
+	lbl.add_theme_color_override("font_color", COLOR_TEXT_DIM)
+	parent.add_child(lbl)
+	return lbl
+
+func _build_vec3_row(parent: Control, min_val: float, max_val: float, step_val: float) -> Array[SpinBox]:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	parent.add_child(row)
+	var result: Array[SpinBox] = []
+	for i: int in range(3):
+		var sb := SpinBox.new()
+		sb.min_value = min_val
+		sb.max_value = max_val
+		sb.step = step_val
+		sb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_style_spinbox(sb)
+		row.add_child(sb)
+		result.append(sb)
+	return result
+
+func _build_labeled_spinbox(parent: Control, label_text: String, min_val: float, max_val: float, step_val: float) -> SpinBox:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	parent.add_child(row)
+	var lbl := Label.new()
+	lbl.text = label_text
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lbl.add_theme_font_size_override("font_size", FONT_BODY)
+	lbl.add_theme_color_override("font_color", COLOR_TEXT_DIM)
+	row.add_child(lbl)
+	var sb := SpinBox.new()
+	sb.min_value = min_val
+	sb.max_value = max_val
+	sb.step = step_val
+	sb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_style_spinbox(sb)
+	row.add_child(sb)
+	return sb
+
+func _build_styled_button(parent: Control, text: String) -> Button:
+	var btn := Button.new()
+	btn.text = text
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = COLOR_BUTTON_NORMAL
+	normal.border_color = COLOR_BORDER
+	normal.set_border_width_all(1)
+	normal.set_corner_radius_all(3)
+	normal.content_margin_left = 8.0
+	normal.content_margin_right = 8.0
+	normal.content_margin_top = 4.0
+	normal.content_margin_bottom = 4.0
+	btn.add_theme_stylebox_override("normal", normal)
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = COLOR_BUTTON_HOVER
+	hover.border_color = COLOR_BORDER_ACCENT
+	btn.add_theme_stylebox_override("hover", hover)
+	var pressed := normal.duplicate() as StyleBoxFlat
+	pressed.bg_color = COLOR_BUTTON_PRESSED
+	btn.add_theme_stylebox_override("pressed", pressed)
+	var disabled := normal.duplicate() as StyleBoxFlat
+	disabled.bg_color = Color(0.06, 0.07, 0.10, 0.7)
+	btn.add_theme_stylebox_override("disabled", disabled)
+	btn.add_theme_color_override("font_color", COLOR_TEXT)
+	btn.add_theme_color_override("font_hover_color", COLOR_TEXT_TITLE)
+	btn.add_theme_color_override("font_disabled_color", COLOR_TEXT_DIM)
+	btn.add_theme_font_size_override("font_size", FONT_BODY)
+	parent.add_child(btn)
+	return btn
+
+func _build_inspector_separator(parent: Control) -> void:
+	var sep := HSeparator.new()
+	sep.add_theme_constant_override("separation", 6)
+	sep.add_theme_stylebox_override("separator", _make_separator_style())
+	parent.add_child(sep)
+
+func _make_panel_style(bg: Color, border: Color, border_w: int = 1, corner: int = 4) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = bg
+	style.border_color = border
+	style.set_border_width_all(border_w)
+	style.set_corner_radius_all(corner)
+	style.content_margin_left = 8.0
+	style.content_margin_top = 6.0
+	style.content_margin_right = 8.0
+	style.content_margin_bottom = 6.0
+	return style
+
+func _make_separator_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = COLOR_SEPARATOR
+	style.content_margin_top = 1.0
+	style.content_margin_bottom = 1.0
+	return style
+
+func _style_item_list(il: ItemList) -> void:
+	var ps := StyleBoxFlat.new()
+	ps.bg_color = COLOR_BG_INPUT
+	ps.border_color = COLOR_BORDER
+	ps.set_border_width_all(1)
+	ps.set_corner_radius_all(3)
+	ps.content_margin_left = 4.0
+	ps.content_margin_top = 4.0
+	ps.content_margin_right = 4.0
+	ps.content_margin_bottom = 4.0
+	il.add_theme_stylebox_override("panel", ps)
+	il.add_theme_color_override("font_color", COLOR_TEXT)
+	il.add_theme_color_override("font_selected_color", COLOR_TEXT_TITLE)
+	il.add_theme_font_size_override("font_size", FONT_BODY)
+
+func _style_spinbox(sb: SpinBox) -> void:
+	sb.add_theme_font_size_override("font_size", FONT_BODY)
+	var le: LineEdit = sb.get_line_edit()
+	if le != null:
+		var le_style := StyleBoxFlat.new()
+		le_style.bg_color = COLOR_BG_INPUT
+		le_style.border_color = COLOR_BORDER
+		le_style.set_border_width_all(1)
+		le_style.set_corner_radius_all(2)
+		le_style.content_margin_left = 4.0
+		le_style.content_margin_right = 4.0
+		le.add_theme_stylebox_override("normal", le_style)
+		le.add_theme_color_override("font_color", COLOR_TEXT)
+		le.add_theme_font_size_override("font_size", FONT_BODY)
+
+func _style_line_edit(le: LineEdit) -> void:
+	var style := StyleBoxFlat.new()
+	style.bg_color = COLOR_BG_INPUT
+	style.border_color = COLOR_BORDER
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(2)
+	style.content_margin_left = 6.0
+	style.content_margin_right = 6.0
+	le.add_theme_stylebox_override("normal", style)
+	var focus_style := style.duplicate() as StyleBoxFlat
+	focus_style.border_color = COLOR_BORDER_ACCENT
+	le.add_theme_stylebox_override("focus", focus_style)
+	le.add_theme_color_override("font_color", COLOR_TEXT)
+	le.add_theme_color_override("font_placeholder_color", COLOR_TEXT_DIM)
+	le.add_theme_font_size_override("font_size", FONT_BODY)
+
+func _style_text_edit(te: TextEdit) -> void:
+	var style := StyleBoxFlat.new()
+	style.bg_color = COLOR_BG_INPUT
+	style.border_color = COLOR_BORDER
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(2)
+	style.content_margin_left = 6.0
+	style.content_margin_right = 6.0
+	style.content_margin_top = 4.0
+	style.content_margin_bottom = 4.0
+	te.add_theme_stylebox_override("normal", style)
+	var focus_style := style.duplicate() as StyleBoxFlat
+	focus_style.border_color = COLOR_BORDER_ACCENT
+	te.add_theme_stylebox_override("focus", focus_style)
+	te.add_theme_color_override("font_color", COLOR_TEXT)
+	te.add_theme_color_override("font_placeholder_color", COLOR_TEXT_DIM)
+	te.add_theme_font_size_override("font_size", FONT_BODY)
+
+func _style_option_button(ob: OptionButton) -> void:
+	ob.add_theme_font_size_override("font_size", FONT_BODY)
+	ob.add_theme_color_override("font_color", COLOR_TEXT)
+
 func _populate_static_options() -> void:
 	authoring_mode_option_button.clear()
 	for mode_id: StringName in CombatAnimationStationStateScript.get_authoring_mode_ids():
@@ -599,8 +1139,12 @@ func _refresh_editor_fields() -> void:
 	var has_node: bool = motion_node != null
 	draft_name_edit.editable = has_draft
 	draft_name_edit.text = String(draft.get("display_name")) if has_draft else ""
+	skill_name_edit.editable = has_draft
+	skill_name_edit.text = String(draft.get("skill_name")) if has_draft else ""
 	skill_slot_edit.editable = has_draft
 	skill_slot_edit.text = String(draft.get("legal_slot_id")) if has_draft else ""
+	skill_description_edit.editable = has_draft
+	skill_description_edit.text = String(draft.get("skill_description")) if has_draft else ""
 	preview_speed_spin_box.editable = has_draft
 	preview_speed_spin_box.value = float(draft.get("preview_playback_speed_scale")) if has_draft else 1.0
 	preview_loop_check_box.disabled = not has_draft
@@ -609,12 +1153,14 @@ func _refresh_editor_fields() -> void:
 	duplicate_point_button.disabled = not has_node
 	remove_point_button.disabled = not has_draft or (has_draft and int((draft.get("motion_node_chain") as Array).size()) <= _get_minimum_motion_node_count(draft))
 	set_continuity_button.disabled = not has_node
+	play_preview_button.disabled = not has_draft
 	position_x_spin_box.editable = has_node
 	position_y_spin_box.editable = has_node
 	position_z_spin_box.editable = has_node
 	rotation_x_spin_box.editable = has_node
 	rotation_y_spin_box.editable = has_node
 	rotation_z_spin_box.editable = has_node
+	plane_vertical_spin_box.editable = has_node
 	transition_spin_box.editable = has_node
 	body_support_spin_box.editable = has_node
 	two_hand_state_option_button.disabled = not has_node
@@ -625,6 +1171,18 @@ func _refresh_editor_fields() -> void:
 	curve_out_x_spin_box.editable = has_node
 	curve_out_y_spin_box.editable = has_node
 	curve_out_z_spin_box.editable = has_node
+	pommel_x_spin_box.editable = has_node
+	pommel_y_spin_box.editable = has_node
+	pommel_z_spin_box.editable = has_node
+	pommel_curve_in_x_spin_box.editable = has_node
+	pommel_curve_in_y_spin_box.editable = has_node
+	pommel_curve_in_z_spin_box.editable = has_node
+	pommel_curve_out_x_spin_box.editable = has_node
+	pommel_curve_out_y_spin_box.editable = has_node
+	pommel_curve_out_z_spin_box.editable = has_node
+	weapon_roll_spin_box.editable = has_node
+	axial_reposition_spin_box.editable = has_node
+	grip_seat_slide_spin_box.editable = has_node
 	draft_notes_edit.editable = has_draft
 	draft_notes_edit.text = String(draft.get("draft_notes")) if has_draft else ""
 	if has_node:
@@ -634,6 +1192,7 @@ func _refresh_editor_fields() -> void:
 		rotation_x_spin_box.value = motion_node.trajectory_plane_orientation_degrees.x
 		rotation_y_spin_box.value = motion_node.trajectory_plane_orientation_degrees.y
 		rotation_z_spin_box.value = motion_node.trajectory_plane_orientation_degrees.z
+		plane_vertical_spin_box.value = motion_node.trajectory_plane_vertical_offset
 		transition_spin_box.value = motion_node.transition_duration_seconds
 		body_support_spin_box.value = motion_node.body_support_blend
 		curve_in_x_spin_box.value = motion_node.tip_curve_in_handle.x
@@ -642,6 +1201,18 @@ func _refresh_editor_fields() -> void:
 		curve_out_x_spin_box.value = motion_node.tip_curve_out_handle.x
 		curve_out_y_spin_box.value = motion_node.tip_curve_out_handle.y
 		curve_out_z_spin_box.value = motion_node.tip_curve_out_handle.z
+		pommel_x_spin_box.value = motion_node.pommel_position_local.x
+		pommel_y_spin_box.value = motion_node.pommel_position_local.y
+		pommel_z_spin_box.value = motion_node.pommel_position_local.z
+		pommel_curve_in_x_spin_box.value = motion_node.pommel_curve_in_handle.x
+		pommel_curve_in_y_spin_box.value = motion_node.pommel_curve_in_handle.y
+		pommel_curve_in_z_spin_box.value = motion_node.pommel_curve_in_handle.z
+		pommel_curve_out_x_spin_box.value = motion_node.pommel_curve_out_handle.x
+		pommel_curve_out_y_spin_box.value = motion_node.pommel_curve_out_handle.y
+		pommel_curve_out_z_spin_box.value = motion_node.pommel_curve_out_handle.z
+		weapon_roll_spin_box.value = motion_node.weapon_roll_degrees
+		axial_reposition_spin_box.value = motion_node.axial_reposition_offset
+		grip_seat_slide_spin_box.value = motion_node.grip_seat_slide_offset
 		_select_option_by_metadata(two_hand_state_option_button, motion_node.two_hand_state)
 		_select_option_by_metadata(grip_mode_option_button, motion_node.preferred_grip_style_mode)
 	else:
@@ -651,6 +1222,7 @@ func _refresh_editor_fields() -> void:
 		rotation_x_spin_box.value = 0.0
 		rotation_y_spin_box.value = 0.0
 		rotation_z_spin_box.value = 0.0
+		plane_vertical_spin_box.value = 0.0
 		transition_spin_box.value = 0.18
 		body_support_spin_box.value = 0.0
 		curve_in_x_spin_box.value = 0.0
@@ -659,6 +1231,18 @@ func _refresh_editor_fields() -> void:
 		curve_out_x_spin_box.value = 0.0
 		curve_out_y_spin_box.value = 0.0
 		curve_out_z_spin_box.value = 0.0
+		pommel_x_spin_box.value = 0.0
+		pommel_y_spin_box.value = 0.0
+		pommel_z_spin_box.value = 0.0
+		pommel_curve_in_x_spin_box.value = 0.0
+		pommel_curve_in_y_spin_box.value = 0.0
+		pommel_curve_in_z_spin_box.value = 0.0
+		pommel_curve_out_x_spin_box.value = 0.0
+		pommel_curve_out_y_spin_box.value = 0.0
+		pommel_curve_out_z_spin_box.value = 0.0
+		weapon_roll_spin_box.value = 0.0
+		axial_reposition_spin_box.value = 0.0
+		grip_seat_slide_spin_box.value = 0.0
 	refreshing_controls = false
 
 func _refresh_summary(status_message: String = "") -> void:
@@ -1012,3 +1596,169 @@ func _cycle_focus() -> void:
 
 func _toggle_preview_playback() -> void:
 	footer_status_label.text = "Preview playback toggle — future feature placeholder."
+
+func set_active_draft_skill_name(name_text: String) -> bool:
+	var draft: Resource = _get_active_draft()
+	if draft == null:
+		return false
+	draft.set("skill_name", name_text.strip_edges())
+	_normalize_draft(draft)
+	_persist_active_wip("Skill name updated.")
+	_refresh_draft_list()
+	_refresh_editor_fields()
+	_refresh_summary("Skill name updated.")
+	return true
+
+func set_active_draft_skill_description(description_text: String) -> bool:
+	var draft: Resource = _get_active_draft()
+	if draft == null:
+		return false
+	draft.set("skill_description", description_text)
+	_normalize_draft(draft)
+	_persist_active_wip("Skill description updated.")
+	_refresh_summary("Skill description updated.")
+	return true
+
+func set_selected_motion_node_pommel_position(pommel_position: Vector3) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
+		return false
+	motion_node.pommel_position_local = pommel_position
+	motion_node.normalize()
+	_persist_active_wip("Pommel position updated.")
+	_refresh_motion_node_list()
+	_refresh_editor_fields()
+	_refresh_preview_scene()
+	_refresh_summary("Pommel position updated.")
+	return true
+
+func set_selected_motion_node_pommel_curve_in(curve_in: Vector3) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
+		return false
+	motion_node.pommel_curve_in_handle = curve_in
+	motion_node.normalize()
+	_persist_active_wip("Pommel curve-in updated.")
+	_refresh_motion_node_list()
+	_refresh_editor_fields()
+	_refresh_preview_scene()
+	_refresh_summary("Pommel curve-in updated.")
+	return true
+
+func set_selected_motion_node_pommel_curve_out(curve_out: Vector3) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
+		return false
+	motion_node.pommel_curve_out_handle = curve_out
+	motion_node.normalize()
+	_persist_active_wip("Pommel curve-out updated.")
+	_refresh_motion_node_list()
+	_refresh_editor_fields()
+	_refresh_preview_scene()
+	_refresh_summary("Pommel curve-out updated.")
+	return true
+
+func set_selected_motion_node_plane_vertical(vertical_offset: float) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
+		return false
+	motion_node.trajectory_plane_vertical_offset = vertical_offset
+	motion_node.normalize()
+	_persist_active_wip("Plane vertical offset updated.")
+	_refresh_motion_node_list()
+	_refresh_editor_fields()
+	_refresh_preview_scene()
+	_refresh_summary("Plane vertical offset updated.")
+	return true
+
+func set_selected_motion_node_weapon_roll(roll_degrees: float) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
+		return false
+	motion_node.weapon_roll_degrees = clampf(roll_degrees, -120.0, 120.0)
+	motion_node.normalize()
+	_persist_active_wip("Weapon roll updated.")
+	_refresh_motion_node_list()
+	_refresh_editor_fields()
+	_refresh_preview_scene()
+	_refresh_summary("Weapon roll updated.")
+	return true
+
+func set_selected_motion_node_axial_reposition(offset: float) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
+		return false
+	motion_node.axial_reposition_offset = offset
+	motion_node.normalize()
+	_persist_active_wip("Axial reposition updated.")
+	_refresh_motion_node_list()
+	_refresh_editor_fields()
+	_refresh_preview_scene()
+	_refresh_summary("Axial reposition updated.")
+	return true
+
+func set_selected_motion_node_grip_seat_slide(offset: float) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
+		return false
+	motion_node.grip_seat_slide_offset = offset
+	motion_node.normalize()
+	_persist_active_wip("Grip seat slide updated.")
+	_refresh_motion_node_list()
+	_refresh_editor_fields()
+	_refresh_preview_scene()
+	_refresh_summary("Grip seat slide updated.")
+	return true
+
+func _on_skill_name_submitted(new_text: String) -> void:
+	if refreshing_controls:
+		return
+	set_active_draft_skill_name(new_text)
+
+func _on_skill_name_focus_exited() -> void:
+	if refreshing_controls:
+		return
+	set_active_draft_skill_name(skill_name_edit.text)
+
+func _on_skill_description_focus_exited() -> void:
+	if refreshing_controls:
+		return
+	set_active_draft_skill_description(skill_description_edit.text)
+
+func _on_pommel_position_component_changed(_value: float, axis_index: int) -> void:
+	if refreshing_controls or axis_index < 0 or axis_index > 2:
+		return
+	set_selected_motion_node_pommel_position(Vector3(pommel_x_spin_box.value, pommel_y_spin_box.value, pommel_z_spin_box.value))
+
+func _on_pommel_curve_in_component_changed(_value: float, axis_index: int) -> void:
+	if refreshing_controls or axis_index < 0 or axis_index > 2:
+		return
+	set_selected_motion_node_pommel_curve_in(Vector3(pommel_curve_in_x_spin_box.value, pommel_curve_in_y_spin_box.value, pommel_curve_in_z_spin_box.value))
+
+func _on_pommel_curve_out_component_changed(_value: float, axis_index: int) -> void:
+	if refreshing_controls or axis_index < 0 or axis_index > 2:
+		return
+	set_selected_motion_node_pommel_curve_out(Vector3(pommel_curve_out_x_spin_box.value, pommel_curve_out_y_spin_box.value, pommel_curve_out_z_spin_box.value))
+
+func _on_plane_vertical_changed(value: float) -> void:
+	if refreshing_controls:
+		return
+	set_selected_motion_node_plane_vertical(value)
+
+func _on_weapon_roll_changed(value: float) -> void:
+	if refreshing_controls:
+		return
+	set_selected_motion_node_weapon_roll(value)
+
+func _on_axial_reposition_changed(value: float) -> void:
+	if refreshing_controls:
+		return
+	set_selected_motion_node_axial_reposition(value)
+
+func _on_grip_seat_slide_changed(value: float) -> void:
+	if refreshing_controls:
+		return
+	set_selected_motion_node_grip_seat_slide(value)
+
+func _on_play_preview_pressed() -> void:
+	_toggle_preview_playback()

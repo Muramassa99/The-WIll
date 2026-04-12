@@ -146,15 +146,21 @@ func _build_skill_bar() -> void:
 	skill_bar_container.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	skill_bar_container.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	skill_bar_container.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	skill_bar_container.offset_top = -bar_bottom_margin_px
+	skill_bar_container.offset_bottom = -bar_bottom_margin_px
 	skill_bar_container.add_theme_constant_override("separation", 0)
 	hud_root.add_child(skill_bar_container)
 	var left_group: HBoxContainer = _build_slot_group("LeftGroup")
 	skill_bar_container.add_child(left_group)
+	var spacer_left: Control = Control.new()
+	spacer_left.custom_minimum_size = Vector2(group_gap_px, 0)
+	spacer_left.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	skill_bar_container.add_child(spacer_left)
 	_build_block_evade_group()
-	var spacer: Control = Control.new()
-	spacer.custom_minimum_size = Vector2(group_gap_px, 0)
-	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	skill_bar_container.add_child(spacer)
+	var spacer_right: Control = Control.new()
+	spacer_right.custom_minimum_size = Vector2(group_gap_px, 0)
+	spacer_right.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	skill_bar_container.add_child(spacer_right)
 	var right_group: HBoxContainer = _build_slot_group("RightGroup")
 	skill_bar_container.add_child(right_group)
 	slot_panels.clear()
@@ -168,7 +174,6 @@ func _build_skill_bar() -> void:
 		var panel: PanelContainer = _build_single_slot_panel(slot_index)
 		right_group.add_child(panel)
 		slot_panels.append(panel)
-	_position_skill_bar()
 
 func _build_slot_group(group_name: String) -> HBoxContainer:
 	var group: HBoxContainer = HBoxContainer.new()
@@ -371,14 +376,6 @@ func _build_target_hp_bar() -> void:
 	target_hp_bar_fill.size = target_hp_bar_fill.custom_minimum_size
 	target_hp_bar_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar_root.add_child(target_hp_bar_fill)
-
-func _position_skill_bar() -> void:
-	if skill_bar_container == null:
-		return
-	skill_bar_container.position = Vector2(
-		-skill_bar_container.size.x * 0.5,
-		-(bar_bottom_margin_px + slot_button_height)
-	)
 
 func _refresh_skill_slot_visual(slot_index: int) -> void:
 	if slot_index < 0 or slot_index >= slot_panels.size():

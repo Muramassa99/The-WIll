@@ -223,6 +223,8 @@ func set_ui_mode_enabled(enabled: bool) -> void:
 	ui_surface_presenter.set_mouse_mode_for_ui(enabled)
 	_refresh_aim_context()
 	_sync_crosshair_visibility()
+	if gameplay_hud_overlay != null and gameplay_hud_overlay.has_method("set_hud_visible"):
+		gameplay_hud_overlay.set_hud_visible(not enabled)
 
 func get_humanoid_standing_height_meters() -> float:
 	if humanoid_rig != null:

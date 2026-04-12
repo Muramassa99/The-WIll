@@ -13,6 +13,8 @@ const PlayerForgeTestPresenterScript = preload("res://runtime/player/player_forg
 const PlayerEquippedItemPresenterScript = preload("res://runtime/player/player_equipped_item_presenter.gd")
 const PlayerUiSurfacePresenterScript = preload("res://runtime/player/player_ui_surface_presenter.gd")
 const PlayerMotionPresenterScript = preload("res://runtime/player/player_motion_presenter.gd")
+const PlayerGameplayHudOverlayScript = preload("res://runtime/ui/player_gameplay_hud_overlay.gd")
+const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_state.gd")
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
 const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://core/defs/forge/forge_view_tuning_default.tres")
 
@@ -39,6 +41,7 @@ const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://co
 @onready var system_menu_overlay: CanvasLayer = $SystemMenuOverlay
 @onready var player_inventory_overlay: CanvasLayer = $PlayerInventoryOverlay
 @onready var crosshair_overlay: Control = $PlayerCrosshairOverlay/Crosshair
+@onready var gameplay_hud_overlay: CanvasLayer = $PlayerGameplayHudOverlay
 
 var gravity: float = float(ProjectSettings.get_setting("physics/3d/default_gravity"))
 var ui_mode_enabled: bool = false
@@ -78,6 +81,8 @@ func _ready() -> void:
 	_refresh_aim_context()
 	_sync_crosshair_visibility()
 	_sync_equipped_test_meshes()
+	if gameplay_hud_overlay != null and gameplay_hud_overlay.has_method("configure"):
+		gameplay_hud_overlay.configure(self)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not _has_runtime_input_actions():
@@ -126,6 +131,23 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if event.is_action_pressed(&"interact"):
 		_try_interact()
+		return
+
+	if event.is_action_pressed(&"skill_block"):
+		_activate_skill_slot(&"skill_block")
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed(&"skill_evade"):
+		_activate_skill_slot(&"skill_evade")
+		get_viewport().set_input_as_handled()
+		return
+
+	for slot_id: StringName in PlayerSkillSlotStateScript.SKILL_SLOT_IDS:
+		if event.is_action_pressed(slot_id):
+			_activate_skill_slot(slot_id)
+			get_viewport().set_input_as_handled()
+			return
 
 func _physics_process(delta: float) -> void:
 	if not _has_runtime_input_actions():
@@ -176,6 +198,10 @@ func _try_interact() -> void:
 		get_tree(),
 		self
 	)
+
+func _activate_skill_slot(slot_id: StringName) -> void:
+	if gameplay_hud_overlay != null:
+		gameplay_hud_overlay.activate_skill_slot(slot_id)
 
 func _toggle_system_menu() -> void:
 	ui_surface_presenter.toggle_system_menu(system_menu_overlay)

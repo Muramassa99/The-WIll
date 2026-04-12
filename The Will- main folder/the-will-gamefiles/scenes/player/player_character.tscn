@@ -5,6 +5,7 @@
 [ext_resource type="PackedScene" path="res://scenes/player/player_humanoid_rig.tscn" id="3_player_humanoid_rig"]
 [ext_resource type="PackedScene" path="res://scenes/ui/player_inventory_overlay.tscn" id="4_player_inventory_overlay"]
 [ext_resource type="PackedScene" path="res://scenes/ui/player_crosshair_overlay.tscn" id="5_player_crosshair_overlay"]
+[ext_resource type="PackedScene" path="res://scenes/ui/player_gameplay_hud_overlay.tscn" id="6_player_gameplay_hud_overlay"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player"]
 radius = 0.35
@@ -43,3 +44,5 @@ target_position = Vector3(0, 0, -3)
 [node name="PlayerInventoryOverlay" parent="." unique_id=94085804 instance=ExtResource("4_player_inventory_overlay")]
 
 [node name="PlayerCrosshairOverlay" parent="." unique_id=1531823853 instance=ExtResource("5_player_crosshair_overlay")]
+
+[node name="PlayerGameplayHudOverlay" parent="." instance=ExtResource("6_player_gameplay_hud_overlay")]

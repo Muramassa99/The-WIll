@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://runtime/ui/player_gameplay_hud_overlay.gd" id="1_hud"]
+
+[node name="PlayerGameplayHudOverlay" type="CanvasLayer"]
+layer = 10
+script = ExtResource("1_hud")

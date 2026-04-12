@@ -21,8 +21,8 @@ func _run_verification() -> void:
 
 	var grip_safe_patch = _find_internal_patch(stage2_item_state, Stage2PatchStateScript.ZONE_PRIMARY_GRIP_SAFE)
 	var general_patch = _find_internal_patch(stage2_item_state, Stage2PatchStateScript.ZONE_GENERAL)
-	_set_patch_offset_cells(grip_safe_patch, -0.25)
-	_set_patch_offset_cells(general_patch, -0.25)
+	_set_patch_offset_cells(stage2_item_state, grip_safe_patch, -0.25)
+	_set_patch_offset_cells(stage2_item_state, general_patch, -0.25)
 	stage2_item_state.refresh_current_local_aabb_from_patches()
 
 	var player: PlayerController3D = PlayerScene.instantiate() as PlayerController3D
@@ -62,6 +62,7 @@ func _run_verification() -> void:
 		_build_patch_hit_data(general_patch),
 		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_LOOP_FILLET
 	)
+	var grip_safe_loop_ids: PackedStringArray = PackedStringArray(grip_safe_selection_data.get("loop_ids", PackedStringArray()))
 	var grip_safe_patch_ids: PackedStringArray = PackedStringArray(grip_safe_selection_data.get("patch_ids", PackedStringArray()))
 	var general_patch_ids: PackedStringArray = PackedStringArray(general_selection_data.get("patch_ids", PackedStringArray()))
 
@@ -113,6 +114,9 @@ func _run_verification() -> void:
 		_collect_patch_origins(stage2_item_state)
 	)
 
+	_set_patch_offset_cells(stage2_item_state, general_patch, -0.25)
+	stage2_item_state.refresh_current_local_aabb_from_patches()
+
 	var general_chamfer_patch_ids: PackedStringArray = PackedStringArray(selection_presenter.resolve_hover_selection_data(
 		stage2_item_state,
 		_build_patch_hit_data(general_patch),
@@ -142,6 +146,7 @@ func _run_verification() -> void:
 	lines.append("feature_loop_tool_clear_visible=%s" % str(feature_loop_tool_clear_visible))
 	lines.append("hover_preview_visible=%s" % str(hover_preview_visible))
 	lines.append("selected_preview_visible=%s" % str(selected_preview_visible))
+	lines.append("selected_loop_count=%d" % grip_safe_loop_ids.size())
 	lines.append("grip_safe_selected_count=%d" % grip_safe_selected_count)
 	lines.append("grip_safe_feature_loop_fillet_changed_shell=%s" % str(grip_safe_feature_loop_fillet_changed_shell))
 	lines.append("selected_count_after_clear=%d" % selected_count_after_clear)
@@ -166,13 +171,13 @@ func _build_front_heavy_sword_wip() -> CraftedItemWIP:
 	wip.forge_builder_path_id = CraftedItemWIP.BUILDER_PATH_MELEE
 
 	var layer_map: Dictionary = {}
-	for x: int in range(40, 52):
+	for x: int in range(32, 58):
 		for y: int in range(24, 27):
 			for z: int in range(18, 20):
 				_add_cell(layer_map, Vector3i(x, y, z), &"mat_wood_gray")
-	for x: int in range(52, 65):
-		for y: int in range(22, 29):
-			for z: int in range(17, 22):
+	for x: int in range(58, 65):
+		for y: int in range(23, 28):
+			for z: int in range(17, 21):
 				_add_cell(layer_map, Vector3i(x, y, z), &"mat_iron_gray")
 
 	var ordered_layers: Array = layer_map.keys()
@@ -224,12 +229,17 @@ func _find_internal_patch(stage2_item_state, zone_mask_id: StringName):
 			best_patch = patch_state
 	return best_patch
 
-func _set_patch_offset_cells(patch_state, offset_cells: float) -> void:
+func _set_patch_offset_cells(stage2_item_state, patch_state, offset_cells: float) -> void:
 	if patch_state == null or patch_state.baseline_quad == null or patch_state.current_quad == null:
 		return
 	var normal: Vector3 = patch_state.current_quad.normal.normalized()
 	patch_state.current_quad.origin_local = patch_state.baseline_quad.origin_local - (normal * offset_cells)
+	patch_state.current_offset_cells = offset_cells
 	patch_state.dirty = true
+	if stage2_item_state != null:
+		stage2_item_state.editable_mesh_visual_authority = true
+		if stage2_item_state.current_editable_mesh_state != null:
+			stage2_item_state.current_editable_mesh_state.dirty = true
 
 func _build_patch_hit_data(patch_state) -> Dictionary:
 	if patch_state == null or patch_state.current_quad == null:

@@ -39,22 +39,67 @@ func apply_material_cells(
 	var current_wip: CraftedItemWIP = ensure_wip_for_editing.call()
 	if current_wip == null:
 		return {}
+	var unique_positions: Array[Vector3i] = _dedupe_grid_positions(grid_positions)
+	if unique_positions.is_empty():
+		return {}
+	if CraftedItemWIPScript.is_builder_marker_material_id(armed_material_variant_id):
+		var any_builder_refresh: bool = false
+		var any_builder_debug_status_dirty: bool = false
+		for grid_position: Vector3i in unique_positions:
+			var builder_result: Dictionary = _place_material_cell_to_wip(
+				forge_controller,
+				inventory_state,
+				current_wip,
+				armed_material_variant_id,
+				grid_position
+			)
+			any_builder_refresh = any_builder_refresh or bool(builder_result.get("queue_edit_refresh", false))
+			any_builder_debug_status_dirty = any_builder_debug_status_dirty or bool(builder_result.get("debug_status_dirty", false))
+		return {
+			"queue_edit_refresh": any_builder_refresh,
+			"debug_status_dirty": any_builder_debug_status_dirty,
+		}
 	var any_refresh: bool = false
 	var any_debug_status_dirty: bool = false
-	var visited: Dictionary = {}
-	for grid_position: Vector3i in grid_positions:
-		if visited.has(grid_position):
+	var positions_to_apply: Array[Vector3i] = []
+	var refund_counts: Dictionary = {}
+	var requires_inventory: bool = _is_inventory_backed_material(armed_material_variant_id)
+	var available_quantity: int = 0
+	if requires_inventory:
+		if inventory_state == null:
+			return {
+				"queue_edit_refresh": true,
+				"debug_status_dirty": true,
+			}
+		available_quantity = inventory_state.get_quantity(armed_material_variant_id)
+	for grid_position: Vector3i in unique_positions:
+		var existing_material_id: StringName = forge_controller.get_material_id_at(grid_position)
+		if existing_material_id == armed_material_variant_id:
 			continue
-		visited[grid_position] = true
-		var result: Dictionary = _place_material_cell_to_wip(
-			forge_controller,
-			inventory_state,
-			current_wip,
-			armed_material_variant_id,
-			grid_position
-		)
-		any_refresh = any_refresh or bool(result.get("queue_edit_refresh", false))
-		any_debug_status_dirty = any_debug_status_dirty or bool(result.get("debug_status_dirty", false))
+		if requires_inventory:
+			if available_quantity <= 0:
+				any_refresh = true
+				any_debug_status_dirty = true
+				continue
+			available_quantity -= 1
+		positions_to_apply.append(grid_position)
+		if _is_inventory_backed_material(existing_material_id) and existing_material_id != armed_material_variant_id:
+			refund_counts[existing_material_id] = int(refund_counts.get(existing_material_id, 0)) + 1
+	if positions_to_apply.is_empty():
+		return {
+			"queue_edit_refresh": any_refresh,
+			"debug_status_dirty": any_debug_status_dirty,
+		}
+	if requires_inventory and not inventory_state.try_consume(armed_material_variant_id, positions_to_apply.size()):
+		return {
+			"queue_edit_refresh": true,
+			"debug_status_dirty": true,
+		}
+	for refund_material_id_variant: Variant in refund_counts.keys():
+		var refund_material_id: StringName = refund_material_id_variant
+		_refund_inventory_material(inventory_state, refund_material_id, int(refund_counts.get(refund_material_id, 0)))
+	var changed_count: int = forge_controller.set_materials_at(positions_to_apply, armed_material_variant_id)
+	any_refresh = any_refresh or changed_count > 0
 	return {
 		"queue_edit_refresh": any_refresh,
 		"debug_status_dirty": any_debug_status_dirty,
@@ -67,18 +112,28 @@ func remove_cells(
 ) -> Dictionary:
 	if forge_controller == null:
 		return {}
+	var unique_positions: Array[Vector3i] = _dedupe_grid_positions(grid_positions)
+	if unique_positions.is_empty():
+		return {}
 	var any_refresh: bool = false
-	var visited: Dictionary = {}
-	for grid_position: Vector3i in grid_positions:
-		if visited.has(grid_position):
+	var material_positions: Array[Vector3i] = []
+	for grid_position: Vector3i in unique_positions:
+		var removed_builder_marker_id: StringName = forge_controller.clear_builder_marker_at(grid_position)
+		if removed_builder_marker_id != StringName():
+			any_refresh = true
 			continue
-		visited[grid_position] = true
-		var result: Dictionary = remove_cell(
-			forge_controller,
+		material_positions.append(grid_position)
+	var removal_result: Dictionary = forge_controller.remove_materials_at(material_positions)
+	var removed_count: int = int(removal_result.get("removed_count", 0))
+	var removed_counts: Dictionary = removal_result.get("removed_counts", {})
+	for removed_material_id_variant: Variant in removed_counts.keys():
+		var removed_material_id: StringName = removed_material_id_variant
+		_refund_inventory_material(
 			inventory_state,
-			grid_position
+			removed_material_id,
+			int(removed_counts.get(removed_material_id, 0))
 		)
-		any_refresh = any_refresh or bool(result.get("queue_edit_refresh", false))
+	any_refresh = any_refresh or removed_count > 0
 	return {
 		"queue_edit_refresh": any_refresh,
 	}
@@ -209,3 +264,13 @@ func _get_material_entry(material_catalog: Array[Dictionary], material_id: Strin
 
 func _is_inventory_backed_material(material_id: StringName) -> bool:
 	return material_id != StringName() and not CraftedItemWIPScript.is_builder_marker_material_id(material_id)
+
+func _dedupe_grid_positions(grid_positions: Array[Vector3i]) -> Array[Vector3i]:
+	var unique_positions: Array[Vector3i] = []
+	var visited: Dictionary = {}
+	for grid_position: Vector3i in grid_positions:
+		if visited.has(grid_position):
+			continue
+		visited[grid_position] = true
+		unique_positions.append(grid_position)
+	return unique_positions

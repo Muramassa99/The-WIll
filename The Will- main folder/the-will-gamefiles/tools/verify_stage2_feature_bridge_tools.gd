@@ -63,6 +63,7 @@ func _run_verification() -> void:
 		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_BRIDGE_FILLET
 	)
 	var general_cluster_patch_ids: PackedStringArray = PackedStringArray(general_cluster_selection.get("patch_ids", PackedStringArray()))
+	var general_bridge_ids: PackedStringArray = PackedStringArray(general_bridge_selection.get("bridge_ids", PackedStringArray()))
 	var general_bridge_patch_ids: PackedStringArray = PackedStringArray(general_bridge_selection.get("patch_ids", PackedStringArray()))
 
 	var bridge_chamfer_apply_patch_ids: PackedStringArray = selection_presenter.resolve_selection_apply_patch_ids(
@@ -131,6 +132,7 @@ func _run_verification() -> void:
 	lines.append("feature_bridge_tool_apply_visible=%s" % str(feature_bridge_tool_apply_visible))
 	lines.append("feature_bridge_tool_clear_visible=%s" % str(feature_bridge_tool_clear_visible))
 	lines.append("synthetic_cluster_selected_count=%d" % general_cluster_patch_ids.size())
+	lines.append("selected_bridge_count=%d" % general_bridge_ids.size())
 	lines.append("synthetic_bridge_selected_count=%d" % general_bridge_patch_ids.size())
 	lines.append("synthetic_bridge_larger_than_cluster=%s" % str(general_bridge_patch_ids.size() > general_cluster_patch_ids.size()))
 	lines.append("feature_bridge_chamfer_changed_shell=%s" % str(feature_bridge_chamfer_changed_shell))
@@ -191,6 +193,7 @@ func _build_synthetic_bridge_state(zone_mask_id: StringName):
 
 func _build_horizontal_bridge_patch_state(patch_index: int, zone_mask_id: StringName):
 	var patch_state = Stage2PatchStateScript.new()
+	var offset_cells: float = _resolve_bridge_offset_cells(patch_index)
 	patch_state.patch_id = StringName("h_patch_%d" % patch_index)
 	patch_state.zone_mask_id = zone_mask_id
 	patch_state.neighbor_patch_ids = PackedStringArray()
@@ -201,17 +204,19 @@ func _build_horizontal_bridge_patch_state(patch_index: int, zone_mask_id: String
 	patch_state.baseline_quad = _build_bridge_quad(float(patch_index), Vector3.ZERO, Vector3.RIGHT, Vector3.UP, Vector3.FORWARD)
 	patch_state.current_quad = _build_bridge_quad(
 		float(patch_index),
-		Vector3(0.0, 0.0, -_resolve_bridge_offset_cells(patch_index)),
+		Vector3(0.0, 0.0, -offset_cells),
 		Vector3.RIGHT,
 		Vector3.UP,
 		Vector3.FORWARD
 	)
+	patch_state.current_offset_cells = offset_cells
 	patch_state.max_fillet_offset_meters = 0.05
 	patch_state.max_chamfer_offset_meters = 0.05
 	return patch_state
 
 func _build_vertical_bridge_patch_state(patch_index: int, zone_mask_id: StringName):
 	var patch_state = Stage2PatchStateScript.new()
+	var offset_cells: float = _resolve_bridge_offset_cells(patch_index)
 	patch_state.patch_id = StringName("v_patch_%d" % patch_index)
 	patch_state.zone_mask_id = zone_mask_id
 	patch_state.neighbor_patch_ids = PackedStringArray()
@@ -222,11 +227,12 @@ func _build_vertical_bridge_patch_state(patch_index: int, zone_mask_id: StringNa
 	patch_state.baseline_quad = _build_bridge_quad(float(patch_index), Vector3(0.0, 1.0, 0.0), Vector3.RIGHT, Vector3.FORWARD, Vector3.UP)
 	patch_state.current_quad = _build_bridge_quad(
 		float(patch_index),
-		Vector3(0.0, 1.0 - _resolve_bridge_offset_cells(patch_index), 0.0),
+		Vector3(0.0, 1.0 - offset_cells, 0.0),
 		Vector3.RIGHT,
 		Vector3.FORWARD,
 		Vector3.UP
 	)
+	patch_state.current_offset_cells = offset_cells
 	patch_state.max_fillet_offset_meters = 0.05
 	patch_state.max_chamfer_offset_meters = 0.05
 	return patch_state

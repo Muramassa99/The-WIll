@@ -68,13 +68,21 @@
 - `SurfaceQuad` = one generated canonical surface element
   - refs: `CraftedItemCanonicalSurfaceQuad`
 - `Stage 2` = optional refinement substage between Stage 1 crafting and test print
-  - refs: `Adaptive Outer Shell - Refinement Envelope System 1.md`, `forge_stage2_service.gd`
+  - refs: `STAGE 2 - UNIFIED VISUAL SHELL IMPLEMENTATION SPEC 2026-04-09.md`, `Adaptive Outer Shell - Refinement Envelope System 1.md`, `forge_stage2_service.gd`
+- `Unified Visual Shell` = the final coherent Stage 2 rendered shell derived from Stage 1 and used as the visible runtime item mesh
+  - refs: `STAGE 2 - UNIFIED VISUAL SHELL IMPLEMENTATION SPEC 2026-04-09.md`
+- `Stage 1 gameplay truth` = the parent structural/backend authority that Stage 2 must not replace
+  - refs: `STAGE 2 - UNIFIED VISUAL SHELL IMPLEMENTATION SPEC 2026-04-09.md`, `forge_service.gd`, `baked_profile.gd`
+- `Stage 2 visual truth` = the child visible-shell authority used for rendered runtime appearance
+  - refs: `STAGE 2 - UNIFIED VISUAL SHELL IMPLEMENTATION SPEC 2026-04-09.md`, `forge_service.gd`, `test_print_instance.gd`
 - `Refinement Envelope` = local inward shell clamp derived from Stage 1 thickness
   - refs: `forge_rules_def.gd`, `forge_stage2_service.gd`
 - `Stage2ItemState` = saved Stage 2 shell section on a WIP or test print
   - refs: `core/models/stage2_item_state.gd`, `core/models/crafted_item_wip.gd`, `core/models/test_print_instance.gd`
-- `Stage2PatchState` = one local Stage 2 shell patch record
-  - refs: `core/models/stage2_patch_state.gd`
+- `Stage2ShellMeshState` = planned authoritative unified-shell topology state for final Stage 2 implementation
+  - refs: `STAGE 2 - UNIFIED VISUAL SHELL IMPLEMENTATION SPEC 2026-04-09.md`
+- `Stage2PatchState` = current prototype local Stage 2 quad-patch record; no longer the intended final visual-shell authority
+  - refs: `core/models/stage2_patch_state.gd`, `STAGE 2 - UNIFIED VISUAL SHELL IMPLEMENTATION SPEC 2026-04-09.md`
 - `stage2_zone_general` = normal Stage 2 shell-edit zone
   - refs: `core/models/stage2_patch_state.gd`, `services/forge_stage2_service.gd`
 - `stage2_zone_primary_grip_safe` = Stage 2 grip-safe zone; destructive carve blocked in first pass

@@ -7,6 +7,8 @@ signal cell_pick_requested(grid_position)
 signal drag_started(grid_position, button_index)
 signal drag_updated(grid_position, button_index)
 signal stroke_finished
+signal hover_grid_position_updated(grid_position)
+signal hover_cleared
 
 const PLANE_XY: StringName = &"xy"
 const PLANE_ZX: StringName = &"zx"
@@ -27,6 +29,8 @@ var material_lookup: Dictionary = {}
 var material_runtime_resolver = MaterialRuntimeResolverScript.new()
 var plane_zoom_scale: float = 1.0
 var plane_zoom_focus: Vector2 = Vector2(0.5, 0.5)
+var plane_pan_offset_pixels: Vector2 = Vector2.ZERO
+var plane_pan_active: bool = false
 var active_drag_button: MouseButton = MOUSE_BUTTON_NONE
 var drag_has_last_grid: bool = false
 var drag_last_grid_position: Vector3i = Vector3i.ZERO
@@ -64,6 +68,10 @@ func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mouse_event: InputEventMouseButton = event
 		if not mouse_event.pressed:
+			if plane_pan_active and mouse_event.button_index == MOUSE_BUTTON_RIGHT:
+				plane_pan_active = false
+				accept_event()
+				return
 			if mouse_event.button_index == active_drag_button:
 				_clear_drag_state()
 				emit_signal("stroke_finished")
@@ -78,6 +86,11 @@ func _gui_input(event: InputEvent) -> void:
 			return
 		if mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_zoom_plane_at(mouse_event.position, -1.0)
+			accept_event()
+			return
+		if mouse_event.button_index == MOUSE_BUTTON_RIGHT and _is_pan_modifier_pressed():
+			plane_pan_active = true
+			_clear_drag_state()
 			accept_event()
 			return
 		if mouse_event.ctrl_pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT:
@@ -95,10 +108,25 @@ func _gui_input(event: InputEvent) -> void:
 			return
 		return
 
+	if event is InputEventMouseMotion and plane_pan_active:
+		var pan_motion_event: InputEventMouseMotion = event
+		_pan_plane_by(pan_motion_event.relative)
+		accept_event()
+		return
 	if event is InputEventMouseMotion and active_drag_button != MOUSE_BUTTON_NONE:
 		var motion_event: InputEventMouseMotion = event
 		_emit_drag_action(motion_event.position, active_drag_button)
 		accept_event()
+		return
+	if event is InputEventMouseMotion:
+		var hover_motion_event: InputEventMouseMotion = event
+		var plane_rect: Rect2 = _get_plane_draw_rect()
+		if not plane_rect.has_point(hover_motion_event.position):
+			emit_signal("hover_cleared")
+			return
+		var hover_grid_variant: Variant = _screen_to_grid(hover_motion_event.position)
+		if hover_grid_variant is Vector3i:
+			emit_signal("hover_grid_position_updated", hover_grid_variant)
 
 func _draw() -> void:
 	var plane_rect: Rect2 = _get_plane_draw_rect()
@@ -155,21 +183,18 @@ func _get_plane_draw_rect() -> Rect2:
 	else:
 		target_size.y = available.size.x / plane_aspect
 	var zoomed_size: Vector2 = target_size * plane_zoom_scale
-	var draw_position: Vector2 = available.position + (available.size - zoomed_size) * 0.5
+	var centered_position: Vector2 = available.position + (available.size - zoomed_size) * 0.5
+	var draw_position: Vector2 = centered_position
 	if plane_zoom_scale > 1.0:
 		var focus_offset: Vector2 = Vector2(
 			clampf(plane_zoom_focus.x, 0.0, 1.0) * zoomed_size.x,
 			clampf(plane_zoom_focus.y, 0.0, 1.0) * zoomed_size.y
 		)
-		draw_position = available.get_center() - focus_offset
-		if zoomed_size.x > available.size.x:
-			draw_position.x = clampf(draw_position.x, available.end.x - zoomed_size.x, available.position.x)
-		else:
-			draw_position.x = available.position.x + (available.size.x - zoomed_size.x) * 0.5
-		if zoomed_size.y > available.size.y:
-			draw_position.y = clampf(draw_position.y, available.end.y - zoomed_size.y, available.position.y)
-		else:
-			draw_position.y = available.position.y + (available.size.y - zoomed_size.y) * 0.5
+		var base_draw_position: Vector2 = available.get_center() - focus_offset
+		draw_position = _clamp_plane_draw_position(base_draw_position + plane_pan_offset_pixels, centered_position, available, zoomed_size)
+		plane_pan_offset_pixels = draw_position - base_draw_position
+	else:
+		plane_pan_offset_pixels = Vector2.ZERO
 	return Rect2(draw_position, zoomed_size)
 
 func _get_plane_dimensions() -> Vector2i:
@@ -294,6 +319,14 @@ func _zoom_plane_at(screen_position: Vector2, direction: float) -> void:
 		return
 	if is_equal_approx(plane_zoom_scale, tuning.plane_zoom_min_scale):
 		plane_zoom_focus = Vector2(0.5, 0.5)
+		plane_pan_offset_pixels = Vector2.ZERO
+	queue_redraw()
+
+func _pan_plane_by(relative: Vector2) -> void:
+	if plane_zoom_scale <= _get_view_tuning().plane_zoom_min_scale:
+		plane_pan_offset_pixels = Vector2.ZERO
+		return
+	plane_pan_offset_pixels += relative
 	queue_redraw()
 
 func _emit_pick_action(screen_position: Vector2) -> void:
@@ -387,6 +420,26 @@ func _clear_drag_state() -> void:
 	active_drag_button = MOUSE_BUTTON_NONE
 	drag_has_last_grid = false
 	drag_has_last_plane_position = false
+
+func _clamp_plane_draw_position(
+	draw_position: Vector2,
+	centered_position: Vector2,
+	available: Rect2,
+	zoomed_size: Vector2
+) -> Vector2:
+	var clamped_position: Vector2 = draw_position
+	if zoomed_size.x > available.size.x:
+		clamped_position.x = clampf(clamped_position.x, available.end.x - zoomed_size.x, available.position.x)
+	else:
+		clamped_position.x = centered_position.x
+	if zoomed_size.y > available.size.y:
+		clamped_position.y = clampf(clamped_position.y, available.end.y - zoomed_size.y, available.position.y)
+	else:
+		clamped_position.y = centered_position.y
+	return clamped_position
+
+func _is_pan_modifier_pressed() -> bool:
+	return Input.is_key_pressed(_get_view_tuning().workspace_pan_modifier_keycode)
 
 func _build_drag_plane_path(current_plane_position: Vector2i) -> Array[Vector2i]:
 	if not drag_has_last_plane_position:

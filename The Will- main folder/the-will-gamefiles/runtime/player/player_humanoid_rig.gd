@@ -6,6 +6,10 @@ const PlayerRigGuidanceStatePresenterScript = preload("res://runtime/player/play
 const PlayerRigLocomotionPresenterScript = preload("res://runtime/player/player_rig_locomotion_presenter.gd")
 const PlayerRigGripLayoutPresenterScript = preload("res://runtime/player/player_rig_grip_layout_presenter.gd")
 const PlayerRigSupportArmIkPresenterScript = preload("res://runtime/player/player_rig_support_arm_ik_presenter.gd")
+const PlayerRigFingerGripPresenterScript = preload("res://runtime/player/player_rig_finger_grip_presenter.gd")
+const HandTargetConstraintSolverScript = preload("res://runtime/player/hand_target_constraint_solver.gd")
+const TwoHandPoseSolverScript = preload("res://runtime/player/two_hand_pose_solver.gd")
+const GripDebugDrawScript = preload("res://runtime/player/grip_debug_draw.gd")
 const RIGHT_HAND_BONE := &"CC_Base_R_Hand"
 const LEFT_HAND_BONE := &"CC_Base_L_Hand"
 const RIGHT_THIGH_BONE := &"CC_Base_R_Thigh"
@@ -16,7 +20,6 @@ const RIGHT_UPPERARM_BONE := &"CC_Base_R_Upperarm"
 const LEFT_UPPERARM_BONE := &"CC_Base_L_Upperarm"
 const RIGHT_FOREARM_BONE := &"CC_Base_R_Forearm"
 const LEFT_FOREARM_BONE := &"CC_Base_L_Forearm"
-
 @export_range(1.6, 2.4, 0.01) var standing_height_meters: float = 2.0
 @export_range(0.0, 0.5, 0.01) var pole_grip_arm_reach_margin_percent: float = 0.10
 @export var right_hand_anchor_position: Vector3 = Vector3(-0.0025, 0.0969, 0.0190)
@@ -31,6 +34,20 @@ const LEFT_FOREARM_BONE := &"CC_Base_L_Forearm"
 @export_range(0.0, 0.6, 0.01) var support_arm_ik_pole_side_offset_meters: float = 0.24
 @export_range(0.0, 0.6, 0.01) var support_arm_ik_pole_down_offset_meters: float = 0.18
 @export_range(0.0, 0.4, 0.01) var support_arm_ik_pole_back_offset_meters: float = 0.08
+
+@export_category("Two Hand Grip Constraint")
+@export_range(0.0, 0.4, 0.01) var two_hand_front_bias_meters: float = 0.18
+@export_range(0.0, 0.3, 0.01) var two_hand_safety_margin_meters: float = 0.08
+@export_range(0.0, 0.4, 0.01) var two_hand_orbit_radius_meters: float = 0.14
+@export_range(1.0, 3.0, 0.1) var two_hand_orbit_radius_scale: float = 1.5
+@export_range(0.0, 0.2, 0.01) var two_hand_orbit_vertical_bias_meters: float = 0.04
+@export_range(4, 24, 1) var two_hand_orbit_sample_count: int = 10
+@export var show_two_hand_grip_debug_markers: bool = false
+
+@export_category("Finger Grip IK")
+@export var enable_finger_grip_ik: bool = true
+@export_range(0.0, 1.0, 0.01) var finger_grip_ik_influence: float = 1.0
+@export_range(1.0, 30.0, 0.1) var finger_grip_target_smoothing_speed: float = 16.0
 
 @export_category("Stowed Weapon Anchors")
 @export var left_shoulder_stow_position: Vector3 = Vector3(0.08, 0.12, -0.10)
@@ -48,6 +65,7 @@ const LEFT_FOREARM_BONE := &"CC_Base_L_Forearm"
 
 @export_category("Locomotion")
 @export var default_animation_name: StringName = &"Idle"
+@export var two_hand_idle_animation_name: StringName = &"2 Hand Idle"
 @export var walk_animation_name: StringName = &"Walk"
 @export var jog_animation_name: StringName = &"SlowRun"
 @export var sprint_animation_name: StringName = &"Run"
@@ -81,6 +99,19 @@ var guidance_state_presenter = PlayerRigGuidanceStatePresenterScript.new()
 var locomotion_presenter = PlayerRigLocomotionPresenterScript.new()
 var grip_layout_presenter = PlayerRigGripLayoutPresenterScript.new()
 var support_arm_ik_presenter = PlayerRigSupportArmIkPresenterScript.new()
+var finger_grip_presenter = PlayerRigFingerGripPresenterScript.new()
+var hand_target_constraint_solver = HandTargetConstraintSolverScript.new()
+var two_hand_pose_solver = TwoHandPoseSolverScript.new()
+var grip_debug_draw = GripDebugDrawScript.new()
+var finger_grip_source_lookup: Dictionary = {}
+var finger_grip_target_lookup: Dictionary = {}
+var finger_grip_modifier_lookup: Dictionary = {}
+var body_restriction_root: Node3D = null
+var grip_solve_root: Node3D = null
+var dominant_grip_slot_id: StringName = StringName()
+var locomotion_grounded: bool = true
+var locomotion_horizontal_speed: float = 0.0
+var locomotion_vertical_velocity: float = 0.0
 
 func _ready() -> void:
 	_apply_target_height_scale()
@@ -98,8 +129,12 @@ func _ready() -> void:
 	max_model_arm_reach_meters = _resolve_max_model_arm_reach_meters()
 	_apply_pole_grip_arm_reach_limits()
 	_ensure_support_arm_ik_modifiers()
+	_ensure_finger_grip_ik_targets_and_modifiers()
+	body_restriction_root = hand_target_constraint_solver.call("ensure_body_restriction_root", self, skeleton) as Node3D
+	grip_solve_root = grip_debug_draw.call("ensure_debug_root", self) as Node3D
 	_snap_support_arm_ik_targets_to_current_pose()
 	_refresh_support_arm_ik_influences()
+	_refresh_finger_grip_ik_influences()
 	process_priority = 10
 	set_process(true)
 	_play_default_animation()
@@ -107,6 +142,8 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_update_support_arm_ik_targets(delta)
 	_refresh_support_arm_ik_influences()
+	_update_finger_grip_targets(delta)
+	_refresh_finger_grip_ik_influences()
 
 func get_standing_height_meters() -> float:
 	return standing_height_meters
@@ -170,6 +207,17 @@ func get_right_hand_item_anchor() -> Node3D:
 func get_left_hand_item_anchor() -> Node3D:
 	return rig_model_presenter.get_left_hand_item_anchor(self)
 
+func resolve_hand_grip_alignment_offset_local(slot_id: StringName) -> Vector3:
+	if skeleton == null:
+		return Vector3.ZERO
+	var hand_anchor: Node3D = get_right_hand_item_anchor() if slot_id == &"hand_right" else get_left_hand_item_anchor()
+	if hand_anchor == null:
+		return Vector3.ZERO
+	var grip_center_world: Vector3 = finger_grip_presenter.resolve_hand_grip_alignment_world_position(skeleton, slot_id)
+	if grip_center_world.length_squared() <= 0.000001:
+		return Vector3.ZERO
+	return hand_anchor.to_local(grip_center_world)
+
 func get_weapon_stow_anchor(stow_mode: StringName, slot_id: StringName) -> Node3D:
 	return rig_model_presenter.get_weapon_stow_anchor(self, stow_mode, slot_id)
 
@@ -180,6 +228,9 @@ func update_locomotion_state(
 		vertical_velocity: float,
 		sprinting: bool
 	) -> void:
+	locomotion_horizontal_speed = horizontal_speed
+	locomotion_grounded = grounded
+	locomotion_vertical_velocity = vertical_velocity
 	locomotion_presenter.update_locomotion_state(
 		animation_player,
 		horizontal_speed,
@@ -187,12 +238,30 @@ func update_locomotion_state(
 		grounded,
 		vertical_velocity,
 		sprinting,
-		_get_locomotion_config()
+		_get_locomotion_config(_should_use_two_hand_idle_animation())
 	)
 
 func set_support_hand_active(slot_id: StringName, active: bool) -> void:
 	guidance_state_presenter.set_support_hand_active(slot_id, active)
 	_refresh_support_arm_ik_influences()
+
+func set_dominant_grip_slot(slot_id: StringName) -> void:
+	if slot_id == &"hand_left":
+		dominant_grip_slot_id = &"hand_left"
+		return
+	dominant_grip_slot_id = &"hand_right"
+
+func clear_dominant_grip_slot() -> void:
+	dominant_grip_slot_id = StringName()
+
+func is_two_hand_idle_animation_active() -> bool:
+	return _should_use_two_hand_idle_animation() and get_current_animation_name() == two_hand_idle_animation_name
+
+func get_body_restriction_root() -> Node3D:
+	return body_restriction_root
+
+func get_grip_solve_root() -> Node3D:
+	return grip_solve_root
 
 func set_arm_guidance_target(slot_id: StringName, target_node: Node3D) -> void:
 	guidance_state_presenter.set_arm_guidance_target(slot_id, target_node)
@@ -201,6 +270,18 @@ func set_arm_guidance_target(slot_id: StringName, target_node: Node3D) -> void:
 func clear_arm_guidance_target(slot_id: StringName) -> void:
 	guidance_state_presenter.clear_arm_guidance_target(slot_id)
 	_refresh_support_arm_ik_influences()
+
+func set_finger_grip_target(slot_id: StringName, guide_node: Node3D) -> void:
+	if slot_id != &"hand_right" and slot_id != &"hand_left":
+		return
+	finger_grip_source_lookup[slot_id] = guide_node
+	_refresh_finger_grip_ik_influences()
+
+func clear_finger_grip_target(slot_id: StringName) -> void:
+	if slot_id != &"hand_right" and slot_id != &"hand_left":
+		return
+	finger_grip_source_lookup.erase(slot_id)
+	_refresh_finger_grip_ik_influences()
 
 func _apply_target_height_scale() -> void:
 	resolved_visual_height_meters = rig_model_presenter.apply_target_height_scale(
@@ -260,6 +341,14 @@ func _ensure_support_arm_ik_modifiers() -> void:
 	right_arm_ik_modifier = modifier_state.get("right_arm_ik_modifier", right_arm_ik_modifier)
 	left_arm_ik_modifier = modifier_state.get("left_arm_ik_modifier", left_arm_ik_modifier)
 
+func _ensure_finger_grip_ik_targets_and_modifiers() -> void:
+	finger_grip_target_lookup = finger_grip_presenter.ensure_finger_target_nodes(ik_targets_root)
+	finger_grip_modifier_lookup = finger_grip_presenter.ensure_finger_ik_modifiers(
+		skeleton,
+		finger_grip_modifier_lookup,
+		finger_grip_target_lookup
+	)
+
 func _snap_support_arm_ik_targets_to_current_pose() -> void:
 	support_arm_ik_presenter.snap_support_arm_ik_targets_to_current_pose(
 		skeleton,
@@ -275,15 +364,19 @@ func _snap_support_arm_ik_targets_to_current_pose() -> void:
 	)
 
 func _update_support_arm_ik_targets(delta: float) -> void:
-	support_arm_ik_presenter.update_support_arm_ik_targets(
+	if skeleton == null or not enable_support_arm_ik:
+		return
+	if body_restriction_root == null or not is_instance_valid(body_restriction_root):
+		body_restriction_root = hand_target_constraint_solver.call("ensure_body_restriction_root", self, skeleton) as Node3D
+	hand_target_constraint_solver.call("sync_body_restriction_root", body_restriction_root, skeleton)
+	if grip_solve_root == null or not is_instance_valid(grip_solve_root):
+		grip_solve_root = grip_debug_draw.call("ensure_debug_root", self) as Node3D
+	var solve_result: Dictionary = two_hand_pose_solver.call(
+		"solve_arm_targets",
 		skeleton,
-		enable_support_arm_ik,
-		_get_support_arm_ik_config(),
+		body_restriction_root,
+		dominant_grip_slot_id,
 		global_basis,
-		right_hand_ik_target,
-		left_hand_ik_target,
-		right_hand_pole_target,
-		left_hand_pole_target,
 		get_arm_guidance_target(&"hand_right"),
 		get_arm_guidance_target(&"hand_left"),
 		get_right_hand_item_anchor(),
@@ -295,8 +388,31 @@ func _update_support_arm_ik_targets(delta: float) -> void:
 		RIGHT_HAND_BONE,
 		LEFT_HAND_BONE,
 		Callable(self, "_get_bone_world_position"),
-		delta
-	)
+		hand_target_constraint_solver,
+		_get_two_hand_constraint_config()
+	) as Dictionary
+	solve_result["dominant_slot_id"] = dominant_grip_slot_id if dominant_grip_slot_id != StringName() else &"hand_right"
+	grip_debug_draw.call("update_debug_markers", grip_solve_root, solve_result, show_two_hand_grip_debug_markers)
+	var right_solve: Dictionary = solve_result.get(&"hand_right", {})
+	if bool(right_solve.get("active", false)) and is_support_hand_active(&"hand_right"):
+		support_arm_ik_presenter.apply_solved_arm_targets(
+			right_hand_ik_target,
+			right_hand_pole_target,
+			right_solve.get("corrected_target", right_hand_ik_target.global_position),
+			right_solve.get("pole_target", right_hand_pole_target.global_position),
+			support_arm_ik_target_smoothing_speed,
+			delta
+		)
+	var left_solve: Dictionary = solve_result.get(&"hand_left", {})
+	if bool(left_solve.get("active", false)) and is_support_hand_active(&"hand_left"):
+		support_arm_ik_presenter.apply_solved_arm_targets(
+			left_hand_ik_target,
+			left_hand_pole_target,
+			left_solve.get("corrected_target", left_hand_ik_target.global_position),
+			left_solve.get("pole_target", left_hand_pole_target.global_position),
+			support_arm_ik_target_smoothing_speed,
+			delta
+		)
 
 func _refresh_support_arm_ik_influences() -> void:
 	support_arm_ik_presenter.refresh_support_arm_ik_influences(
@@ -308,6 +424,24 @@ func _refresh_support_arm_ik_influences() -> void:
 		is_support_hand_active(&"hand_left"),
 		get_arm_guidance_target(&"hand_right"),
 		get_arm_guidance_target(&"hand_left")
+	)
+
+func _update_finger_grip_targets(delta: float) -> void:
+	finger_grip_presenter.update_finger_grip_targets(
+		skeleton,
+		finger_grip_source_lookup,
+		finger_grip_target_lookup,
+		Callable(self, "_get_bone_world_position"),
+		finger_grip_target_smoothing_speed,
+		delta
+	)
+
+func _refresh_finger_grip_ik_influences() -> void:
+	finger_grip_presenter.refresh_finger_ik_influences(
+		enable_finger_grip_ik,
+		finger_grip_ik_influence,
+		finger_grip_modifier_lookup,
+		finger_grip_source_lookup
 	)
 
 func _resolve_max_model_arm_reach_meters() -> float:
@@ -343,9 +477,12 @@ func _get_support_arm_ik_config() -> Dictionary:
 		"support_arm_ik_pole_back_offset_meters": support_arm_ik_pole_back_offset_meters,
 	}
 
-func _get_locomotion_config() -> Dictionary:
+func _get_locomotion_config(two_hand_idle_requested: bool = false) -> Dictionary:
 	return {
 		"default_animation_name": default_animation_name,
+		"two_hand_idle_animation_name": two_hand_idle_animation_name,
+		"two_hand_idle_available": has_animation_name(two_hand_idle_animation_name),
+		"two_hand_idle_requested": two_hand_idle_requested,
 		"walk_animation_name": walk_animation_name,
 		"jog_animation_name": jog_animation_name,
 		"sprint_animation_name": sprint_animation_name,
@@ -355,4 +492,22 @@ func _get_locomotion_config() -> Dictionary:
 		"idle_horizontal_speed_threshold": idle_horizontal_speed_threshold,
 		"walk_ratio_threshold": walk_ratio_threshold,
 		"jump_vertical_velocity_threshold": jump_vertical_velocity_threshold,
+	}
+
+func _should_use_two_hand_idle_animation() -> bool:
+	if dominant_grip_slot_id == StringName():
+		return false
+	return is_support_hand_active(&"hand_right") or is_support_hand_active(&"hand_left")
+
+func _get_two_hand_constraint_config() -> Dictionary:
+	return {
+		"front_bias_amount": two_hand_front_bias_meters,
+		"safety_margin_meters": two_hand_safety_margin_meters,
+		"orbit_radius_meters": two_hand_orbit_radius_meters,
+		"orbit_radius_scale": two_hand_orbit_radius_scale,
+		"orbit_vertical_bias": two_hand_orbit_vertical_bias_meters,
+		"orbit_sample_count": two_hand_orbit_sample_count,
+		"elbow_pole_side_offset_meters": support_arm_ik_pole_side_offset_meters,
+		"elbow_pole_down_offset_meters": support_arm_ik_pole_down_offset_meters,
+		"elbow_pole_back_offset_meters": support_arm_ik_pole_back_offset_meters,
 	}

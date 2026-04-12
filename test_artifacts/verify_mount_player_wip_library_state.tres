@@ -222,240 +222,816 @@ layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
 [sub_resource type="Resource" id="Resource_4lg8f"]
-script = ExtResource("2_k1o35")
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 10, 20)
 layer_index = 20
-cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_hei1f"), SubResource("Resource_8lq0n"), SubResource("Resource_tht4c"), SubResource("Resource_23v4a"), SubResource("Resource_wht14"), SubResource("Resource_cj1hw"), SubResource("Resource_tm26g"), SubResource("Resource_xfpj5"), SubResource("Resource_43rxm"), SubResource("Resource_dabj6"), SubResource("Resource_5myve"), SubResource("Resource_uvp54"), SubResource("Resource_vta2d"), SubResource("Resource_yj36d"), SubResource("Resource_71vrn"), SubResource("Resource_t2cmc"), SubResource("Resource_tdnmh"), SubResource("Resource_gfwse"), SubResource("Resource_va6dp"), SubResource("Resource_cniod"), SubResource("Resource_t15im"), SubResource("Resource_6qa5r"), SubResource("Resource_ybg7g"), SubResource("Resource_23eaa"), SubResource("Resource_d7vld"), SubResource("Resource_hmj3k"), SubResource("Resource_e20wi"), SubResource("Resource_cireg"), SubResource("Resource_efeqf"), SubResource("Resource_i52qf"), SubResource("Resource_npvfe"), SubResource("Resource_54bu8"), SubResource("Resource_p03ft"), SubResource("Resource_ayr3f"), SubResource("Resource_7japb"), SubResource("Resource_hixqd")])
+material_variant_id = &"mat_wood_gray"
 
 [sub_resource type="Resource" id="Resource_8g60t"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_y6x8k"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_7r0nd"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1j52s"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_o0dld"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_4yugc"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_cau3q"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_s207v"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_eeo0p"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_s3tni"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_wvl0m"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_n2aho"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_jy2nu"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_pyvvm"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_0sa6o"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_jqymw"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_cly1g"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_oex5n"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_yn0fn"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_dllck"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_qgx3a"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ypnk7"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xg7k5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_lpt0b"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_i5t5v"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2wwdn"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_j8eq4"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_hy2ls"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5f4jn"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_vekt2"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_fvun8"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_hsuud"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_7bjn5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2yib5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_airef"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_v17qj"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_30x1s"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_mu806"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_0bqc8"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_fmtim"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_eb0fq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_3bly5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_0trnf"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_a8igr"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_l6ych"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_gm0k7"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_rx53x"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_sa6bm"]
+script = ExtResource("2_k1o35")
+layer_index = 20
+cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_hei1f"), SubResource("Resource_8lq0n"), SubResource("Resource_tht4c"), SubResource("Resource_23v4a"), SubResource("Resource_wht14"), SubResource("Resource_cj1hw"), SubResource("Resource_tm26g"), SubResource("Resource_xfpj5"), SubResource("Resource_43rxm"), SubResource("Resource_dabj6"), SubResource("Resource_5myve"), SubResource("Resource_uvp54"), SubResource("Resource_vta2d"), SubResource("Resource_yj36d"), SubResource("Resource_71vrn"), SubResource("Resource_t2cmc"), SubResource("Resource_tdnmh"), SubResource("Resource_gfwse"), SubResource("Resource_va6dp"), SubResource("Resource_cniod"), SubResource("Resource_t15im"), SubResource("Resource_6qa5r"), SubResource("Resource_ybg7g"), SubResource("Resource_23eaa"), SubResource("Resource_d7vld"), SubResource("Resource_hmj3k"), SubResource("Resource_e20wi"), SubResource("Resource_cireg"), SubResource("Resource_efeqf"), SubResource("Resource_i52qf"), SubResource("Resource_npvfe"), SubResource("Resource_54bu8"), SubResource("Resource_p03ft"), SubResource("Resource_ayr3f"), SubResource("Resource_7japb"), SubResource("Resource_hixqd"), SubResource("Resource_4lg8f"), SubResource("Resource_8g60t"), SubResource("Resource_y6x8k"), SubResource("Resource_7r0nd"), SubResource("Resource_1j52s"), SubResource("Resource_o0dld"), SubResource("Resource_4yugc"), SubResource("Resource_cau3q"), SubResource("Resource_s207v"), SubResource("Resource_eeo0p"), SubResource("Resource_s3tni"), SubResource("Resource_wvl0m"), SubResource("Resource_n2aho"), SubResource("Resource_jy2nu"), SubResource("Resource_pyvvm"), SubResource("Resource_0sa6o"), SubResource("Resource_jqymw"), SubResource("Resource_cly1g"), SubResource("Resource_oex5n"), SubResource("Resource_yn0fn"), SubResource("Resource_dllck"), SubResource("Resource_qgx3a"), SubResource("Resource_ypnk7"), SubResource("Resource_xg7k5"), SubResource("Resource_lpt0b"), SubResource("Resource_i5t5v"), SubResource("Resource_2wwdn"), SubResource("Resource_j8eq4"), SubResource("Resource_hy2ls"), SubResource("Resource_5f4jn"), SubResource("Resource_vekt2"), SubResource("Resource_fvun8"), SubResource("Resource_hsuud"), SubResource("Resource_7bjn5"), SubResource("Resource_2yib5"), SubResource("Resource_airef"), SubResource("Resource_v17qj"), SubResource("Resource_30x1s"), SubResource("Resource_mu806"), SubResource("Resource_0bqc8"), SubResource("Resource_fmtim"), SubResource("Resource_eb0fq"), SubResource("Resource_3bly5"), SubResource("Resource_0trnf"), SubResource("Resource_a8igr"), SubResource("Resource_l6ych"), SubResource("Resource_gm0k7"), SubResource("Resource_rx53x")])
+
+[sub_resource type="Resource" id="Resource_4m6eo"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(20, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_y6x8k"]
+[sub_resource type="Resource" id="Resource_kkttq"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(20, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_7r0nd"]
+[sub_resource type="Resource" id="Resource_tdmhp"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(20, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_1j52s"]
+[sub_resource type="Resource" id="Resource_esago"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(21, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_o0dld"]
+[sub_resource type="Resource" id="Resource_fioxa"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(21, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_4yugc"]
+[sub_resource type="Resource" id="Resource_8wl46"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(21, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_cau3q"]
+[sub_resource type="Resource" id="Resource_y87er"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(22, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_s207v"]
+[sub_resource type="Resource" id="Resource_w5wbx"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(22, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_eeo0p"]
+[sub_resource type="Resource" id="Resource_btirm"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(22, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_s3tni"]
+[sub_resource type="Resource" id="Resource_naq74"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(23, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_wvl0m"]
+[sub_resource type="Resource" id="Resource_npod5"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(23, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_n2aho"]
+[sub_resource type="Resource" id="Resource_f3gly"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(23, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_jy2nu"]
+[sub_resource type="Resource" id="Resource_doeaq"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(24, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_pyvvm"]
+[sub_resource type="Resource" id="Resource_v0cio"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(24, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_0sa6o"]
+[sub_resource type="Resource" id="Resource_5qq78"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(24, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_jqymw"]
+[sub_resource type="Resource" id="Resource_nfin4"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(25, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_cly1g"]
+[sub_resource type="Resource" id="Resource_7rpdx"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(25, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_oex5n"]
+[sub_resource type="Resource" id="Resource_hpwbt"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(25, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_yn0fn"]
+[sub_resource type="Resource" id="Resource_v47yo"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(26, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_dllck"]
+[sub_resource type="Resource" id="Resource_4p8i5"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(26, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_qgx3a"]
+[sub_resource type="Resource" id="Resource_1c87o"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(26, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_ypnk7"]
+[sub_resource type="Resource" id="Resource_qfrc0"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(27, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_xg7k5"]
+[sub_resource type="Resource" id="Resource_3ybmo"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(27, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_lpt0b"]
+[sub_resource type="Resource" id="Resource_kcqbw"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(27, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_i5t5v"]
+[sub_resource type="Resource" id="Resource_0uo0u"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(28, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_2wwdn"]
+[sub_resource type="Resource" id="Resource_2qsrh"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(28, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_j8eq4"]
+[sub_resource type="Resource" id="Resource_olryv"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(28, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_hy2ls"]
+[sub_resource type="Resource" id="Resource_neg4k"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(29, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_5f4jn"]
+[sub_resource type="Resource" id="Resource_w8emx"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(29, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_vekt2"]
+[sub_resource type="Resource" id="Resource_huktr"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(29, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_fvun8"]
+[sub_resource type="Resource" id="Resource_74ygr"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(30, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_hsuud"]
+[sub_resource type="Resource" id="Resource_wovfu"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(30, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_7bjn5"]
+[sub_resource type="Resource" id="Resource_tfiii"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(30, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_2yib5"]
+[sub_resource type="Resource" id="Resource_4nq2t"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(31, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_airef"]
+[sub_resource type="Resource" id="Resource_liobx"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(31, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_v17qj"]
+[sub_resource type="Resource" id="Resource_80kt4"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(31, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_30x1s"]
+[sub_resource type="Resource" id="Resource_u6ado"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ydkyf"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_eh41v"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_3v44w"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_3j2m7"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_a8uhl"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_fdudy"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xvmtr"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_nlqok"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_uwasi"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_mlb1g"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_8p6cw"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_m8xdc"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1xjw4"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_76xam"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_isod3"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_oppkh"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_82dua"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_jmp3i"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_cudip"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_lb726"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_d8724"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_rof8h"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_prsdb"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_gjpk8"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xg853"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_vqtvw"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_jpmu5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_iqd0g"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2jv50"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_f2s6k"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_b8wf1"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2k07w"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xp74l"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_sgtl3"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_iac5u"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_rnrqf"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_x4i0a"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_e208w"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5o6hu"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_vdyt5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ml8jv"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_q27l4"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_k7q53"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_a3inv"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_pjo6o"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5wen6"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_v6mmc"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_54u3m"]
 script = ExtResource("2_k1o35")
 layer_index = 21
-cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_8g60t"), SubResource("Resource_y6x8k"), SubResource("Resource_7r0nd"), SubResource("Resource_1j52s"), SubResource("Resource_o0dld"), SubResource("Resource_4yugc"), SubResource("Resource_cau3q"), SubResource("Resource_s207v"), SubResource("Resource_eeo0p"), SubResource("Resource_s3tni"), SubResource("Resource_wvl0m"), SubResource("Resource_n2aho"), SubResource("Resource_jy2nu"), SubResource("Resource_pyvvm"), SubResource("Resource_0sa6o"), SubResource("Resource_jqymw"), SubResource("Resource_cly1g"), SubResource("Resource_oex5n"), SubResource("Resource_yn0fn"), SubResource("Resource_dllck"), SubResource("Resource_qgx3a"), SubResource("Resource_ypnk7"), SubResource("Resource_xg7k5"), SubResource("Resource_lpt0b"), SubResource("Resource_i5t5v"), SubResource("Resource_2wwdn"), SubResource("Resource_j8eq4"), SubResource("Resource_hy2ls"), SubResource("Resource_5f4jn"), SubResource("Resource_vekt2"), SubResource("Resource_fvun8"), SubResource("Resource_hsuud"), SubResource("Resource_7bjn5"), SubResource("Resource_2yib5"), SubResource("Resource_airef"), SubResource("Resource_v17qj")])
+cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_4m6eo"), SubResource("Resource_kkttq"), SubResource("Resource_tdmhp"), SubResource("Resource_esago"), SubResource("Resource_fioxa"), SubResource("Resource_8wl46"), SubResource("Resource_y87er"), SubResource("Resource_w5wbx"), SubResource("Resource_btirm"), SubResource("Resource_naq74"), SubResource("Resource_npod5"), SubResource("Resource_f3gly"), SubResource("Resource_doeaq"), SubResource("Resource_v0cio"), SubResource("Resource_5qq78"), SubResource("Resource_nfin4"), SubResource("Resource_7rpdx"), SubResource("Resource_hpwbt"), SubResource("Resource_v47yo"), SubResource("Resource_4p8i5"), SubResource("Resource_1c87o"), SubResource("Resource_qfrc0"), SubResource("Resource_3ybmo"), SubResource("Resource_kcqbw"), SubResource("Resource_0uo0u"), SubResource("Resource_2qsrh"), SubResource("Resource_olryv"), SubResource("Resource_neg4k"), SubResource("Resource_w8emx"), SubResource("Resource_huktr"), SubResource("Resource_74ygr"), SubResource("Resource_wovfu"), SubResource("Resource_tfiii"), SubResource("Resource_4nq2t"), SubResource("Resource_liobx"), SubResource("Resource_80kt4"), SubResource("Resource_u6ado"), SubResource("Resource_ydkyf"), SubResource("Resource_eh41v"), SubResource("Resource_3v44w"), SubResource("Resource_3j2m7"), SubResource("Resource_a8uhl"), SubResource("Resource_fdudy"), SubResource("Resource_xvmtr"), SubResource("Resource_nlqok"), SubResource("Resource_uwasi"), SubResource("Resource_mlb1g"), SubResource("Resource_8p6cw"), SubResource("Resource_m8xdc"), SubResource("Resource_1xjw4"), SubResource("Resource_76xam"), SubResource("Resource_isod3"), SubResource("Resource_oppkh"), SubResource("Resource_82dua"), SubResource("Resource_jmp3i"), SubResource("Resource_cudip"), SubResource("Resource_lb726"), SubResource("Resource_d8724"), SubResource("Resource_rof8h"), SubResource("Resource_prsdb"), SubResource("Resource_gjpk8"), SubResource("Resource_xg853"), SubResource("Resource_vqtvw"), SubResource("Resource_jpmu5"), SubResource("Resource_iqd0g"), SubResource("Resource_2jv50"), SubResource("Resource_f2s6k"), SubResource("Resource_b8wf1"), SubResource("Resource_2k07w"), SubResource("Resource_xp74l"), SubResource("Resource_sgtl3"), SubResource("Resource_iac5u"), SubResource("Resource_rnrqf"), SubResource("Resource_x4i0a"), SubResource("Resource_e208w"), SubResource("Resource_5o6hu"), SubResource("Resource_vdyt5"), SubResource("Resource_ml8jv"), SubResource("Resource_q27l4"), SubResource("Resource_k7q53"), SubResource("Resource_a3inv"), SubResource("Resource_pjo6o"), SubResource("Resource_5wen6"), SubResource("Resource_v6mmc")])
 
-[sub_resource type="Resource" id="Resource_mu806"]
+[sub_resource type="Resource" id="Resource_dds8g"]
 script = ExtResource("1_6dfki")
 wip_id = &"verify_mount_right_normal"
 forge_project_name = "verify_mount_right_normal"
 creator_id = &"verify"
-created_timestamp = 1775087276.365
+created_timestamp = 1775884527.084
 forge_intent = &"intent_melee"
 equipment_context = &"ctx_weapon"
-layers = Array[ExtResource("2_k1o35")]([SubResource("Resource_4lg8f"), SubResource("Resource_30x1s")])
+layers = Array[ExtResource("2_k1o35")]([SubResource("Resource_sa6bm"), SubResource("Resource_54u3m")])
 
 [sub_resource type="Resource" id="Resource_6dfki"]
 script = ExtResource("3_8cnb4")
@@ -481,1342 +1057,3070 @@ grid_position = Vector3i(21, 10, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_0bqc8"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(21, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_fmtim"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(21, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_eb0fq"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_3bly5"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_0trnf"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_a8igr"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_l6ych"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_gm0k7"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_rx53x"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(24, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_sa6bm"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(24, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_4m6eo"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(24, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_kkttq"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(25, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_tdmhp"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(25, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_esago"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(25, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_fioxa"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(26, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_8wl46"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(26, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_y87er"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(26, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_w5wbx"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(27, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_btirm"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(27, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_naq74"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(27, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_npod5"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(28, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_f3gly"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(28, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_doeaq"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(28, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_v0cio"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(29, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_5qq78"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(29, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_nfin4"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(29, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_7rpdx"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(30, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_hpwbt"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(30, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_v47yo"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(30, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_4p8i5"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(31, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_1c87o"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(31, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_qfrc0"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(31, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_3ybmo"]
-script = ExtResource("2_k1o35")
-layer_index = 20
-cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_6dfki"), SubResource("Resource_k1o35"), SubResource("Resource_8cnb4"), SubResource("Resource_jp12v"), SubResource("Resource_0bqc8"), SubResource("Resource_fmtim"), SubResource("Resource_eb0fq"), SubResource("Resource_3bly5"), SubResource("Resource_0trnf"), SubResource("Resource_a8igr"), SubResource("Resource_l6ych"), SubResource("Resource_gm0k7"), SubResource("Resource_rx53x"), SubResource("Resource_sa6bm"), SubResource("Resource_4m6eo"), SubResource("Resource_kkttq"), SubResource("Resource_tdmhp"), SubResource("Resource_esago"), SubResource("Resource_fioxa"), SubResource("Resource_8wl46"), SubResource("Resource_y87er"), SubResource("Resource_w5wbx"), SubResource("Resource_btirm"), SubResource("Resource_naq74"), SubResource("Resource_npod5"), SubResource("Resource_f3gly"), SubResource("Resource_doeaq"), SubResource("Resource_v0cio"), SubResource("Resource_5qq78"), SubResource("Resource_nfin4"), SubResource("Resource_7rpdx"), SubResource("Resource_hpwbt"), SubResource("Resource_v47yo"), SubResource("Resource_4p8i5"), SubResource("Resource_1c87o"), SubResource("Resource_qfrc0")])
-
-[sub_resource type="Resource" id="Resource_kcqbw"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(20, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_0uo0u"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(20, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_2qsrh"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(20, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_olryv"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(21, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_neg4k"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(21, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_w8emx"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(21, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_huktr"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_74ygr"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_wovfu"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_tfiii"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_4nq2t"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_liobx"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_80kt4"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(24, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_u6ado"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(24, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_ydkyf"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(24, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_eh41v"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(25, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_3v44w"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(25, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_3j2m7"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(25, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_a8uhl"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(26, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_fdudy"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(26, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_xvmtr"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(26, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_nlqok"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(27, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_uwasi"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(27, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_mlb1g"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(27, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_8p6cw"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(28, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_m8xdc"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(28, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_1xjw4"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(28, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_76xam"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(29, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_isod3"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(29, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_oppkh"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(29, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_82dua"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(30, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_jmp3i"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(30, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_cudip"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(30, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_lb726"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(31, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_d8724"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(31, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_rof8h"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(31, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_prsdb"]
-script = ExtResource("2_k1o35")
-layer_index = 21
-cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_kcqbw"), SubResource("Resource_0uo0u"), SubResource("Resource_2qsrh"), SubResource("Resource_olryv"), SubResource("Resource_neg4k"), SubResource("Resource_w8emx"), SubResource("Resource_huktr"), SubResource("Resource_74ygr"), SubResource("Resource_wovfu"), SubResource("Resource_tfiii"), SubResource("Resource_4nq2t"), SubResource("Resource_liobx"), SubResource("Resource_80kt4"), SubResource("Resource_u6ado"), SubResource("Resource_ydkyf"), SubResource("Resource_eh41v"), SubResource("Resource_3v44w"), SubResource("Resource_3j2m7"), SubResource("Resource_a8uhl"), SubResource("Resource_fdudy"), SubResource("Resource_xvmtr"), SubResource("Resource_nlqok"), SubResource("Resource_uwasi"), SubResource("Resource_mlb1g"), SubResource("Resource_8p6cw"), SubResource("Resource_m8xdc"), SubResource("Resource_1xjw4"), SubResource("Resource_76xam"), SubResource("Resource_isod3"), SubResource("Resource_oppkh"), SubResource("Resource_82dua"), SubResource("Resource_jmp3i"), SubResource("Resource_cudip"), SubResource("Resource_lb726"), SubResource("Resource_d8724"), SubResource("Resource_rof8h")])
-
-[sub_resource type="Resource" id="Resource_gjpk8"]
-script = ExtResource("1_6dfki")
-wip_id = &"verify_mount_right_reverse"
-forge_project_name = "verify_mount_right_reverse"
-creator_id = &"verify"
-created_timestamp = 1775087276.369
-forge_intent = &"intent_melee"
-equipment_context = &"ctx_weapon"
-grip_style_mode = &"grip_reverse"
-layers = Array[ExtResource("2_k1o35")]([SubResource("Resource_3ybmo"), SubResource("Resource_prsdb")])
-
-[sub_resource type="Resource" id="Resource_xg853"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(20, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_vqtvw"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(20, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_jpmu5"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(20, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_iqd0g"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(21, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_2jv50"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(21, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_f2s6k"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(21, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_b8wf1"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_2k07w"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_xp74l"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_sgtl3"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_iac5u"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_rnrqf"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_x4i0a"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(24, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_e208w"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(24, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_5o6hu"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(24, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_vdyt5"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(25, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_ml8jv"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(25, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_q27l4"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(25, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_k7q53"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(26, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_a3inv"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(26, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_pjo6o"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(26, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_5wen6"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(27, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_v6mmc"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(27, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_54u3m"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(27, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_dds8g"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(28, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
 [sub_resource type="Resource" id="Resource_ldp2k"]
 script = ExtResource("3_8cnb4")
-grid_position = Vector3i(28, 11, 20)
+grid_position = Vector3i(21, 11, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
 [sub_resource type="Resource" id="Resource_6eroe"]
 script = ExtResource("3_8cnb4")
-grid_position = Vector3i(28, 12, 20)
+grid_position = Vector3i(21, 12, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
 [sub_resource type="Resource" id="Resource_7ssxs"]
 script = ExtResource("3_8cnb4")
-grid_position = Vector3i(29, 10, 20)
+grid_position = Vector3i(22, 10, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
 [sub_resource type="Resource" id="Resource_odqsr"]
 script = ExtResource("3_8cnb4")
-grid_position = Vector3i(29, 11, 20)
+grid_position = Vector3i(22, 11, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
 [sub_resource type="Resource" id="Resource_s7yly"]
 script = ExtResource("3_8cnb4")
-grid_position = Vector3i(29, 12, 20)
+grid_position = Vector3i(22, 12, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
 [sub_resource type="Resource" id="Resource_jbvve"]
 script = ExtResource("3_8cnb4")
-grid_position = Vector3i(30, 10, 20)
+grid_position = Vector3i(23, 10, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
 [sub_resource type="Resource" id="Resource_oa3mr"]
 script = ExtResource("3_8cnb4")
-grid_position = Vector3i(30, 11, 20)
+grid_position = Vector3i(23, 11, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
 [sub_resource type="Resource" id="Resource_1auqt"]
 script = ExtResource("3_8cnb4")
-grid_position = Vector3i(30, 12, 20)
+grid_position = Vector3i(23, 12, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
 [sub_resource type="Resource" id="Resource_dbucc"]
 script = ExtResource("3_8cnb4")
-grid_position = Vector3i(31, 10, 20)
+grid_position = Vector3i(24, 10, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
 [sub_resource type="Resource" id="Resource_vppcx"]
 script = ExtResource("3_8cnb4")
-grid_position = Vector3i(31, 11, 20)
+grid_position = Vector3i(24, 11, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
 [sub_resource type="Resource" id="Resource_oax8i"]
 script = ExtResource("3_8cnb4")
-grid_position = Vector3i(31, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_8ncce"]
-script = ExtResource("2_k1o35")
-layer_index = 20
-cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_xg853"), SubResource("Resource_vqtvw"), SubResource("Resource_jpmu5"), SubResource("Resource_iqd0g"), SubResource("Resource_2jv50"), SubResource("Resource_f2s6k"), SubResource("Resource_b8wf1"), SubResource("Resource_2k07w"), SubResource("Resource_xp74l"), SubResource("Resource_sgtl3"), SubResource("Resource_iac5u"), SubResource("Resource_rnrqf"), SubResource("Resource_x4i0a"), SubResource("Resource_e208w"), SubResource("Resource_5o6hu"), SubResource("Resource_vdyt5"), SubResource("Resource_ml8jv"), SubResource("Resource_q27l4"), SubResource("Resource_k7q53"), SubResource("Resource_a3inv"), SubResource("Resource_pjo6o"), SubResource("Resource_5wen6"), SubResource("Resource_v6mmc"), SubResource("Resource_54u3m"), SubResource("Resource_dds8g"), SubResource("Resource_ldp2k"), SubResource("Resource_6eroe"), SubResource("Resource_7ssxs"), SubResource("Resource_odqsr"), SubResource("Resource_s7yly"), SubResource("Resource_jbvve"), SubResource("Resource_oa3mr"), SubResource("Resource_1auqt"), SubResource("Resource_dbucc"), SubResource("Resource_vppcx"), SubResource("Resource_oax8i")])
-
-[sub_resource type="Resource" id="Resource_rjhyo"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(20, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_kcsnb"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(20, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_7ia3w"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(20, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_ck4u0"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(21, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_p82jy"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(21, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_b0jbf"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(21, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_hlpyo"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_q00cc"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_1dw64"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_x54rj"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_aqhg4"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_pu6jp"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_wahds"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(24, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_mk6b8"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(24, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_l2337"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(24, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_775wg"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(25, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_elh0r"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(25, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_mfug8"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(25, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_hachp"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(26, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_51qbm"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(26, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_woaff"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(26, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_nwppq"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(27, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_xwtp5"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(27, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_d5c4p"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(27, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_ljwu4"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(28, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_1ht66"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(28, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_bays7"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(28, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_cqobk"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(29, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_73lfq"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(29, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_xfrrn"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(29, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_1xlbc"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(30, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_d5tqq"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(30, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_uoshe"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(30, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_u6qd5"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(31, 10, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_rx75k"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(31, 11, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_yc2yd"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(31, 12, 21)
-layer_index = 21
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_pcush"]
-script = ExtResource("2_k1o35")
-layer_index = 21
-cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_rjhyo"), SubResource("Resource_kcsnb"), SubResource("Resource_7ia3w"), SubResource("Resource_ck4u0"), SubResource("Resource_p82jy"), SubResource("Resource_b0jbf"), SubResource("Resource_hlpyo"), SubResource("Resource_q00cc"), SubResource("Resource_1dw64"), SubResource("Resource_x54rj"), SubResource("Resource_aqhg4"), SubResource("Resource_pu6jp"), SubResource("Resource_wahds"), SubResource("Resource_mk6b8"), SubResource("Resource_l2337"), SubResource("Resource_775wg"), SubResource("Resource_elh0r"), SubResource("Resource_mfug8"), SubResource("Resource_hachp"), SubResource("Resource_51qbm"), SubResource("Resource_woaff"), SubResource("Resource_nwppq"), SubResource("Resource_xwtp5"), SubResource("Resource_d5c4p"), SubResource("Resource_ljwu4"), SubResource("Resource_1ht66"), SubResource("Resource_bays7"), SubResource("Resource_cqobk"), SubResource("Resource_73lfq"), SubResource("Resource_xfrrn"), SubResource("Resource_1xlbc"), SubResource("Resource_d5tqq"), SubResource("Resource_uoshe"), SubResource("Resource_u6qd5"), SubResource("Resource_rx75k"), SubResource("Resource_yc2yd")])
-
-[sub_resource type="Resource" id="Resource_x6cfi"]
-script = ExtResource("1_6dfki")
-wip_id = &"verify_mount_left_normal"
-forge_project_name = "verify_mount_left_normal"
-creator_id = &"verify"
-created_timestamp = 1775087276.379
-forge_intent = &"intent_melee"
-equipment_context = &"ctx_weapon"
-layers = Array[ExtResource("2_k1o35")]([SubResource("Resource_8ncce"), SubResource("Resource_pcush")])
-
-[sub_resource type="Resource" id="Resource_ecpdc"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(20, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_nnp1v"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(20, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_a6n1a"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(20, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_4i7je"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(21, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_dftva"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(21, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_6c8hw"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(21, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_883e1"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_gtd34"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_c3kx8"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(22, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_h6ui4"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_vr8ag"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_3grwb"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(23, 12, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_6babu"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(24, 10, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_qyjo5"]
-script = ExtResource("3_8cnb4")
-grid_position = Vector3i(24, 11, 20)
-layer_index = 20
-material_variant_id = &"mat_wood_gray"
-
-[sub_resource type="Resource" id="Resource_vflh8"]
-script = ExtResource("3_8cnb4")
 grid_position = Vector3i(24, 12, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_r0vxe"]
+[sub_resource type="Resource" id="Resource_8ncce"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(25, 10, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_53srq"]
+[sub_resource type="Resource" id="Resource_rjhyo"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(25, 11, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_yi6l5"]
+[sub_resource type="Resource" id="Resource_kcsnb"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(25, 12, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_mp0ge"]
+[sub_resource type="Resource" id="Resource_7ia3w"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(26, 10, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_nywem"]
+[sub_resource type="Resource" id="Resource_ck4u0"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(26, 11, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_pssh2"]
+[sub_resource type="Resource" id="Resource_p82jy"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(26, 12, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_up4s4"]
+[sub_resource type="Resource" id="Resource_b0jbf"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(27, 10, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_qcfpt"]
+[sub_resource type="Resource" id="Resource_hlpyo"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(27, 11, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_5t6fj"]
+[sub_resource type="Resource" id="Resource_q00cc"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(27, 12, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_5nqr0"]
+[sub_resource type="Resource" id="Resource_1dw64"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(28, 10, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_4n5ij"]
+[sub_resource type="Resource" id="Resource_x54rj"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(28, 11, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_li170"]
+[sub_resource type="Resource" id="Resource_aqhg4"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(28, 12, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_w5bge"]
+[sub_resource type="Resource" id="Resource_pu6jp"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(29, 10, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_uf6oy"]
+[sub_resource type="Resource" id="Resource_wahds"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(29, 11, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_1yx32"]
+[sub_resource type="Resource" id="Resource_mk6b8"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(29, 12, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_0fup6"]
+[sub_resource type="Resource" id="Resource_l2337"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(30, 10, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_jrxcq"]
+[sub_resource type="Resource" id="Resource_775wg"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(30, 11, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_jtblg"]
+[sub_resource type="Resource" id="Resource_elh0r"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(30, 12, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_javru"]
+[sub_resource type="Resource" id="Resource_mfug8"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(31, 10, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_s14j5"]
+[sub_resource type="Resource" id="Resource_hachp"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(31, 11, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_nr1w4"]
+[sub_resource type="Resource" id="Resource_51qbm"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(31, 12, 20)
 layer_index = 20
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_3mh4c"]
+[sub_resource type="Resource" id="Resource_woaff"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_nwppq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xwtp5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_d5c4p"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ljwu4"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1ht66"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_bays7"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_cqobk"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_73lfq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xfrrn"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1xlbc"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_d5tqq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_uoshe"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_u6qd5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_rx75k"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_yc2yd"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_pcush"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_x6cfi"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ecpdc"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_nnp1v"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_a6n1a"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_4i7je"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_dftva"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_6c8hw"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_883e1"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_gtd34"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_c3kx8"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_h6ui4"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_vr8ag"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_3grwb"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_6babu"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_qyjo5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_vflh8"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_r0vxe"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_53srq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_yi6l5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_mp0ge"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_nywem"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_pssh2"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_up4s4"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_qcfpt"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5t6fj"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5nqr0"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_4n5ij"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_li170"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_w5bge"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_uf6oy"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1yx32"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_0fup6"]
 script = ExtResource("2_k1o35")
 layer_index = 20
-cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_ecpdc"), SubResource("Resource_nnp1v"), SubResource("Resource_a6n1a"), SubResource("Resource_4i7je"), SubResource("Resource_dftva"), SubResource("Resource_6c8hw"), SubResource("Resource_883e1"), SubResource("Resource_gtd34"), SubResource("Resource_c3kx8"), SubResource("Resource_h6ui4"), SubResource("Resource_vr8ag"), SubResource("Resource_3grwb"), SubResource("Resource_6babu"), SubResource("Resource_qyjo5"), SubResource("Resource_vflh8"), SubResource("Resource_r0vxe"), SubResource("Resource_53srq"), SubResource("Resource_yi6l5"), SubResource("Resource_mp0ge"), SubResource("Resource_nywem"), SubResource("Resource_pssh2"), SubResource("Resource_up4s4"), SubResource("Resource_qcfpt"), SubResource("Resource_5t6fj"), SubResource("Resource_5nqr0"), SubResource("Resource_4n5ij"), SubResource("Resource_li170"), SubResource("Resource_w5bge"), SubResource("Resource_uf6oy"), SubResource("Resource_1yx32"), SubResource("Resource_0fup6"), SubResource("Resource_jrxcq"), SubResource("Resource_jtblg"), SubResource("Resource_javru"), SubResource("Resource_s14j5"), SubResource("Resource_nr1w4")])
+cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_6dfki"), SubResource("Resource_k1o35"), SubResource("Resource_8cnb4"), SubResource("Resource_jp12v"), SubResource("Resource_ldp2k"), SubResource("Resource_6eroe"), SubResource("Resource_7ssxs"), SubResource("Resource_odqsr"), SubResource("Resource_s7yly"), SubResource("Resource_jbvve"), SubResource("Resource_oa3mr"), SubResource("Resource_1auqt"), SubResource("Resource_dbucc"), SubResource("Resource_vppcx"), SubResource("Resource_oax8i"), SubResource("Resource_8ncce"), SubResource("Resource_rjhyo"), SubResource("Resource_kcsnb"), SubResource("Resource_7ia3w"), SubResource("Resource_ck4u0"), SubResource("Resource_p82jy"), SubResource("Resource_b0jbf"), SubResource("Resource_hlpyo"), SubResource("Resource_q00cc"), SubResource("Resource_1dw64"), SubResource("Resource_x54rj"), SubResource("Resource_aqhg4"), SubResource("Resource_pu6jp"), SubResource("Resource_wahds"), SubResource("Resource_mk6b8"), SubResource("Resource_l2337"), SubResource("Resource_775wg"), SubResource("Resource_elh0r"), SubResource("Resource_mfug8"), SubResource("Resource_hachp"), SubResource("Resource_51qbm"), SubResource("Resource_woaff"), SubResource("Resource_nwppq"), SubResource("Resource_xwtp5"), SubResource("Resource_d5c4p"), SubResource("Resource_ljwu4"), SubResource("Resource_1ht66"), SubResource("Resource_bays7"), SubResource("Resource_cqobk"), SubResource("Resource_73lfq"), SubResource("Resource_xfrrn"), SubResource("Resource_1xlbc"), SubResource("Resource_d5tqq"), SubResource("Resource_uoshe"), SubResource("Resource_u6qd5"), SubResource("Resource_rx75k"), SubResource("Resource_yc2yd"), SubResource("Resource_pcush"), SubResource("Resource_x6cfi"), SubResource("Resource_ecpdc"), SubResource("Resource_nnp1v"), SubResource("Resource_a6n1a"), SubResource("Resource_4i7je"), SubResource("Resource_dftva"), SubResource("Resource_6c8hw"), SubResource("Resource_883e1"), SubResource("Resource_gtd34"), SubResource("Resource_c3kx8"), SubResource("Resource_h6ui4"), SubResource("Resource_vr8ag"), SubResource("Resource_3grwb"), SubResource("Resource_6babu"), SubResource("Resource_qyjo5"), SubResource("Resource_vflh8"), SubResource("Resource_r0vxe"), SubResource("Resource_53srq"), SubResource("Resource_yi6l5"), SubResource("Resource_mp0ge"), SubResource("Resource_nywem"), SubResource("Resource_pssh2"), SubResource("Resource_up4s4"), SubResource("Resource_qcfpt"), SubResource("Resource_5t6fj"), SubResource("Resource_5nqr0"), SubResource("Resource_4n5ij"), SubResource("Resource_li170"), SubResource("Resource_w5bge"), SubResource("Resource_uf6oy"), SubResource("Resource_1yx32")])
 
-[sub_resource type="Resource" id="Resource_4wwph"]
+[sub_resource type="Resource" id="Resource_jrxcq"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(20, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_s0fhd"]
+[sub_resource type="Resource" id="Resource_jtblg"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(20, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_s52xi"]
+[sub_resource type="Resource" id="Resource_javru"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(20, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_11o44"]
+[sub_resource type="Resource" id="Resource_s14j5"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(21, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_uj0lk"]
+[sub_resource type="Resource" id="Resource_nr1w4"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(21, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_q8qje"]
+[sub_resource type="Resource" id="Resource_3mh4c"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(21, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_t40al"]
+[sub_resource type="Resource" id="Resource_4wwph"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(22, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_n54kt"]
+[sub_resource type="Resource" id="Resource_s0fhd"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(22, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_sttmy"]
+[sub_resource type="Resource" id="Resource_s52xi"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(22, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_3807m"]
+[sub_resource type="Resource" id="Resource_11o44"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(23, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_jiqmx"]
+[sub_resource type="Resource" id="Resource_uj0lk"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(23, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_8qacy"]
+[sub_resource type="Resource" id="Resource_q8qje"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(23, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_5soj0"]
+[sub_resource type="Resource" id="Resource_t40al"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(24, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_0206v"]
+[sub_resource type="Resource" id="Resource_n54kt"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(24, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_52357"]
+[sub_resource type="Resource" id="Resource_sttmy"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(24, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_twl51"]
+[sub_resource type="Resource" id="Resource_3807m"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(25, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_8ganl"]
+[sub_resource type="Resource" id="Resource_jiqmx"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(25, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_tn4yx"]
+[sub_resource type="Resource" id="Resource_8qacy"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(25, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_04uc0"]
+[sub_resource type="Resource" id="Resource_5soj0"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(26, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_wyq0y"]
+[sub_resource type="Resource" id="Resource_0206v"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(26, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_q72jh"]
+[sub_resource type="Resource" id="Resource_52357"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(26, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_s1ct1"]
+[sub_resource type="Resource" id="Resource_twl51"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(27, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_5pcx6"]
+[sub_resource type="Resource" id="Resource_8ganl"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(27, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_747jx"]
+[sub_resource type="Resource" id="Resource_tn4yx"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(27, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_wds80"]
+[sub_resource type="Resource" id="Resource_04uc0"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(28, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_oyocs"]
+[sub_resource type="Resource" id="Resource_wyq0y"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(28, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_054cg"]
+[sub_resource type="Resource" id="Resource_q72jh"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(28, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_m85sq"]
+[sub_resource type="Resource" id="Resource_s1ct1"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(29, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_pceqx"]
+[sub_resource type="Resource" id="Resource_5pcx6"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(29, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_5mrir"]
+[sub_resource type="Resource" id="Resource_747jx"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(29, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_x3h73"]
+[sub_resource type="Resource" id="Resource_wds80"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(30, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_4e8ov"]
+[sub_resource type="Resource" id="Resource_oyocs"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(30, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_sjm5v"]
+[sub_resource type="Resource" id="Resource_054cg"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(30, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_byws4"]
+[sub_resource type="Resource" id="Resource_m85sq"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(31, 10, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_74crb"]
+[sub_resource type="Resource" id="Resource_pceqx"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(31, 11, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_xso0q"]
+[sub_resource type="Resource" id="Resource_5mrir"]
 script = ExtResource("3_8cnb4")
 grid_position = Vector3i(31, 12, 21)
 layer_index = 21
 material_variant_id = &"mat_wood_gray"
 
-[sub_resource type="Resource" id="Resource_6beoy"]
-script = ExtResource("2_k1o35")
+[sub_resource type="Resource" id="Resource_x3h73"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 10, 21)
 layer_index = 21
-cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_4wwph"), SubResource("Resource_s0fhd"), SubResource("Resource_s52xi"), SubResource("Resource_11o44"), SubResource("Resource_uj0lk"), SubResource("Resource_q8qje"), SubResource("Resource_t40al"), SubResource("Resource_n54kt"), SubResource("Resource_sttmy"), SubResource("Resource_3807m"), SubResource("Resource_jiqmx"), SubResource("Resource_8qacy"), SubResource("Resource_5soj0"), SubResource("Resource_0206v"), SubResource("Resource_52357"), SubResource("Resource_twl51"), SubResource("Resource_8ganl"), SubResource("Resource_tn4yx"), SubResource("Resource_04uc0"), SubResource("Resource_wyq0y"), SubResource("Resource_q72jh"), SubResource("Resource_s1ct1"), SubResource("Resource_5pcx6"), SubResource("Resource_747jx"), SubResource("Resource_wds80"), SubResource("Resource_oyocs"), SubResource("Resource_054cg"), SubResource("Resource_m85sq"), SubResource("Resource_pceqx"), SubResource("Resource_5mrir"), SubResource("Resource_x3h73"), SubResource("Resource_4e8ov"), SubResource("Resource_sjm5v"), SubResource("Resource_byws4"), SubResource("Resource_74crb"), SubResource("Resource_xso0q")])
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_4e8ov"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_sjm5v"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_byws4"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_74crb"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xso0q"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_6beoy"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
 
 [sub_resource type="Resource" id="Resource_ymhc2"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_8jsjq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_uh0yn"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_dwbwp"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_nyhkh"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_6jmdd"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_rpp6b"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_0gwoe"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_j774j"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_gsjbx"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ktb8t"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1p113"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_f1win"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_s2nhu"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_eeiuu"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ufhqa"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_7u0ph"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_y7ahc"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5c7v1"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_8na21"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_fd1np"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_bms8b"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_udfbc"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_vvrl8"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_fmp5a"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_bwsu7"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_8cndn"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_obfri"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_8e8bc"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_sjv75"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_hbciy"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_cl7tq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_r4wyk"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_wu6mr"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_lrq54"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_icp4k"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_h6tk2"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5bs3b"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_m0rph"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5lcwa"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_nec7g"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2fdyt"]
+script = ExtResource("2_k1o35")
+layer_index = 21
+cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_jrxcq"), SubResource("Resource_jtblg"), SubResource("Resource_javru"), SubResource("Resource_s14j5"), SubResource("Resource_nr1w4"), SubResource("Resource_3mh4c"), SubResource("Resource_4wwph"), SubResource("Resource_s0fhd"), SubResource("Resource_s52xi"), SubResource("Resource_11o44"), SubResource("Resource_uj0lk"), SubResource("Resource_q8qje"), SubResource("Resource_t40al"), SubResource("Resource_n54kt"), SubResource("Resource_sttmy"), SubResource("Resource_3807m"), SubResource("Resource_jiqmx"), SubResource("Resource_8qacy"), SubResource("Resource_5soj0"), SubResource("Resource_0206v"), SubResource("Resource_52357"), SubResource("Resource_twl51"), SubResource("Resource_8ganl"), SubResource("Resource_tn4yx"), SubResource("Resource_04uc0"), SubResource("Resource_wyq0y"), SubResource("Resource_q72jh"), SubResource("Resource_s1ct1"), SubResource("Resource_5pcx6"), SubResource("Resource_747jx"), SubResource("Resource_wds80"), SubResource("Resource_oyocs"), SubResource("Resource_054cg"), SubResource("Resource_m85sq"), SubResource("Resource_pceqx"), SubResource("Resource_5mrir"), SubResource("Resource_x3h73"), SubResource("Resource_4e8ov"), SubResource("Resource_sjm5v"), SubResource("Resource_byws4"), SubResource("Resource_74crb"), SubResource("Resource_xso0q"), SubResource("Resource_6beoy"), SubResource("Resource_ymhc2"), SubResource("Resource_8jsjq"), SubResource("Resource_uh0yn"), SubResource("Resource_dwbwp"), SubResource("Resource_nyhkh"), SubResource("Resource_6jmdd"), SubResource("Resource_rpp6b"), SubResource("Resource_0gwoe"), SubResource("Resource_j774j"), SubResource("Resource_gsjbx"), SubResource("Resource_ktb8t"), SubResource("Resource_1p113"), SubResource("Resource_f1win"), SubResource("Resource_s2nhu"), SubResource("Resource_eeiuu"), SubResource("Resource_ufhqa"), SubResource("Resource_7u0ph"), SubResource("Resource_y7ahc"), SubResource("Resource_5c7v1"), SubResource("Resource_8na21"), SubResource("Resource_fd1np"), SubResource("Resource_bms8b"), SubResource("Resource_udfbc"), SubResource("Resource_vvrl8"), SubResource("Resource_fmp5a"), SubResource("Resource_bwsu7"), SubResource("Resource_8cndn"), SubResource("Resource_obfri"), SubResource("Resource_8e8bc"), SubResource("Resource_sjv75"), SubResource("Resource_hbciy"), SubResource("Resource_cl7tq"), SubResource("Resource_r4wyk"), SubResource("Resource_wu6mr"), SubResource("Resource_lrq54"), SubResource("Resource_icp4k"), SubResource("Resource_h6tk2"), SubResource("Resource_5bs3b"), SubResource("Resource_m0rph"), SubResource("Resource_5lcwa"), SubResource("Resource_nec7g")])
+
+[sub_resource type="Resource" id="Resource_kbtfq"]
+script = ExtResource("1_6dfki")
+wip_id = &"verify_mount_right_reverse"
+forge_project_name = "verify_mount_right_reverse"
+creator_id = &"verify"
+created_timestamp = 1775884527.091
+forge_intent = &"intent_melee"
+equipment_context = &"ctx_weapon"
+grip_style_mode = &"grip_reverse"
+layers = Array[ExtResource("2_k1o35")]([SubResource("Resource_0fup6"), SubResource("Resource_2fdyt")])
+
+[sub_resource type="Resource" id="Resource_ou4jf"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(20, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2c6r6"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(20, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_klrda"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(20, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_rmmg4"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(21, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_siww7"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(21, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_r6llg"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(21, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_20l1s"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(22, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_68nm4"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(22, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_uoxx2"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(22, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_r3dml"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(23, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_dlikg"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(23, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_bjh1r"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(23, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_35mdj"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(24, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2iopp"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(24, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_317fg"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(24, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_uof65"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(25, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_lirfr"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(25, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_u37kk"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(25, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1cl7c"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(26, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_hswqm"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(26, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_482w0"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(26, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_vkjnf"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(27, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_p3rvq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(27, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_x2sbg"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(27, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_7fc1c"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(28, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_dj1j8"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(28, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_d3lto"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(28, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_rryp5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(29, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_gsg7r"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(29, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_6fq40"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(29, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_315w6"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(30, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xgo2a"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(30, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xxpas"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(30, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2464v"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(31, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_or6wc"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(31, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_4spm0"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(31, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2t3my"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xstpr"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_cdbn1"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xnanj"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_fu38f"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_g5kju"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_nyw1h"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xay84"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2i52a"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_65oph"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_0kxv1"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5eknd"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_sgynv"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_mxj2h"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_rumo5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5a07k"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_rwnci"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_j0rth"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_g20ky"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_s7lcs"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_cws15"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_7ipya"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_6nam6"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_7aabp"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_eargg"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ew7tb"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_j0ow1"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_wbv26"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_54kwk"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_4omdy"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5c25g"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_chknl"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_sducv"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_qdnh8"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_c2wit"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_juw1e"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_uqp02"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_tocei"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_agg3c"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_euals"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_v56d0"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_c1o1b"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_qbgwg"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1bg8h"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1xmh1"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1aydx"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_v6nu7"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_hrxek"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_pv7jy"]
+script = ExtResource("2_k1o35")
+layer_index = 20
+cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_ou4jf"), SubResource("Resource_2c6r6"), SubResource("Resource_klrda"), SubResource("Resource_rmmg4"), SubResource("Resource_siww7"), SubResource("Resource_r6llg"), SubResource("Resource_20l1s"), SubResource("Resource_68nm4"), SubResource("Resource_uoxx2"), SubResource("Resource_r3dml"), SubResource("Resource_dlikg"), SubResource("Resource_bjh1r"), SubResource("Resource_35mdj"), SubResource("Resource_2iopp"), SubResource("Resource_317fg"), SubResource("Resource_uof65"), SubResource("Resource_lirfr"), SubResource("Resource_u37kk"), SubResource("Resource_1cl7c"), SubResource("Resource_hswqm"), SubResource("Resource_482w0"), SubResource("Resource_vkjnf"), SubResource("Resource_p3rvq"), SubResource("Resource_x2sbg"), SubResource("Resource_7fc1c"), SubResource("Resource_dj1j8"), SubResource("Resource_d3lto"), SubResource("Resource_rryp5"), SubResource("Resource_gsg7r"), SubResource("Resource_6fq40"), SubResource("Resource_315w6"), SubResource("Resource_xgo2a"), SubResource("Resource_xxpas"), SubResource("Resource_2464v"), SubResource("Resource_or6wc"), SubResource("Resource_4spm0"), SubResource("Resource_2t3my"), SubResource("Resource_xstpr"), SubResource("Resource_cdbn1"), SubResource("Resource_xnanj"), SubResource("Resource_fu38f"), SubResource("Resource_g5kju"), SubResource("Resource_nyw1h"), SubResource("Resource_xay84"), SubResource("Resource_2i52a"), SubResource("Resource_65oph"), SubResource("Resource_0kxv1"), SubResource("Resource_5eknd"), SubResource("Resource_sgynv"), SubResource("Resource_mxj2h"), SubResource("Resource_rumo5"), SubResource("Resource_5a07k"), SubResource("Resource_rwnci"), SubResource("Resource_j0rth"), SubResource("Resource_g20ky"), SubResource("Resource_s7lcs"), SubResource("Resource_cws15"), SubResource("Resource_7ipya"), SubResource("Resource_6nam6"), SubResource("Resource_7aabp"), SubResource("Resource_eargg"), SubResource("Resource_ew7tb"), SubResource("Resource_j0ow1"), SubResource("Resource_wbv26"), SubResource("Resource_54kwk"), SubResource("Resource_4omdy"), SubResource("Resource_5c25g"), SubResource("Resource_chknl"), SubResource("Resource_sducv"), SubResource("Resource_qdnh8"), SubResource("Resource_c2wit"), SubResource("Resource_juw1e"), SubResource("Resource_uqp02"), SubResource("Resource_tocei"), SubResource("Resource_agg3c"), SubResource("Resource_euals"), SubResource("Resource_v56d0"), SubResource("Resource_c1o1b"), SubResource("Resource_qbgwg"), SubResource("Resource_1bg8h"), SubResource("Resource_1xmh1"), SubResource("Resource_1aydx"), SubResource("Resource_v6nu7"), SubResource("Resource_hrxek")])
+
+[sub_resource type="Resource" id="Resource_eq2yv"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(20, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_tll1t"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(20, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_yw8js"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(20, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_nguq5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(21, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_viknv"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(21, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2kkt5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(21, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_rgvuj"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(22, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_sg72h"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(22, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_kqnqw"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(22, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_pce0h"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(23, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_581md"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(23, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_wrn8b"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(23, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1milt"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(24, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_wfj7v"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(24, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_kn2tn"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(24, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_kcpot"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(25, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2fq7y"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(25, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ybfgn"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(25, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_8iqu2"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(26, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_fnee0"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(26, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_gtt4b"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(26, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ryeyq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(27, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1jpkb"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(27, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_y2e0k"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(27, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_wqatv"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(28, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_kpk00"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(28, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_72w2s"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(28, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_6c6dg"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(29, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_637si"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(29, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_r5jog"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(29, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_dmq1t"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(30, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_06q3t"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(30, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_wo2kg"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(30, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_inhfc"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(31, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_nsu76"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(31, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_v58mw"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(31, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_r2ysj"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_bkqcb"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5sv85"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_8h1pl"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_bum37"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xby31"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_vyfhn"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_hjqfc"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_44msh"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_chkwi"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_yfcwh"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_qycom"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_8mnmj"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_etjiu"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_3fne4"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_d0u2q"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_jflmo"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_e3nyq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_b5w50"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_03e8f"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_f0c8e"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_lsvcq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_b0av1"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_7s1cg"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ior5g"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_nvp42"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_l4yw0"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_lchh0"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_q6s7x"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_kpwmq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_m5iqb"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_lo45c"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_isc1a"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_h264b"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_roxma"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_r70as"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ips65"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1befl"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_vsqb3"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_sxgn0"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_eik18"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_boqxd"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_m25ca"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ms1t8"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_0brs2"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_fv0a4"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_imngc"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_pitn6"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_yuwwi"]
+script = ExtResource("2_k1o35")
+layer_index = 21
+cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_eq2yv"), SubResource("Resource_tll1t"), SubResource("Resource_yw8js"), SubResource("Resource_nguq5"), SubResource("Resource_viknv"), SubResource("Resource_2kkt5"), SubResource("Resource_rgvuj"), SubResource("Resource_sg72h"), SubResource("Resource_kqnqw"), SubResource("Resource_pce0h"), SubResource("Resource_581md"), SubResource("Resource_wrn8b"), SubResource("Resource_1milt"), SubResource("Resource_wfj7v"), SubResource("Resource_kn2tn"), SubResource("Resource_kcpot"), SubResource("Resource_2fq7y"), SubResource("Resource_ybfgn"), SubResource("Resource_8iqu2"), SubResource("Resource_fnee0"), SubResource("Resource_gtt4b"), SubResource("Resource_ryeyq"), SubResource("Resource_1jpkb"), SubResource("Resource_y2e0k"), SubResource("Resource_wqatv"), SubResource("Resource_kpk00"), SubResource("Resource_72w2s"), SubResource("Resource_6c6dg"), SubResource("Resource_637si"), SubResource("Resource_r5jog"), SubResource("Resource_dmq1t"), SubResource("Resource_06q3t"), SubResource("Resource_wo2kg"), SubResource("Resource_inhfc"), SubResource("Resource_nsu76"), SubResource("Resource_v58mw"), SubResource("Resource_r2ysj"), SubResource("Resource_bkqcb"), SubResource("Resource_5sv85"), SubResource("Resource_8h1pl"), SubResource("Resource_bum37"), SubResource("Resource_xby31"), SubResource("Resource_vyfhn"), SubResource("Resource_hjqfc"), SubResource("Resource_44msh"), SubResource("Resource_chkwi"), SubResource("Resource_yfcwh"), SubResource("Resource_qycom"), SubResource("Resource_8mnmj"), SubResource("Resource_etjiu"), SubResource("Resource_3fne4"), SubResource("Resource_d0u2q"), SubResource("Resource_jflmo"), SubResource("Resource_e3nyq"), SubResource("Resource_b5w50"), SubResource("Resource_03e8f"), SubResource("Resource_f0c8e"), SubResource("Resource_lsvcq"), SubResource("Resource_b0av1"), SubResource("Resource_7s1cg"), SubResource("Resource_ior5g"), SubResource("Resource_nvp42"), SubResource("Resource_l4yw0"), SubResource("Resource_lchh0"), SubResource("Resource_q6s7x"), SubResource("Resource_kpwmq"), SubResource("Resource_m5iqb"), SubResource("Resource_lo45c"), SubResource("Resource_isc1a"), SubResource("Resource_h264b"), SubResource("Resource_roxma"), SubResource("Resource_r70as"), SubResource("Resource_ips65"), SubResource("Resource_1befl"), SubResource("Resource_vsqb3"), SubResource("Resource_sxgn0"), SubResource("Resource_eik18"), SubResource("Resource_boqxd"), SubResource("Resource_m25ca"), SubResource("Resource_ms1t8"), SubResource("Resource_0brs2"), SubResource("Resource_fv0a4"), SubResource("Resource_imngc"), SubResource("Resource_pitn6")])
+
+[sub_resource type="Resource" id="Resource_qf7tv"]
+script = ExtResource("1_6dfki")
+wip_id = &"verify_mount_left_normal"
+forge_project_name = "verify_mount_left_normal"
+creator_id = &"verify"
+created_timestamp = 1775884527.106
+forge_intent = &"intent_melee"
+equipment_context = &"ctx_weapon"
+layers = Array[ExtResource("2_k1o35")]([SubResource("Resource_pv7jy"), SubResource("Resource_yuwwi")])
+
+[sub_resource type="Resource" id="Resource_xexjd"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(20, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_b87y5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(20, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_4x3p5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(20, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_eopkk"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(21, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_jpwd0"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(21, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_aug8c"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(21, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_81vag"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(22, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_4k8av"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(22, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_use63"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(22, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xxfkk"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(23, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_bncph"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(23, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_cux0h"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(23, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_wgok6"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(24, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_o6eci"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(24, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_yg84t"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(24, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2ix0j"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(25, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_8g84k"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(25, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_3rn1d"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(25, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_n2tfs"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(26, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_aeixs"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(26, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_lem2t"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(26, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ewxyb"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(27, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_yc08q"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(27, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_nvr06"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(27, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_omhhg"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(28, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_mcxf2"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(28, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_pa2vr"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(28, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_0q76t"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(29, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_aat1a"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(29, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1ienn"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(29, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ebdth"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(30, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_3am8h"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(30, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_gkbpl"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(30, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_wfgmd"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(31, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ssiv0"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(31, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5l6dy"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(31, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_c4h3m"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_14a33"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_w4m4s"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xow4u"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_w27wd"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_8ghvs"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_01gm4"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_s0umh"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_eos30"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_l5j52"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ak7tb"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xjvxg"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_x38ri"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5ka5c"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ytg55"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ypuwt"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_lq31d"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_f5alq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_adgwq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_3x11y"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_pkqdy"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_4j3m7"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_uyloo"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xbil2"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_pk5v0"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_g8qoc"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_j7nba"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ir51m"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_c0ick"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_r5owj"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_0vhdj"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_bqvnh"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_hbh0v"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_us3hn"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ehr60"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_td6h1"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_gvm43"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_vi0ss"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_nfwll"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1tgns"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_otvn7"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_w06ck"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_h8j1r"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_w2gps"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1f6gq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_4ktm1"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 10, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_tlpdv"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 11, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_qbc3l"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 12, 20)
+layer_index = 20
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_3ubjn"]
+script = ExtResource("2_k1o35")
+layer_index = 20
+cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_xexjd"), SubResource("Resource_b87y5"), SubResource("Resource_4x3p5"), SubResource("Resource_eopkk"), SubResource("Resource_jpwd0"), SubResource("Resource_aug8c"), SubResource("Resource_81vag"), SubResource("Resource_4k8av"), SubResource("Resource_use63"), SubResource("Resource_xxfkk"), SubResource("Resource_bncph"), SubResource("Resource_cux0h"), SubResource("Resource_wgok6"), SubResource("Resource_o6eci"), SubResource("Resource_yg84t"), SubResource("Resource_2ix0j"), SubResource("Resource_8g84k"), SubResource("Resource_3rn1d"), SubResource("Resource_n2tfs"), SubResource("Resource_aeixs"), SubResource("Resource_lem2t"), SubResource("Resource_ewxyb"), SubResource("Resource_yc08q"), SubResource("Resource_nvr06"), SubResource("Resource_omhhg"), SubResource("Resource_mcxf2"), SubResource("Resource_pa2vr"), SubResource("Resource_0q76t"), SubResource("Resource_aat1a"), SubResource("Resource_1ienn"), SubResource("Resource_ebdth"), SubResource("Resource_3am8h"), SubResource("Resource_gkbpl"), SubResource("Resource_wfgmd"), SubResource("Resource_ssiv0"), SubResource("Resource_5l6dy"), SubResource("Resource_c4h3m"), SubResource("Resource_14a33"), SubResource("Resource_w4m4s"), SubResource("Resource_xow4u"), SubResource("Resource_w27wd"), SubResource("Resource_8ghvs"), SubResource("Resource_01gm4"), SubResource("Resource_s0umh"), SubResource("Resource_eos30"), SubResource("Resource_l5j52"), SubResource("Resource_ak7tb"), SubResource("Resource_xjvxg"), SubResource("Resource_x38ri"), SubResource("Resource_5ka5c"), SubResource("Resource_ytg55"), SubResource("Resource_ypuwt"), SubResource("Resource_lq31d"), SubResource("Resource_f5alq"), SubResource("Resource_adgwq"), SubResource("Resource_3x11y"), SubResource("Resource_pkqdy"), SubResource("Resource_4j3m7"), SubResource("Resource_uyloo"), SubResource("Resource_xbil2"), SubResource("Resource_pk5v0"), SubResource("Resource_g8qoc"), SubResource("Resource_j7nba"), SubResource("Resource_ir51m"), SubResource("Resource_c0ick"), SubResource("Resource_r5owj"), SubResource("Resource_0vhdj"), SubResource("Resource_bqvnh"), SubResource("Resource_hbh0v"), SubResource("Resource_us3hn"), SubResource("Resource_ehr60"), SubResource("Resource_td6h1"), SubResource("Resource_gvm43"), SubResource("Resource_vi0ss"), SubResource("Resource_nfwll"), SubResource("Resource_1tgns"), SubResource("Resource_otvn7"), SubResource("Resource_w06ck"), SubResource("Resource_h8j1r"), SubResource("Resource_w2gps"), SubResource("Resource_1f6gq"), SubResource("Resource_4ktm1"), SubResource("Resource_tlpdv"), SubResource("Resource_qbc3l")])
+
+[sub_resource type="Resource" id="Resource_mibd3"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(20, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_fkhje"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(20, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_s18qo"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(20, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_q65sq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(21, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_8f566"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(21, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_mgro4"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(21, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xothy"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(22, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_oq7r5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(22, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_vbo1t"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(22, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_6soh4"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(23, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_cdmvv"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(23, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_04xh0"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(23, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_3jqg3"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(24, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_yvu0n"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(24, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_uvjis"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(24, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_exyvy"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(25, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_mrcaq"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(25, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ncaep"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(25, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ugxwe"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(26, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2c76d"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(26, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ja3j5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(26, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xieaa"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(27, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_m55lt"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(27, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5jssr"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(27, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_gk57v"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(28, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_qpaio"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(28, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ppyu3"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(28, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_d81ra"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(29, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_wggur"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(29, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ldi71"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(29, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_sdbr7"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(30, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_5102u"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(30, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_qeut0"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(30, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_u758q"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(31, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_niiwy"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(31, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_033ts"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(31, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_t25y2"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_rsiw2"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_b6dme"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(32, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_8jkjo"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_declx"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_gfw5q"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(33, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_g4lx6"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_lvgh2"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_sjyo6"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(34, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_0683b"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ya461"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_hkb27"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(35, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_yc5yb"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_lwimw"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xd02y"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(36, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_albr0"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_da4hi"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_062xa"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(37, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_22hat"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_6ta2n"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_15yxs"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(38, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_343vs"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1dc4p"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_hxseu"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(39, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_7vnwl"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_8dfdy"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_xco20"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(40, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_pk408"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_a0tst"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_i330j"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(41, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_s644t"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_nvgka"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_wtfdx"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(42, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_6lg8k"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_r67xv"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_g7bef"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(43, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_2vtlx"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_fj4cv"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_o4dky"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(44, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_1om8m"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_mabxo"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_x2chc"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(45, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ff5h5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_0mm4u"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_db7c1"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(46, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_ftl6k"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 10, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_epn1x"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 11, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_bh5q5"]
+script = ExtResource("3_8cnb4")
+grid_position = Vector3i(47, 12, 21)
+layer_index = 21
+material_variant_id = &"mat_wood_gray"
+
+[sub_resource type="Resource" id="Resource_khsj7"]
+script = ExtResource("2_k1o35")
+layer_index = 21
+cells = Array[ExtResource("3_8cnb4")]([SubResource("Resource_mibd3"), SubResource("Resource_fkhje"), SubResource("Resource_s18qo"), SubResource("Resource_q65sq"), SubResource("Resource_8f566"), SubResource("Resource_mgro4"), SubResource("Resource_xothy"), SubResource("Resource_oq7r5"), SubResource("Resource_vbo1t"), SubResource("Resource_6soh4"), SubResource("Resource_cdmvv"), SubResource("Resource_04xh0"), SubResource("Resource_3jqg3"), SubResource("Resource_yvu0n"), SubResource("Resource_uvjis"), SubResource("Resource_exyvy"), SubResource("Resource_mrcaq"), SubResource("Resource_ncaep"), SubResource("Resource_ugxwe"), SubResource("Resource_2c76d"), SubResource("Resource_ja3j5"), SubResource("Resource_xieaa"), SubResource("Resource_m55lt"), SubResource("Resource_5jssr"), SubResource("Resource_gk57v"), SubResource("Resource_qpaio"), SubResource("Resource_ppyu3"), SubResource("Resource_d81ra"), SubResource("Resource_wggur"), SubResource("Resource_ldi71"), SubResource("Resource_sdbr7"), SubResource("Resource_5102u"), SubResource("Resource_qeut0"), SubResource("Resource_u758q"), SubResource("Resource_niiwy"), SubResource("Resource_033ts"), SubResource("Resource_t25y2"), SubResource("Resource_rsiw2"), SubResource("Resource_b6dme"), SubResource("Resource_8jkjo"), SubResource("Resource_declx"), SubResource("Resource_gfw5q"), SubResource("Resource_g4lx6"), SubResource("Resource_lvgh2"), SubResource("Resource_sjyo6"), SubResource("Resource_0683b"), SubResource("Resource_ya461"), SubResource("Resource_hkb27"), SubResource("Resource_yc5yb"), SubResource("Resource_lwimw"), SubResource("Resource_xd02y"), SubResource("Resource_albr0"), SubResource("Resource_da4hi"), SubResource("Resource_062xa"), SubResource("Resource_22hat"), SubResource("Resource_6ta2n"), SubResource("Resource_15yxs"), SubResource("Resource_343vs"), SubResource("Resource_1dc4p"), SubResource("Resource_hxseu"), SubResource("Resource_7vnwl"), SubResource("Resource_8dfdy"), SubResource("Resource_xco20"), SubResource("Resource_pk408"), SubResource("Resource_a0tst"), SubResource("Resource_i330j"), SubResource("Resource_s644t"), SubResource("Resource_nvgka"), SubResource("Resource_wtfdx"), SubResource("Resource_6lg8k"), SubResource("Resource_r67xv"), SubResource("Resource_g7bef"), SubResource("Resource_2vtlx"), SubResource("Resource_fj4cv"), SubResource("Resource_o4dky"), SubResource("Resource_1om8m"), SubResource("Resource_mabxo"), SubResource("Resource_x2chc"), SubResource("Resource_ff5h5"), SubResource("Resource_0mm4u"), SubResource("Resource_db7c1"), SubResource("Resource_ftl6k"), SubResource("Resource_epn1x"), SubResource("Resource_bh5q5")])
+
+[sub_resource type="Resource" id="Resource_yye42"]
 script = ExtResource("1_6dfki")
 wip_id = &"verify_mount_left_reverse"
 forge_project_name = "verify_mount_left_reverse"
 creator_id = &"verify"
-created_timestamp = 1775087276.39
+created_timestamp = 1775884527.126
 forge_intent = &"intent_melee"
 equipment_context = &"ctx_weapon"
 grip_style_mode = &"grip_reverse"
-layers = Array[ExtResource("2_k1o35")]([SubResource("Resource_3mh4c"), SubResource("Resource_6beoy")])
+layers = Array[ExtResource("2_k1o35")]([SubResource("Resource_3ubjn"), SubResource("Resource_khsj7")])
 
 [resource]
 script = ExtResource("4_jp12v")
-saved_wips = Array[ExtResource("1_6dfki")]([SubResource("Resource_mu806"), SubResource("Resource_gjpk8"), SubResource("Resource_x6cfi"), SubResource("Resource_ymhc2")])
+saved_wips = Array[ExtResource("1_6dfki")]([SubResource("Resource_dds8g"), SubResource("Resource_kbtfq"), SubResource("Resource_qf7tv"), SubResource("Resource_yye42")])
 selected_wip_id = &"verify_mount_left_reverse"
 save_file_path = "C:/WORKSPACE/test_artifacts/verify_mount_player_wip_library_state.tres"

@@ -60,12 +60,12 @@ func _run_verification() -> void:
 	crafting_ui.call("_update_stage2_brush_hover", grip_safe_screen_position)
 	await process_frame
 	var grip_hover_blocked: bool = preview != null and bool(preview.stage2_brush_preview_blocked)
-	var origins_before_safe_carve: Array[Vector3] = _collect_patch_origins(stage2_item_state)
+	var origins_before_safe_carve: Array[Vector3] = _collect_stage2_surface_signature(stage2_item_state)
 	crafting_ui.call("_apply_stage2_brush_at_screen_position", grip_safe_screen_position)
 	await process_frame
 	var grip_safe_carve_changed_shell: bool = _has_any_patch_origin_changed(
 		origins_before_safe_carve,
-		_collect_patch_origins(stage2_item_state)
+		_collect_stage2_surface_signature(stage2_item_state)
 	)
 
 	crafting_ui.call("_on_action_menu_id_pressed", int(menu_ids.get("geometry_tool_fillet", -1)))
@@ -73,12 +73,12 @@ func _run_verification() -> void:
 	crafting_ui.call("_update_stage2_brush_hover", grip_safe_screen_position)
 	await process_frame
 	var grip_hover_blocked_for_fillet: bool = preview != null and bool(preview.stage2_brush_preview_blocked)
-	var origins_before_safe_fillet: Array[Vector3] = _collect_patch_origins(stage2_item_state)
+	var origins_before_safe_fillet: Array[Vector3] = _collect_stage2_surface_signature(stage2_item_state)
 	crafting_ui.call("_apply_stage2_brush_at_screen_position", grip_safe_screen_position)
 	await process_frame
 	var grip_safe_fillet_changed_shell: bool = _has_any_patch_origin_changed(
 		origins_before_safe_fillet,
-		_collect_patch_origins(stage2_item_state)
+		_collect_stage2_surface_signature(stage2_item_state)
 	)
 
 	crafting_ui.call("_on_action_menu_id_pressed", int(menu_ids.get("geometry_tool_chamfer", -1)))
@@ -86,19 +86,19 @@ func _run_verification() -> void:
 	crafting_ui.call("_update_stage2_brush_hover", grip_safe_screen_position)
 	await process_frame
 	var grip_hover_blocked_for_chamfer: bool = preview != null and bool(preview.stage2_brush_preview_blocked)
-	var origins_before_safe_chamfer: Array[Vector3] = _collect_patch_origins(stage2_item_state)
+	var origins_before_safe_chamfer: Array[Vector3] = _collect_stage2_surface_signature(stage2_item_state)
 	crafting_ui.call("_apply_stage2_brush_at_screen_position", grip_safe_screen_position)
 	await process_frame
 	var grip_safe_chamfer_changed_shell: bool = _has_any_patch_origin_changed(
 		origins_before_safe_chamfer,
-		_collect_patch_origins(stage2_item_state)
+		_collect_stage2_surface_signature(stage2_item_state)
 	)
 
 	var general_screen_position: Vector2 = general_hit.get("screen_position", Vector2.ZERO)
 	crafting_ui.call("_update_stage2_brush_hover", general_screen_position)
 	await process_frame
 	var general_hover_blocked: bool = preview != null and bool(preview.stage2_brush_preview_blocked)
-	var origins_before_general_carve: Array[Vector3] = _collect_patch_origins(stage2_item_state)
+	var origins_before_general_carve: Array[Vector3] = _collect_stage2_surface_signature(stage2_item_state)
 	var general_patch = general_hit.get("patch_state", null)
 	var brush_presenter = ForgeStage2BrushPresenterScript.new()
 	var general_patch_center: Vector3 = _resolve_patch_center_local(general_patch)
@@ -111,9 +111,21 @@ func _run_verification() -> void:
 	)
 	var general_carve_changed_shell: bool = _has_any_patch_origin_changed(
 		origins_before_general_carve,
-		_collect_patch_origins(stage2_item_state)
+		_collect_stage2_surface_signature(stage2_item_state)
 	)
-	var origins_before_general_chamfer: Array[Vector3] = _collect_patch_origins(stage2_item_state)
+	var origins_before_general_fillet: Array[Vector3] = _collect_stage2_surface_signature(stage2_item_state)
+	brush_presenter.apply_brush(
+		stage2_item_state,
+		ForgeStage2BrushPresenterScript.TOOL_STAGE2_FILLET,
+		general_patch_center,
+		float(crafting_ui.get("stage2_brush_radius_meters")),
+		float(crafting_ui.get("stage2_brush_radius_meters")) * 0.25
+	)
+	var general_fillet_changed_shell: bool = _has_any_patch_origin_changed(
+		origins_before_general_fillet,
+		_collect_stage2_surface_signature(stage2_item_state)
+	)
+	var origins_before_general_chamfer: Array[Vector3] = _collect_stage2_surface_signature(stage2_item_state)
 	brush_presenter.apply_brush(
 		stage2_item_state,
 		ForgeStage2BrushPresenterScript.TOOL_STAGE2_CHAMFER,
@@ -123,7 +135,7 @@ func _run_verification() -> void:
 	)
 	var general_chamfer_changed_shell: bool = _has_any_patch_origin_changed(
 		origins_before_general_chamfer,
-		_collect_patch_origins(stage2_item_state)
+		_collect_stage2_surface_signature(stage2_item_state)
 	)
 
 	var lines: PackedStringArray = []
@@ -141,6 +153,7 @@ func _run_verification() -> void:
 	lines.append("grip_safe_chamfer_changed_shell=%s" % str(grip_safe_chamfer_changed_shell))
 	lines.append("general_hover_blocked=%s" % str(general_hover_blocked))
 	lines.append("general_carve_changed_shell=%s" % str(general_carve_changed_shell))
+	lines.append("general_fillet_changed_shell=%s" % str(general_fillet_changed_shell))
 	lines.append("general_chamfer_changed_shell=%s" % str(general_chamfer_changed_shell))
 
 	var file: FileAccess = FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)
@@ -160,13 +173,13 @@ func _build_front_heavy_sword_wip() -> CraftedItemWIP:
 	wip.forge_builder_path_id = CraftedItemWIP.BUILDER_PATH_MELEE
 
 	var layer_map: Dictionary = {}
-	for x: int in range(40, 52):
+	for x: int in range(32, 58):
 		for y: int in range(24, 27):
 			for z: int in range(18, 20):
 				_add_cell(layer_map, Vector3i(x, y, z), &"mat_wood_gray")
-	for x: int in range(52, 65):
-		for y: int in range(22, 29):
-			for z: int in range(17, 22):
+	for x: int in range(58, 65):
+		for y: int in range(23, 28):
+			for z: int in range(17, 21):
 				_add_cell(layer_map, Vector3i(x, y, z), &"mat_iron_gray")
 
 	var ordered_layers: Array = layer_map.keys()
@@ -208,6 +221,24 @@ func _collect_patch_origins(stage2_item_state) -> Array[Vector3]:
 			continue
 		origins.append(patch_state.current_quad.origin_local)
 	return origins
+
+func _collect_stage2_surface_signature(stage2_item_state) -> Array[Vector3]:
+	if (
+		stage2_item_state != null
+		and bool(stage2_item_state.get("editable_mesh_visual_authority"))
+		and stage2_item_state.has_method("has_current_editable_mesh")
+		and bool(stage2_item_state.call("has_current_editable_mesh"))
+	):
+		var editable_mesh_state: Resource = stage2_item_state.get("current_editable_mesh_state") as Resource
+		if editable_mesh_state != null:
+			var surface_arrays: Array = editable_mesh_state.get("surface_arrays") as Array
+			if surface_arrays.size() > Mesh.ARRAY_VERTEX and surface_arrays[Mesh.ARRAY_VERTEX] is PackedVector3Array:
+				var vertices: PackedVector3Array = surface_arrays[Mesh.ARRAY_VERTEX]
+				var signature: Array[Vector3] = []
+				for vertex_local: Vector3 in vertices:
+					signature.append(vertex_local)
+				return signature
+	return _collect_patch_origins(stage2_item_state)
 
 func _has_any_patch_origin_changed(origins_before: Array[Vector3], origins_after: Array[Vector3]) -> bool:
 	if origins_before.size() != origins_after.size():

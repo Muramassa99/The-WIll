@@ -53,6 +53,7 @@ func apply_primary_grip_profile(
 		profile.reach
 	)
 	profile.balance_score = _calculate_balance_score(profile.primary_grip_offset, profile.reach)
+	_apply_weapon_total_length(profile, cells, forward_axis, primary_grip.span_start_local_position, grip_contact_position)
 
 func _find_primary_grip_anchor(anchors: Array[AnchorAtom], center_of_mass: Vector3 = Vector3.ZERO) -> AnchorAtom:
 	var best_anchor: AnchorAtom = null
@@ -174,6 +175,57 @@ func _is_primary_grip_two_hand_eligible(
 ) -> bool:
 	if primary_grip == null:
 		return false
-	if forge_intent != &"intent_melee" or equipment_context != &"ctx_weapon":
+	var branch_allows_two_hand: bool = (
+		(forge_intent == &"intent_melee" and equipment_context == &"ctx_weapon")
+		or (forge_intent == &"intent_magic" and equipment_context == &"ctx_focus")
+	)
+	if not branch_allows_two_hand:
 		return false
 	return primary_grip.span_length >= forge_rules.primary_grip_two_hand_min_length_voxels
+
+func _apply_weapon_total_length(
+	profile: BakedProfile,
+	cells: Array[CellAtom],
+	grip_axis_direction: Vector3,
+	grip_axis_origin: Vector3,
+	hand_contact_position: Vector3
+) -> void:
+	if profile == null or cells.is_empty() or grip_axis_direction.length_squared() <= 0.00001:
+		return
+	var axis_normalized: Vector3 = grip_axis_direction.normalized()
+	var min_proj: float = INF
+	var max_proj: float = -INF
+	for cell: CellAtom in cells:
+		if cell == null:
+			continue
+		var center: Vector3 = cell.get_center_position()
+		var proj: float = axis_normalized.dot(center - grip_axis_origin)
+		min_proj = minf(min_proj, proj)
+		max_proj = maxf(max_proj, proj)
+	if min_proj >= max_proj:
+		return
+	var total_length: float = max_proj - min_proj
+	var extremity_1: Vector3 = grip_axis_origin + axis_normalized * min_proj
+	var extremity_2: Vector3 = grip_axis_origin + axis_normalized * max_proj
+	var hand_proj: float = axis_normalized.dot(hand_contact_position - grip_axis_origin)
+	var dist_to_1: float = absf(hand_proj - min_proj)
+	var dist_to_2: float = absf(hand_proj - max_proj)
+	var tip_point: Vector3
+	var pommel_point: Vector3
+	var tip_dist: float
+	var pommel_dist: float
+	if dist_to_2 >= dist_to_1:
+		tip_point = extremity_2
+		pommel_point = extremity_1
+		tip_dist = dist_to_2
+		pommel_dist = dist_to_1
+	else:
+		tip_point = extremity_1
+		pommel_point = extremity_2
+		tip_dist = dist_to_1
+		pommel_dist = dist_to_2
+	profile.weapon_total_length_meters = total_length
+	profile.weapon_tip_point = tip_point
+	profile.weapon_pommel_point = pommel_point
+	profile.weapon_tip_distance_meters = tip_dist
+	profile.weapon_pommel_distance_meters = pommel_dist

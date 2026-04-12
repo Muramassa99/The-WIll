@@ -12,3 +12,4 @@ class_name MaterialVariantDef
 @export var resolved_skill_family_bias_lines: Array[StatLine] = []
 @export var resolved_elemental_affinity_lines: Array[StatLine] = []
 @export var resolved_equipment_context_bias_lines: Array[StatLine] = []
+@export var resolved_animation_effect_stubs: Array[Resource] = []

@@ -73,9 +73,17 @@ func _run_verification() -> void:
 	await process_frame
 	var material_hidden_in_stage2: bool = not crafting_ui.material_status_label.visible
 	var radius_visible_in_stage2: bool = crafting_ui.radius_status_label.visible
-	var stage2_tool_state_add_ok: bool = crafting_ui.tool_state_label.text == "Tool State: Add"
+	var amount_visible_in_stage2: bool = crafting_ui.tool_amount_status_label.visible
+	var stage2_tool_state_apply_ok: bool = crafting_ui.tool_state_label.text == "Tool State: Apply"
 	var stage2_active_tool_carve_ok: bool = crafting_ui.active_tool_label.text == "Active Tool: Carve"
 	var radius_label_prefix_ok: bool = crafting_ui.radius_status_label.text.begins_with("Radius: ")
+	var amount_label_prefix_ok: bool = crafting_ui.tool_amount_status_label.text.begins_with("Amount: ")
+	crafting_ui.set("stage2_tool_amount_ratio", 0.50)
+	crafting_ui.call("_refresh_tool_overlay")
+	crafting_ui.call("_refresh_status_text")
+	await process_frame
+	var amount_before_up: float = float(crafting_ui.get("stage2_tool_amount_ratio"))
+	var camera_distance_before_amount_up: float = crafting_ui.free_workspace_preview.camera.position.z
 
 	var radius_before_up: float = float(crafting_ui.get("stage2_brush_radius_meters"))
 	var camera_distance_before_up: float = crafting_ui.free_workspace_preview.camera.position.z
@@ -90,6 +98,27 @@ func _run_verification() -> void:
 	var radius_after_up: float = float(crafting_ui.get("stage2_brush_radius_meters"))
 	var radius_increased_with_ctrl_scroll: bool = radius_after_up > radius_before_up
 	var camera_zoom_suppressed_with_ctrl_scroll: bool = is_equal_approx(crafting_ui.free_workspace_preview.camera.position.z, camera_distance_before_up)
+
+	var amount_up_event: InputEventMouseButton = InputEventMouseButton.new()
+	amount_up_event.button_index = MOUSE_BUTTON_WHEEL_UP
+	amount_up_event.pressed = true
+	amount_up_event.position = crafting_ui.free_view_container.size * 0.5
+	var v_press_event: InputEventKey = InputEventKey.new()
+	v_press_event.keycode = KEY_V
+	v_press_event.pressed = true
+	crafting_ui.call("_input", v_press_event)
+	crafting_ui.call("_unhandled_input", v_press_event)
+	crafting_ui.call("_on_free_view_panel_gui_input", amount_up_event)
+	crafting_ui.call("_on_free_view_gui_input", amount_up_event)
+	await process_frame
+	var v_release_event: InputEventKey = InputEventKey.new()
+	v_release_event.keycode = KEY_V
+	v_release_event.pressed = false
+	crafting_ui.call("_input", v_release_event)
+	crafting_ui.call("_unhandled_input", v_release_event)
+	var amount_after_up: float = float(crafting_ui.get("stage2_tool_amount_ratio"))
+	var amount_increased_with_v_scroll: bool = amount_after_up > amount_before_up
+	var camera_zoom_suppressed_with_v_scroll: bool = is_equal_approx(crafting_ui.free_workspace_preview.camera.position.z, camera_distance_before_amount_up)
 
 	var wheel_down_event: InputEventMouseButton = InputEventMouseButton.new()
 	wheel_down_event.button_index = MOUSE_BUTTON_WHEEL_DOWN
@@ -124,11 +153,15 @@ func _run_verification() -> void:
 	lines.append("overlay_active_tool_rectangle_ok=%s" % str(overlay_active_tool_rectangle_ok))
 	lines.append("material_hidden_in_stage2=%s" % str(material_hidden_in_stage2))
 	lines.append("radius_visible_in_stage2=%s" % str(radius_visible_in_stage2))
-	lines.append("stage2_tool_state_add_ok=%s" % str(stage2_tool_state_add_ok))
+	lines.append("amount_visible_in_stage2=%s" % str(amount_visible_in_stage2))
+	lines.append("stage2_tool_state_apply_ok=%s" % str(stage2_tool_state_apply_ok))
 	lines.append("stage2_active_tool_carve_ok=%s" % str(stage2_active_tool_carve_ok))
 	lines.append("radius_label_prefix_ok=%s" % str(radius_label_prefix_ok))
+	lines.append("amount_label_prefix_ok=%s" % str(amount_label_prefix_ok))
 	lines.append("radius_increased_with_ctrl_scroll=%s" % str(radius_increased_with_ctrl_scroll))
 	lines.append("camera_zoom_suppressed_with_ctrl_scroll=%s" % str(camera_zoom_suppressed_with_ctrl_scroll))
+	lines.append("amount_increased_with_v_scroll=%s" % str(amount_increased_with_v_scroll))
+	lines.append("camera_zoom_suppressed_with_v_scroll=%s" % str(camera_zoom_suppressed_with_v_scroll))
 	lines.append("radius_clamped_to_min=%s" % str(radius_clamped_to_min))
 	lines.append("radius_clamped_to_max=%s" % str(radius_clamped_to_max))
 

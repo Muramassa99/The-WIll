@@ -22,6 +22,7 @@ func _run_verification() -> void:
 	lines.append("rig_loaded=%s" % str(rig != null))
 	lines.append("animation_player_loaded=%s" % str(animation_player != null))
 	lines.append("has_idle=%s" % str(rig != null and rig.has_animation_name(&"Idle")))
+	lines.append("has_two_hand_idle=%s" % str(rig != null and rig.has_animation_name(&"2 Hand Idle")))
 	lines.append("has_walk=%s" % str(rig != null and rig.has_animation_name(&"Walk")))
 	lines.append("has_slow_run=%s" % str(rig != null and rig.has_animation_name(&"SlowRun")))
 	lines.append("has_run=%s" % str(rig != null and rig.has_animation_name(&"Run")))

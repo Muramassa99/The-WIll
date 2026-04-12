@@ -19,14 +19,15 @@ func refresh_workspace_visuals(
 ) -> String:
 	if forge_controller == null:
 		return ""
-	if force_full_sync or plane_viewport.grid_size != forge_controller.grid_size:
-		plane_viewport.set_grid_size(forge_controller.grid_size)
-	plane_viewport.set_active_plane(active_plane)
-	plane_viewport.set_active_layer(active_layer)
-	plane_viewport.set_active_wip(current_wip)
-	plane_viewport.set_material_lookup(material_lookup)
-	if force_full_sync:
-		plane_viewport.set_view_tuning(view_tuning)
+	if plane_viewport != null:
+		if force_full_sync or plane_viewport.grid_size != forge_controller.grid_size:
+			plane_viewport.set_grid_size(forge_controller.grid_size)
+		plane_viewport.set_active_plane(active_plane)
+		plane_viewport.set_active_layer(active_layer)
+		plane_viewport.set_active_wip(current_wip)
+		plane_viewport.set_material_lookup(material_lookup)
+		if force_full_sync:
+			plane_viewport.set_view_tuning(view_tuning)
 	if force_full_sync:
 		free_workspace_preview.set_view_tuning(view_tuning)
 		free_workspace_preview.configure(forge_controller.grid_size, forge_controller.get_cell_world_size_meters(), preserve_workspace_view)
@@ -39,7 +40,9 @@ func refresh_workspace_visuals(
 		stage2_refinement_mode_active
 	)
 	free_workspace_preview.grid_bounds_instance.visible = show_grid_bounds
-	free_workspace_preview.active_plane_instance.visible = show_active_slice
+	free_workspace_preview.active_plane_instance.visible = show_active_slice and not stage2_refinement_mode_active
+	if stage2_refinement_mode_active:
+		return "3D Refinement Workspace"
 	return "%s\nPlane %s / Layer %d" % [
 		"3D Workspace" if main_workspace_mode == &"free" else "3D Inset",
 		String(active_plane).to_upper(),
@@ -62,9 +65,14 @@ func build_left_panel_state(
 	var used_cells: int = count_cells(current_wip)
 	var max_fill_cells: int = forge_controller.get_max_fill_cells()
 	var fill_ratio: float = float(used_cells) / maxf(float(max_fill_cells), 1.0)
+	var layer_status_text: String = "Active layer: %d / %d" % [active_layer, max_layer_for_plane]
+	var plane_status_text: String = "Plane: %s" % String(active_plane).to_upper()
+	if stage2_refinement_mode_active:
+		layer_status_text = "Refinement Space: Full 3D"
+		plane_status_text = "Layer rules: Structural placement only"
 	return {
-		"layer_status_text": "Active layer: %d / %d" % [active_layer, max_layer_for_plane],
-		"plane_status_text": "Plane: %s" % String(active_plane).to_upper(),
+		"layer_status_text": layer_status_text,
+		"plane_status_text": plane_status_text,
 		"tool_status_text": _format_tool_status_text(active_tool, shape_rotation_degrees),
 		"stage2_status_text": _build_stage2_status_text(current_wip, stage2_refinement_mode_active),
 		"armed_material_text": "Material: %s" % armed_material_display_name,
@@ -116,7 +124,11 @@ func build_status_text(
 	lines.append("Grid: %d x %d x %d" % [forge_controller.grid_size.x, forge_controller.grid_size.y, forge_controller.grid_size.z])
 	lines.append("Cell scale: %.3fm" % forge_controller.get_cell_world_size_meters())
 	lines.append("Stage 2: %s" % _build_stage2_status_text(current_wip, stage2_refinement_mode_active))
-	lines.append("Plane / layer: %s / %d" % [String(active_plane).to_upper(), active_layer])
+	if stage2_refinement_mode_active:
+		lines.append("Refinement space: Full 3D model interaction")
+		lines.append("Layer rules: inactive during Stage 2")
+	else:
+		lines.append("Plane / layer: %s / %d" % [String(active_plane).to_upper(), active_layer])
 	lines.append("Tool: %s" % _format_tool_status_text(active_tool, shape_rotation_degrees))
 	if _is_stage1_shape_tool(active_tool):
 		lines.append("Shape rotation: %d°" % shape_rotation_degrees)
@@ -196,7 +208,10 @@ func _build_stage2_status_text(current_wip: CraftedItemWIP, stage2_refinement_mo
 		return "not initialized"
 	if not current_wip.stage2_item_state.has_current_shell():
 		return "empty"
-	var status_text: String = "initialized (%d patches)" % current_wip.stage2_item_state.get_patch_count()
+	var status_text: String = "initialized (%d shell quads / %d patches)" % [
+		current_wip.stage2_item_state.get_unified_shell_quad_count(),
+		current_wip.stage2_item_state.get_patch_count()
+	]
 	if stage2_refinement_mode_active:
 		status_text += " [editing]"
 	return status_text

@@ -5,6 +5,9 @@ const ZONE_GENERAL: StringName = &"stage2_zone_general"
 const ZONE_PRIMARY_GRIP_SAFE: StringName = &"stage2_zone_primary_grip_safe"
 
 @export var patch_id: StringName = &""
+@export var shell_quad_id: StringName = &""
+@export var grid_u_index: int = 0
+@export var grid_v_index: int = 0
 @export var baseline_quad: Resource
 @export var current_quad: Resource
 @export var min_surface_depth_voxels: int = 0
@@ -12,6 +15,7 @@ const ZONE_PRIMARY_GRIP_SAFE: StringName = &"stage2_zone_primary_grip_safe"
 @export var max_inward_offset_meters: float = 0.0
 @export var max_fillet_offset_meters: float = 0.0
 @export var max_chamfer_offset_meters: float = 0.0
+@export var current_offset_cells: float = 0.0
 @export var zone_mask_id: StringName = ZONE_GENERAL
 @export var neighbor_patch_ids: PackedStringArray = PackedStringArray()
 @export var dirty: bool = false

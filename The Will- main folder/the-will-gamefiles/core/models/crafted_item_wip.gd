@@ -1,6 +1,8 @@
 extends Resource
 class_name CraftedItemWIP
 
+const CombatAnimationStationStateScript = preload("res://core/models/combat_animation_station_state.gd")
+
 const BUILDER_PATH_MELEE := &"builder_path_melee"
 const BUILDER_PATH_RANGED_PHYSICAL := &"builder_path_ranged_physical"
 const BUILDER_PATH_SHIELD := &"builder_path_shield"
@@ -29,6 +31,7 @@ const GRIP_REVERSE := &"grip_reverse"
 @export var forge_builder_component_id: StringName = BUILDER_COMPONENT_PRIMARY
 @export var builder_marker_positions: Dictionary = {}
 @export var stage2_item_state: Resource
+@export var combat_animation_station_state: Resource
 @export var forge_intent: StringName = &""
 @export var equipment_context: StringName = &""
 @export var stow_position_mode: StringName = STOW_SHOULDER_HANGING
@@ -426,7 +429,21 @@ static func apply_builder_path_defaults(
 	target_wip.forge_builder_component_id = normalized_builder_component_id
 	target_wip.forge_intent = get_default_forge_intent_for_builder_path(normalized_builder_path_id)
 	target_wip.equipment_context = get_default_equipment_context_for_builder_path(normalized_builder_path_id)
+	target_wip.ensure_combat_animation_station_state()
 	return target_wip
+
+func ensure_combat_animation_station_state() -> Resource:
+	var station_state: Resource = combat_animation_station_state
+	if station_state == null or not station_state.has_method("ensure_default_baseline_content"):
+		station_state = CombatAnimationStationStateScript.new()
+		combat_animation_station_state = station_state
+	station_state.call(
+		"ensure_default_baseline_content",
+		forge_builder_path_id,
+		equipment_context,
+		grip_style_mode
+	)
+	return station_state
 
 static func get_stow_position_modes() -> Array[StringName]:
 	return [

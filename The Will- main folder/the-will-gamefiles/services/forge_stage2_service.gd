@@ -4,14 +4,17 @@ class_name ForgeStage2Service
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
 const CraftedItemCanonicalSolidResolverScript = preload("res://core/resolvers/crafted_item_canonical_solid_resolver.gd")
 const CraftedItemCanonicalGeometryResolverScript = preload("res://core/resolvers/crafted_item_canonical_geometry_resolver.gd")
+const Stage2EditableMeshBuilderScript = preload("res://core/resolvers/stage2_editable_mesh_builder.gd")
 const CraftedItemCanonicalSurfaceQuadScript = preload("res://core/models/crafted_item_canonical_surface_quad.gd")
 const Stage2ItemStateScript = preload("res://core/models/stage2_item_state.gd")
 const Stage2PatchStateScript = preload("res://core/models/stage2_patch_state.gd")
+const Stage2ShellMeshStateScript = preload("res://core/models/stage2_shell_mesh_state.gd")
 const Stage2ShellQuadStateScript = preload("res://core/models/stage2_shell_quad_state.gd")
 
 var forge_rules: ForgeRulesDef = DEFAULT_FORGE_RULES_RESOURCE
 var canonical_solid_resolver = CraftedItemCanonicalSolidResolverScript.new()
 var canonical_geometry_resolver = CraftedItemCanonicalGeometryResolverScript.new()
+var editable_mesh_builder = Stage2EditableMeshBuilderScript.new()
 
 func _init(rules: ForgeRulesDef = null) -> void:
 	set_forge_rules(rules)
@@ -19,7 +22,7 @@ func _init(rules: ForgeRulesDef = null) -> void:
 func set_forge_rules(rules: ForgeRulesDef) -> void:
 	forge_rules = rules if rules != null else DEFAULT_FORGE_RULES_RESOURCE
 
-func ensure_stage2_item_state_for_wip(wip: CraftedItemWIP):
+func ensure_stage2_item_state_for_wip(wip: CraftedItemWIP, material_lookup: Dictionary = {}):
 	if wip == null:
 		return null
 	var canonical_solid = canonical_solid_resolver.call("resolve_from_cells", CraftedItemWIP.collect_bake_cells(wip))
@@ -28,7 +31,8 @@ func ensure_stage2_item_state_for_wip(wip: CraftedItemWIP):
 		wip,
 		canonical_solid,
 		canonical_geometry,
-		wip.latest_baked_profile_snapshot
+		wip.latest_baked_profile_snapshot,
+		material_lookup
 	)
 	wip.stage2_item_state = stage2_item_state
 	return stage2_item_state
@@ -37,9 +41,11 @@ func build_stage2_item_state_from_stage1(
 	wip: CraftedItemWIP,
 	canonical_solid,
 	canonical_geometry,
-	baked_profile_snapshot = null
+	baked_profile_snapshot = null,
+	material_lookup: Dictionary = {}
 ) :
 	var stage2_item_state = Stage2ItemStateScript.new()
+	var stage2_tagged_canonical_geometry = _build_stage2_tagged_canonical_geometry(canonical_geometry)
 	stage2_item_state.source_wip_id = wip.wip_id if wip != null else StringName()
 	stage2_item_state.source_stage1_cell_count = (
 		canonical_solid.get_cell_count()
@@ -47,36 +53,137 @@ func build_stage2_item_state_from_stage1(
 		else CraftedItemWIP.collect_bake_cells(wip).size()
 	)
 	stage2_item_state.cell_world_size_meters = forge_rules.cell_world_size_meters
-	if canonical_geometry != null:
-		stage2_item_state.baseline_local_aabb_position = canonical_geometry.local_aabb.position
-		stage2_item_state.baseline_local_aabb_size = canonical_geometry.local_aabb.size
-		stage2_item_state.current_local_aabb_position = canonical_geometry.local_aabb.position
-		stage2_item_state.current_local_aabb_size = canonical_geometry.local_aabb.size
+	if stage2_tagged_canonical_geometry != null:
+		stage2_item_state.baseline_local_aabb_position = stage2_tagged_canonical_geometry.local_aabb.position
+		stage2_item_state.baseline_local_aabb_size = stage2_tagged_canonical_geometry.local_aabb.size
+		stage2_item_state.current_local_aabb_position = stage2_tagged_canonical_geometry.local_aabb.position
+		stage2_item_state.current_local_aabb_size = stage2_tagged_canonical_geometry.local_aabb.size
+		stage2_item_state.baseline_editable_mesh_state = editable_mesh_builder.build_state_from_canonical_geometry(
+			stage2_tagged_canonical_geometry,
+			material_lookup
+		)
+		stage2_item_state.current_editable_mesh_state = stage2_item_state.baseline_editable_mesh_state.duplicate(true)
+		stage2_item_state.editable_mesh_visual_authority = stage2_item_state.has_current_editable_mesh()
+		stage2_item_state.baseline_shell_mesh_state = _build_shell_mesh_state_from_canonical_geometry(stage2_tagged_canonical_geometry)
+		stage2_item_state.current_shell_mesh_state = _build_shell_mesh_state_from_canonical_geometry(stage2_tagged_canonical_geometry)
 	if canonical_geometry == null or canonical_geometry.surface_quads.is_empty():
 		return stage2_item_state
 	var patch_states: Array[Resource] = []
 	var patch_index: int = 0
-	for surface_quad in canonical_geometry.surface_quads:
+	var surface_quad_index: int = 0
+	for surface_quad in stage2_tagged_canonical_geometry.surface_quads:
 		if surface_quad == null:
+			surface_quad_index += 1
 			continue
+		var shell_quad_id: StringName = _build_shell_quad_id(surface_quad_index)
 		var surface_quad_patch_states: Array[Resource] = _build_patch_states_from_surface_quad(
 			canonical_solid,
 			surface_quad,
+			shell_quad_id,
 			patch_index,
 			baked_profile_snapshot
 		)
 		for patch_state: Resource in surface_quad_patch_states:
 			patch_states.append(patch_state)
 			patch_index += 1
+		surface_quad_index += 1
 	_populate_patch_neighbor_ids(patch_states)
 	stage2_item_state.patch_states = patch_states
-	stage2_item_state.refinement_initialized = not patch_states.is_empty()
+	stage2_item_state.refinement_initialized = (
+		stage2_item_state.has_unified_shell()
+		or not patch_states.is_empty()
+	)
 	stage2_item_state.dirty = false
 	return stage2_item_state
+
+func _build_stage2_tagged_canonical_geometry(canonical_geometry):
+	if canonical_geometry == null:
+		return null
+	var tagged_geometry = CraftedItemCanonicalGeometry.new()
+	tagged_geometry.source_solid = canonical_geometry.source_solid
+	tagged_geometry.local_aabb = canonical_geometry.local_aabb
+	var surface_quad_index: int = 0
+	for source_surface_quad in canonical_geometry.surface_quads:
+		if source_surface_quad == null:
+			surface_quad_index += 1
+			continue
+		var tagged_surface_quad = CraftedItemCanonicalSurfaceQuadScript.new()
+		tagged_surface_quad.origin_local = source_surface_quad.origin_local
+		tagged_surface_quad.edge_u_local = source_surface_quad.edge_u_local
+		tagged_surface_quad.edge_v_local = source_surface_quad.edge_v_local
+		tagged_surface_quad.normal = source_surface_quad.normal
+		tagged_surface_quad.material_variant_id = source_surface_quad.material_variant_id
+		tagged_surface_quad.width_voxels = source_surface_quad.width_voxels
+		tagged_surface_quad.height_voxels = source_surface_quad.height_voxels
+		tagged_surface_quad.stage2_face_id = _build_shell_quad_id(surface_quad_index)
+		tagged_surface_quad.stage2_shell_quad_id = _build_shell_quad_id(surface_quad_index)
+		tagged_surface_quad.stage2_target_kind = source_surface_quad.stage2_target_kind
+		tagged_surface_quad.stage2_patch_ids = PackedStringArray(source_surface_quad.stage2_patch_ids)
+		tagged_geometry.surface_quads.append(tagged_surface_quad)
+		surface_quad_index += 1
+	for source_surface_triangle in canonical_geometry.surface_triangles:
+		tagged_geometry.surface_triangles.append(source_surface_triangle)
+	return tagged_geometry
+
+func _build_shell_mesh_state_from_canonical_geometry(canonical_geometry) -> Resource:
+	var shell_mesh_state = Stage2ShellMeshStateScript.new()
+	shell_mesh_state.copy_from_canonical_geometry(canonical_geometry)
+	var shared_vertex_lookup: Dictionary = {}
+	var shared_vertex_keys: PackedStringArray = PackedStringArray()
+	var shared_vertex_baseline_positions_local: PackedVector3Array = PackedVector3Array()
+	var shared_vertex_current_positions_local: PackedVector3Array = PackedVector3Array()
+	for shell_quad_index: int in range(shell_mesh_state.shell_quads.size()):
+		var shell_quad_state: Resource = shell_mesh_state.shell_quads[shell_quad_index]
+		if shell_quad_state == null:
+			continue
+		shell_quad_state.shell_quad_id = _build_shell_quad_id(shell_quad_index)
+		var width_steps: int = maxi(shell_quad_state.width_voxels, 1)
+		var height_steps: int = maxi(shell_quad_state.height_voxels, 1)
+		var patch_cell_count: int = width_steps * height_steps
+		var patch_offset_cells: PackedFloat32Array = PackedFloat32Array()
+		patch_offset_cells.resize(patch_cell_count)
+		shell_quad_state.patch_offset_cells = patch_offset_cells
+		var vertex_count: int = (width_steps + 1) * (height_steps + 1)
+		var edge_u_step: Vector3 = shell_quad_state.edge_u_local / float(width_steps)
+		var edge_v_step: Vector3 = shell_quad_state.edge_v_local / float(height_steps)
+		var vertex_keys: PackedStringArray = PackedStringArray()
+		vertex_keys.resize(vertex_count)
+		for vertex_v_index: int in range(height_steps + 1):
+			for vertex_u_index: int in range(width_steps + 1):
+				var vertex_local: Vector3 = (
+					shell_quad_state.origin_local
+					+ (edge_u_step * float(vertex_u_index))
+					+ (edge_v_step * float(vertex_v_index))
+				)
+				var vertex_key: StringName = _build_shared_shell_vertex_key(vertex_local)
+				if not shared_vertex_lookup.has(vertex_key):
+					var shared_vertex_index: int = shared_vertex_keys.size()
+					shared_vertex_lookup[vertex_key] = shared_vertex_index
+					shared_vertex_keys.append(String(vertex_key))
+					shared_vertex_baseline_positions_local.append(vertex_local)
+					shared_vertex_current_positions_local.append(vertex_local)
+				var shell_vertex_index: int = (vertex_v_index * (width_steps + 1)) + vertex_u_index
+				vertex_keys[shell_vertex_index] = String(vertex_key)
+		shell_quad_state.vertex_keys = vertex_keys
+		var vertex_offset_cells: PackedFloat32Array = PackedFloat32Array()
+		vertex_offset_cells.resize(vertex_count)
+		shell_quad_state.vertex_offset_cells = vertex_offset_cells
+	shell_mesh_state.shared_vertex_keys = shared_vertex_keys
+	shell_mesh_state.shared_vertex_baseline_positions_local = shared_vertex_baseline_positions_local
+	shell_mesh_state.shared_vertex_current_positions_local = shared_vertex_current_positions_local
+	return shell_mesh_state
+
+func _build_shared_shell_vertex_key(vertex_local: Vector3) -> StringName:
+	return StringName("%d::%d::%d" % [
+		int(round(vertex_local.x * 10000.0)),
+		int(round(vertex_local.y * 10000.0)),
+		int(round(vertex_local.z * 10000.0)),
+	])
 
 func _build_patch_states_from_surface_quad(
 	canonical_solid,
 	surface_quad,
+	shell_quad_id: StringName,
 	patch_index_start: int,
 	baked_profile_snapshot = null
 ) -> Array[Resource]:
@@ -100,6 +207,9 @@ func _build_patch_states_from_surface_quad(
 			patch_states.append(_build_patch_state_from_surface_quad(
 				canonical_solid,
 				patch_surface_quad,
+				shell_quad_id,
+				u_index,
+				v_index,
 				local_patch_index,
 				baked_profile_snapshot
 			))
@@ -109,13 +219,22 @@ func _build_patch_states_from_surface_quad(
 func _build_patch_state_from_surface_quad(
 	canonical_solid,
 	surface_quad,
+	shell_quad_id: StringName,
+	grid_u_index: int,
+	grid_v_index: int,
 	patch_index: int,
 	baked_profile_snapshot = null
 ):
 	var patch_state = Stage2PatchStateScript.new()
 	patch_state.patch_id = _build_patch_id(surface_quad, patch_index)
+	patch_state.shell_quad_id = shell_quad_id
+	patch_state.grid_u_index = grid_u_index
+	patch_state.grid_v_index = grid_v_index
 	patch_state.baseline_quad = _build_stage2_shell_quad_state(surface_quad)
 	patch_state.current_quad = _build_stage2_shell_quad_state(surface_quad)
+	patch_state.baseline_quad.shell_quad_id = shell_quad_id
+	patch_state.current_quad.shell_quad_id = shell_quad_id
+	patch_state.current_offset_cells = 0.0
 	patch_state.min_surface_depth_voxels = _resolve_min_surface_depth_voxels(canonical_solid, surface_quad)
 	patch_state.max_inward_offset_ratio = _resolve_max_inward_offset_ratio(patch_state.min_surface_depth_voxels)
 	patch_state.max_inward_offset_meters = (
@@ -134,6 +253,9 @@ func _build_patch_state_from_surface_quad(
 	patch_state.zone_mask_id = _resolve_patch_zone_mask_id(patch_state, baked_profile_snapshot)
 	patch_state.neighbor_patch_ids = PackedStringArray()
 	return patch_state
+
+func _build_shell_quad_id(shell_quad_index: int) -> StringName:
+	return StringName("stage2_shell_quad_%d" % shell_quad_index)
 
 func _populate_patch_neighbor_ids(patch_states: Array[Resource]) -> void:
 	var patch_lookup: Dictionary = {}

@@ -74,6 +74,42 @@ func _run_verification() -> void:
 	var plane_is_primary_after_flip: bool = plane_view_panel.get_parent() == main_viewport_host
 	var free_is_inset_after_flip: bool = free_view_panel.get_parent() == inset_viewport_host
 
+	var pan_key_down: InputEventKey = InputEventKey.new()
+	pan_key_down.keycode = KEY_C
+	pan_key_down.pressed = true
+	Input.parse_input_event(pan_key_down)
+	await process_frame
+
+	var plane_draw_rect_before_pan: Rect2 = plane_viewport.call("_get_plane_draw_rect")
+	var plane_pan_press: InputEventMouseButton = InputEventMouseButton.new()
+	plane_pan_press.button_index = MOUSE_BUTTON_RIGHT
+	plane_pan_press.pressed = true
+	plane_pan_press.position = plane_draw_rect_before_pan.get_center()
+	plane_viewport._gui_input(plane_pan_press)
+	await process_frame
+
+	var plane_pan_motion: InputEventMouseMotion = InputEventMouseMotion.new()
+	plane_pan_motion.relative = Vector2(24.0, -18.0)
+	plane_pan_motion.position = plane_draw_rect_before_pan.get_center() + plane_pan_motion.relative
+	plane_viewport._gui_input(plane_pan_motion)
+	await process_frame
+
+	var plane_draw_rect_after_pan: Rect2 = plane_viewport.call("_get_plane_draw_rect")
+	var plane_pan_shifted_view: bool = plane_draw_rect_after_pan.position.distance_to(plane_draw_rect_before_pan.position) > 0.0001
+
+	var plane_pan_release: InputEventMouseButton = InputEventMouseButton.new()
+	plane_pan_release.button_index = MOUSE_BUTTON_RIGHT
+	plane_pan_release.pressed = false
+	plane_pan_release.position = plane_pan_motion.position
+	plane_viewport._gui_input(plane_pan_release)
+	await process_frame
+
+	var pan_key_up: InputEventKey = InputEventKey.new()
+	pan_key_up.keycode = KEY_C
+	pan_key_up.pressed = false
+	Input.parse_input_event(pan_key_up)
+	await process_frame
+
 	debug_info_button.emit_signal("pressed")
 	await process_frame
 	await process_frame
@@ -104,6 +140,9 @@ func _run_verification() -> void:
 	lines.append("main_workspace_mode_after_flip=%s" % String(crafting_ui.main_workspace_mode))
 	lines.append("plane_is_primary_after_flip=%s" % str(plane_is_primary_after_flip))
 	lines.append("free_is_inset_after_flip=%s" % str(free_is_inset_after_flip))
+	lines.append("plane_pan_shifted_view=%s" % str(plane_pan_shifted_view))
+	lines.append("plane_draw_rect_before_pan=%s" % str(plane_draw_rect_before_pan))
+	lines.append("plane_draw_rect_after_pan=%s" % str(plane_draw_rect_after_pan))
 	lines.append("debug_popup_visible=%s" % str(debug_popup_visible))
 	lines.append("debug_text_has_content=%s" % str(debug_text_has_content))
 

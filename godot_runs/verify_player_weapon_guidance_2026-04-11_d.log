@@ -1,0 +1,137 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+SCRIPT ERROR: Parse Error: Could not find type "CombatAnimationStationState" in the current scope.
+   at: GDScript::reload (res://core/models/crafted_item_wip.gd:436)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://core/models/player_equipment_state.gd:0)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/defs/base_material_def.gd:50)
+ERROR: Failed to load script "res://core/defs/base_material_def.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/defs/material_variant_def.gd:15)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/resolvers/material_runtime_resolver.gd:106)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/resolvers/material_runtime_resolver.gd:143)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/resolvers/material_runtime_resolver.gd:143)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "resolved_animation_effect_stubs".
+   at: GDScript::reload (res://core/resolvers/material_runtime_resolver.gd:108)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "animation_effect_stubs".
+   at: GDScript::reload (res://core/resolvers/material_runtime_resolver.gd:113)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/resolvers/material_runtime_resolver.gd:144)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/resolvers/material_runtime_resolver.gd:145)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/resolvers/material_runtime_resolver.gd:148)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/resolvers/material_runtime_resolver.gd:148)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://core/resolvers/stage2_editable_mesh_builder.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://services/forge_stage2_service.gd:0)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/resolvers/tier_resolver.gd:41)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/resolvers/tier_resolver.gd:41)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/resolvers/tier_resolver.gd:42)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/resolvers/tier_resolver.gd:43)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/resolvers/tier_resolver.gd:46)
+SCRIPT ERROR: Parse Error: Could not find type "MaterialAnimationEffectStub" in the current scope.
+   at: GDScript::reload (res://core/resolvers/tier_resolver.gd:46)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://services/forge_service.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://services/material_pipeline_service.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/player/player_controller.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://tools/verify_player_weapon_guidance.gd:0)
+ERROR: Failed to load script "res://tools/verify_player_weapon_guidance.gd" with error "Compilation failed".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: ForgeService._init (res://services/forge_service.gd:25)
+   GDScript backtrace (most recent call first):
+       [0] _init (res://services/forge_service.gd:25)
+       [1] @implicit_new (res://services/material_pipeline_service.gd:12)
+       [2] @implicit_new (res://runtime/player/player_controller.gd:51)
+       [3] _run_verification (res://tools/verify_player_weapon_guidance.gd:16)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: ForgeService._init (res://services/forge_service.gd:25)
+   GDScript backtrace (most recent call first):
+       [0] _init (res://services/forge_service.gd:25)
+       [1] @implicit_new (res://runtime/player/player_controller.gd:52)
+       [2] _run_verification (res://tools/verify_player_weapon_guidance.gd:16)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: TestPrintMeshBuilder.@implicit_new (res://runtime/forge/test_print_mesh_builder.gd:13)
+   GDScript backtrace (most recent call first):
+       [0] @implicit_new (res://runtime/forge/test_print_mesh_builder.gd:13)
+       [1] @implicit_new (res://runtime/player/player_controller.gd:53)
+       [2] _run_verification (res://tools/verify_player_weapon_guidance.gd:16)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: ForgeService._init (res://services/forge_service.gd:25)
+   GDScript backtrace (most recent call first):
+       [0] _init (res://services/forge_service.gd:25)
+       [1] @implicit_new (res://services/material_pipeline_service.gd:12)
+       [2] @implicit_new (res://runtime/ui/player_inventory_overlay.gd:81)
+       [3] _run_verification (res://tools/verify_player_weapon_guidance.gd:16)
+ERROR: Attempted to assign an object into a TypedArray, that does not inherit from 'GDScript'.
+   at: _internal_validate_object (core/variant/container_type_validate.h:129)
+   GDScript backtrace (most recent call first):
+       [0] load_or_create (res://core/models/persistent_resource_state_io.gd:7)
+       [1] load_or_create (res://core/models/player_forge_wip_library_state.gd:12)
+       [2] get_forge_wip_library_state (res://runtime/player/player_runtime_state_presenter.gd:32)
+       [3] get_forge_wip_library_state (res://runtime/player/player_controller.gd:223)
+       [4] _sync_equipped_test_meshes (res://runtime/player/player_controller.gd:299)
+       [5] _ready (res://runtime/player/player_controller.gd:80)
+       [6] _run_verification (res://tools/verify_player_weapon_guidance.gd:17)
+ERROR: Unable to convert array index 0 from "Object" to "Object".
+   at: assign (core/variant/array.cpp:238)
+   GDScript backtrace (most recent call first):
+       [0] load_or_create (res://core/models/persistent_resource_state_io.gd:7)
+       [1] load_or_create (res://core/models/player_forge_wip_library_state.gd:12)
+       [2] get_forge_wip_library_state (res://runtime/player/player_runtime_state_presenter.gd:32)
+       [3] get_forge_wip_library_state (res://runtime/player/player_controller.gd:223)
+       [4] _sync_equipped_test_meshes (res://runtime/player/player_controller.gd:299)
+       [5] _ready (res://runtime/player/player_controller.gd:80)
+       [6] _run_verification (res://tools/verify_player_weapon_guidance.gd:17)
+ERROR: Cannot save file 'user://inventory/player_equipment_state.tres'.
+   at: save (scene/resources/resource_format_text.cpp:1756)
+   GDScript backtrace (most recent call first):
+       [0] persist_resource (res://core/models/persistent_resource_state_io.gd:24)
+       [1] persist (res://core/models/player_equipment_state.gd:73)
+       [2] clear_slot (res://core/models/player_equipment_state.gd:47)
+       [3] sync_equipped_slot_visual (res://runtime/player/player_equipped_item_presenter.gd:538)
+       [4] sync_equipped_test_meshes (res://runtime/player/player_equipped_item_presenter.gd:500)
+       [5] sync_equipped_test_meshes (res://runtime/player/player_forge_test_presenter.gd:110)
+       [6] _sync_equipped_test_meshes (res://runtime/player/player_controller.gd:299)
+       [7] _ready (res://runtime/player/player_controller.gd:80)
+       [8] _run_verification (res://tools/verify_player_weapon_guidance.gd:17)
+ERROR: Cannot save file 'C:/Users/ixro1/AppData/Roaming/Godot/app_userdata/The Will-Gamefiles/inventory/player_equipment_state.tres'.
+   at: save (scene/resources/resource_format_text.cpp:1756)
+   GDScript backtrace (most recent call first):
+       [0] persist_resource (res://core/models/persistent_resource_state_io.gd:27)
+       [1] persist (res://core/models/player_equipment_state.gd:73)
+       [2] clear_slot (res://core/models/player_equipment_state.gd:47)
+       [3] sync_equipped_slot_visual (res://runtime/player/player_equipped_item_presenter.gd:538)
+       [4] sync_equipped_test_meshes (res://runtime/player/player_equipped_item_presenter.gd:500)
+       [5] sync_equipped_test_meshes (res://runtime/player/player_forge_test_presenter.gd:110)
+       [6] _sync_equipped_test_meshes (res://runtime/player/player_controller.gd:299)
+       [7] _ready (res://runtime/player/player_controller.gd:80)
+       [8] _run_verification (res://tools/verify_player_weapon_guidance.gd:17)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: _build_two_hand_test_wip (res://tools/verify_player_weapon_guidance.gd:141)
+   GDScript backtrace (most recent call first):
+       [0] _build_two_hand_test_wip (res://tools/verify_player_weapon_guidance.gd:141)
+       [1] _run_verification (res://tools/verify_player_weapon_guidance.gd:37)
+SCRIPT ERROR: Invalid access to property or key 'wip_id' on a base object of type 'Nil'.
+   at: _run_verification (res://tools/verify_player_weapon_guidance.gd:38)
+   GDScript backtrace (most recent call first):
+       [0] _run_verification (res://tools/verify_player_weapon_guidance.gd:38)

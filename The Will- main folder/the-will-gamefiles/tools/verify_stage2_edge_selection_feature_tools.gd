@@ -74,7 +74,17 @@ func _run_verification() -> void:
 	crafting_ui.call("_toggle_stage2_patch_selection_at_screen_position", grip_safe_screen_position)
 	await process_frame
 	var selected_preview_visible: bool = preview != null and preview.stage2_selected_faces_instance != null and preview.stage2_selected_faces_instance.visible
-	var selected_count_after_pick: int = PackedStringArray(crafting_ui.get("stage2_selected_patch_ids")).size()
+	var selected_edge_count_after_pick: int = PackedStringArray(crafting_ui.get("stage2_selected_edge_ids")).size()
+	var selected_patch_cache_after_pick_variant: Variant = crafting_ui.get("stage2_selected_patch_ids")
+	var selected_patch_cache_after_pick: int = 0
+	if selected_patch_cache_after_pick_variant is PackedStringArray:
+		selected_patch_cache_after_pick = selected_patch_cache_after_pick_variant.size()
+	var selected_count_after_pick: int = selection_presenter.resolve_patch_ids_for_selection_identifiers(
+		stage2_item_state,
+		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_EDGE_FILLET,
+		PackedStringArray(),
+		PackedStringArray(crafting_ui.get("stage2_selected_edge_ids"))
+	).size()
 	var origins_before_safe_edge_fillet: Array[Vector3] = _collect_patch_origins(stage2_item_state)
 	crafting_ui.call("_on_action_menu_id_pressed", int(menu_ids.get("geometry_selection_apply", -1)))
 	await process_frame
@@ -85,7 +95,12 @@ func _run_verification() -> void:
 
 	crafting_ui.call("_on_action_menu_id_pressed", int(menu_ids.get("geometry_selection_clear", -1)))
 	await process_frame
-	var selected_count_after_clear: int = PackedStringArray(crafting_ui.get("stage2_selected_patch_ids")).size()
+	var selected_count_after_clear: int = selection_presenter.resolve_patch_ids_for_selection_identifiers(
+		stage2_item_state,
+		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_EDGE_FILLET,
+		PackedStringArray(),
+		PackedStringArray(crafting_ui.get("stage2_selected_edge_ids"))
+	).size()
 
 	crafting_ui.call("_on_action_menu_id_pressed", int(menu_ids.get("geometry_tool_surface_edge_chamfer", -1)))
 	await process_frame
@@ -105,7 +120,12 @@ func _run_verification() -> void:
 	var general_screen_position: Vector2 = general_target.get("screen_position", Vector2.ZERO)
 	crafting_ui.call("_toggle_stage2_patch_selection_at_screen_position", general_screen_position)
 	await process_frame
-	var general_selected_count: int = PackedStringArray(crafting_ui.get("stage2_selected_patch_ids")).size()
+	var general_selected_count: int = selection_presenter.resolve_patch_ids_for_selection_identifiers(
+		stage2_item_state,
+		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_EDGE_CHAMFER,
+		PackedStringArray(),
+		PackedStringArray(crafting_ui.get("stage2_selected_edge_ids"))
+	).size()
 	var origins_before_general_edge_chamfer: Array[Vector3] = _collect_patch_origins(stage2_item_state)
 	crafting_ui.call("_on_action_menu_id_pressed", int(menu_ids.get("geometry_selection_apply", -1)))
 	await process_frame
@@ -122,6 +142,8 @@ func _run_verification() -> void:
 	lines.append("hover_preview_visible=%s" % str(hover_preview_visible))
 	lines.append("selected_preview_visible=%s" % str(selected_preview_visible))
 	lines.append("selected_count_after_pick=%d" % selected_count_after_pick)
+	lines.append("selected_edge_count_after_pick=%d" % selected_edge_count_after_pick)
+	lines.append("selected_patch_cache_after_pick=%d" % selected_patch_cache_after_pick)
 	lines.append("grip_safe_edge_fillet_changed_shell=%s" % str(grip_safe_edge_fillet_changed_shell))
 	lines.append("selected_count_after_clear=%d" % selected_count_after_clear)
 	lines.append("grip_safe_edge_chamfer_changed_shell=%s" % str(grip_safe_edge_chamfer_changed_shell))
@@ -145,13 +167,13 @@ func _build_front_heavy_sword_wip() -> CraftedItemWIP:
 	wip.forge_builder_path_id = CraftedItemWIP.BUILDER_PATH_MELEE
 
 	var layer_map: Dictionary = {}
-	for x: int in range(40, 52):
+	for x: int in range(32, 58):
 		for y: int in range(24, 27):
 			for z: int in range(18, 20):
 				_add_cell(layer_map, Vector3i(x, y, z), &"mat_wood_gray")
-	for x: int in range(52, 65):
-		for y: int in range(22, 29):
-			for z: int in range(17, 22):
+	for x: int in range(58, 65):
+		for y: int in range(23, 28):
+			for z: int in range(17, 21):
 				_add_cell(layer_map, Vector3i(x, y, z), &"mat_iron_gray")
 
 	var ordered_layers: Array = layer_map.keys()

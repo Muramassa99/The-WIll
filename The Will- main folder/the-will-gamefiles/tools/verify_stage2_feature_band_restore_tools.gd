@@ -57,6 +57,23 @@ func _run_verification() -> void:
 	var restore_tool_revert_visible: bool = _popup_has_item_text(geometry_popup, "Revert Selected Targets")
 	var restore_tool_clear_visible: bool = _popup_has_item_text(geometry_popup, "Clear Target Selection")
 
+	var grip_safe_band_seed_selection: Dictionary = selection_presenter.resolve_hover_selection_data(
+		stage2_item_state,
+		_build_patch_hit_data(grip_safe_patch),
+		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_BAND_FILLET
+	)
+	var grip_safe_band_seed_patch_ids: PackedStringArray = PackedStringArray(grip_safe_band_seed_selection.get("patch_ids", PackedStringArray()))
+	var grip_safe_band_seed_apply_patch_ids: PackedStringArray = selection_presenter.resolve_selection_apply_patch_ids(
+		stage2_item_state,
+		grip_safe_band_seed_patch_ids,
+		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_BAND_FILLET
+	)
+	var grip_safe_feature_band_seed_changed_shell: bool = crafting_ui.stage2_brush_presenter.apply_selection_tool(
+		stage2_item_state,
+		grip_safe_band_seed_patch_ids,
+		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_BAND_FILLET,
+		grip_safe_band_seed_apply_patch_ids
+	)
 	var grip_safe_band_selection: Dictionary = selection_presenter.resolve_hover_selection_data(
 		stage2_item_state,
 		_build_patch_hit_data(grip_safe_patch),
@@ -69,16 +86,59 @@ func _run_verification() -> void:
 		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_BAND_RESTORE
 	)
 	var origins_before_grip_safe_band_restore: Array[Vector3] = _collect_patch_origins(stage2_item_state)
-	var grip_safe_feature_band_restore_changed_shell: bool = crafting_ui.stage2_brush_presenter.apply_selection_tool(
+	var editable_vertices_before_grip_safe_band_restore: Array[Vector3] = _collect_editable_mesh_vertices(stage2_item_state)
+	var baseline_distance_before_grip_safe_band_restore: float = _resolve_editable_mesh_total_baseline_distance(stage2_item_state)
+	var grip_safe_band_restore_uses_editable_mesh: bool = baseline_distance_before_grip_safe_band_restore > 0.00001
+	var grip_safe_feature_band_restore_applied: bool = crafting_ui.stage2_brush_presenter.apply_selection_tool(
 		stage2_item_state,
 		grip_safe_band_patch_ids,
 		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_BAND_RESTORE,
 		grip_safe_band_apply_patch_ids
-	) and _has_any_patch_origin_changed(
+	)
+	var grip_safe_band_restore_vertices_changed: bool = _has_any_editable_mesh_vertex_changed(
+		editable_vertices_before_grip_safe_band_restore,
+		_collect_editable_mesh_vertices(stage2_item_state)
+	)
+	var grip_safe_band_restore_patch_origins_changed: bool = _has_any_patch_origin_changed(
 		origins_before_grip_safe_band_restore,
 		_collect_patch_origins(stage2_item_state)
 	)
+	var baseline_distance_after_grip_safe_band_restore: float = _resolve_editable_mesh_total_baseline_distance(stage2_item_state)
+	var grip_safe_feature_band_restore_changed_shell: bool = (
+		grip_safe_feature_band_restore_applied
+		and (
+			(
+				grip_safe_band_restore_uses_editable_mesh
+				and grip_safe_band_restore_vertices_changed
+				and baseline_distance_after_grip_safe_band_restore < baseline_distance_before_grip_safe_band_restore
+			)
+			or (
+				not grip_safe_band_restore_uses_editable_mesh
+				and grip_safe_band_restore_patch_origins_changed
+			)
+		)
+	)
 
+	_build_offset_cluster(stage2_item_state, general_patch, 5, -0.25)
+	stage2_item_state.refresh_current_local_aabb_from_patches()
+
+	var general_band_seed_selection: Dictionary = selection_presenter.resolve_hover_selection_data(
+		stage2_item_state,
+		_build_patch_hit_data(general_patch),
+		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_BAND_CHAMFER
+	)
+	var general_band_seed_patch_ids: PackedStringArray = PackedStringArray(general_band_seed_selection.get("patch_ids", PackedStringArray()))
+	var general_band_seed_apply_patch_ids: PackedStringArray = selection_presenter.resolve_selection_apply_patch_ids(
+		stage2_item_state,
+		general_band_seed_patch_ids,
+		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_BAND_CHAMFER
+	)
+	var general_feature_band_seed_changed_shell: bool = crafting_ui.stage2_brush_presenter.apply_selection_tool(
+		stage2_item_state,
+		general_band_seed_patch_ids,
+		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_BAND_CHAMFER,
+		general_band_seed_apply_patch_ids
+	)
 	var general_band_selection: Dictionary = selection_presenter.resolve_hover_selection_data(
 		stage2_item_state,
 		_build_patch_hit_data(general_patch),
@@ -91,25 +151,62 @@ func _run_verification() -> void:
 		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_BAND_RESTORE
 	)
 	var origins_before_general_band_restore: Array[Vector3] = _collect_patch_origins(stage2_item_state)
-	var general_feature_band_restore_changed_shell: bool = crafting_ui.stage2_brush_presenter.apply_selection_tool(
+	var editable_vertices_before_general_band_restore: Array[Vector3] = _collect_editable_mesh_vertices(stage2_item_state)
+	var baseline_distance_before_general_band_restore: float = _resolve_editable_mesh_total_baseline_distance(stage2_item_state)
+	var general_band_restore_uses_editable_mesh: bool = baseline_distance_before_general_band_restore > 0.00001
+	var general_feature_band_restore_applied: bool = crafting_ui.stage2_brush_presenter.apply_selection_tool(
 		stage2_item_state,
 		general_band_patch_ids,
 		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_BAND_RESTORE,
 		general_band_apply_patch_ids
-	) and _has_any_patch_origin_changed(
+	)
+	var general_band_restore_vertices_changed: bool = _has_any_editable_mesh_vertex_changed(
+		editable_vertices_before_general_band_restore,
+		_collect_editable_mesh_vertices(stage2_item_state)
+	)
+	var general_band_restore_patch_origins_changed: bool = _has_any_patch_origin_changed(
 		origins_before_general_band_restore,
 		_collect_patch_origins(stage2_item_state)
+	)
+	var baseline_distance_after_general_band_restore: float = _resolve_editable_mesh_total_baseline_distance(stage2_item_state)
+	var general_feature_band_restore_changed_shell: bool = (
+		general_feature_band_restore_applied
+		and (
+			(
+				general_band_restore_uses_editable_mesh
+				and general_band_restore_vertices_changed
+				and baseline_distance_after_general_band_restore < baseline_distance_before_general_band_restore
+			)
+			or (
+				not general_band_restore_uses_editable_mesh
+				and general_band_restore_patch_origins_changed
+			)
+		)
 	)
 
 	var lines: PackedStringArray = []
 	lines.append("stage2_geometry_menu_feature_band_restore_hidden=%s" % str(feature_band_restore_hidden))
 	lines.append("restore_tool_revert_visible=%s" % str(restore_tool_revert_visible))
 	lines.append("restore_tool_clear_visible=%s" % str(restore_tool_clear_visible))
+	lines.append("grip_safe_feature_band_seed_changed_shell=%s" % str(grip_safe_feature_band_seed_changed_shell))
 	lines.append("grip_safe_feature_band_selected_count=%d" % grip_safe_band_patch_ids.size())
 	lines.append("grip_safe_feature_band_apply_target_count=%d" % grip_safe_band_apply_patch_ids.size())
+	lines.append("grip_safe_feature_band_restore_applied=%s" % str(grip_safe_feature_band_restore_applied))
+	lines.append("grip_safe_feature_band_restore_uses_editable_mesh=%s" % str(grip_safe_band_restore_uses_editable_mesh))
+	lines.append("grip_safe_feature_band_restore_vertices_changed=%s" % str(grip_safe_band_restore_vertices_changed))
+	lines.append("grip_safe_feature_band_restore_patch_origins_changed=%s" % str(grip_safe_band_restore_patch_origins_changed))
+	lines.append("grip_safe_feature_band_baseline_distance_before_restore=%s" % str(baseline_distance_before_grip_safe_band_restore))
+	lines.append("grip_safe_feature_band_baseline_distance_after_restore=%s" % str(baseline_distance_after_grip_safe_band_restore))
 	lines.append("grip_safe_feature_band_restore_changed_shell=%s" % str(grip_safe_feature_band_restore_changed_shell))
+	lines.append("general_feature_band_seed_changed_shell=%s" % str(general_feature_band_seed_changed_shell))
 	lines.append("general_feature_band_selected_count=%d" % general_band_patch_ids.size())
 	lines.append("general_feature_band_apply_target_count=%d" % general_band_apply_patch_ids.size())
+	lines.append("general_feature_band_restore_applied=%s" % str(general_feature_band_restore_applied))
+	lines.append("general_feature_band_restore_uses_editable_mesh=%s" % str(general_band_restore_uses_editable_mesh))
+	lines.append("general_feature_band_restore_vertices_changed=%s" % str(general_band_restore_vertices_changed))
+	lines.append("general_feature_band_restore_patch_origins_changed=%s" % str(general_band_restore_patch_origins_changed))
+	lines.append("general_feature_band_baseline_distance_before_restore=%s" % str(baseline_distance_before_general_band_restore))
+	lines.append("general_feature_band_baseline_distance_after_restore=%s" % str(baseline_distance_after_general_band_restore))
 	lines.append("general_feature_band_restore_changed_shell=%s" % str(general_feature_band_restore_changed_shell))
 
 	var file: FileAccess = FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)
@@ -129,13 +226,13 @@ func _build_front_heavy_sword_wip() -> CraftedItemWIP:
 	wip.forge_builder_path_id = CraftedItemWIP.BUILDER_PATH_MELEE
 
 	var layer_map: Dictionary = {}
-	for x: int in range(40, 52):
+	for x: int in range(32, 58):
 		for y: int in range(24, 27):
 			for z: int in range(18, 20):
 				_add_cell(layer_map, Vector3i(x, y, z), &"mat_wood_gray")
-	for x: int in range(52, 65):
-		for y: int in range(22, 29):
-			for z: int in range(17, 22):
+	for x: int in range(58, 65):
+		for y: int in range(23, 28):
+			for z: int in range(17, 21):
 				_add_cell(layer_map, Vector3i(x, y, z), &"mat_iron_gray")
 
 	var ordered_layers: Array = layer_map.keys()
@@ -212,19 +309,24 @@ func _build_offset_cluster(stage2_item_state, anchor_patch, desired_count: int, 
 		if not patch_state.current_quad.normal.normalized().is_equal_approx(anchor_normal):
 			continue
 		cluster_patch_ids.append(String(patch_id))
-		_set_patch_offset_cells(patch_state, offset_cells)
+		_set_patch_offset_cells(stage2_item_state, patch_state, offset_cells)
 		for neighbor_patch_id_string: String in patch_state.neighbor_patch_ids:
 			var neighbor_patch_id: StringName = StringName(neighbor_patch_id_string)
 			if not visited_lookup.has(neighbor_patch_id):
 				pending_patch_ids.append(neighbor_patch_id)
 	return cluster_patch_ids
 
-func _set_patch_offset_cells(patch_state, offset_cells: float) -> void:
+func _set_patch_offset_cells(stage2_item_state, patch_state, offset_cells: float) -> void:
 	if patch_state == null or patch_state.baseline_quad == null or patch_state.current_quad == null:
 		return
 	var normal: Vector3 = patch_state.current_quad.normal.normalized()
 	patch_state.current_quad.origin_local = patch_state.baseline_quad.origin_local - (normal * offset_cells)
+	patch_state.current_offset_cells = offset_cells
 	patch_state.dirty = true
+	if stage2_item_state != null:
+		stage2_item_state.editable_mesh_visual_authority = true
+		if stage2_item_state.current_editable_mesh_state != null:
+			stage2_item_state.current_editable_mesh_state.dirty = true
 
 func _build_patch_hit_data(patch_state) -> Dictionary:
 	if patch_state == null or patch_state.current_quad == null:
@@ -247,6 +349,7 @@ func _collect_patch_origins(stage2_item_state) -> Array[Vector3]:
 		origins.append(patch_state.current_quad.origin_local)
 	return origins
 
+
 func _has_any_patch_origin_changed(origins_before: Array[Vector3], origins_after: Array[Vector3]) -> bool:
 	if origins_before.size() != origins_after.size():
 		return true
@@ -254,6 +357,49 @@ func _has_any_patch_origin_changed(origins_before: Array[Vector3], origins_after
 		if not origins_before[index].is_equal_approx(origins_after[index]):
 			return true
 	return false
+
+func _collect_editable_mesh_vertices(stage2_item_state) -> Array[Vector3]:
+	var vertices: Array[Vector3] = []
+	if stage2_item_state == null or stage2_item_state.current_editable_mesh_state == null:
+		return vertices
+	var surface_arrays: Array = stage2_item_state.current_editable_mesh_state.get("surface_arrays") as Array
+	if surface_arrays.size() <= Mesh.ARRAY_VERTEX or surface_arrays[Mesh.ARRAY_VERTEX] is not PackedVector3Array:
+		return vertices
+	for vertex: Vector3 in PackedVector3Array(surface_arrays[Mesh.ARRAY_VERTEX]):
+		vertices.append(vertex)
+	return vertices
+
+func _has_any_editable_mesh_vertex_changed(vertices_before: Array[Vector3], vertices_after: Array[Vector3]) -> bool:
+	if vertices_before.size() != vertices_after.size():
+		return true
+	for index: int in range(vertices_before.size()):
+		if not vertices_before[index].is_equal_approx(vertices_after[index]):
+			return true
+	return false
+
+func _resolve_editable_mesh_total_baseline_distance(stage2_item_state) -> float:
+	if (
+		stage2_item_state == null
+		or stage2_item_state.current_editable_mesh_state == null
+		or stage2_item_state.baseline_editable_mesh_state == null
+	):
+		return 0.0
+	var current_surface_arrays: Array = stage2_item_state.current_editable_mesh_state.get("surface_arrays") as Array
+	var baseline_surface_arrays: Array = stage2_item_state.baseline_editable_mesh_state.get("surface_arrays") as Array
+	if (
+		current_surface_arrays.size() <= Mesh.ARRAY_VERTEX
+		or baseline_surface_arrays.size() <= Mesh.ARRAY_VERTEX
+		or current_surface_arrays[Mesh.ARRAY_VERTEX] is not PackedVector3Array
+		or baseline_surface_arrays[Mesh.ARRAY_VERTEX] is not PackedVector3Array
+	):
+		return 0.0
+	var current_vertices: PackedVector3Array = current_surface_arrays[Mesh.ARRAY_VERTEX]
+	var baseline_vertices: PackedVector3Array = baseline_surface_arrays[Mesh.ARRAY_VERTEX]
+	var compared_vertex_count: int = mini(current_vertices.size(), baseline_vertices.size())
+	var total_distance: float = 0.0
+	for vertex_index: int in range(compared_vertex_count):
+		total_distance += current_vertices[vertex_index].distance_to(baseline_vertices[vertex_index])
+	return total_distance
 
 func _popup_has_item_text(popup: PopupMenu, item_text: String) -> bool:
 	if popup == null:

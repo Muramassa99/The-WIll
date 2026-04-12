@@ -64,7 +64,7 @@ func _run_verification() -> void:
 	lines.append("ranged_quiver_component=%s" % String(ranged_quiver_wip.forge_builder_component_id))
 	lines.append("ranged_quiver_grid=%s" % str(ranged_quiver_grid))
 	lines.append("ranged_quiver_grid_is_correct=%s" % str(
-		ranged_quiver_wip != null and ranged_quiver_grid == Vector3i(70, 30, 30)
+		ranged_quiver_wip != null and ranged_quiver_grid == Vector3i(140, 60, 60)
 	))
 	lines.append("quiver_source_mentions_quiver=%s" % str(
 		quiver_source_text.to_lower().contains("quiver")
@@ -74,13 +74,13 @@ func _run_verification() -> void:
 		reset_quiver_wip != null
 		and reset_quiver_wip.forge_builder_path_id == CraftedItemWIP.BUILDER_PATH_RANGED_PHYSICAL
 		and reset_quiver_wip.forge_builder_component_id == CraftedItemWIP.BUILDER_COMPONENT_QUIVER
-		and reset_quiver_grid == Vector3i(70, 30, 30)
+		and reset_quiver_grid == Vector3i(140, 60, 60)
 	))
 	lines.append("legacy_ranged_grid=%s" % str(legacy_ranged_grid))
 	lines.append("legacy_saved_defaulted_to_bow=%s" % str(
 		forge_controller.active_wip != null
 		and forge_controller.active_wip.forge_builder_component_id == CraftedItemWIP.BUILDER_COMPONENT_BOW
-		and legacy_ranged_grid == Vector3i(160, 80, 30)
+		and legacy_ranged_grid == Vector3i(320, 160, 60)
 	))
 
 	var file: FileAccess = FileAccess.open("c:/WORKSPACE/ranged_physical_component_foundation_results.txt", FileAccess.WRITE)

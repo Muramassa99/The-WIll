@@ -13,6 +13,9 @@ const TOOL_PICK: StringName = &"pick"
 const DEFAULT_STAGE2_POINTER_TOOL_MIN_RADIUS_METERS: float = 0.0125
 const DEFAULT_STAGE2_POINTER_TOOL_MAX_RADIUS_METERS: float = 0.375
 const DEFAULT_STAGE2_POINTER_TOOL_RADIUS_STEP_METERS: float = 0.0125
+const DEFAULT_STAGE2_TOOL_MIN_AMOUNT_RATIO: float = 0.05
+const DEFAULT_STAGE2_TOOL_MAX_AMOUNT_RATIO: float = 1.0
+const DEFAULT_STAGE2_TOOL_AMOUNT_RATIO_STEP: float = 0.05
 
 const PLANE_XY: StringName = &"xy"
 const PLANE_ZX: StringName = &"zx"
@@ -67,11 +70,24 @@ const MENU_GEOMETRY_TOOL_TRIANGLE_PLACE := 245
 const MENU_GEOMETRY_TOOL_TRIANGLE_ERASE := 246
 const MENU_GEOMETRY_SHAPE_ROTATE_LEFT := 247
 const MENU_GEOMETRY_SHAPE_ROTATE_RIGHT := 248
+const MENU_GEOMETRY_HANDLES_PANEL := 270
 const MENU_GEOMETRY_PLANE_XY := 203
 const MENU_GEOMETRY_PLANE_ZX := 204
 const MENU_GEOMETRY_PLANE_ZY := 205
 const MENU_GEOMETRY_LAYER_DOWN := 206
 const MENU_GEOMETRY_LAYER_UP := 207
+const MENU_TOOL_RADIUS_DOWN := 249
+const MENU_TOOL_RADIUS_UP := 250
+const MENU_TOOL_AMOUNT_DOWN := 251
+const MENU_TOOL_AMOUNT_UP := 252
+const MENU_TOOL_SHAPE_ROTATE_LEFT := 253
+const MENU_TOOL_SHAPE_ROTATE_RIGHT := 254
+const MENU_TOOL_SHAPE_MODE_DRAW := 255
+const MENU_TOOL_SHAPE_MODE_ERASE := 256
+const MENU_TOOL_SHAPE_PRIMARY_DOWN := 257
+const MENU_TOOL_SHAPE_PRIMARY_UP := 258
+const MENU_TOOL_SHAPE_SECONDARY_DOWN := 259
+const MENU_TOOL_SHAPE_SECONDARY_UP := 260
 const MENU_WORKFLOW_BAKE := 300
 const MENU_WORKFLOW_RESET := 301
 const MENU_WORKFLOW_CLOSE := 302
@@ -210,6 +226,7 @@ const ForgeWorkspaceShapeToolPresenterScript = preload("res://runtime/forge/forg
 @onready var status_menu_button: MenuButton = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow/StatusMenuButton
 @onready var view_menu_button: MenuButton = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow/ViewMenuButton
 @onready var geometry_menu_button: MenuButton = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow/GeometryMenuButton
+@onready var tool_menu_button: MenuButton = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow/ToolMenuButton
 @onready var workflow_menu_button: MenuButton = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow/WorkflowMenuButton
 @onready var flip_view_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow/FlipViewButton
 @onready var debug_info_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/ActionHostRow/DebugInfoButton
@@ -228,6 +245,7 @@ const ForgeWorkspaceShapeToolPresenterScript = preload("res://runtime/forge/forg
 @onready var rotation_status_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/RotationStatusLabel
 @onready var material_status_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/MaterialStatusLabel
 @onready var radius_status_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/RadiusStatusLabel
+@onready var tool_amount_status_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ToolAmountStatusLabel
 @onready var orientation_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/FreeViewPanel/FreeVBox/OrientationLabel
 @onready var stow_hint_popup: PopupPanel = $StowHintPopup
 @onready var stow_hint_label: Label = $StowHintPopup/StowHintMargin/StowHintLabel
@@ -277,6 +295,8 @@ var bench_start_menu_presenter = ForgeBenchStartMenuPresenterScript.new()
 var show_grid_bounds: bool = true
 var show_active_slice: bool = true
 var main_workspace_mode: StringName = WORKSPACE_VIEW_FREE
+var stage1_main_workspace_mode_before_stage2_refinement: StringName = WORKSPACE_VIEW_FREE
+var stage1_show_active_slice_before_stage2_refinement: bool = true
 var suppress_active_wip_refresh: bool = false
 var cached_material_lookup: Dictionary = {}
 var debug_status_dirty: bool = true
@@ -304,12 +324,39 @@ var structural_shape_preview_dirty: bool = false
 var structural_shape_last_committed_layer: int = -1
 var structural_shape_last_committed_plane: StringName = StringName()
 var structural_shape_rotation_quadrant: int = 0
+var selected_handle_preset_id: StringName = StringName()
+var rectangle_shape_size_a_cells: int = 1
+var rectangle_shape_size_b_cells: int = 1
+var circle_shape_radius_cells: int = 1
+var oval_shape_size_a_cells: int = 1
+var oval_shape_size_b_cells: int = 1
+var triangle_shape_size_a_cells: int = 1
+var triangle_shape_size_b_cells: int = 1
 var stage2_brush_radius_meters: float = 0.0
-var stage2_hover_patch_ids: PackedStringArray = PackedStringArray()
-var stage2_selected_patch_ids: PackedStringArray = PackedStringArray()
+var stage2_tool_amount_ratio: float = 1.0
+var stage2_hover_face_ids: PackedStringArray = PackedStringArray()
+var stage2_selected_face_ids: PackedStringArray = PackedStringArray()
+var stage2_hover_edge_ids: PackedStringArray = PackedStringArray()
+var stage2_selected_edge_ids: PackedStringArray = PackedStringArray()
+var stage2_hover_region_ids: PackedStringArray = PackedStringArray()
+var stage2_selected_region_ids: PackedStringArray = PackedStringArray()
+var stage2_hover_band_ids: PackedStringArray = PackedStringArray()
+var stage2_selected_band_ids: PackedStringArray = PackedStringArray()
+var stage2_hover_cluster_ids: PackedStringArray = PackedStringArray()
+var stage2_selected_cluster_ids: PackedStringArray = PackedStringArray()
+var stage2_hover_bridge_ids: PackedStringArray = PackedStringArray()
+var stage2_selected_bridge_ids: PackedStringArray = PackedStringArray()
+var stage2_hover_contour_ids: PackedStringArray = PackedStringArray()
+var stage2_selected_contour_ids: PackedStringArray = PackedStringArray()
+var stage2_hover_loop_ids: PackedStringArray = PackedStringArray()
+var stage2_selected_loop_ids: PackedStringArray = PackedStringArray()
+var geometry_handles_popup: PopupPanel
+var geometry_handles_grid: GridContainer
+var handle_preset_icon_cache: Dictionary = {}
 var tool_state_modifier: StringName = ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD
 var stage1_tool_family: StringName = ForgeWorkspaceShapeToolPresenterScript.FAMILY_FREEHAND
 var stage2_tool_family: StringName = ForgeStage2BrushPresenterScript.FAMILY_STAGE2_CARVE
+var stage2_amount_modifier_active: bool = false
 
 func _ready() -> void:
 	panel.visible = false
@@ -324,6 +371,7 @@ func _ready() -> void:
 	_populate_grip_style_options()
 	_ensure_free_workspace_preview()
 	stage2_brush_radius_meters = _get_view_tuning().workspace_stage2_default_brush_radius_meters
+	stage2_tool_amount_ratio = _clamp_stage2_tool_amount_ratio(stage2_tool_amount_ratio)
 	plane_viewport.set_view_tuning(_get_view_tuning())
 	_sync_workspace_hosts()
 	if not get_viewport().size_changed.is_connected(_queue_layout_refresh):
@@ -341,7 +389,11 @@ func _process(delta: float) -> void:
 	_process_pending_edit_refresh(delta)
 	_refresh_axis_indicator()
 
+func _input(event: InputEvent) -> void:
+	_update_stage2_amount_modifier_state(event)
+
 func _unhandled_input(event: InputEvent) -> void:
+	_update_stage2_amount_modifier_state(event)
 	if workspace_edit_flow.is_free_view_drag_active():
 		if event is InputEventMouseMotion:
 			workspace_interaction_presenter.handle_free_view_drag_motion_state(
@@ -413,6 +465,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		_set_active_plane(PLANE_ZY)
 		get_viewport().set_input_as_handled()
 
+func _update_stage2_amount_modifier_state(event: InputEvent) -> void:
+	if event is not InputEventKey:
+		return
+	var key_event: InputEventKey = event
+	if key_event.keycode != KEY_V or key_event.echo:
+		return
+	stage2_amount_modifier_active = key_event.pressed
+
 func toggle_for(player: PlayerController3D, controller: ForgeGridController, bench_name: String) -> void:
 	if panel.visible:
 		close_ui()
@@ -427,6 +487,7 @@ func toggle_start_menu_for(player: PlayerController3D, controller: ForgeGridCont
 
 func open_for(player: PlayerController3D, controller: ForgeGridController, bench_name: String) -> void:
 	_set_stage2_refinement_mode(false, false)
+	stage2_amount_modifier_active = false
 	active_player = player
 	forge_controller = controller
 	current_bench_name = bench_name
@@ -459,10 +520,12 @@ func open_for(player: PlayerController3D, controller: ForgeGridController, bench
 	_show_editor_surface_for_current_wip()
 
 func open_start_menu_for(player: PlayerController3D, controller: ForgeGridController, bench_name: String) -> void:
+	stage2_amount_modifier_active = false
 	open_for(player, controller, bench_name)
 	_show_start_menu()
 
 func close_ui() -> void:
+	stage2_amount_modifier_active = false
 	_set_stage2_refinement_mode(false, false)
 	_autosave_current_wip_if_needed()
 	project_manager_popup.hide()
@@ -612,6 +675,7 @@ func _connect_ui_signals() -> void:
 	project_menu_button.get_popup().about_to_popup.connect(_rebuild_project_menu)
 	status_menu_button.get_popup().about_to_popup.connect(_rebuild_status_menu)
 	geometry_menu_button.get_popup().about_to_popup.connect(_rebuild_geometry_menu)
+	tool_menu_button.get_popup().about_to_popup.connect(_rebuild_tool_menu)
 	flip_view_button.pressed.connect(_on_flip_view_pressed)
 	debug_info_button.pressed.connect(_open_debug_popup)
 	debug_close_button.pressed.connect(func() -> void: debug_popup.hide())
@@ -621,22 +685,58 @@ func _connect_ui_signals() -> void:
 	plane_viewport.drag_started.connect(_on_plane_drag_started)
 	plane_viewport.drag_updated.connect(_on_plane_drag_updated)
 	plane_viewport.stroke_finished.connect(_on_plane_stroke_finished)
+	plane_viewport.hover_grid_position_updated.connect(_on_plane_hover_grid_position_updated)
+	plane_viewport.mouse_exited.connect(_on_plane_mouse_exited)
 	free_view_panel.gui_input.connect(_on_free_view_panel_gui_input)
 	free_view_container.gui_input.connect(_on_free_view_gui_input)
 
 func _configure_action_menus() -> void:
+	if selected_handle_preset_id == StringName():
+		selected_handle_preset_id = workspace_shape_tool_presenter.get_default_handle_preset_id()
 	bench_menu_presenter.configure_action_menus(
 		project_menu_button,
 		status_menu_button,
 		view_menu_button,
 		geometry_menu_button,
+		tool_menu_button,
 		workflow_menu_button,
 		Callable(self, "_on_action_menu_id_pressed"),
 		_get_action_menu_ids()
 	)
+	_ensure_geometry_handles_popup()
+	var tool_popup: PopupMenu = tool_menu_button.get_popup()
+	tool_popup.hide_on_item_selection = false
+	tool_popup.hide_on_checkable_item_selection = false
 	_rebuild_project_menu()
 	_rebuild_status_menu()
 	_rebuild_geometry_menu()
+	_rebuild_tool_menu()
+
+func _ensure_geometry_handles_popup() -> void:
+	if is_instance_valid(geometry_handles_popup):
+		return
+	geometry_handles_popup = PopupPanel.new()
+	geometry_handles_popup.name = "GeometryHandlesPopup"
+	geometry_handles_popup.visible = false
+	geometry_handles_popup.unresizable = true
+	add_child(geometry_handles_popup)
+
+	var panel_margin: MarginContainer = MarginContainer.new()
+	panel_margin.name = "GeometryHandlesMargin"
+	panel_margin.add_theme_constant_override("margin_left", 8)
+	panel_margin.add_theme_constant_override("margin_top", 8)
+	panel_margin.add_theme_constant_override("margin_right", 8)
+	panel_margin.add_theme_constant_override("margin_bottom", 8)
+	geometry_handles_popup.add_child(panel_margin)
+
+	var grid: GridContainer = GridContainer.new()
+	grid.name = "GeometryHandlesGrid"
+	grid.columns = 4
+	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	panel_margin.add_child(grid)
+	geometry_handles_grid = grid
+	_rebuild_geometry_handles_popup()
 
 func _populate_stow_position_options() -> void:
 	project_panel_presenter.populate_stow_position_options(project_stow_position_option_button)
@@ -837,6 +937,7 @@ func _sync_workspace_hosts() -> void:
 		plane_title_label,
 		flip_view_button
 	)
+	_apply_stage2_workspace_host_constraints()
 	if is_instance_valid(tool_overlay_host):
 		tool_overlay_host.move_to_front()
 
@@ -858,9 +959,18 @@ func _apply_workspace_layout(compact_mode: bool) -> void:
 		WORKSPACE_VIEW_FREE,
 		WORKSPACE_VIEW_PLANE
 	)
+	_apply_stage2_workspace_host_constraints()
 	call_deferred("_sync_free_subviewport_size")
 	if is_instance_valid(tool_overlay_host):
 		tool_overlay_host.move_to_front()
+
+func _apply_stage2_workspace_host_constraints() -> void:
+	if is_instance_valid(inset_viewport_host):
+		inset_viewport_host.visible = not stage2_refinement_mode_active
+	if is_instance_valid(flip_view_button):
+		flip_view_button.disabled = stage2_refinement_mode_active
+		if stage2_refinement_mode_active:
+			flip_view_button.text = "3D Locked"
 
 func _sync_free_subviewport_size() -> void:
 	workspace_layout_presenter.sync_free_subviewport_size(free_view_container, free_subviewport)
@@ -935,11 +1045,38 @@ func _refresh_stage2_selection_preview() -> void:
 	):
 		free_workspace_preview.clear_stage2_selection_preview()
 		return
+	var hovered_preview_patch_ids: PackedStringArray = _resolve_stage2_patch_ids_for_selection_state(
+		current_wip.stage2_item_state,
+		true
+	)
+	var selected_preview_patch_ids: PackedStringArray = _resolve_stage2_patch_ids_for_selection_state(
+		current_wip.stage2_item_state,
+		false
+	)
 	free_workspace_preview.set_stage2_selection_preview_state(
 		current_wip.stage2_item_state,
-		stage2_hover_patch_ids,
-		stage2_selected_patch_ids,
-		forge_controller.test_print_mesh_builder
+		stage2_hover_face_ids,
+		stage2_selected_face_ids,
+		hovered_preview_patch_ids,
+		selected_preview_patch_ids,
+		forge_controller.test_print_mesh_builder,
+		&"surface_face" if stage2_selection_presenter.is_surface_face_tool(active_tool) else StringName()
+	)
+
+func _resolve_stage2_patch_ids_for_selection_state(stage2_item_state: Resource, use_hover_state: bool) -> PackedStringArray:
+	if stage2_item_state == null:
+		return PackedStringArray()
+	return stage2_selection_presenter.resolve_patch_ids_for_selection_identifiers(
+		stage2_item_state,
+		active_tool,
+		stage2_hover_face_ids if use_hover_state else stage2_selected_face_ids,
+		stage2_hover_edge_ids if use_hover_state else stage2_selected_edge_ids,
+		stage2_hover_region_ids if use_hover_state else stage2_selected_region_ids,
+		stage2_hover_band_ids if use_hover_state else stage2_selected_band_ids,
+		stage2_hover_cluster_ids if use_hover_state else stage2_selected_cluster_ids,
+		stage2_hover_bridge_ids if use_hover_state else stage2_selected_bridge_ids,
+		stage2_hover_contour_ids if use_hover_state else stage2_selected_contour_ids,
+		stage2_hover_loop_ids if use_hover_state else stage2_selected_loop_ids
 	)
 
 func _refresh_axis_indicator() -> void:
@@ -986,6 +1123,9 @@ func _update_structural_shape_preview() -> void:
 		_clear_structural_shape_preview()
 		return
 	if workspace_shape_tool_presenter.is_shape_tool(active_tool) and forge_controller != null:
+		var use_fixed_shape_size: bool = structural_shape_drag_anchor_grid_position == structural_shape_drag_current_grid_position
+		var shape_settings: Dictionary = _get_stage1_shape_settings()
+		shape_settings["use_fixed_size"] = use_fixed_shape_size
 		structural_shape_preview_grid_positions = workspace_shape_tool_presenter.build_shape_footprint(
 			active_tool,
 			structural_shape_drag_anchor_grid_position,
@@ -993,7 +1133,8 @@ func _update_structural_shape_preview() -> void:
 			active_plane,
 			active_layer,
 			forge_controller.grid_size,
-			structural_shape_rotation_quadrant
+			structural_shape_rotation_quadrant,
+			shape_settings
 		)
 	else:
 		structural_shape_preview_grid_positions.clear()
@@ -1151,7 +1292,7 @@ func _refresh_tool_overlay() -> void:
 	shape_size_status_label.visible = show_shape_status
 	rotation_status_label.visible = show_shape_status
 	if show_shape_status:
-		shape_size_status_label.text = "Size: Drag Footprint"
+		shape_size_status_label.text = _get_stage1_shape_overlay_size_text()
 		rotation_status_label.text = "Rotation: %d°" % workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_quadrant)
 	var show_material_status: bool = _should_show_overlay_material_status()
 	material_status_label.visible = show_material_status
@@ -1161,6 +1302,11 @@ func _refresh_tool_overlay() -> void:
 	radius_status_label.visible = show_radius_status
 	if show_radius_status:
 		radius_status_label.text = "Radius: %s m" % _format_overlay_radius_text(stage2_brush_radius_meters)
+	var show_amount_status: bool = _should_show_overlay_amount_status()
+	tool_amount_status_label.visible = show_amount_status
+	if show_amount_status:
+		tool_amount_status_label.text = "Amount: %d%%" % int(round(stage2_tool_amount_ratio * 100.0))
+	_rebuild_tool_menu()
 
 func _on_primary_overlay_tool_pressed() -> void:
 	_set_tool_state_modifier(ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD)
@@ -1169,6 +1315,12 @@ func _on_secondary_overlay_tool_pressed() -> void:
 	_set_tool_state_modifier(ForgeWorkspaceShapeToolPresenterScript.MODIFIER_REMOVE)
 
 func _get_overlay_tool_state_text() -> String:
+	if stage2_refinement_mode_active:
+		match tool_state_modifier:
+			ForgeWorkspaceShapeToolPresenterScript.MODIFIER_REMOVE:
+				return "Revert"
+			_:
+				return "Apply"
 	match tool_state_modifier:
 		ForgeWorkspaceShapeToolPresenterScript.MODIFIER_PICK:
 			return "Pick"
@@ -1184,6 +1336,11 @@ func _get_overlay_active_tool_text() -> String:
 		if stage2_selection_presenter.is_selection_family(stage2_tool_family):
 			return stage2_selection_presenter.get_selection_tool_display_name(stage2_tool_family)
 		return stage2_brush_presenter.get_pointer_tool_display_name(stage2_tool_family)
+	return _get_stage1_tool_display_text()
+
+func _get_stage1_tool_display_text() -> String:
+	if stage1_tool_family == ForgeWorkspaceShapeToolPresenterScript.FAMILY_HANDLE:
+		return "Handle: %s" % workspace_shape_tool_presenter.get_handle_preset_label(selected_handle_preset_id)
 	return workspace_shape_tool_presenter.get_stage1_tool_display_name(stage1_tool_family)
 
 func _should_show_overlay_material_status() -> bool:
@@ -1217,8 +1374,63 @@ func _should_show_overlay_radius_status() -> bool:
 		and stage2_brush_presenter.is_pointer_radius_family(stage2_tool_family)
 	)
 
+func _should_show_overlay_amount_status() -> bool:
+	return (
+		stage2_refinement_mode_active
+		and (
+			stage2_brush_presenter.is_pointer_radius_family(stage2_tool_family)
+			or stage2_selection_presenter.is_selection_family(stage2_tool_family)
+		)
+	)
+
 func _format_overlay_radius_text(radius_meters: float) -> String:
 	return ("%.4f" % snappedf(radius_meters, 0.0001)).rstrip("0").rstrip(".")
+
+func _build_tool_menu_state() -> Dictionary:
+	var shape_adjustments_visible: bool = (
+		not stage2_refinement_mode_active
+		and workspace_shape_tool_presenter.is_shape_family(stage1_tool_family)
+	)
+	var shape_remove_mode_active: bool = (
+		shape_adjustments_visible
+		and tool_state_modifier == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_REMOVE
+	)
+	var radius_visible: bool = _should_show_overlay_radius_status()
+	var amount_visible: bool = _should_show_overlay_amount_status()
+	var min_radius_meters: float = _get_stage2_pointer_tool_min_radius_meters()
+	var max_radius_meters: float = _get_stage2_pointer_tool_max_radius_meters()
+	var min_amount_ratio: float = _get_stage2_tool_min_amount_ratio()
+	var max_amount_ratio: float = _get_stage2_tool_max_amount_ratio()
+	var shape_settings: Dictionary = _get_stage1_shape_settings()
+	return {
+		"shape_adjustments_visible": shape_adjustments_visible,
+		"shape_tool_text": "Shape Tool: %s" % _get_stage1_tool_display_text(),
+		"shape_size_text": String(shape_settings.get("menu_summary_text", "Sizing")),
+		"shape_size_controls_visible": bool(shape_settings.get("size_controls_visible", true)),
+		"shape_primary_text": String(shape_settings.get("primary_text", "Size A: 1")),
+		"shape_primary_down_text": String(shape_settings.get("primary_down_text", "Size A -")),
+		"shape_primary_up_text": String(shape_settings.get("primary_up_text", "Size A +")),
+		"shape_primary_decrease_enabled": bool(shape_settings.get("primary_decrease_enabled", false)),
+		"shape_primary_increase_enabled": bool(shape_settings.get("primary_increase_enabled", false)),
+		"shape_secondary_visible": bool(shape_settings.get("secondary_visible", false)),
+		"shape_secondary_text": String(shape_settings.get("secondary_text", "Size B: 1")),
+		"shape_secondary_down_text": String(shape_settings.get("secondary_down_text", "Size B -")),
+		"shape_secondary_up_text": String(shape_settings.get("secondary_up_text", "Size B +")),
+		"shape_secondary_decrease_enabled": bool(shape_settings.get("secondary_decrease_enabled", false)),
+		"shape_secondary_increase_enabled": bool(shape_settings.get("secondary_increase_enabled", false)),
+		"shape_mode_text": "Mode: %s" % ("Erase" if shape_remove_mode_active else "Draw"),
+		"shape_draw_enabled": shape_adjustments_visible and shape_remove_mode_active,
+		"shape_erase_enabled": shape_adjustments_visible and not shape_remove_mode_active,
+		"shape_rotation_text": "Rotation: %d deg" % workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_quadrant),
+		"stage2_radius_visible": radius_visible,
+		"stage2_radius_text": "Radius: %s m" % _format_overlay_radius_text(stage2_brush_radius_meters),
+		"stage2_radius_decrease_enabled": radius_visible and stage2_brush_radius_meters > min_radius_meters + 0.00001,
+		"stage2_radius_increase_enabled": radius_visible and stage2_brush_radius_meters < max_radius_meters - 0.00001,
+		"stage2_amount_visible": amount_visible,
+		"stage2_amount_text": "Amount: %d%%" % int(round(stage2_tool_amount_ratio * 100.0)),
+		"stage2_amount_decrease_enabled": amount_visible and stage2_tool_amount_ratio > min_amount_ratio + 0.00001,
+		"stage2_amount_increase_enabled": amount_visible and stage2_tool_amount_ratio < max_amount_ratio - 0.00001,
+	}
 
 func _refresh_status_text() -> void:
 	last_debug_text = bench_panel_presenter.refresh_status_text(
@@ -1284,9 +1496,24 @@ func _compose_effective_active_tool_from_state() -> StringName:
 
 func _apply_active_tool_change(refresh_ui: bool = true) -> void:
 	active_tool = workspace_interaction_presenter.resolve_active_tool(_compose_effective_active_tool_from_state())
+	if (
+		not stage2_refinement_mode_active
+		and workspace_shape_tool_presenter.is_shape_tool(active_tool)
+		and main_workspace_mode != WORKSPACE_VIEW_PLANE
+	):
+		main_workspace_mode = WORKSPACE_VIEW_PLANE
+		_sync_workspace_hosts()
+		_refresh_plane_and_preview()
 	if not workspace_shape_tool_presenter.is_shape_tool(active_tool):
 		_clear_structural_shape_preview()
-	stage2_hover_patch_ids = PackedStringArray()
+	stage2_hover_face_ids = PackedStringArray()
+	stage2_hover_edge_ids = PackedStringArray()
+	stage2_hover_region_ids = PackedStringArray()
+	stage2_hover_band_ids = PackedStringArray()
+	stage2_hover_cluster_ids = PackedStringArray()
+	stage2_hover_bridge_ids = PackedStringArray()
+	stage2_hover_contour_ids = PackedStringArray()
+	stage2_hover_loop_ids = PackedStringArray()
 	_rebuild_geometry_menu()
 	if is_instance_valid(free_workspace_preview):
 		if _is_stage2_selection_tool(active_tool):
@@ -1344,6 +1571,147 @@ func _step_structural_shape_rotation(delta_quadrants: int) -> void:
 		_update_structural_shape_preview()
 	_rebuild_geometry_menu()
 	_refresh_left_panel()
+	_refresh_status_text()
+
+func _get_active_plane_dimensions() -> Vector2i:
+	var grid_size: Vector3i = forge_controller.grid_size if forge_controller != null else Vector3i.ONE
+	match active_plane:
+		PLANE_ZX:
+			return Vector2i(maxi(grid_size.z, 1), maxi(grid_size.x, 1))
+		PLANE_ZY:
+			return Vector2i(maxi(grid_size.z, 1), maxi(grid_size.y, 1))
+		_:
+			return Vector2i(maxi(grid_size.x, 1), maxi(grid_size.y, 1))
+
+func _get_stage1_shape_settings() -> Dictionary:
+	var plane_dimensions: Vector2i = _get_active_plane_dimensions()
+	match stage1_tool_family:
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_CIRCLE:
+			var max_radius_cells: int = maxi(int(ceil(float(mini(plane_dimensions.x, plane_dimensions.y)) * 0.5)), 1)
+			circle_shape_radius_cells = clampi(circle_shape_radius_cells, 1, max_radius_cells)
+			return {
+				"menu_summary_text": "Click Radius: %d cells" % circle_shape_radius_cells,
+				"overlay_text": "Radius: %d cells" % circle_shape_radius_cells,
+				"primary_text": "Radius: %d cells" % circle_shape_radius_cells,
+				"primary_down_text": "Radius -",
+				"primary_up_text": "Radius +",
+				"primary_decrease_enabled": circle_shape_radius_cells > 1,
+				"primary_increase_enabled": circle_shape_radius_cells < max_radius_cells,
+				"secondary_visible": false,
+				"radius_cells": circle_shape_radius_cells,
+			}
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_OVAL:
+			oval_shape_size_a_cells = clampi(oval_shape_size_a_cells, 1, maxi(plane_dimensions.x, 1))
+			oval_shape_size_b_cells = clampi(oval_shape_size_b_cells, 1, maxi(plane_dimensions.y, 1))
+			return {
+				"menu_summary_text": "Click Size: %d x %d" % [oval_shape_size_a_cells, oval_shape_size_b_cells],
+				"overlay_text": "Size: %d x %d" % [oval_shape_size_a_cells, oval_shape_size_b_cells],
+				"primary_text": "Size A: %d cells" % oval_shape_size_a_cells,
+				"primary_down_text": "Size A -",
+				"primary_up_text": "Size A +",
+				"primary_decrease_enabled": oval_shape_size_a_cells > 1,
+				"primary_increase_enabled": oval_shape_size_a_cells < maxi(plane_dimensions.x, 1),
+				"secondary_visible": true,
+				"secondary_text": "Size B: %d cells" % oval_shape_size_b_cells,
+				"secondary_down_text": "Size B -",
+				"secondary_up_text": "Size B +",
+				"secondary_decrease_enabled": oval_shape_size_b_cells > 1,
+				"secondary_increase_enabled": oval_shape_size_b_cells < maxi(plane_dimensions.y, 1),
+				"size_a_cells": oval_shape_size_a_cells,
+				"size_b_cells": oval_shape_size_b_cells,
+			}
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_TRIANGLE:
+			triangle_shape_size_a_cells = clampi(triangle_shape_size_a_cells, 1, maxi(plane_dimensions.x, 1))
+			triangle_shape_size_b_cells = clampi(triangle_shape_size_b_cells, 1, maxi(plane_dimensions.y, 1))
+			return {
+				"menu_summary_text": "Click Size: %d x %d" % [triangle_shape_size_a_cells, triangle_shape_size_b_cells],
+				"overlay_text": "Size: %d x %d" % [triangle_shape_size_a_cells, triangle_shape_size_b_cells],
+				"primary_text": "Side A: %d cells" % triangle_shape_size_a_cells,
+				"primary_down_text": "Side A -",
+				"primary_up_text": "Side A +",
+				"primary_decrease_enabled": triangle_shape_size_a_cells > 1,
+				"primary_increase_enabled": triangle_shape_size_a_cells < maxi(plane_dimensions.x, 1),
+				"secondary_visible": true,
+				"secondary_text": "Side B: %d cells" % triangle_shape_size_b_cells,
+				"secondary_down_text": "Side B -",
+				"secondary_up_text": "Side B +",
+				"secondary_decrease_enabled": triangle_shape_size_b_cells > 1,
+				"secondary_increase_enabled": triangle_shape_size_b_cells < maxi(plane_dimensions.y, 1),
+				"size_a_cells": triangle_shape_size_a_cells,
+				"size_b_cells": triangle_shape_size_b_cells,
+			}
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_RECTANGLE:
+			rectangle_shape_size_a_cells = clampi(rectangle_shape_size_a_cells, 1, maxi(plane_dimensions.x, 1))
+			rectangle_shape_size_b_cells = clampi(rectangle_shape_size_b_cells, 1, maxi(plane_dimensions.y, 1))
+			return {
+				"menu_summary_text": "Click Size: %d x %d" % [rectangle_shape_size_a_cells, rectangle_shape_size_b_cells],
+				"overlay_text": "Size: %d x %d" % [rectangle_shape_size_a_cells, rectangle_shape_size_b_cells],
+				"primary_text": "Size A: %d cells" % rectangle_shape_size_a_cells,
+				"primary_down_text": "Size A -",
+				"primary_up_text": "Size A +",
+				"primary_decrease_enabled": rectangle_shape_size_a_cells > 1,
+				"primary_increase_enabled": rectangle_shape_size_a_cells < maxi(plane_dimensions.x, 1),
+				"secondary_visible": true,
+				"secondary_text": "Size B: %d cells" % rectangle_shape_size_b_cells,
+				"secondary_down_text": "Size B -",
+				"secondary_up_text": "Size B +",
+				"secondary_decrease_enabled": rectangle_shape_size_b_cells > 1,
+				"secondary_increase_enabled": rectangle_shape_size_b_cells < maxi(plane_dimensions.y, 1),
+				"size_a_cells": rectangle_shape_size_a_cells,
+				"size_b_cells": rectangle_shape_size_b_cells,
+			}
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_HANDLE:
+			return {
+				"menu_summary_text": "Preset: %s" % workspace_shape_tool_presenter.get_handle_preset_label(selected_handle_preset_id),
+				"overlay_text": "Preset: %s" % workspace_shape_tool_presenter.get_handle_preset_label(selected_handle_preset_id),
+				"size_controls_visible": false,
+				"secondary_visible": false,
+				"handle_preset_id": selected_handle_preset_id,
+			}
+		_:
+			return {
+				"menu_summary_text": "Sizing: Drag on Workspace",
+				"overlay_text": "Sizing: Drag on Workspace",
+				"size_controls_visible": false,
+				"secondary_visible": false,
+			}
+
+func _get_stage1_shape_overlay_size_text() -> String:
+	return String(_get_stage1_shape_settings().get("overlay_text", "Sizing: Drag on Workspace"))
+
+func _step_stage1_shape_primary_size(step_direction: int) -> void:
+	var plane_dimensions: Vector2i = _get_active_plane_dimensions()
+	match stage1_tool_family:
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_CIRCLE:
+			var max_radius_cells: int = maxi(int(ceil(float(mini(plane_dimensions.x, plane_dimensions.y)) * 0.5)), 1)
+			circle_shape_radius_cells = clampi(circle_shape_radius_cells + step_direction, 1, max_radius_cells)
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_OVAL:
+			oval_shape_size_a_cells = clampi(oval_shape_size_a_cells + step_direction, 1, maxi(plane_dimensions.x, 1))
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_TRIANGLE:
+			triangle_shape_size_a_cells = clampi(triangle_shape_size_a_cells + step_direction, 1, maxi(plane_dimensions.x, 1))
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_RECTANGLE:
+			rectangle_shape_size_a_cells = clampi(rectangle_shape_size_a_cells + step_direction, 1, maxi(plane_dimensions.x, 1))
+		_:
+			return
+	if structural_shape_drag_active and workspace_shape_tool_presenter.is_shape_tool(active_tool):
+		_update_structural_shape_preview()
+	_refresh_tool_overlay()
+	_refresh_status_text()
+
+func _step_stage1_shape_secondary_size(step_direction: int) -> void:
+	var plane_dimensions: Vector2i = _get_active_plane_dimensions()
+	match stage1_tool_family:
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_OVAL:
+			oval_shape_size_b_cells = clampi(oval_shape_size_b_cells + step_direction, 1, maxi(plane_dimensions.y, 1))
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_TRIANGLE:
+			triangle_shape_size_b_cells = clampi(triangle_shape_size_b_cells + step_direction, 1, maxi(plane_dimensions.y, 1))
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_RECTANGLE:
+			rectangle_shape_size_b_cells = clampi(rectangle_shape_size_b_cells + step_direction, 1, maxi(plane_dimensions.y, 1))
+		_:
+			return
+	if structural_shape_drag_active and workspace_shape_tool_presenter.is_shape_tool(active_tool):
+		_update_structural_shape_preview()
+	_refresh_tool_overlay()
 	_refresh_status_text()
 
 func _is_stage2_refinement_tool(tool_id: StringName) -> bool:
@@ -1412,11 +1780,52 @@ func _step_stage2_pointer_tool_radius(step_direction: int, hover_screen_position
 	if hover_screen_position != Vector2.ZERO:
 		_update_stage2_brush_hover(hover_screen_position)
 
+func _get_stage2_tool_min_amount_ratio() -> float:
+	var rules: ForgeRulesDef = forge_controller.forge_rules if forge_controller != null else null
+	return (
+		float(rules.stage2_tool_min_amount_ratio)
+		if rules != null
+		else DEFAULT_STAGE2_TOOL_MIN_AMOUNT_RATIO
+	)
+
+func _get_stage2_tool_max_amount_ratio() -> float:
+	var rules: ForgeRulesDef = forge_controller.forge_rules if forge_controller != null else null
+	return (
+		float(rules.stage2_tool_max_amount_ratio)
+		if rules != null
+		else DEFAULT_STAGE2_TOOL_MAX_AMOUNT_RATIO
+	)
+
+func _get_stage2_tool_amount_ratio_step() -> float:
+	var rules: ForgeRulesDef = forge_controller.forge_rules if forge_controller != null else null
+	return (
+		float(rules.stage2_tool_amount_ratio_step)
+		if rules != null
+		else DEFAULT_STAGE2_TOOL_AMOUNT_RATIO_STEP
+	)
+
+func _clamp_stage2_tool_amount_ratio(amount_ratio: float) -> float:
+	var min_amount_ratio: float = _get_stage2_tool_min_amount_ratio()
+	var max_amount_ratio: float = maxf(_get_stage2_tool_max_amount_ratio(), min_amount_ratio)
+	return clampf(amount_ratio, min_amount_ratio, max_amount_ratio)
+
+func _step_stage2_tool_amount(step_direction: int) -> void:
+	if not _should_show_overlay_amount_status():
+		return
+	var next_amount_ratio: float = _clamp_stage2_tool_amount_ratio(
+		stage2_tool_amount_ratio + (float(step_direction) * _get_stage2_tool_amount_ratio_step())
+	)
+	if is_equal_approx(next_amount_ratio, stage2_tool_amount_ratio):
+		return
+	stage2_tool_amount_ratio = next_amount_ratio
+	_refresh_tool_overlay()
+	_refresh_status_text()
+
 func _get_stage2_brush_step_meters() -> float:
 	var cell_world_size_meters: float = (
 		forge_controller.get_cell_world_size_meters()
 		if forge_controller != null
-		else 0.025
+		else 0.0125
 	)
 	return maxf(
 		cell_world_size_meters * _get_view_tuning().workspace_stage2_brush_step_ratio,
@@ -1437,9 +1846,25 @@ func _set_stage2_refinement_mode(next_active: bool, refresh_ui: bool = true) -> 
 			free_workspace_preview.clear_stage2_selection_preview()
 		return
 	stage2_refinement_mode_active = next_active
-	stage2_hover_patch_ids = PackedStringArray()
-	stage2_selected_patch_ids = PackedStringArray()
+	stage2_hover_face_ids = PackedStringArray()
+	stage2_selected_face_ids = PackedStringArray()
+	stage2_hover_edge_ids = PackedStringArray()
+	stage2_selected_edge_ids = PackedStringArray()
+	stage2_hover_region_ids = PackedStringArray()
+	stage2_selected_region_ids = PackedStringArray()
+	stage2_hover_band_ids = PackedStringArray()
+	stage2_selected_band_ids = PackedStringArray()
+	stage2_hover_cluster_ids = PackedStringArray()
+	stage2_selected_cluster_ids = PackedStringArray()
+	stage2_hover_bridge_ids = PackedStringArray()
+	stage2_selected_bridge_ids = PackedStringArray()
+	stage2_hover_contour_ids = PackedStringArray()
+	stage2_selected_contour_ids = PackedStringArray()
+	stage2_hover_loop_ids = PackedStringArray()
+	stage2_selected_loop_ids = PackedStringArray()
 	if stage2_refinement_mode_active:
+		stage1_main_workspace_mode_before_stage2_refinement = main_workspace_mode
+		stage1_show_active_slice_before_stage2_refinement = show_active_slice
 		if not _is_stage2_refinement_tool(active_tool):
 			stage1_active_tool_before_stage2_refinement = active_tool
 		if tool_state_modifier == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_PICK:
@@ -1455,23 +1880,34 @@ func _set_stage2_refinement_mode(next_active: bool, refresh_ui: bool = true) -> 
 				_get_view_tuning().workspace_stage2_default_brush_radius_meters
 			)
 		)
+		stage2_tool_amount_ratio = _clamp_stage2_tool_amount_ratio(stage2_tool_amount_ratio)
+		main_workspace_mode = WORKSPACE_VIEW_FREE
+		show_active_slice = false
+		_clear_layer_hold()
 		if is_instance_valid(free_workspace_preview):
 			free_workspace_preview.clear_stage2_brush_preview()
 			free_workspace_preview.clear_stage2_selection_preview()
 	else:
 		_sync_stage1_tool_state_from_effective_tool(stage1_active_tool_before_stage2_refinement)
+		main_workspace_mode = stage1_main_workspace_mode_before_stage2_refinement
+		show_active_slice = stage1_show_active_slice_before_stage2_refinement
+		_clear_layer_hold()
 		if is_instance_valid(free_workspace_preview):
 			free_workspace_preview.clear_stage2_brush_preview()
 			free_workspace_preview.clear_stage2_selection_preview()
 	_apply_active_tool_change(false)
+	_sync_workspace_hosts()
 	if refresh_ui:
 		_rebuild_geometry_menu()
 		_refresh_left_panel()
 		_refresh_status_text()
 		_rebuild_workflow_menu()
 		_refresh_workspace_visuals()
+		_queue_layout_refresh()
 
 func _set_active_plane(plane_id: StringName) -> void:
+	if stage2_refinement_mode_active:
+		return
 	if structural_shape_drag_active:
 		_clear_structural_shape_preview()
 	var plane_state: Dictionary = workspace_interaction_presenter.resolve_active_plane_state(
@@ -1488,6 +1924,8 @@ func _set_active_plane(plane_id: StringName) -> void:
 	_refresh_status_text()
 
 func _step_layer(delta: int) -> void:
+	if stage2_refinement_mode_active:
+		return
 	var previous_active_layer: int = active_layer
 	var next_active_layer: int = workspace_interaction_presenter.resolve_stepped_layer(
 		active_layer,
@@ -1548,6 +1986,8 @@ func _on_inventory_item_clicked(index: int, _at_position: Vector2, _mouse_button
 	armed_material_variant_id = material_selection_state.get("armed_material_variant_id", StringName())
 
 func _on_flip_view_pressed() -> void:
+	if stage2_refinement_mode_active:
+		return
 	main_workspace_mode = workspace_interaction_presenter.toggle_workspace_mode(
 		main_workspace_mode,
 		WORKSPACE_VIEW_FREE,
@@ -1609,7 +2049,7 @@ func _on_plane_drag_started(grid_position: Vector3i, button_index: MouseButton) 
 	structural_shape_drag_current_grid_position = grid_position
 	_update_structural_shape_preview()
 
-func _on_plane_drag_updated(grid_position: Vector3i, button_index: MouseButton) -> void:
+func _on_plane_drag_updated(_grid_position: Vector3i, button_index: MouseButton) -> void:
 	if stage2_refinement_mode_active:
 		return
 	if not structural_shape_drag_active:
@@ -1618,8 +2058,38 @@ func _on_plane_drag_updated(grid_position: Vector3i, button_index: MouseButton) 
 		return
 	if button_index != MOUSE_BUTTON_LEFT:
 		return
-	structural_shape_drag_current_grid_position = grid_position
-	_update_structural_shape_preview()
+	if structural_shape_drag_current_grid_position != structural_shape_drag_anchor_grid_position:
+		structural_shape_drag_current_grid_position = structural_shape_drag_anchor_grid_position
+
+func _on_plane_hover_grid_position_updated(grid_position: Vector3i) -> void:
+	if stage2_refinement_mode_active:
+		return
+	if structural_shape_drag_active:
+		return
+	if not workspace_shape_tool_presenter.is_shape_tool(active_tool):
+		return
+	if forge_controller == null:
+		return
+	var shape_settings: Dictionary = _get_stage1_shape_settings()
+	shape_settings["use_fixed_size"] = true
+	structural_shape_preview_grid_positions = workspace_shape_tool_presenter.build_shape_footprint(
+		active_tool,
+		grid_position,
+		grid_position,
+		active_plane,
+		active_layer,
+		forge_controller.grid_size,
+		structural_shape_rotation_quadrant,
+		shape_settings
+	)
+	_sync_structural_shape_preview()
+
+func _on_plane_mouse_exited() -> void:
+	if structural_shape_drag_active:
+		return
+	if not workspace_shape_tool_presenter.is_shape_tool(active_tool):
+		return
+	_clear_structural_shape_preview()
 
 func _on_plane_stroke_finished() -> void:
 	if structural_shape_drag_active and workspace_shape_tool_presenter.is_shape_tool(active_tool):
@@ -1632,6 +2102,22 @@ func _on_plane_stroke_finished() -> void:
 	_flush_pending_edit_refresh(true)
 
 func _on_free_view_panel_gui_input(event: InputEvent) -> void:
+	if stage2_refinement_mode_active and event is InputEventMouseButton:
+		var mouse_button: InputEventMouseButton = event
+		if mouse_button.pressed and (
+			(mouse_button.ctrl_pressed and (
+				mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP
+				or mouse_button.button_index == MOUSE_BUTTON_WHEEL_DOWN
+			))
+			or (stage2_amount_modifier_active and (
+				mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP
+				or mouse_button.button_index == MOUSE_BUTTON_WHEEL_DOWN
+			))
+		):
+			if is_instance_valid(free_view_panel):
+				free_view_panel.accept_event()
+			get_viewport().set_input_as_handled()
+			return
 	workspace_interaction_presenter.handle_free_view_panel_gui_input(
 		event,
 		forge_controller,
@@ -1669,18 +2155,43 @@ func _handle_stage2_free_view_gui_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		var mouse_button: InputEventMouseButton = event
+		if stage2_amount_modifier_active and mouse_button.pressed:
+			if mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP:
+				_step_stage2_tool_amount(1)
+				if is_instance_valid(free_view_container):
+					free_view_container.accept_event()
+				get_viewport().set_input_as_handled()
+				return
+			if mouse_button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				_step_stage2_tool_amount(-1)
+				if is_instance_valid(free_view_container):
+					free_view_container.accept_event()
+				get_viewport().set_input_as_handled()
+				return
 		if mouse_button.ctrl_pressed and mouse_button.pressed:
 			if mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP:
 				_step_stage2_pointer_tool_radius(1, mouse_button.position)
+				if is_instance_valid(free_view_container):
+					free_view_container.accept_event()
+				get_viewport().set_input_as_handled()
 				return
 			if mouse_button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 				_step_stage2_pointer_tool_radius(-1, mouse_button.position)
+				if is_instance_valid(free_view_container):
+					free_view_container.accept_event()
+				get_viewport().set_input_as_handled()
 				return
 		if mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP and mouse_button.pressed:
 			free_workspace_preview.zoom_by(-_get_view_tuning().workspace_zoom_step)
+			if is_instance_valid(free_view_container):
+				free_view_container.accept_event()
+			get_viewport().set_input_as_handled()
 			return
 		if mouse_button.button_index == MOUSE_BUTTON_WHEEL_DOWN and mouse_button.pressed:
 			free_workspace_preview.zoom_by(_get_view_tuning().workspace_zoom_step)
+			if is_instance_valid(free_view_container):
+				free_view_container.accept_event()
+			get_viewport().set_input_as_handled()
 			return
 		if mouse_button.button_index == _get_workspace_orbit_mouse_button():
 			if mouse_button.pressed:
@@ -1710,16 +2221,37 @@ func _handle_stage2_selection_free_view_gui_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		var mouse_button: InputEventMouseButton = event
+		if stage2_amount_modifier_active and mouse_button.pressed and (
+			mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP
+			or mouse_button.button_index == MOUSE_BUTTON_WHEEL_DOWN
+		):
+			if mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP:
+				_step_stage2_tool_amount(1)
+			else:
+				_step_stage2_tool_amount(-1)
+			if is_instance_valid(free_view_container):
+				free_view_container.accept_event()
+			get_viewport().set_input_as_handled()
+			return
 		if mouse_button.ctrl_pressed and mouse_button.pressed and (
 			mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP
 			or mouse_button.button_index == MOUSE_BUTTON_WHEEL_DOWN
 		):
+			if is_instance_valid(free_view_container):
+				free_view_container.accept_event()
+			get_viewport().set_input_as_handled()
 			return
 		if mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP and mouse_button.pressed:
 			free_workspace_preview.zoom_by(-_get_view_tuning().workspace_zoom_step)
+			if is_instance_valid(free_view_container):
+				free_view_container.accept_event()
+			get_viewport().set_input_as_handled()
 			return
 		if mouse_button.button_index == MOUSE_BUTTON_WHEEL_DOWN and mouse_button.pressed:
 			free_workspace_preview.zoom_by(_get_view_tuning().workspace_zoom_step)
+			if is_instance_valid(free_view_container):
+				free_view_container.accept_event()
+			get_viewport().set_input_as_handled()
 			return
 		if mouse_button.button_index == _get_workspace_orbit_mouse_button():
 			if mouse_button.pressed:
@@ -1778,12 +2310,18 @@ func _apply_stage2_brush_at_screen_position(screen_position: Vector2) -> void:
 		stage2_brush_radius_meters,
 		brush_blocked
 	)
+	var tool_axis_local: Vector3 = Vector3(
+		hit_data.get("ray_direction_canonical_local", Vector3.ZERO)
+	).normalized()
 	if stage2_brush_presenter.apply_brush(
 		current_wip.stage2_item_state,
 		active_tool,
 		hit_point_canonical_local,
 		stage2_brush_radius_meters,
-		_get_stage2_brush_step_meters()
+		_get_stage2_brush_step_meters(),
+		stage2_tool_amount_ratio,
+		StringName(hit_data.get("face_id", StringName())),
+		tool_axis_local
 	):
 		forge_controller.clear_active_baked_profile()
 		forge_controller.clear_active_test_print()
@@ -1800,7 +2338,14 @@ func _update_stage2_selection_hover(screen_position: Vector2) -> void:
 		hit_data,
 		active_tool
 	)
-	stage2_hover_patch_ids = PackedStringArray(hover_selection_data.get("patch_ids", PackedStringArray()))
+	stage2_hover_face_ids = PackedStringArray(hover_selection_data.get("face_ids", PackedStringArray()))
+	stage2_hover_edge_ids = PackedStringArray(hover_selection_data.get("edge_ids", PackedStringArray()))
+	stage2_hover_region_ids = PackedStringArray(hover_selection_data.get("region_ids", PackedStringArray()))
+	stage2_hover_band_ids = PackedStringArray(hover_selection_data.get("band_ids", PackedStringArray()))
+	stage2_hover_cluster_ids = PackedStringArray(hover_selection_data.get("cluster_ids", PackedStringArray()))
+	stage2_hover_bridge_ids = PackedStringArray(hover_selection_data.get("bridge_ids", PackedStringArray()))
+	stage2_hover_contour_ids = PackedStringArray(hover_selection_data.get("contour_ids", PackedStringArray()))
+	stage2_hover_loop_ids = PackedStringArray(hover_selection_data.get("loop_ids", PackedStringArray()))
 	_refresh_stage2_selection_preview()
 
 func _toggle_stage2_patch_selection_at_screen_position(screen_position: Vector2) -> void:
@@ -1813,9 +2358,106 @@ func _toggle_stage2_patch_selection_at_screen_position(screen_position: Vector2)
 		hit_data,
 		active_tool
 	)
-	var hovered_patch_ids: PackedStringArray = PackedStringArray(hover_selection_data.get("patch_ids", PackedStringArray()))
-	stage2_hover_patch_ids = hovered_patch_ids
-	stage2_selected_patch_ids = stage2_selection_presenter.toggle_patch_selection(stage2_selected_patch_ids, hovered_patch_ids)
+	var hovered_face_ids: PackedStringArray = PackedStringArray(hover_selection_data.get("face_ids", PackedStringArray()))
+	var hovered_edge_ids: PackedStringArray = PackedStringArray(hover_selection_data.get("edge_ids", PackedStringArray()))
+	var hovered_region_ids: PackedStringArray = PackedStringArray(hover_selection_data.get("region_ids", PackedStringArray()))
+	var hovered_band_ids: PackedStringArray = PackedStringArray(hover_selection_data.get("band_ids", PackedStringArray()))
+	var hovered_cluster_ids: PackedStringArray = PackedStringArray(hover_selection_data.get("cluster_ids", PackedStringArray()))
+	var hovered_bridge_ids: PackedStringArray = PackedStringArray(hover_selection_data.get("bridge_ids", PackedStringArray()))
+	var hovered_contour_ids: PackedStringArray = PackedStringArray(hover_selection_data.get("contour_ids", PackedStringArray()))
+	var hovered_loop_ids: PackedStringArray = PackedStringArray(hover_selection_data.get("loop_ids", PackedStringArray()))
+	stage2_hover_face_ids = hovered_face_ids
+	stage2_hover_edge_ids = hovered_edge_ids
+	stage2_hover_region_ids = hovered_region_ids
+	stage2_hover_band_ids = hovered_band_ids
+	stage2_hover_cluster_ids = hovered_cluster_ids
+	stage2_hover_bridge_ids = hovered_bridge_ids
+	stage2_hover_contour_ids = hovered_contour_ids
+	stage2_hover_loop_ids = hovered_loop_ids
+	if stage2_selection_presenter.is_surface_face_tool(active_tool):
+		stage2_selected_face_ids = stage2_selection_presenter.toggle_identifier_selection(stage2_selected_face_ids, hovered_face_ids)
+		stage2_selected_edge_ids = PackedStringArray()
+		stage2_selected_region_ids = PackedStringArray()
+		stage2_selected_band_ids = PackedStringArray()
+		stage2_selected_cluster_ids = PackedStringArray()
+		stage2_selected_bridge_ids = PackedStringArray()
+		stage2_selected_contour_ids = PackedStringArray()
+		stage2_selected_loop_ids = PackedStringArray()
+	elif (
+		stage2_selection_presenter.is_surface_edge_tool(active_tool)
+		or stage2_selection_presenter.is_surface_feature_edge_tool(active_tool)
+	):
+		stage2_selected_face_ids = PackedStringArray()
+		stage2_selected_edge_ids = stage2_selection_presenter.toggle_identifier_selection(stage2_selected_edge_ids, hovered_edge_ids)
+		stage2_selected_region_ids = PackedStringArray()
+		stage2_selected_band_ids = PackedStringArray()
+		stage2_selected_cluster_ids = PackedStringArray()
+		stage2_selected_bridge_ids = PackedStringArray()
+		stage2_selected_contour_ids = PackedStringArray()
+		stage2_selected_loop_ids = PackedStringArray()
+	elif stage2_selection_presenter.is_surface_feature_region_tool(active_tool):
+		stage2_selected_face_ids = PackedStringArray()
+		stage2_selected_edge_ids = PackedStringArray()
+		stage2_selected_region_ids = stage2_selection_presenter.toggle_identifier_selection(stage2_selected_region_ids, hovered_region_ids)
+		stage2_selected_band_ids = PackedStringArray()
+		stage2_selected_cluster_ids = PackedStringArray()
+		stage2_selected_bridge_ids = PackedStringArray()
+		stage2_selected_contour_ids = PackedStringArray()
+		stage2_selected_loop_ids = PackedStringArray()
+	elif stage2_selection_presenter.is_surface_feature_band_tool(active_tool):
+		stage2_selected_face_ids = PackedStringArray()
+		stage2_selected_edge_ids = PackedStringArray()
+		stage2_selected_region_ids = PackedStringArray()
+		stage2_selected_band_ids = stage2_selection_presenter.toggle_identifier_selection(stage2_selected_band_ids, hovered_band_ids)
+		stage2_selected_cluster_ids = PackedStringArray()
+		stage2_selected_bridge_ids = PackedStringArray()
+		stage2_selected_contour_ids = PackedStringArray()
+		stage2_selected_loop_ids = PackedStringArray()
+	elif stage2_selection_presenter.is_surface_feature_cluster_tool(active_tool):
+		stage2_selected_face_ids = PackedStringArray()
+		stage2_selected_edge_ids = PackedStringArray()
+		stage2_selected_region_ids = PackedStringArray()
+		stage2_selected_band_ids = PackedStringArray()
+		stage2_selected_cluster_ids = stage2_selection_presenter.toggle_identifier_selection(stage2_selected_cluster_ids, hovered_cluster_ids)
+		stage2_selected_bridge_ids = PackedStringArray()
+		stage2_selected_contour_ids = PackedStringArray()
+		stage2_selected_loop_ids = PackedStringArray()
+	elif stage2_selection_presenter.is_surface_feature_bridge_tool(active_tool):
+		stage2_selected_face_ids = PackedStringArray()
+		stage2_selected_edge_ids = PackedStringArray()
+		stage2_selected_region_ids = PackedStringArray()
+		stage2_selected_band_ids = PackedStringArray()
+		stage2_selected_cluster_ids = PackedStringArray()
+		stage2_selected_bridge_ids = stage2_selection_presenter.toggle_identifier_selection(stage2_selected_bridge_ids, hovered_bridge_ids)
+		stage2_selected_contour_ids = PackedStringArray()
+		stage2_selected_loop_ids = PackedStringArray()
+	elif stage2_selection_presenter.is_surface_feature_contour_tool(active_tool):
+		stage2_selected_face_ids = PackedStringArray()
+		stage2_selected_edge_ids = PackedStringArray()
+		stage2_selected_region_ids = PackedStringArray()
+		stage2_selected_band_ids = PackedStringArray()
+		stage2_selected_cluster_ids = PackedStringArray()
+		stage2_selected_bridge_ids = PackedStringArray()
+		stage2_selected_contour_ids = stage2_selection_presenter.toggle_identifier_selection(stage2_selected_contour_ids, hovered_contour_ids)
+		stage2_selected_loop_ids = PackedStringArray()
+	elif stage2_selection_presenter.is_surface_feature_loop_tool(active_tool):
+		stage2_selected_face_ids = PackedStringArray()
+		stage2_selected_edge_ids = PackedStringArray()
+		stage2_selected_region_ids = PackedStringArray()
+		stage2_selected_band_ids = PackedStringArray()
+		stage2_selected_cluster_ids = PackedStringArray()
+		stage2_selected_bridge_ids = PackedStringArray()
+		stage2_selected_contour_ids = PackedStringArray()
+		stage2_selected_loop_ids = stage2_selection_presenter.toggle_identifier_selection(stage2_selected_loop_ids, hovered_loop_ids)
+	else:
+		stage2_selected_face_ids = PackedStringArray()
+		stage2_selected_edge_ids = PackedStringArray()
+		stage2_selected_region_ids = PackedStringArray()
+		stage2_selected_band_ids = PackedStringArray()
+		stage2_selected_cluster_ids = PackedStringArray()
+		stage2_selected_bridge_ids = PackedStringArray()
+		stage2_selected_contour_ids = PackedStringArray()
+		stage2_selected_loop_ids = PackedStringArray()
 	_rebuild_geometry_menu()
 	_refresh_stage2_selection_preview()
 
@@ -1826,21 +2468,44 @@ func _apply_stage2_selection_tool() -> void:
 		or forge_controller.active_wip == null
 		or forge_controller.active_wip.stage2_item_state == null
 		or not _is_stage2_selection_tool(active_tool)
-		or stage2_selected_patch_ids.is_empty()
+		or (
+			stage2_selected_face_ids.is_empty()
+			and stage2_selected_edge_ids.is_empty()
+			and stage2_selected_region_ids.is_empty()
+			and stage2_selected_band_ids.is_empty()
+			and stage2_selected_cluster_ids.is_empty()
+			and stage2_selected_bridge_ids.is_empty()
+			and stage2_selected_contour_ids.is_empty()
+			and stage2_selected_loop_ids.is_empty()
+		)
 	):
 		return
-	var selection_apply_patch_ids: PackedStringArray = stage2_selection_presenter.resolve_selection_apply_patch_ids(
+	var selection_apply_state: Dictionary = stage2_selection_presenter.resolve_selection_apply_state(
 		forge_controller.active_wip.stage2_item_state,
-		stage2_selected_patch_ids,
-		active_tool
+		active_tool,
+		stage2_selected_face_ids,
+		stage2_selected_edge_ids,
+		stage2_selected_region_ids,
+		stage2_selected_band_ids,
+		stage2_selected_cluster_ids,
+		stage2_selected_bridge_ids,
+		stage2_selected_contour_ids,
+		stage2_selected_loop_ids
 	)
+	var selected_patch_ids: PackedStringArray = PackedStringArray(selection_apply_state.get("selected_patch_ids", PackedStringArray()))
+	if selected_patch_ids.is_empty():
+		return
+	var selection_apply_patch_ids: PackedStringArray = PackedStringArray(selection_apply_state.get("apply_patch_ids", PackedStringArray()))
 	if selection_apply_patch_ids.is_empty():
 		return
+	var selection_editable_mesh_vertex_indices: PackedInt32Array = PackedInt32Array(selection_apply_state.get("editable_mesh_vertex_indices", PackedInt32Array()))
 	if stage2_brush_presenter.apply_selection_tool(
 		forge_controller.active_wip.stage2_item_state,
-		stage2_selected_patch_ids,
+		selected_patch_ids,
 		active_tool,
-		selection_apply_patch_ids
+		selection_apply_patch_ids,
+		stage2_tool_amount_ratio,
+		selection_editable_mesh_vertex_indices
 	):
 		forge_controller.clear_active_baked_profile()
 		forge_controller.clear_active_test_print()
@@ -1848,18 +2513,83 @@ func _apply_stage2_selection_tool() -> void:
 		_refresh_status_text()
 
 func _clear_stage2_selection() -> void:
-	stage2_hover_patch_ids = PackedStringArray()
-	stage2_selected_patch_ids = stage2_selection_presenter.clear_selection()
+	stage2_hover_face_ids = PackedStringArray()
+	stage2_selected_face_ids = PackedStringArray()
+	stage2_hover_edge_ids = PackedStringArray()
+	stage2_selected_edge_ids = PackedStringArray()
+	stage2_hover_region_ids = PackedStringArray()
+	stage2_selected_region_ids = PackedStringArray()
+	stage2_hover_band_ids = PackedStringArray()
+	stage2_selected_band_ids = PackedStringArray()
+	stage2_hover_cluster_ids = PackedStringArray()
+	stage2_selected_cluster_ids = PackedStringArray()
+	stage2_hover_bridge_ids = PackedStringArray()
+	stage2_selected_bridge_ids = PackedStringArray()
+	stage2_hover_contour_ids = PackedStringArray()
+	stage2_selected_contour_ids = PackedStringArray()
+	stage2_hover_loop_ids = PackedStringArray()
+	stage2_selected_loop_ids = PackedStringArray()
 	_rebuild_geometry_menu()
 	_refresh_stage2_selection_preview()
 
 func _on_action_menu_id_pressed(action_id: int) -> void:
 	var menu_ids: Dictionary = _get_action_menu_ids()
+	if action_id == int(menu_ids.get("geometry_handles_panel", -1)):
+		_open_geometry_handles_popup()
+		return
 	if action_id == int(menu_ids.get("geometry_selection_apply", -1)):
 		_apply_stage2_selection_tool()
 		return
 	if action_id == int(menu_ids.get("geometry_selection_clear", -1)):
 		_clear_stage2_selection()
+		return
+	if action_id == int(menu_ids.get("tool_radius_down", -1)):
+		_step_stage2_pointer_tool_radius(-1)
+		_refresh_tool_menu_popup_contents()
+		return
+	if action_id == int(menu_ids.get("tool_radius_up", -1)):
+		_step_stage2_pointer_tool_radius(1)
+		_refresh_tool_menu_popup_contents()
+		return
+	if action_id == int(menu_ids.get("tool_amount_down", -1)):
+		_step_stage2_tool_amount(-1)
+		_refresh_tool_menu_popup_contents()
+		return
+	if action_id == int(menu_ids.get("tool_amount_up", -1)):
+		_step_stage2_tool_amount(1)
+		_refresh_tool_menu_popup_contents()
+		return
+	if action_id == int(menu_ids.get("tool_shape_mode_draw", -1)):
+		_set_tool_state_modifier(ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD)
+		_refresh_tool_menu_popup_contents()
+		return
+	if action_id == int(menu_ids.get("tool_shape_mode_erase", -1)):
+		_set_tool_state_modifier(ForgeWorkspaceShapeToolPresenterScript.MODIFIER_REMOVE)
+		_refresh_tool_menu_popup_contents()
+		return
+	if action_id == int(menu_ids.get("tool_shape_primary_down", -1)):
+		_step_stage1_shape_primary_size(-1)
+		_refresh_tool_menu_popup_contents()
+		return
+	if action_id == int(menu_ids.get("tool_shape_primary_up", -1)):
+		_step_stage1_shape_primary_size(1)
+		_refresh_tool_menu_popup_contents()
+		return
+	if action_id == int(menu_ids.get("tool_shape_secondary_down", -1)):
+		_step_stage1_shape_secondary_size(-1)
+		_refresh_tool_menu_popup_contents()
+		return
+	if action_id == int(menu_ids.get("tool_shape_secondary_up", -1)):
+		_step_stage1_shape_secondary_size(1)
+		_refresh_tool_menu_popup_contents()
+		return
+	if action_id == int(menu_ids.get("tool_shape_rotate_left", -1)):
+		_step_structural_shape_rotation(-1)
+		_refresh_tool_menu_popup_contents()
+		return
+	if action_id == int(menu_ids.get("tool_shape_rotate_right", -1)):
+		_step_structural_shape_rotation(1)
+		_refresh_tool_menu_popup_contents()
 		return
 	var menu_state: Dictionary = bench_menu_presenter.handle_action_menu_id_pressed(
 		action_id,
@@ -1888,6 +2618,20 @@ func _on_action_menu_id_pressed(action_id: int) -> void:
 	)
 	show_grid_bounds = bool(menu_state.get("show_grid_bounds", show_grid_bounds))
 	show_active_slice = bool(menu_state.get("show_active_slice", show_active_slice))
+
+func _refresh_tool_menu_popup_contents() -> void:
+	if not is_instance_valid(tool_menu_button):
+		return
+	call_deferred("_refresh_tool_menu_popup_contents_if_available")
+
+func _refresh_tool_menu_popup_contents_if_available() -> void:
+	if not is_instance_valid(tool_menu_button):
+		return
+	var tool_popup: PopupMenu = tool_menu_button.get_popup()
+	var popup_visible: bool = tool_popup.visible
+	_rebuild_tool_menu()
+	if popup_visible and not tool_popup.visible:
+		tool_menu_button.show_popup()
 
 func _fit_free_workspace_preview() -> void:
 	if is_instance_valid(free_workspace_preview):
@@ -2134,6 +2878,8 @@ func _end_free_view_paint() -> void:
 	)
 
 func _paint_free_view_at_screen_position(screen_position: Vector2) -> void:
+	if not stage2_refinement_mode_active and workspace_shape_tool_presenter.is_shape_tool(active_tool):
+		return
 	workspace_interaction_presenter.paint_free_view_at_screen_position_state(
 		workspace_edit_flow,
 		screen_position,
@@ -2508,8 +3254,21 @@ func _get_action_menu_ids() -> Dictionary:
 		"geometry_tool_triangle_erase": MENU_GEOMETRY_TOOL_TRIANGLE_ERASE,
 		"geometry_shape_rotate_left": MENU_GEOMETRY_SHAPE_ROTATE_LEFT,
 		"geometry_shape_rotate_right": MENU_GEOMETRY_SHAPE_ROTATE_RIGHT,
+		"geometry_handles_panel": MENU_GEOMETRY_HANDLES_PANEL,
 		"geometry_selection_apply": MENU_GEOMETRY_SELECTION_APPLY,
 		"geometry_selection_clear": MENU_GEOMETRY_SELECTION_CLEAR,
+		"tool_radius_down": MENU_TOOL_RADIUS_DOWN,
+		"tool_radius_up": MENU_TOOL_RADIUS_UP,
+		"tool_amount_down": MENU_TOOL_AMOUNT_DOWN,
+		"tool_amount_up": MENU_TOOL_AMOUNT_UP,
+		"tool_shape_rotate_left": MENU_TOOL_SHAPE_ROTATE_LEFT,
+		"tool_shape_rotate_right": MENU_TOOL_SHAPE_ROTATE_RIGHT,
+		"tool_shape_mode_draw": MENU_TOOL_SHAPE_MODE_DRAW,
+		"tool_shape_mode_erase": MENU_TOOL_SHAPE_MODE_ERASE,
+		"tool_shape_primary_down": MENU_TOOL_SHAPE_PRIMARY_DOWN,
+		"tool_shape_primary_up": MENU_TOOL_SHAPE_PRIMARY_UP,
+		"tool_shape_secondary_down": MENU_TOOL_SHAPE_SECONDARY_DOWN,
+		"tool_shape_secondary_up": MENU_TOOL_SHAPE_SECONDARY_UP,
 		"geometry_plane_xy": MENU_GEOMETRY_PLANE_XY,
 		"geometry_plane_zx": MENU_GEOMETRY_PLANE_ZX,
 		"geometry_plane_zy": MENU_GEOMETRY_PLANE_ZY,
@@ -2537,16 +3296,104 @@ func _rebuild_project_menu() -> void:
 func _rebuild_status_menu() -> void:
 	bench_menu_presenter.rebuild_status_menu(status_menu_button, last_left_panel_state)
 
+func _rebuild_tool_menu() -> void:
+	bench_menu_presenter.rebuild_tool_menu(
+		tool_menu_button,
+		_get_action_menu_ids(),
+		_build_tool_menu_state()
+	)
+
 func _rebuild_geometry_menu() -> void:
+	var has_stage2_selection: bool = (
+		not stage2_selected_face_ids.is_empty()
+		or not stage2_selected_edge_ids.is_empty()
+		or not stage2_selected_region_ids.is_empty()
+		or not stage2_selected_band_ids.is_empty()
+		or not stage2_selected_cluster_ids.is_empty()
+		or not stage2_selected_bridge_ids.is_empty()
+		or not stage2_selected_contour_ids.is_empty()
+		or not stage2_selected_loop_ids.is_empty()
+	)
+	_ensure_geometry_handles_popup()
 	bench_menu_presenter.rebuild_geometry_menu(
 		geometry_menu_button,
 		_get_action_menu_ids(),
 		stage2_refinement_mode_active,
 		active_tool,
 		workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_quadrant),
-		not stage2_selected_patch_ids.is_empty(),
-		not stage2_selected_patch_ids.is_empty()
+		has_stage2_selection,
+		has_stage2_selection,
+		not workspace_shape_tool_presenter.get_handle_preset_defs().is_empty()
 	)
+
+func _build_handle_preset_menu_items() -> Array[Dictionary]:
+	var handle_preset_items: Array[Dictionary] = []
+	for preset_def: Dictionary in workspace_shape_tool_presenter.get_handle_preset_defs():
+		var preset_id: StringName = preset_def.get("preset_id", StringName())
+		handle_preset_items.append({
+			"preset_id": preset_id,
+			"label": String(preset_def.get("label", "Handle")),
+			"icon": _get_handle_preset_icon(preset_id),
+		})
+	return handle_preset_items
+
+func _get_handle_preset_icon(preset_id: StringName) -> Texture2D:
+	if handle_preset_icon_cache.has(preset_id):
+		return handle_preset_icon_cache.get(preset_id) as Texture2D
+	var icon_texture: Texture2D = workspace_shape_tool_presenter.build_handle_preset_icon(preset_id)
+	handle_preset_icon_cache[preset_id] = icon_texture
+	return icon_texture
+
+func _rebuild_geometry_handles_popup() -> void:
+	if not is_instance_valid(geometry_handles_grid):
+		return
+	for child: Node in geometry_handles_grid.get_children():
+		geometry_handles_grid.remove_child(child)
+		child.queue_free()
+	for preset_item: Dictionary in _build_handle_preset_menu_items():
+		var preset_id: StringName = preset_item.get("preset_id", StringName())
+		var preset_label: String = String(preset_item.get("label", "Handle"))
+		var preset_icon: Texture2D = preset_item.get("icon", null) as Texture2D
+		var preset_button: Button = Button.new()
+		preset_button.text = ""
+		preset_button.icon = preset_icon
+		preset_button.expand_icon = true
+		preset_button.flat = false
+		preset_button.custom_minimum_size = Vector2(56.0, 56.0)
+		preset_button.tooltip_text = preset_label
+		preset_button.toggle_mode = true
+		preset_button.button_pressed = preset_id == selected_handle_preset_id
+		preset_button.pressed.connect(_on_geometry_handle_preset_button_pressed.bind(preset_id))
+		geometry_handles_grid.add_child(preset_button)
+	if is_instance_valid(geometry_handles_popup):
+		var item_count: int = geometry_handles_grid.get_child_count()
+		var row_count: int = int(ceil(float(item_count) / 4.0))
+		var popup_width: int = 8 + (4 * 56) + ((4 - 1) * int(geometry_handles_grid.get_theme_constant("h_separation"))) + 8
+		var popup_height: int = 8 + (row_count * 56) + (maxi(row_count - 1, 0) * int(geometry_handles_grid.get_theme_constant("v_separation"))) + 8
+		geometry_handles_popup.size = Vector2i(popup_width, popup_height)
+
+func _open_geometry_handles_popup() -> void:
+	_ensure_geometry_handles_popup()
+	_rebuild_geometry_handles_popup()
+	if not is_instance_valid(geometry_handles_popup) or not is_instance_valid(geometry_menu_button):
+		return
+	var menu_screen_position: Vector2 = geometry_menu_button.get_screen_position()
+	var popup_position: Vector2i = Vector2i(
+		int(round(menu_screen_position.x + geometry_menu_button.size.x + 8.0)),
+		int(round(menu_screen_position.y))
+	)
+	geometry_handles_popup.position = popup_position
+	geometry_handles_popup.popup()
+
+func _close_geometry_handles_popup() -> void:
+	if is_instance_valid(geometry_handles_popup):
+		geometry_handles_popup.hide()
+
+func _on_geometry_handle_preset_button_pressed(preset_id: StringName) -> void:
+	selected_handle_preset_id = preset_id
+	_set_active_tool(ForgeWorkspaceShapeToolPresenterScript.FAMILY_HANDLE)
+	_rebuild_geometry_handles_popup()
+	_close_geometry_handles_popup()
 
 func _refresh_project_panel() -> void:
 	var current_wip: CraftedItemWIP = _ensure_wip_for_editing()
@@ -2629,12 +3476,16 @@ func _is_action_released_if_available(event: InputEvent, action_name: StringName
 	return workspace_interaction_presenter.is_action_released_if_available(event, action_name)
 
 func _begin_layer_hold(direction: int) -> void:
+	if stage2_refinement_mode_active:
+		return
 	workspace_interaction_presenter.begin_layer_hold(direction, layer_hold_repeat_delay_seconds)
 
 func _clear_layer_hold() -> void:
 	workspace_interaction_presenter.clear_layer_hold()
 
 func _process_layer_hold_repeat(delta: float) -> void:
+	if stage2_refinement_mode_active:
+		return
 	workspace_interaction_presenter.process_layer_hold_repeat(
 		delta,
 		layer_hold_repeat_rate_hz,

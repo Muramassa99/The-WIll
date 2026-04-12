@@ -4,6 +4,7 @@ feature_loop_tool_apply_visible=true
 feature_loop_tool_clear_visible=true
 hover_preview_visible=true
 selected_preview_visible=true
+selected_loop_count=1
 grip_safe_selected_count=5
 grip_safe_feature_loop_fillet_changed_shell=true
 selected_count_after_clear=0

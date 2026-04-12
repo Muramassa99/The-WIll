@@ -1,0 +1,35 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+SCRIPT ERROR: Parse Error: Function "_resolve_current_offset_cells()" not found in base self.
+   at: GDScript::reload (res://core/models/stage2_item_state.gd:526)
+SCRIPT ERROR: Parse Error: Function "_shares_plane_and_normal()" not found in base self.
+   at: GDScript::reload (res://core/models/stage2_item_state.gd:542)
+SCRIPT ERROR: Parse Error: Function "_resolve_current_offset_cells()" not found in base self.
+   at: GDScript::reload (res://core/models/stage2_item_state.gd:544)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://services/forge_stage2_service.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://services/forge_service.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/forge_material_lookup_presenter.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/forge_grid_controller.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/forge_material_catalog_presenter.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/crafting_bench_ui.gd:0)
+ERROR: Failed to load script "res://runtime/forge/crafting_bench_ui.gd" with error "Compilation failed".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: ForgeStage2Service.build_stage2_item_state_from_stage1 (res://services/forge_stage2_service.gd:43)
+   GDScript backtrace (most recent call first):
+       [0] build_stage2_item_state_from_stage1 (res://services/forge_stage2_service.gd:43)
+       [1] ensure_stage2_item_state_for_wip (res://services/forge_stage2_service.gd:28)
+       [2] ensure_stage2_item_state_for_active_wip (res://runtime/forge/forge_grid_controller.gd:158)
+       [3] _run_verification (res://tools/verify_stage2_feature_restore_tools.gd:19)
+SCRIPT ERROR: Invalid call. Nonexistent function 'refresh_current_local_aabb_from_patches' in base 'Nil'.
+   at: _run_verification (res://tools/verify_stage2_feature_restore_tools.gd:26)
+   GDScript backtrace (most recent call first):
+       [0] _run_verification (res://tools/verify_stage2_feature_restore_tools.gd:26)

@@ -1,0 +1,16 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+SCRIPT ERROR: Parse Error: Invalid operands "Vector2" and "Vector2i" for "+" operator.
+   at: GDScript::reload (res://runtime/forge/crafting_bench_ui.gd:3382)
+ERROR: Failed to load script "res://runtime/forge/crafting_bench_ui.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+ERROR: Required object "rp_child" is null.
+   at: add_child (scene/main/node.cpp:1703)
+   GDScript backtrace (most recent call first):
+       [0] _run_verification (res://tools/verify_crafting_bench_handle_presets.gd:23)
+SCRIPT ERROR: Invalid call. Nonexistent function 'open_for' in base 'Nil'.
+   at: _run_verification (res://tools/verify_crafting_bench_handle_presets.gd:27)
+   GDScript backtrace (most recent call first):
+       [0] _run_verification (res://tools/verify_crafting_bench_handle_presets.gd:27)

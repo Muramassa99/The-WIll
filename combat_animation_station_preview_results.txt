@@ -1,0 +1,11 @@
+preview_actor_exists=true
+preview_weapon_exists=true
+primary_grip_anchor_exists=true
+ui_selected_point_index=1
+ui_point_count=3
+preview_draft_point_count=3
+curve_baked_point_count=22
+point_marker_count=3
+control_handle_marker_count=6
+selected_point_index=1
+marker_root_exists=true

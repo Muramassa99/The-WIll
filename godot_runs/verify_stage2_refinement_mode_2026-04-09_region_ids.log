@@ -1,0 +1,60 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+SCRIPT ERROR: Parse Error: Function "_resolve_current_offset_cells()" not found in base self.
+   at: GDScript::reload (res://core/models/stage2_item_state.gd:526)
+SCRIPT ERROR: Parse Error: Function "_shares_plane_and_normal()" not found in base self.
+   at: GDScript::reload (res://core/models/stage2_item_state.gd:542)
+SCRIPT ERROR: Parse Error: Function "_resolve_current_offset_cells()" not found in base self.
+   at: GDScript::reload (res://core/models/stage2_item_state.gd:544)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://services/forge_stage2_service.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://services/forge_service.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/forge_material_lookup_presenter.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/forge_grid_controller.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/forge_material_catalog_presenter.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/crafting_bench_ui.gd:0)
+ERROR: Failed to load script "res://runtime/forge/crafting_bench_ui.gd" with error "Compilation failed".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: ForgeStage2Service.build_stage2_item_state_from_stage1 (res://services/forge_stage2_service.gd:43)
+   GDScript backtrace (most recent call first):
+       [0] build_stage2_item_state_from_stage1 (res://services/forge_stage2_service.gd:43)
+       [1] ensure_stage2_item_state_for_wip (res://services/forge_stage2_service.gd:28)
+       [2] ensure_stage2_item_state_for_active_wip (res://runtime/forge/forge_grid_controller.gd:158)
+       [3] _run_verification (res://tools/verify_stage2_refinement_mode.gd:18)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: ForgeStage2Service.build_stage2_item_state_from_stage1 (res://services/forge_stage2_service.gd:43)
+   GDScript backtrace (most recent call first):
+       [0] build_stage2_item_state_from_stage1 (res://services/forge_stage2_service.gd:43)
+       [1] build_test_print_from_wip (res://services/forge_service.gd:115)
+       [2] spawn_test_print_from_active_wip (res://runtime/forge/forge_grid_controller.gd:343)
+       [3] _run_verification (res://tools/verify_stage2_refinement_mode.gd:19)
+SCRIPT ERROR: Invalid call. Nonexistent function 'has_current_shell' in base 'Resource'.
+   at: ForgeService.build_test_print_from_wip (res://services/forge_service.gd:112)
+   GDScript backtrace (most recent call first):
+       [0] build_test_print_from_wip (res://services/forge_service.gd:112)
+       [1] build_equipped_item_node (res://runtime/player/player_equipped_item_presenter.gd:39)
+       [2] sync_equipped_slot_visual (res://runtime/player/player_equipped_item_presenter.gd:264)
+       [3] sync_equipped_test_meshes (res://runtime/player/player_equipped_item_presenter.gd:208)
+       [4] sync_equipped_test_meshes (res://runtime/player/player_forge_test_presenter.gd:110)
+       [5] _sync_equipped_test_meshes (res://runtime/player/player_controller.gd:299)
+       [6] _ready (res://runtime/player/player_controller.gd:80)
+       [7] _run_verification (res://tools/verify_stage2_refinement_mode.gd:23)
+SCRIPT ERROR: Invalid call. Nonexistent function 'has_current_shell' in base 'Resource'.
+   at: ForgeService.build_test_print_from_wip (res://services/forge_service.gd:112)
+   GDScript backtrace (most recent call first):
+       [0] build_test_print_from_wip (res://services/forge_service.gd:112)
+       [1] build_equipped_item_node (res://runtime/player/player_equipped_item_presenter.gd:39)
+       [2] sync_equipped_slot_visual (res://runtime/player/player_equipped_item_presenter.gd:264)
+       [3] sync_equipped_test_meshes (res://runtime/player/player_equipped_item_presenter.gd:221)
+       [4] sync_equipped_test_meshes (res://runtime/player/player_forge_test_presenter.gd:110)
+       [5] _sync_equipped_test_meshes (res://runtime/player/player_controller.gd:299)
+       [6] _ready (res://runtime/player/player_controller.gd:80)
+       [7] _run_verification (res://tools/verify_stage2_refinement_mode.gd:23)

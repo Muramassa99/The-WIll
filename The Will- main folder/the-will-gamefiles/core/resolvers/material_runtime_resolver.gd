@@ -103,6 +103,15 @@ func resolve_equipment_context_bias_lines_for_cell(cell: CellAtom, material_look
 		return []
 	return _copy_stat_lines(base_material.equipment_context_bias_lines)
 
+func resolve_animation_effect_stubs_for_cell(cell: CellAtom, material_lookup: Dictionary) -> Array[Resource]:
+	var material_variant: MaterialVariantDef = resolve_material_variant_for_cell(cell, material_lookup)
+	if material_variant != null and not material_variant.resolved_animation_effect_stubs.is_empty():
+		return _copy_animation_effect_stubs(material_variant.resolved_animation_effect_stubs)
+	var base_material: BaseMaterialDef = resolve_base_material_for_cell(cell, material_lookup)
+	if base_material == null:
+		return []
+	return _copy_animation_effect_stubs(base_material.animation_effect_stubs)
+
 func has_positive_capability_bias_for_cell(cell: CellAtom, material_lookup: Dictionary, capability_id: StringName) -> bool:
 	for bias_line: StatLine in resolve_capability_bias_lines_for_cell(cell, material_lookup):
 		if bias_line == null:
@@ -130,6 +139,19 @@ func _copy_stat_lines(stat_lines: Array[StatLine]) -> Array[StatLine]:
 			continue
 		copied_lines.append(stat_line.copy_scaled(1.0))
 	return copied_lines
+
+func _copy_animation_effect_stubs(effect_stubs: Array[Resource]) -> Array[Resource]:
+	var copied_stubs: Array[Resource] = []
+	for effect_stub: Resource in effect_stubs:
+		if effect_stub == null:
+			continue
+		var effect_copy: Resource = effect_stub.duplicate(true)
+		if effect_copy == null:
+			continue
+		if effect_copy.has_method("normalize"):
+			effect_copy.call("normalize")
+		copied_stubs.append(effect_copy)
+	return copied_stubs
 
 func _build_variant_from_material_id(material_id: StringName, material_lookup: Dictionary) -> MaterialVariantDef:
 	var base_material: BaseMaterialDef = _resolve_base_material_from_variant_id(material_id, material_lookup)

@@ -12,6 +12,7 @@
 - current exported lines after count refresh: `594`
 - current unique exported names after count refresh: `510`
 - line numbers in the main full-registry body below still come from the last full sweep unless an incremental update section says otherwise
+- last incremental update date: `11-04-2026` (`DD-MM-YYYY`)
 
 ## Search / Topic Index
 - `hurtbox` / `hitbox` = no final live combat volume system yet
@@ -67,6 +68,12 @@
 - `stage2` / `refinement` / `refinement envelope` = optional shell-refinement layer between Stage 1 crafting and test print
   - names: `stage2_item_state`, `stage2_version`, `refinement_initialized`, `stage2_single_cell_max_inward_ratio`, `stage2_multi_cell_max_inward_ratio`, `stage2_fillet_max_inward_ratio`, `stage2_chamfer_max_inward_ratio`, `stage2_primary_grip_safe_radius_voxels`, `min_surface_depth_voxels`, `max_inward_offset_meters`, `max_fillet_offset_meters`, `max_chamfer_offset_meters`, `zone_mask_id`, `stage2_zone_primary_grip_safe`, `neighbor_patch_ids`, `workspace_stage2_shell_color`, `workspace_stage2_brush_color`, `workspace_stage2_blocked_brush_color`, `workspace_stage2_hover_face_color`, `workspace_stage2_selected_face_color`, `workspace_stage2_default_brush_radius_meters`, `workspace_stage2_brush_step_ratio`, `stage2_surface_face_fillet`, `stage2_surface_face_chamfer`, `stage2_surface_face_restore`, `stage2_surface_edge_fillet`, `stage2_surface_edge_chamfer`, `stage2_surface_edge_restore`, `stage2_surface_feature_edge_fillet`, `stage2_surface_feature_edge_chamfer`, `stage2_surface_feature_edge_restore`, `stage2_surface_feature_region_fillet`, `stage2_surface_feature_region_chamfer`, `stage2_surface_feature_region_restore`, `stage2_surface_feature_band_fillet`, `stage2_surface_feature_band_chamfer`, `stage2_surface_feature_band_restore`, `stage2_surface_feature_cluster_fillet`, `stage2_surface_feature_cluster_chamfer`, `stage2_surface_feature_cluster_restore`, `stage2_surface_feature_bridge_fillet`, `stage2_surface_feature_bridge_chamfer`, `stage2_surface_feature_bridge_restore`, `stage2_surface_feature_contour_fillet`, `stage2_surface_feature_contour_chamfer`, `stage2_surface_feature_contour_restore`, `stage2_surface_feature_loop_fillet`, `stage2_surface_feature_loop_chamfer`, `stage2_surface_feature_loop_restore`, `surface_feature_region`, `surface_feature_band`, `surface_feature_cluster`, `surface_feature_bridge`, `surface_feature_contour`, `surface_feature_loop`
   - refs: `core/models/crafted_item_wip.gd`, `core/models/test_print_instance.gd`, `core/models/stage2_item_state.gd`, `core/models/stage2_patch_state.gd`, `core/models/stage2_shell_quad_state.gd`, `core/defs/forge_rules_def.gd`, `core/defs/forge_view_tuning_def.gd`, `services/forge_stage2_service.gd`, `services/forge_service.gd`, `runtime/forge/forge_stage2_brush_presenter.gd`, `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/forge_stage2_preview_presenter.gd`
+- `combat animation` / `skill crafter` / `idle draft` = weapon-owned runtime combat animation creator branch foundation
+  - names: `combat_animation_station_state`, `station_schema_id`, `selected_authoring_mode`, `selected_skill_id`, `selected_idle_context_id`, `idle_drafts`, `skill_drafts`, `draft_id`, `draft_kind`, `context_id`, `owning_skill_id`, `legal_slot_id`, `point_chain`, `selected_point_index`, `continuity_point_index`, `preview_playback_speed_scale`, `preview_loop_enabled`, `point_id`, `local_target_position`, `local_target_rotation_degrees`, `active_plane_origin_local`, `active_plane_normal_local`, `active_plane_axis_u_local`, `active_plane_axis_v_local`, `transition_duration_seconds`, `body_support_blend`, `two_hand_state`
+  - refs: `core/models/crafted_item_wip.gd`, `core/models/combat_animation_station_state.gd`, `core/models/combat_animation_draft.gd`, `core/models/combat_animation_point.gd`
+- `animation effect stub` / `motion threshold fx` = forward-compatible combat-animation-driven material effect stub layer
+  - names: `animation_effect_stubs`, `resolved_animation_effect_stubs`, `effect_stub_id`, `trigger_kind`, `effect_kind`, `animation_speed_threshold_ratio`, `particle_scene_path`, `sound_event_id`
+  - refs: `core/defs/base_material_def.gd`, `core/defs/material_variant_def.gd`, `core/defs/material_animation_effect_stub.gd`, `core/resolvers/tier_resolver.gd`, `core/resolvers/material_runtime_resolver.gd`
 - `rectangle` / `circle` / `oval` / `triangle` / `shape tool` = live structural macro-footprint tool family in the forge bench
   - names: `rectangle_place`, `rectangle_erase`, `circle_place`, `circle_erase`, `oval_place`, `oval_erase`, `triangle_place`, `triangle_erase`, `geometry_shape_rotate_left`, `geometry_shape_rotate_right`, `structural_shape_rotation_quadrant`, `plane_shape_add_preview_alpha`, `plane_shape_remove_preview_color`
   - refs: `runtime/forge/forge_workspace_shape_tool_presenter.gd`, `runtime/forge/crafting_bench_ui.gd`, `runtime/forge/forge_plane_viewport.gd`, `core/defs/forge_view_tuning_def.gd`, `GDD-and Text Resources/Structural Volume Authoring System.md`
@@ -141,6 +148,75 @@
 - `core/defs/forge_view_tuning_def.gd`
   - L16 `plane_shape_add_preview_alpha`
   - L17 `plane_shape_remove_preview_color`
+
+## Incremental Updates - 11-04-2026
+
+### Combat Animation Creator Branch Foundation
+- scope correction:
+  - this is the general runtime combat animation creator branch
+  - it is not a two-hand-only weapon fix
+  - it sits alongside the forge crafter, disassembly bench, and inventory system as its own branch
+- `core/models/crafted_item_wip.gd`
+  - L34 `combat_animation_station_state`
+- `core/models/combat_animation_point.gd`
+  - L8 `point_id`
+  - L9 `point_index`
+  - L10 `local_target_position`
+  - L11 `local_target_rotation_degrees`
+  - L12 `curve_in_handle_local`
+  - L13 `curve_out_handle_local`
+  - L14 `active_plane_origin_local`
+  - L15 `active_plane_normal_local`
+  - L16 `active_plane_axis_u_local`
+  - L17 `active_plane_axis_v_local`
+  - L18 `transition_duration_seconds`
+  - L19 `body_support_blend`
+  - L20 `preferred_grip_style_mode`
+  - L21 `two_hand_state`
+  - L22 `committed`
+- `core/models/combat_animation_draft.gd`
+  - L11 `draft_id`
+  - L12 `display_name`
+  - L13 `draft_kind`
+  - L14 `context_id`
+  - L15 `owning_skill_id`
+  - L16 `legal_slot_id`
+  - L17 `preferred_grip_style_mode`
+  - L18 `authored_for_two_hand_only`
+  - L19 `point_chain`
+  - L20 `selected_point_index`
+  - L21 `continuity_point_index`
+  - L22 `preview_playback_speed_scale`
+  - L23 `preview_loop_enabled`
+  - L24 `draft_notes`
+- `core/models/combat_animation_station_state.gd`
+  - L13 `station_version`
+  - L14 `station_schema_id`
+  - L15 `selected_authoring_mode`
+  - L16 `selected_skill_id`
+  - L17 `selected_idle_context_id`
+  - L18 `uses_stage1_geometry_truth`
+  - L19 `uses_stage2_geometry_truth`
+  - L20 `auto_save_draft_continuity`
+  - L21 `idle_drafts`
+  - L22 `skill_drafts`
+  - L23 `default_skill_package_initialized`
+  - L24 `station_notes`
+- `core/defs/material_animation_effect_stub.gd`
+  - L10 `effect_stub_id`
+  - L11 `trigger_kind`
+  - L12 `effect_kind`
+  - L13 `animation_speed_threshold_ratio`
+  - L14 `particle_scene_path`
+  - L15 `sound_event_id`
+  - L16 `notes`
+- `core/defs/base_material_def.gd`
+  - L50 `animation_effect_stubs`
+- `core/defs/material_variant_def.gd`
+  - L15 `resolved_animation_effect_stubs`
+- verification note:
+  - `combat_animation_station_foundation_results.txt` is the focused branch-foundation proof file
+  - persistence through `user://forge/...` was also rechecked successfully when rerun outside the workspace sandbox
 
 ## Exported Knob Registry By File
 
@@ -335,6 +411,9 @@
 - L63 `stage2_pointer_tool_min_radius_meters`
 - L64 `stage2_pointer_tool_max_radius_meters`
 - L65 `stage2_pointer_tool_radius_step_meters`
+- L66 `stage2_tool_min_amount_ratio`
+- L67 `stage2_tool_max_amount_ratio`
+- L68 `stage2_tool_amount_ratio_step`
 
 ## core/defs/forge_storage_rules_def.gd
 - L4 `rules_id`
@@ -771,3 +850,20 @@
 - when a new exported knob appears, add it here or regenerate this file from live code
 - keep the search/topic index near the top
 - keep `NAMING_LAW.md` for naming meaning, and this file for knob lookup
+
+## Incremental Updates - 11-04-2026
+- `runtime/combat/combat_animation_station.gd`, `runtime/combat/combat_animation_station_ui.gd`, `scenes/world/combat_animation_station.tscn`, and `scenes/ui/combat_animation_station_ui.tscn` were added as the first real combat animation station workflow surface
+- `core/models/combat_animation_point.gd` now also exposes live Bezier handle offsets:
+  - `curve_in_handle_local`
+  - `curve_out_handle_local`
+- the station now has a first embedded preview layer through:
+  - `runtime/combat/combat_animation_station_preview_presenter.gd`
+  - `scenes/ui/combat_animation_station_ui.tscn`
+- search topics to remember:
+  - `combat animation station`
+  - `combat animation draft`
+  - `curve_in_handle_local`
+  - `curve_out_handle_local`
+  - `Bezier trajectory`
+  - `idle draft authoring`
+  - `weapon-owned skill draft`

@@ -1,0 +1,36 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+SCRIPT ERROR: Parse Error: Function "use_legacy_pointer_brush_path()" not found in base self.
+   at: GDScript::reload (res://core/resolvers/stage2_shell_apply_resolver.gd:91)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/forge_stage2_brush_presenter.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/crafting_bench_ui.gd:0)
+ERROR: Failed to load script "res://runtime/forge/crafting_bench_ui.gd" with error "Compilation failed".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: ForgeStage2BrushPresenter.@implicit_new (res://runtime/forge/forge_stage2_brush_presenter.gd:19)
+   GDScript backtrace (most recent call first):
+       [0] @implicit_new (res://runtime/forge/forge_stage2_brush_presenter.gd:19)
+       [1] @implicit_new (res://runtime/forge/crafting_bench_ui.gd:305)
+       [2] _run_verification (res://tools/verify_stage2_refinement_mode.gd:25)
+SCRIPT ERROR: Invalid call. Nonexistent function 'is_zone_mask_blocked' in base 'Nil'.
+   at: ForgeStage2BrushPresenter.is_zone_mask_blocked (res://runtime/forge/forge_stage2_brush_presenter.gd:119)
+   GDScript backtrace (most recent call first):
+       [0] is_zone_mask_blocked (res://runtime/forge/forge_stage2_brush_presenter.gd:119)
+       [1] _update_stage2_brush_hover (res://runtime/forge/crafting_bench_ui.gd:1964)
+       [2] _run_verification (res://tools/verify_stage2_refinement_mode.gd:94)
+SCRIPT ERROR: Invalid call. Nonexistent function 'is_zone_mask_blocked' in base 'Nil'.
+   at: ForgeStage2BrushPresenter.is_zone_mask_blocked (res://runtime/forge/forge_stage2_brush_presenter.gd:119)
+   GDScript backtrace (most recent call first):
+       [0] is_zone_mask_blocked (res://runtime/forge/forge_stage2_brush_presenter.gd:119)
+       [1] _apply_stage2_brush_at_screen_position (res://runtime/forge/crafting_bench_ui.gd:1985)
+       [2] _run_verification (res://tools/verify_stage2_refinement_mode.gd:99)
+SCRIPT ERROR: Invalid call. Nonexistent function 'apply_pointer_brush' in base 'Nil'.
+   at: ForgeStage2BrushPresenter.apply_brush (res://runtime/forge/forge_stage2_brush_presenter.gd:104)
+   GDScript backtrace (most recent call first):
+       [0] apply_brush (res://runtime/forge/forge_stage2_brush_presenter.gd:104)
+       [1] _apply_stage2_brush_at_screen_position (res://runtime/forge/crafting_bench_ui.gd:1997)
+       [2] _run_verification (res://tools/verify_stage2_refinement_mode.gd:99)

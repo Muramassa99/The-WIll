@@ -4,6 +4,10 @@ Hard rules:
 - Do not invent core game rules that are not explicitly defined in project docs.
 - Do not rename files, folders, classes, or IDs unless explicitly asked.
 - Do not collapse distinct lifecycle objects into one generic type.
+- For any Godot implementation task, do topic-specific online documentation research first, even for trivial changes.
+- Use official Godot documentation as the first technical authority for Godot behavior, APIs, workflow, and engine constraints.
+- Prefer built-in Godot tools and documented engine workflows before inventing custom replacements.
+- Only move to custom Godot-side solutions after checking whether the official documented path can already solve the problem alone or in combination with other native tools.
 - Keep these separate:
   - raw drops
   - forge material stacks

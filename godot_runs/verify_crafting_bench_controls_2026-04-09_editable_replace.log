@@ -1,0 +1,18 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+SCRIPT ERROR: Parse Error: Function "use_legacy_pointer_brush_path()" not found in base self.
+   at: GDScript::reload (res://core/resolvers/stage2_shell_apply_resolver.gd:91)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/forge_stage2_brush_presenter.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/crafting_bench_ui.gd:0)
+ERROR: Failed to load script "res://runtime/forge/crafting_bench_ui.gd" with error "Compilation failed".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: ForgeStage2BrushPresenter.@implicit_new (res://runtime/forge/forge_stage2_brush_presenter.gd:19)
+   GDScript backtrace (most recent call first):
+       [0] @implicit_new (res://runtime/forge/forge_stage2_brush_presenter.gd:19)
+       [1] @implicit_new (res://runtime/forge/crafting_bench_ui.gd:305)
+       [2] _run_verification (res://tools/verify_crafting_bench_controls.gd:19)

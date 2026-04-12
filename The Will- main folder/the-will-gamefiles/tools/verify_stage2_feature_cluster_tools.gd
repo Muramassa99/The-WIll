@@ -25,11 +25,11 @@ func _run_verification() -> void:
 	var face_patch_ids: PackedStringArray = _collect_face_patch_ids(stage2_item_state, face_reference_patch)
 	var face_stripes: Array[PackedStringArray] = _build_face_stripes(stage2_item_state, face_patch_ids)
 	if face_stripes.size() >= 1:
-		_set_patch_group_offset(stage2_item_state, face_stripes[0], -0.25)
+		_set_patch_group_offset(stage2_item_state, face_stripes[0], 0.25)
 	if face_stripes.size() >= 2:
-		_set_patch_group_offset(stage2_item_state, face_stripes[1], -0.5)
+		_set_patch_group_offset(stage2_item_state, face_stripes[1], 0.5)
 	if face_stripes.size() >= 3:
-		_set_patch_group_offset(stage2_item_state, face_stripes[2], -0.75)
+		_set_patch_group_offset(stage2_item_state, face_stripes[2], 0.75)
 	stage2_item_state.refresh_current_local_aabb_from_patches()
 
 	var selection_anchor_patch = _find_patch_by_id(
@@ -61,13 +61,13 @@ func _run_verification() -> void:
 	var feature_cluster_restore_hidden: bool = not _popup_has_item_text(geometry_popup, "Feature Cluster Restore Tool")
 
 	var synthetic_stage2_item_state = _build_synthetic_feature_cluster_state()
-	var synthetic_band_selection: Dictionary = selection_presenter.resolve_hover_selection_data(
-		synthetic_stage2_item_state,
+	var synthetic_band_selection: Dictionary = synthetic_stage2_item_state.call(
+		"resolve_hover_selection_data",
 		_build_synthetic_patch_hit_data(&"patch_0"),
 		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_BAND_FILLET
 	)
-	var synthetic_cluster_selection: Dictionary = selection_presenter.resolve_hover_selection_data(
-		synthetic_stage2_item_state,
+	var synthetic_cluster_selection: Dictionary = synthetic_stage2_item_state.call(
+		"resolve_hover_selection_data",
 		_build_synthetic_patch_hit_data(&"patch_0"),
 		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_CLUSTER_FILLET
 	)
@@ -81,27 +81,28 @@ func _run_verification() -> void:
 	var feature_cluster_tool_apply_visible: bool = _popup_has_item_text(geometry_popup, "Apply Selected Targets")
 	var feature_cluster_tool_clear_visible: bool = _popup_has_item_text(geometry_popup, "Clear Target Selection")
 
-	var band_selection: Dictionary = selection_presenter.resolve_hover_selection_data(
-		stage2_item_state,
+	var band_selection: Dictionary = stage2_item_state.call(
+		"resolve_hover_selection_data",
 		_build_patch_hit_data(selection_anchor_patch),
 		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_BAND_FILLET
 	)
-	var cluster_selection: Dictionary = selection_presenter.resolve_hover_selection_data(
-		stage2_item_state,
+	var cluster_selection: Dictionary = stage2_item_state.call(
+		"resolve_hover_selection_data",
 		_build_patch_hit_data(selection_anchor_patch),
 		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_CLUSTER_FILLET
 	)
 	var band_patch_ids: PackedStringArray = PackedStringArray(band_selection.get("patch_ids", PackedStringArray()))
+	var cluster_ids: PackedStringArray = PackedStringArray(cluster_selection.get("cluster_ids", PackedStringArray()))
 	var cluster_patch_ids: PackedStringArray = PackedStringArray(cluster_selection.get("patch_ids", PackedStringArray()))
 
 	crafting_ui.call("_on_action_menu_id_pressed", int(menu_ids.get("geometry_tool_surface_feature_cluster_chamfer", -1)))
 	await process_frame
 	await process_frame
-	var cluster_chamfer_apply_patch_ids: PackedStringArray = selection_presenter.resolve_selection_apply_patch_ids(
-		stage2_item_state,
+	var cluster_chamfer_apply_patch_ids: PackedStringArray = PackedStringArray(stage2_item_state.call(
+		"resolve_selection_apply_patch_ids",
 		cluster_patch_ids,
 		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_CLUSTER_CHAMFER
-	)
+	))
 	var origins_before_cluster_chamfer: Array[Vector3] = _collect_patch_origins(stage2_item_state)
 	var feature_cluster_chamfer_changed_shell: bool = crafting_ui.stage2_brush_presenter.apply_selection_tool(
 		stage2_item_state,
@@ -113,16 +114,16 @@ func _run_verification() -> void:
 	crafting_ui.call("_on_action_menu_id_pressed", int(menu_ids.get("geometry_tool_surface_feature_cluster_restore", -1)))
 	await process_frame
 	await process_frame
-	var cluster_restore_patch_ids: PackedStringArray = PackedStringArray(selection_presenter.resolve_hover_selection_data(
-		stage2_item_state,
+	var cluster_restore_patch_ids: PackedStringArray = PackedStringArray(stage2_item_state.call(
+		"resolve_hover_selection_data",
 		_build_patch_hit_data(selection_anchor_patch),
 		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_CLUSTER_RESTORE
 	).get("patch_ids", PackedStringArray()))
-	var cluster_restore_apply_patch_ids: PackedStringArray = selection_presenter.resolve_selection_apply_patch_ids(
-		stage2_item_state,
+	var cluster_restore_apply_patch_ids: PackedStringArray = PackedStringArray(stage2_item_state.call(
+		"resolve_selection_apply_patch_ids",
 		cluster_restore_patch_ids,
 		ForgeStage2SelectionPresenterScript.TOOL_STAGE2_SURFACE_FEATURE_CLUSTER_RESTORE
-	)
+	))
 	var origins_before_cluster_restore: Array[Vector3] = _collect_patch_origins(stage2_item_state)
 	var feature_cluster_restore_changed_shell: bool = crafting_ui.stage2_brush_presenter.apply_selection_tool(
 		stage2_item_state,
@@ -141,6 +142,7 @@ func _run_verification() -> void:
 	lines.append("synthetic_cluster_selected_count=%d" % synthetic_cluster_patch_ids.size())
 	lines.append("synthetic_cluster_larger_than_band=%s" % str(synthetic_cluster_patch_ids.size() > synthetic_band_patch_ids.size()))
 	lines.append("band_selected_count=%d" % band_patch_ids.size())
+	lines.append("selected_cluster_count=%d" % cluster_ids.size())
 	lines.append("cluster_selected_count=%d" % cluster_patch_ids.size())
 	lines.append("feature_cluster_chamfer_changed_shell=%s" % str(feature_cluster_chamfer_changed_shell))
 	lines.append("feature_cluster_restore_changed_shell=%s" % str(feature_cluster_restore_changed_shell))
@@ -257,8 +259,14 @@ func _set_patch_group_offset(stage2_item_state, patch_ids: PackedStringArray, of
 	var patch_lookup: Dictionary = _build_patch_lookup(stage2_item_state)
 	for patch_id: String in patch_ids:
 		var patch_state = patch_lookup.get(StringName(patch_id), null)
-		if patch_state == null or patch_state.baseline_quad == null or patch_state.current_quad == null:
+		if patch_state == null:
 			continue
+		if stage2_item_state != null and stage2_item_state.has_method("set_patch_current_offset_cells"):
+			stage2_item_state.call("set_patch_current_offset_cells", patch_state, offset_cells)
+			continue
+		if patch_state.baseline_quad == null or patch_state.current_quad == null:
+			continue
+		patch_state.current_offset_cells = offset_cells
 		var normal: Vector3 = patch_state.current_quad.normal.normalized()
 		patch_state.current_quad.origin_local = patch_state.baseline_quad.origin_local - (normal * offset_cells)
 		patch_state.dirty = true
@@ -349,6 +357,7 @@ func _build_synthetic_feature_cluster_state():
 		elif patch_index >= 4:
 			offset_cells = 0.75
 		patch_state.current_quad = _build_synthetic_quad(float(patch_index), offset_cells)
+		patch_state.current_offset_cells = offset_cells
 		stage2_item_state.patch_states.append(patch_state)
 	return stage2_item_state
 

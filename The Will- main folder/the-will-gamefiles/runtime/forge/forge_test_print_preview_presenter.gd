@@ -38,7 +38,7 @@ func sync_spawned_test_print_mesh(
 
 	var canonical_solid = active_test_print.canonical_solid if active_test_print.canonical_solid != null else test_print_mesh_builder.build_canonical_solid(active_test_print.display_cells)
 	var canonical_geometry = active_test_print.canonical_geometry if active_test_print.canonical_geometry != null else test_print_mesh_builder.build_canonical_geometry(canonical_solid)
-	var mesh: ArrayMesh = test_print_mesh_builder.build_mesh_from_canonical_geometry(canonical_geometry, material_lookup)
+	var mesh: ArrayMesh = test_print_mesh_builder.build_mesh_from_test_print(active_test_print, material_lookup)
 	if mesh == null or mesh.get_surface_count() == 0:
 		test_print_mesh_instance.mesh = null
 		test_print_mesh_instance.position = Vector3.ZERO
@@ -46,7 +46,11 @@ func sync_spawned_test_print_mesh(
 		return test_print_mesh_instance
 
 	test_print_mesh_instance.mesh = mesh
-	test_print_mesh_instance.position = -canonical_geometry.get_local_center() if canonical_geometry != null else -mesh.get_aabb().get_center()
+	test_print_mesh_instance.position = (
+		-mesh.get_aabb().get_center()
+		if active_test_print.visual_mesh_source == &"editable_mesh"
+		else (-canonical_geometry.get_local_center() if canonical_geometry != null else -mesh.get_aabb().get_center())
+	)
 	test_print_mesh_instance.visible = true
 	return test_print_mesh_instance
 

@@ -1,0 +1,80 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+SCRIPT ERROR: Parse Error: Too few arguments for "sync_stage2_shell_preview()" call. Expected at least 8 but received 7.
+   at: GDScript::reload (res://runtime/forge/forge_workspace_preview.gd:395)
+SCRIPT ERROR: Parse Error: Invalid argument for "sync_stage2_shell_preview()" function: argument 4 should be "Dictionary" but is "Vector3i".
+   at: GDScript::reload (res://runtime/forge/forge_workspace_preview.gd:399)
+SCRIPT ERROR: Parse Error: Invalid argument for "sync_stage2_shell_preview()" function: argument 5 should be "Vector3i" but is "float".
+   at: GDScript::reload (res://runtime/forge/forge_workspace_preview.gd:400)
+SCRIPT ERROR: Parse Error: Invalid argument for "sync_stage2_shell_preview()" function: argument 6 should be "float" but is "ForgeViewTuningDef".
+   at: GDScript::reload (res://runtime/forge/forge_workspace_preview.gd:401)
+SCRIPT ERROR: Parse Error: Invalid argument for "sync_stage2_shell_preview()" function: argument 7 should be "ForgeViewTuningDef" but is "bool".
+   at: GDScript::reload (res://runtime/forge/forge_workspace_preview.gd:402)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/forge_workspace_edit_flow.gd:0)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://runtime/forge/crafting_bench_ui.gd:0)
+ERROR: Failed to load script "res://runtime/forge/crafting_bench_ui.gd" with error "Compilation failed".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: CraftingBenchUI._ensure_free_workspace_preview (res://runtime/forge/crafting_bench_ui.gd:705)
+   GDScript backtrace (most recent call first):
+       [0] _ensure_free_workspace_preview (res://runtime/forge/crafting_bench_ui.gd:705)
+       [1] _ready (res://runtime/forge/crafting_bench_ui.gd:337)
+       [2] _run_verification (res://tools/verify_stage2_refinement_mode.gd:26)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: CraftingBenchUI._ensure_free_workspace_preview (res://runtime/forge/crafting_bench_ui.gd:705)
+   GDScript backtrace (most recent call first):
+       [0] _ensure_free_workspace_preview (res://runtime/forge/crafting_bench_ui.gd:705)
+       [1] _refresh_workspace_visuals (res://runtime/forge/crafting_bench_ui.gd:931)
+       [2] _refresh_plane_and_preview (res://runtime/forge/crafting_bench_ui.gd:927)
+       [3] refresh_all (res://runtime/forge/forge_bench_refresh_presenter.gd:23)
+       [4] _refresh_all (res://runtime/forge/crafting_bench_ui.gd:725)
+       [5] open_session (res://runtime/forge/forge_bench_session_presenter.gd:68)
+       [6] open_for (res://runtime/forge/crafting_bench_ui.gd:446)
+       [7] _run_verification (res://tools/verify_stage2_refinement_mode.gd:30)
+SCRIPT ERROR: Invalid call. Nonexistent function 'set_view_tuning' in base 'Nil'.
+   at: ForgeWorkspacePresentation.refresh_workspace_visuals (res://runtime/forge/forge_workspace_presentation.gd:32)
+   GDScript backtrace (most recent call first):
+       [0] refresh_workspace_visuals (res://runtime/forge/forge_workspace_presentation.gd:32)
+       [1] _refresh_workspace_visuals (res://runtime/forge/crafting_bench_ui.gd:932)
+       [2] _refresh_plane_and_preview (res://runtime/forge/crafting_bench_ui.gd:927)
+       [3] refresh_all (res://runtime/forge/forge_bench_refresh_presenter.gd:23)
+       [4] _refresh_all (res://runtime/forge/crafting_bench_ui.gd:725)
+       [5] open_session (res://runtime/forge/forge_bench_session_presenter.gd:68)
+       [6] open_for (res://runtime/forge/crafting_bench_ui.gd:446)
+       [7] _run_verification (res://tools/verify_stage2_refinement_mode.gd:30)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: CraftingBenchUI._ensure_free_workspace_preview (res://runtime/forge/crafting_bench_ui.gd:705)
+   GDScript backtrace (most recent call first):
+       [0] _ensure_free_workspace_preview (res://runtime/forge/crafting_bench_ui.gd:705)
+       [1] _refresh_workspace_visuals (res://runtime/forge/crafting_bench_ui.gd:931)
+       [2] _set_stage2_refinement_mode (res://runtime/forge/crafting_bench_ui.gd:1594)
+       [3] _toggle_stage2_refinement_mode (res://runtime/forge/crafting_bench_ui.gd:1539)
+       [4] _run_verification (res://tools/verify_stage2_refinement_mode.gd:34)
+SCRIPT ERROR: Invalid call. Nonexistent function 'set_active_slice' in base 'Nil'.
+   at: ForgeWorkspacePresentation.refresh_workspace_visuals (res://runtime/forge/forge_workspace_presentation.gd:34)
+   GDScript backtrace (most recent call first):
+       [0] refresh_workspace_visuals (res://runtime/forge/forge_workspace_presentation.gd:34)
+       [1] _refresh_workspace_visuals (res://runtime/forge/crafting_bench_ui.gd:932)
+       [2] _set_stage2_refinement_mode (res://runtime/forge/crafting_bench_ui.gd:1594)
+       [3] _toggle_stage2_refinement_mode (res://runtime/forge/crafting_bench_ui.gd:1539)
+       [4] _run_verification (res://tools/verify_stage2_refinement_mode.gd:34)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: CraftingBenchUI._ensure_free_workspace_preview (res://runtime/forge/crafting_bench_ui.gd:705)
+   GDScript backtrace (most recent call first):
+       [0] _ensure_free_workspace_preview (res://runtime/forge/crafting_bench_ui.gd:705)
+       [1] _refresh_workspace_visuals (res://runtime/forge/crafting_bench_ui.gd:931)
+       [2] _set_stage2_refinement_mode (res://runtime/forge/crafting_bench_ui.gd:1594)
+       [3] _toggle_stage2_refinement_mode (res://runtime/forge/crafting_bench_ui.gd:1539)
+       [4] _run_verification (res://tools/verify_stage2_refinement_mode.gd:79)
+SCRIPT ERROR: Invalid call. Nonexistent function 'set_active_slice' in base 'Nil'.
+   at: ForgeWorkspacePresentation.refresh_workspace_visuals (res://runtime/forge/forge_workspace_presentation.gd:34)
+   GDScript backtrace (most recent call first):
+       [0] refresh_workspace_visuals (res://runtime/forge/forge_workspace_presentation.gd:34)
+       [1] _refresh_workspace_visuals (res://runtime/forge/crafting_bench_ui.gd:932)
+       [2] _set_stage2_refinement_mode (res://runtime/forge/crafting_bench_ui.gd:1594)
+       [3] _toggle_stage2_refinement_mode (res://runtime/forge/crafting_bench_ui.gd:1539)
+       [4] _run_verification (res://tools/verify_stage2_refinement_mode.gd:79)

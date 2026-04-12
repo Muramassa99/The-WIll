@@ -27,7 +27,8 @@ func validate_bow_structure(
 		material_lookup: Dictionary,
 		forge_intent: StringName,
 		equipment_context: StringName,
-		authored_cells: Array[CellAtom] = []
+		authored_cells: Array[CellAtom] = [],
+		primary_grip_valid: bool = false
 	) -> Dictionary:
 	_clear_segment_role_hints(segments)
 	var explicit_string_anchor_pair: Dictionary = CraftedItemWIPScript.resolve_first_complete_string_anchor_pair(authored_cells)
@@ -89,7 +90,7 @@ func validate_bow_structure(
 	var lower_limb_valid: bool = limb_validation_resolver.is_valid_limb_segment(lower_limb_segment, material_lookup)
 	var explicit_string_anchor_valid: bool = bool(explicit_string_anchor_pair.get("valid", false))
 	var bow_string_valid: bool = explicit_string_anchor_valid or limb_validation_resolver.is_valid_bow_string(bow_string_segment, material_lookup)
-	var bow_valid: bool = riser_segment != null and upper_limb_valid and lower_limb_valid and bow_string_valid and not reference_points.get("projectile_pass_point", Vector3.ZERO).is_equal_approx(Vector3.ZERO)
+	var bow_valid: bool = primary_grip_valid and riser_segment != null and upper_limb_valid and lower_limb_valid and bow_string_valid and not reference_points.get("projectile_pass_point", Vector3.ZERO).is_equal_approx(Vector3.ZERO)
 	var upper_limb_flex_score: float = limb_validation_resolver.calculate_limb_flex_score(upper_limb_segment, material_lookup) if upper_limb_valid else 0.0
 	var lower_limb_flex_score: float = limb_validation_resolver.calculate_limb_flex_score(lower_limb_segment, material_lookup) if lower_limb_valid else 0.0
 	var string_tension_score: float = 1.0 if bow_string_valid else 0.0
@@ -106,6 +107,7 @@ func validate_bow_structure(
 
 	return {
 		"bow_valid": bow_valid,
+		"primary_grip_valid": primary_grip_valid,
 		"bow_reference_center": reference_points.get("bow_reference_center", Vector3.ZERO),
 		"projectile_pass_point": reference_points.get("projectile_pass_point", Vector3.ZERO),
 		"shoot_axis": axes.get("shoot_axis", Vector3.ZERO),
@@ -128,7 +130,7 @@ func validate_bow_structure(
 		"lower_limb_flex_score": lower_limb_flex_score,
 		"string_tension_score": string_tension_score,
 		"bow_asymmetry_score": limb_validation_resolver.calculate_bow_asymmetry_score(upper_limb_flex_score, lower_limb_flex_score),
-		"validation_error": _resolve_validation_error(riser_segment, upper_limb_valid, lower_limb_valid, bow_string_valid, reference_points),
+		"validation_error": _resolve_validation_error(primary_grip_valid, riser_segment, upper_limb_valid, lower_limb_valid, bow_string_valid, reference_points),
 	}
 
 func resolve_bow_reference_points(
@@ -153,12 +155,15 @@ func _is_ranged_context(forge_intent: StringName, equipment_context: StringName)
 	return forge_intent == &"intent_ranged" and equipment_context == &"ctx_weapon"
 
 func _resolve_validation_error(
+		primary_grip_valid: bool,
 		riser_segment: SegmentAtom,
 		upper_limb_valid: bool,
 		lower_limb_valid: bool,
 		bow_string_valid: bool,
 		reference_points: Dictionary
 	) -> StringName:
+	if not primary_grip_valid:
+		return &"no_primary_grip_candidate"
 	if riser_segment == null:
 		return &"missing_riser"
 	if not upper_limb_valid:

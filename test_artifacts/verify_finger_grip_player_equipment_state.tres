@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="PlayerEquipmentState" format=3]
+
+[ext_resource type="Script" path="res://core/models/equipped_slot_instance.gd" id="1_yav7x"]
+[ext_resource type="Script" path="res://core/models/player_equipment_state.gd" id="2_aa7ll"]
+
+[sub_resource type="Resource" id="Resource_y8x6f"]
+script = ExtResource("1_yav7x")
+slot_id = &"hand_right"
+entry_kind = &"forge_test_wip"
+source_wip_id = &"verify_two_hand_finger_grip"
+display_name = "Verify Two Hand Finger Grip"
+is_forge_internal_only = true
+
+[resource]
+script = ExtResource("2_aa7ll")
+equipped_slots = Array[Resource]([SubResource("Resource_y8x6f")])
+save_file_path = "C:/WORKSPACE/test_artifacts/verify_finger_grip_player_equipment_state.tres"

@@ -155,7 +155,10 @@ func ensure_stage2_item_state_for_active_wip():
 		active_baked_profile = forge_service.bake_wip(active_wip, build_default_material_lookup())
 	elif active_baked_profile == null:
 		active_baked_profile = active_wip.latest_baked_profile_snapshot
-	var stage2_item_state = forge_stage2_service.ensure_stage2_item_state_for_wip(active_wip)
+	var stage2_item_state = forge_stage2_service.ensure_stage2_item_state_for_wip(
+		active_wip,
+		build_default_material_lookup()
+	)
 	if stage2_item_state == null:
 		return null
 	clear_active_test_print()
@@ -305,11 +308,28 @@ func set_material_at(grid_position: Vector3i, material_variant_id: StringName) -
 		Callable(self, "_mark_wip_dirty")
 	)
 
+func set_materials_at(grid_positions: Array[Vector3i], material_variant_id: StringName) -> int:
+	return wip_cell_state_presenter.set_materials_at(
+		active_cell_lookup,
+		grid_positions,
+		material_variant_id,
+		Callable(self, "ensure_editable_wip"),
+		Callable(self, "_mark_wip_dirty")
+	)
+
 func remove_material_at(grid_position: Vector3i) -> StringName:
 	return wip_cell_state_presenter.remove_material_at(
 		active_wip,
 		active_cell_lookup,
 		grid_position,
+		Callable(self, "_mark_wip_dirty")
+	)
+
+func remove_materials_at(grid_positions: Array[Vector3i]) -> Dictionary:
+	return wip_cell_state_presenter.remove_materials_at(
+		active_wip,
+		active_cell_lookup,
+		grid_positions,
 		Callable(self, "_mark_wip_dirty")
 	)
 

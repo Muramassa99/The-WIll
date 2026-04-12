@@ -551,23 +551,34 @@ func _build_ui() -> void:
 	panel = PanelContainer.new()
 	panel.name = "Panel"
 	panel.visible = false
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	panel.anchor_left = 0.0
+	panel.anchor_top = 0.0
+	panel.anchor_right = 1.0
+	panel.anchor_bottom = 1.0
+	var safe_margin_h := 24
+	var safe_margin_v := 16
+	panel.offset_left = safe_margin_h
+	panel.offset_top = safe_margin_v
+	panel.offset_right = -safe_margin_h
+	panel.offset_bottom = -safe_margin_v
 	var root_style := StyleBoxFlat.new()
 	root_style.bg_color = COLOR_BG_ROOT
-	root_style.set_border_width_all(0)
-	root_style.set_corner_radius_all(0)
+	root_style.set_border_width_all(1)
+	root_style.border_color = COLOR_BORDER
+	root_style.set_corner_radius_all(4)
 	panel.add_theme_stylebox_override("panel", root_style)
 	add_child(panel)
 	var root_margin := MarginContainer.new()
 	root_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for side: String in ["margin_left", "margin_right"]:
-		root_margin.add_theme_constant_override(side, 14)
-	for side: String in ["margin_top", "margin_bottom"]:
 		root_margin.add_theme_constant_override(side, 10)
+	for side: String in ["margin_top", "margin_bottom"]:
+		root_margin.add_theme_constant_override(side, 8)
 	panel.add_child(root_margin)
 	var root_vbox := VBoxContainer.new()
 	root_vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root_vbox.add_theme_constant_override("separation", 6)
+	root_vbox.add_theme_constant_override("separation", 4)
 	root_margin.add_child(root_vbox)
 	_build_header(root_vbox)
 	var header_sep := HSeparator.new()
@@ -576,7 +587,7 @@ func _build_ui() -> void:
 	root_vbox.add_child(header_sep)
 	var content_hbox := HBoxContainer.new()
 	content_hbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	content_hbox.add_theme_constant_override("separation", 6)
+	content_hbox.add_theme_constant_override("separation", 4)
 	root_vbox.add_child(content_hbox)
 	_build_left_sidebar(content_hbox)
 	_build_center_column(content_hbox)
@@ -614,8 +625,10 @@ func _build_header(parent: VBoxContainer) -> void:
 
 func _build_left_sidebar(parent: HBoxContainer) -> void:
 	var sidebar := VBoxContainer.new()
-	sidebar.custom_minimum_size = Vector2(230, 0)
-	sidebar.add_theme_constant_override("separation", 6)
+	sidebar.custom_minimum_size = Vector2(180, 0)
+	sidebar.size_flags_horizontal = Control.SIZE_FILL
+	sidebar.size_flags_stretch_ratio = 0.22
+	sidebar.add_theme_constant_override("separation", 4)
 	parent.add_child(sidebar)
 	var w_vbox := _build_section_panel(sidebar, true)
 	_build_section_header(w_vbox, "WEAPONS")
@@ -658,7 +671,8 @@ func _build_left_sidebar(parent: HBoxContainer) -> void:
 func _build_center_column(parent: HBoxContainer) -> void:
 	var center := VBoxContainer.new()
 	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	center.add_theme_constant_override("separation", 6)
+	center.size_flags_stretch_ratio = 1.0
+	center.add_theme_constant_override("separation", 4)
 	parent.add_child(center)
 	var preview_panel := PanelContainer.new()
 	preview_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -669,7 +683,7 @@ func _build_center_column(parent: HBoxContainer) -> void:
 	pv_vbox.add_theme_constant_override("separation", 0)
 	preview_panel.add_child(pv_vbox)
 	preview_view_container = SubViewportContainer.new()
-	preview_view_container.custom_minimum_size = Vector2(480, 320)
+	preview_view_container.custom_minimum_size = Vector2(280, 180)
 	preview_view_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	preview_view_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	preview_view_container.stretch = true
@@ -747,19 +761,21 @@ func _build_center_column(parent: HBoxContainer) -> void:
 	ds_right.add_child(preview_loop_check_box)
 	_build_field_label(ds_right, "Description")
 	skill_description_edit = TextEdit.new()
-	skill_description_edit.custom_minimum_size = Vector2(0, 42)
+	skill_description_edit.custom_minimum_size = Vector2(0, 34)
 	skill_description_edit.placeholder_text = "Skill description..."
 	_style_text_edit(skill_description_edit)
 	ds_right.add_child(skill_description_edit)
 	_build_field_label(ds_right, "Notes")
 	draft_notes_edit = TextEdit.new()
-	draft_notes_edit.custom_minimum_size = Vector2(0, 42)
+	draft_notes_edit.custom_minimum_size = Vector2(0, 34)
 	_style_text_edit(draft_notes_edit)
 	ds_right.add_child(draft_notes_edit)
 
 func _build_right_inspector(parent: HBoxContainer) -> void:
 	var inspector_panel := PanelContainer.new()
-	inspector_panel.custom_minimum_size = Vector2(270, 0)
+	inspector_panel.custom_minimum_size = Vector2(210, 0)
+	inspector_panel.size_flags_horizontal = Control.SIZE_FILL
+	inspector_panel.size_flags_stretch_ratio = 0.26
 	inspector_panel.add_theme_stylebox_override("panel", _make_panel_style(COLOR_BG_SECTION, COLOR_BORDER, 1, 4))
 	parent.add_child(inspector_panel)
 	var scroll := ScrollContainer.new()

@@ -6,7 +6,7 @@ signal closed
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
 const CombatAnimationStationStateScript = preload("res://core/models/combat_animation_station_state.gd")
 const CombatAnimationDraftScript = preload("res://core/models/combat_animation_draft.gd")
-const CombatAnimationPointScript = preload("res://core/models/combat_animation_point.gd")
+const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
 const CombatAnimationStationPreviewPresenterScript = preload("res://runtime/combat/combat_animation_station_preview_presenter.gd")
 
 const AUTHORING_MODE_LABELS := {
@@ -15,9 +15,9 @@ const AUTHORING_MODE_LABELS := {
 }
 
 const TWO_HAND_STATE_LABELS := {
-	CombatAnimationPointScript.TWO_HAND_STATE_AUTO: "Auto",
-	CombatAnimationPointScript.TWO_HAND_STATE_ONE_HAND: "One Hand",
-	CombatAnimationPointScript.TWO_HAND_STATE_TWO_HAND: "Two Hand",
+	CombatAnimationMotionNodeScript.TWO_HAND_STATE_AUTO: "Auto",
+	CombatAnimationMotionNodeScript.TWO_HAND_STATE_ONE_HAND: "One Hand",
+	CombatAnimationMotionNodeScript.TWO_HAND_STATE_TWO_HAND: "Two Hand",
 }
 
 @onready var backdrop: ColorRect = $Backdrop
@@ -73,12 +73,12 @@ func _ready() -> void:
 	panel.visible = false
 	project_list.item_clicked.connect(_on_project_item_clicked)
 	draft_list.item_clicked.connect(_on_draft_item_clicked)
-	point_list.item_clicked.connect(_on_point_item_clicked)
+	point_list.item_clicked.connect(_on_motion_node_item_clicked)
 	authoring_mode_option_button.item_selected.connect(_on_authoring_mode_selected)
 	new_skill_draft_button.pressed.connect(_on_new_skill_draft_pressed)
-	add_point_button.pressed.connect(_on_add_point_pressed)
-	duplicate_point_button.pressed.connect(_on_duplicate_point_pressed)
-	remove_point_button.pressed.connect(_on_remove_point_pressed)
+	add_point_button.pressed.connect(_on_add_motion_node_pressed)
+	duplicate_point_button.pressed.connect(_on_duplicate_motion_node_pressed)
+	remove_point_button.pressed.connect(_on_remove_motion_node_pressed)
 	set_continuity_button.pressed.connect(_on_set_continuity_pressed)
 	draft_name_edit.text_submitted.connect(_on_draft_name_submitted)
 	draft_name_edit.focus_exited.connect(_on_draft_name_focus_exited)
@@ -86,25 +86,26 @@ func _ready() -> void:
 	skill_slot_edit.focus_exited.connect(_on_skill_slot_focus_exited)
 	preview_speed_spin_box.value_changed.connect(_on_preview_speed_changed)
 	preview_loop_check_box.toggled.connect(_on_preview_loop_toggled)
-	position_x_spin_box.value_changed.connect(_on_position_component_changed.bind(0))
-	position_y_spin_box.value_changed.connect(_on_position_component_changed.bind(1))
-	position_z_spin_box.value_changed.connect(_on_position_component_changed.bind(2))
-	rotation_x_spin_box.value_changed.connect(_on_rotation_component_changed.bind(0))
-	rotation_y_spin_box.value_changed.connect(_on_rotation_component_changed.bind(1))
-	rotation_z_spin_box.value_changed.connect(_on_rotation_component_changed.bind(2))
+	position_x_spin_box.value_changed.connect(_on_tip_position_component_changed.bind(0))
+	position_y_spin_box.value_changed.connect(_on_tip_position_component_changed.bind(1))
+	position_z_spin_box.value_changed.connect(_on_tip_position_component_changed.bind(2))
+	rotation_x_spin_box.value_changed.connect(_on_plane_orientation_component_changed.bind(0))
+	rotation_y_spin_box.value_changed.connect(_on_plane_orientation_component_changed.bind(1))
+	rotation_z_spin_box.value_changed.connect(_on_plane_orientation_component_changed.bind(2))
 	transition_spin_box.value_changed.connect(_on_transition_changed)
 	body_support_spin_box.value_changed.connect(_on_body_support_changed)
 	two_hand_state_option_button.item_selected.connect(_on_two_hand_state_selected)
 	grip_mode_option_button.item_selected.connect(_on_grip_mode_selected)
 	preview_view_container.resized.connect(_on_preview_container_resized)
-	curve_in_x_spin_box.value_changed.connect(_on_curve_in_component_changed.bind(0))
-	curve_in_y_spin_box.value_changed.connect(_on_curve_in_component_changed.bind(1))
-	curve_in_z_spin_box.value_changed.connect(_on_curve_in_component_changed.bind(2))
-	curve_out_x_spin_box.value_changed.connect(_on_curve_out_component_changed.bind(0))
-	curve_out_y_spin_box.value_changed.connect(_on_curve_out_component_changed.bind(1))
-	curve_out_z_spin_box.value_changed.connect(_on_curve_out_component_changed.bind(2))
+	curve_in_x_spin_box.value_changed.connect(_on_tip_curve_in_component_changed.bind(0))
+	curve_in_y_spin_box.value_changed.connect(_on_tip_curve_in_component_changed.bind(1))
+	curve_in_z_spin_box.value_changed.connect(_on_tip_curve_in_component_changed.bind(2))
+	curve_out_x_spin_box.value_changed.connect(_on_tip_curve_out_component_changed.bind(0))
+	curve_out_y_spin_box.value_changed.connect(_on_tip_curve_out_component_changed.bind(1))
+	curve_out_z_spin_box.value_changed.connect(_on_tip_curve_out_component_changed.bind(2))
 	draft_notes_edit.focus_exited.connect(_on_draft_notes_focus_exited)
 	close_button.pressed.connect(close_ui)
+	_register_station_input_actions()
 	_populate_static_options()
 	_refresh_all("Select a saved weapon WIP to begin authoring.")
 
@@ -114,6 +115,31 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed(&"ui_cancel"):
 		close_ui()
 		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed(&"skill_crafter_prev_node"):
+		_navigate_motion_node(-1)
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed(&"skill_crafter_next_node"):
+		_navigate_motion_node(1)
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed(&"skill_crafter_copy_node"):
+		duplicate_selected_motion_node()
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed(&"skill_crafter_delete_node"):
+		remove_selected_motion_node()
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed(&"skill_crafter_cycle_focus"):
+		_cycle_focus()
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed(&"skill_crafter_play_preview"):
+		_toggle_preview_playback()
+		get_viewport().set_input_as_handled()
+		return
 
 func toggle_for(player, bench_name: String) -> void:
 	if panel.visible:
@@ -125,7 +151,7 @@ func open_for(player, bench_name: String) -> void:
 	active_player = player
 	active_wip_library = _get_forge_wip_library_state()
 	title_label.text = "%s Combat Animation Station" % bench_name
-	subtitle_label.text = "Weapon selection -> draft selection -> point-chain authoring. This station saves runtime combat idle and skill motion truth back into the owning weapon WIP."
+	subtitle_label.text = "Weapon selection -> draft selection -> motion-node authoring. This station saves runtime combat idle and skill motion truth back into the owning weapon WIP."
 	if active_player != null and active_player.has_method("set_ui_mode_enabled"):
 		active_player.call("set_ui_mode_enabled", true)
 	visible = true
@@ -186,8 +212,8 @@ func select_draft(draft_identifier: StringName) -> bool:
 		station_state.set("selected_idle_context_id", draft_identifier)
 	else:
 		station_state.set("selected_skill_id", draft_identifier)
-	var selected_point_index: int = int(draft.get("selected_point_index"))
-	draft.set("selected_point_index", clampi(selected_point_index, 0, maxi(int((draft.get("point_chain") as Array).size()) - 1, 0)))
+	var selected_node_index: int = int(draft.get("selected_motion_node_index"))
+	draft.set("selected_motion_node_index", clampi(selected_node_index, 0, maxi(int((draft.get("motion_node_chain") as Array).size()) - 1, 0)))
 	_persist_active_wip("Draft selection updated.")
 	_refresh_all("Draft selection updated.")
 	return true
@@ -212,191 +238,184 @@ func create_skill_draft(skill_id: StringName = StringName(), display_name: Strin
 	_refresh_all("Created %s." % resolved_display_name)
 	return resolved_skill_id
 
-func select_point(point_index: int) -> bool:
+func select_motion_node(node_index: int) -> bool:
 	var draft: Resource = _get_active_draft()
 	if draft == null:
 		return false
-	var point_chain: Array = draft.get("point_chain") as Array
-	if point_chain.is_empty():
+	var motion_node_chain: Array = draft.get("motion_node_chain") as Array
+	if motion_node_chain.is_empty():
 		return false
-	draft.set("selected_point_index", clampi(point_index, 0, point_chain.size() - 1))
-	_persist_active_wip("Point selection updated.")
-	_refresh_all("Point selection updated.")
+	draft.set("selected_motion_node_index", clampi(node_index, 0, motion_node_chain.size() - 1))
+	_persist_active_wip("Motion node selection updated.")
+	_refresh_all("Motion node selection updated.")
 	return true
 
-func insert_point_after_selection() -> bool:
+func insert_motion_node_after_selection() -> bool:
 	var draft: Resource = _get_active_draft()
 	if draft == null:
 		return false
-	var point_chain: Array = draft.get("point_chain") as Array
-	var insert_index: int = clampi(int(draft.get("selected_point_index")), 0, maxi(point_chain.size() - 1, 0)) + 1
-	var seed_point: CombatAnimationPoint = _get_active_point()
-	var new_point: CombatAnimationPoint = _duplicate_or_build_point(seed_point)
-	if new_point == null:
+	var motion_node_chain: Array = draft.get("motion_node_chain") as Array
+	var insert_index: int = clampi(int(draft.get("selected_motion_node_index")), 0, maxi(motion_node_chain.size() - 1, 0)) + 1
+	var seed_node: CombatAnimationMotionNode = _get_active_motion_node()
+	var new_node: CombatAnimationMotionNode = _duplicate_or_build_motion_node(seed_node)
+	if new_node == null:
 		return false
-	new_point.local_target_position += Vector3(0.0, 0.0, -0.08)
-	new_point.active_plane_origin_local = new_point.local_target_position
-	new_point.committed = false
-	point_chain.insert(insert_index, new_point)
-	draft.set("selected_point_index", insert_index)
+	motion_node_chain.insert(insert_index, new_node)
+	draft.set("selected_motion_node_index", insert_index)
 	_normalize_draft(draft)
-	_persist_active_wip("Inserted point %d." % insert_index)
-	_refresh_all("Inserted point %d." % insert_index)
+	_persist_active_wip("Inserted motion node %d." % insert_index)
+	_refresh_all("Inserted motion node %d." % insert_index)
 	return true
 
-func duplicate_selected_point() -> bool:
+func duplicate_selected_motion_node() -> bool:
 	var draft: Resource = _get_active_draft()
-	var point: CombatAnimationPoint = _get_active_point()
-	if draft == null or point == null:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if draft == null or motion_node == null:
 		return false
-	var point_chain: Array = draft.get("point_chain") as Array
-	var selected_index: int = clampi(int(draft.get("selected_point_index")), 0, maxi(point_chain.size() - 1, 0))
-	var duplicate_point: CombatAnimationPoint = _duplicate_or_build_point(point)
-	if duplicate_point == null:
+	var motion_node_chain: Array = draft.get("motion_node_chain") as Array
+	var selected_index: int = clampi(int(draft.get("selected_motion_node_index")), 0, maxi(motion_node_chain.size() - 1, 0))
+	var duplicate_node: CombatAnimationMotionNode = _duplicate_or_build_motion_node(motion_node)
+	if duplicate_node == null:
 		return false
-	duplicate_point.local_target_position += Vector3(0.0, 0.0, -0.04)
-	duplicate_point.active_plane_origin_local = duplicate_point.local_target_position
-	duplicate_point.committed = false
-	point_chain.insert(selected_index + 1, duplicate_point)
-	draft.set("selected_point_index", selected_index + 1)
+	motion_node_chain.insert(selected_index + 1, duplicate_node)
+	draft.set("selected_motion_node_index", selected_index + 1)
 	_normalize_draft(draft)
-	_persist_active_wip("Duplicated point %d." % selected_index)
-	_refresh_all("Duplicated point %d." % selected_index)
+	_persist_active_wip("Duplicated motion node %d." % selected_index)
+	_refresh_all("Duplicated motion node %d." % selected_index)
 	return true
 
-func remove_selected_point() -> bool:
+func remove_selected_motion_node() -> bool:
 	var draft: Resource = _get_active_draft()
 	if draft == null:
 		return false
-	var point_chain: Array = draft.get("point_chain") as Array
-	if point_chain.size() <= _get_minimum_point_count(draft):
-		_refresh_all("Minimum baseline point count reached.")
+	var motion_node_chain: Array = draft.get("motion_node_chain") as Array
+	if motion_node_chain.size() <= _get_minimum_motion_node_count(draft):
+		_refresh_all("Minimum baseline motion node count reached.")
 		return false
-	var selected_index: int = clampi(int(draft.get("selected_point_index")), 0, point_chain.size() - 1)
-	point_chain.remove_at(selected_index)
-	draft.set("selected_point_index", clampi(selected_index, 0, point_chain.size() - 1))
-	draft.set("continuity_point_index", clampi(int(draft.get("continuity_point_index")), 0, point_chain.size() - 1))
+	var selected_index: int = clampi(int(draft.get("selected_motion_node_index")), 0, motion_node_chain.size() - 1)
+	motion_node_chain.remove_at(selected_index)
+	draft.set("selected_motion_node_index", clampi(selected_index, 0, motion_node_chain.size() - 1))
+	draft.set("continuity_motion_node_index", clampi(int(draft.get("continuity_motion_node_index")), 0, motion_node_chain.size() - 1))
 	_normalize_draft(draft)
-	_persist_active_wip("Removed point %d." % selected_index)
-	_refresh_all("Removed point %d." % selected_index)
+	_persist_active_wip("Removed motion node %d." % selected_index)
+	_refresh_all("Removed motion node %d." % selected_index)
 	return true
 
-func set_selected_point_as_continuity() -> bool:
+func set_selected_motion_node_as_continuity() -> bool:
 	var draft: Resource = _get_active_draft()
 	if draft == null:
 		return false
-	draft.set("continuity_point_index", int(draft.get("selected_point_index")))
-	_persist_active_wip("Continuity point updated.")
-	_refresh_all("Continuity point updated.")
+	draft.set("continuity_motion_node_index", int(draft.get("selected_motion_node_index")))
+	_persist_active_wip("Continuity motion node updated.")
+	_refresh_all("Continuity motion node updated.")
 	return true
 
-func set_selected_point_local_position(local_position: Vector3) -> bool:
-	var point: CombatAnimationPoint = _get_active_point()
-	if point == null:
+func set_selected_motion_node_tip_position(tip_position: Vector3) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
 		return false
-	point.local_target_position = local_position
-	point.active_plane_origin_local = local_position
-	point.normalize()
-	_persist_active_wip("Point position updated.")
-	_refresh_point_list()
+	motion_node.tip_position_local = tip_position
+	motion_node.normalize()
+	_persist_active_wip("Motion node tip position updated.")
+	_refresh_motion_node_list()
 	_refresh_editor_fields()
 	_refresh_preview_scene()
-	_refresh_summary("Point position updated.")
+	_refresh_summary("Motion node tip position updated.")
 	return true
 
-func set_selected_point_local_rotation_degrees(local_rotation_degrees: Vector3) -> bool:
-	var point: CombatAnimationPoint = _get_active_point()
-	if point == null:
+func set_selected_motion_node_plane_orientation(plane_degrees: Vector3) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
 		return false
-	point.local_target_rotation_degrees = local_rotation_degrees
-	point.normalize()
-	_persist_active_wip("Point rotation updated.")
-	_refresh_point_list()
+	motion_node.trajectory_plane_orientation_degrees = plane_degrees
+	motion_node.normalize()
+	_persist_active_wip("Motion node plane orientation updated.")
+	_refresh_motion_node_list()
 	_refresh_editor_fields()
 	_refresh_preview_scene()
-	_refresh_summary("Point rotation updated.")
+	_refresh_summary("Motion node plane orientation updated.")
 	return true
 
-func set_selected_point_transition_duration(duration_seconds: float) -> bool:
-	var point: CombatAnimationPoint = _get_active_point()
-	if point == null:
+func set_selected_motion_node_transition_duration(duration_seconds: float) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
 		return false
-	point.transition_duration_seconds = maxf(duration_seconds, 0.0)
-	point.normalize()
-	_persist_active_wip("Point transition updated.")
-	_refresh_point_list()
+	motion_node.transition_duration_seconds = maxf(duration_seconds, 0.0)
+	motion_node.normalize()
+	_persist_active_wip("Motion node transition updated.")
+	_refresh_motion_node_list()
 	_refresh_editor_fields()
-	_refresh_summary("Point transition updated.")
+	_refresh_summary("Motion node transition updated.")
 	return true
 
-func set_selected_point_body_support_blend(blend_ratio: float) -> bool:
-	var point: CombatAnimationPoint = _get_active_point()
-	if point == null:
+func set_selected_motion_node_body_support_blend(blend_ratio: float) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
 		return false
-	point.body_support_blend = clampf(blend_ratio, 0.0, 1.0)
-	point.normalize()
-	_persist_active_wip("Point body-support blend updated.")
-	_refresh_point_list()
-	_refresh_editor_fields()
-	_refresh_preview_scene()
-	_refresh_summary("Point body-support blend updated.")
-	return true
-
-func set_selected_point_two_hand_state(state_id: StringName) -> bool:
-	var point: CombatAnimationPoint = _get_active_point()
-	if point == null or not CombatAnimationPointScript.get_two_hand_state_ids().has(state_id):
-		return false
-	point.two_hand_state = state_id
-	point.normalize()
-	_persist_active_wip("Point two-hand state updated.")
-	_refresh_point_list()
+	motion_node.body_support_blend = clampf(blend_ratio, 0.0, 1.0)
+	motion_node.normalize()
+	_persist_active_wip("Motion node body-support blend updated.")
+	_refresh_motion_node_list()
 	_refresh_editor_fields()
 	_refresh_preview_scene()
-	_refresh_summary("Point two-hand state updated.")
+	_refresh_summary("Motion node body-support blend updated.")
 	return true
 
-func set_selected_point_preferred_grip_style(grip_mode: StringName) -> bool:
-	var point: CombatAnimationPoint = _get_active_point()
-	if point == null:
+func set_selected_motion_node_two_hand_state(state_id: StringName) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null or not CombatAnimationMotionNodeScript.get_two_hand_state_ids().has(state_id):
+		return false
+	motion_node.two_hand_state = state_id
+	motion_node.normalize()
+	_persist_active_wip("Motion node two-hand state updated.")
+	_refresh_motion_node_list()
+	_refresh_editor_fields()
+	_refresh_preview_scene()
+	_refresh_summary("Motion node two-hand state updated.")
+	return true
+
+func set_selected_motion_node_preferred_grip_style(grip_mode: StringName) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
 		return false
 	var resolved_grip_mode: StringName = CraftedItemWIPScript.resolve_supported_grip_style(
 		grip_mode,
 		active_wip.forge_intent if active_wip != null else StringName(),
 		active_wip.equipment_context if active_wip != null else StringName()
 	)
-	point.preferred_grip_style_mode = resolved_grip_mode
-	point.normalize()
-	_persist_active_wip("Point grip preference updated.")
-	_refresh_point_list()
+	motion_node.preferred_grip_style_mode = resolved_grip_mode
+	motion_node.normalize()
+	_persist_active_wip("Motion node grip preference updated.")
+	_refresh_motion_node_list()
 	_refresh_editor_fields()
 	_refresh_preview_scene()
-	_refresh_summary("Point grip preference updated.")
+	_refresh_summary("Motion node grip preference updated.")
 	return true
 
-func set_selected_point_curve_in_handle_local(curve_in_handle_local: Vector3) -> bool:
-	var point: CombatAnimationPoint = _get_active_point()
-	if point == null:
+func set_selected_motion_node_tip_curve_in(curve_in_handle: Vector3) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
 		return false
-	point.curve_in_handle_local = curve_in_handle_local
-	point.normalize()
-	_persist_active_wip("Point curve-in handle updated.")
-	_refresh_point_list()
+	motion_node.tip_curve_in_handle = curve_in_handle
+	motion_node.normalize()
+	_persist_active_wip("Motion node tip curve-in handle updated.")
+	_refresh_motion_node_list()
 	_refresh_editor_fields()
 	_refresh_preview_scene()
-	_refresh_summary("Point curve-in handle updated.")
+	_refresh_summary("Motion node tip curve-in handle updated.")
 	return true
 
-func set_selected_point_curve_out_handle_local(curve_out_handle_local: Vector3) -> bool:
-	var point: CombatAnimationPoint = _get_active_point()
-	if point == null:
+func set_selected_motion_node_tip_curve_out(curve_out_handle: Vector3) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
 		return false
-	point.curve_out_handle_local = curve_out_handle_local
-	point.normalize()
-	_persist_active_wip("Point curve-out handle updated.")
-	_refresh_point_list()
+	motion_node.tip_curve_out_handle = curve_out_handle
+	motion_node.normalize()
+	_persist_active_wip("Motion node tip curve-out handle updated.")
+	_refresh_motion_node_list()
 	_refresh_editor_fields()
 	_refresh_preview_scene()
-	_refresh_summary("Point curve-out handle updated.")
+	_refresh_summary("Motion node tip curve-out handle updated.")
 	return true
 
 func set_active_draft_display_name(display_name: String) -> bool:
@@ -462,9 +481,9 @@ func get_active_draft_identifier() -> StringName:
 	var draft: Resource = _get_active_draft()
 	return _get_draft_identifier(draft)
 
-func get_selected_point_index() -> int:
+func get_selected_motion_node_index() -> int:
 	var draft: Resource = _get_active_draft()
-	return int(draft.get("selected_point_index")) if draft != null else 0
+	return int(draft.get("selected_motion_node_index")) if draft != null else 0
 
 func get_preview_debug_state() -> Dictionary:
 	return preview_presenter.get_debug_state(preview_subviewport)
@@ -475,7 +494,7 @@ func _populate_static_options() -> void:
 		authoring_mode_option_button.add_item(AUTHORING_MODE_LABELS.get(mode_id, String(mode_id)))
 		authoring_mode_option_button.set_item_metadata(authoring_mode_option_button.get_item_count() - 1, mode_id)
 	two_hand_state_option_button.clear()
-	for state_id: StringName in CombatAnimationPointScript.get_two_hand_state_ids():
+	for state_id: StringName in CombatAnimationMotionNodeScript.get_two_hand_state_ids():
 		two_hand_state_option_button.add_item(TWO_HAND_STATE_LABELS.get(state_id, String(state_id)))
 		two_hand_state_option_button.set_item_metadata(two_hand_state_option_button.get_item_count() - 1, state_id)
 	grip_mode_option_button.clear()
@@ -499,7 +518,7 @@ func _refresh_all(status_message: String = "") -> void:
 	_refresh_project_list()
 	_refresh_authoring_mode_selector()
 	_refresh_draft_list()
-	_refresh_point_list()
+	_refresh_motion_node_list()
 	_refresh_editor_fields()
 	_refresh_preview_scene()
 	_refresh_summary(status_message)
@@ -548,36 +567,36 @@ func _refresh_draft_list() -> void:
 	new_skill_draft_button.visible = _is_skill_mode()
 	new_skill_draft_button.disabled = _get_active_station_state() == null
 
-func _refresh_point_list() -> void:
+func _refresh_motion_node_list() -> void:
 	point_list.clear()
 	var draft: Resource = _get_active_draft()
 	if draft == null:
 		return
-	var point_chain: Array = draft.get("point_chain") as Array
-	var selected_point_index: int = int(draft.get("selected_point_index"))
-	var continuity_point_index: int = int(draft.get("continuity_point_index"))
-	for point_index: int in range(point_chain.size()):
-		var point: CombatAnimationPoint = point_chain[point_index] as CombatAnimationPoint
-		if point == null:
+	var motion_node_chain: Array = draft.get("motion_node_chain") as Array
+	var selected_node_index: int = int(draft.get("selected_motion_node_index"))
+	var continuity_node_index: int = int(draft.get("continuity_motion_node_index"))
+	for node_index: int in range(motion_node_chain.size()):
+		var motion_node: CombatAnimationMotionNode = motion_node_chain[node_index] as CombatAnimationMotionNode
+		if motion_node == null:
 			continue
-		var continuity_marker: String = " | continuity" if point_index == continuity_point_index else ""
-		var item_text: String = "P%02d | %s%s" % [
-			point_index + 1,
-			_snapped_vector3_text(point.local_target_position, 0.001),
+		var continuity_marker: String = " | continuity" if node_index == continuity_node_index else ""
+		var item_text: String = "N%02d | tip %s%s" % [
+			node_index + 1,
+			_snapped_vector3_text(motion_node.tip_position_local, 0.001),
 			continuity_marker,
 		]
 		point_list.add_item(item_text)
 		var item_id: int = point_list.get_item_count() - 1
-		point_list.set_item_metadata(item_id, point_index)
-		if point_index == selected_point_index:
+		point_list.set_item_metadata(item_id, node_index)
+		if node_index == selected_node_index:
 			point_list.select(item_id)
 
 func _refresh_editor_fields() -> void:
 	refreshing_controls = true
 	var draft: Resource = _get_active_draft()
-	var point: CombatAnimationPoint = _get_active_point()
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
 	var has_draft: bool = draft != null
-	var has_point: bool = point != null
+	var has_node: bool = motion_node != null
 	draft_name_edit.editable = has_draft
 	draft_name_edit.text = String(draft.get("display_name")) if has_draft else ""
 	skill_slot_edit.editable = has_draft
@@ -587,44 +606,44 @@ func _refresh_editor_fields() -> void:
 	preview_loop_check_box.disabled = not has_draft
 	preview_loop_check_box.button_pressed = bool(draft.get("preview_loop_enabled")) if has_draft else false
 	add_point_button.disabled = not has_draft
-	duplicate_point_button.disabled = not has_point
-	remove_point_button.disabled = not has_draft or (has_draft and int((draft.get("point_chain") as Array).size()) <= _get_minimum_point_count(draft))
-	set_continuity_button.disabled = not has_point
-	position_x_spin_box.editable = has_point
-	position_y_spin_box.editable = has_point
-	position_z_spin_box.editable = has_point
-	rotation_x_spin_box.editable = has_point
-	rotation_y_spin_box.editable = has_point
-	rotation_z_spin_box.editable = has_point
-	transition_spin_box.editable = has_point
-	body_support_spin_box.editable = has_point
-	two_hand_state_option_button.disabled = not has_point
-	grip_mode_option_button.disabled = not has_point
-	curve_in_x_spin_box.editable = has_point
-	curve_in_y_spin_box.editable = has_point
-	curve_in_z_spin_box.editable = has_point
-	curve_out_x_spin_box.editable = has_point
-	curve_out_y_spin_box.editable = has_point
-	curve_out_z_spin_box.editable = has_point
+	duplicate_point_button.disabled = not has_node
+	remove_point_button.disabled = not has_draft or (has_draft and int((draft.get("motion_node_chain") as Array).size()) <= _get_minimum_motion_node_count(draft))
+	set_continuity_button.disabled = not has_node
+	position_x_spin_box.editable = has_node
+	position_y_spin_box.editable = has_node
+	position_z_spin_box.editable = has_node
+	rotation_x_spin_box.editable = has_node
+	rotation_y_spin_box.editable = has_node
+	rotation_z_spin_box.editable = has_node
+	transition_spin_box.editable = has_node
+	body_support_spin_box.editable = has_node
+	two_hand_state_option_button.disabled = not has_node
+	grip_mode_option_button.disabled = not has_node
+	curve_in_x_spin_box.editable = has_node
+	curve_in_y_spin_box.editable = has_node
+	curve_in_z_spin_box.editable = has_node
+	curve_out_x_spin_box.editable = has_node
+	curve_out_y_spin_box.editable = has_node
+	curve_out_z_spin_box.editable = has_node
 	draft_notes_edit.editable = has_draft
 	draft_notes_edit.text = String(draft.get("draft_notes")) if has_draft else ""
-	if has_point:
-		position_x_spin_box.value = point.local_target_position.x
-		position_y_spin_box.value = point.local_target_position.y
-		position_z_spin_box.value = point.local_target_position.z
-		rotation_x_spin_box.value = point.local_target_rotation_degrees.x
-		rotation_y_spin_box.value = point.local_target_rotation_degrees.y
-		rotation_z_spin_box.value = point.local_target_rotation_degrees.z
-		transition_spin_box.value = point.transition_duration_seconds
-		body_support_spin_box.value = point.body_support_blend
-		curve_in_x_spin_box.value = point.curve_in_handle_local.x
-		curve_in_y_spin_box.value = point.curve_in_handle_local.y
-		curve_in_z_spin_box.value = point.curve_in_handle_local.z
-		curve_out_x_spin_box.value = point.curve_out_handle_local.x
-		curve_out_y_spin_box.value = point.curve_out_handle_local.y
-		curve_out_z_spin_box.value = point.curve_out_handle_local.z
-		_select_option_by_metadata(two_hand_state_option_button, point.two_hand_state)
-		_select_option_by_metadata(grip_mode_option_button, point.preferred_grip_style_mode)
+	if has_node:
+		position_x_spin_box.value = motion_node.tip_position_local.x
+		position_y_spin_box.value = motion_node.tip_position_local.y
+		position_z_spin_box.value = motion_node.tip_position_local.z
+		rotation_x_spin_box.value = motion_node.trajectory_plane_orientation_degrees.x
+		rotation_y_spin_box.value = motion_node.trajectory_plane_orientation_degrees.y
+		rotation_z_spin_box.value = motion_node.trajectory_plane_orientation_degrees.z
+		transition_spin_box.value = motion_node.transition_duration_seconds
+		body_support_spin_box.value = motion_node.body_support_blend
+		curve_in_x_spin_box.value = motion_node.tip_curve_in_handle.x
+		curve_in_y_spin_box.value = motion_node.tip_curve_in_handle.y
+		curve_in_z_spin_box.value = motion_node.tip_curve_in_handle.z
+		curve_out_x_spin_box.value = motion_node.tip_curve_out_handle.x
+		curve_out_y_spin_box.value = motion_node.tip_curve_out_handle.y
+		curve_out_z_spin_box.value = motion_node.tip_curve_out_handle.z
+		_select_option_by_metadata(two_hand_state_option_button, motion_node.two_hand_state)
+		_select_option_by_metadata(grip_mode_option_button, motion_node.preferred_grip_style_mode)
 	else:
 		position_x_spin_box.value = 0.0
 		position_y_spin_box.value = 0.0
@@ -650,7 +669,7 @@ func _refresh_summary(status_message: String = "") -> void:
 	else:
 		var station_state: Resource = _get_active_station_state()
 		var draft: Resource = _get_active_draft()
-		var point: CombatAnimationPoint = _get_active_point()
+		var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
 		lines.append("Weapon: %s" % active_wip.forge_project_name)
 		lines.append("Builder Scope: %s" % CraftedItemWIPScript.get_builder_scope_label(active_wip.forge_builder_path_id, active_wip.forge_builder_component_id))
 		lines.append("Grip Style: %s" % CraftedItemWIPScript.get_grip_style_label(active_wip.grip_style_mode))
@@ -658,16 +677,17 @@ func _refresh_summary(status_message: String = "") -> void:
 		if draft != null:
 			lines.append("Draft: %s" % String(draft.get("display_name")))
 			lines.append("Draft Identifier: %s" % String(_get_draft_identifier(draft)))
-			lines.append("Point Count: %d" % int((draft.get("point_chain") as Array).size()))
+			lines.append("Motion Node Count: %d" % int((draft.get("motion_node_chain") as Array).size()))
 			lines.append("Preview Loop: %s" % str(bool(draft.get("preview_loop_enabled"))))
 			if _is_skill_mode():
 				lines.append("Skill Slot: %s" % String(draft.get("legal_slot_id")))
-		if point != null:
-			lines.append("Selected Point: %s" % String(point.point_id))
-			lines.append("Position: %s" % _snapped_vector3_text(point.local_target_position, 0.001))
-			lines.append("Rotation: %s" % _snapped_vector3_text(point.local_target_rotation_degrees, 0.01))
-			lines.append("Two-Hand State: %s" % TWO_HAND_STATE_LABELS.get(point.two_hand_state, String(point.two_hand_state)))
-			lines.append("Body Support Blend: %s" % str(snapped(point.body_support_blend, 0.01)))
+		if motion_node != null:
+			lines.append("Selected Node: %s" % String(motion_node.node_id))
+			lines.append("Tip Position: %s" % _snapped_vector3_text(motion_node.tip_position_local, 0.001))
+			lines.append("Plane Orientation: %s" % _snapped_vector3_text(motion_node.trajectory_plane_orientation_degrees, 0.01))
+			lines.append("Two-Hand State: %s" % TWO_HAND_STATE_LABELS.get(motion_node.two_hand_state, String(motion_node.two_hand_state)))
+			lines.append("Body Support Blend: %s" % str(snapped(motion_node.body_support_blend, 0.01)))
+			lines.append("Weapon Roll: %s°" % str(snapped(motion_node.weapon_roll_degrees, 0.1)))
 		lines.append("Station Truth: Stage 1 = %s | Stage 2 = %s" % [
 			str(bool(station_state.get("uses_stage1_geometry_truth"))),
 			str(bool(station_state.get("uses_stage2_geometry_truth"))),
@@ -682,7 +702,7 @@ func _refresh_preview_scene() -> void:
 		preview_subviewport,
 		active_wip,
 		_get_active_draft(),
-		get_selected_point_index()
+		get_selected_motion_node_index()
 	)
 
 func _get_forge_wip_library_state() -> PlayerForgeWipLibraryState:
@@ -715,15 +735,15 @@ func _get_active_draft() -> Resource:
 	var target_identifier: StringName = station_state.get("selected_idle_context_id") if _is_idle_mode() else station_state.get("selected_skill_id")
 	return _find_active_draft_by_identifier(target_identifier)
 
-func _get_active_point() -> CombatAnimationPoint:
+func _get_active_motion_node() -> CombatAnimationMotionNode:
 	var draft: Resource = _get_active_draft()
 	if draft == null:
 		return null
-	var point_chain: Array = draft.get("point_chain") as Array
-	if point_chain.is_empty():
+	var motion_node_chain: Array = draft.get("motion_node_chain") as Array
+	if motion_node_chain.is_empty():
 		return null
-	var point_index: int = clampi(int(draft.get("selected_point_index")), 0, point_chain.size() - 1)
-	return point_chain[point_index] as CombatAnimationPoint
+	var node_index: int = clampi(int(draft.get("selected_motion_node_index")), 0, motion_node_chain.size() - 1)
+	return motion_node_chain[node_index] as CombatAnimationMotionNode
 
 func _find_active_draft_by_identifier(draft_identifier: StringName) -> Resource:
 	for draft: Resource in _get_active_drafts():
@@ -780,15 +800,15 @@ func _is_skill_mode() -> bool:
 	var station_state: Resource = _get_active_station_state()
 	return station_state != null and station_state.get("selected_authoring_mode") == CombatAnimationStationStateScript.AUTHORING_MODE_SKILL
 
-func _get_minimum_point_count(draft: Resource) -> int:
+func _get_minimum_motion_node_count(draft: Resource) -> int:
 	if draft == null:
 		return 1
 	return 1 if draft.get("draft_kind") == CombatAnimationDraftScript.DRAFT_KIND_IDLE else 2
 
-func _duplicate_or_build_point(source_point: CombatAnimationPoint) -> CombatAnimationPoint:
-	if source_point != null:
-		return source_point.duplicate(true) as CombatAnimationPoint
-	return CombatAnimationPointScript.new()
+func _duplicate_or_build_motion_node(source_node: CombatAnimationMotionNode) -> CombatAnimationMotionNode:
+	if source_node != null:
+		return source_node.duplicate_node()
+	return CombatAnimationMotionNodeScript.new()
 
 func _normalize_draft(draft: Resource) -> void:
 	if draft == null:
@@ -841,9 +861,9 @@ func _on_draft_item_clicked(index: int, _at_position: Vector2, _mouse_button_ind
 	var draft_identifier: StringName = draft_list.get_item_metadata(index)
 	select_draft(draft_identifier)
 
-func _on_point_item_clicked(index: int, _at_position: Vector2, _mouse_button_index: int) -> void:
-	var point_index: int = int(point_list.get_item_metadata(index))
-	select_point(point_index)
+func _on_motion_node_item_clicked(index: int, _at_position: Vector2, _mouse_button_index: int) -> void:
+	var node_index: int = int(point_list.get_item_metadata(index))
+	select_motion_node(node_index)
 
 func _on_authoring_mode_selected(index: int) -> void:
 	if refreshing_controls:
@@ -854,17 +874,17 @@ func _on_authoring_mode_selected(index: int) -> void:
 func _on_new_skill_draft_pressed() -> void:
 	create_skill_draft()
 
-func _on_add_point_pressed() -> void:
-	insert_point_after_selection()
+func _on_add_motion_node_pressed() -> void:
+	insert_motion_node_after_selection()
 
-func _on_duplicate_point_pressed() -> void:
-	duplicate_selected_point()
+func _on_duplicate_motion_node_pressed() -> void:
+	duplicate_selected_motion_node()
 
-func _on_remove_point_pressed() -> void:
-	remove_selected_point()
+func _on_remove_motion_node_pressed() -> void:
+	remove_selected_motion_node()
 
 func _on_set_continuity_pressed() -> void:
-	set_selected_point_as_continuity()
+	set_selected_motion_node_as_continuity()
 
 func _on_draft_name_submitted(new_text: String) -> void:
 	if refreshing_controls:
@@ -896,59 +916,59 @@ func _on_preview_loop_toggled(enabled: bool) -> void:
 		return
 	set_active_draft_preview_loop(enabled)
 
-func _on_position_component_changed(_value: float, axis_index: int) -> void:
+func _on_tip_position_component_changed(_value: float, axis_index: int) -> void:
 	if refreshing_controls:
 		return
 	var position_value: Vector3 = Vector3(position_x_spin_box.value, position_y_spin_box.value, position_z_spin_box.value)
 	if axis_index < 0 or axis_index > 2:
 		return
-	set_selected_point_local_position(position_value)
+	set_selected_motion_node_tip_position(position_value)
 
-func _on_rotation_component_changed(_value: float, axis_index: int) -> void:
+func _on_plane_orientation_component_changed(_value: float, axis_index: int) -> void:
 	if refreshing_controls:
 		return
-	var rotation_value: Vector3 = Vector3(rotation_x_spin_box.value, rotation_y_spin_box.value, rotation_z_spin_box.value)
+	var orientation_value: Vector3 = Vector3(rotation_x_spin_box.value, rotation_y_spin_box.value, rotation_z_spin_box.value)
 	if axis_index < 0 or axis_index > 2:
 		return
-	set_selected_point_local_rotation_degrees(rotation_value)
+	set_selected_motion_node_plane_orientation(orientation_value)
 
 func _on_transition_changed(value: float) -> void:
 	if refreshing_controls:
 		return
-	set_selected_point_transition_duration(value)
+	set_selected_motion_node_transition_duration(value)
 
 func _on_body_support_changed(value: float) -> void:
 	if refreshing_controls:
 		return
-	set_selected_point_body_support_blend(value)
+	set_selected_motion_node_body_support_blend(value)
 
-func _on_curve_in_component_changed(_value: float, axis_index: int) -> void:
+func _on_tip_curve_in_component_changed(_value: float, axis_index: int) -> void:
 	if refreshing_controls:
 		return
 	if axis_index < 0 or axis_index > 2:
 		return
 	var handle_value := Vector3(curve_in_x_spin_box.value, curve_in_y_spin_box.value, curve_in_z_spin_box.value)
-	set_selected_point_curve_in_handle_local(handle_value)
+	set_selected_motion_node_tip_curve_in(handle_value)
 
-func _on_curve_out_component_changed(_value: float, axis_index: int) -> void:
+func _on_tip_curve_out_component_changed(_value: float, axis_index: int) -> void:
 	if refreshing_controls:
 		return
 	if axis_index < 0 or axis_index > 2:
 		return
 	var handle_value := Vector3(curve_out_x_spin_box.value, curve_out_y_spin_box.value, curve_out_z_spin_box.value)
-	set_selected_point_curve_out_handle_local(handle_value)
+	set_selected_motion_node_tip_curve_out(handle_value)
 
 func _on_two_hand_state_selected(index: int) -> void:
 	if refreshing_controls:
 		return
 	var state_id: StringName = two_hand_state_option_button.get_item_metadata(index)
-	set_selected_point_two_hand_state(state_id)
+	set_selected_motion_node_two_hand_state(state_id)
 
 func _on_grip_mode_selected(index: int) -> void:
 	if refreshing_controls:
 		return
 	var grip_mode: StringName = grip_mode_option_button.get_item_metadata(index)
-	set_selected_point_preferred_grip_style(grip_mode)
+	set_selected_motion_node_preferred_grip_style(grip_mode)
 
 func _on_draft_notes_focus_exited() -> void:
 	if refreshing_controls:
@@ -957,3 +977,38 @@ func _on_draft_notes_focus_exited() -> void:
 
 func _on_preview_container_resized() -> void:
 	_refresh_preview_scene()
+
+func _register_station_input_actions() -> void:
+	var action_key_map: Dictionary = {
+		&"skill_crafter_prev_node": KEY_Q,
+		&"skill_crafter_next_node": KEY_E,
+		&"skill_crafter_copy_node": KEY_R,
+		&"skill_crafter_delete_node": KEY_T,
+		&"skill_crafter_cycle_focus": KEY_SPACE,
+		&"skill_crafter_play_preview": KEY_F,
+	}
+	for action_name: StringName in action_key_map:
+		if InputMap.has_action(action_name):
+			continue
+		InputMap.add_action(action_name)
+		var key_event := InputEventKey.new()
+		key_event.keycode = action_key_map[action_name] as Key
+		InputMap.action_add_event(action_name, key_event)
+
+func _navigate_motion_node(direction: int) -> void:
+	var draft: Resource = _get_active_draft()
+	if draft == null:
+		return
+	var current_index: int = int(draft.get("selected_motion_node_index"))
+	var chain_size: int = int((draft.get("motion_node_chain") as Array).size())
+	if chain_size <= 0:
+		return
+	var new_index: int = clampi(current_index + direction, 0, chain_size - 1)
+	if new_index != current_index:
+		select_motion_node(new_index)
+
+func _cycle_focus() -> void:
+	footer_status_label.text = "Focus cycling (tip/pommel) — future feature placeholder."
+
+func _toggle_preview_playback() -> void:
+	footer_status_label.text = "Preview playback toggle — future feature placeholder."

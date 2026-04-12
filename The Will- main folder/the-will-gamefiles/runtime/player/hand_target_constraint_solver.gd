@@ -9,6 +9,10 @@ const ABDOMEN_BONE: StringName = &"CC_Base_Waist"
 const HIP_BONE: StringName = &"CC_Base_Hip"
 const LEFT_SHOULDER_BONE: StringName = &"CC_Base_L_Clavicle"
 const RIGHT_SHOULDER_BONE: StringName = &"CC_Base_R_Clavicle"
+const LEFT_UPPERARM_BONE: StringName = &"CC_Base_L_Upperarm"
+const LEFT_FOREARM_BONE: StringName = &"CC_Base_L_Forearm"
+const RIGHT_UPPERARM_BONE: StringName = &"CC_Base_R_Upperarm"
+const RIGHT_FOREARM_BONE: StringName = &"CC_Base_R_Forearm"
 
 const DEFAULT_SETTINGS := {
 	"safety_margin_meters": 0.08,
@@ -70,6 +74,42 @@ func ensure_body_restriction_root(rig_root: Node3D, skeleton: Skeleton3D) -> Nod
 		Vector3(-0.04, -0.02, 0.00),
 		Vector3(0.14, 0.18, 0.16),
 		Color(0.55, 0.30, 0.90, 0.16)
+	)
+	_ensure_capsule_restriction_attachment(
+		restriction_root,
+		"LeftUpperarmRestrictionAttachment",
+		LEFT_UPPERARM_BONE,
+		Vector3(0.0, -0.13, 0.0),
+		0.055,
+		0.26,
+		Color(0.20, 0.75, 0.45, 0.16)
+	)
+	_ensure_capsule_restriction_attachment(
+		restriction_root,
+		"LeftForearmRestrictionAttachment",
+		LEFT_FOREARM_BONE,
+		Vector3(0.0, -0.12, 0.0),
+		0.045,
+		0.24,
+		Color(0.20, 0.75, 0.45, 0.16)
+	)
+	_ensure_capsule_restriction_attachment(
+		restriction_root,
+		"RightUpperarmRestrictionAttachment",
+		RIGHT_UPPERARM_BONE,
+		Vector3(0.0, -0.13, 0.0),
+		0.055,
+		0.26,
+		Color(0.20, 0.75, 0.45, 0.16)
+	)
+	_ensure_capsule_restriction_attachment(
+		restriction_root,
+		"RightForearmRestrictionAttachment",
+		RIGHT_FOREARM_BONE,
+		Vector3(0.0, -0.12, 0.0),
+		0.045,
+		0.24,
+		Color(0.20, 0.75, 0.45, 0.16)
 	)
 	sync_body_restriction_root(restriction_root, skeleton)
 	return restriction_root
@@ -203,6 +243,65 @@ func _ensure_restriction_attachment(
 	debug_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	debug_material.no_depth_test = true
 
+func _ensure_capsule_restriction_attachment(
+	restriction_root: Node3D,
+	attachment_name: String,
+	bone_name: StringName,
+	local_offset: Vector3,
+	capsule_radius: float,
+	capsule_height: float,
+	debug_color: Color
+) -> void:
+	var attachment: Node3D = restriction_root.get_node_or_null(attachment_name) as Node3D
+	if attachment == null:
+		attachment = Node3D.new()
+		attachment.name = attachment_name
+		restriction_root.add_child(attachment)
+	attachment.set_meta("bone_name", bone_name)
+	attachment.position = Vector3.ZERO
+	attachment.rotation = Vector3.ZERO
+	var area: Area3D = attachment.get_node_or_null("RestrictionArea") as Area3D
+	if area == null:
+		area = Area3D.new()
+		area.name = "RestrictionArea"
+		attachment.add_child(area)
+	area.collision_layer = BODY_RESTRICTION_COLLISION_LAYER
+	area.collision_mask = 0
+	area.monitoring = false
+	area.monitorable = true
+	var collision_shape: CollisionShape3D = area.get_node_or_null("RestrictionShape") as CollisionShape3D
+	if collision_shape == null:
+		collision_shape = CollisionShape3D.new()
+		collision_shape.name = "RestrictionShape"
+		area.add_child(collision_shape)
+	var capsule_shape: CapsuleShape3D = collision_shape.shape as CapsuleShape3D
+	if capsule_shape == null:
+		capsule_shape = CapsuleShape3D.new()
+		collision_shape.shape = capsule_shape
+	capsule_shape.radius = capsule_radius
+	capsule_shape.height = capsule_height
+	collision_shape.position = local_offset
+	var debug_mesh: MeshInstance3D = attachment.get_node_or_null("RestrictionDebug") as MeshInstance3D
+	if debug_mesh == null:
+		debug_mesh = MeshInstance3D.new()
+		debug_mesh.name = "RestrictionDebug"
+		attachment.add_child(debug_mesh)
+	var capsule_mesh: CapsuleMesh = debug_mesh.mesh as CapsuleMesh
+	if capsule_mesh == null:
+		capsule_mesh = CapsuleMesh.new()
+		debug_mesh.mesh = capsule_mesh
+	capsule_mesh.radius = capsule_radius
+	capsule_mesh.height = capsule_height
+	debug_mesh.position = local_offset
+	var debug_material: StandardMaterial3D = debug_mesh.material_override as StandardMaterial3D
+	if debug_material == null:
+		debug_material = StandardMaterial3D.new()
+		debug_mesh.material_override = debug_material
+	debug_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	debug_material.albedo_color = debug_color
+	debug_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	debug_material.no_depth_test = true
+
 func _segment_hits_body_restriction(
 	body_restriction_root: Node3D,
 	from_world: Vector3,
@@ -240,13 +339,26 @@ func _point_inside_body_restriction(body_restriction_root: Node3D, point_world: 
 		var collision_shape: CollisionShape3D = area.get_node_or_null("RestrictionShape") as CollisionShape3D
 		if collision_shape == null:
 			continue
-		var box_shape: BoxShape3D = collision_shape.shape as BoxShape3D
-		if box_shape == null:
+		var shape: Shape3D = collision_shape.shape
+		if shape == null:
 			continue
 		var local_point: Vector3 = collision_shape.global_transform.affine_inverse() * point_world
-		var half_size: Vector3 = box_shape.size * 0.5
-		if absf(local_point.x) <= half_size.x and absf(local_point.y) <= half_size.y and absf(local_point.z) <= half_size.z:
-			return true
+		var box_shape: BoxShape3D = shape as BoxShape3D
+		if box_shape != null:
+			var half_size: Vector3 = box_shape.size * 0.5
+			if absf(local_point.x) <= half_size.x and absf(local_point.y) <= half_size.y and absf(local_point.z) <= half_size.z:
+				return true
+			continue
+		var capsule_shape: CapsuleShape3D = shape as CapsuleShape3D
+		if capsule_shape != null:
+			var cap_radius: float = capsule_shape.radius
+			var cap_half_height: float = capsule_shape.height * 0.5
+			var half_mid: float = cap_half_height - cap_radius
+			var clamped_y: float = clampf(local_point.y, -half_mid, half_mid)
+			var closest_axis_point: Vector3 = Vector3(0.0, clamped_y, 0.0)
+			if local_point.distance_to(closest_axis_point) <= cap_radius:
+				return true
+			continue
 	return false
 
 func _resolve_best_orbit_candidate(

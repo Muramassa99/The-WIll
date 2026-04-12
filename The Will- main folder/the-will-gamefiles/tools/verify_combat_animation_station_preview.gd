@@ -45,23 +45,23 @@ func _run_verification() -> void:
 	await process_frame
 	ui.create_skill_draft(&"skill_preview_alpha", "Preview Alpha")
 	await process_frame
-	ui.set_selected_point_curve_out_handle_local(Vector3(0.08, 0.02, -0.05))
-	ui.insert_point_after_selection()
+	ui.set_selected_motion_node_tip_curve_out(Vector3(0.08, 0.02, -0.05))
+	ui.insert_motion_node_after_selection()
 	await process_frame
-	ui.set_selected_point_curve_in_handle_local(Vector3(-0.05, 0.04, 0.03))
-	ui.set_selected_point_two_hand_state(&"two_hand_two_hand")
+	ui.set_selected_motion_node_tip_curve_in(Vector3(-0.05, 0.04, 0.03))
+	ui.set_selected_motion_node_two_hand_state(&"two_hand_two_hand")
 	await process_frame
 	await process_frame
 
 	var debug_state: Dictionary = ui.get_preview_debug_state()
 	var active_draft: Resource = ui.call("_get_active_draft") as Resource
-	var ui_point_count: int = int((active_draft.get("point_chain") as Array).size()) if active_draft != null else 0
+	var ui_node_count: int = int((active_draft.get("motion_node_chain") as Array).size()) if active_draft != null else 0
 	var lines: PackedStringArray = []
 	lines.append("preview_actor_exists=%s" % str(bool(debug_state.get("has_preview_actor", false))))
 	lines.append("preview_weapon_exists=%s" % str(bool(debug_state.get("has_preview_weapon", false))))
 	lines.append("primary_grip_anchor_exists=%s" % str(bool(debug_state.get("has_primary_grip_anchor", false))))
-	lines.append("ui_selected_point_index=%d" % ui.get_selected_point_index())
-	lines.append("ui_point_count=%d" % ui_point_count)
+	lines.append("ui_selected_motion_node_index=%d" % ui.get_selected_motion_node_index())
+	lines.append("ui_motion_node_count=%d" % ui_node_count)
 	lines.append("preview_draft_point_count=%d" % int(debug_state.get("draft_point_count", 0)))
 	lines.append("curve_baked_point_count=%d" % int(debug_state.get("curve_baked_point_count", 0)))
 	lines.append("point_marker_count=%d" % int(debug_state.get("point_marker_count", 0)))

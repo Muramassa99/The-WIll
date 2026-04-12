@@ -64,7 +64,7 @@ func get_or_create_idle_draft(idle_context_id: StringName, display_name: String,
 		if idle_draft.get("context_id") == idle_context_id:
 			idle_draft.set("display_name", display_name)
 			idle_draft.set("preferred_grip_style_mode", grip_style_mode)
-			idle_draft.call("ensure_minimum_baseline_points")
+			idle_draft.call("ensure_minimum_baseline_nodes")
 			return idle_draft
 	var draft_id: StringName = StringName("%s_%s" % [String(idle_context_id), "draft"])
 	var draft: Resource = _build_default_idle_draft(draft_id, display_name, idle_context_id)
@@ -79,7 +79,7 @@ func get_or_create_skill_draft(skill_id: StringName, display_name: String, grip_
 		if skill_draft.get("owning_skill_id") == skill_id:
 			skill_draft.set("display_name", display_name)
 			skill_draft.set("preferred_grip_style_mode", grip_style_mode)
-			skill_draft.call("ensure_minimum_baseline_points")
+			skill_draft.call("ensure_minimum_baseline_nodes")
 			return skill_draft
 	var draft: Resource = _build_default_skill_draft(StringName("%s_draft" % String(skill_id)), display_name, skill_id)
 	draft.set("preferred_grip_style_mode", grip_style_mode)
@@ -95,7 +95,7 @@ func _normalize_draft_array(drafts: Array[Resource], expected_kind: StringName) 
 		if draft == null:
 			continue
 		draft.set("draft_kind", expected_kind)
-		draft.call("ensure_minimum_baseline_points")
+		draft.call("ensure_minimum_baseline_nodes")
 		normalized_drafts.append(draft)
 	return normalized_drafts
 
@@ -126,7 +126,7 @@ func _build_default_idle_draft(draft_id: StringName, display_name: String, idle_
 	draft.set("draft_kind", CombatAnimationDraftScript.DRAFT_KIND_IDLE)
 	draft.set("context_id", idle_context_id)
 	draft.set("preview_loop_enabled", true)
-	draft.call("ensure_minimum_baseline_points")
+	draft.call("ensure_minimum_baseline_nodes")
 	return draft
 
 func _build_default_skill_draft(draft_id: StringName, display_name: String, skill_id: StringName) -> Resource:
@@ -138,5 +138,5 @@ func _build_default_skill_draft(draft_id: StringName, display_name: String, skil
 	draft.set("display_name", display_name)
 	draft.set("draft_kind", CombatAnimationDraftScript.DRAFT_KIND_SKILL)
 	draft.set("owning_skill_id", skill_id)
-	draft.call("ensure_minimum_baseline_points")
+	draft.call("ensure_minimum_baseline_nodes")
 	return draft

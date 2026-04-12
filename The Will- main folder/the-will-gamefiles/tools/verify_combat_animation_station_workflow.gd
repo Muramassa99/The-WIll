@@ -52,14 +52,14 @@ func _run_verification() -> void:
 	var created_skill_id: StringName = ui.create_skill_draft(&"skill_custom_alpha", "Custom Alpha")
 	await process_frame
 	var selected_draft_after_create: StringName = ui.get_active_draft_identifier()
-	var add_point_ok: bool = ui.insert_point_after_selection()
+	var add_node_ok: bool = ui.insert_motion_node_after_selection()
 	await process_frame
-	var point_selection_after_insert: int = ui.get_selected_point_index()
-	var position_update_ok: bool = ui.set_selected_point_local_position(Vector3(0.15, 0.02, -0.21))
-	var rotation_update_ok: bool = ui.set_selected_point_local_rotation_degrees(Vector3(-12.0, 6.0, 18.0))
-	var transition_update_ok: bool = ui.set_selected_point_transition_duration(0.44)
-	var support_blend_ok: bool = ui.set_selected_point_body_support_blend(0.35)
-	var two_hand_ok: bool = ui.set_selected_point_two_hand_state(&"two_hand_two_hand")
+	var node_selection_after_insert: int = ui.get_selected_motion_node_index()
+	var tip_position_ok: bool = ui.set_selected_motion_node_tip_position(Vector3(0.15, 0.02, -0.21))
+	var plane_orientation_ok: bool = ui.set_selected_motion_node_plane_orientation(Vector3(-12.0, 6.0, 18.0))
+	var transition_update_ok: bool = ui.set_selected_motion_node_transition_duration(0.44)
+	var support_blend_ok: bool = ui.set_selected_motion_node_body_support_blend(0.35)
+	var two_hand_ok: bool = ui.set_selected_motion_node_two_hand_state(&"two_hand_two_hand")
 	var notes_ok: bool = ui.set_active_draft_notes("Verifier notes")
 	await process_frame
 
@@ -68,8 +68,8 @@ func _run_verification() -> void:
 	var reloaded_station_state: Resource = reloaded_wip.combat_animation_station_state if reloaded_wip != null else null
 	var reloaded_skill_drafts: Array = reloaded_station_state.get("skill_drafts") as Array if reloaded_station_state != null else []
 	var reloaded_custom_draft: Resource = _find_skill_draft(reloaded_skill_drafts, created_skill_id)
-	var reloaded_points: Array = reloaded_custom_draft.get("point_chain") as Array if reloaded_custom_draft != null else []
-	var reloaded_point: Resource = reloaded_points[1] as Resource if reloaded_points.size() > 1 else null
+	var reloaded_motion_nodes: Array = reloaded_custom_draft.get("motion_node_chain") as Array if reloaded_custom_draft != null else []
+	var reloaded_node: Resource = reloaded_motion_nodes[1] as Resource if reloaded_motion_nodes.size() > 1 else null
 
 	var lines: PackedStringArray = []
 	lines.append("station_opened=%s" % str(opened))
@@ -78,20 +78,20 @@ func _run_verification() -> void:
 	lines.append("created_skill_id=%s" % String(created_skill_id))
 	lines.append("selected_draft_after_create=%s" % String(selected_draft_after_create))
 	lines.append("skill_draft_created=%s" % str(reloaded_custom_draft != null))
-	lines.append("insert_point_ok=%s" % str(add_point_ok))
-	lines.append("point_selection_after_insert=%d" % point_selection_after_insert)
-	lines.append("reloaded_point_count=%d" % reloaded_points.size())
-	lines.append("position_update_ok=%s" % str(position_update_ok))
-	lines.append("rotation_update_ok=%s" % str(rotation_update_ok))
+	lines.append("insert_node_ok=%s" % str(add_node_ok))
+	lines.append("node_selection_after_insert=%d" % node_selection_after_insert)
+	lines.append("reloaded_motion_node_count=%d" % reloaded_motion_nodes.size())
+	lines.append("tip_position_ok=%s" % str(tip_position_ok))
+	lines.append("plane_orientation_ok=%s" % str(plane_orientation_ok))
 	lines.append("transition_update_ok=%s" % str(transition_update_ok))
 	lines.append("support_blend_ok=%s" % str(support_blend_ok))
 	lines.append("two_hand_ok=%s" % str(two_hand_ok))
 	lines.append("notes_ok=%s" % str(notes_ok))
-	lines.append("reloaded_point_position=%s" % str(reloaded_point.get("local_target_position") if reloaded_point != null else Vector3.ZERO))
-	lines.append("reloaded_point_rotation=%s" % str(reloaded_point.get("local_target_rotation_degrees") if reloaded_point != null else Vector3.ZERO))
-	lines.append("reloaded_point_transition=%s" % str(snapped(float(reloaded_point.get("transition_duration_seconds")) if reloaded_point != null else -1.0, 0.0001)))
-	lines.append("reloaded_point_support_blend=%s" % str(snapped(float(reloaded_point.get("body_support_blend")) if reloaded_point != null else -1.0, 0.0001)))
-	lines.append("reloaded_point_two_hand_state=%s" % String(reloaded_point.get("two_hand_state") if reloaded_point != null else StringName()))
+	lines.append("reloaded_node_tip_position=%s" % str(reloaded_node.get("tip_position_local") if reloaded_node != null else Vector3.ZERO))
+	lines.append("reloaded_node_plane_orientation=%s" % str(reloaded_node.get("trajectory_plane_orientation_degrees") if reloaded_node != null else Vector3.ZERO))
+	lines.append("reloaded_node_transition=%s" % str(snapped(float(reloaded_node.get("transition_duration_seconds")) if reloaded_node != null else -1.0, 0.0001)))
+	lines.append("reloaded_node_support_blend=%s" % str(snapped(float(reloaded_node.get("body_support_blend")) if reloaded_node != null else -1.0, 0.0001)))
+	lines.append("reloaded_node_two_hand_state=%s" % String(reloaded_node.get("two_hand_state") if reloaded_node != null else StringName()))
 	lines.append("reloaded_notes=%s" % String(reloaded_custom_draft.get("draft_notes") if reloaded_custom_draft != null else ""))
 
 	var file: FileAccess = FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)

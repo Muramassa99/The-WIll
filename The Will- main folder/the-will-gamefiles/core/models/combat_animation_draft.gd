@@ -14,11 +14,13 @@ const IDLE_CONTEXT_NONCOMBAT: StringName = &"idle_noncombat"
 @export var legal_slot_id: StringName = &""
 @export var preferred_grip_style_mode: StringName = &"grip_normal"
 @export var authored_for_two_hand_only: bool = false
-@export var point_chain: Array[Resource] = []
-@export var selected_point_index: int = 0
-@export var continuity_point_index: int = 0
+@export var motion_node_chain: Array[Resource] = []
+@export var selected_motion_node_index: int = 0
+@export var continuity_motion_node_index: int = 0
 @export_range(0.0, 3.0, 0.01) var preview_playback_speed_scale: float = 1.0
 @export var preview_loop_enabled: bool = false
+@export var skill_name: String = ""
+@export var skill_description: String = ""
 @export_multiline var draft_notes: String = ""
 
 static func get_draft_kind_ids() -> Array[StringName]:
@@ -48,9 +50,9 @@ static func create_default_skill_baseline(
 	draft.draft_kind = DRAFT_KIND_SKILL
 	draft.owning_skill_id = skill_id
 	draft.legal_slot_id = slot_id
-	draft.point_chain = [
-		_build_default_point(0, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3(0.0, 0.0, -0.04)),
-		_build_default_point(1, Vector3(0.0, 0.0, -0.12), Vector3(-8.0, 0.0, 0.0), Vector3(0.0, 0.0, 0.04), Vector3.ZERO),
+	draft.motion_node_chain = [
+		_build_default_motion_node(0, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3(0.0, 0.0, -0.04)),
+		_build_default_motion_node(1, Vector3(0.0, 0.0, -0.12), Vector3(0.0, 0.0, -0.12), Vector3(0.0, 0.0, 0.04), Vector3.ZERO),
 	]
 	draft.normalize()
 	return draft
@@ -69,32 +71,31 @@ static func create_default_idle_baseline(
 	draft.draft_kind = DRAFT_KIND_IDLE
 	draft.context_id = idle_context_id
 	draft.preview_loop_enabled = true
-	draft.point_chain = [
-		_build_default_point(0, Vector3.ZERO, Vector3.ZERO),
+	draft.motion_node_chain = [
+		_build_default_motion_node(0, Vector3.ZERO, Vector3.ZERO),
 	]
 	draft.normalize()
 	return draft
 
-static func _build_default_point(
+static func _build_default_motion_node(
 	index: int,
-	local_position: Vector3,
-	local_rotation_degrees: Vector3,
-	curve_in_handle_local: Vector3 = Vector3.ZERO,
-	curve_out_handle_local: Vector3 = Vector3.ZERO
+	tip_position: Vector3,
+	pommel_position: Vector3,
+	tip_curve_in: Vector3 = Vector3.ZERO,
+	tip_curve_out: Vector3 = Vector3.ZERO
 ):
-	var point_script: Script = load("res://core/models/combat_animation_point.gd") as Script
-	var point = point_script.new() if point_script != null else null
-	if point == null:
+	var node_script: Script = load("res://core/models/combat_animation_motion_node.gd") as Script
+	var motion_node = node_script.new() if node_script != null else null
+	if motion_node == null:
 		return null
-	point.point_index = index
-	point.point_id = StringName("point_%02d" % index)
-	point.local_target_position = local_position
-	point.local_target_rotation_degrees = local_rotation_degrees
-	point.curve_in_handle_local = curve_in_handle_local
-	point.curve_out_handle_local = curve_out_handle_local
-	point.active_plane_origin_local = local_position
-	point.normalize()
-	return point
+	motion_node.node_index = index
+	motion_node.node_id = StringName("motion_node_%02d" % index)
+	motion_node.tip_position_local = tip_position
+	motion_node.pommel_position_local = pommel_position
+	motion_node.tip_curve_in_handle = tip_curve_in
+	motion_node.tip_curve_out_handle = tip_curve_out
+	motion_node.normalize()
+	return motion_node
 
 func normalize() -> void:
 	if not get_draft_kind_ids().has(draft_kind):
@@ -103,35 +104,35 @@ func normalize() -> void:
 		context_id = IDLE_CONTEXT_COMBAT
 	if preview_playback_speed_scale <= 0.0:
 		preview_playback_speed_scale = 1.0
-	for point_index: int in range(point_chain.size()):
-		var point: Resource = point_chain[point_index]
-		if point == null:
-			var point_script: Script = load("res://core/models/combat_animation_point.gd") as Script
-			point = point_script.new() if point_script != null else null
-			if point == null:
+	for node_index: int in range(motion_node_chain.size()):
+		var motion_node: Resource = motion_node_chain[node_index]
+		if motion_node == null:
+			var node_script: Script = load("res://core/models/combat_animation_motion_node.gd") as Script
+			motion_node = node_script.new() if node_script != null else null
+			if motion_node == null:
 				continue
-			point_chain[point_index] = point
-		point.set("point_index", point_index)
-		if point.has_method("normalize"):
-			point.call("normalize")
-	selected_point_index = clampi(selected_point_index, 0, maxi(point_chain.size() - 1, 0))
-	continuity_point_index = clampi(continuity_point_index, 0, maxi(point_chain.size() - 1, 0))
+			motion_node_chain[node_index] = motion_node
+		motion_node.set("node_index", node_index)
+		if motion_node.has_method("normalize"):
+			motion_node.call("normalize")
+	selected_motion_node_index = clampi(selected_motion_node_index, 0, maxi(motion_node_chain.size() - 1, 0))
+	continuity_motion_node_index = clampi(continuity_motion_node_index, 0, maxi(motion_node_chain.size() - 1, 0))
 
-func ensure_minimum_baseline_points() -> void:
-	if not point_chain.is_empty():
+func ensure_minimum_baseline_nodes() -> void:
+	if not motion_node_chain.is_empty():
 		normalize()
 		return
 	if draft_kind == DRAFT_KIND_IDLE:
-		point_chain = [_build_default_point(0, Vector3.ZERO, Vector3.ZERO)]
+		motion_node_chain = [_build_default_motion_node(0, Vector3.ZERO, Vector3.ZERO)]
 	else:
-		point_chain = [
-			_build_default_point(0, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3(0.0, 0.0, -0.04)),
-			_build_default_point(1, Vector3(0.0, 0.0, -0.12), Vector3(-8.0, 0.0, 0.0), Vector3(0.0, 0.0, 0.04), Vector3.ZERO),
+		motion_node_chain = [
+			_build_default_motion_node(0, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3(0.0, 0.0, -0.04)),
+			_build_default_motion_node(1, Vector3(0.0, 0.0, -0.12), Vector3(0.0, 0.0, -0.12), Vector3(0.0, 0.0, 0.04), Vector3.ZERO),
 		]
 	normalize()
 
-func get_point_count() -> int:
-	return point_chain.size()
+func get_motion_node_count() -> int:
+	return motion_node_chain.size()
 
 func duplicate_draft():
 	return duplicate(true)

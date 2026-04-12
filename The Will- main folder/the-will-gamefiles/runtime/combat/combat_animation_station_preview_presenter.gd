@@ -9,7 +9,7 @@ const ForgeServiceScript = preload("res://services/forge_service.gd")
 const TestPrintMeshBuilderScript = preload("res://runtime/forge/test_print_mesh_builder.gd")
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
 const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://core/defs/forge/forge_view_tuning_default.tres")
-const CombatAnimationPointScript = preload("res://core/models/combat_animation_point.gd")
+const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
 
 const PREVIEW_ROOT_NAME := "CombatAnimationPreviewRoot3D"
 const PREVIEW_CAMERA_NAME := "PreviewCamera3D"
@@ -33,12 +33,12 @@ func refresh_preview(
 	preview_subviewport: SubViewport,
 	active_wip: CraftedItemWIP,
 	active_draft: Resource,
-	selected_point_index: int
+	selected_node_index: int
 ) -> void:
 	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
 	_sync_preview_size(preview_container, preview_subviewport)
-	_refresh_actor_and_weapon(state, active_wip, _resolve_selected_point(active_draft, selected_point_index))
-	_refresh_trajectory_visuals(state, active_draft, selected_point_index)
+	_refresh_actor_and_weapon(state, active_wip, _resolve_selected_motion_node(active_draft, selected_node_index))
+	_refresh_trajectory_visuals(state, active_draft, selected_node_index)
 
 func get_debug_state(preview_subviewport: SubViewport) -> Dictionary:
 	var preview_root: Node3D = preview_subviewport.get_node_or_null(PREVIEW_ROOT_NAME) as Node3D if preview_subviewport != null else null
@@ -114,14 +114,14 @@ func _ensure_preview_nodes(preview_container: SubViewportContainer, preview_subv
 		fill_light.light_energy = 0.9
 		fill_light.rotation_degrees = Vector3(-18.0, -122.0, 0.0)
 		preview_root.add_child(fill_light)
-		var floor := MeshInstance3D.new()
-		floor.name = PREVIEW_FLOOR_NAME
+		var preview_floor := MeshInstance3D.new()
+		preview_floor.name = PREVIEW_FLOOR_NAME
 		var floor_mesh := BoxMesh.new()
 		floor_mesh.size = Vector3(5.5, 0.02, 5.5)
-		floor.mesh = floor_mesh
-		floor.position = Vector3(0.0, -0.01, 0.0)
-		floor.material_override = _build_surface_material(Color(0.17, 0.19, 0.22, 1.0), 0.92)
-		preview_root.add_child(floor)
+		preview_floor.mesh = floor_mesh
+		preview_floor.position = Vector3(0.0, -0.01, 0.0)
+		preview_floor.material_override = _build_surface_material(Color(0.17, 0.19, 0.22, 1.0), 0.92)
+		preview_root.add_child(preview_floor)
 	_update_camera(preview_root, null)
 	return {
 		"preview_root": preview_root,
@@ -142,7 +142,7 @@ func _sync_preview_size(preview_container: SubViewportContainer, preview_subview
 	if preview_subviewport.size != target_size:
 		preview_subviewport.size = target_size
 
-func _refresh_actor_and_weapon(state: Dictionary, active_wip: CraftedItemWIP, selected_point: CombatAnimationPoint) -> void:
+func _refresh_actor_and_weapon(state: Dictionary, active_wip: CraftedItemWIP, selected_motion_node: CombatAnimationMotionNode) -> void:
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D
 	var actor_pivot: Node3D = state.get("actor_pivot", null) as Node3D
 	if preview_root == null or actor_pivot == null:
@@ -169,10 +169,10 @@ func _refresh_actor_and_weapon(state: Dictionary, active_wip: CraftedItemWIP, se
 		held_item = _build_weapon_preview_node(actor, active_wip)
 		preview_root.set_meta("preview_held_item", held_item)
 		preview_root.set_meta("preview_wip_id", active_wip.wip_id)
-	_apply_two_hand_preview_state(actor, held_item, selected_point)
+	_apply_two_hand_preview_state(actor, held_item, selected_motion_node)
 	_update_camera(preview_root, weapon_grip_anchor_provider.get_primary_grip_anchor(held_item))
 
-func _refresh_trajectory_visuals(state: Dictionary, active_draft: Resource, selected_point_index: int) -> void:
+func _refresh_trajectory_visuals(state: Dictionary, active_draft: Resource, selected_node_index: int) -> void:
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D
 	var trajectory_root: Node3D = state.get("trajectory_root", null) as Node3D
 	var marker_root: Node3D = state.get("marker_root", null) as Node3D
@@ -196,37 +196,44 @@ func _refresh_trajectory_visuals(state: Dictionary, active_draft: Resource, sele
 		trajectory_root.transform = Transform3D.IDENTITY
 	for child_node: Node in marker_root.get_children():
 		child_node.queue_free()
-	var point_chain: Array = active_draft.get("point_chain") as Array if active_draft != null else []
-	var curve := Curve3D.new()
-	curve.bake_interval = 0.015
-	var point_marker_count: int = 0
+	var motion_node_chain: Array = active_draft.get("motion_node_chain") as Array if active_draft != null else []
+	var tip_curve := Curve3D.new()
+	tip_curve.bake_interval = 0.015
+	var pommel_curve := Curve3D.new()
+	pommel_curve.bake_interval = 0.015
+	var node_marker_count: int = 0
 	var handle_marker_count: int = 0
-	for point_index: int in range(point_chain.size()):
-		var point: CombatAnimationPoint = point_chain[point_index] as CombatAnimationPoint
-		if point == null:
+	for node_index: int in range(motion_node_chain.size()):
+		var motion_node: CombatAnimationMotionNode = motion_node_chain[node_index] as CombatAnimationMotionNode
+		if motion_node == null:
 			continue
-		curve.add_point(point.local_target_position, point.curve_in_handle_local, point.curve_out_handle_local)
-		_create_point_marker(marker_root, point.local_target_position, point_index == selected_point_index)
-		_create_handle_marker(marker_root, point.local_target_position + point.curve_in_handle_local, Color(0.2, 0.75, 1.0, 1.0), "In")
-		_create_handle_marker(marker_root, point.local_target_position + point.curve_out_handle_local, Color(1.0, 0.55, 0.12, 1.0), "Out")
-		point_marker_count += 1
-		handle_marker_count += 2
-	_render_curve_mesh(trajectory_mesh_instance.mesh as ImmediateMesh, curve)
-	_render_control_lines(control_mesh_instance.mesh as ImmediateMesh, point_chain)
-	preview_root.set_meta("draft_point_count", point_chain.size())
-	preview_root.set_meta("curve_baked_point_count", curve.get_baked_points().size())
-	preview_root.set_meta("point_marker_count", point_marker_count)
+		tip_curve.add_point(motion_node.tip_position_local, motion_node.tip_curve_in_handle, motion_node.tip_curve_out_handle)
+		pommel_curve.add_point(motion_node.pommel_position_local, motion_node.pommel_curve_in_handle, motion_node.pommel_curve_out_handle)
+		var is_selected: bool = node_index == selected_node_index
+		_create_point_marker(marker_root, motion_node.tip_position_local, is_selected)
+		_create_point_marker(marker_root, motion_node.pommel_position_local, false)
+		_create_handle_marker(marker_root, motion_node.tip_position_local + motion_node.tip_curve_in_handle, Color(0.2, 0.75, 1.0, 1.0), "TipIn")
+		_create_handle_marker(marker_root, motion_node.tip_position_local + motion_node.tip_curve_out_handle, Color(1.0, 0.55, 0.12, 1.0), "TipOut")
+		_create_handle_marker(marker_root, motion_node.pommel_position_local + motion_node.pommel_curve_in_handle, Color(0.2, 0.55, 0.85, 1.0), "PomIn")
+		_create_handle_marker(marker_root, motion_node.pommel_position_local + motion_node.pommel_curve_out_handle, Color(0.85, 0.4, 0.12, 1.0), "PomOut")
+		node_marker_count += 2
+		handle_marker_count += 4
+	_render_curve_mesh(trajectory_mesh_instance.mesh as ImmediateMesh, tip_curve)
+	_render_control_lines(control_mesh_instance.mesh as ImmediateMesh, motion_node_chain)
+	preview_root.set_meta("draft_point_count", motion_node_chain.size())
+	preview_root.set_meta("curve_baked_point_count", tip_curve.get_baked_points().size())
+	preview_root.set_meta("point_marker_count", node_marker_count)
 	preview_root.set_meta("control_handle_marker_count", handle_marker_count)
-	preview_root.set_meta("selected_point_index", selected_point_index)
+	preview_root.set_meta("selected_point_index", selected_node_index)
 
-func _resolve_selected_point(active_draft: Resource, selected_point_index: int) -> CombatAnimationPoint:
+func _resolve_selected_motion_node(active_draft: Resource, selected_node_index: int) -> CombatAnimationMotionNode:
 	if active_draft == null:
 		return null
-	var point_chain: Array = active_draft.get("point_chain") as Array
-	if point_chain.is_empty():
+	var motion_node_chain: Array = active_draft.get("motion_node_chain") as Array
+	if motion_node_chain.is_empty():
 		return null
-	var resolved_index: int = clampi(selected_point_index, 0, point_chain.size() - 1)
-	return point_chain[resolved_index] as CombatAnimationPoint
+	var resolved_index: int = clampi(selected_node_index, 0, motion_node_chain.size() - 1)
+	return motion_node_chain[resolved_index] as CombatAnimationMotionNode
 
 func _build_weapon_preview_node(actor: Node3D, active_wip: CraftedItemWIP) -> Node3D:
 	if actor == null or active_wip == null:
@@ -249,15 +256,15 @@ func _build_weapon_preview_node(actor: Node3D, active_wip: CraftedItemWIP) -> No
 	hand_anchor.add_child(held_item)
 	return held_item
 
-func _apply_two_hand_preview_state(actor: Node3D, held_item: Node3D, selected_point: CombatAnimationPoint) -> void:
+func _apply_two_hand_preview_state(actor: Node3D, held_item: Node3D, selected_motion_node: CombatAnimationMotionNode) -> void:
 	if actor == null:
 		return
 	var held_items: Dictionary = {}
 	if held_item != null:
 		held_items[&"hand_right"] = held_item
 	equipped_item_presenter.sync_rig_weapon_guidance(actor, held_items, true, null)
-	var point_two_hand_state: StringName = selected_point.two_hand_state if selected_point != null else CombatAnimationPointScript.TWO_HAND_STATE_AUTO
-	if point_two_hand_state == CombatAnimationPointScript.TWO_HAND_STATE_ONE_HAND:
+	var node_two_hand_state: StringName = selected_motion_node.two_hand_state if selected_motion_node != null else CombatAnimationMotionNodeScript.TWO_HAND_STATE_AUTO
+	if node_two_hand_state == CombatAnimationMotionNodeScript.TWO_HAND_STATE_ONE_HAND:
 		if actor.has_method("clear_arm_guidance_target"):
 			actor.call("clear_arm_guidance_target", &"hand_left")
 		if actor.has_method("clear_finger_grip_target"):
@@ -293,26 +300,35 @@ func _render_curve_mesh(immediate_mesh: ImmediateMesh, curve: Curve3D) -> void:
 		immediate_mesh.surface_add_vertex(baked_points[point_index + 1])
 	immediate_mesh.surface_end()
 
-func _render_control_lines(immediate_mesh: ImmediateMesh, point_chain: Array) -> void:
+func _render_control_lines(immediate_mesh: ImmediateMesh, motion_node_chain: Array) -> void:
 	if immediate_mesh == null:
 		return
 	immediate_mesh.clear_surfaces()
-	if point_chain.is_empty():
+	if motion_node_chain.is_empty():
 		return
 	immediate_mesh.surface_begin(Mesh.PRIMITIVE_LINES)
-	for point_variant: Variant in point_chain:
-		var point: CombatAnimationPoint = point_variant as CombatAnimationPoint
-		if point == null:
+	for node_variant: Variant in motion_node_chain:
+		var motion_node: CombatAnimationMotionNode = node_variant as CombatAnimationMotionNode
+		if motion_node == null:
 			continue
-		var point_position: Vector3 = point.local_target_position
+		var tip_pos: Vector3 = motion_node.tip_position_local
 		immediate_mesh.surface_set_color(Color(0.2, 0.75, 1.0, 1.0))
-		immediate_mesh.surface_add_vertex(point_position)
+		immediate_mesh.surface_add_vertex(tip_pos)
 		immediate_mesh.surface_set_color(Color(0.2, 0.75, 1.0, 1.0))
-		immediate_mesh.surface_add_vertex(point_position + point.curve_in_handle_local)
+		immediate_mesh.surface_add_vertex(tip_pos + motion_node.tip_curve_in_handle)
 		immediate_mesh.surface_set_color(Color(1.0, 0.55, 0.12, 1.0))
-		immediate_mesh.surface_add_vertex(point_position)
+		immediate_mesh.surface_add_vertex(tip_pos)
 		immediate_mesh.surface_set_color(Color(1.0, 0.55, 0.12, 1.0))
-		immediate_mesh.surface_add_vertex(point_position + point.curve_out_handle_local)
+		immediate_mesh.surface_add_vertex(tip_pos + motion_node.tip_curve_out_handle)
+		var pommel_pos: Vector3 = motion_node.pommel_position_local
+		immediate_mesh.surface_set_color(Color(0.2, 0.55, 0.85, 1.0))
+		immediate_mesh.surface_add_vertex(pommel_pos)
+		immediate_mesh.surface_set_color(Color(0.2, 0.55, 0.85, 1.0))
+		immediate_mesh.surface_add_vertex(pommel_pos + motion_node.pommel_curve_in_handle)
+		immediate_mesh.surface_set_color(Color(0.85, 0.4, 0.12, 1.0))
+		immediate_mesh.surface_add_vertex(pommel_pos)
+		immediate_mesh.surface_set_color(Color(0.85, 0.4, 0.12, 1.0))
+		immediate_mesh.surface_add_vertex(pommel_pos + motion_node.pommel_curve_out_handle)
 	immediate_mesh.surface_end()
 
 func _create_point_marker(marker_root: Node3D, local_position: Vector3, active: bool) -> void:

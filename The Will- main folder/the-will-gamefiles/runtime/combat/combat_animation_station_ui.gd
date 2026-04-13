@@ -669,13 +669,18 @@ func _build_left_sidebar(parent: HBoxContainer) -> void:
 	s_vbox.add_child(summary_label)
 
 func _build_center_column(parent: HBoxContainer) -> void:
+	var center_scroll := ScrollContainer.new()
+	center_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	center_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	center_scroll.size_flags_stretch_ratio = 1.0
+	center_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	center_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	parent.add_child(center_scroll)
 	var center := VBoxContainer.new()
 	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	center.size_flags_stretch_ratio = 1.0
 	center.add_theme_constant_override("separation", 4)
-	parent.add_child(center)
+	center_scroll.add_child(center)
 	var preview_panel := PanelContainer.new()
-	preview_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var pv_style := _make_panel_style(COLOR_BG_PREVIEW, COLOR_BORDER_ACCENT, 2, 4)
 	preview_panel.add_theme_stylebox_override("panel", pv_style)
 	center.add_child(preview_panel)
@@ -683,9 +688,8 @@ func _build_center_column(parent: HBoxContainer) -> void:
 	pv_vbox.add_theme_constant_override("separation", 0)
 	preview_panel.add_child(pv_vbox)
 	preview_view_container = SubViewportContainer.new()
-	preview_view_container.custom_minimum_size = Vector2(280, 180)
+	preview_view_container.custom_minimum_size = Vector2(280, 140)
 	preview_view_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	preview_view_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	preview_view_container.stretch = true
 	pv_vbox.add_child(preview_view_container)
 	preview_subviewport = SubViewport.new()
@@ -697,7 +701,7 @@ func _build_center_column(parent: HBoxContainer) -> void:
 	var tl_vbox := _build_section_panel(center, false)
 	_build_section_header(tl_vbox, "MOTION NODE CHAIN")
 	point_list = ItemList.new()
-	point_list.custom_minimum_size = Vector2(0, 64)
+	point_list.custom_minimum_size = Vector2(0, 48)
 	point_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	point_list.allow_reselect = true
 	_style_item_list(point_list)
@@ -712,40 +716,30 @@ func _build_center_column(parent: HBoxContainer) -> void:
 	play_preview_button = _build_styled_button(action_row, "▶ Play [F]")
 	var ds_vbox := _build_section_panel(center, false)
 	_build_section_header(ds_vbox, "DRAFT SETTINGS")
-	var ds_cols := HBoxContainer.new()
-	ds_cols.add_theme_constant_override("separation", 12)
-	ds_vbox.add_child(ds_cols)
-	var ds_left := VBoxContainer.new()
-	ds_left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ds_left.add_theme_constant_override("separation", 3)
-	ds_cols.add_child(ds_left)
-	_build_field_label(ds_left, "Draft Name")
+	var ds_grid := GridContainer.new()
+	ds_grid.columns = 4
+	ds_grid.add_theme_constant_override("h_separation", 6)
+	ds_grid.add_theme_constant_override("v_separation", 2)
+	ds_vbox.add_child(ds_grid)
+	_build_field_label(ds_grid, "Draft Name")
 	draft_name_edit = LineEdit.new()
 	draft_name_edit.placeholder_text = "Unnamed Draft"
+	draft_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_style_line_edit(draft_name_edit)
-	ds_left.add_child(draft_name_edit)
-	_build_field_label(ds_left, "Skill Name")
+	ds_grid.add_child(draft_name_edit)
+	_build_field_label(ds_grid, "Skill Name")
 	skill_name_edit = LineEdit.new()
 	skill_name_edit.placeholder_text = "Display name"
+	skill_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_style_line_edit(skill_name_edit)
-	ds_left.add_child(skill_name_edit)
-	_build_field_label(ds_left, "Skill Slot")
+	ds_grid.add_child(skill_name_edit)
+	_build_field_label(ds_grid, "Skill Slot")
 	skill_slot_edit = LineEdit.new()
 	skill_slot_edit.placeholder_text = "slot_damage / slot_block"
+	skill_slot_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_style_line_edit(skill_slot_edit)
-	ds_left.add_child(skill_slot_edit)
-	var ds_right := VBoxContainer.new()
-	ds_right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ds_right.add_theme_constant_override("separation", 3)
-	ds_cols.add_child(ds_right)
-	var speed_row := HBoxContainer.new()
-	speed_row.add_theme_constant_override("separation", 8)
-	ds_right.add_child(speed_row)
-	var speed_lbl := Label.new()
-	speed_lbl.text = "Speed"
-	speed_lbl.add_theme_font_size_override("font_size", FONT_BODY)
-	speed_lbl.add_theme_color_override("font_color", COLOR_TEXT_DIM)
-	speed_row.add_child(speed_lbl)
+	ds_grid.add_child(skill_slot_edit)
+	_build_field_label(ds_grid, "Speed")
 	preview_speed_spin_box = SpinBox.new()
 	preview_speed_spin_box.min_value = 0.01
 	preview_speed_spin_box.max_value = 3.0
@@ -753,23 +747,40 @@ func _build_center_column(parent: HBoxContainer) -> void:
 	preview_speed_spin_box.value = 1.0
 	preview_speed_spin_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_style_spinbox(preview_speed_spin_box)
-	speed_row.add_child(preview_speed_spin_box)
+	ds_grid.add_child(preview_speed_spin_box)
 	preview_loop_check_box = CheckBox.new()
-	preview_loop_check_box.text = "Loop Preview"
+	preview_loop_check_box.text = "Loop"
 	preview_loop_check_box.add_theme_color_override("font_color", COLOR_TEXT)
 	preview_loop_check_box.add_theme_font_size_override("font_size", FONT_BODY)
-	ds_right.add_child(preview_loop_check_box)
-	_build_field_label(ds_right, "Description")
+	ds_grid.add_child(preview_loop_check_box)
+	var _loop_spacer := Control.new()
+	ds_grid.add_child(_loop_spacer)
+	var _loop_spacer2 := Control.new()
+	ds_grid.add_child(_loop_spacer2)
+	var _loop_spacer3 := Control.new()
+	ds_grid.add_child(_loop_spacer3)
+	var ds_text_row := HBoxContainer.new()
+	ds_text_row.add_theme_constant_override("separation", 6)
+	ds_vbox.add_child(ds_text_row)
+	var desc_col := VBoxContainer.new()
+	desc_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	desc_col.add_theme_constant_override("separation", 1)
+	ds_text_row.add_child(desc_col)
+	_build_field_label(desc_col, "Description")
 	skill_description_edit = TextEdit.new()
-	skill_description_edit.custom_minimum_size = Vector2(0, 34)
+	skill_description_edit.custom_minimum_size = Vector2(0, 28)
 	skill_description_edit.placeholder_text = "Skill description..."
 	_style_text_edit(skill_description_edit)
-	ds_right.add_child(skill_description_edit)
-	_build_field_label(ds_right, "Notes")
+	desc_col.add_child(skill_description_edit)
+	var notes_col := VBoxContainer.new()
+	notes_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	notes_col.add_theme_constant_override("separation", 1)
+	ds_text_row.add_child(notes_col)
+	_build_field_label(notes_col, "Notes")
 	draft_notes_edit = TextEdit.new()
-	draft_notes_edit.custom_minimum_size = Vector2(0, 34)
+	draft_notes_edit.custom_minimum_size = Vector2(0, 28)
 	_style_text_edit(draft_notes_edit)
-	ds_right.add_child(draft_notes_edit)
+	notes_col.add_child(draft_notes_edit)
 
 func _build_right_inspector(parent: HBoxContainer) -> void:
 	var inspector_panel := PanelContainer.new()

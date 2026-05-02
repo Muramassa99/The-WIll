@@ -1,5 +1,0 @@
-right_normal_forward=(0.0, 0.0, 0.0)
-right_reverse_forward=(0.0, 0.0, 0.0)
-right left_normal_vs_right_normal=0.0 left_reverse_vs_right_reverse=0.0 left_normal_up=-2.0 left_reverse_up=-2.0
-up left_normal_vs_right_normal=0.0 left_reverse_vs_right_reverse=0.0 left_normal_up=-2.0 left_reverse_up=-2.0
-forward left_normal_vs_right_normal=0.0 left_reverse_vs_right_reverse=0.0 left_normal_up=-2.0 left_reverse_up=-2.0

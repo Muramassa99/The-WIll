@@ -1,4 +1,0 @@
-source_scene_loaded=true
-instantiated=true
-pack_error=0
-save_error=0

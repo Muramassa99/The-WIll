@@ -1,6 +1,0 @@
-player_loaded=true
-rig_loaded=true
-skeleton_loaded=true
-hand_direct_rotation_changed=true
-index1_direct_rotation_changed=true
-thumb1_direct_rotation_changed=true

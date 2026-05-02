@@ -1,7 +1,0 @@
-close_autosave_exists=true
-close_autosave_has_cells=true
-saved_after_close_count=1
-switch_autosave_saved=true
-switch_autosave_has_cells=true
-saved_after_switch_count=1
-switched_to_shield_path=true

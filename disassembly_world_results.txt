@@ -1,7 +1,0 @@
-main_scene_loaded=true
-crafting_bench_present=true
-disassembly_bench_present=true
-combat_animation_station_present=true
-disassembly_ui_present=true
-combat_animation_ui_present=true
-combat_animation_station_open=true

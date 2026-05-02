@@ -1,8 +1,0 @@
-saved_count=1
-selected_wip_id=player_wip_1775927386.916_1
-saved_copy_id=player_wip_1775927386.916_1
-reloaded_project_name=Forge Temp Alpha
-reloaded_project_notes=initial notes
-duplicate_deleted=true
-post_delete_saved_count=1
-reloaded_creator_id=test_runner

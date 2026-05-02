@@ -1,2 +1,0 @@
-preset_count=0
-has_presets=false

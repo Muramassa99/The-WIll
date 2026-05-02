@@ -1,4 +1,0 @@
-body_save_ok=true
-body_file_exists=true
-storage_save_ok=true
-storage_file_exists=true

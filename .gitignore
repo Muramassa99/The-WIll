@@ -1,1 +1,25 @@
-﻿*.exe
+*.exe
+
+# Local debug and verification output
+/DEBUG-LOGS/
+/godot_runs/
+/test_artifacts/*.tres
+/*_results.txt
+/*_diagnosis.txt
+/*_samples.csv
+/check_*.txt
+/chk_*.txt
+/godot_*.txt
+/godot_*.log
+/*_verify.log
+/main_scene_startup.log
+/terminal_probe_bg.txt
+
+# Root-level scratch notes from agent/debug sessions
+/audit_findings.md
+/debugging.md
+/plan.md
+/combat_animation_station_continuation_plan.md
+
+# Root-level temporary Godot state snapshots
+/test_start_menu_state.tres

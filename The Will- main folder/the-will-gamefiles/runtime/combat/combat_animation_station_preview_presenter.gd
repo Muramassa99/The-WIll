@@ -369,13 +369,17 @@ func sync_playback_pose(
 	var playback_motion_node: CombatAnimationMotionNode = _build_effective_preview_motion_node(selected_motion_node, playback_state)
 	_refresh_actor_and_weapon(state, active_wip, playback_motion_node)
 	_prepare_trajectory_root_for_authoring(state)
-	var resolved_playback_state: Dictionary = _apply_authored_weapon_pose(
-		state,
-		playback_motion_node,
-		playback_state,
-		false,
-		AUTHORING_PREVIEW_DOMINANT_SEAT_LOCK_STRENGTH,
-		false
+	var resolved_playback_state: Dictionary = (
+		_apply_runtime_clip_preview_pose(state, playback_motion_node, playback_state)
+		if bool(playback_state.get("runtime_clip_playback", false))
+		else _apply_authored_weapon_pose(
+			state,
+			playback_motion_node,
+			playback_state,
+			false,
+			AUTHORING_PREVIEW_DOMINANT_SEAT_LOCK_STRENGTH,
+			false
+		)
 	)
 	_refresh_live_playback_markers(state, resolved_playback_state)
 
@@ -988,6 +992,32 @@ func zoom_camera(preview_subviewport: SubViewport, zoom_steps: int) -> bool:
 	_apply_camera_transform(preview_root)
 	return true
 
+func capture_camera_state(preview_subviewport: SubViewport) -> Dictionary:
+	var preview_root: Node3D = _get_preview_root(preview_subviewport)
+	if preview_root == null:
+		return {}
+	var focus_point: Vector3 = _get_vector3_meta(preview_root, CAMERA_FOCUS_POINT_META, _resolve_camera_focus_point(null))
+	_ensure_camera_state(preview_root, focus_point)
+	return {
+		"valid": true,
+		"focus_point": _get_vector3_meta(preview_root, CAMERA_FOCUS_POINT_META, focus_point),
+		"distance": float(_get_node_meta_or_default(preview_root, CAMERA_DISTANCE_META, CAMERA_DEFAULT_DISTANCE)),
+		"orbit_yaw_degrees": float(_get_node_meta_or_default(preview_root, CAMERA_ORBIT_YAW_META, 0.0)),
+		"orbit_pitch_degrees": float(_get_node_meta_or_default(preview_root, CAMERA_ORBIT_PITCH_META, 0.0)),
+	}
+
+func restore_camera_state(preview_subviewport: SubViewport, camera_state: Dictionary) -> bool:
+	var preview_root: Node3D = _get_preview_root(preview_subviewport)
+	if preview_root == null or not bool(camera_state.get("valid", false)):
+		return false
+	preview_root.set_meta(CAMERA_STATE_READY_META, true)
+	preview_root.set_meta(CAMERA_FOCUS_POINT_META, camera_state.get("focus_point", Vector3(0.0, 1.1, 0.0)) as Vector3)
+	preview_root.set_meta(CAMERA_DISTANCE_META, float(camera_state.get("distance", CAMERA_DEFAULT_DISTANCE)))
+	preview_root.set_meta(CAMERA_ORBIT_YAW_META, float(camera_state.get("orbit_yaw_degrees", 0.0)))
+	preview_root.set_meta(CAMERA_ORBIT_PITCH_META, float(camera_state.get("orbit_pitch_degrees", 0.0)))
+	_apply_camera_transform(preview_root)
+	return true
+
 func ensure_baked_profile_snapshot(active_wip: CraftedItemWIP) -> BakedProfile:
 	if active_wip == null:
 		return null
@@ -1218,6 +1248,7 @@ func _refresh_trajectory_visuals(
 	var handle_marker_count: int = 0
 	var playback_active: bool = bool(playback_state.get("active", false))
 	var authoring_drag_active: bool = bool(playback_state.get("authoring_drag_active", false))
+	var authoring_drag_lightweight: bool = authoring_drag_active and bool(playback_state.get("authoring_drag_lightweight", false))
 	var tip_is_active_focus: bool = active_focus == CombatAnimationSessionStateScript.FOCUS_TIP and not playback_active
 	var pommel_is_active_focus: bool = active_focus == CombatAnimationSessionStateScript.FOCUS_POMMEL and not playback_active
 	preview_root.set_meta("display_selected_tip_position_local", Vector3.ZERO)
@@ -1254,16 +1285,21 @@ func _refresh_trajectory_visuals(
 	if playback_active:
 		_create_playback_marker(marker_root, playback_state.get("tip_position_local", Vector3.ZERO) as Vector3, Color(1.0, 0.78, 0.22, 1.0), "PlaybackTip")
 		_create_playback_marker(marker_root, playback_state.get("pommel_position_local", Vector3.ZERO) as Vector3, Color(0.56, 0.82, 1.0, 1.0), "PlaybackPommel")
-	var speed_state_result: Dictionary = speed_state_sampler.sample_motion_chain(
-		motion_node_chain,
-		tip_curve,
-		pommel_curve,
-		speed_state_config
-	)
+	var speed_state_result: Dictionary = {"sample_count": 0, "samples": []}
+	if not authoring_drag_lightweight:
+		speed_state_result = speed_state_sampler.sample_motion_chain(
+			motion_node_chain,
+			tip_curve,
+			pommel_curve,
+			speed_state_config
+		)
 	var collision_path_result: Dictionary = {"legal": true, "path_sample_count": 0}
 	if not authoring_drag_active:
 		collision_path_result = _evaluate_preview_collision_path(state, motion_node_chain, speed_state_result)
-	_render_speed_colored_curve_mesh(trajectory_mesh_instance.mesh as ImmediateMesh, speed_state_result)
+	if authoring_drag_lightweight:
+		_render_lightweight_curve_mesh(trajectory_mesh_instance.mesh as ImmediateMesh, tip_curve, pommel_curve)
+	else:
+		_render_speed_colored_curve_mesh(trajectory_mesh_instance.mesh as ImmediateMesh, speed_state_result)
 	_render_control_lines(control_mesh_instance.mesh as ImmediateMesh, motion_node_chain, selected_node_index)
 	if not authoring_drag_active:
 		_refresh_onion_skin(onion_skin_root, motion_node_chain, selected_node_index)
@@ -1425,6 +1461,73 @@ func _resolve_preview_body_clearance_fallback_push(actor: Node3D) -> Vector3:
 		forward_world = character_frame_resolver.get_default_forward_world()
 	return forward_world.normalized() * 0.04
 
+func _apply_runtime_clip_preview_pose(
+	state: Dictionary,
+	selected_motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary
+) -> Dictionary:
+	var preview_root: Node3D = state.get("preview_root", null) as Node3D
+	var actor_pivot: Node3D = state.get("actor_pivot", null) as Node3D
+	var trajectory_root: Node3D = state.get("trajectory_root", null) as Node3D
+	if preview_root == null or trajectory_root == null:
+		return playback_state
+	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
+	if held_item == null or not is_instance_valid(held_item) or selected_motion_node == null:
+		return playback_state
+	var local_tip: Vector3 = held_item.get_meta("weapon_tip_local", Vector3.ZERO) as Vector3
+	var local_pommel: Vector3 = held_item.get_meta("weapon_pommel_local", Vector3.ZERO) as Vector3
+	if local_tip.is_equal_approx(local_pommel):
+		return playback_state
+	var actor: Node3D = actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D if actor_pivot != null else null
+	_apply_preview_motion_grip_state(held_item, selected_motion_node, playback_state, actor)
+	_sync_preview_contact_axis_override(held_item, playback_state, trajectory_root)
+	var authored_tip_local: Vector3 = playback_state.get("tip_position_local", selected_motion_node.tip_position_local) as Vector3
+	var authored_pommel_local: Vector3 = playback_state.get("pommel_position_local", selected_motion_node.pommel_position_local) as Vector3
+	var authored_tip_world: Vector3 = trajectory_root.to_global(authored_tip_local)
+	var authored_pommel_world: Vector3 = trajectory_root.to_global(authored_pommel_local)
+	var resolved_weapon_orientation_degrees: Vector3 = playback_state.get(
+		"weapon_orientation_degrees",
+		_resolve_motion_node_weapon_orientation_degrees(selected_motion_node)
+	) as Vector3
+	if authored_tip_world.distance_to(authored_pommel_world) > SEGMENT_LEGALITY_EPSILON_METERS:
+		var local_axis: Vector3 = (local_tip - local_pommel).normalized()
+		var local_up_reference: Vector3 = _resolve_weapon_local_up_reference(held_item, local_axis)
+		held_item.global_transform = weapon_frame_solver.solve_transform_from_segment(
+			local_tip,
+			local_pommel,
+			authored_tip_world,
+			authored_pommel_world,
+			local_up_reference,
+			trajectory_root.global_basis,
+			resolved_weapon_orientation_degrees,
+			float(playback_state.get("weapon_roll_degrees", selected_motion_node.weapon_roll_degrees))
+		)
+	_apply_preview_resolved_grip_state(held_item)
+	var solved_tip_world: Vector3 = held_item.to_global(local_tip)
+	var solved_pommel_world: Vector3 = held_item.to_global(local_pommel)
+	var resolved_playback_state: Dictionary = playback_state.duplicate(true)
+	resolved_playback_state["active"] = bool(resolved_playback_state.get("active", true))
+	resolved_playback_state["tip_position_local"] = trajectory_root.to_local(solved_tip_world)
+	resolved_playback_state["pommel_position_local"] = trajectory_root.to_local(solved_pommel_world)
+	resolved_playback_state["weapon_orientation_degrees"] = resolved_weapon_orientation_degrees
+	preview_root.set_meta("weapon_tip_alignment_error_meters", solved_tip_world.distance_to(authored_tip_world))
+	preview_root.set_meta("weapon_pommel_alignment_error_meters", solved_pommel_world.distance_to(authored_pommel_world))
+	preview_root.set_meta("resolved_playback_state", resolved_playback_state)
+	if actor != null:
+		_apply_two_hand_preview_state(actor, held_item, selected_motion_node)
+		_apply_preview_upper_body_authoring_state(
+			actor,
+			held_item,
+			selected_motion_node,
+			resolved_playback_state,
+			solved_tip_world,
+			solved_pommel_world,
+			held_item.global_transform,
+			true
+		)
+		_apply_preview_actor_upper_body_pose_now(actor)
+	return resolved_playback_state
+
 func _apply_authored_weapon_pose(
 	state: Dictionary,
 	selected_motion_node: CombatAnimationMotionNode,
@@ -1438,6 +1541,7 @@ func _apply_authored_weapon_pose(
 	var trajectory_root: Node3D = state.get("trajectory_root", null) as Node3D
 	if preview_root == null or trajectory_root == null:
 		return playback_state
+	var authoring_drag_lightweight: bool = bool(playback_state.get("authoring_drag_lightweight", false))
 	preview_root.set_meta("weapon_tip_alignment_error_meters", -1.0)
 	preview_root.set_meta("weapon_pommel_alignment_error_meters", -1.0)
 	preview_root.set_meta("authoring_endpoint_legality_result", {})
@@ -1458,7 +1562,7 @@ func _apply_authored_weapon_pose(
 		_resolve_motion_node_weapon_orientation_degrees(selected_motion_node)
 	) as Vector3
 	var use_free_authoring_endpoint_authority: bool = false
-	var allow_free_authoring_endpoint_authority: bool = preserve_authoring_endpoints
+	var allow_free_authoring_endpoint_authority: bool = preserve_authoring_endpoints or authoring_drag_lightweight
 	var solved_transform: Transform3D
 	var solved_transform_valid: bool = false
 	if actor != null:
@@ -1487,7 +1591,15 @@ func _apply_authored_weapon_pose(
 			true
 		)
 		_apply_preview_actor_upper_body_pose_now(actor)
-		if allow_free_authoring_endpoint_authority:
+		if authoring_drag_lightweight:
+			var deferred_legality_result: Dictionary = {
+				"legal": true,
+				"deferred": true,
+				"reason": "authoring_drag_lightweight",
+			}
+			preview_root.set_meta("authoring_endpoint_legality_result", deferred_legality_result)
+			use_free_authoring_endpoint_authority = true
+		elif allow_free_authoring_endpoint_authority:
 			var authored_legality_result: Dictionary = _evaluate_preview_segment_legality(
 				actor,
 				held_item,
@@ -1535,6 +1647,27 @@ func _apply_authored_weapon_pose(
 	resolved_playback_state["pommel_position_local"] = trajectory_root.to_local(solved_pommel_world)
 	resolved_playback_state["weapon_orientation_degrees"] = resolved_weapon_orientation_degrees
 	preview_root.set_meta("resolved_playback_state", resolved_playback_state)
+	if authoring_drag_lightweight:
+		if actor != null:
+			_apply_two_hand_preview_state(actor, held_item, selected_motion_node)
+			_apply_preview_upper_body_authoring_state(actor, held_item, selected_motion_node, resolved_playback_state)
+			_apply_preview_actor_upper_body_pose_now(actor)
+		var deferred_metrics: Dictionary = {
+			"stopped_reason": "authoring_drag_lightweight",
+			"weapon_locked_to_moving_hand": false,
+			"legality_deferred_until_release": true,
+		}
+		preview_root.set_meta("contact_coupling_metrics", deferred_metrics)
+		preview_root.set_meta("contact_clearance_settle_metrics", deferred_metrics)
+		preview_root.set_meta("final_anchor_reseat_metrics", deferred_metrics)
+		preview_root.set_meta("collision_pose_legal", true)
+		preview_root.set_meta("collision_pose_deferred", true)
+		preview_root.set_meta("collision_pose_illegal_sample_count", 0)
+		preview_root.set_meta("collision_pose_region", "")
+		preview_root.set_meta("collision_pose_attachment", "")
+		preview_root.set_meta("collision_pose_sample", "")
+		preview_root.set_meta("collision_pose_clearance_meters", -1.0)
+		return resolved_playback_state
 	if actor != null:
 		_apply_two_hand_preview_state(actor, held_item, selected_motion_node)
 		_apply_preview_upper_body_authoring_state(actor, held_item, selected_motion_node, resolved_playback_state)
@@ -4215,6 +4348,28 @@ func _render_speed_colored_curve_mesh(immediate_mesh: ImmediateMesh, speed_state
 		immediate_mesh.surface_set_color(Color(color_b.r, color_b.g, color_b.b, 0.72))
 		immediate_mesh.surface_add_vertex(sample_b.get("pommel_position", Vector3.ZERO) as Vector3)
 	immediate_mesh.surface_end()
+
+func _render_lightweight_curve_mesh(immediate_mesh: ImmediateMesh, tip_curve: Curve3D, pommel_curve: Curve3D) -> void:
+	if immediate_mesh == null:
+		return
+	immediate_mesh.clear_surfaces()
+	var tip_points: PackedVector3Array = tip_curve.get_baked_points() if tip_curve != null else PackedVector3Array()
+	var pommel_points: PackedVector3Array = pommel_curve.get_baked_points() if pommel_curve != null else PackedVector3Array()
+	if tip_points.size() < 2 and pommel_points.size() < 2:
+		return
+	immediate_mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+	_add_lightweight_curve_vertices(immediate_mesh, tip_points, Color(1.0, 0.82, 0.18, 1.0))
+	_add_lightweight_curve_vertices(immediate_mesh, pommel_points, Color(1.0, 0.82, 0.18, 0.62))
+	immediate_mesh.surface_end()
+
+func _add_lightweight_curve_vertices(immediate_mesh: ImmediateMesh, points: PackedVector3Array, color: Color) -> void:
+	if immediate_mesh == null or points.size() < 2:
+		return
+	for point_index: int in range(points.size() - 1):
+		immediate_mesh.surface_set_color(color)
+		immediate_mesh.surface_add_vertex(points[point_index])
+		immediate_mesh.surface_set_color(color)
+		immediate_mesh.surface_add_vertex(points[point_index + 1])
 
 func _add_speed_colored_vertices(immediate_mesh: ImmediateMesh, curve: Curve3D, baked_points: PackedVector3Array, segment_speeds: Array[float], is_tip: bool) -> void:
 	if baked_points.size() < 2:

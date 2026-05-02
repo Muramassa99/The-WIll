@@ -15,6 +15,7 @@ const CombatAnimationDraftValidatorScript = preload("res://core/resolvers/combat
 const CombatAnimationWeaponGeometryResolverScript = preload("res://core/resolvers/combat_animation_weapon_geometry_resolver.gd")
 const CombatAnimationRetargetResolverScript = preload("res://core/resolvers/combat_animation_retarget_resolver.gd")
 const CombatRuntimeClipBakerScript = preload("res://core/resolvers/combat_runtime_clip_baker.gd")
+const CombatAnimationRuntimeChainCompilerScript = preload("res://core/resolvers/combat_animation_runtime_chain_compiler.gd")
 const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_state.gd")
 const UserSettingsStateScript = preload("res://core/models/user_settings_state.gd")
 const UserSettingsRuntimeScript = preload("res://runtime/system/user_settings_runtime.gd")
@@ -190,6 +191,8 @@ var chain_player: CombatAnimationChainPlayer = CombatAnimationChainPlayerScript.
 var session_state: CombatAnimationSessionState = CombatAnimationSessionStateScript.new()
 var motion_node_editor: CombatAnimationMotionNodeEditor = CombatAnimationMotionNodeEditorScript.new()
 var preview_camera_orbiting: bool = false
+var preview_camera_skip_next_orbit_motion: bool = false
+var preview_camera_orbit_guard_until_msec: int = 0
 var editor_state_dirty: bool = false
 var preview_drag_override_node: CombatAnimationMotionNode = null
 var preview_drag_has_moved: bool = false
@@ -199,6 +202,7 @@ var draft_validator: CombatAnimationDraftValidator = CombatAnimationDraftValidat
 var weapon_geometry_resolver = CombatAnimationWeaponGeometryResolverScript.new()
 var retarget_resolver = CombatAnimationRetargetResolverScript.new()
 var runtime_clip_baker = CombatRuntimeClipBakerScript.new()
+var runtime_chain_compiler = CombatAnimationRuntimeChainCompilerScript.new()
 var cached_editor_shortcuts_signature: String = ""
 var cached_active_weapon_baseline_seed: Dictionary = {}
 var cached_active_weapon_baseline_seed_signature: String = ""
@@ -209,7 +213,8 @@ var pending_weapon_open_primary_slot_id: StringName = HAND_SLOT_RIGHT
 var active_preview_dominant_slot_id: StringName = HAND_SLOT_RIGHT
 var active_preview_default_two_hand: bool = false
 
-const PREVIEW_DRAG_REFRESH_INTERVAL_MSEC: int = 33
+const PREVIEW_DRAG_REFRESH_INTERVAL_MSEC: int = 50
+const PREVIEW_CAMERA_POST_COMMIT_MOTION_GUARD_MSEC: int = 350
 var last_station_retarget_result: Dictionary = {}
 
 func _ready() -> void:
@@ -2927,6 +2932,7 @@ func _refresh_preview_scene() -> void:
 	var playback_state: Dictionary = _build_preview_playback_state()
 	if motion_node_editor.is_dragging() and preview_drag_override_node != null:
 		playback_state["authoring_drag_active"] = true
+		playback_state["authoring_drag_lightweight"] = true
 		playback_state["authoring_drag_target"] = motion_node_editor.get_drag_target()
 	preview_presenter.configure_preview_hand_setup(_resolve_active_motion_node_primary_slot_id(), active_preview_default_two_hand)
 	preview_presenter.refresh_preview(
@@ -3632,6 +3638,7 @@ func _build_preview_playback_state() -> Dictionary:
 		return {}
 	return {
 		"active": true,
+		"runtime_clip_playback": chain_player.current_trajectory_volume_state.get("source", StringName()) == &"baked_runtime_clip",
 		"tip_position_local": chain_player.current_tip_position,
 		"pommel_position_local": chain_player.current_pommel_position,
 		"weapon_orientation_degrees": chain_player.current_weapon_orientation_degrees,
@@ -3979,7 +3986,8 @@ func _apply_contact_tether_to_segment(
 
 func _resolve_motion_node_segment_for_tip_target(
 	motion_node: CombatAnimationMotionNode,
-	requested_tip_position_local: Vector3
+	requested_tip_position_local: Vector3,
+	apply_endpoint_authority: bool = true
 ) -> Dictionary:
 	if motion_node == null:
 		return {}
@@ -3993,11 +4001,15 @@ func _resolve_motion_node_segment_for_tip_target(
 		"pommel_position_local": motion_node.pommel_position_local,
 		"progress": 1.0,
 	}
+	if not apply_endpoint_authority:
+		resolved_segment["endpoint_authority_deferred"] = true
+		return resolved_segment
 	return _apply_contact_tether_to_segment(motion_node, resolved_segment, &"tip_pivot")
 
 func _resolve_motion_node_segment_for_pommel_target(
 	motion_node: CombatAnimationMotionNode,
-	requested_pommel_position_local: Vector3
+	requested_pommel_position_local: Vector3,
+	apply_endpoint_authority: bool = true
 ) -> Dictionary:
 	if motion_node == null:
 		return {}
@@ -4007,6 +4019,9 @@ func _resolve_motion_node_segment_for_pommel_target(
 		"pommel_position_local": requested_pommel_position_local,
 		"progress": 1.0,
 	}
+	if not apply_endpoint_authority:
+		resolved_segment["endpoint_authority_deferred"] = true
+		return resolved_segment
 	return _apply_contact_tether_to_segment(motion_node, resolved_segment, &"translate")
 
 func _apply_motion_node_state(target: CombatAnimationMotionNode, source: CombatAnimationMotionNode) -> bool:
@@ -4074,16 +4089,84 @@ func _finalize_preview_drag(status_message: String = "Motion node edit locked in
 			footer_status_label.text = status_message
 		return
 	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
-	var changed: bool = _apply_motion_node_state(motion_node, preview_drag_override_node)
+	var preserved_camera_state: Dictionary = preview_presenter.capture_camera_state(preview_subviewport)
+	var commit_result: Dictionary = _resolve_preview_drag_commit_motion_node(motion_node)
+	if not bool(commit_result.get("legal", true)):
+		var validation_result: Dictionary = commit_result.get("validation_result", {}) as Dictionary
+		_clear_preview_drag_override()
+		_refresh_preview_scene()
+		_restore_preview_camera_after_drag_commit(preserved_camera_state)
+		_set_preview_drag_blocked_status(validation_result)
+		return
+	var commit_motion_node: CombatAnimationMotionNode = commit_result.get("motion_node", preview_drag_override_node) as CombatAnimationMotionNode
+	var changed: bool = _apply_motion_node_state(motion_node, commit_motion_node)
 	_clear_preview_drag_override()
 	if changed:
 		editor_state_dirty = true
 		_refresh_motion_node_list()
 		_refresh_editor_fields()
 		_refresh_preview_scene()
+		_restore_preview_camera_after_drag_commit(preserved_camera_state)
 		_refresh_summary(status_message)
-	elif not status_message.strip_edges().is_empty():
-		footer_status_label.text = status_message
+	else:
+		_restore_preview_camera_after_drag_commit(preserved_camera_state)
+		if not status_message.strip_edges().is_empty():
+			footer_status_label.text = status_message
+
+func _restore_preview_camera_after_drag_commit(camera_state: Dictionary) -> void:
+	if preview_presenter.restore_camera_state(preview_subviewport, camera_state):
+		preview_camera_skip_next_orbit_motion = true
+		preview_camera_orbit_guard_until_msec = Time.get_ticks_msec() + PREVIEW_CAMERA_POST_COMMIT_MOTION_GUARD_MSEC
+
+func _should_suppress_post_commit_camera_motion() -> bool:
+	if not preview_camera_skip_next_orbit_motion:
+		return false
+	var now_msec: int = Time.get_ticks_msec()
+	if now_msec > preview_camera_orbit_guard_until_msec:
+		preview_camera_skip_next_orbit_motion = false
+		preview_camera_orbit_guard_until_msec = 0
+		return false
+	preview_camera_skip_next_orbit_motion = false
+	preview_camera_orbit_guard_until_msec = 0
+	return true
+
+func _resolve_preview_drag_commit_motion_node(source_motion_node: CombatAnimationMotionNode) -> Dictionary:
+	if source_motion_node == null or preview_drag_override_node == null:
+		return {"legal": true, "motion_node": preview_drag_override_node}
+	var proposed_motion_node: CombatAnimationMotionNode = preview_drag_override_node.duplicate(true) as CombatAnimationMotionNode
+	if proposed_motion_node == null:
+		return {"legal": true, "motion_node": preview_drag_override_node}
+	proposed_motion_node.normalize()
+	if _is_motion_node_authoring_locked(source_motion_node):
+		return {"legal": true, "motion_node": proposed_motion_node}
+	var endpoint_or_orientation_changed: bool = (
+		not source_motion_node.tip_position_local.is_equal_approx(proposed_motion_node.tip_position_local)
+		or not source_motion_node.pommel_position_local.is_equal_approx(proposed_motion_node.pommel_position_local)
+		or not source_motion_node.weapon_orientation_degrees.is_equal_approx(proposed_motion_node.weapon_orientation_degrees)
+		or source_motion_node.weapon_orientation_authored != proposed_motion_node.weapon_orientation_authored
+	)
+	if not endpoint_or_orientation_changed:
+		return {"legal": true, "motion_node": proposed_motion_node}
+	var validation_result: Dictionary = preview_presenter.constrain_authored_segment_to_endpoint_authority(
+		preview_subviewport,
+		active_wip,
+		proposed_motion_node,
+		proposed_motion_node.tip_position_local,
+		proposed_motion_node.pommel_position_local
+	)
+	if not bool(validation_result.get("legal", true)):
+		return {
+			"legal": false,
+			"motion_node": proposed_motion_node,
+			"validation_result": validation_result,
+		}
+	_apply_resolved_segment_to_motion_node(proposed_motion_node, validation_result)
+	proposed_motion_node.normalize()
+	return {
+		"legal": true,
+		"motion_node": proposed_motion_node,
+		"validation_result": validation_result,
+	}
 
 func _get_draft_identifier(draft: Resource) -> StringName:
 	if draft == null:
@@ -4546,34 +4629,76 @@ func _toggle_preview_playback() -> void:
 		return
 	var playback_speed: float = float(draft.get("preview_playback_speed_scale"))
 	var should_loop: bool = bool(draft.get("preview_loop_enabled"))
+	var trajectory_volume_config: Dictionary = _resolve_preview_trajectory_volume_config()
+	var runtime_chain_result: Dictionary = _build_preview_runtime_motion_chain(motion_node_chain, trajectory_volume_config)
+	var playable_motion_node_chain: Array = runtime_chain_result.get("motion_node_chain", motion_node_chain) as Array
+	if playable_motion_node_chain.size() < 2:
+		footer_status_label.text = "Runtime preview compilation did not produce a playable chain."
+		return
 	var runtime_clip = runtime_clip_baker.bake_from_motion_node_chain(
-		motion_node_chain,
+		playable_motion_node_chain,
 		{
 			"clip_kind": &"skill_playback",
 			"source_draft_id": StringName(draft.get("draft_id")),
 			"source_skill_slot_id": _get_active_skill_slot_id(),
 			"source_weapon_wip_id": active_wip.wip_id if active_wip != null else StringName(),
+			"source_weapon_length_meters": _get_active_weapon_total_length(),
 			"playback_speed_scale": playback_speed,
 			"loop_enabled": should_loop,
 			"sample_rate_hz": PREVIEW_RUNTIME_CLIP_SAMPLE_RATE_HZ,
-			"trajectory_volume_config": _resolve_preview_trajectory_volume_config(),
+			"trajectory_volume_config": trajectory_volume_config,
+			"compile_diagnostics": runtime_chain_result.get("diagnostics", []),
+			"degraded_node_count": int(runtime_chain_result.get("degraded_node_count", 0)),
+			"hand_swap_bridge_count": int(runtime_chain_result.get("hand_swap_bridge_count", 0)),
+			"retargeted_count": int(runtime_chain_result.get("retargeted_count", 0)),
 		}
 	)
 	if runtime_clip != null and runtime_clip.has_method("get_frame_count") and int(runtime_clip.call("get_frame_count")) > 0:
 		chain_player.prepare_runtime_clip(runtime_clip, playback_speed, should_loop)
 	else:
 		chain_player.prepare(
-			motion_node_chain,
-			motion_node_editor.build_tip_curve(motion_node_chain),
-			motion_node_editor.build_pommel_curve(motion_node_chain),
+			playable_motion_node_chain,
+			motion_node_editor.build_tip_curve(playable_motion_node_chain),
+			motion_node_editor.build_pommel_curve(playable_motion_node_chain),
 			playback_speed,
 			should_loop,
-			_resolve_preview_trajectory_volume_config()
+			trajectory_volume_config
 		)
 	chain_player.start()
 	session_state.playback_active = true
 	_refresh_preview_scene()
 	footer_status_label.text = "Preview playing... (F to stop)"
+
+func _build_preview_runtime_motion_chain(motion_node_chain: Array, trajectory_volume_config: Dictionary) -> Dictionary:
+	var result: Dictionary = {
+		"compiled": false,
+		"motion_node_chain": motion_node_chain,
+		"diagnostics": [],
+		"degraded_node_count": 0,
+		"hand_swap_bridge_count": 0,
+		"retargeted_count": 0,
+	}
+	if runtime_chain_compiler == null or motion_node_chain.size() < 2:
+		return result
+	var dominant_slot_id: StringName = active_preview_dominant_slot_id
+	if dominant_slot_id == StringName():
+		dominant_slot_id = HAND_SLOT_RIGHT
+	var support_slot_id: StringName = HAND_SLOT_LEFT if dominant_slot_id == HAND_SLOT_RIGHT else HAND_SLOT_RIGHT
+	var support_hand_available: bool = true
+	var compile_result: Dictionary = runtime_chain_compiler.compile_skill_chain(
+		motion_node_chain,
+		_get_active_weapon_total_length(),
+		trajectory_volume_config,
+		{
+			"support_hand_available": support_hand_available,
+			"two_hand_allowed": active_preview_default_two_hand and support_hand_available,
+			"dominant_slot_id": dominant_slot_id,
+			"support_slot_id": support_slot_id,
+		}
+	)
+	if bool(compile_result.get("compiled", false)):
+		return compile_result
+	return result
 
 func _resolve_preview_trajectory_volume_config() -> Dictionary:
 	var preview_root: Node3D = _get_preview_root()
@@ -4910,6 +5035,9 @@ func _on_preview_gui_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion:
 		var mm: InputEventMouseMotion = event as InputEventMouseMotion
 		if preview_camera_orbiting:
+			if _should_suppress_post_commit_camera_motion():
+				preview_view_container.accept_event()
+				return
 			if orbit_preview_camera(mm.relative):
 				preview_view_container.accept_event()
 			return
@@ -4946,11 +5074,9 @@ func _handle_preview_drag(screen_position: Vector2) -> void:
 		if hit != null:
 			var resolved_segment: Dictionary = _resolve_motion_node_segment_for_tip_target(
 				editable_motion_node,
-				hit as Vector3
+				hit as Vector3,
+				false
 			)
-			if bool(resolved_segment.get("body_clearance_rejected", false)):
-				_set_preview_drag_blocked_status(resolved_segment)
-				return
 			if _apply_resolved_segment_to_motion_node(editable_motion_node, resolved_segment):
 				preview_drag_has_moved = true
 				editable_motion_node.normalize()
@@ -4965,11 +5091,9 @@ func _handle_preview_drag(screen_position: Vector2) -> void:
 		if hit_pommel != null:
 			var resolved_segment: Dictionary = _resolve_motion_node_segment_for_pommel_target(
 				editable_motion_node,
-				hit_pommel as Vector3
+				hit_pommel as Vector3,
+				false
 			)
-			if bool(resolved_segment.get("body_clearance_rejected", false)):
-				_set_preview_drag_blocked_status(resolved_segment)
-				return
 			if _apply_resolved_segment_to_motion_node(editable_motion_node, resolved_segment):
 				preview_drag_has_moved = true
 				editable_motion_node.normalize()
@@ -4979,23 +5103,8 @@ func _handle_preview_drag(screen_position: Vector2) -> void:
 		if resolved_weapon_orientation != null:
 			var resolved_weapon_plane: Vector3 = resolved_weapon_orientation as Vector3
 			if not editable_motion_node.weapon_orientation_degrees.is_equal_approx(resolved_weapon_plane) or not editable_motion_node.weapon_orientation_authored:
-				var previous_weapon_orientation: Vector3 = editable_motion_node.weapon_orientation_degrees
-				var previous_weapon_orientation_authored: bool = editable_motion_node.weapon_orientation_authored
 				editable_motion_node.weapon_orientation_degrees = resolved_weapon_plane
 				editable_motion_node.weapon_orientation_authored = true
-				var orientation_legality: Dictionary = preview_presenter.constrain_authored_segment_to_endpoint_authority(
-					preview_subviewport,
-					active_wip,
-					editable_motion_node,
-					editable_motion_node.tip_position_local,
-					editable_motion_node.pommel_position_local
-				)
-				if not bool(orientation_legality.get("legal", true)):
-					editable_motion_node.weapon_orientation_degrees = previous_weapon_orientation
-					editable_motion_node.weapon_orientation_authored = previous_weapon_orientation_authored
-					_set_preview_drag_blocked_status(orientation_legality)
-					return
-				_apply_resolved_segment_to_motion_node(editable_motion_node, orientation_legality)
 				preview_drag_has_moved = true
 				editable_motion_node.normalize()
 				_queue_preview_drag_refresh()

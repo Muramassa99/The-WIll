@@ -4,16 +4,22 @@ const PlayerBodyInventoryStateScript = preload("res://core/models/player_body_in
 const PlayerPersonalStorageStateScript = preload("res://core/models/player_personal_storage_state.gd")
 const PlayerEquipmentStateScript = preload("res://core/models/player_equipment_state.gd")
 const PlayerForgeWipLibraryStateScript = preload("res://core/models/player_forge_wip_library_state.gd")
+const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_state.gd")
 
 const RESULT_FILE_PATH := "C:/WORKSPACE/player_weapon_grip_orientation_results.txt"
 const TEMP_STATE_DIR := "C:/WORKSPACE/test_artifacts"
+const TEST_GRIP_LAYER_START := 20
+const TEST_GRIP_SLICE_COUNT := 20
 
 func _init() -> void:
 	call_deferred("_run_verification")
 
 func _run_verification() -> void:
 	var player_scene: PackedScene = load("res://scenes/player/player_character.tscn") as PackedScene
-	var player_root: Node = player_scene.instantiate()
+	var player_root: PlayerController3D = player_scene.instantiate() as PlayerController3D
+	var skill_slot_state := PlayerSkillSlotStateScript.new()
+	skill_slot_state.save_file_path = "%s/verify_grip_orientation_skill_slot_state.tres" % TEMP_STATE_DIR
+	player_root.player_skill_slot_state = skill_slot_state
 	root.add_child(player_root)
 	await process_frame
 	await process_frame
@@ -39,28 +45,28 @@ func _run_verification() -> void:
 	var left_normal_wip: CraftedItemWIP = wip_library.save_wip(_build_valid_test_wip(&"verify_left_normal", CraftedItemWIP.GRIP_NORMAL))
 	var left_reverse_wip: CraftedItemWIP = wip_library.save_wip(_build_valid_test_wip(&"verify_left_reverse", CraftedItemWIP.GRIP_REVERSE))
 
-	var right_normal_data: Dictionary = await _equip_and_measure(player, right_normal_wip.wip_id, &"hand_right")
-	var right_reverse_data: Dictionary = await _equip_and_measure(player, right_reverse_wip.wip_id, &"hand_right")
-	var left_normal_data: Dictionary = await _equip_and_measure(player, left_normal_wip.wip_id, &"hand_left")
-	var left_reverse_data: Dictionary = await _equip_and_measure(player, left_reverse_wip.wip_id, &"hand_left")
+	var right_normal_data: Dictionary = await _equip_and_measure(player, right_normal_wip.wip_id, &"hand_right", CraftedItemWIP.GRIP_NORMAL)
+	var right_reverse_data: Dictionary = await _equip_and_measure(player, right_reverse_wip.wip_id, &"hand_right", CraftedItemWIP.GRIP_REVERSE)
+	var left_normal_data: Dictionary = await _equip_and_measure(player, left_normal_wip.wip_id, &"hand_left", CraftedItemWIP.GRIP_NORMAL)
+	var left_reverse_data: Dictionary = await _equip_and_measure(player, left_reverse_wip.wip_id, &"hand_left", CraftedItemWIP.GRIP_REVERSE)
 
 	var lines: PackedStringArray = []
 	lines.append("right_normal_exists=%s" % str(right_normal_data.get("exists", false)))
 	lines.append("right_reverse_exists=%s" % str(right_reverse_data.get("exists", false)))
 	lines.append("left_normal_exists=%s" % str(left_normal_data.get("exists", false)))
 	lines.append("left_reverse_exists=%s" % str(left_reverse_data.get("exists", false)))
-	lines.append("right_normal_forward_score=%s" % str(snappedf(float(right_normal_data.get("forward_score", -2.0)), 0.0001)))
-	lines.append("right_reverse_forward_score=%s" % str(snappedf(float(right_reverse_data.get("forward_score", -2.0)), 0.0001)))
-	lines.append("left_normal_forward_score=%s" % str(snappedf(float(left_normal_data.get("forward_score", -2.0)), 0.0001)))
-	lines.append("left_reverse_forward_score=%s" % str(snappedf(float(left_reverse_data.get("forward_score", -2.0)), 0.0001)))
-	lines.append("right_normal_up_score=%s" % str(snappedf(float(right_normal_data.get("up_score", -2.0)), 0.0001)))
-	lines.append("right_reverse_up_score=%s" % str(snappedf(float(right_reverse_data.get("up_score", -2.0)), 0.0001)))
-	lines.append("left_normal_up_score=%s" % str(snappedf(float(left_normal_data.get("up_score", -2.0)), 0.0001)))
-	lines.append("left_reverse_up_score=%s" % str(snappedf(float(left_reverse_data.get("up_score", -2.0)), 0.0001)))
-	lines.append("right_reverse_flips_forward=%s" % str(_vectors_dot(right_normal_data, right_reverse_data) < -0.8))
-	lines.append("left_reverse_flips_forward=%s" % str(_vectors_dot(left_normal_data, left_reverse_data) < -0.8))
-	lines.append("left_normal_matches_right_normal=%s" % str(_vectors_dot(right_normal_data, left_normal_data) > 0.8))
-	lines.append("left_reverse_matches_right_reverse=%s" % str(_vectors_dot(right_reverse_data, left_reverse_data) > 0.8))
+	lines.append("right_normal_tip_axis_score=%s" % str(snappedf(float(right_normal_data.get("tip_axis_score", -2.0)), 0.0001)))
+	lines.append("right_reverse_tip_axis_score=%s" % str(snappedf(float(right_reverse_data.get("tip_axis_score", -2.0)), 0.0001)))
+	lines.append("left_normal_tip_axis_score=%s" % str(snappedf(float(left_normal_data.get("tip_axis_score", -2.0)), 0.0001)))
+	lines.append("left_reverse_tip_axis_score=%s" % str(snappedf(float(left_reverse_data.get("tip_axis_score", -2.0)), 0.0001)))
+	lines.append("right_normal_grip_style=%s" % String(right_normal_data.get("grip_style_mode", StringName())))
+	lines.append("right_reverse_grip_style=%s" % String(right_reverse_data.get("grip_style_mode", StringName())))
+	lines.append("left_normal_grip_style=%s" % String(left_normal_data.get("grip_style_mode", StringName())))
+	lines.append("left_reverse_grip_style=%s" % String(left_reverse_data.get("grip_style_mode", StringName())))
+	lines.append("right_normal_tip_axis_matches_contact_axis=%s" % str(float(right_normal_data.get("tip_axis_score", -2.0)) > 0.95))
+	lines.append("right_reverse_tip_axis_matches_reverse_contact_axis=%s" % str(float(right_reverse_data.get("tip_axis_score", 2.0)) > 0.95))
+	lines.append("left_normal_tip_axis_matches_contact_axis=%s" % str(float(left_normal_data.get("tip_axis_score", -2.0)) > 0.95))
+	lines.append("left_reverse_tip_axis_matches_reverse_contact_axis=%s" % str(float(left_reverse_data.get("tip_axis_score", 2.0)) > 0.95))
 	lines.append("right_reverse_support_guide_absent=%s" % str(not bool(right_reverse_data.get("has_secondary_guide", true))))
 	lines.append("left_reverse_support_guide_absent=%s" % str(not bool(left_reverse_data.get("has_secondary_guide", true))))
 
@@ -71,7 +77,12 @@ func _run_verification() -> void:
 
 	quit()
 
-func _equip_and_measure(player: PlayerController3D, saved_wip_id: StringName, slot_id: StringName) -> Dictionary:
+func _equip_and_measure(
+	player: PlayerController3D,
+	saved_wip_id: StringName,
+	slot_id: StringName,
+	desired_grip_style_mode: StringName
+) -> Dictionary:
 	player.clear_equipment_slot(&"hand_right")
 	player.clear_equipment_slot(&"hand_left")
 	await process_frame
@@ -84,26 +95,46 @@ func _equip_and_measure(player: PlayerController3D, saved_wip_id: StringName, sl
 	if held_item == null:
 		return {
 			"exists": false,
-			"forward_score": -2.0,
-			"up_score": -2.0,
-			"forward": Vector3.ZERO,
+			"tip_axis_score": -2.0,
 			"has_secondary_guide": false
 		}
-	var player_forward: Vector3 = -player.visual_root.global_basis.z.normalized()
-	var forward_vector: Vector3 = held_item.global_basis.x.normalized()
-	var up_vector: Vector3 = held_item.global_basis.y.normalized()
+	player.equipped_item_presenter.apply_held_item_grip_style_mode(
+		held_item,
+		player.humanoid_rig,
+		slot_id,
+		desired_grip_style_mode
+	)
+	player.equipped_item_presenter.apply_hand_mount_transform(held_item)
+	await process_frame
+	var local_tip: Vector3 = held_item.get_meta("weapon_tip_local", Vector3.ZERO) as Vector3
+	var local_grip: Vector3 = held_item.get_meta("primary_grip_contact_local", Vector3.ZERO) as Vector3
+	var local_tip_axis: Vector3 = local_tip - local_grip
+	var tip_axis_score: float = -2.0
+	if local_tip_axis.length_squared() > 0.000001:
+		var expected_contact_axis: Vector3 = _resolve_contact_axis_local(player, slot_id)
+		var grip_style_mode: StringName = held_item.get_meta("grip_style_mode", CraftedItemWIP.GRIP_NORMAL) as StringName
+		if grip_style_mode == CraftedItemWIP.GRIP_REVERSE:
+			expected_contact_axis = -expected_contact_axis
+		var hand_anchor: Node3D = held_item.get_parent() as Node3D
+		var expected_anchor_axis: Vector3 = expected_contact_axis
+		if hand_anchor != null:
+			expected_anchor_axis = (hand_anchor.transform.basis.inverse() * expected_contact_axis).normalized()
+		var tip_axis_in_anchor: Vector3 = (held_item.transform.basis * local_tip_axis.normalized()).normalized()
+		tip_axis_score = tip_axis_in_anchor.dot(expected_anchor_axis.normalized())
 	return {
 		"exists": true,
-		"forward_score": forward_vector.dot(player_forward),
-		"up_score": up_vector.dot(Vector3.UP),
-		"forward": forward_vector,
+		"tip_axis_score": tip_axis_score,
+		"grip_style_mode": held_item.get_meta("grip_style_mode", StringName()),
 		"has_secondary_guide": held_item.get_node_or_null("SecondaryGripGuide") != null
 	}
 
-func _vectors_dot(a: Dictionary, b: Dictionary) -> float:
-	if not bool(a.get("exists", false)) or not bool(b.get("exists", false)):
-		return -2.0
-	return (a.get("forward", Vector3.ZERO) as Vector3).dot(b.get("forward", Vector3.ZERO) as Vector3)
+func _resolve_contact_axis_local(player: PlayerController3D, slot_id: StringName) -> Vector3:
+	var humanoid_rig: Node3D = player.humanoid_rig if player != null else null
+	if humanoid_rig != null and humanoid_rig.has_method("resolve_hand_index_pinky_axis_local"):
+		var resolved_axis: Vector3 = humanoid_rig.call("resolve_hand_index_pinky_axis_local", slot_id) as Vector3
+		if resolved_axis.length_squared() > 0.000001:
+			return resolved_axis.normalized()
+	return Vector3.RIGHT
 
 func _build_valid_test_wip(wip_id: StringName, grip_style_mode: StringName) -> CraftedItemWIP:
 	var wip: CraftedItemWIP = CraftedItemWIP.new()
@@ -114,18 +145,18 @@ func _build_valid_test_wip(wip_id: StringName, grip_style_mode: StringName) -> C
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
 	wip.grip_style_mode = grip_style_mode
-	var layer_a: LayerAtom = LayerAtom.new()
-	layer_a.layer_index = 20
-	layer_a.cells = _build_handle_cells(20)
-	var layer_b: LayerAtom = LayerAtom.new()
-	layer_b.layer_index = 21
-	layer_b.cells = _build_handle_cells(21)
-	wip.layers = [layer_a, layer_b]
+	var layers: Array[LayerAtom] = []
+	for layer_index: int in range(TEST_GRIP_LAYER_START, TEST_GRIP_LAYER_START + TEST_GRIP_SLICE_COUNT):
+		var layer := LayerAtom.new()
+		layer.layer_index = layer_index
+		layer.cells = _build_handle_cells(layer_index)
+		layers.append(layer)
+	wip.layers = layers
 	return wip
 
 func _build_handle_cells(layer_index: int) -> Array[CellAtom]:
 	var cells: Array[CellAtom] = []
-	for x in range(20, 32):
+	for x in range(20, 23):
 		for y in range(10, 13):
 			var cell: CellAtom = CellAtom.new()
 			cell.grid_position = Vector3i(x, y, layer_index)

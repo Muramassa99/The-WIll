@@ -1,11 +1,12 @@
 # CURRENT STATE OF THE WILL - IMPLEMENTATION MEMORY
 
-Date: 2026-04-02
-Scope: first forge vertical slice plus active audit-led foundation cleanup and ranged physical / shield planning lock
+Date: 2026-04-13
+Scope: live recovery baseline across forge, Stage 2, player hold/grip, and combat animation creator branches
 
 Reference note: TOWN_GATE_FLOOR_FORGE_AUTHORITY_SAVEPOINT_2026-03-23.md captures the active authority savepoint for Town/Gate/Floor/Forge design intent, clarifications, and lore framing. Use that note for behavioral/world-design truth; keep this file focused on implementation state and verification.
 Reference note: THE WILL — .tres RESOURCE RULES.md locks the current `.tres` policy. Shared project `.tres` files are for authored definitions, templates, lookup data, and tuning defaults; they are not shared live session state.
 Reference note: THE WILL — RESOURCE USAGE RULES locks the broader Resource policy. Use Resource for structured domain data, definitions, templates, and saveable/duplicable instance data; do not use Resource for scene presence, controller/service orchestration, or volatile live interaction state.
+Reference note: REPO_ALIGNMENT_RECOVERY_SAVEPOINT_2026-04-13.md is the active restart file for tracker-drift recovery and the under-logged `be2f294` workspace push. Use it before doing more recovery logging so duplicate relogging is avoided.
 Primary implementation references:
 - quirky-cuddling-mochi.md
 - DECISION_LEDGER_FIRST_SLICE.md
@@ -15,6 +16,15 @@ Primary implementation references:
 - project-aligned workaround.md
 - FULL_REPO_AUDIT_FIX_LEDGER_2026-04-01.md
 - RANGED_PHYSICAL_WEAPON_AND_SHIELD_FOUNDATION_SPEC_2026-04-02.md
+
+Recovery note:
+- On 2026-04-13 this file was re-baselined against live repo code and fresh verifier reruns after tracker drift concerns.
+- When older summary lines conflict with later dated entries and fresh verifier results, the latest dated entries below win.
+- Fresh reruns used during this recovery pass:
+  - `combat_animation_station_workflow_results.txt`
+  - `combat_animation_station_preview_results.txt`
+  - `player_weapon_guidance_results.txt`
+  - `player_locomotion_animation_results.txt`
 
 ## Purpose
 
@@ -5328,6 +5338,41 @@ Focused verification now on record:
 
 Authority correction now parked for the next grip phase:
 - solve this as a legal-target generation problem first, then IK
+
+2026-04-13 - Skill Crafter UI structural containment and viewport-proportional scaling
+
+What changed:
+- `runtime/combat/combat_animation_station_ui.gd` — comprehensive layout and scaling fix
+- **Structural containment (root cause of "menu not fitting on screen"):**
+  - Left sidebar and right inspector changed from `SIZE_FILL` to `SIZE_EXPAND_FILL` horizontal — this makes `stretch_ratio` actually work. Per Godot docs, stretch_ratio is only honored when the EXPAND flag is set. Without it, sidebar (0.22) and inspector (0.26) ratios were silently ignored and widths were purely content-driven.
+  - Sidebar added `SIZE_EXPAND_FILL` vertical so it constrains to HBoxContainer height instead of growing to content height.
+  - Removed `set_anchors_and_offsets_preset(PRESET_FULL_RECT)` from `root_margin` (MarginContainer) and `root_vbox` (VBoxContainer). Per Godot docs: "When a Container-derived node is used, all children Control nodes give up their own positioning ability." Anchor presets on Container children are wrong; replaced with proper `SIZE_EXPAND_FILL` size flags.
+  - Added `clip_contents = true` on root `panel` PanelContainer as safety net — any content exceeding the viewport-anchored bounds is clipped instead of rendering past screen edges.
+  - Removed `SIZE_EXPAND_FILL` from ScrollContainer's vbox child inside inspector — ScrollContainer children should not expand on the scroll axis.
+- **Viewport-proportional scaling (root cause of warning "scale_factor unused"):**
+  - `scale_factor` promoted from local var in `_build_ui()` to member var on the class (`var scale_factor: float = 1.0`), computed as `minf(viewport_w / 1920.0, viewport_h / 1080.0)`.
+  - Added `_spi(px: int) -> int` and `_spf(px: float) -> float` scaling helpers that multiply by `scale_factor` with a minimum of 1.
+  - Removed `scale_factor` parameter from `_build_left_sidebar`, `_build_center_column`, `_build_right_inspector` — they now read the member var directly, and style helpers access it without signature changes.
+  - ALL font size overrides now use `_spi(FONT_*)` instead of raw `FONT_*` constants (FONT_TITLE=20, FONT_SECTION=13, FONT_BODY=12, FONT_HINT=11 are base values for 1920×1080).
+  - ALL content margins in `_make_panel_style`, `_build_styled_button`, `_style_item_list`, `_style_spinbox`, `_style_line_edit`, `_style_text_edit` now use `_spf()`.
+  - ALL separation constants in containers/separators now use `_spi()`.
+  - Root margin container margins (10/8) now use `_spi()`.
+- **Collapsible inspector sections** (from prior turn, included for completeness):
+  - 6 sections: TIP POSITION, TRAJECTORY PLANE, POMMEL POSITION, WEAPON ORIENTATION, TIMING & BEHAVIOR (default expanded), DRAFT SETTINGS (default collapsed).
+  - `_build_collapsible_section()` creates clickable arrow-prefixed Label header toggling content visibility.
+  - `_refresh_focus_indicators()` preserves arrow prefix when updating tip/pommel header text.
+- Three-column proportional widths now active: sidebar 0.22, center 1.0, inspector 0.26 (14.9% / 67.6% / 17.6% of available).
+
+Files involved:
+- `runtime/combat/combat_animation_station_ui.gd`
+
+Focused verification now on record:
+- Zero GDScript lint errors after all changes
+- No remaining unscaled `FONT_*` references in theme overrides (grep verified)
+- No remaining unscaled `content_margin` literals except intentional 1px separator line
+- No remaining hardcoded `separation` constants except intentional `0` on preview vbox
+- All `stretch_ratio` values now paired with `SIZE_EXPAND_FILL` (grep verified: no `SIZE_FILL` without EXPAND where ratio is set)
+- Not runtime-verified (headless Godot crashes VS Code environment — known constraint)
 - dominant hand owns weapon seat from weapon grip anchor
 - support hand joins the already seated weapon from the secondary grip anchor
 - both targets must be projected into legal space before IK:
@@ -5586,7 +5631,7 @@ Focused verification now on record:
   - `idle_state_animation=2 Hand Idle`
   - `has_two_hand_idle=true`
 - `player_weapon_guidance_results.txt`
-  - support guidance remains stable on `SupportGripAnchor`
+  - at the time of this 2026-04-11 pass, support guidance still resolved through `SupportGripAnchor`
   - the scene still tends to report `Fall(Pose)` because that verifier sample starts in falling locomotion
 - `player_finger_grip_ik_results.txt`
   - finger stability stayed on the pre-port baseline
@@ -5805,3 +5850,763 @@ Focused verification now on record:
 Honest boundary:
 - the combat animation station is now reachable in the live world through the same runtime interaction path as the other stations
 - this pass did not add new editor capabilities inside the station; it only fixed the missing world access point
+
+2026-04-12 - Migrated the live combat animation creator branch from point-chain truth to motion-node truth
+
+What changed:
+- added `core/models/combat_animation_motion_node.gd` as the active authored unit for the combat animation creator branch
+- `core/models/combat_animation_draft.gd` now uses:
+  - `motion_node_chain`
+  - `selected_motion_node_index`
+  - `continuity_motion_node_index`
+  - `skill_name`
+  - `skill_description`
+- the live station UI now routes authoring input through node-based actions:
+  - `skill_crafter_prev_node`
+  - `skill_crafter_next_node`
+  - `skill_crafter_copy_node`
+  - `skill_crafter_delete_node`
+  - `skill_crafter_cycle_focus`
+  - `skill_crafter_play_preview`
+- the live station preview and workflow paths now read `motion_node_chain` and `CombatAnimationMotionNode`
+- `core/models/combat_animation_point.gd` still exists in the repo, but it is no longer the active authored-chain truth for the current combat animation creator flow
+- some compatibility/debug wording still says `point` even though the authored data model is now motion-node based:
+  - `draft_point_count`
+  - `selected_point_index`
+  - `point_marker_count`
+
+Focused verification now on record:
+- `combat_animation_station_workflow_results.txt`
+  - `insert_node_ok=true`
+  - `node_selection_after_insert=1`
+  - `reloaded_motion_node_count=3`
+  - `tip_position_ok=true`
+  - `plane_orientation_ok=true`
+  - `transition_update_ok=true`
+  - `support_blend_ok=true`
+  - `two_hand_ok=true`
+  - `notes_ok=true`
+- `combat_animation_station_preview_results.txt`
+  - `ui_selected_motion_node_index=1`
+  - `ui_motion_node_count=3`
+  - `preview_draft_point_count=3`
+  - `point_marker_count=6`
+  - `control_handle_marker_count=12`
+  - `selected_point_index=1`
+
+Honest boundary:
+- the live authoring branch is motion-node based now
+- verifier/meta wording still mixes `node` and `point`
+- direct draggable 3D gizmo editing is still pending
+
+2026-04-13 - Added and confirmed the canonical runtime combat skill-slot and HUD assignment layer
+
+What changed:
+- `runtime/system/user_settings_runtime.gd` now defines the canonical combat input ids:
+  - `skill_block`
+  - `skill_evade`
+  - `skill_slot_1` through `skill_slot_12`
+- `core/models/player_skill_slot_state.gd` now persists slot assignments for the main skill-slot family plus the dedicated block/evade slots
+- `core/models/skill_slot_assignment.gd` now records:
+  - `slot_id`
+  - `source_weapon_wip_id`
+  - `source_skill_draft_id`
+  - `display_name`
+- `runtime/ui/player_gameplay_hud_overlay.gd` now renders a 12-slot skill bar plus dedicated `Q` block and `E` evade panels and reads from `PlayerSkillSlotState`
+- `core/models/player_hud_layout_state.gd` now persists per-element HUD positions/scales for later runtime layout editing
+
+Focused implementation truth now on record:
+- canonical slot ids now exist in code:
+  - `skill_slot_1` through `skill_slot_12`
+  - `skill_block`
+  - `skill_evade`
+- the live HUD overlay now maps the 12 main slots directly to those canonical ids
+- `PlayerSkillSlotState.SKILL_SLOT_IDS` now matches the canonical `skill_slot_1` -> `skill_slot_12` family
+
+Honest boundary:
+- this recovery pass confirmed the runtime input/state/HUD surfaces in code
+- no dedicated HUD verifier was rerun in this pass
+- `PlayerGameplayHudOverlay` still has placeholder block/evade refresh methods:
+  - `_refresh_block_slot_visual()`
+  - `_refresh_evade_slot_visual()`
+
+2026-04-13 - Recovery re-baseline corrected stale two-hand support-hand claims
+
+What changed:
+- reran the current player/weapon guidance and locomotion verifiers against live code
+- confirmed the dedicated `2 Hand Idle` clip still exists and current locomotion resolution still selects it when the two-hand idle request path is active
+- confirmed the two-hand guidance spine still exposes:
+  - `SupportGripAnchor`
+  - `BodyRestrictionRoot`
+  - `GripSolveRoot`
+  - dominant/support desired/corrected debug markers
+- invalidated the older memory reading that support-side seating was stable in the current verifier sample
+
+Focused verification now on record:
+- `player_locomotion_animation_results.txt`
+  - `has_two_hand_idle=true`
+  - `idle_state_animation=2 Hand Idle`
+- `player_weapon_guidance_results.txt`
+  - `left_support_target_matches_support_anchor=true`
+  - `left_anchor_distance_to_support=0.1393`
+  - `left_hand_near_support=false`
+  - `two_hand_idle_animation_active=false`
+
+Honest boundary:
+- the current two-hand guidance spine exists
+- the current verifier sample still does not seat the held left hand near the support anchor
+- older lines in this file that described stable support-hand seating should be treated as superseded by this rerun
+
+2026-04-13 - Recovered committed-history audit for the previously unlogged 2026-04-12 / 2026-04-13 branch work
+
+Audit scope:
+- recovered from committed git history in the range:
+  - `be2f294..0db6bf0`
+- this committed range contains the already-landed implementation work that had not been written back into the tracker layer
+
+Committed-history truth recovered:
+
+1. `9f2c0aa` - motion-node migration for the combat animation creator branch
+- the live authored combat-animation unit was migrated from the older point model to a compound motion-node model
+- `core/models/combat_animation_motion_node.gd` was added as live authored truth
+- `core/models/combat_animation_draft.gd` changed its active authored-chain fields to:
+  - `motion_node_chain`
+  - `selected_motion_node_index`
+  - `continuity_motion_node_index`
+  - `skill_name`
+  - `skill_description`
+- `core/models/baked_profile.gd` gained weapon-length and extremity metadata:
+  - `weapon_total_length_meters`
+  - `weapon_tip_point`
+  - `weapon_pommel_point`
+  - `weapon_tip_distance_meters`
+  - `weapon_pommel_distance_meters`
+- `core/resolvers/profile_primary_grip_resolver.gd` now derives those weapon-length/extremity facts from the resolved grip axis
+- `runtime/combat/combat_animation_station_preview_presenter.gd` now renders dual tip/pommel trajectory truth with richer handle visuals
+- `runtime/player/hand_target_constraint_solver.gd` also moved forward in the same commit with more arm-shape restriction handling
+
+2. `455096d` - gameplay HUD and canonical skill-slot runtime branch
+- the canonical combat slot family was implemented in runtime code:
+  - `skill_block`
+  - `skill_evade`
+  - `skill_slot_1` through `skill_slot_12`
+- new persistent runtime state containers were added:
+  - `core/models/player_skill_slot_state.gd`
+  - `core/models/skill_slot_assignment.gd`
+  - `core/models/player_hud_layout_state.gd`
+- new live HUD surface was added:
+  - `runtime/ui/player_gameplay_hud_overlay.gd`
+  - `scenes/ui/player_gameplay_hud_overlay.tscn`
+- `runtime/player/player_controller.gd` now configures the HUD and routes canonical skill-slot input activation through `_activate_skill_slot(...)`
+- `runtime/system/user_settings_runtime.gd` now maps:
+  - `Q` -> `skill_block`
+  - `E` -> `skill_evade`
+  - `1 2 3 4 5 6 7 8 9 0 - =` -> `skill_slot_1` through `skill_slot_12`
+- `scenes/player/player_character.tscn` now instantiates the gameplay HUD overlay
+
+3. `b5ca542` and `c750dcb` - HUD presentation fixes
+- the gameplay HUD branch immediately received two committed fixes:
+  - skill bar anchoring/centering fix so the bar no longer collapses from zero-size layout timing
+  - menu-mode visibility fix so the HUD hides when UI surfaces are open
+- the second fix lives in `runtime/player/player_controller.gd` through `set_ui_mode_enabled(...)`
+
+4. `959085f`, `bdc9c46`, and `0db6bf0` - large Skill Crafter UI overhaul plus responsive/layout fixes
+- the Skill Crafter station UI moved far beyond the earlier basic workflow shell
+- `runtime/combat/combat_animation_station_ui.gd` was heavily expanded into a forged dark-theme authoring surface
+- the new live UI characteristics now include:
+  - dark forge-themed palette
+  - three-column layout
+  - promoted central preview surface
+  - expanded motion-node inspector coverage
+  - pommel controls
+  - plane vertical offset
+  - weapon roll control
+  - axial reposition control
+  - grip-seat slide control
+  - skill name / description editing
+- subsequent committed fixes then added:
+  - screen-safe margins
+  - more responsive column scaling
+  - tighter minimum sizes for smaller displays
+  - scrollable center-column behavior to prevent vertical overflow
+
+Recovered implementation conclusion:
+- the committed branch history after `be2f294` materially advanced three major live surfaces that were not fully reflected in the tracker layer:
+  - combat animation creator data model migration
+  - gameplay HUD / skill-slot runtime branch
+  - Skill Crafter visual/editor surface overhaul
+
+Recovery note:
+- the tracker layer should now treat those committed changes as part of current implementation truth
+- if any older section in this file still reads like the Skill Crafter is only a first minimal shell, that older wording should be read through the later dated recovery entries above
+
+2026-04-13 - Cross-reference audit against `be2f294` to avoid duplicate recovery work
+
+Cross-reference target:
+- `be2f294` = `Full workspace push - all current work (exclude .exe via .gitignore)`
+- committed delta:
+  - `757 files changed`
+  - `93188 insertions(+)`
+  - `2776 deletions(-)`
+
+Already represented in this implementation-memory file:
+- the large Stage 2 editable-mesh / shell-apply / unified-selection work
+- grip-safe remapping and current two-hand guidance spine
+- handle-validity and grip-law migration
+- combat animation creator foundation / workflow / preview / world-entry path
+- `2 Hand Idle` scene-backed animation lane
+- later motion-node migration and the post-2026-04-12 Skill Crafter / gameplay-HUD follow-up work
+
+Do not waste recovery effort relogging these as if they are absent:
+- Stage 2 editable-mesh state and shell-apply ownership
+- combat animation station foundation/workflow/preview/world-entry
+- runtime two-hand guidance backbone
+- major handle/grip behavior passes that already received dated entries later in this file
+
+Still under-logged or only partially logged from `be2f294`:
+- the addition of the shared grip-slice authority helper:
+  - `core/defs/primary_grip_slice_profile_library.gd`
+- the repo-level arrival of supporting canonical / shell state classes:
+  - `core/models/crafted_item_canonical_surface_triangle.gd`
+  - `core/models/stage2_shell_mesh_state.gd`
+- the specific preset-cleanup/default-sandbox surface in that big push:
+  - sample preset removals
+  - `forge_authoring_sandbox_default.tres` empty/default preset state
+- the addition of major authored reference docs/specs in the same push:
+  - `Runtime Melee Combat Editor Visual-System.md`
+  - `Runtime Combat Editor Visual and System Addendum.md`
+  - `Runtime Weapon-Owned Melee Skill Crafter 1.md`
+  - `Runtime Weapon-Owned Melee Skill Crafter-2.md`
+  - `STAGE 2 - UNIFIED VISUAL SHELL IMPLEMENTATION SPEC 2026-04-09.md`
+- the breadth of new verifier harness surfaces added in that push as project infrastructure, even when the feature behavior itself is already logged
+
+Not worth implementation-memory relogging as core state:
+- `.uid` files
+- `godot_runs/*` raw logs
+- `test_artifacts/*`
+- result txt snapshots by themselves
+- tool/editor cache churn
+- deleted executable / packaging noise
+
+Working recovery rule from this point:
+- use `be2f294` as a source commit
+- only add the still-missing subsystem truths above
+- do not duplicate later dated entries that already supersede that large push
+
+2026-04-14 - Advanced the Skill Crafter / Combat Animation Station through Milestones M0-cleanup, M1/M3, M5, M7, M8
+
+What changed:
+- M0 cleanup: deleted `core/models/combat_animation_point.gd` (legacy point-era Resource, fully replaced by CombatAnimationMotionNode, no remaining references in any .gd or .tscn)
+- M0 cleanup: migrated `test_artifacts/verify_combat_animation_station_wip_library.tres` from CombatAnimationPoint/point_chain to CombatAnimationMotionNode/motion_node_chain
+- M0 cleanup: updated `tools/verify_combat_animation_station_foundation.gd` from `get_point_count` calls to `(draft.get("motion_node_chain") as Array).size()` checks
+- M1/M3 focus cycling: added `current_focus: StringName` state to station UI with `FOCUS_TIP`/`FOCUS_POMMEL` constants
+  - Space key toggles tip↔pommel focus
+  - section header labels show `[ACTIVE]` indicator with color change on the focused side
+  - `_refresh_focus_indicators()` runs from `_refresh_editor_fields()`
+  - `current_focus` passed through to preview presenter
+- M5 onion skin: added `_refresh_onion_skin()` to preview presenter
+  - ±1 neighbor positions: tip + pommel sphere markers at 35% alpha
+  - ±2 neighbor positions: tip + pommel sphere markers at 15% alpha
+  - uses `StandardMaterial3D.TRANSPARENCY_ALPHA` with per-marker albedo_color.a
+  - onion markers parent under dedicated `ONION_SKIN_MESH_NAME` root node
+- M7 chain playback: created `runtime/combat/combat_animation_chain_player.gd` (RefCounted, ~168 lines)
+  - `prepare(chain, tip_curve, pommel_curve, speed_scale, loop)` → precomputes segment offsets via `Curve3D.get_closest_offset()`
+  - `start()` / `stop()` / `advance(delta)` / `is_playing()` lifecycle
+  - per-frame interpolation: `Curve3D.sample_baked()` for tip/pommel positions, `lerpf()` for weapon_roll, axial_reposition, grip_seat_slide, body_support_blend
+  - signals: `playback_finished`, `node_reached(index: int)`
+  - wired into station UI: F key triggers `_toggle_preview_playback()`, `_process(delta)` advances the player each frame, `close_ui()` calls `chain_player.stop()`
+- M8 speed-state coloring: replaced static yellow trajectory with per-vertex speed-derived coloring
+  - `_render_speed_colored_curve_mesh()` renders BOTH tip and pommel curves in one pass
+  - speed = segment arc length / transition_duration_seconds, normalized 0→1 across chain
+  - color lerp: green (slow) → red (fast) per vertex
+  - tip curve at full alpha, pommel curve at 0.7 alpha
+  - old `_render_curve_mesh()` deleted
+
+Files modified:
+- `runtime/combat/combat_animation_station_ui.gd` (1281 lines) — focus cycling, chain playback integration, _process
+- `runtime/combat/combat_animation_station_preview_presenter.gd` (522 lines) — onion skin, speed coloring, focus-aware markers
+- `tools/verify_combat_animation_station_foundation.gd` (102 lines) — motion_node_chain size checks
+- `test_artifacts/verify_combat_animation_station_wip_library.tres` (63 lines) — migrated sub-resources
+
+Files created:
+- `runtime/combat/combat_animation_chain_player.gd` (168 lines) — reusable chain playback driver
+
+Files deleted:
+- `core/models/combat_animation_point.gd` — legacy, fully replaced
+
+Focused verification now on record:
+- `combat_animation_station_foundation_results.txt`
+  - `combat_animation_station_exists=true`
+  - `combat_animation_station_schema_id=combat_animation_creator_v1`
+  - `idle_draft_count=2`
+  - `skill_draft_count=2`
+  - `default_skill_package_initialized=true`
+  - `combat_idle_motion_node_count=1`
+  - `noncombat_idle_motion_node_count=1`
+  - `saved_clone_exists=true`
+  - `saved_station_exists=true`
+  - `saved_skill_draft_count=2`
+  - `material_effect_stub_base_count=1`
+  - `material_effect_stub_variant_count=1`
+  - `material_effect_stub_runtime_count=1`
+  - `material_effect_stub_runtime_threshold=0.65`
+- all three modified .gd files pass lint with zero errors
+
+Honest boundary:
+- M0 (cleanup), M1/M3 (focus cycling), M5 (onion skin), M7 (chain playback), M8 (speed coloring) are implemented and verified
+- M4 (session state separation), M6 (3D plane + sphere drag editing), M9 (validation + Stage 1 integration) remain for future implementation passes
+- M2 (preview presenter refactor) was mostly done prior; this pass completed the remaining preview gaps (onion skin, speed coloring, focus-aware rendering)
+- chain playback mass-effect weighting from BakedProfile is placeholder (uniform timing), intended for M9 integration
+
+2026-04-13 - Completed Milestones M4 (Session State Separation), M6 (Plane + Sphere Drag Editing), M9 (Validation + Stage 1 Integration) for the Combat Animation Station
+
+What changed:
+
+M4 — Session State Separation:
+- created `core/models/combat_animation_session_state.gd` (RefCounted, ~32 lines)
+  - constants: `FOCUS_TIP`, `FOCUS_POMMEL`
+  - fields: `current_weapon_wip_id`, `current_draft_ref`, `current_motion_node_index`, `current_focus`, `active_plane_visualization_enabled`, `playback_active`, `onion_skin_enabled`
+  - methods: `cycle_focus()`, `is_tip_focused()`, `reset()`
+- wired into `combat_animation_station_ui.gd` — replaced scattered local focus state with `session_state` references
+
+M6 — Plane + Sphere Drag Editing:
+- created `runtime/combat/combat_animation_motion_node_editor.gd` (RefCounted, ~110 lines)
+  - methods: `raycast_tip_on_plane()`, `raycast_pommel_on_sphere()`, `constrain_pommel_to_sphere()`, `begin_drag()`, `end_drag()`, `is_dragging()`, `get_drag_target()`, `build_trajectory_plane()`
+- wired into `combat_animation_station_ui.gd` — gui_input connection, `_on_preview_gui_input()`, `_handle_preview_drag()`, helper methods
+- added plane/sphere visualization to `combat_animation_station_preview_presenter.gd`:
+  - ImmediateMesh quad for trajectory plane: `Color(0.45, 0.65, 0.85, 0.25)`
+  - wireframe sphere for pommel constraint: `Color(0.8, 0.55, 0.9, 0.2)`
+  - `_refresh_plane_and_sphere_visuals()` renders plane quad at node's orientation + vertical offset, sphere at tip position with `weapon_total_length_meters` radius
+
+M9 — Validation + Stage 1 Integration:
+- created `core/resolvers/combat_animation_draft_validator.gd` (RefCounted, ~120 lines)
+  - methods: `validate_draft()`, `has_errors()`, `get_error_count()`
+  - validates: minimum node count (`MIN_SKILL_NODES=2`, `MIN_IDLE_NODES=1`), protected first node, degenerate zero-handle chains (`DEGENERATE_HANDLE_THRESHOLD=0.0001`), node index consistency, transition durations
+- wired into `combat_animation_station_ui.gd` — `draft_validator` instance, validation results shown in summary panel (error/warning count or "OK")
+- BakedProfile grip axis wired: new `_apply_grip_axis_default_orientation()` method sets default trajectory plane orientation from `primary_grip_slide_axis` on new motion nodes
+- BakedProfile `weapon_total_length_meters` wired into sphere visualization and pommel raycast
+
+Files created:
+- `core/models/combat_animation_session_state.gd` (~32 lines) — M4
+- `runtime/combat/combat_animation_motion_node_editor.gd` (~110 lines) — M6
+- `core/resolvers/combat_animation_draft_validator.gd` (~120 lines) — M9
+
+Files modified:
+- `runtime/combat/combat_animation_station_ui.gd` — M4, M6, M9 wiring
+- `runtime/combat/combat_animation_station_preview_presenter.gd` — M6 plane/sphere visualization
+
+Focused verification now on record:
+- `combat_animation_station_foundation_results.txt` — pass
+- `combat_animation_station_preview_results.txt` — pass
+- `combat_animation_station_workflow_results.txt` — pass
+- zero lint errors across all touched files
+
+Honest boundary:
+- all 10 milestones (M0 through M9) of the combat animation station continuation plan are now complete
+- the three verifier surfaces (foundation, preview, workflow) all pass
+- axial reposition and grip-seat slide UI controls exist but full runtime articulation behavior consuming those values is still a later slice
+- chain playback mass-effect weighting from BakedProfile is still placeholder (uniform timing)
+- hit economy / segment rules (§3.11) and reusable presentation-context playback are still future work beyond the M0-M9 scope
+
+2026-04-13 - Skill Crafter UI layout rearrangement
+
+What changed:
+- Center column: removed ScrollContainer wrapper, replaced with direct VBoxContainer using stretch ratios — preview viewport gets 3/4 height (stretch_ratio=3.0), motion node chain panel gets 1/4 height (stretch_ratio=1.0)
+- Draft Settings section (draft name, skill name, skill slot, preview speed, loop, description, notes) moved from center column into the right inspector panel, placed after the Timing & Behavior section
+- SubViewportContainer now uses SIZE_EXPAND_FILL vertically instead of a fixed custom_minimum_size, filling the available 3/4 panel
+- Motion node chain ItemList now uses SIZE_EXPAND_FILL vertically to fill its 1/4 panel
+
+Files modified:
+- `runtime/combat/combat_animation_station_ui.gd` — `_build_center_column()` rewritten, `_build_right_inspector()` extended with draft settings section after grip mode
+
+Verification:
+- zero lint errors
+
+2026-04-24 - Started Skill Crafter collision-law cleanup for two-hand/contact authority
+
+What changed:
+- `runtime/player/two_hand_pose_solver.gd` no longer carries its own private body-point containment rule for weapon proxy samples.
+- Weapon-body proxy checks in `TwoHandPoseSolver` now route through the shared `HandTargetConstraintSolver.point_inside_body_restriction(...)` method.
+- This removes a real split-brain case where `HandTargetConstraintSolver` understood both box and capsule body restriction shapes, while `TwoHandPoseSolver` only treated box shapes as body restriction truth.
+
+Focused verification now on record:
+- `verify_combat_animation_station_preview.gd` passed.
+- `verify_player_upper_body_authoring_pose.gd` passed.
+- `verify_player_runtime_skill_playback.gd` passed.
+- Godot still prints the unrelated Windows root certificate store warning during headless runs.
+
+Current honest boundary:
+- This is cleanup/order work, not the full two-way Contact Coupling Planner yet.
+- The preview verifier still reports support-hand mismatch:
+  - `support_grip_alignment_error_meters=0.1891`
+  - `support_radial_mismatch_meters=0.1891`
+- The next intended policing pass is to continue collapsing duplicate legality/coupling decisions into one contact-authority path before deeper authoring behavior changes.
+
+2026-04-24 - Added first shared two-hand contact accommodation in Skill Crafter preview
+
+What changed:
+- `runtime/combat/combat_animation_station_preview_presenter.gd` now applies a shared two-hand contact translation after support-side rotation in `_apply_preview_support_coupling(...)`.
+- The support hand no longer receives the entire rigid-body contact mismatch while the dominant hand remains infinitely locked.
+- In normal preview solve, dominant and support grip contact weights are equal.
+- In drag solve, the dominant side still has a stronger stabilizing weight so authoring movement remains controllable.
+- Candidate shared translations are rejected if they introduce a new weapon/body proxy intersection relative to the previous transform.
+
+Focused verification now on record:
+- `verify_combat_animation_station_preview.gd` passed.
+- `verify_player_upper_body_authoring_pose.gd` passed.
+- `verify_player_runtime_skill_playback.gd` passed.
+
+Observed preview metric change:
+- Before this pass:
+  - `dominant_grip_alignment_error_meters=0.0`
+  - `support_grip_alignment_error_meters=0.1891`
+- After this pass:
+  - `dominant_grip_alignment_error_meters=0.0947`
+  - `support_grip_alignment_error_meters=0.0947`
+
+Current honest boundary:
+- This is not the final perfect two-hand seating system.
+- It is the first correct directional move from one-way support-hand punishment toward two-way contact coupling.
+- The remaining non-zero shared error means the body/arm/contact solve still needs the next authority pass so both hands can actually move to the shared weapon rather than merely distributing rigid mismatch.
+
+2026-04-24 - Demoted legacy body/trajectory plane from occupied weapon authority
+
+What changed:
+- `core/models/combat_animation_session_state.gd` now starts and cycles Skill Crafter focus through `Tip -> Pommel -> Weapon`, leaving the old trajectory/body plane out of the active authoring cycle.
+- `runtime/combat/combat_animation_station_preview_presenter.gd` no longer uses `_resolve_tip_target_world_on_plane(...)` as the fallback occupied-weapon solve path when tip/pommel data collapses.
+- The degenerate occupied-weapon fallback now uses the hand-mounted weapon/contact frame, then applies legality and support coupling from that frame.
+- `runtime/combat/combat_animation_motion_node_editor.gd` now drags the tip on a camera-facing view plane through the current tip instead of raycasting tip edits onto the old body/trajectory plane.
+- `runtime/combat/combat_animation_chain_player.gd` no longer falls back to trajectory-plane orientation for unauthored weapon orientation during playback interpolation.
+- `runtime/combat/combat_animation_motion_node_editor.gd` no longer lets the hidden plane gizmo steal pointer input unless the legacy plane focus is explicitly active.
+- `runtime/combat/combat_animation_station_ui.gd` updated the viewport shortcut legend away from plane-first authoring language.
+- `tools/verify_combat_animation_station_preview.gd` now expects the new `Tip -> Pommel -> Weapon` focus cycle and records `legacy_plane_pick_disabled_ok=true`.
+
+Focused verification now on record:
+- `verify_combat_animation_station_preview.gd` passed.
+- `verify_player_upper_body_authoring_pose.gd` passed.
+- `verify_player_runtime_skill_playback.gd` passed.
+- Godot still prints the unrelated Windows root certificate store warning during headless runs.
+
+Current honest boundary:
+- Legacy trajectory-plane fields still exist on `CombatAnimationMotionNode` for save compatibility and later migration, but they are no longer the occupied weapon fallback authority.
+- Full replacement with the future Contact Group / two-way weapon-hand coupling planner is still pending.
+
+2026-04-25 - Removed legacy Skill Crafter trajectory/body-plane authority from active code
+
+What changed:
+- `core/models/combat_animation_motion_node.gd` no longer exports `trajectory_plane_orientation_degrees` or `trajectory_plane_vertical_offset`; motion nodes now carry tip, pommel, weapon orientation, weapon roll, grip slide, timing, and stance data only.
+- `core/models/combat_animation_session_state.gd` now has only `Tip -> Pommel -> Weapon` focus states. The old plane focus and active plane visualization flag are gone.
+- `runtime/combat/combat_animation_motion_node_editor.gd` was reduced to direct tip drag, pommel sphere drag, and weapon-orientation drag. Old plane drag targets, plane ray math, and plane gizmo picking were removed.
+- `runtime/combat/combat_animation_station_ui.gd` no longer builds or edits a trajectory-plane inspector section, no longer persists plane state, and no longer copies plane state during live drag finalization.
+- `runtime/combat/combat_animation_station_preview_presenter.gd` no longer creates trajectory-plane visualization meshes or derives seed data from a helper plane.
+- Added `runtime/combat/combat_animation_weapon_frame_solver.gd` as the first clean rebuild core for weapon transform solving from authored tip/pommel endpoints plus weapon orientation/roll.
+- `core/resolvers/combat_animation_weapon_geometry_resolver.gd` now seeds `weapon_orientation_degrees` directly from weapon/grip geometry without producing trajectory-plane fields.
+
+Focused verification now on record:
+- `verify_combat_animation_chain_player.gd` passed.
+- `verify_combat_animation_station_preview.gd` passed.
+- `verify_combat_animation_station_workflow.gd` passed.
+- `verify_combat_animation_station_baseline_reset.gd` passed.
+- `verify_player_upper_body_authoring_pose.gd` passed.
+- `verify_player_runtime_skill_playback.gd` passed.
+- Godot still prints the unrelated Windows root certificate store warning during headless runs.
+
+Current honest boundary:
+- This pass removes the legacy body/trajectory-plane authority and gives the Skill Crafter one active weapon-frame channel.
+- It does not finish the future Contact Group / bidirectional hand-to-weapon coupling planner yet.
+- Preview still reports the known shared hand-seat mismatch (`dominant_grip_alignment_error_meters=0.0947`, `support_grip_alignment_error_meters=0.0947`), so the next solve should focus on the new coupling/IK chain rather than resurrecting any old plane logic.
+
+2026-04-25 - Skill Crafter free-authoring snap-back removal
+
+What changed:
+- `runtime/combat/combat_animation_station_ui.gd` no longer routes live tip/pommel edits through the old character-stop segment resolver.
+- Tip edits now translate the whole authored weapon segment directly.
+- Pommel edits still respect the fixed weapon-length sphere around the tip, but they no longer get binary-searched back toward the body/hand contact solver during authoring.
+- `_synchronize_motion_node_derived_segment(...)` no longer silently rewrites authored endpoints from grip/contact legality; it only normalizes the node. This keeps direct authoring data as the source of truth.
+- `runtime/combat/combat_animation_station_preview_presenter.gd` now treats normal editor authoring as free endpoint authority: the authored tip/pommel segment owns the preview weapon transform, while strict grip/contact lock remains outside that direct-edit path.
+- `tools/verify_combat_animation_station_preview.gd` now records explicit free-authoring checks:
+  - `authoring_tip_update_ok=true`
+  - `authoring_tip_retained_ok=true`
+  - `authoring_pommel_update_ok=true`
+  - `authoring_pommel_retained_ok=true`
+  - `authoring_segment_length_ok=true`
+
+Focused verification now on record:
+- `verify_combat_animation_station_preview.gd` passed.
+- `verify_combat_animation_station_workflow.gd` passed.
+- `verify_combat_animation_station_baseline_reset.gd` passed.
+- `verify_combat_animation_chain_player.gd` passed.
+- `verify_player_upper_body_authoring_pose.gd` passed.
+- `verify_player_runtime_skill_playback.gd` passed.
+- `verify_player_runtime_skill_activation.gd` wrote a valid result file but the headless process still exits with existing Godot/Jolt leak cleanup noise.
+
+Current honest boundary:
+- This is a testability pass for direct Skill Crafter authoring, not the final Contact Group solve.
+- The editor should no longer rubber-band authored tip/pommel movement back to the default hand-seat position.
+- Grip seating/contact coupling is intentionally still the next rebuild layer; free endpoint authoring may show hand/weapon separation until that layer is rebuilt cleanly.
+
+2026-04-26 - Swapped Skill Crafter endpoint movement authority to pommel-led translation
+
+What changed:
+- Skill Crafter direct endpoint editing now treats the pommel as the free-moving whole-weapon translation handle.
+- Moving the pommel translates both pommel and tip by the same delta, preserving the authored weapon segment and avoiding the earlier tip-led whole-weapon movement model.
+- Moving the tip now orbits around the pommel on a fixed-radius sphere equal to `weapon_total_length_meters`.
+- `runtime/combat/combat_animation_motion_node_editor.gd` now exposes the active helper names that match this authority:
+  - `raycast_pommel_on_view_drag_plane(...)`
+  - `raycast_tip_on_sphere(...)`
+  - `constrain_tip_to_sphere(...)`
+- `runtime/combat/combat_animation_station_ui.gd` mirrors the same behavior for both viewport drag and inspector edits, so there is no split between mouse editing and typed/spinbox values.
+
+Focused verification now on record:
+- `verify_combat_animation_station_preview.gd` passed and now records:
+  - `authoring_tip_retained_ok=true`
+  - `authoring_tip_kept_pommel_ok=true`
+  - `authoring_pommel_retained_ok=true`
+  - `authoring_pommel_translated_tip_ok=true`
+  - `authoring_segment_length_ok=true`
+- `verify_combat_animation_station_workflow.gd` passed.
+- `verify_combat_animation_station_baseline_reset.gd` passed.
+- `verify_combat_animation_chain_player.gd` passed.
+- `verify_player_upper_body_authoring_pose.gd` passed.
+- `verify_player_runtime_skill_playback.gd` passed.
+
+Current honest boundary:
+- This is intended as the cleaner foundation for the next grip/contact coupling rebuild.
+- Body/IK/contact legality is still not the final solved layer, but the authored weapon controls now match the intended future direction: pommel moves the weapon, tip defines swing/orbit direction around that pommel-led body relationship.
+
+2026-04-26 - First bidirectional Skill Crafter grip/contact coupling slice
+
+What changed:
+- `runtime/combat/combat_animation_station_preview_presenter.gd` now activates dominant-hand arm guidance in the Skill Crafter preview instead of leaving only the support hand to chase the weapon.
+- Normal editor preview now has a post-authoring contact-coupling solve:
+  - body/hand targets move toward weapon grip anchors through the existing upper-body authoring + arm-guidance path
+  - the preview weapon can translate and rotate back toward those body/hand targets through a shared contact solve
+  - the correction is visual/preview-level and does not rewrite the saved motion node tip/pommel positions
+- The contact solve records debug metrics in `contact_coupling_metrics`, including before/after dominant and support grip error.
+- `tools/verify_combat_animation_station_preview.gd` now records contact-coupling improvement metrics.
+
+Observed verifier metrics from this slice:
+- dominant contact error improved from `0.6427m` to `0.4178m`
+- support contact error improved from `0.7158m` to `0.4922m`
+- contact-coupling translation was `0.239m`
+- `contact_coupling_improved_or_held_ok=true`
+
+Focused verification now on record:
+- `verify_combat_animation_station_preview.gd` passed.
+- `verify_combat_animation_station_workflow.gd` passed.
+- `verify_combat_animation_station_baseline_reset.gd` passed.
+- `verify_combat_animation_chain_player.gd` passed.
+- `verify_player_upper_body_authoring_pose.gd` passed.
+- `verify_player_runtime_skill_playback.gd` passed.
+
+Current honest boundary:
+- This is not the final mesh-perfect Contact Group / collision-aware hand path planner.
+- It is the first stable two-way coupling layer: body reaches toward weapon, and weapon is allowed to come back toward body targets.
+- `weapon_endpoint_alignment_ok=false` is now expected in preview when contact coupling visibly corrects the weapon away from the raw authored endpoint segment. The saved authored endpoints still remain the motion-node truth.
+
+2026-04-26 - Skill Crafter resolved endpoint display alignment
+
+What changed:
+- `runtime/combat/combat_animation_station_preview_presenter.gd` now builds a display-only selected motion-node chain from the resolved preview state after grip/contact coupling.
+- Tip/pommel markers, the selected control handles, and weapon orientation gizmos now read the same resolved endpoint frame as the visible weapon instead of the stale raw authored motion-node frame.
+- The cheap per-frame `sync_preview_pose(...)` path now refreshes the lightweight trajectory/control visuals too, preventing the weapon from moving through contact coupling while the visible endpoint markers stay behind.
+- The old sphere display was corrected to match the current authority model: the tip orbits around the pommel at weapon length, not the old pommel-around-tip rule.
+- `runtime/combat/combat_animation_station_ui.gd` helper copy was updated to describe the current pommel-led translation / tip-orbit behavior.
+
+Focused verification now on record:
+- `verify_combat_animation_station_preview.gd` passed and now records:
+  - `display_tip_matches_resolved_ok=true`
+  - `display_pommel_matches_resolved_ok=true`
+- `verify_combat_animation_station_workflow.gd` passed.
+
+Current honest boundary:
+- This fixes the visible marker/weapon frame mismatch shown in the Skill Crafter screenshot.
+- It does not make contact coupling final. Dominant/support contact errors are still large enough to require the next grip/contact rebuild layer, but the editor should no longer show endpoint controls detached from the visibly coupled weapon.
+
+2026-04-26 - Skill Crafter Contact Group seating guardrail and direct authoring arm reach
+
+What changed:
+- `runtime/player/player_rig_finger_grip_presenter.gd` now makes finger grip IK contact-distance aware.
+- Grip guides now record:
+  - `finger_grip_contact_readiness`
+  - `finger_grip_contact_distance_meters`
+- Finger curl/IK influence now fades out when the Contact Group is not actually seated close enough to the grip shell, preventing fingers from becoming the fake elastic connector while the arm/weapon solve is still far away.
+- `runtime/player/player_humanoid_rig.gd` now switches Skill Crafter preview rigs to manual skeleton modifier processing and advances modifiers explicitly during authoring preview frames.
+- Skill Crafter preview also has an authoring-only direct CCD arm reach pass for upperarm/forearm before finger contact is resolved. This gives the Contact Group a real wrist/hand seat during live editing instead of waiting on deferred IK processing.
+- `runtime/player/player_rig_support_arm_ik_presenter.gd` and `runtime/player/player_rig_finger_grip_presenter.gd` now store IK target paths relative to their modifiers.
+- `runtime/combat/combat_animation_station_preview_presenter.gd` and `tools/verify_combat_animation_station_preview.gd` now expose/debug contact readiness, contact distance, arm guidance state, and hand-to-IK-target distance.
+
+Observed verifier metrics from this slice:
+- Before the direct authoring arm reach pass, preview hand-to-target distances were roughly `0.4757m` right and `0.5743m` left.
+- After the pass, preview hand-to-target distances are roughly `0.0025m` right and `0.0014m` left.
+- Dominant finger contact readiness improved to `1.0`.
+- Support finger contact readiness improved to about `0.65` in the current stress-test pose.
+- Dominant grip alignment improved to about `0.0308m` in the current stress-test pose.
+
+Focused verification now on record:
+- `verify_combat_animation_station_preview.gd` passed.
+- `verify_combat_animation_station_workflow.gd` passed.
+- `verify_player_upper_body_authoring_pose.gd` passed.
+- `verify_player_runtime_skill_playback.gd` passed.
+- `verify_player_finger_grip_ik.gd` passed its result checks, but the headless run still logs pre-existing sandbox/user-save errors when it tries to persist `user://skills/player_skill_slot_state.tres`.
+
+Current honest boundary:
+- This is still not the final mesh-perfect Contact Group/pathing/collision solve.
+- The editor should now stop mangling hands during live weapon movement because fingers only receive grip authority when the hand is actually close enough to the grip shell.
+- The next grip/contact layer still needs to improve support-hand seat quality and final weapon endpoint/contact reconciliation, but the hand-to-weapon preview solve is now materially closer and much more testable.
+
+2026-04-26 - Skill Crafter per-motion-node primary hand selector
+
+What changed:
+- `core/models/combat_animation_motion_node.gd` now stores `primary_hand_slot` with explicit states:
+  - `primary_hand_auto`
+  - `hand_right`
+  - `hand_left`
+- Skill Crafter UI now exposes `Primary Hand` beside `Two-Hand State`.
+- `primary_hand_auto` means the node follows the weapon-open baseline, while explicit right/left overrides that node.
+- Baseline reset keeps primary hand on `Auto`, so the draft remains portable across default/right-click open modes instead of baking a stale right/left choice.
+- `CombatAnimationChainPlayer` now carries `current_primary_hand_slot`, and preview playback state forwards it.
+- `LIVE_EXPORTED_KNOB_REGISTRY.md` now includes `primary_hand_slot` and `current_primary_hand_slot`.
+
+Related seat-control clarification:
+- The existing `grip_seat_slide_offset` is the current primary grip-seat slide control.
+- The existing `axial_reposition_offset` is the weapon axial reposition control along the grip axis.
+- A separate secondary/support grip-seat slide does not exist yet; it belongs with the next Contact Group / support-hand coupling layer so it can be solved against support IK legality instead of becoming a disconnected UI value.
+
+Focused verification now on record:
+- `verify_combat_animation_chain_player.gd` passed and confirms primary-hand state switches from right to left across playback nodes.
+- `verify_combat_animation_station_workflow.gd` passed and confirms the primary-hand selector can be changed, then reset restores baseline `primary_hand_auto`.
+- `verify_combat_animation_station_preview.gd` passed with the known non-final contact/coupling warnings still present.
+
+2026-04-26 - Skill Crafter occupied-hand contact tether slice
+
+What changed:
+- Skill Crafter authored endpoint edits now pass through an occupied-hand Contact Group tether before being accepted into the editable motion node.
+- The tether is reach-bound rather than a blind snap:
+  - normal in-range tip/pommel edits remain free and preserve the current pommel-led/tip-orbit authoring law
+  - impossible out-of-reach edits are clamped back to the character's computed `max_model_arm_reach_combat_meters`
+  - the weapon segment remains rigid, so tip/pommel distance still matches solved weapon length
+- `runtime/combat/combat_animation_station_preview_presenter.gd` now exposes `constrain_authored_segment_to_contact_tether(...)`.
+- `runtime/combat/combat_animation_station_ui.gd` now routes tip and pommel authoring changes through the tether resolver before writing them to the live preview/edit node.
+- Preview debug now exposes `authoring_contact_tether_metrics`, including dominant/support reach before/after, reach limits, translation delta, and whether the edit was clamped.
+
+Focused verification now on record:
+- `verify_combat_animation_station_preview.gd` passed and now includes a forced impossible pommel request:
+  - `authoring_tether_clamped=true`
+  - `authoring_tether_rejected_raw_request_ok=true`
+  - `authoring_tether_segment_length_ok=true`
+  - `authoring_tether_dominant_inside_limit_ok=true`
+  - `authoring_tether_support_inside_limit_ok=true`
+- `verify_combat_animation_station_workflow.gd` passed.
+- `verify_player_upper_body_authoring_pose.gd` passed.
+
+Current honest boundary:
+- This is not mesh-perfect body collision/pathfinding yet.
+- It is the first hard authoring acceptance boundary for occupied-hand contact: the editor no longer accepts a saved endpoint move that drags the coupled weapon beyond arm reach.
+- The next layer still needs richer two-hand re-accommodation, support-seat slide authority, and body/weapon collision-aware pathing.
+
+2026-04-26 - Skill Crafter tip-pivot tether and dominant Contact Group wrist basis
+
+What changed:
+- Skill Crafter occupied-hand contact tether now has two explicit modes:
+  - `translate` for pommel/whole-weapon movement
+  - `tip_pivot` for tip movement when the dominant grip would exceed arm reach
+- In `tip_pivot` mode, the weapon first attempts the requested tip move. If that would overextend the occupied hand, the solver pivots around the dominant Contact Group target instead of rubberbanding the full weapon back as a pure translation.
+- `runtime/combat/combat_animation_station_ui.gd` routes tip edits through `tip_pivot` and pommel edits through `translate`.
+- `runtime/combat/combat_animation_station_preview_presenter.gd` records `mode`, `pivot_mode`, and `pivot_delta_meters` in `authoring_contact_tether_metrics`.
+- Skill Crafter preview now derives an authoring-only dominant hand anchor basis from the current weapon frame and the stored preview hand-mount transform.
+- `runtime/player/player_humanoid_rig.gd` applies that authoring Contact Group wrist basis before finger IK resolves, so the palm/finger package is re-oriented to the moved weapon frame instead of trying to grip from a stale wrist orientation.
+- This dominant wrist-basis pass is preview-only and intentionally does not fake support-hand wrist orientation yet; support needs its own slot-specific contact-frame law.
+
+Focused verification now on record:
+- `verify_combat_animation_station_preview.gd` passed and confirms:
+  - `authoring_tip_tether_mode=tip_pivot`
+  - `authoring_tip_tether_pivot_mode=dominant_contact`
+  - `authoring_tip_tether_segment_length_ok=true`
+  - dominant `authoring_contact_basis_active=true`
+  - switching the selected motion node to left-hand primary activates the left authoring contact basis and clears the right one
+- `verify_player_upper_body_authoring_pose.gd` passed.
+
+Current honest boundary:
+- The dominant Contact Group is now better aligned during authored weapon movement, but support-hand wrist basis, mesh-perfect body collision/pathing, and final two-hand re-accommodation remain future work.
+
+2026-04-26 - Contact Group raycast debug trail
+
+What changed:
+- Finger/Contact Group grip raycasts now record a lightweight debug trail on each `GripShellCenter`.
+- The debug trail captures ray context, slot, finger, from/to points, collision mask, hit/miss, hit point/normal, hit distance, collider path/name/class, collider layer, and skip reason.
+- Skill Crafter preview debug now exposes:
+  - `dominant_finger_contact_ray_debug`
+  - `support_finger_contact_ray_debug`
+- The Skill Crafter `CURRENT CONTEXT` panel now shows compact contact ray summaries so runtime testing can reveal whether fingers are hitting the grip shell, missing it, or querying the wrong mask.
+- `verify_combat_animation_station_preview.gd` now writes contact ray counts, hit counts, first-hit collider, and last-ray summary into `combat_animation_station_preview_results.txt`.
+
+Focused verification now on record:
+- `verify_combat_animation_station_preview.gd` passed.
+- `verify_combat_animation_station_workflow.gd` passed.
+- Current verifier observation: both dominant and support Contact Groups cast 72 grip-shell rays on mask `16777216`, with `0` hits in that verifier pose.
+
+Current honest boundary:
+- This is instrumentation only. It does not change finger collision behavior yet.
+- The first useful truth from the verifier is that the debug pose is missing the grip shell, not hitting the large weapon bounds proxy.
+
+2026-04-26 - Contact Group grip-shell fallback correction
+
+What changed:
+- Contact Group finger solving now uses the raycast debug finding directly:
+  - if the normal non-thumb plane-curl trajectory misses the grip shell, the solver falls back to casting at actual occupied grip profile cell centers
+  - this avoids aiming at the abstract shell midpoint, which can sit between cells on even-width grip profiles
+  - thumb/non-plane fingers now use the grip-shell contact path whenever the Contact Group is close enough, instead of staying on the animation-baseline target
+- New fallback contexts visible in debug:
+  - `plane_curl_profile_fallback`
+  - `plane_curl_idle_profile_fallback`
+
+Focused verification now on record:
+- `verify_combat_animation_station_preview.gd` passed and reports:
+  - `dominant_contact_ray_hit_count=4`
+  - `support_contact_ray_hit_count=2`
+  - `contact_rays_hit_grip_shell_ok=true`
+- `verify_combat_animation_station_workflow.gd` passed.
+
+Current honest boundary:
+- This makes the finger ray solve reliably hit the actual `GripContactArea` in the verifier pose.
+- It does not finish the larger endpoint seating / mesh-perfect body collision / full support-hand re-accommodation work.
+
+2026-04-26 - Authoring Contact Group wrist no-roll law
+
+What changed:
+- Skill Crafter authoring Contact Group wrist basis now strips self-roll/twist around the forearm-to-hand axis.
+- `runtime/player/player_humanoid_rig.gd` exposes `authoring_contact_wrist_twist_limit_degrees`, defaulting to `0.0`.
+- The hand can still swing/aim toward the weapon contact frame, but it should not corkscrew around its own wrist axis.
+- This matches the Contact Group law: weapon/contact orientation belongs to the weapon/contact package and upstream arm chain, not unlimited wrist roll.
+
+Focused verification now on record:
+- `verify_combat_animation_station_preview.gd` passed.
+- `verify_combat_animation_station_workflow.gd` passed.
+- Contact ray truth remained good after the no-roll change:
+  - `dominant_contact_ray_hit_count=4`
+  - `support_contact_ray_hit_count=4`
+  - `contact_rays_hit_grip_shell_ok=true`
+
+2026-04-26 - Skill Crafter hard occupied-hand contact tether
+
+What changed:
+- Live Skill Crafter dragging now uses full dominant seat lock instead of the previous weakened drag value.
+  - `AUTHORING_DRAG_DOMINANT_SEAT_LOCK_STRENGTH` changed from loose/free authoring behavior to hard contact seating.
+- `constrain_authored_segment_to_contact_tether(...)` now explicitly re-seats the active/dominant grip point to the current hand/contact target before accepting the authored segment.
+- New tether metrics:
+  - `dominant_seat_error_before_meters`
+  - `dominant_seat_error_after_meters`
+  - `dominant_seat_lock_delta_meters`
+- This changes the editor law from “the weapon can wander inside a broad shoulder reach bubble” to “the occupied Contact Group is a hard tether; the authored weapon must remain seated to the hand/contact target.”
+
+Focused verification now on record:
+- `verify_combat_animation_station_preview.gd` passed and the forced impossible pommel test reports:
+  - `authoring_tether_dominant_seat_error_before_meters=0.9019`
+  - `authoring_tether_dominant_seat_error_after_meters=0.0`
+  - `authoring_tether_dominant_seat_locked_ok=true`
+- `verify_combat_animation_station_workflow.gd` passed.
+
+Current honest boundary:
+- This is a stronger editor-authoring acceptance rule. It does not yet solve full support-hand re-accommodation or mesh-perfect body collision.
+- Some older verifier expectations that authored raw requests are retained are no longer conceptually correct under hard tethering; the tether is allowed to reject/move impossible authored positions.

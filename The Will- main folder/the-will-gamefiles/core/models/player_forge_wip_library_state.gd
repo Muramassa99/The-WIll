@@ -5,6 +5,7 @@ const DEFAULT_SAVE_FILE_PATH := "user://forge/player_wip_library_state.tres"
 const PersistentResourceStateIOScript = preload("res://core/models/persistent_resource_state_io.gd")
 
 @export var saved_wips: Array[CraftedItemWIP] = []
+@export var unarmed_authoring_wip: CraftedItemWIP
 @export var selected_wip_id: StringName = &""
 @export var save_file_path: String = DEFAULT_SAVE_FILE_PATH
 
@@ -34,9 +35,25 @@ func get_saved_wip_clone(saved_wip_id: StringName) -> CraftedItemWIP:
 		saved_clone.call("ensure_combat_animation_station_state")
 	return saved_clone
 
+func get_unarmed_authoring_wip() -> CraftedItemWIP:
+	if unarmed_authoring_wip != null:
+		return unarmed_authoring_wip
+	return get_saved_wip(CraftedItemWIP.UNARMED_AUTHORING_WIP_ID)
+
+func get_unarmed_authoring_wip_clone() -> CraftedItemWIP:
+	var source_wip: CraftedItemWIP = get_unarmed_authoring_wip()
+	if source_wip == null:
+		return null
+	var saved_clone: CraftedItemWIP = source_wip.duplicate(true) as CraftedItemWIP
+	if saved_clone != null and saved_clone.has_method("ensure_combat_animation_station_state"):
+		saved_clone.call("ensure_combat_animation_station_state")
+	return saved_clone
+
 func save_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 	if source_wip == null:
 		return null
+	if CraftedItemWIP.is_unarmed_authoring_wip(source_wip):
+		return save_unarmed_authoring_wip(source_wip)
 	var saved_clone: CraftedItemWIP = source_wip.duplicate(true) as CraftedItemWIP
 	var resolved_wip_id: StringName = _resolve_saved_wip_id(saved_clone)
 	saved_clone.wip_id = resolved_wip_id
@@ -56,6 +73,26 @@ func save_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 	else:
 		saved_wips.append(saved_clone)
 	selected_wip_id = resolved_wip_id
+	persist()
+	return saved_clone.duplicate(true) as CraftedItemWIP
+
+func save_unarmed_authoring_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
+	if source_wip == null:
+		return null
+	var saved_clone: CraftedItemWIP = source_wip.duplicate(true) as CraftedItemWIP
+	saved_clone.wip_id = CraftedItemWIP.UNARMED_AUTHORING_WIP_ID
+	saved_clone.forge_project_name = "- Unarmed"
+	saved_clone.forge_intent = CraftedItemWIP.FORGE_INTENT_UNARMED
+	saved_clone.equipment_context = CraftedItemWIP.EQUIPMENT_CONTEXT_UNARMED
+	saved_clone.forge_builder_path_id = CraftedItemWIP.BUILDER_PATH_MELEE
+	saved_clone.forge_builder_component_id = CraftedItemWIP.BUILDER_COMPONENT_PRIMARY
+	saved_clone.grip_style_mode = CraftedItemWIP.GRIP_NORMAL
+	saved_clone.latest_baked_profile_snapshot = null
+	saved_clone.layers.clear()
+	if saved_clone.has_method("ensure_combat_animation_station_state"):
+		saved_clone.call("ensure_combat_animation_station_state")
+	unarmed_authoring_wip = saved_clone
+	selected_wip_id = CraftedItemWIP.UNARMED_AUTHORING_WIP_ID
 	persist()
 	return saved_clone.duplicate(true) as CraftedItemWIP
 

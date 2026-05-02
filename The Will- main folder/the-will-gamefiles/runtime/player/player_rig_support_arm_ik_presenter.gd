@@ -72,9 +72,9 @@ func ensure_two_bone_ik(
 		modifier.set_end_bone(0, end_bone_idx)
 	modifier.set_end_bone_name(0, String(end_bone_name))
 	if target_node != null:
-		modifier.set_target_node(0, target_node.get_path())
+		modifier.set_target_node(0, modifier.get_path_to(target_node))
 	if pole_node != null:
-		modifier.set_pole_node(0, pole_node.get_path())
+		modifier.set_pole_node(0, modifier.get_path_to(pole_node))
 	modifier.active = true
 	modifier.influence = 0.0
 	return modifier
@@ -160,19 +160,19 @@ func refresh_support_arm_ik_influences(
 	support_arm_ik_influence: float,
 	right_arm_ik_modifier: SkeletonModifier3D,
 	left_arm_ik_modifier: SkeletonModifier3D,
-	right_hand_support_active: bool,
-	left_hand_support_active: bool,
+	right_hand_arm_guidance_active: bool,
+	left_hand_arm_guidance_active: bool,
 	right_hand_guidance_target: Node3D,
 	left_hand_guidance_target: Node3D
 ) -> void:
 	set_modifier_runtime_state(
 		right_arm_ik_modifier,
-		slot_requires_support_arm_ik(enable_support_arm_ik, right_hand_support_active, right_hand_guidance_target),
+		slot_requires_arm_guidance(enable_support_arm_ik, right_hand_arm_guidance_active, right_hand_guidance_target),
 		support_arm_ik_influence
 	)
 	set_modifier_runtime_state(
 		left_arm_ik_modifier,
-		slot_requires_support_arm_ik(enable_support_arm_ik, left_hand_support_active, left_hand_guidance_target),
+		slot_requires_arm_guidance(enable_support_arm_ik, left_hand_arm_guidance_active, left_hand_guidance_target),
 		support_arm_ik_influence
 	)
 
@@ -209,10 +209,10 @@ func update_support_arm_ik_target_for_side(
 	move_ik_target_toward(target_node, desired_target, float(config.get("support_arm_ik_target_smoothing_speed", 12.0)), delta)
 	move_ik_target_toward(pole_node, desired_pole, float(config.get("support_arm_ik_target_smoothing_speed", 12.0)), delta)
 
-func slot_requires_support_arm_ik(enable_support_arm_ik: bool, support_hand_active: bool, guidance_target: Node3D) -> bool:
+func slot_requires_arm_guidance(enable_support_arm_ik: bool, arm_guidance_active: bool, guidance_target: Node3D) -> bool:
 	if not enable_support_arm_ik:
 		return false
-	return support_hand_active and guidance_target != null and is_instance_valid(guidance_target)
+	return arm_guidance_active and guidance_target != null and is_instance_valid(guidance_target)
 
 func set_modifier_runtime_state(modifier: SkeletonModifier3D, enabled: bool, influence_value: float) -> void:
 	if modifier == null:

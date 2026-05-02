@@ -61,6 +61,8 @@ var slot_keybind_labels: Array[Label] = []
 var slot_name_labels: Array[Label] = []
 var block_panel: PanelContainer = null
 var evade_panel: PanelContainer = null
+var block_name_label: Label = null
+var evade_name_label: Label = null
 var hp_bar_fill: ColorRect = null
 var stamina_bar_fill: ColorRect = null
 var target_hp_container: Control = null
@@ -89,6 +91,7 @@ func is_hud_visible() -> bool:
 	return hud_root != null and hud_root.visible
 
 func refresh_all_slots() -> void:
+	skill_slot_state = PlayerSkillSlotStateScript.load_or_create() as PlayerSkillSlotState
 	for slot_index: int in range(PlayerSkillSlotStateScript.SKILL_SLOT_IDS.size()):
 		_refresh_skill_slot_visual(slot_index)
 	_refresh_block_slot_visual()
@@ -234,11 +237,15 @@ func _build_block_evade_group() -> void:
 	group.add_child(block_panel)
 	evade_panel = _build_special_slot_panel("EvadeSlot", "E", "Evade", EVADE_SLOT_COLOR)
 	group.add_child(evade_panel)
+	if block_panel != null:
+		block_name_label = block_panel.get_node_or_null("HBox/NameLabel") as Label
+	if evade_panel != null:
+		evade_name_label = evade_panel.get_node_or_null("HBox/NameLabel") as Label
 
 func _build_special_slot_panel(panel_name: String, keybind_text: String, display_text: String, bg_color: Color) -> PanelContainer:
 	var panel: PanelContainer = PanelContainer.new()
 	panel.name = panel_name
-	panel.custom_minimum_size = Vector2(slot_button_width, (slot_button_height - slot_gap_px) / 2)
+	panel.custom_minimum_size = Vector2(slot_button_width, float(slot_button_height - slot_gap_px) / 2.0)
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var stylebox: StyleBoxFlat = StyleBoxFlat.new()
 	stylebox.bg_color = bg_color
@@ -251,16 +258,19 @@ func _build_special_slot_panel(panel_name: String, keybind_text: String, display
 	stylebox.content_margin_bottom = 1.0
 	panel.add_theme_stylebox_override("panel", stylebox)
 	var hbox: HBoxContainer = HBoxContainer.new()
+	hbox.name = "HBox"
 	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hbox.add_theme_constant_override("separation", 3)
 	panel.add_child(hbox)
 	var key_label: Label = Label.new()
+	key_label.name = "KeybindLabel"
 	key_label.text = keybind_text
 	key_label.add_theme_font_size_override("font_size", 10)
 	key_label.add_theme_color_override("font_color", SLOT_KEYBIND_COLOR)
 	key_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hbox.add_child(key_label)
 	var name_label: Label = Label.new()
+	name_label.name = "NameLabel"
 	name_label.text = display_text
 	name_label.add_theme_font_size_override("font_size", 10)
 	name_label.add_theme_color_override("font_color", SLOT_NAME_COLOR)
@@ -316,7 +326,7 @@ func _build_stamina_bar() -> void:
 	stamina_container.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	var total_skill_bar_width: int = (slot_button_width * 12) + (slot_gap_px * 10) + (group_gap_px * 2) + slot_button_width
 	stamina_container.position = Vector2(
-		(total_skill_bar_width / 2) + 14,
+		float(total_skill_bar_width) / 2.0 + 14.0,
 		-(bar_bottom_margin_px + stamina_bar_height)
 	)
 	var stamina_bg: ColorRect = ColorRect.new()
@@ -394,10 +404,24 @@ func _refresh_skill_slot_visual(slot_index: int) -> void:
 			stylebox.bg_color = SLOT_EMPTY_COLOR
 
 func _refresh_block_slot_visual() -> void:
-	pass
+	if block_panel == null:
+		return
+	var stylebox: StyleBoxFlat = block_panel.get_theme_stylebox("panel") as StyleBoxFlat
+	var assigned: bool = skill_slot_state != null and skill_slot_state.is_slot_assigned(PlayerSkillSlotStateScript.BLOCK_SLOT_ID)
+	if block_name_label != null:
+		block_name_label.text = skill_slot_state.get_slot_display_name(PlayerSkillSlotStateScript.BLOCK_SLOT_ID) if assigned else "Block"
+	if stylebox != null:
+		stylebox.bg_color = BLOCK_SLOT_COLOR.lightened(0.08) if assigned else BLOCK_SLOT_COLOR
 
 func _refresh_evade_slot_visual() -> void:
-	pass
+	if evade_panel == null:
+		return
+	var stylebox: StyleBoxFlat = evade_panel.get_theme_stylebox("panel") as StyleBoxFlat
+	var assigned: bool = skill_slot_state != null and skill_slot_state.is_slot_assigned(PlayerSkillSlotStateScript.EVADE_SLOT_ID)
+	if evade_name_label != null:
+		evade_name_label.text = skill_slot_state.get_slot_display_name(PlayerSkillSlotStateScript.EVADE_SLOT_ID) if assigned else "Evade"
+	if stylebox != null:
+		stylebox.bg_color = EVADE_SLOT_COLOR.lightened(0.08) if assigned else EVADE_SLOT_COLOR
 
 func _flash_slot_activation(slot_id: StringName) -> void:
 	var slot_index: int = -1

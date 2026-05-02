@@ -89,6 +89,33 @@ func resolve_max_model_arm_reach_meters(
 	var left_hand_anchor_rest_position: Vector3 = resolve_anchor_rest_global_position(skeleton, left_hand_bone_index, left_hand_anchor_position)
 	return right_hand_anchor_rest_position.distance_to(left_hand_anchor_rest_position)
 
+func resolve_arm_chain_reach_meters(
+	skeleton: Skeleton3D,
+	clavicle_bone_name: StringName,
+	upperarm_bone_name: StringName,
+	forearm_bone_name: StringName,
+	hand_bone_name: StringName,
+	hand_anchor_position: Vector3,
+	bone_index_cache: Dictionary
+) -> float:
+	if skeleton == null:
+		return 0.0
+	var clavicle_index: int = get_bone_index(skeleton, clavicle_bone_name, bone_index_cache)
+	var upperarm_index: int = get_bone_index(skeleton, upperarm_bone_name, bone_index_cache)
+	var forearm_index: int = get_bone_index(skeleton, forearm_bone_name, bone_index_cache)
+	var hand_index: int = get_bone_index(skeleton, hand_bone_name, bone_index_cache)
+	if clavicle_index < 0 or upperarm_index < 0 or forearm_index < 0 or hand_index < 0:
+		return 0.0
+	var clavicle_rest_world: Vector3 = resolve_bone_rest_global_position(skeleton, clavicle_index)
+	var upperarm_rest_world: Vector3 = resolve_bone_rest_global_position(skeleton, upperarm_index)
+	var forearm_rest_world: Vector3 = resolve_bone_rest_global_position(skeleton, forearm_index)
+	var hand_rest_world: Vector3 = resolve_bone_rest_global_position(skeleton, hand_index)
+	var hand_anchor_rest_world: Vector3 = resolve_anchor_rest_global_position(skeleton, hand_index, hand_anchor_position)
+	return clavicle_rest_world.distance_to(upperarm_rest_world) \
+		+ upperarm_rest_world.distance_to(forearm_rest_world) \
+		+ forearm_rest_world.distance_to(hand_rest_world) \
+		+ hand_rest_world.distance_to(hand_anchor_rest_world)
+
 func get_bone_world_position(
 	owner_global_position: Vector3,
 	skeleton: Skeleton3D,
@@ -115,6 +142,11 @@ func resolve_anchor_rest_global_position(skeleton: Skeleton3D, bone_index: int, 
 	var bone_global_rest: Transform3D = get_bone_global_rest_transform(skeleton, bone_index)
 	var anchor_local_rest_position: Vector3 = bone_global_rest * anchor_local_position
 	return skeleton.to_global(anchor_local_rest_position)
+
+func resolve_bone_rest_global_position(skeleton: Skeleton3D, bone_index: int) -> Vector3:
+	if skeleton == null or bone_index < 0:
+		return Vector3.ZERO
+	return skeleton.to_global(get_bone_global_rest_transform(skeleton, bone_index).origin)
 
 func get_bone_global_rest_transform(skeleton: Skeleton3D, bone_index: int) -> Transform3D:
 	if skeleton == null or bone_index < 0:

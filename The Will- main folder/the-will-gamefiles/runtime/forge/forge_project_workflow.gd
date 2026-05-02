@@ -87,11 +87,7 @@ static func build_project_catalog(forge_controller: ForgeGridController, wip_lib
 			saved_wip.forge_builder_path_id,
 			saved_wip.forge_builder_component_id
 		)
-		var stow_summary: String = "Stowed: %s" % CraftedItemWIP.get_stow_position_label(saved_wip.stow_position_mode)
-		var grip_summary: String = "Grip: %s" % CraftedItemWIP.get_grip_style_label(saved_wip.grip_style_mode)
 		saved_description = "%s\n%s" % [saved_description, builder_scope_summary] if not saved_description.is_empty() else builder_scope_summary
-		saved_description = "%s\n%s" % [saved_description, stow_summary] if not saved_description.is_empty() else stow_summary
-		saved_description = "%s\n%s" % [saved_description, grip_summary] if not saved_description.is_empty() else grip_summary
 		project_catalog.append({
 			"entry_type": &"saved",
 			"saved_wip_id": saved_wip.wip_id,
@@ -105,17 +101,17 @@ static func apply_editor_metadata(
 	current_wip: CraftedItemWIP,
 	submitted_name: String,
 	submitted_notes: String,
-	stow_mode: StringName,
-	grip_mode: StringName,
+	_stow_mode: StringName,
+	_grip_mode: StringName,
 	default_project_name: String
 ) -> CraftedItemWIP:
 	if forge_controller == null or current_wip == null:
 		return null
 	current_wip.forge_project_name = submitted_name.strip_edges() if not submitted_name.strip_edges().is_empty() else default_project_name
 	current_wip.forge_project_notes = submitted_notes.strip_edges()
-	current_wip.stow_position_mode = CraftedItemWIP.normalize_stow_position_mode(stow_mode)
+	current_wip.stow_position_mode = CraftedItemWIP.normalize_stow_position_mode(current_wip.stow_position_mode)
 	current_wip.grip_style_mode = CraftedItemWIP.resolve_supported_grip_style(
-		grip_mode,
+		current_wip.grip_style_mode,
 		current_wip.forge_intent,
 		current_wip.equipment_context
 	)

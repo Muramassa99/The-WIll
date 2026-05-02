@@ -98,7 +98,7 @@ func _capture_measurement(held_item: Node3D, player: PlayerController3D) -> Dict
 			"forward": Vector3.ZERO,
 			"up_score": -2.0
 		}
-	var player_forward: Vector3 = -player.visual_root.global_basis.z.normalized()
+	var player_forward: Vector3 = player.visual_root.global_basis.z.normalized()
 	return {
 		"exists": true,
 		"node": held_item,

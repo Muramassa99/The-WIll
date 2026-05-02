@@ -21,6 +21,9 @@ const STOW_SIDE_HIP := &"stow_side_hip"
 const STOW_LOWER_BACK := &"stow_lower_back"
 const GRIP_NORMAL := &"grip_normal"
 const GRIP_REVERSE := &"grip_reverse"
+const UNARMED_AUTHORING_WIP_ID := &"__unarmed_authoring__"
+const FORGE_INTENT_UNARMED := &"intent_unarmed"
+const EQUIPMENT_CONTEXT_UNARMED := &"ctx_unarmed"
 
 @export var wip_id: StringName = &""
 @export var forge_project_name: String = ""
@@ -413,6 +416,16 @@ static func get_default_equipment_context_for_builder_path(builder_path_id: Stri
 		_:
 			return &"ctx_weapon"
 
+static func is_unarmed_authoring_wip(wip: CraftedItemWIP) -> bool:
+	return (
+		wip != null
+		and (
+			wip.wip_id == UNARMED_AUTHORING_WIP_ID
+			or wip.forge_intent == FORGE_INTENT_UNARMED
+			or wip.equipment_context == EQUIPMENT_CONTEXT_UNARMED
+		)
+	)
+
 static func apply_builder_path_defaults(
 	target_wip: CraftedItemWIP,
 	builder_path_id: StringName,
@@ -441,7 +454,8 @@ func ensure_combat_animation_station_state() -> Resource:
 		"ensure_default_baseline_content",
 		forge_builder_path_id,
 		equipment_context,
-		grip_style_mode
+		grip_style_mode,
+		stow_position_mode
 	)
 	return station_state
 

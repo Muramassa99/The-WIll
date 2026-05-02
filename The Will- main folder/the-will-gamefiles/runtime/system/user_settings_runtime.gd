@@ -4,6 +4,13 @@ class_name UserSettingsRuntime
 const UserSettingsStateScript = preload("res://core/models/user_settings_state.gd")
 
 const FONT_SIZE_PROPERTIES := [&"font_size", &"normal_font_size"]
+const LEGACY_ACTION_BINDING_MIGRATIONS := {
+	"skill_crafter_prev_motion_node": "skill_crafter_prev_node",
+	"skill_crafter_next_motion_node": "skill_crafter_next_node",
+	"skill_crafter_new_motion_node": "skill_crafter_copy_node",
+	"skill_crafter_delete_motion_node": "skill_crafter_delete_node",
+	"skill_crafter_cycle_active_subcontrol": "skill_crafter_cycle_focus",
+}
 
 const ACTION_DEFINITIONS: Array[Dictionary] = [
 	{"action": "move_forward", "display_name": "Move Forward", "category": "movement", "binding": {"physical_keycode": KEY_W, "keycode": KEY_W, "ctrl": false, "shift": false, "alt": false, "meta": false}},
@@ -57,7 +64,13 @@ const ACTION_DEFINITIONS: Array[Dictionary] = [
 	{"action": "forge_layer_up", "display_name": "Layer Up", "category": "forge", "binding": {"physical_keycode": KEY_E, "keycode": KEY_E, "ctrl": false, "shift": false, "alt": false, "meta": false}},
 	{"action": "forge_plane_xy", "display_name": "Select XY Plane", "category": "forge", "binding": {"physical_keycode": KEY_1, "keycode": KEY_1, "ctrl": false, "shift": false, "alt": false, "meta": false}},
 	{"action": "forge_plane_zx", "display_name": "Select ZX Plane", "category": "forge", "binding": {"physical_keycode": KEY_2, "keycode": KEY_2, "ctrl": false, "shift": false, "alt": false, "meta": false}},
-	{"action": "forge_plane_zy", "display_name": "Select ZY Plane", "category": "forge", "binding": {"physical_keycode": KEY_3, "keycode": KEY_3, "ctrl": false, "shift": false, "alt": false, "meta": false}}
+	{"action": "forge_plane_zy", "display_name": "Select ZY Plane", "category": "forge", "binding": {"physical_keycode": KEY_3, "keycode": KEY_3, "ctrl": false, "shift": false, "alt": false, "meta": false}},
+	{"action": "skill_crafter_prev_motion_node", "display_name": "Previous Motion Node", "category": "skill_crafter", "binding": {"physical_keycode": KEY_Q, "keycode": KEY_Q, "ctrl": false, "shift": false, "alt": false, "meta": false}},
+	{"action": "skill_crafter_next_motion_node", "display_name": "Next Motion Node", "category": "skill_crafter", "binding": {"physical_keycode": KEY_E, "keycode": KEY_E, "ctrl": false, "shift": false, "alt": false, "meta": false}},
+	{"action": "skill_crafter_new_motion_node", "display_name": "Add Motion Node", "category": "skill_crafter", "binding": {"physical_keycode": KEY_R, "keycode": KEY_R, "ctrl": false, "shift": false, "alt": false, "meta": false}},
+	{"action": "skill_crafter_delete_motion_node", "display_name": "Delete Motion Node", "category": "skill_crafter", "binding": {"physical_keycode": KEY_T, "keycode": KEY_T, "ctrl": false, "shift": false, "alt": false, "meta": false}},
+	{"action": "skill_crafter_cycle_active_subcontrol", "display_name": "Cycle Active Subcontrol", "category": "skill_crafter", "binding": {"physical_keycode": KEY_SPACE, "keycode": KEY_SPACE, "ctrl": false, "shift": false, "alt": false, "meta": false}},
+	{"action": "skill_crafter_play_preview", "display_name": "Preview Motion Chain", "category": "skill_crafter", "binding": {"physical_keycode": KEY_F, "keycode": KEY_F, "ctrl": false, "shift": false, "alt": false, "meta": false}}
 ]
 
 const CATEGORY_DISPLAY_NAMES := {
@@ -65,10 +78,12 @@ const CATEGORY_DISPLAY_NAMES := {
 	"combat": "Combat",
 	"camera": "Camera",
 	"ui_menu": "UI / Menu",
-	"forge": "Forge"
+	"forge": "Forge",
+	"skill_crafter": "Skill Crafter"
 }
 
 static func ensure_input_actions(settings_state: UserSettingsState) -> void:
+	_migrate_legacy_keybindings(settings_state)
 	for definition: Dictionary in ACTION_DEFINITIONS:
 		var action_name: StringName = StringName(String(definition.get("action", "")))
 		if action_name == StringName():
@@ -140,6 +155,14 @@ static func get_keybinding_label(binding_data: Dictionary) -> String:
 	parts.append(OS.get_keycode_string(resolved_keycode))
 	return "+".join(parts)
 
+static func get_action_binding_label(action_name: StringName, settings_state: UserSettingsState = null) -> String:
+	if settings_state != null:
+		return get_keybinding_label(settings_state.get_keybinding_data(action_name, get_default_binding_data(action_name)))
+	var input_map_binding_label: String = _get_input_map_binding_label(action_name)
+	if not input_map_binding_label.is_empty():
+		return input_map_binding_label
+	return get_keybinding_label(get_default_binding_data(action_name))
+
 static func _ensure_key_action(action_name: StringName, key_event: InputEventKey) -> void:
 	if not InputMap.has_action(action_name):
 		InputMap.add_action(action_name)
@@ -153,6 +176,37 @@ static func _clear_key_events(action_name: StringName) -> void:
 	for event: InputEvent in events:
 		if event is InputEventKey:
 			InputMap.action_erase_event(action_name, event)
+
+static func _migrate_legacy_keybindings(settings_state: UserSettingsState) -> void:
+	if settings_state == null:
+		return
+	for action_name_text: String in LEGACY_ACTION_BINDING_MIGRATIONS.keys():
+		var action_name: StringName = StringName(action_name_text)
+		var legacy_action_name: StringName = StringName(String(LEGACY_ACTION_BINDING_MIGRATIONS[action_name_text]))
+		var current_binding: Dictionary = settings_state.get_keybinding_data(action_name)
+		if not current_binding.is_empty():
+			continue
+		var legacy_binding: Dictionary = settings_state.get_keybinding_data(legacy_action_name)
+		if legacy_binding.is_empty():
+			continue
+		settings_state.set_keybinding_data(action_name, legacy_binding)
+		settings_state.keybindings.erase(String(legacy_action_name))
+
+static func _get_input_map_binding_label(action_name: StringName) -> String:
+	if not InputMap.has_action(action_name):
+		return ""
+	for event: InputEvent in InputMap.action_get_events(action_name):
+		if event is InputEventKey:
+			var key_event: InputEventKey = event as InputEventKey
+			return get_keybinding_label({
+				"physical_keycode": int(key_event.physical_keycode),
+				"keycode": int(key_event.keycode),
+				"ctrl": key_event.ctrl_pressed,
+				"shift": key_event.shift_pressed,
+				"alt": key_event.alt_pressed,
+				"meta": key_event.meta_pressed,
+			})
+	return ""
 
 static func _apply_display_settings(settings_state: UserSettingsState) -> void:
 	if OS.has_feature("headless"):

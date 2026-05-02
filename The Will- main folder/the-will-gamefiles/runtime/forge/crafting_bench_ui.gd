@@ -203,7 +203,9 @@ const ForgeWorkspaceShapeToolPresenterScript = preload("res://runtime/forge/forg
 @onready var builder_component_bow_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/BuilderComponentTabs/BuilderComponentBowButton
 @onready var builder_component_quiver_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/BuilderComponentTabs/BuilderComponentQuiverButton
 @onready var project_name_edit: LineEdit = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectNameEdit
+@onready var project_stow_position_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectStowPositionLabel
 @onready var project_stow_position_option_button: OptionButton = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectStowPositionOptionButton
+@onready var project_grip_style_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectGripStyleLabel
 @onready var project_grip_style_option_button: OptionButton = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectGripStyleOptionButton
 @onready var new_project_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectButtonRow/NewProjectButton
 @onready var save_project_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/LeftPanel/MarginContainer/LeftScroll/LeftVBox/ProjectPanel/ProjectMargin/ProjectVBox/ProjectButtonRow/SaveProjectButton
@@ -369,6 +371,7 @@ func _ready() -> void:
 	_connect_ui_signals()
 	_populate_stow_position_options()
 	_populate_grip_style_options()
+	_disable_obsolete_stage1_stance_controls()
 	_ensure_free_workspace_preview()
 	stage2_brush_radius_meters = _get_view_tuning().workspace_stage2_default_brush_radius_meters
 	stage2_tool_amount_ratio = _clamp_stage2_tool_amount_ratio(stage2_tool_amount_ratio)
@@ -748,13 +751,42 @@ func _select_project_stow_position(stow_mode: StringName) -> void:
 	project_panel_presenter.select_project_stow_position(project_stow_position_option_button, stow_mode)
 
 func _get_selected_project_stow_position() -> StringName:
-	return project_panel_presenter.get_selected_project_stow_position(project_stow_position_option_button)
+	var current_wip: CraftedItemWIP = forge_controller.active_wip if forge_controller != null else null
+	if current_wip != null:
+		return CraftedItemWIP.normalize_stow_position_mode(current_wip.stow_position_mode)
+	return CraftedItemWIP.STOW_SHOULDER_HANGING
 
 func _select_project_grip_style(grip_mode: StringName, current_wip: CraftedItemWIP = null) -> void:
 	project_panel_presenter.select_project_grip_style(project_grip_style_option_button, grip_mode, current_wip)
 
 func _get_selected_project_grip_style() -> StringName:
-	return project_panel_presenter.get_selected_project_grip_style(project_grip_style_option_button)
+	var current_wip: CraftedItemWIP = forge_controller.active_wip if forge_controller != null else null
+	if current_wip != null:
+		return CraftedItemWIP.resolve_supported_grip_style(
+			current_wip.grip_style_mode,
+			current_wip.forge_intent,
+			current_wip.equipment_context
+		)
+	return CraftedItemWIP.GRIP_NORMAL
+
+func _disable_obsolete_stage1_stance_controls() -> void:
+	var obsolete_controls: Array[Control] = [
+		project_stow_position_label,
+		project_stow_position_option_button,
+		project_grip_style_label,
+		project_grip_style_option_button,
+	]
+	for control: Control in obsolete_controls:
+		if control == null:
+			continue
+		control.visible = false
+		control.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if project_stow_position_option_button != null:
+		project_stow_position_option_button.disabled = true
+	if project_grip_style_option_button != null:
+		project_grip_style_option_button.disabled = true
+	_hide_stow_position_hint()
+	_hide_grip_style_hint()
 
 func _refresh_grip_style_option_availability(current_wip: CraftedItemWIP) -> void:
 	project_panel_presenter.refresh_grip_style_option_availability(project_grip_style_option_button, current_wip)
@@ -3113,26 +3145,16 @@ func _on_project_name_focus_exited() -> void:
 	_commit_project_metadata_if_visible()
 
 func _on_project_stow_position_selected(_index: int) -> void:
-	_commit_project_metadata_if_visible()
+	_disable_obsolete_stage1_stance_controls()
 
 func _on_project_grip_style_selected(_index: int) -> void:
-	_commit_project_metadata_if_visible()
+	_disable_obsolete_stage1_stance_controls()
 
-func _on_stow_position_popup_id_focused(focused_id: int) -> void:
-	project_panel_presenter.handle_stow_position_popup_focus(
-		focused_id,
-		project_stow_position_option_button,
-		Callable(self, "_show_stow_position_hint"),
-		Callable(self, "_hide_stow_position_hint")
-	)
+func _on_stow_position_popup_id_focused(_focused_id: int) -> void:
+	_disable_obsolete_stage1_stance_controls()
 
-func _on_grip_style_popup_id_focused(focused_id: int) -> void:
-	project_panel_presenter.handle_grip_style_popup_focus(
-		focused_id,
-		project_grip_style_option_button,
-		Callable(self, "_show_grip_style_hint"),
-		Callable(self, "_hide_grip_style_hint")
-	)
+func _on_grip_style_popup_id_focused(_focused_id: int) -> void:
+	_disable_obsolete_stage1_stance_controls()
 
 func _on_project_notes_focus_exited() -> void:
 	_commit_project_metadata_if_visible()
@@ -3423,6 +3445,7 @@ func _refresh_project_panel() -> void:
 		Callable(self, "_hide_grip_style_hint")
 	)
 	_rebuild_project_menu()
+	_disable_obsolete_stage1_stance_controls()
 
 func _open_ranged_builder_component(builder_component_id: StringName) -> void:
 	var current_wip: CraftedItemWIP = forge_controller.active_wip if forge_controller != null else null

@@ -11,6 +11,8 @@ const PlayerInteractionPresenterScript = preload("res://runtime/player/player_in
 const PlayerRuntimeStatePresenterScript = preload("res://runtime/player/player_runtime_state_presenter.gd")
 const PlayerForgeTestPresenterScript = preload("res://runtime/player/player_forge_test_presenter.gd")
 const PlayerEquippedItemPresenterScript = preload("res://runtime/player/player_equipped_item_presenter.gd")
+const PlayerEquippedSkillSlotPresenterScript = preload("res://runtime/player/player_equipped_skill_slot_presenter.gd")
+const PlayerRuntimeSkillPlaybackPresenterScript = preload("res://runtime/player/player_runtime_skill_playback_presenter.gd")
 const PlayerUiSurfacePresenterScript = preload("res://runtime/player/player_ui_surface_presenter.gd")
 const PlayerMotionPresenterScript = preload("res://runtime/player/player_motion_presenter.gd")
 const PlayerGameplayHudOverlayScript = preload("res://runtime/ui/player_gameplay_hud_overlay.gd")
@@ -31,6 +33,7 @@ const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://co
 @export var aim_max_range_meters: float = 60.0
 @export var interaction_distance: float = 4.5
 @export var weapons_drawn: bool = true
+@export var combat_idle_expiry_seconds: float = 15.0
 
 @onready var visual_root: Node3D = $VisualRoot
 @onready var humanoid_rig: Node3D = $VisualRoot/PlayerHumanoidRig
@@ -58,11 +61,17 @@ var interaction_presenter = PlayerInteractionPresenterScript.new()
 var state_presenter = PlayerRuntimeStatePresenterScript.new()
 var forge_test_presenter = PlayerForgeTestPresenterScript.new()
 var equipped_item_presenter = PlayerEquippedItemPresenterScript.new()
+var equipped_skill_slot_presenter = PlayerEquippedSkillSlotPresenterScript.new()
 var ui_surface_presenter = PlayerUiSurfacePresenterScript.new()
 var motion_presenter = PlayerMotionPresenterScript.new()
 var cached_material_lookup: Dictionary = {}
 var held_item_nodes: Dictionary = {}
 var current_aim_context = PlayerAimContextScript.new()
+var player_skill_slot_state: PlayerSkillSlotState = null
+var last_skill_activation_result: Dictionary = {}
+var runtime_skill_playback_presenter = PlayerRuntimeSkillPlaybackPresenterScript.new()
+var last_runtime_idle_pose_result: Dictionary = {}
+var runtime_idle_pose_dirty: bool = true
 
 func _enter_tree() -> void:
 	_ensure_runtime_input_actions()
@@ -83,6 +92,8 @@ func _ready() -> void:
 	_sync_equipped_test_meshes()
 	if gameplay_hud_overlay != null and gameplay_hud_overlay.has_method("configure"):
 		gameplay_hud_overlay.configure(self)
+	runtime_skill_playback_presenter.set_combat_idle_expiry_seconds(combat_idle_expiry_seconds)
+	_sync_equipped_skill_slots()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not _has_runtime_input_actions():
@@ -158,6 +169,7 @@ func _physics_process(delta: float) -> void:
 		_apply_vertical_motion(delta)
 		move_and_slide()
 		_sync_humanoid_locomotion(0.0, false)
+		_advance_runtime_skill_playback(delta)
 		return
 
 	var input_vector: Vector2 = Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
@@ -179,6 +191,7 @@ func _physics_process(delta: float) -> void:
 	_refresh_aim_context()
 	_update_visual_facing(move_direction, delta)
 	_sync_humanoid_locomotion(target_move_speed, sprinting)
+	_advance_runtime_skill_playback(delta)
 
 func _apply_vertical_motion(delta: float) -> void:
 	motion_presenter.apply_vertical_motion(self, gravity, delta)
@@ -200,8 +213,67 @@ func _try_interact() -> void:
 	)
 
 func _activate_skill_slot(slot_id: StringName) -> void:
+	last_skill_activation_result = preview_runtime_skill_slot_activation(slot_id)
+	if bool(last_skill_activation_result.get("success", false)):
+		runtime_skill_playback_presenter.set_combat_idle_expiry_seconds(combat_idle_expiry_seconds)
+		if not weapons_drawn:
+			runtime_skill_playback_presenter.begin_draw_bridge(
+				last_skill_activation_result.get("source_equipment_slot_id", StringName()) as StringName
+			)
+			set_weapons_drawn(true)
+		var playback_result: Dictionary = runtime_skill_playback_presenter.start_playback(
+			last_skill_activation_result,
+			humanoid_rig,
+			held_item_nodes,
+			equipped_item_presenter,
+			get_equipment_state(),
+			weapons_drawn
+		)
+		last_skill_activation_result["runtime_playback_started"] = bool(playback_result.get("started", false))
+		last_skill_activation_result["runtime_playback_message"] = String(playback_result.get("message", ""))
+		last_skill_activation_result["source_equipment_slot_id"] = playback_result.get(
+			"dominant_slot_id",
+			last_skill_activation_result.get("source_equipment_slot_id", StringName())
+		)
 	if gameplay_hud_overlay != null:
 		gameplay_hud_overlay.activate_skill_slot(slot_id)
+
+func preview_runtime_skill_slot_activation(slot_id: StringName) -> Dictionary:
+	if slot_id == StringName():
+		last_skill_activation_result = {
+			"success": false,
+			"slot_id": slot_id,
+			"message": "No skill slot id was provided.",
+		}
+		return last_skill_activation_result
+	if player_skill_slot_state == null:
+		player_skill_slot_state = equipped_skill_slot_presenter.sync_from_equipment(
+			get_equipment_state(),
+			get_forge_wip_library_state(),
+			player_skill_slot_state
+		)
+	last_skill_activation_result = equipped_skill_slot_presenter.resolve_runtime_skill_slot(
+		slot_id,
+		get_equipment_state(),
+		get_forge_wip_library_state(),
+		player_skill_slot_state
+	)
+	return last_skill_activation_result
+
+func get_last_skill_activation_result() -> Dictionary:
+	return last_skill_activation_result.duplicate(true)
+
+func is_runtime_skill_playback_active() -> bool:
+	return runtime_skill_playback_presenter.is_playing()
+
+func get_runtime_skill_playback_debug_state() -> Dictionary:
+	return runtime_skill_playback_presenter.get_debug_state()
+
+func get_runtime_idle_pose_debug_state() -> Dictionary:
+	return runtime_skill_playback_presenter.get_idle_debug_state()
+
+func get_last_runtime_idle_pose_result() -> Dictionary:
+	return last_runtime_idle_pose_result.duplicate(true)
 
 func _toggle_system_menu() -> void:
 	ui_surface_presenter.toggle_system_menu(system_menu_overlay)
@@ -293,7 +365,7 @@ func preview_saved_wip_grip_hold_layout(saved_wip_id: StringName, dominant_slot_
 	)
 
 func equip_saved_wip_to_hand(saved_wip_id: StringName, slot_id: StringName) -> Dictionary:
-	return forge_test_presenter.equip_saved_wip_to_hand(
+	var result: Dictionary = forge_test_presenter.equip_saved_wip_to_hand(
 		saved_wip_id,
 		slot_id,
 		get_forge_wip_library_state(),
@@ -303,6 +375,10 @@ func equip_saved_wip_to_hand(saved_wip_id: StringName, slot_id: StringName) -> D
 		Callable(self, "_sync_equipped_test_meshes"),
 		equipped_item_presenter
 	)
+	if bool(result.get("success", false)):
+		runtime_idle_pose_dirty = true
+		_sync_equipped_skill_slots()
+	return result
 
 func clear_equipment_slot(slot_id: StringName) -> void:
 	forge_test_presenter.clear_equipment_slot(
@@ -310,11 +386,21 @@ func clear_equipment_slot(slot_id: StringName) -> void:
 		get_equipment_state(),
 		Callable(self, "_sync_equipped_test_meshes")
 	)
+	runtime_idle_pose_dirty = true
+	_sync_equipped_skill_slots()
 
 func set_weapons_drawn(draw_weapons: bool) -> void:
 	if weapons_drawn == draw_weapons:
 		return
 	weapons_drawn = draw_weapons
+	runtime_idle_pose_dirty = true
+	if equipped_item_presenter.reanchor_equipped_item_nodes(
+		humanoid_rig,
+		held_item_nodes,
+		get_equipment_state(),
+		weapons_drawn
+	):
+		return
 	_sync_equipped_test_meshes()
 
 func get_current_aim_context():
@@ -324,6 +410,14 @@ func get_current_aim_point() -> Vector3:
 	return current_aim_context.aim_point if current_aim_context != null else global_position
 
 func _sync_equipped_test_meshes() -> void:
+	runtime_idle_pose_dirty = true
+	runtime_skill_playback_presenter.stop_playback(
+		humanoid_rig,
+		held_item_nodes,
+		equipped_item_presenter,
+		get_equipment_state(),
+		weapons_drawn
+	)
 	forge_test_presenter.sync_equipped_test_meshes(
 		humanoid_rig,
 		held_item_nodes,
@@ -338,6 +432,15 @@ func _sync_equipped_test_meshes() -> void:
 		equipped_item_presenter
 	)
 
+func _sync_equipped_skill_slots() -> void:
+	player_skill_slot_state = equipped_skill_slot_presenter.sync_from_equipment(
+		get_equipment_state(),
+		get_forge_wip_library_state(),
+		player_skill_slot_state
+	)
+	if gameplay_hud_overlay != null and gameplay_hud_overlay.has_method("refresh_all_slots"):
+		gameplay_hud_overlay.refresh_all_slots()
+
 func _get_hand_anchor(slot_id: StringName) -> Node3D:
 	return forge_test_presenter.get_hand_anchor(humanoid_rig, slot_id, equipped_item_presenter)
 
@@ -350,6 +453,54 @@ func _ensure_runtime_input_actions() -> void:
 
 func _has_runtime_input_actions() -> bool:
 	return motion_presenter.has_runtime_input_actions()
+
+func _advance_runtime_skill_playback(delta: float) -> void:
+	var playback_result: Dictionary = runtime_skill_playback_presenter.advance_playback(
+		delta,
+		humanoid_rig,
+		held_item_nodes
+	)
+	if bool(playback_result.get("finished", false)):
+		runtime_skill_playback_presenter.stop_playback(
+			humanoid_rig,
+			held_item_nodes,
+			equipped_item_presenter,
+			get_equipment_state(),
+			weapons_drawn,
+			false,
+			true
+		)
+		if not last_skill_activation_result.is_empty():
+			last_skill_activation_result["runtime_playback_finished"] = true
+	if not runtime_skill_playback_presenter.is_playing():
+		_apply_runtime_idle_pose(delta)
+
+func _apply_runtime_idle_pose(delta: float) -> void:
+	if runtime_idle_pose_dirty or last_runtime_idle_pose_result.is_empty():
+		last_runtime_idle_pose_result = equipped_skill_slot_presenter.resolve_runtime_idle_pose(
+			get_equipment_state(),
+			get_forge_wip_library_state(),
+			weapons_drawn
+		)
+		runtime_idle_pose_dirty = false
+	var idle_apply_result: Dictionary = runtime_skill_playback_presenter.apply_idle_pose(
+		delta,
+		last_runtime_idle_pose_result,
+		humanoid_rig,
+		held_item_nodes,
+		equipped_item_presenter,
+		get_equipment_state(),
+		weapons_drawn
+	)
+	if not idle_apply_result.is_empty():
+		last_runtime_idle_pose_result["runtime_idle_applied"] = bool(idle_apply_result.get("applied", false))
+		last_runtime_idle_pose_result["runtime_idle_message"] = String(idle_apply_result.get("message", ""))
+		last_runtime_idle_pose_result["runtime_idle_dominant_slot_id"] = idle_apply_result.get("dominant_slot_id", StringName())
+		last_runtime_idle_pose_result["hidden_bridge_state"] = idle_apply_result.get("hidden_bridge_state", {})
+		last_runtime_idle_pose_result["combat_idle_elapsed_seconds"] = float(idle_apply_result.get("combat_idle_elapsed_seconds", 0.0))
+		last_runtime_idle_pose_result["combat_idle_expired_pending"] = bool(idle_apply_result.get("combat_idle_expired_pending", false))
+		if bool(idle_apply_result.get("requested_weapons_drawn", weapons_drawn)) != weapons_drawn:
+			set_weapons_drawn(bool(idle_apply_result.get("requested_weapons_drawn", weapons_drawn)))
 
 func _sync_humanoid_locomotion(target_move_speed: float, sprinting: bool) -> void:
 	motion_presenter.sync_humanoid_locomotion(

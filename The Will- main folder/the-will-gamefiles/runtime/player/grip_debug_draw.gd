@@ -27,7 +27,7 @@ func update_debug_markers(debug_root: Node3D, solve_result: Dictionary, debug_vi
 	_update_marker(debug_root, "SupportCorrectedTarget", _resolve_slot_position(solve_result, false, "corrected_target"), support_color, debug_visible)
 	_update_marker(debug_root, "DominantElbowPole", _resolve_slot_position(solve_result, true, "pole_target"), Color(0.85, 0.25, 0.90, 0.95), debug_visible)
 	_update_marker(debug_root, "SupportElbowPole", _resolve_slot_position(solve_result, false, "pole_target"), Color(0.55, 0.25, 0.95, 0.95), debug_visible)
-	_update_slot_proxy_markers(debug_root, "SupportWeaponProxy", support_slot_data.get("weapon_body_proxy_samples", []), Color(0.98, 0.35, 0.35, 0.90), debug_visible)
+	_update_slot_proxy_markers(debug_root, "SupportWeaponProxy", support_slot_data.get("weapon_body_proxy_samples", []), Color(1.0, 0.12, 0.75, 0.90), debug_visible)
 	var torso_frame: Dictionary = solve_result.get("torso_frame", {})
 	var chest_origin: Vector3 = torso_frame.get("origin_world", Vector3.ZERO) as Vector3
 	var chest_forward: Vector3 = torso_frame.get("forward_world", Vector3.ZERO) as Vector3

@@ -27,7 +27,7 @@ func refresh_bindings_list(
 
 		var binding_button: Button = Button.new()
 		binding_button.custom_minimum_size = Vector2(180.0, 0.0)
-		binding_button.text = UserSettingsRuntimeScript.get_keybinding_label(settings_state.get_keybinding_data(action_name, UserSettingsRuntimeScript.get_default_binding_data(action_name)))
+		binding_button.text = UserSettingsRuntimeScript.get_action_binding_label(action_name, settings_state)
 		binding_button.pressed.connect(begin_rebind_callable.bind(action_name))
 		row.add_child(binding_button)
 
@@ -46,7 +46,7 @@ func commit_key_rebind(settings_state: UserSettingsState, action_name: StringNam
 		"status_message": "Saved controls for %s." % action_display_name,
 		"bindings_status_text": "%s is now bound to %s." % [
 			action_display_name,
-			UserSettingsRuntimeScript.get_keybinding_label(settings_state.get_keybinding_data(action_name))
+			UserSettingsRuntimeScript.get_action_binding_label(action_name, settings_state)
 		],
 	}
 

@@ -42,7 +42,13 @@ func get_slot_assignment(slot_id: StringName) -> Resource:
 			return assignment
 	return null
 
-func set_slot_assignment(slot_id: StringName, source_weapon_wip_id: StringName, source_skill_draft_id: StringName, display_name: String) -> void:
+func set_slot_assignment(
+	slot_id: StringName,
+	source_weapon_wip_id: StringName,
+	source_skill_draft_id: StringName,
+	display_name: String,
+	persist_changes: bool = true
+) -> void:
 	if slot_id == StringName():
 		return
 	var assignment: Resource = get_slot_assignment(slot_id)
@@ -53,17 +59,35 @@ func set_slot_assignment(slot_id: StringName, source_weapon_wip_id: StringName, 
 	assignment.set("source_weapon_wip_id", source_weapon_wip_id)
 	assignment.set("source_skill_draft_id", source_skill_draft_id)
 	assignment.set("display_name", display_name)
-	persist()
+	if persist_changes:
+		persist()
 
-func clear_slot(slot_id: StringName) -> void:
+func clear_slot(slot_id: StringName, persist_changes: bool = true) -> void:
 	for index: int in range(slot_assignments.size()):
 		var assignment: Resource = slot_assignments[index]
 		if assignment == null:
 			continue
 		if assignment.get("slot_id") == slot_id:
 			slot_assignments.remove_at(index)
-			persist()
+			if persist_changes:
+				persist()
 			return
+
+func clear_slots(slot_ids: Array[StringName], persist_changes: bool = true) -> void:
+	if slot_ids.is_empty():
+		return
+	var slots_removed: bool = false
+	for index: int in range(slot_assignments.size() - 1, -1, -1):
+		var assignment: Resource = slot_assignments[index]
+		if assignment == null:
+			continue
+		var slot_id: StringName = assignment.get("slot_id") as StringName
+		if not slot_ids.has(slot_id):
+			continue
+		slot_assignments.remove_at(index)
+		slots_removed = true
+	if slots_removed and persist_changes:
+		persist()
 
 func get_slot_display_name(slot_id: StringName) -> String:
 	var assignment: Resource = get_slot_assignment(slot_id)

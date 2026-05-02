@@ -11,6 +11,15 @@ const GRIP_BASELINE_ANIMATION_NAMES: Array[StringName] = [&"SlowRun", &"Run"]
 const GRIP_BASELINE_SAMPLE_RATIOS: Array[float] = [0.2, 0.5, 0.8]
 const CURL_TRAJECTORY_SAMPLE_STEPS: int = 18
 const PINKY_MAX_CURL_T: float = 0.58
+const CONTACT_GROUP_MAX_CURL_DEGREES: float = 90.0
+const CONTACT_READINESS_META := "finger_grip_contact_readiness"
+const CONTACT_DISTANCE_META := "finger_grip_contact_distance_meters"
+const CONTACT_RAY_DEBUG_META := "finger_grip_contact_ray_debug"
+const CONTACT_RAY_DEBUG_LIMIT: int = 96
+const CONTACT_FULL_SEAT_MIN_METERS: float = 0.055
+const CONTACT_FADE_OUT_MIN_METERS: float = 0.18
+const CONTACT_FULL_SEAT_CELL_MULTIPLIER: float = 4.0
+const CONTACT_FADE_OUT_CELL_MULTIPLIER: float = 14.0
 const SLOT_LABELS := {
 	SLOT_RIGHT: "Right",
 	SLOT_LEFT: "Left",
@@ -92,26 +101,36 @@ const FINGER_BASELINE_ROTATION_BONES := {
 	SLOT_RIGHT: [
 		&"CC_Base_R_Thumb1",
 		&"CC_Base_R_Thumb2",
+		&"CC_Base_R_Thumb3",
 		&"CC_Base_R_Index1",
 		&"CC_Base_R_Index2",
+		&"CC_Base_R_Index3",
 		&"CC_Base_R_Mid1",
 		&"CC_Base_R_Mid2",
+		&"CC_Base_R_Mid3",
 		&"CC_Base_R_Ring1",
 		&"CC_Base_R_Ring2",
+		&"CC_Base_R_Ring3",
 		&"CC_Base_R_Pinky1",
 		&"CC_Base_R_Pinky2",
+		&"CC_Base_R_Pinky3",
 	],
 	SLOT_LEFT: [
 		&"CC_Base_L_Thumb1",
 		&"CC_Base_L_Thumb2",
+		&"CC_Base_L_Thumb3",
 		&"CC_Base_L_Index1",
 		&"CC_Base_L_Index2",
+		&"CC_Base_L_Index3",
 		&"CC_Base_L_Mid1",
 		&"CC_Base_L_Mid2",
+		&"CC_Base_L_Mid3",
 		&"CC_Base_L_Ring1",
 		&"CC_Base_L_Ring2",
+		&"CC_Base_L_Ring3",
 		&"CC_Base_L_Pinky1",
 		&"CC_Base_L_Pinky2",
+		&"CC_Base_L_Pinky3",
 	],
 }
 const PALM_TRIANGULATION_BONES := {
@@ -196,8 +215,9 @@ func update_finger_grip_targets(
 		var grip_guide: Node3D = source_lookup.get(slot_id) as Node3D
 		if grip_guide == null or not is_instance_valid(grip_guide):
 			continue
-		_apply_animation_grip_baseline_pose(skeleton, slot_id)
+		_apply_animation_contact_open_pose(skeleton, slot_id)
 		var grip_center_node: Node3D = _resolve_grip_center_node(grip_guide)
+		_clear_contact_ray_debug(grip_center_node)
 		var profile_offsets: Array = grip_center_node.get_meta("grip_shell_profile_offsets_minor", []) as Array
 		if profile_offsets.is_empty():
 			continue
@@ -211,6 +231,15 @@ func update_finger_grip_targets(
 		var major_axis_world: Vector3 = (grip_center_node.global_basis * major_axis_local).normalized()
 		var minor_axis_a_world: Vector3 = (grip_center_node.global_basis * minor_axis_a_local).normalized()
 		var minor_axis_b_world: Vector3 = (grip_center_node.global_basis * minor_axis_b_local).normalized()
+		var contact_axes: Dictionary = _resolve_roll_decoupled_contact_axes(
+			skeleton,
+			slot_id,
+			major_axis_world,
+			minor_axis_a_world,
+			minor_axis_b_world
+		)
+		minor_axis_a_world = contact_axes.get("minor_axis_a_world", minor_axis_a_world) as Vector3
+		minor_axis_b_world = contact_axes.get("minor_axis_b_world", minor_axis_b_world) as Vector3
 		var side_chains: Dictionary = FINGER_CHAINS.get(slot_id, {})
 		var palm_frame: Dictionary = _build_palm_frame(
 			slot_id,
@@ -222,29 +251,33 @@ func update_finger_grip_targets(
 		)
 		if palm_frame.is_empty():
 			continue
+		var contact_group_center_world: Vector3 = palm_frame.get("center_world", center_world) as Vector3
+		var contact_distance_meters: float = contact_group_center_world.distance_to(center_world)
+		var contact_readiness: float = _resolve_grip_contact_readiness(contact_distance_meters, cell_world_size)
+		_set_source_contact_readiness(grip_guide, grip_center_node, contact_readiness, contact_distance_meters)
 		for finger_id: StringName in FINGER_IDS:
 			var target_node: Node3D = side_targets.get(finger_id) as Node3D
 			var chain_def: Dictionary = side_chains.get(finger_id, {})
 			if target_node == null:
 				continue
-			var desired_position: Vector3 = Vector3.ZERO
-			if _finger_uses_plane_curl_path(finger_id):
-				desired_position = _resolve_plane_curl_finger_target_world_position(
-					skeleton,
-					slot_id,
-					finger_id,
-					chain_def,
-					grip_center_node,
-					cell_world_size
-				)
-			else:
-				desired_position = _resolve_animation_baseline_tip_world_position_from_cache(
-					skeleton,
-					animation_grip_baseline_cache,
-					slot_id,
-					finger_id
-				)
-				if desired_position.length_squared() <= 0.000001:
+			var desired_position: Vector3 = _resolve_animation_baseline_tip_world_position_from_cache(
+				skeleton,
+				animation_idle_baseline_cache,
+				slot_id,
+				finger_id
+			)
+			if contact_readiness > 0.001:
+				if _finger_uses_plane_curl_path(finger_id):
+					desired_position = _resolve_plane_curl_finger_target_world_position(
+						skeleton,
+						slot_id,
+						finger_id,
+						chain_def,
+						grip_center_node,
+						cell_world_size,
+						contact_readiness
+					)
+				else:
 					desired_position = _resolve_finger_target_world_position(
 						skeleton,
 						slot_id,
@@ -262,14 +295,54 @@ func update_finger_grip_targets(
 					)
 			_move_target_toward(target_node, desired_position, smoothing_speed, delta)
 
+func _resolve_roll_decoupled_contact_axes(
+	skeleton: Skeleton3D,
+	slot_id: StringName,
+	major_axis_world: Vector3,
+	fallback_minor_axis_a_world: Vector3,
+	fallback_minor_axis_b_world: Vector3
+) -> Dictionary:
+	var major_axis: Vector3 = major_axis_world.normalized()
+	if major_axis.length_squared() <= 0.000001:
+		return {
+			"minor_axis_a_world": fallback_minor_axis_a_world,
+			"minor_axis_b_world": fallback_minor_axis_b_world,
+		}
+	var hand_name: StringName = (PALM_TRIANGULATION_BONES.get(slot_id, {}) as Dictionary).get("hand", StringName())
+	var hand_index: int = skeleton.find_bone(String(hand_name)) if skeleton != null else -1
+	var preferred_up: Vector3 = fallback_minor_axis_b_world
+	if hand_index >= 0:
+		var hand_pose: Transform3D = skeleton.get_bone_global_pose(hand_index)
+		preferred_up = (skeleton.global_basis * hand_pose.basis).orthonormalized().y
+	preferred_up = preferred_up - major_axis * preferred_up.dot(major_axis)
+	if preferred_up.length_squared() <= 0.000001:
+		preferred_up = fallback_minor_axis_b_world - major_axis * fallback_minor_axis_b_world.dot(major_axis)
+	if preferred_up.length_squared() <= 0.000001:
+		preferred_up = Vector3.UP - major_axis * Vector3.UP.dot(major_axis)
+	if preferred_up.length_squared() <= 0.000001:
+		preferred_up = Vector3.RIGHT - major_axis * Vector3.RIGHT.dot(major_axis)
+	preferred_up = preferred_up.normalized()
+	var minor_axis_a: Vector3 = preferred_up.cross(major_axis).normalized()
+	if minor_axis_a.length_squared() <= 0.000001:
+		minor_axis_a = fallback_minor_axis_a_world.normalized()
+	var minor_axis_b: Vector3 = major_axis.cross(minor_axis_a).normalized()
+	if minor_axis_b.length_squared() <= 0.000001:
+		minor_axis_b = preferred_up
+	return {
+		"minor_axis_a_world": minor_axis_a,
+		"minor_axis_b_world": minor_axis_b,
+	}
+
 func refresh_finger_ik_influences(
-	enable_finger_grip_ik: bool,
-	finger_grip_ik_influence: float,
+	_enable_finger_grip_ik: bool,
+	_finger_grip_ik_influence: float,
 	modifier_lookup: Dictionary,
-	source_lookup: Dictionary
+	_source_lookup: Dictionary
 ) -> void:
+	# Finger contact is now authored by the deterministic contact-group pose.
+	# The old CCDIK modifiers are kept as existing nodes/debug plumbing, but
+	# they must not override the strict local-Z finger curl lane.
 	for slot_id: StringName in [SLOT_RIGHT, SLOT_LEFT]:
-		var slot_active: bool = enable_finger_grip_ik and _source_is_valid(source_lookup.get(slot_id, null))
 		for finger_id: StringName in FINGER_IDS:
 			var modifier: SkeletonModifier3D = modifier_lookup.get(
 				StringName("%s_%s" % [String(slot_id), String(finger_id)]),
@@ -277,9 +350,10 @@ func refresh_finger_ik_influences(
 			) as SkeletonModifier3D
 			if modifier == null:
 				continue
-			modifier.active = slot_active
-			modifier.influence = finger_grip_ik_influence if slot_active else 0.0
-			if not slot_active and modifier.has_method("reset"):
+			var needs_reset: bool = modifier.active or modifier.influence > 0.0
+			modifier.active = false
+			modifier.influence = 0.0
+			if needs_reset and modifier.has_method("reset"):
 				modifier.call("reset")
 
 func resolve_hand_grip_alignment_world_position(skeleton: Skeleton3D, slot_id: StringName) -> Vector3:
@@ -323,7 +397,7 @@ func _ensure_finger_ik_modifier(
 		modifier.set_end_bone(0, end_bone_index)
 	modifier.set_end_bone_name(0, String(end_bone_name))
 	if target_node != null:
-		modifier.set_target_node(0, target_node.get_path())
+		modifier.set_target_node(0, modifier.get_path_to(target_node))
 	modifier.active = false
 	modifier.influence = 0.0
 	return modifier
@@ -520,7 +594,10 @@ func _resolve_non_thumb_target_world_position(
 		cast_from_world,
 		predicted_target,
 		cell_world_size,
-		closure_vector
+		closure_vector,
+		slot_id,
+		finger_id,
+		&"surface_contact"
 	)
 
 func _resolve_thumb_target_world_position(
@@ -591,7 +668,10 @@ func _resolve_thumb_target_world_position(
 		cast_from_world,
 		predicted_target,
 		cell_world_size,
-		shell_closure_vector
+		shell_closure_vector,
+		slot_id,
+		finger_id,
+		&"thumb_contact"
 	)
 
 func _resolve_profile_support_point(profile_offsets: Array, radial_direction_2d: Vector2, cell_world_size: float) -> Vector2:
@@ -615,31 +695,78 @@ func _resolve_contact_target_world_position(
 	cast_from_world: Vector3,
 	predicted_target_world: Vector3,
 	cell_world_size: float,
-	preferred_direction_world: Vector3 = Vector3.ZERO
+	preferred_direction_world: Vector3 = Vector3.ZERO,
+	slot_id: StringName = StringName(),
+	finger_id: StringName = StringName(),
+	ray_context: StringName = &"contact_target"
 ) -> Vector3:
 	if grip_center_node == null or not is_instance_valid(grip_center_node):
 		return predicted_target_world
 	var world_3d: World3D = grip_center_node.get_world_3d()
 	if world_3d == null:
+		_record_contact_ray_debug(
+			grip_center_node,
+			slot_id,
+			finger_id,
+			ray_context,
+			cast_from_world,
+			predicted_target_world,
+			0,
+			{},
+			"missing_world"
+		)
 		return predicted_target_world
 	var direction: Vector3 = predicted_target_world - cast_from_world
 	if preferred_direction_world.length_squared() > 0.000001:
 		direction = preferred_direction_world.normalized() * maxf(direction.length(), cell_world_size * 3.0)
 	if direction.length_squared() <= 0.000001:
+		_record_contact_ray_debug(
+			grip_center_node,
+			slot_id,
+			finger_id,
+			ray_context,
+			cast_from_world,
+			predicted_target_world,
+			0,
+			{},
+			"empty_direction"
+		)
 		return predicted_target_world
 	var collision_mask: int = int(grip_center_node.get_meta("grip_shell_collision_layer", 0))
 	if collision_mask <= 0:
+		_record_contact_ray_debug(
+			grip_center_node,
+			slot_id,
+			finger_id,
+			ray_context,
+			cast_from_world,
+			predicted_target_world,
+			collision_mask,
+			{},
+			"missing_collision_mask"
+		)
 		return predicted_target_world
 	var ray_distance: float = maxf(direction.length() + cell_world_size * 2.0, cell_world_size * 4.0)
+	var ray_to_world: Vector3 = cast_from_world + direction.normalized() * ray_distance
 	var ray_query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
 		cast_from_world,
-		cast_from_world + direction.normalized() * ray_distance,
+		ray_to_world,
 		collision_mask
 	)
 	ray_query.collide_with_areas = true
 	ray_query.collide_with_bodies = false
 	ray_query.hit_from_inside = true
 	var hit: Dictionary = world_3d.direct_space_state.intersect_ray(ray_query)
+	_record_contact_ray_debug(
+		grip_center_node,
+		slot_id,
+		finger_id,
+		ray_context,
+		cast_from_world,
+		ray_to_world,
+		collision_mask,
+		hit
+	)
 	if hit.is_empty():
 		return predicted_target_world
 	var hit_position: Vector3 = hit.get("position", predicted_target_world)
@@ -664,6 +791,114 @@ func _move_target_toward(target_node: Node3D, desired_global_position: Vector3, 
 func _source_is_valid(source_node_variant: Variant) -> bool:
 	var source_node: Node3D = source_node_variant as Node3D
 	return source_node != null and is_instance_valid(source_node)
+
+func _resolve_grip_contact_readiness(contact_distance_meters: float, cell_world_size: float) -> float:
+	var full_seat_distance: float = maxf(
+		CONTACT_FULL_SEAT_MIN_METERS,
+		cell_world_size * CONTACT_FULL_SEAT_CELL_MULTIPLIER
+	)
+	var fade_out_distance: float = maxf(
+		CONTACT_FADE_OUT_MIN_METERS,
+		full_seat_distance + cell_world_size * CONTACT_FADE_OUT_CELL_MULTIPLIER
+	)
+	if contact_distance_meters <= full_seat_distance:
+		return 1.0
+	if contact_distance_meters >= fade_out_distance:
+		return 0.0
+	var fade_t: float = clampf(
+		(contact_distance_meters - full_seat_distance) / maxf(fade_out_distance - full_seat_distance, 0.000001),
+		0.0,
+		1.0
+	)
+	var smooth_fade_t: float = fade_t * fade_t * (3.0 - 2.0 * fade_t)
+	return 1.0 - smooth_fade_t
+
+func _set_source_contact_readiness(
+	grip_guide: Node3D,
+	grip_center_node: Node3D,
+	contact_readiness: float,
+	contact_distance_meters: float
+) -> void:
+	for source_node: Node3D in [grip_guide, grip_center_node]:
+		if source_node == null or not is_instance_valid(source_node):
+			continue
+		source_node.set_meta(CONTACT_READINESS_META, clampf(contact_readiness, 0.0, 1.0))
+		source_node.set_meta(CONTACT_DISTANCE_META, maxf(contact_distance_meters, 0.0))
+
+func _clear_contact_ray_debug(grip_center_node: Node3D) -> void:
+	if grip_center_node == null or not is_instance_valid(grip_center_node):
+		return
+	grip_center_node.set_meta(CONTACT_RAY_DEBUG_META, [])
+
+func _record_contact_ray_debug(
+	grip_center_node: Node3D,
+	slot_id: StringName,
+	finger_id: StringName,
+	ray_context: StringName,
+	from_world: Vector3,
+	to_world: Vector3,
+	collision_mask: int,
+	ray_hit: Dictionary = {},
+	skipped_reason: String = ""
+) -> void:
+	if grip_center_node == null or not is_instance_valid(grip_center_node):
+		return
+	var has_hit: bool = not ray_hit.is_empty()
+	var hit_position: Vector3 = Vector3.ZERO
+	var hit_normal: Vector3 = Vector3.ZERO
+	var collider_object: Object = null
+	if has_hit:
+		hit_position = ray_hit.get("position", Vector3.ZERO) as Vector3
+		hit_normal = ray_hit.get("normal", Vector3.ZERO) as Vector3
+		collider_object = ray_hit.get("collider", null) as Object
+	var collider_node: Node = collider_object as Node
+	var collider_name: String = ""
+	var collider_path: String = ""
+	var collider_class: String = ""
+	var collider_layer: int = -1
+	if collider_object != null:
+		collider_class = collider_object.get_class()
+	if collider_node != null:
+		collider_name = String(collider_node.name)
+		collider_path = String(collider_node.get_path())
+	var collision_object: CollisionObject3D = collider_node as CollisionObject3D
+	if collision_object != null:
+		collider_layer = collision_object.collision_layer
+	var hit_distance: float = -1.0
+	if has_hit:
+		hit_distance = from_world.distance_to(hit_position)
+	var ray_entries: Array = grip_center_node.get_meta(CONTACT_RAY_DEBUG_META, []) as Array
+	ray_entries.append({
+		"slot_id": String(slot_id),
+		"finger_id": String(finger_id),
+		"context": String(ray_context),
+		"from_world": from_world,
+		"to_world": to_world,
+		"collision_mask": collision_mask,
+		"hit": has_hit,
+		"hit_position": hit_position,
+		"hit_normal": hit_normal,
+		"hit_distance_meters": hit_distance,
+		"collider_name": collider_name,
+		"collider_path": collider_path,
+		"collider_class": collider_class,
+		"collider_layer": collider_layer,
+		"skipped_reason": skipped_reason,
+	})
+	while ray_entries.size() > CONTACT_RAY_DEBUG_LIMIT:
+		ray_entries.pop_front()
+	grip_center_node.set_meta(CONTACT_RAY_DEBUG_META, ray_entries)
+
+func _resolve_source_contact_readiness(source_node_variant: Variant) -> float:
+	if not _source_is_valid(source_node_variant):
+		return 0.0
+	var source_node: Node3D = source_node_variant as Node3D
+	if source_node.has_meta(CONTACT_READINESS_META):
+		return clampf(float(source_node.get_meta(CONTACT_READINESS_META, 1.0)), 0.0, 1.0)
+	var grip_center_node: Node3D = _resolve_grip_center_node(source_node)
+	if grip_center_node != null and grip_center_node.has_meta(CONTACT_READINESS_META):
+		return clampf(float(grip_center_node.get_meta(CONTACT_READINESS_META, 1.0)), 0.0, 1.0)
+	return 1.0
 
 func _ensure_animation_grip_baseline_cache() -> void:
 	if animation_grip_baseline_initialized:
@@ -831,8 +1066,15 @@ func _sample_animation_hand_pose(animation_name: StringName, sample_ratio: float
 	josie_root.free()
 	return sample
 
-func _apply_animation_grip_baseline_pose(skeleton: Skeleton3D, slot_id: StringName) -> void:
-	var slot_cache: Dictionary = animation_grip_baseline_cache.get(slot_id, {})
+func _apply_animation_contact_open_pose(skeleton: Skeleton3D, slot_id: StringName) -> void:
+	_apply_animation_pose_cache_to_slot(skeleton, animation_idle_baseline_cache, slot_id)
+
+func _apply_animation_pose_cache_to_slot(
+	skeleton: Skeleton3D,
+	pose_cache: Dictionary,
+	slot_id: StringName
+) -> void:
+	var slot_cache: Dictionary = pose_cache.get(slot_id, {})
 	if slot_cache.is_empty():
 		return
 	var hand_name: StringName = (PALM_TRIANGULATION_BONES.get(slot_id, {}) as Dictionary).get("hand", StringName())
@@ -945,7 +1187,8 @@ func _resolve_plane_curl_finger_target_world_position(
 	finger_id: StringName,
 	chain_def: Dictionary,
 	grip_center_node: Node3D,
-	cell_world_size: float
+	cell_world_size: float,
+	contact_readiness: float
 ) -> Vector3:
 	var curl_stop: Dictionary = _resolve_plane_curl_stop(
 		skeleton,
@@ -956,9 +1199,20 @@ func _resolve_plane_curl_finger_target_world_position(
 		cell_world_size
 	)
 	var curl_t: float = float(curl_stop.get("t", _resolve_max_curl_t_for_finger(finger_id)))
-	_apply_plane_curl_pose(skeleton, slot_id, finger_id, curl_t)
+	var resolved_readiness: float = clampf(contact_readiness, 0.0, 1.0)
+	_apply_plane_curl_pose(skeleton, slot_id, finger_id, curl_t * resolved_readiness)
 	skeleton.force_update_all_bone_transforms()
-	return curl_stop.get("target_world", Vector3.ZERO) as Vector3
+	var target_world: Vector3 = curl_stop.get("target_world", Vector3.ZERO) as Vector3
+	if resolved_readiness < 0.999:
+		var baseline_tip_world: Vector3 = _resolve_animation_baseline_tip_world_position_from_cache(
+			skeleton,
+			animation_grip_baseline_cache,
+			slot_id,
+			finger_id
+		)
+		if baseline_tip_world.length_squared() > 0.000001:
+			target_world = baseline_tip_world.lerp(target_world, resolved_readiness)
+	return target_world
 
 func _resolve_plane_curl_stop(
 	skeleton: Skeleton3D,
@@ -1020,7 +1274,10 @@ func _resolve_plane_curl_stop(
 		var hit: Dictionary = _resolve_contact_hit_on_segment(
 			grip_center_node,
 			previous_point_world,
-			sample_point_world
+			sample_point_world,
+			slot_id,
+			finger_id,
+			&"plane_curl"
 		)
 		if not hit.is_empty():
 			var segment_length: float = previous_point_world.distance_to(sample_point_world)
@@ -1042,10 +1299,132 @@ func _resolve_plane_curl_stop(
 			}
 		previous_point_world = sample_point_world
 		previous_t = curve_t
+	var fallback_hit: Dictionary = _resolve_contact_hit_against_profile_cells(
+		grip_center_node,
+		capped_grip_tip_world,
+		slot_id,
+		finger_id,
+		&"plane_curl_profile_fallback"
+	)
+	if fallback_hit.is_empty():
+		fallback_hit = _resolve_contact_hit_against_profile_cells(
+			grip_center_node,
+			idle_tip_world,
+			slot_id,
+			finger_id,
+			&"plane_curl_idle_profile_fallback"
+		)
+	if not fallback_hit.is_empty():
+		var fallback_hit_position: Vector3 = fallback_hit.get("position", capped_grip_tip_world) as Vector3
+		var fallback_hit_normal: Vector3 = fallback_hit.get("normal", Vector3.ZERO) as Vector3
+		if fallback_hit_normal.length_squared() <= 0.000001:
+			fallback_hit_normal = (capped_grip_tip_world - grip_center_node.global_position).normalized()
+		if fallback_hit_normal.length_squared() <= 0.000001:
+			fallback_hit_normal = Vector3.UP
+		return {
+			"t": max_curl_t,
+			"target_world": fallback_hit_position + fallback_hit_normal.normalized() * (cell_world_size * 0.05),
+		}
 	return {
 		"t": max_curl_t,
 		"target_world": capped_grip_tip_world,
 	}
+
+func _resolve_contact_hit_against_profile_cells(
+	grip_center_node: Node3D,
+	from_world: Vector3,
+	slot_id: StringName,
+	finger_id: StringName,
+	ray_context: StringName
+) -> Dictionary:
+	if grip_center_node == null or not is_instance_valid(grip_center_node):
+		return {}
+	var profile_offsets: Array = grip_center_node.get_meta("grip_shell_profile_offsets_minor", []) as Array
+	if profile_offsets.is_empty():
+		return _resolve_contact_hit_on_segment(
+			grip_center_node,
+			from_world,
+			grip_center_node.global_position,
+			slot_id,
+			finger_id,
+			ray_context
+		)
+	var minor_axis_a_local: Vector3 = grip_center_node.get_meta("grip_shell_minor_axis_a_local", Vector3.RIGHT) as Vector3
+	var minor_axis_b_local: Vector3 = grip_center_node.get_meta("grip_shell_minor_axis_b_local", Vector3.UP) as Vector3
+	var minor_axis_a_world: Vector3 = (grip_center_node.global_basis * minor_axis_a_local).normalized()
+	var minor_axis_b_world: Vector3 = (grip_center_node.global_basis * minor_axis_b_local).normalized()
+	if minor_axis_a_world.length_squared() <= 0.000001:
+		minor_axis_a_world = grip_center_node.global_basis.x.normalized()
+	if minor_axis_b_world.length_squared() <= 0.000001:
+		minor_axis_b_world = grip_center_node.global_basis.y.normalized()
+	var closest_index: int = -1
+	var closest_distance_squared: float = INF
+	for profile_index in range(profile_offsets.size()):
+		var offset_minor: Vector2 = profile_offsets[profile_index] as Vector2
+		var candidate_world: Vector3 = grip_center_node.global_position \
+			+ minor_axis_a_world * offset_minor.x \
+			+ minor_axis_b_world * offset_minor.y
+		var distance_squared: float = from_world.distance_squared_to(candidate_world)
+		if distance_squared < closest_distance_squared:
+			closest_distance_squared = distance_squared
+			closest_index = profile_index
+	if closest_index >= 0:
+		var closest_hit: Dictionary = _resolve_contact_hit_against_profile_cell_index(
+			grip_center_node,
+			from_world,
+			profile_offsets,
+			closest_index,
+			minor_axis_a_world,
+			minor_axis_b_world,
+			slot_id,
+			finger_id,
+			ray_context
+		)
+		if not closest_hit.is_empty():
+			return closest_hit
+	for profile_index in range(profile_offsets.size()):
+		if profile_index == closest_index:
+			continue
+		var profile_hit: Dictionary = _resolve_contact_hit_against_profile_cell_index(
+			grip_center_node,
+			from_world,
+			profile_offsets,
+			profile_index,
+			minor_axis_a_world,
+			minor_axis_b_world,
+			slot_id,
+			finger_id,
+			ray_context
+		)
+		if not profile_hit.is_empty():
+			return profile_hit
+	return {}
+
+func _resolve_contact_hit_against_profile_cell_index(
+	grip_center_node: Node3D,
+	from_world: Vector3,
+	profile_offsets: Array,
+	profile_index: int,
+	minor_axis_a_world: Vector3,
+	minor_axis_b_world: Vector3,
+	slot_id: StringName,
+	finger_id: StringName,
+	ray_context: StringName
+) -> Dictionary:
+	if profile_index < 0 or profile_index >= profile_offsets.size():
+		return {}
+	var offset_minor: Vector2 = profile_offsets[profile_index] as Vector2
+	var cell_center_world: Vector3 = grip_center_node.global_position \
+		+ minor_axis_a_world * offset_minor.x \
+		+ minor_axis_b_world * offset_minor.y
+	return _resolve_contact_hit_on_segment(
+		grip_center_node,
+		from_world,
+		cell_center_world,
+		slot_id,
+		finger_id,
+		ray_context
+	)
 
 func _apply_plane_curl_pose(
 	skeleton: Skeleton3D,
@@ -1062,10 +1441,7 @@ func _apply_plane_curl_pose(
 	if hand_index < 0:
 		return
 	var hand_pose: Transform3D = skeleton.get_bone_global_pose(hand_index)
-	var plane_bones: Array[StringName] = [
-		(FINGER_CHAINS.get(slot_id, {}) as Dictionary).get(finger_id, {}).get("guide", StringName()),
-		(FINGER_CHAINS.get(slot_id, {}) as Dictionary).get(finger_id, {}).get("mid", StringName()),
-	]
+	var plane_bones: Array[StringName] = _resolve_ordered_finger_bones(slot_id, finger_id)
 	for bone_name: StringName in plane_bones:
 		if bone_name == StringName():
 			continue
@@ -1084,7 +1460,12 @@ func _apply_plane_curl_pose(
 			bone_name,
 			open_rotation
 		) as Quaternion).normalized()
-		var desired_hand_relative_rotation: Quaternion = open_rotation.slerp(closed_rotation, clampf(curl_t, 0.0, 1.0))
+		var desired_hand_relative_rotation: Quaternion = _resolve_planar_contact_group_rotation(
+			slot_id,
+			open_rotation,
+			closed_rotation,
+			curl_t
+		)
 		var desired_global_basis: Basis = hand_pose.basis * Basis(desired_hand_relative_rotation)
 		var desired_local_basis: Basis = parent_pose.basis.inverse() * desired_global_basis
 		skeleton.set_bone_pose_rotation(
@@ -1092,13 +1473,44 @@ func _apply_plane_curl_pose(
 			desired_local_basis.get_rotation_quaternion().normalized()
 		)
 
+func _resolve_ordered_finger_bones(slot_id: StringName, finger_id: StringName) -> Array[StringName]:
+	var chain_def: Dictionary = (FINGER_CHAINS.get(slot_id, {}) as Dictionary).get(finger_id, {})
+	var ordered_bones: Array[StringName] = []
+	for joint_key: StringName in [&"root", &"guide", &"mid", &"end"]:
+		var bone_name: StringName = chain_def.get(joint_key, StringName())
+		if bone_name == StringName() or bone_name in ordered_bones:
+			continue
+		ordered_bones.append(bone_name)
+	return ordered_bones
+
+func _resolve_planar_contact_group_rotation(
+	slot_id: StringName,
+	open_rotation: Quaternion,
+	_closed_rotation: Quaternion,
+	curl_t: float
+) -> Quaternion:
+	var open_basis: Basis = Basis(open_rotation.normalized()).orthonormalized()
+	var axis_hand: Vector3 = open_basis.z.normalized()
+	if axis_hand.length_squared() <= 0.000001:
+		return open_rotation.normalized()
+	var hand_direction: float = -1.0 if slot_id == SLOT_LEFT else 1.0
+	var tween_t: float = _smooth_contact_group_tween_t(curl_t)
+	var max_closed_angle: float = deg_to_rad(CONTACT_GROUP_MAX_CURL_DEGREES)
+	var resolved_angle: float = hand_direction * max_closed_angle * tween_t
+	var resolved_basis: Basis = (Basis(axis_hand, resolved_angle) * open_basis).orthonormalized()
+	return resolved_basis.get_rotation_quaternion().normalized()
+
+func _smooth_contact_group_tween_t(raw_t: float) -> float:
+	var resolved_t: float = clampf(raw_t, 0.0, 1.0)
+	return resolved_t * resolved_t * (3.0 - 2.0 * resolved_t)
+
 func _resolve_max_curl_t_for_finger(finger_id: StringName) -> float:
 	if finger_id == &"pinky":
 		return PINKY_MAX_CURL_T
 	return 1.0
 
 func _finger_uses_plane_curl_path(finger_id: StringName) -> bool:
-	return finger_id in [&"index", &"middle", &"ring", &"pinky"]
+	return finger_id in FINGER_IDS
 
 func _get_current_chain_end_world_position(skeleton: Skeleton3D, chain_def: Dictionary) -> Vector3:
 	var end_bone_name: StringName = chain_def.get("end", StringName())
@@ -1124,17 +1536,53 @@ func _sample_cubic_bezier_3d(
 func _resolve_contact_hit_on_segment(
 	grip_center_node: Node3D,
 	from_world: Vector3,
-	to_world: Vector3
+	to_world: Vector3,
+	slot_id: StringName = StringName(),
+	finger_id: StringName = StringName(),
+	ray_context: StringName = &"contact_segment"
 ) -> Dictionary:
 	if grip_center_node == null or not is_instance_valid(grip_center_node):
 		return {}
 	var world_3d: World3D = grip_center_node.get_world_3d()
 	if world_3d == null:
+		_record_contact_ray_debug(
+			grip_center_node,
+			slot_id,
+			finger_id,
+			ray_context,
+			from_world,
+			to_world,
+			0,
+			{},
+			"missing_world"
+		)
 		return {}
 	var collision_mask: int = int(grip_center_node.get_meta("grip_shell_collision_layer", 0))
 	if collision_mask <= 0:
+		_record_contact_ray_debug(
+			grip_center_node,
+			slot_id,
+			finger_id,
+			ray_context,
+			from_world,
+			to_world,
+			collision_mask,
+			{},
+			"missing_collision_mask"
+		)
 		return {}
 	if from_world.distance_to(to_world) <= 0.000001:
+		_record_contact_ray_debug(
+			grip_center_node,
+			slot_id,
+			finger_id,
+			ray_context,
+			from_world,
+			to_world,
+			collision_mask,
+			{},
+			"empty_segment"
+		)
 		return {}
 	var ray_query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
 		from_world,
@@ -1144,7 +1592,18 @@ func _resolve_contact_hit_on_segment(
 	ray_query.collide_with_areas = true
 	ray_query.collide_with_bodies = false
 	ray_query.hit_from_inside = true
-	return world_3d.direct_space_state.intersect_ray(ray_query)
+	var hit: Dictionary = world_3d.direct_space_state.intersect_ray(ray_query)
+	_record_contact_ray_debug(
+		grip_center_node,
+		slot_id,
+		finger_id,
+		ray_context,
+		from_world,
+		to_world,
+		collision_mask,
+		hit
+	)
+	return hit
 
 func _resolve_baseline_contact_target_world_position(
 	grip_center_node: Node3D,
@@ -1157,13 +1616,19 @@ func _resolve_baseline_contact_target_world_position(
 	var hit: Dictionary = _resolve_contact_hit_on_segment(
 		grip_center_node,
 		baseline_tip_world,
-		center_world
+		center_world,
+		StringName(),
+		StringName(),
+		&"baseline_contact_tip_to_center"
 	)
 	if hit.is_empty():
 		hit = _resolve_contact_hit_on_segment(
 			grip_center_node,
 			center_world,
-			baseline_tip_world
+			baseline_tip_world,
+			StringName(),
+			StringName(),
+			&"baseline_contact_center_to_tip"
 		)
 	if hit.is_empty():
 		return baseline_tip_world

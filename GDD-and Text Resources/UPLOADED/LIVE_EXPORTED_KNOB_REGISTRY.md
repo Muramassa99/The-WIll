@@ -8,11 +8,10 @@
 ## Current Snapshot
 - source: live `@export var` and `@export_range ... var` usage in `.gd` files
 - last full registry sweep date: `04-04-2026` (`DD-MM-YYYY`)
-- last incremental update date: `05-04-2026` (`DD-MM-YYYY`)
-- current exported lines after count refresh: `594`
-- current unique exported names after count refresh: `510`
+- last incremental update date: `14-04-2026` (`DD-MM-YYYY`)
+- current exported lines after count refresh: `664`
+- current unique exported names after count refresh: `572`
 - line numbers in the main full-registry body below still come from the last full sweep unless an incremental update section says otherwise
-- last incremental update date: `11-04-2026` (`DD-MM-YYYY`)
 
 ## Search / Topic Index
 - `hurtbox` / `hitbox` = no final live combat volume system yet
@@ -68,9 +67,24 @@
 - `stage2` / `refinement` / `refinement envelope` = optional shell-refinement layer between Stage 1 crafting and test print
   - names: `stage2_item_state`, `stage2_version`, `refinement_initialized`, `stage2_single_cell_max_inward_ratio`, `stage2_multi_cell_max_inward_ratio`, `stage2_fillet_max_inward_ratio`, `stage2_chamfer_max_inward_ratio`, `stage2_primary_grip_safe_radius_voxels`, `min_surface_depth_voxels`, `max_inward_offset_meters`, `max_fillet_offset_meters`, `max_chamfer_offset_meters`, `zone_mask_id`, `stage2_zone_primary_grip_safe`, `neighbor_patch_ids`, `workspace_stage2_shell_color`, `workspace_stage2_brush_color`, `workspace_stage2_blocked_brush_color`, `workspace_stage2_hover_face_color`, `workspace_stage2_selected_face_color`, `workspace_stage2_default_brush_radius_meters`, `workspace_stage2_brush_step_ratio`, `stage2_surface_face_fillet`, `stage2_surface_face_chamfer`, `stage2_surface_face_restore`, `stage2_surface_edge_fillet`, `stage2_surface_edge_chamfer`, `stage2_surface_edge_restore`, `stage2_surface_feature_edge_fillet`, `stage2_surface_feature_edge_chamfer`, `stage2_surface_feature_edge_restore`, `stage2_surface_feature_region_fillet`, `stage2_surface_feature_region_chamfer`, `stage2_surface_feature_region_restore`, `stage2_surface_feature_band_fillet`, `stage2_surface_feature_band_chamfer`, `stage2_surface_feature_band_restore`, `stage2_surface_feature_cluster_fillet`, `stage2_surface_feature_cluster_chamfer`, `stage2_surface_feature_cluster_restore`, `stage2_surface_feature_bridge_fillet`, `stage2_surface_feature_bridge_chamfer`, `stage2_surface_feature_bridge_restore`, `stage2_surface_feature_contour_fillet`, `stage2_surface_feature_contour_chamfer`, `stage2_surface_feature_contour_restore`, `stage2_surface_feature_loop_fillet`, `stage2_surface_feature_loop_chamfer`, `stage2_surface_feature_loop_restore`, `surface_feature_region`, `surface_feature_band`, `surface_feature_cluster`, `surface_feature_bridge`, `surface_feature_contour`, `surface_feature_loop`
   - refs: `core/models/crafted_item_wip.gd`, `core/models/test_print_instance.gd`, `core/models/stage2_item_state.gd`, `core/models/stage2_patch_state.gd`, `core/models/stage2_shell_quad_state.gd`, `core/defs/forge_rules_def.gd`, `core/defs/forge_view_tuning_def.gd`, `services/forge_stage2_service.gd`, `services/forge_service.gd`, `runtime/forge/forge_stage2_brush_presenter.gd`, `runtime/forge/forge_stage2_selection_presenter.gd`, `runtime/forge/forge_stage2_preview_presenter.gd`
-- `combat animation` / `skill crafter` / `idle draft` = weapon-owned runtime combat animation creator branch foundation
-  - names: `combat_animation_station_state`, `station_schema_id`, `selected_authoring_mode`, `selected_skill_id`, `selected_idle_context_id`, `idle_drafts`, `skill_drafts`, `draft_id`, `draft_kind`, `context_id`, `owning_skill_id`, `legal_slot_id`, `point_chain`, `selected_point_index`, `continuity_point_index`, `preview_playback_speed_scale`, `preview_loop_enabled`, `point_id`, `local_target_position`, `local_target_rotation_degrees`, `active_plane_origin_local`, `active_plane_normal_local`, `active_plane_axis_u_local`, `active_plane_axis_v_local`, `transition_duration_seconds`, `body_support_blend`, `two_hand_state`
-  - refs: `core/models/crafted_item_wip.gd`, `core/models/combat_animation_station_state.gd`, `core/models/combat_animation_draft.gd`, `core/models/combat_animation_point.gd`
+- `combat animation` / `skill crafter` / `idle draft` / `motion node` = weapon-owned runtime combat animation creator branch
+  - names: `combat_animation_station_state`, `station_schema_id`, `selected_authoring_mode`, `selected_skill_id`, `selected_idle_context_id`, `idle_drafts`, `skill_drafts`, `draft_id`, `draft_kind`, `context_id`, `owning_skill_id`, `legal_slot_id`, `motion_node_chain`, `selected_motion_node_index`, `continuity_motion_node_index`, `preview_playback_speed_scale`, `preview_loop_enabled`, `skill_name`, `skill_description`, `node_id`, `node_index`, `weapon_orientation_degrees`, `weapon_orientation_authored`, `tip_position_local`, `tip_curve_in_handle`, `tip_curve_out_handle`, `pommel_position_local`, `pommel_curve_in_handle`, `pommel_curve_out_handle`, `weapon_roll_degrees`, `axial_reposition_offset`, `grip_seat_slide_offset`, `transition_duration_seconds`, `body_support_blend`, `two_hand_state`, `primary_hand_slot`
+  - refs: `core/models/crafted_item_wip.gd`, `core/models/combat_animation_station_state.gd`, `core/models/combat_animation_draft.gd`, `core/models/combat_animation_motion_node.gd`, `core/models/combat_animation_session_state.gd`, `runtime/combat/combat_animation_station_ui.gd`, `runtime/combat/combat_animation_station_preview_presenter.gd`, `runtime/combat/combat_animation_chain_player.gd`, `runtime/combat/combat_animation_motion_node_editor.gd`, `runtime/combat/combat_animation_weapon_frame_solver.gd`, `core/resolvers/combat_animation_draft_validator.gd`
+- `chain playback` / `chain player` = reusable combat animation playback driver
+  - names: `CombatAnimationChainPlayer`, `playback_finished`, `node_reached`, `current_tip_position`, `current_pommel_position`, `current_weapon_roll`, `current_axial_reposition`, `current_grip_seat_slide`, `current_body_support_blend`, `current_primary_hand_slot`, `speed_scale`, `loop_enabled`
+  - refs: `runtime/combat/combat_animation_chain_player.gd`, `runtime/combat/combat_animation_station_ui.gd`
+- `focus cycling` / `current_focus` = tip↔pommel focus toggle in skill crafter UI
+  - names: `current_focus`, `FOCUS_TIP`, `FOCUS_POMMEL`
+  - refs: `runtime/combat/combat_animation_station_ui.gd`, `runtime/combat/combat_animation_station_preview_presenter.gd`
+- `onion skin` = ghost neighbor markers at ±1/±2 motion node positions
+  - names: `ONION_SKIN_MESH_NAME`
+  - refs: `runtime/combat/combat_animation_station_preview_presenter.gd`
+- `legacy point` = DELETED — older combat-animation resource, fully replaced by CombatAnimationMotionNode
+  - names: `CombatAnimationPoint` (DELETED)
+  - refs: `core/models/combat_animation_point.gd` (DELETED)
+- `skill slot` / `skill bar` / `block` / `evade` = canonical combat slot assignment and HUD surface
+  - names: `skill_block`, `skill_evade`, `skill_slot_1` through `skill_slot_12`, `slot_assignments`, `source_weapon_wip_id`, `source_skill_draft_id`, `element_positions`, `element_scales`
+  - refs: `runtime/system/user_settings_runtime.gd`, `core/models/player_skill_slot_state.gd`, `core/models/skill_slot_assignment.gd`, `core/models/player_hud_layout_state.gd`, `runtime/ui/player_gameplay_hud_overlay.gd`
 - `animation effect stub` / `motion threshold fx` = forward-compatible combat-animation-driven material effect stub layer
   - names: `animation_effect_stubs`, `resolved_animation_effect_stubs`, `effect_stub_id`, `trigger_kind`, `effect_kind`, `animation_speed_threshold_ratio`, `particle_scene_path`, `sound_event_id`
   - refs: `core/defs/base_material_def.gd`, `core/defs/material_variant_def.gd`, `core/defs/material_animation_effect_stub.gd`, `core/resolvers/tier_resolver.gd`, `core/resolvers/material_runtime_resolver.gd`
@@ -183,12 +197,14 @@
   - L16 `legal_slot_id`
   - L17 `preferred_grip_style_mode`
   - L18 `authored_for_two_hand_only`
-  - L19 `point_chain`
-  - L20 `selected_point_index`
-  - L21 `continuity_point_index`
+  - L19 `motion_node_chain`
+  - L20 `selected_motion_node_index`
+  - L21 `continuity_motion_node_index`
   - L22 `preview_playback_speed_scale`
   - L23 `preview_loop_enabled`
-  - L24 `draft_notes`
+  - L24 `skill_name`
+  - L25 `skill_description`
+  - L26 `draft_notes`
 - `core/models/combat_animation_station_state.gd`
   - L13 `station_version`
   - L14 `station_schema_id`
@@ -846,6 +862,71 @@
 - L48 `compact_footer_button_min_height`
 - L49 `page_scroll_width_padding`
 
+## core/models/combat_animation_motion_node.gd
+- L8 `node_id`
+- L9 `node_index`
+- L12 `weapon_orientation_degrees`
+- L13 `weapon_orientation_authored`
+- L16 `tip_position_local`
+- L17 `tip_curve_in_handle`
+- L18 `tip_curve_out_handle`
+- L21 `pommel_position_local`
+- L22 `pommel_curve_in_handle`
+- L23 `pommel_curve_out_handle`
+- L26 `weapon_roll_degrees`
+- L29 `axial_reposition_offset`
+- L30 `grip_seat_slide_offset`
+- L33 `transition_duration_seconds`
+- L36 `body_support_blend`
+- L37 `preferred_grip_style_mode`
+- L38 `two_hand_state`
+- L39 `primary_hand_slot`
+- L41 `draft_notes`
+
+## core/models/combat_animation_draft.gd
+- L9 `draft_id`
+- L10 `display_name`
+- L11 `draft_kind`
+- L12 `context_id`
+- L13 `owning_skill_id`
+- L14 `legal_slot_id`
+- L15 `preferred_grip_style_mode`
+- L16 `authored_for_two_hand_only`
+- L17 `motion_node_chain`
+- L18 `selected_motion_node_index`
+- L19 `continuity_motion_node_index`
+- L20 `preview_playback_speed_scale`
+- L21 `preview_loop_enabled`
+- L22 `skill_name`
+- L23 `skill_description`
+- L24 `draft_notes`
+
+## core/models/player_skill_slot_state.gd
+- L25 `slot_assignments`
+- L26 `save_file_path`
+
+## core/models/skill_slot_assignment.gd
+- L4 `slot_id`
+- L5 `source_weapon_wip_id`
+- L6 `source_skill_draft_id`
+- L7 `display_name`
+
+## core/models/player_hud_layout_state.gd
+- L7 `element_positions`
+- L8 `element_scales`
+- L9 `save_file_path`
+
+## runtime/ui/player_gameplay_hud_overlay.gd
+- L46 `slot_button_width`
+- L47 `slot_button_height`
+- L48 `slot_gap_px`
+- L49 `group_gap_px`
+- L50 `bar_bottom_margin_px`
+- L51 `hp_bar_width`
+- L52 `hp_bar_height`
+- L53 `stamina_bar_width`
+- L54 `stamina_bar_height`
+
 ## Update Rule
 - when a new exported knob appears, add it here or regenerate this file from live code
 - keep the search/topic index near the top
@@ -867,3 +948,113 @@
   - `Bezier trajectory`
   - `idle draft authoring`
   - `weapon-owned skill draft`
+
+## Incremental Updates - 13-04-2026
+
+### Registry Count Refresh
+- refreshed the snapshot counts directly from live code:
+  - `exported_lines=664`
+  - `unique_exported_names=572`
+
+### Combat Animation Creator Motion-Node Migration
+- live authored combat-animation truth now lives in:
+  - `core/models/combat_animation_motion_node.gd`
+  - `core/models/combat_animation_draft.gd`
+- the active exported field family is now:
+  - `motion_node_chain`
+  - `selected_motion_node_index`
+  - `continuity_motion_node_index`
+  - `skill_name`
+  - `skill_description`
+  - `weapon_orientation_degrees`
+  - `weapon_orientation_authored`
+  - `tip_position_local`
+  - `pommel_position_local`
+  - `weapon_roll_degrees`
+  - `axial_reposition_offset`
+  - `grip_seat_slide_offset`
+- legacy wording still exists in compatibility/debug surfaces:
+  - `draft_point_count`
+  - `selected_point_index`
+  - `point_marker_count`
+  - `CombatAnimationPoint`
+
+### Combat Animation Session State, Motion Node Editor, and Draft Validator (M4, M6, M9)
+- new files added:
+  - `core/models/combat_animation_session_state.gd` — editor session state (M4)
+  - `runtime/combat/combat_animation_motion_node_editor.gd` — tip, pommel sphere, and weapon-orientation drag interaction (M6)
+  - `runtime/combat/combat_animation_weapon_frame_solver.gd` — clean tip/pommel/weapon-orientation transform solver
+  - `core/resolvers/combat_animation_draft_validator.gd` — draft validation (M9)
+- validator constants:
+  - `MIN_SKILL_NODES = 2` — minimum motion nodes for a skill draft
+  - `MIN_IDLE_NODES = 1` — minimum motion nodes for an idle draft
+  - `DEGENERATE_HANDLE_THRESHOLD = 0.0001` — zero-handle detection epsilon
+- visualization colors (hardcoded in combat_animation_station_preview_presenter.gd):
+  - pommel constraint sphere: `Color(0.8, 0.55, 0.9, 0.2)`
+- session state fields:
+  - `FOCUS_TIP`, `FOCUS_POMMEL`, `FOCUS_WEAPON` — focus mode constants
+  - `current_weapon_wip_id`, `current_draft_ref`, `current_motion_node_index`, `current_focus`
+  - `playback_active`, `onion_skin_enabled`
+  - `cycle_focus()`, `is_tip_focused()`, `reset()`
+- motion node editor fields:
+  - `raycast_tip_on_view_drag_plane()`, `raycast_pommel_on_sphere()`, `constrain_pommel_to_sphere()`
+  - `begin_drag()`, `end_drag()`, `is_dragging()`, `get_drag_target()`, `resolve_weapon_orientation_drag()`
+- search topics to remember:
+  - `session state separation`
+  - `weapon frame solver`
+  - `sphere constraint`
+  - `draft validator`
+  - `MIN_SKILL_NODES`
+  - `DEGENERATE_HANDLE_THRESHOLD`
+  - `grip axis default orientation`
+
+### Canonical Combat Skill Slot / HUD Surface
+- live canonical combat slot ids now exist in code:
+  - `skill_block`
+  - `skill_evade`
+  - `skill_slot_1` through `skill_slot_12`
+- slot assignment and HUD layout state now live through:
+  - `core/models/player_skill_slot_state.gd`
+  - `core/models/skill_slot_assignment.gd`
+  - `core/models/player_hud_layout_state.gd`
+  - `runtime/ui/player_gameplay_hud_overlay.gd`
+- note:
+  - the HUD shell exists and reads the canonical slot family
+  - block/evade dedicated refresh methods are still placeholder code in the current overlay
+
+### Skill Crafter UI Scaling and Layout Internals
+- `runtime/combat/combat_animation_station_ui.gd`:
+  - `var scale_factor: float` — viewport-proportional multiplier, computed as `minf(viewport_w / 1920.0, viewport_h / 1080.0)`
+  - `_spi(px: int) -> int` — scale integer pixel values (fonts, separations) by scale_factor, min 1
+  - `_spf(px: float) -> float` — scale float pixel values (content margins) by scale_factor, min 1.0
+  - base font constants (unscaled reference): `FONT_TITLE=20`, `FONT_SECTION=13`, `FONT_BODY=12`, `FONT_HINT=11`
+  - three-column stretch ratios: sidebar `0.22`, center `1.0`, inspector `0.26` (all `SIZE_EXPAND_FILL`)
+  - collapsible section helper: `_build_collapsible_section(parent, title, initially_expanded)` — returns content VBoxContainer
+- search topics:
+  - `scale_factor`
+  - `_spi` / `_spf`
+  - `collapsible section`
+  - `stretch_ratio`
+
+- `authoring contact tether` = Skill Crafter occupied-hand reach-bound acceptance clamp for authored tip/pommel edits
+  - names: `constrain_authored_segment_to_contact_tether`, `authoring_contact_tether_metrics`, `AUTHORING_CONTACT_TETHER_REACH_MARGIN_METERS`, `AUTHORING_CONTACT_TETHER_ITERATIONS`, `AUTHORING_CONTACT_SEAT_LOCK_STRENGTH`
+  - modes: `AUTHORING_CONTACT_TETHER_MODE_TRANSLATE`, `AUTHORING_CONTACT_TETHER_MODE_TIP_PIVOT`
+  - metrics: `mode`, `pivot_mode`, `pivot_delta_meters`, `dominant_seat_error_before_meters`, `dominant_seat_error_after_meters`, `dominant_seat_lock_delta_meters`
+  - law: live drag uses hard occupied-hand seating; the dominant Contact Group should remain seated instead of allowing loose shoulder-bubble wandering
+  - refs: `runtime/combat/combat_animation_station_preview_presenter.gd`, `runtime/combat/combat_animation_station_ui.gd`, `tools/verify_combat_animation_station_preview.gd`
+
+- `authoring Contact Group wrist basis` = Skill Crafter preview-only hand-anchor basis alignment before finger IK
+  - names: `enable_authoring_contact_wrist_basis`, `authoring_contact_wrist_basis_strength`, `authoring_contact_wrist_twist_limit_degrees`, `set_authoring_contact_anchor_basis`, `clear_authoring_contact_anchor_basis`, `clear_authoring_contact_anchor_bases`
+  - law: default `authoring_contact_wrist_twist_limit_degrees = 0.0`; the Contact Group wrist may swing/aim, but should not roll around its own forearm-to-hand axis
+  - debug: `right_authoring_contact_basis_active`, `left_authoring_contact_basis_active`
+  - refs: `runtime/player/player_humanoid_rig.gd`, `runtime/combat/combat_animation_station_preview_presenter.gd`, `tools/verify_combat_animation_station_preview.gd`
+
+- `finger grip contact ray debug` = runtime/debug metadata trail for Contact Group raycasts against grip shells
+  - meta: `finger_grip_contact_ray_debug`
+  - limit: `CONTACT_RAY_DEBUG_LIMIT = 96`
+  - payload: `slot_id`, `finger_id`, `context`, `from_world`, `to_world`, `collision_mask`, `hit`, `hit_position`, `hit_normal`, `hit_distance_meters`, `collider_name`, `collider_path`, `collider_class`, `collider_layer`, `skipped_reason`
+  - fallback contexts: `plane_curl_profile_fallback`, `plane_curl_idle_profile_fallback`
+  - fallback law: if plane curl misses, cast to actual occupied grip profile cell centers, not only the abstract grip-shell midpoint
+  - preview debug: `dominant_finger_contact_ray_debug`, `support_finger_contact_ray_debug`
+  - UI summary: Skill Crafter `CURRENT CONTEXT` dominant/support contact ray lines
+  - refs: `runtime/player/player_rig_finger_grip_presenter.gd`, `runtime/combat/combat_animation_station_preview_presenter.gd`, `runtime/combat/combat_animation_station_ui.gd`, `tools/verify_combat_animation_station_preview.gd`

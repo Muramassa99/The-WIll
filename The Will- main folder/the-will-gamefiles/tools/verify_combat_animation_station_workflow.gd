@@ -49,18 +49,23 @@ func _run_verification() -> void:
 
 	var opened: bool = ui.is_open()
 	var selected_wip_before: StringName = ui.get_active_saved_wip_id()
-	var created_skill_id: StringName = ui.create_skill_draft(&"skill_custom_alpha", "Custom Alpha")
+	var created_skill_id: StringName = &"skill_slot_4"
+	var slot_select_ok: bool = ui.select_skill_slot(created_skill_id)
+	ui.set_active_draft_skill_name("Custom Alpha")
 	await process_frame
 	var selected_draft_after_create: StringName = ui.get_active_draft_identifier()
 	var add_node_ok: bool = ui.insert_motion_node_after_selection()
 	await process_frame
 	var node_selection_after_insert: int = ui.get_selected_motion_node_index()
 	var tip_position_ok: bool = ui.set_selected_motion_node_tip_position(Vector3(0.15, 0.02, -0.21))
-	var plane_orientation_ok: bool = ui.set_selected_motion_node_plane_orientation(Vector3(-12.0, 6.0, 18.0))
+	var weapon_orientation_ok: bool = ui.set_selected_motion_node_weapon_orientation(Vector3(-12.0, 6.0, 18.0))
 	var transition_update_ok: bool = ui.set_selected_motion_node_transition_duration(0.44)
+	var preview_speed_ok: bool = ui.set_active_draft_preview_speed(1.35)
 	var support_blend_ok: bool = ui.set_selected_motion_node_body_support_blend(0.35)
 	var two_hand_ok: bool = ui.set_selected_motion_node_two_hand_state(&"two_hand_two_hand")
+	var primary_hand_ok: bool = ui.set_selected_motion_node_primary_hand_slot(&"hand_left")
 	var notes_ok: bool = ui.set_active_draft_notes("Verifier notes")
+	var reset_ok: bool = ui.reset_active_draft_to_baseline()
 	await process_frame
 
 	var reloaded_library: PlayerForgeWipLibraryState = PlayerForgeWipLibraryStateScript.load_or_create(TEMP_SAVE_FILE_PATH)
@@ -69,12 +74,16 @@ func _run_verification() -> void:
 	var reloaded_skill_drafts: Array = reloaded_station_state.get("skill_drafts") as Array if reloaded_station_state != null else []
 	var reloaded_custom_draft: Resource = _find_skill_draft(reloaded_skill_drafts, created_skill_id)
 	var reloaded_motion_nodes: Array = reloaded_custom_draft.get("motion_node_chain") as Array if reloaded_custom_draft != null else []
-	var reloaded_node: Resource = reloaded_motion_nodes[1] as Resource if reloaded_motion_nodes.size() > 1 else null
+	var reloaded_first_node: Resource = reloaded_motion_nodes[0] as Resource if reloaded_motion_nodes.size() > 0 else null
+	var reloaded_second_node: Resource = reloaded_motion_nodes[1] as Resource if reloaded_motion_nodes.size() > 1 else null
+	var reloaded_second_transition: float = float(reloaded_second_node.get("transition_duration_seconds")) if reloaded_second_node != null else -1.0
+	var reloaded_second_tip: Vector3 = reloaded_second_node.get("tip_position_local") as Vector3 if reloaded_second_node != null else Vector3.ZERO
 
 	var lines: PackedStringArray = []
 	lines.append("station_opened=%s" % str(opened))
 	lines.append("player_ui_mode_enabled=%s" % str(fake_player.ui_mode_enabled))
 	lines.append("selected_wip_before=%s" % String(selected_wip_before))
+	lines.append("slot_select_ok=%s" % str(slot_select_ok))
 	lines.append("created_skill_id=%s" % String(created_skill_id))
 	lines.append("selected_draft_after_create=%s" % String(selected_draft_after_create))
 	lines.append("skill_draft_created=%s" % str(reloaded_custom_draft != null))
@@ -82,16 +91,26 @@ func _run_verification() -> void:
 	lines.append("node_selection_after_insert=%d" % node_selection_after_insert)
 	lines.append("reloaded_motion_node_count=%d" % reloaded_motion_nodes.size())
 	lines.append("tip_position_ok=%s" % str(tip_position_ok))
-	lines.append("plane_orientation_ok=%s" % str(plane_orientation_ok))
+	lines.append("weapon_orientation_ok=%s" % str(weapon_orientation_ok))
 	lines.append("transition_update_ok=%s" % str(transition_update_ok))
+	lines.append("preview_speed_ok=%s" % str(preview_speed_ok))
 	lines.append("support_blend_ok=%s" % str(support_blend_ok))
 	lines.append("two_hand_ok=%s" % str(two_hand_ok))
+	lines.append("primary_hand_ok=%s" % str(primary_hand_ok))
 	lines.append("notes_ok=%s" % str(notes_ok))
-	lines.append("reloaded_node_tip_position=%s" % str(reloaded_node.get("tip_position_local") if reloaded_node != null else Vector3.ZERO))
-	lines.append("reloaded_node_plane_orientation=%s" % str(reloaded_node.get("trajectory_plane_orientation_degrees") if reloaded_node != null else Vector3.ZERO))
-	lines.append("reloaded_node_transition=%s" % str(snapped(float(reloaded_node.get("transition_duration_seconds")) if reloaded_node != null else -1.0, 0.0001)))
-	lines.append("reloaded_node_support_blend=%s" % str(snapped(float(reloaded_node.get("body_support_blend")) if reloaded_node != null else -1.0, 0.0001)))
-	lines.append("reloaded_node_two_hand_state=%s" % String(reloaded_node.get("two_hand_state") if reloaded_node != null else StringName()))
+	lines.append("reset_ok=%s" % str(reset_ok))
+	lines.append("reloaded_selected_motion_node_index=%d" % int(reloaded_custom_draft.get("selected_motion_node_index") if reloaded_custom_draft != null else -1))
+	lines.append("reloaded_preview_speed=%s" % str(snapped(float(reloaded_custom_draft.get("preview_playback_speed_scale")) if reloaded_custom_draft != null else -1.0, 0.0001)))
+	lines.append("reloaded_first_node_tip_position=%s" % str(reloaded_first_node.get("tip_position_local") if reloaded_first_node != null else Vector3.ZERO))
+	lines.append("reloaded_second_node_tip_position=%s" % str(reloaded_second_node.get("tip_position_local") if reloaded_second_node != null else Vector3.ZERO))
+	lines.append("reloaded_second_node_weapon_orientation=%s" % str(reloaded_second_node.get("weapon_orientation_degrees") if reloaded_second_node != null else Vector3.ZERO))
+	lines.append("reloaded_second_node_transition=%s" % str(snapped(reloaded_second_transition, 0.0001)))
+	lines.append("reloaded_second_node_support_blend=%s" % str(snapped(float(reloaded_second_node.get("body_support_blend")) if reloaded_second_node != null else -1.0, 0.0001)))
+	lines.append("reloaded_second_node_two_hand_state=%s" % String(reloaded_second_node.get("two_hand_state") if reloaded_second_node != null else StringName()))
+	lines.append("reloaded_second_node_primary_hand_slot=%s" % String(reloaded_second_node.get("primary_hand_slot") if reloaded_second_node != null else StringName()))
+	lines.append("reset_restored_baseline_count=%s" % str(reloaded_motion_nodes.size() == 2))
+	lines.append("reset_cleared_modified_transition=%s" % str(absf(reloaded_second_transition - 0.44) > 0.0001))
+	lines.append("reset_cleared_modified_tip=%s" % str(reloaded_second_node != null and not reloaded_second_tip.is_equal_approx(Vector3(0.15, 0.02, -0.21))))
 	lines.append("reloaded_notes=%s" % String(reloaded_custom_draft.get("draft_notes") if reloaded_custom_draft != null else ""))
 
 	var file: FileAccess = FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)

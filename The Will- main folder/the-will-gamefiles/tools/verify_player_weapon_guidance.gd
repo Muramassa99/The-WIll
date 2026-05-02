@@ -4,16 +4,22 @@ const PlayerBodyInventoryStateScript = preload("res://core/models/player_body_in
 const PlayerPersonalStorageStateScript = preload("res://core/models/player_personal_storage_state.gd")
 const PlayerEquipmentStateScript = preload("res://core/models/player_equipment_state.gd")
 const PlayerForgeWipLibraryStateScript = preload("res://core/models/player_forge_wip_library_state.gd")
+const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_state.gd")
 
 const RESULT_FILE_PATH := "C:/WORKSPACE/player_weapon_guidance_results.txt"
 const TEMP_STATE_DIR := "C:/WORKSPACE/test_artifacts"
+const TEST_GRIP_LAYER_START := 20
+const TEST_GRIP_SLICE_COUNT := 20
 
 func _init() -> void:
 	call_deferred("_run_verification")
 
 func _run_verification() -> void:
 	var player_scene: PackedScene = load("res://scenes/player/player_character.tscn") as PackedScene
-	var player_root: Node = player_scene.instantiate()
+	var player_root: PlayerController3D = player_scene.instantiate() as PlayerController3D
+	var skill_slot_state := PlayerSkillSlotStateScript.new()
+	skill_slot_state.save_file_path = "%s/verify_guidance_skill_slot_state.tres" % TEMP_STATE_DIR
+	player_root.player_skill_slot_state = skill_slot_state
 	root.add_child(player_root)
 	await process_frame
 	await process_frame
@@ -66,6 +72,8 @@ func _run_verification() -> void:
 	var left_guidance_target: Node3D = rig.get_arm_guidance_target(&"hand_left") if rig != null else null
 	var left_support_active: bool = rig.is_support_hand_active(&"hand_left") if rig != null else false
 	var body_restriction_root: Node3D = rig.get_body_restriction_root() if rig != null and rig.has_method("get_body_restriction_root") else null
+	var body_clearance_debug: Dictionary = rig.get_body_clearance_debug_state() if rig != null and rig.has_method("get_body_clearance_debug_state") else {}
+	var body_self_collision_debug: Dictionary = rig.get_body_self_collision_debug_state() if rig != null and rig.has_method("get_body_self_collision_debug_state") else {}
 	var grip_solve_root: Node3D = rig.get_grip_solve_root() if rig != null and rig.has_method("get_grip_solve_root") else null
 	var current_animation_name: StringName = rig.get_current_animation_name() if rig != null and rig.has_method("get_current_animation_name") else StringName()
 	var two_hand_idle_animation_active: bool = rig.is_two_hand_idle_animation_active() if rig != null and rig.has_method("is_two_hand_idle_animation_active") else false
@@ -81,6 +89,19 @@ func _run_verification() -> void:
 	var support_desired_marker: Node3D = grip_solve_root.get_node_or_null("SupportDesiredTarget") as Node3D if grip_solve_root != null else null
 	var support_corrected_marker: Node3D = grip_solve_root.get_node_or_null("SupportCorrectedTarget") as Node3D if grip_solve_root != null else null
 	var support_weapon_proxy_marker: Node3D = grip_solve_root.get_node_or_null("SupportWeaponProxy_0") as Node3D if grip_solve_root != null else null
+	var weapon_proxy_sample_local_positions: PackedStringArray = []
+	var weapon_proxy_max_local_distance_from_origin: float = -1.0
+	if weapon_body_proxy_root != null:
+		weapon_proxy_max_local_distance_from_origin = 0.0
+		for child_node: Node in weapon_body_proxy_root.get_children():
+			var sample_node: Node3D = child_node as Node3D
+			if sample_node == null:
+				continue
+			weapon_proxy_sample_local_positions.append("%s=%s" % [String(sample_node.name), str(sample_node.position)])
+			weapon_proxy_max_local_distance_from_origin = maxf(
+				weapon_proxy_max_local_distance_from_origin,
+				sample_node.position.length()
+			)
 
 	var left_hand_index: int = skeleton.find_bone("CC_Base_L_Hand") if skeleton != null else -1
 	var left_hand_world_position: Vector3 = Vector3.ZERO
@@ -108,11 +129,35 @@ func _run_verification() -> void:
 	lines.append("support_basis_anchor_valid=%s" % str(bool(support_basis_anchor.get_meta("grip_basis_valid", false)) if support_basis_anchor != null else false))
 	lines.append("weapon_body_proxy_exists=%s" % str(weapon_body_proxy_root != null))
 	lines.append("weapon_body_proxy_sample_count=%d" % int(weapon_body_proxy_root.get_child_count() if weapon_body_proxy_root != null else 0))
+	lines.append("weapon_body_proxy_source=%s" % str(weapon_body_proxy_root.get_meta("proxy_source", StringName()) if weapon_body_proxy_root != null else StringName()))
+	lines.append("weapon_body_proxy_clearance_offset_meters=%s" % str(snapped(float(weapon_body_proxy_root.get_meta("clearance_offset_meters", 0.0)) if weapon_body_proxy_root != null else 0.0, 0.0001)))
+	lines.append("weapon_body_proxy_uses_full_geometry=%s" % str(bool(weapon_body_proxy_root.get_meta("weapon_proxy_uses_full_geometry", false)) if weapon_body_proxy_root != null else false))
+	lines.append("weapon_body_proxy_sample_local_positions=%s" % " | ".join(weapon_proxy_sample_local_positions))
+	lines.append("weapon_body_proxy_max_local_distance_from_origin=%s" % str(snapped(weapon_proxy_max_local_distance_from_origin, 0.0001)))
+	lines.append("weapon_body_proxy_geometry_frame_ok=%s" % str(
+		weapon_body_proxy_root != null
+		and weapon_body_proxy_root.get_child_count() >= 8
+		and weapon_proxy_max_local_distance_from_origin > 0.08
+	))
 	lines.append("required_cc_base_bones_present=%s" % str(missing_required_bones.is_empty()))
 	lines.append("missing_cc_base_bone_count=%d" % missing_required_bones.size())
 	lines.append("missing_cc_base_bones=%s" % ", ".join(missing_required_bones))
 	lines.append("secondary_guide_exists=%s" % str(secondary_guide != null))
 	lines.append("body_restriction_root_exists=%s" % str(body_restriction_root != null))
+	lines.append("body_clearance_proxy_source=%s" % str(body_clearance_debug.get("body_clearance_proxy_source", StringName())))
+	lines.append("body_clearance_offset_meters=%s" % str(snapped(float(body_clearance_debug.get("body_clearance_offset_meters", 0.0)), 0.0001)))
+	lines.append("body_clearance_descriptor_count=%d" % int(body_clearance_debug.get("body_clearance_descriptor_count", 0)))
+	lines.append("body_clearance_attachment_count=%d" % int(body_clearance_debug.get("body_clearance_attachment_count", 0)))
+	lines.append("body_clearance_regions=%s" % ", ".join(body_clearance_debug.get("body_clearance_regions", PackedStringArray())))
+	lines.append("body_clearance_source_mesh_aabb_size=%s" % str(body_clearance_debug.get("body_clearance_source_mesh_aabb_size", Vector3.ZERO)))
+	lines.append("body_self_collision_legal=%s" % str(bool(body_self_collision_debug.get("legal", true))))
+	lines.append("body_self_collision_checked_pair_count=%d" % int(body_self_collision_debug.get("checked_pair_count", 0)))
+	lines.append("body_self_collision_overlap_pair_count=%d" % int(body_self_collision_debug.get("overlap_pair_count", 0)))
+	lines.append("body_self_collision_allowed_overlap_pair_count=%d" % int(body_self_collision_debug.get("allowed_overlap_pair_count", 0)))
+	lines.append("body_self_collision_illegal_pair_count=%d" % int(body_self_collision_debug.get("illegal_pair_count", 0)))
+	lines.append("body_self_collision_first_illegal_pair=%s" % str(body_self_collision_debug.get("first_illegal_pair", {})))
+	lines.append("body_self_collision_illegal_pairs=%s" % str(body_self_collision_debug.get("illegal_pairs", [])))
+	lines.append("body_self_collision_first_allowed_pair=%s" % str(body_self_collision_debug.get("first_allowed_overlap_pair", {})))
 	lines.append("grip_solve_root_exists=%s" % str(grip_solve_root != null))
 	lines.append("dominant_desired_marker_exists=%s" % str(dominant_desired_marker != null))
 	lines.append("dominant_corrected_marker_exists=%s" % str(dominant_corrected_marker != null))
@@ -145,18 +190,18 @@ func _build_two_hand_test_wip() -> CraftedItemWIP:
 	wip.created_timestamp = Time.get_unix_time_from_system()
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
-	var layer_a: LayerAtom = LayerAtom.new()
-	layer_a.layer_index = 20
-	layer_a.cells = _build_handle_cells(20)
-	var layer_b: LayerAtom = LayerAtom.new()
-	layer_b.layer_index = 21
-	layer_b.cells = _build_handle_cells(21)
-	wip.layers = [layer_a, layer_b]
+	var layers: Array[LayerAtom] = []
+	for layer_index: int in range(TEST_GRIP_LAYER_START, TEST_GRIP_LAYER_START + TEST_GRIP_SLICE_COUNT):
+		var layer := LayerAtom.new()
+		layer.layer_index = layer_index
+		layer.cells = _build_handle_cells(layer_index)
+		layers.append(layer)
+	wip.layers = layers
 	return wip
 
 func _build_handle_cells(layer_index: int) -> Array[CellAtom]:
 	var cells: Array[CellAtom] = []
-	for x in range(20, 48):
+	for x in range(20, 23):
 		for y in range(10, 13):
 			var cell: CellAtom = CellAtom.new()
 			cell.grid_position = Vector3i(x, y, layer_index)

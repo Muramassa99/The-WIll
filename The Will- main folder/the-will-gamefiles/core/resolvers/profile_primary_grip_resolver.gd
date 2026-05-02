@@ -193,18 +193,23 @@ func _apply_weapon_total_length(
 	if profile == null or cells.is_empty() or grip_axis_direction.length_squared() <= 0.00001:
 		return
 	var axis_normalized: Vector3 = grip_axis_direction.normalized()
+	var cell_half_projection: float = 0.5 * (
+		absf(axis_normalized.x)
+		+ absf(axis_normalized.y)
+		+ absf(axis_normalized.z)
+	)
 	var min_proj: float = INF
 	var max_proj: float = -INF
 	for cell: CellAtom in cells:
 		if cell == null:
 			continue
 		var center: Vector3 = cell.get_center_position()
-		var proj: float = axis_normalized.dot(center - grip_axis_origin)
-		min_proj = minf(min_proj, proj)
-		max_proj = maxf(max_proj, proj)
+		var proj_center: float = axis_normalized.dot(center - grip_axis_origin)
+		min_proj = minf(min_proj, proj_center - cell_half_projection)
+		max_proj = maxf(max_proj, proj_center + cell_half_projection)
 	if min_proj >= max_proj:
 		return
-	var total_length: float = max_proj - min_proj
+	var total_length_voxels: float = max_proj - min_proj
 	var extremity_1: Vector3 = grip_axis_origin + axis_normalized * min_proj
 	var extremity_2: Vector3 = grip_axis_origin + axis_normalized * max_proj
 	var hand_proj: float = axis_normalized.dot(hand_contact_position - grip_axis_origin)
@@ -224,8 +229,9 @@ func _apply_weapon_total_length(
 		pommel_point = extremity_2
 		tip_dist = dist_to_1
 		pommel_dist = dist_to_2
-	profile.weapon_total_length_meters = total_length
+	var cell_world_size_meters: float = maxf(forge_rules.cell_world_size_meters, 0.0001)
+	profile.weapon_total_length_meters = total_length_voxels * cell_world_size_meters
 	profile.weapon_tip_point = tip_point
 	profile.weapon_pommel_point = pommel_point
-	profile.weapon_tip_distance_meters = tip_dist
-	profile.weapon_pommel_distance_meters = pommel_dist
+	profile.weapon_tip_distance_meters = tip_dist * cell_world_size_meters
+	profile.weapon_pommel_distance_meters = pommel_dist * cell_world_size_meters

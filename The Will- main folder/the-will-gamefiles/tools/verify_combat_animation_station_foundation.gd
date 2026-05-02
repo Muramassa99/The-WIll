@@ -30,7 +30,7 @@ func _run_verification() -> void:
 		CombatAnimationDraftScript.IDLE_CONTEXT_COMBAT,
 		"Combat Idle"
 	)
-	var noncombat_idle_draft: Resource = station_state.call(
+	var noncombat_idle_draft_result: Resource = station_state.call(
 		"get_or_create_idle_draft",
 		CombatAnimationDraftScript.IDLE_CONTEXT_NONCOMBAT,
 		"Noncombat Idle"
@@ -66,10 +66,13 @@ func _run_verification() -> void:
 	lines.append("combat_animation_station_exists=%s" % str(station_state != null))
 	lines.append("combat_animation_station_schema_id=%s" % str(_resource_get(station_state, &"station_schema_id", StringName())))
 	lines.append("idle_draft_count=%d" % int((_resource_get(station_state, &"idle_drafts", []) as Array).size() if station_state != null else 0))
+	lines.append("authoring_idle_context_count=%d" % int(CombatAnimationStationStateScript.get_authoring_idle_context_ids().size()))
 	lines.append("skill_draft_count=%d" % int((_resource_get(station_state, &"skill_drafts", []) as Array).size() if station_state != null else 0))
 	lines.append("default_skill_package_initialized=%s" % str(bool(_resource_get(station_state, &"default_skill_package_initialized", false)) if station_state != null else false))
-	lines.append("combat_idle_point_count=%d" % int(combat_idle_draft.call("get_point_count") if combat_idle_draft != null else 0))
-	lines.append("noncombat_idle_point_count=%d" % int(noncombat_idle_draft.call("get_point_count") if noncombat_idle_draft != null else 0))
+	lines.append("combat_idle_motion_node_count=%d" % int((combat_idle_draft.get("motion_node_chain") as Array).size() if combat_idle_draft != null else 0))
+	lines.append("noncombat_idle_authoring_available=%s" % str(noncombat_idle_draft_result != null))
+	lines.append("noncombat_idle_motion_node_count=%d" % int((noncombat_idle_draft_result.get("motion_node_chain") as Array).size() if noncombat_idle_draft_result != null else 0))
+	lines.append("noncombat_idle_stow_anchor_mode=%s" % String(_resource_get(noncombat_idle_draft_result, &"stow_anchor_mode", StringName())))
 	lines.append("saved_clone_exists=%s" % str(saved_clone != null))
 	lines.append("saved_station_exists=%s" % str(saved_station_state != null))
 	lines.append("saved_skill_draft_count=%d" % int((_resource_get(saved_station_state, &"skill_drafts", []) as Array).size() if saved_station_state != null else 0))

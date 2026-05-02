@@ -83,6 +83,28 @@
   - refs: `STAGE 2 - UNIFIED VISUAL SHELL IMPLEMENTATION SPEC 2026-04-09.md`
 - `Stage2PatchState` = current prototype local Stage 2 quad-patch record; no longer the intended final visual-shell authority
   - refs: `core/models/stage2_patch_state.gd`, `STAGE 2 - UNIFIED VISUAL SHELL IMPLEMENTATION SPEC 2026-04-09.md`
+- `Combat Animation Creator` = weapon-owned runtime combat motion authoring branch
+  - refs: `core/models/combat_animation_station_state.gd`, `runtime/combat/combat_animation_station.gd`, `runtime/combat/combat_animation_station_ui.gd`
+- `CombatAnimationStationState` = per-weapon / per-WIP combat-animation authoring state container
+  - refs: `core/models/combat_animation_station_state.gd`, `core/models/crafted_item_wip.gd`
+- `CombatAnimationDraft` = one authored idle or skill draft inside the combat animation creator branch
+  - refs: `core/models/combat_animation_draft.gd`, `runtime/combat/combat_animation_station_ui.gd`
+- `motion node` = the current authored combat-motion unit inside a draft
+  - refs: `core/models/combat_animation_motion_node.gd`, `core/models/combat_animation_draft.gd`, `runtime/combat/combat_animation_station_ui.gd`
+- `CombatAnimationMotionNode` = Resource class for the live motion-node truth
+  - refs: `core/models/combat_animation_motion_node.gd`
+- `CombatAnimationChainPlayer` = RefCounted reusable chain playback driver for dual tip+pommel curve interpolation
+  - refs: `runtime/combat/combat_animation_chain_player.gd`, `runtime/combat/combat_animation_station_ui.gd`
+- `CombatAnimationSessionState` = RefCounted editor session state for combat animation station (focus, playback, onion skin flags)
+  - refs: `core/models/combat_animation_session_state.gd`, `runtime/combat/combat_animation_station_ui.gd`
+- `CombatAnimationMotionNodeEditor` = RefCounted plane + sphere drag interaction handler for motion-node 3D editing
+  - refs: `runtime/combat/combat_animation_motion_node_editor.gd`, `runtime/combat/combat_animation_station_ui.gd`
+- `CombatAnimationDraftValidator` = RefCounted draft validation layer (minimum nodes, protected first node, degenerate handles, node index consistency, transition durations)
+  - refs: `core/resolvers/combat_animation_draft_validator.gd`, `runtime/combat/combat_animation_station_ui.gd`
+- `CombatAnimationPoint` = DELETED — legacy point-era combat-animation resource, fully replaced by CombatAnimationMotionNode
+  - refs: `core/models/combat_animation_point.gd` (DELETED)
+- `2 Hand Idle` = dedicated authored animation clip name for the two-hand idle lane
+  - refs: `Josie/josie.tscn`, `runtime/player/player_rig_locomotion_presenter.gd`
 - `stage2_zone_general` = normal Stage 2 shell-edit zone
   - refs: `core/models/stage2_patch_state.gd`, `services/forge_stage2_service.gd`
 - `stage2_zone_primary_grip_safe` = Stage 2 grip-safe zone; destructive carve blocked in first pass
@@ -258,6 +280,23 @@
 - `builder_marker_positions` = saved authored marker-position authority on the WIP
   - current first live use is ranged bow string anchors stored outside material mass cells
   - refs: `crafted_item_wip.gd`, `forge_grid_controller.gd`
+- `point` = legacy combat-animation wording only
+  - do not use this as the live authored-unit term for the combat animation creator branch
+  - use `motion node` for the current authored unit instead
+- `motion node` = composite authored combat-motion state
+  - not just a single position/vector
+  - includes the authored weapon-state parameters for that timeline unit
+- `legal_slot_id` = canonical combat slot binding field on `CombatAnimationDraft`
+  - intended live values are `skill_slot_1` through `skill_slot_12`
+- `skill slot` = canonical main combat slot family
+  - current live ids are `skill_slot_1` through `skill_slot_12`
+  - keyboard mapping currently follows `1 2 3 4 5 6 7 8 9 0 - =`
+- `skill_block` = dedicated block slot id
+  - current live key is `Q`
+- `skill_evade` = dedicated evade slot id
+  - current live key is `E`
+- `skill_crafter_prev_node` / `skill_crafter_next_node` / `skill_crafter_copy_node` / `skill_crafter_delete_node` / `skill_crafter_cycle_focus` / `skill_crafter_play_preview` = current live combat-animation station input-action ids
+  - current live action family uses `node`, not `point`
 - `string_pull_point_draw_max` = first-pass maximum bow string draw pull point
   - current first pass is `rest pull point + draw axis * bow_string_draw_distance_meters`
   - refs: `bow_resolver.gd`, `forge_workspace_preview.gd`, `forge_rules_def.gd`
@@ -330,3 +369,10 @@
   - select family
   - then switch modifier
 - user-facing material wording in forge HUD should use `Material`, not `Armed material`
+
+## Skill Crafter Weapon Frame Law
+- `weapon frame` = the authored weapon transform authority derived from motion-node `tip_position_local`, `pommel_position_local`, `weapon_orientation_degrees`, and `weapon_roll_degrees`
+- `CombatAnimationWeaponFrameSolver` = the focused runtime helper that turns weapon-frame data into a transform
+- do not reintroduce a separate trajectory/body-plane authority for occupied weapon authoring
+- user-facing Skill Crafter focus should remain `Tip`, `Pommel`, and `Weapon`
+- `primary_hand_slot` = per-motion-node primary-hand authority selector; `primary_hand_auto` follows the weapon-open baseline, while `hand_right` and `hand_left` explicitly override it for that node

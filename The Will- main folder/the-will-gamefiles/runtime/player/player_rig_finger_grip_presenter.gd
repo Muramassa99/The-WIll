@@ -339,9 +339,8 @@ func refresh_finger_ik_influences(
 	modifier_lookup: Dictionary,
 	_source_lookup: Dictionary
 ) -> void:
-	# Finger contact is now authored by the deterministic contact-group pose.
-	# The old CCDIK modifiers are kept as existing nodes/debug plumbing, but
-	# they must not override the strict local-Z finger curl lane.
+	# Finger contact is authored by the deterministic open-to-contact curl pass.
+	# CCDIK nodes stay inactive so they cannot add unconstrained finger twist.
 	for slot_id: StringName in [SLOT_RIGHT, SLOT_LEFT]:
 		for finger_id: StringName in FINGER_IDS:
 			var modifier: SkeletonModifier3D = modifier_lookup.get(

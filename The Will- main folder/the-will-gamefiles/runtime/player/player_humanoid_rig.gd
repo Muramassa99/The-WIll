@@ -293,9 +293,15 @@ func resolve_hand_grip_alignment_offset_local(slot_id: StringName) -> Vector3:
 	var hand_anchor: Node3D = get_right_hand_item_anchor() if slot_id == &"hand_right" else get_left_hand_item_anchor()
 	if hand_anchor == null:
 		return Vector3.ZERO
-	var grip_center_world: Vector3 = _resolve_hand_index_pinky_contact_center_world(slot_id)
+	var contact_center_world: Vector3 = _resolve_hand_index_pinky_contact_center_world(slot_id)
+	var grip_center_world: Vector3 = contact_center_world
 	if grip_center_world.length_squared() <= 0.000001:
 		grip_center_world = finger_grip_presenter.resolve_hand_grip_alignment_world_position(skeleton, slot_id)
+	else:
+		grip_center_world = _resolve_anatomically_seated_hand_grip_center_world(
+			slot_id,
+			contact_center_world
+		)
 	if grip_center_world.length_squared() <= 0.000001:
 		return Vector3.ZERO
 	return hand_anchor.to_local(grip_center_world)
@@ -324,6 +330,60 @@ func _resolve_hand_index_pinky_contact_center_world(slot_id: StringName) -> Vect
 	if index_world.distance_squared_to(pinky_world) <= 0.000001:
 		return Vector3.ZERO
 	return index_world.lerp(pinky_world, 0.5)
+
+func _resolve_anatomically_seated_hand_grip_center_world(
+	slot_id: StringName,
+	contact_center_world: Vector3
+) -> Vector3:
+	var anatomical_center_world: Vector3 = finger_grip_presenter.resolve_hand_grip_alignment_world_position(skeleton, slot_id)
+	if anatomical_center_world.length_squared() <= 0.000001:
+		return contact_center_world
+	var anatomical_offset_world: Vector3 = anatomical_center_world - contact_center_world
+	var contact_axis_world: Vector3 = _resolve_hand_index_pinky_contact_axis_world(slot_id)
+	if contact_axis_world.length_squared() > 0.000001:
+		anatomical_offset_world -= contact_axis_world * anatomical_offset_world.dot(contact_axis_world)
+	var max_offset_meters: float = _resolve_hand_index_pinky_contact_span_meters(slot_id) * 0.75
+	var offset_length: float = anatomical_offset_world.length()
+	if max_offset_meters > 0.0 and offset_length > max_offset_meters:
+		anatomical_offset_world = anatomical_offset_world.normalized() * max_offset_meters
+	if anatomical_offset_world.length_squared() <= 0.000001:
+		return contact_center_world
+	return contact_center_world + anatomical_offset_world
+
+func _resolve_hand_index_pinky_contact_axis_world(slot_id: StringName) -> Vector3:
+	if skeleton == null:
+		return Vector3.ZERO
+	var index_bone: StringName = RIGHT_INDEX1_BONE
+	var pinky_bone: StringName = RIGHT_PINKY1_BONE
+	if slot_id == &"hand_left":
+		index_bone = LEFT_INDEX1_BONE
+		pinky_bone = LEFT_PINKY1_BONE
+	var index_index: int = skeleton.find_bone(String(index_bone))
+	var pinky_index: int = skeleton.find_bone(String(pinky_bone))
+	if index_index < 0 or pinky_index < 0:
+		return Vector3.ZERO
+	var index_world: Vector3 = skeleton.to_global(skeleton.get_bone_global_pose(index_index).origin)
+	var pinky_world: Vector3 = skeleton.to_global(skeleton.get_bone_global_pose(pinky_index).origin)
+	var index_to_pinky_world: Vector3 = index_world - pinky_world
+	if index_to_pinky_world.length_squared() <= 0.000001:
+		return Vector3.ZERO
+	return index_to_pinky_world.normalized()
+
+func _resolve_hand_index_pinky_contact_span_meters(slot_id: StringName) -> float:
+	if skeleton == null:
+		return 0.0
+	var index_bone: StringName = RIGHT_INDEX1_BONE
+	var pinky_bone: StringName = RIGHT_PINKY1_BONE
+	if slot_id == &"hand_left":
+		index_bone = LEFT_INDEX1_BONE
+		pinky_bone = LEFT_PINKY1_BONE
+	var index_index: int = skeleton.find_bone(String(index_bone))
+	var pinky_index: int = skeleton.find_bone(String(pinky_bone))
+	if index_index < 0 or pinky_index < 0:
+		return 0.0
+	var index_world: Vector3 = skeleton.to_global(skeleton.get_bone_global_pose(index_index).origin)
+	var pinky_world: Vector3 = skeleton.to_global(skeleton.get_bone_global_pose(pinky_index).origin)
+	return index_world.distance_to(pinky_world)
 
 func get_weapon_stow_anchor(stow_mode: StringName, slot_id: StringName) -> Node3D:
 	return rig_model_presenter.get_weapon_stow_anchor(self, stow_mode, slot_id)

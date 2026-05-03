@@ -38,9 +38,9 @@ const PRIMARY_HAND_LABELS := {
 }
 
 const STOW_ANCHOR_LABELS := {
-	CombatAnimationDraftScript.STOW_ANCHOR_SHOULDER_HANGING: "Shoulder Hanging",
-	CombatAnimationDraftScript.STOW_ANCHOR_SIDE_HIP: "Side Hip",
+	CombatAnimationDraftScript.STOW_ANCHOR_SHOULDER_HANGING: "Upper Back",
 	CombatAnimationDraftScript.STOW_ANCHOR_LOWER_BACK: "Lower Back",
+	CombatAnimationDraftScript.STOW_ANCHOR_SIDE_HIP: "Hip",
 }
 
 const GENERATED_TRANSITION_LABELS := {
@@ -138,6 +138,7 @@ var speed_acceleration_spin_box: SpinBox = null
 var speed_deceleration_spin_box: SpinBox = null
 var stow_anchor_field_container: VBoxContainer = null
 var stow_anchor_option_button: OptionButton = null
+var stow_contact_ratio_spin_box: SpinBox = null
 var position_x_spin_box: SpinBox = null
 var position_y_spin_box: SpinBox = null
 var position_z_spin_box: SpinBox = null
@@ -244,6 +245,7 @@ func _ready() -> void:
 	speed_acceleration_spin_box.value_changed.connect(_on_speed_acceleration_changed)
 	speed_deceleration_spin_box.value_changed.connect(_on_speed_deceleration_changed)
 	stow_anchor_option_button.item_selected.connect(_on_stow_anchor_selected)
+	stow_contact_ratio_spin_box.value_changed.connect(_on_stow_contact_ratio_changed)
 	position_x_spin_box.value_changed.connect(_on_tip_position_component_changed.bind(0))
 	position_y_spin_box.value_changed.connect(_on_tip_position_component_changed.bind(1))
 	position_z_spin_box.value_changed.connect(_on_tip_position_component_changed.bind(2))
@@ -523,6 +525,10 @@ func select_draft(draft_identifier: StringName, advance_workflow: bool = true) -
 	var selected_node_index: int = int(draft.get("selected_motion_node_index"))
 	draft.set("selected_motion_node_index", clampi(selected_node_index, 0, maxi(int((draft.get("motion_node_chain") as Array).size()) - 1, 0)))
 	session_state.current_draft_ref = draft
+	if _is_noncombat_idle_draft(draft):
+		var stow_segment_changed: bool = _recenter_active_noncombat_stow_segment()
+		if stow_segment_changed:
+			_persist_active_wip("Noncombat stow pivot centered.")
 	_refresh_all("Draft selection updated.")
 	if advance_workflow:
 		_set_workflow_step(WORKFLOW_STEP_EDITOR, "Editing %s." % String(draft.get("display_name")))
@@ -735,7 +741,7 @@ func set_selected_motion_node_tip_position(
 	if _is_motion_node_authoring_locked(motion_node):
 		_reject_locked_motion_node_edit()
 		return false
-	var baseline_motion_node: CombatAnimationMotionNode = _build_authoring_motion_node_baseline(motion_node)
+	var baseline_motion_node: CombatAnimationMotionNode = _build_motion_node_segment_baseline_for_direct_edit(motion_node)
 	if (
 		motion_node.tip_position_local.is_equal_approx(tip_position)
 		and baseline_motion_node != null
@@ -1157,10 +1163,27 @@ func set_active_draft_stow_anchor_mode(stow_mode: StringName) -> bool:
 		return false
 	draft.set("stow_anchor_mode", resolved_stow_mode)
 	_normalize_draft(draft)
+	_recenter_active_noncombat_stow_segment()
 	_persist_active_wip("Noncombat stow anchor updated.")
 	_refresh_editor_fields()
 	_refresh_preview_scene()
 	_refresh_summary("Noncombat stow anchor updated.")
+	return true
+
+func set_active_draft_stow_contact_ratio(contact_ratio: float) -> bool:
+	var draft: Resource = _get_active_draft()
+	if draft == null or not _is_noncombat_idle_draft(draft):
+		return false
+	var resolved_contact_ratio: float = CombatAnimationDraftScript.normalize_stow_contact_ratio(contact_ratio)
+	if is_equal_approx(float(draft.get("stow_contact_ratio")), resolved_contact_ratio):
+		return false
+	draft.set("stow_contact_ratio", resolved_contact_ratio)
+	_normalize_draft(draft)
+	_recenter_active_noncombat_stow_segment()
+	_persist_active_wip("Noncombat stow contact updated.")
+	_refresh_editor_fields()
+	_refresh_preview_scene()
+	_refresh_summary("Noncombat stow contact updated.")
 	return true
 
 func set_active_draft_preview_loop(loop_enabled: bool) -> bool:
@@ -1859,6 +1882,7 @@ func _build_right_inspector(parent: HBoxContainer) -> void:
 	stow_anchor_option_button = OptionButton.new()
 	_style_option_button(stow_anchor_option_button)
 	stow_anchor_field_container.add_child(stow_anchor_option_button)
+	stow_contact_ratio_spin_box = _build_labeled_spinbox(stow_anchor_field_container, "Weapon Contact", 0.0, 1.0, 0.01)
 	preview_loop_check_box = CheckBox.new()
 	preview_loop_check_box.text = "Loop Preview"
 	preview_loop_check_box.add_theme_color_override("font_color", COLOR_TEXT)
@@ -2452,11 +2476,15 @@ func _refresh_editor_fields() -> void:
 	if stow_anchor_field_container != null:
 		stow_anchor_field_container.visible = noncombat_idle_draft
 	stow_anchor_option_button.disabled = not noncombat_idle_draft
+	stow_contact_ratio_spin_box.editable = noncombat_idle_draft
 	if noncombat_idle_draft:
 		_select_option_by_metadata(
 			stow_anchor_option_button,
 			CombatAnimationDraftScript.normalize_stow_anchor_mode(StringName(draft.get("stow_anchor_mode")))
 		)
+		stow_contact_ratio_spin_box.set_value_no_signal(CombatAnimationDraftScript.normalize_stow_contact_ratio(float(draft.get("stow_contact_ratio"))))
+	else:
+		stow_contact_ratio_spin_box.set_value_no_signal(CombatAnimationDraftScript.DEFAULT_STOW_CONTACT_RATIO)
 	preview_loop_check_box.disabled = not has_draft
 	preview_loop_check_box.button_pressed = bool(draft.get("preview_loop_enabled")) if has_draft else false
 	add_point_button.disabled = not has_draft or idle_draft_locked
@@ -3873,6 +3901,16 @@ func _build_authoring_motion_node_baseline(source_motion_node: CombatAnimationMo
 		fallback_motion_node.normalize()
 	return fallback_motion_node
 
+func _build_motion_node_segment_baseline_for_direct_edit(source_motion_node: CombatAnimationMotionNode) -> CombatAnimationMotionNode:
+	if source_motion_node == null:
+		return null
+	if not _is_noncombat_idle_draft(_get_active_draft()):
+		return _build_authoring_motion_node_baseline(source_motion_node)
+	var stored_motion_node: CombatAnimationMotionNode = source_motion_node.duplicate_node()
+	if stored_motion_node != null:
+		stored_motion_node.normalize()
+	return stored_motion_node
+
 func _build_display_motion_node_for_viewport_pick(source_motion_node: CombatAnimationMotionNode) -> CombatAnimationMotionNode:
 	if source_motion_node == null:
 		return null
@@ -3945,6 +3983,77 @@ func _reseat_motion_node_grip_to_occupied_contact(motion_node: CombatAnimationMo
 	)
 	return _apply_resolved_segment_to_motion_node(motion_node, resolved_segment)
 
+func _recenter_active_noncombat_stow_segment() -> bool:
+	var draft: Resource = _get_active_draft()
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if draft == null or motion_node == null or not _is_noncombat_idle_draft(draft):
+		return false
+	var contact_ratio: float = _resolve_active_noncombat_stow_contact_ratio()
+	var current_axis: Vector3 = _resolve_motion_node_axis_or_default(motion_node)
+	var resolved_segment: Dictionary = _build_noncombat_stow_segment_from_axis(
+		Vector3.ZERO,
+		current_axis,
+		contact_ratio
+	)
+	var changed: bool = _apply_resolved_segment_to_motion_node(motion_node, resolved_segment)
+	if changed:
+		motion_node.normalize()
+		editor_state_dirty = true
+	return changed
+
+func _resolve_active_noncombat_stow_contact_ratio() -> float:
+	var draft: Resource = _get_active_draft()
+	if draft == null:
+		return CombatAnimationDraftScript.DEFAULT_STOW_CONTACT_RATIO
+	return CombatAnimationDraftScript.normalize_stow_contact_ratio(float(draft.get("stow_contact_ratio")))
+
+func _resolve_motion_node_axis_or_default(motion_node: CombatAnimationMotionNode) -> Vector3:
+	if motion_node != null:
+		var axis: Vector3 = motion_node.tip_position_local - motion_node.pommel_position_local
+		if axis.length_squared() > 0.000001:
+			return axis.normalized()
+	return Vector3.FORWARD
+
+func _build_noncombat_stow_segment_from_axis(
+	pivot_position_local: Vector3,
+	axis_direction: Vector3,
+	contact_ratio: float
+) -> Dictionary:
+	var resolved_axis: Vector3 = axis_direction.normalized() if axis_direction.length_squared() > 0.000001 else Vector3.FORWARD
+	var resolved_ratio: float = CombatAnimationDraftScript.normalize_stow_contact_ratio(contact_ratio)
+	var weapon_total_length: float = maxf(_get_active_weapon_total_length(), 0.01)
+	return {
+		"tip_position_local": pivot_position_local + resolved_axis * weapon_total_length * (1.0 - resolved_ratio),
+		"pommel_position_local": pivot_position_local - resolved_axis * weapon_total_length * resolved_ratio,
+		"progress": 1.0,
+	}
+
+func _resolve_noncombat_stow_segment_for_tip_target(
+	motion_node: CombatAnimationMotionNode,
+	requested_tip_position_local: Vector3
+) -> Dictionary:
+	if motion_node == null:
+		return {}
+	var contact_ratio: float = _resolve_active_noncombat_stow_contact_ratio()
+	var pivot_position: Vector3 = motion_node.pommel_position_local.lerp(motion_node.tip_position_local, contact_ratio)
+	var requested_axis: Vector3 = requested_tip_position_local - pivot_position
+	if requested_axis.length_squared() <= 0.000001:
+		requested_axis = _resolve_motion_node_axis_or_default(motion_node)
+	return _build_noncombat_stow_segment_from_axis(pivot_position, requested_axis, contact_ratio)
+
+func _resolve_noncombat_stow_segment_for_pommel_target(
+	motion_node: CombatAnimationMotionNode,
+	requested_pommel_position_local: Vector3
+) -> Dictionary:
+	if motion_node == null:
+		return {}
+	var contact_ratio: float = _resolve_active_noncombat_stow_contact_ratio()
+	var pivot_position: Vector3 = motion_node.pommel_position_local.lerp(motion_node.tip_position_local, contact_ratio)
+	var requested_axis: Vector3 = pivot_position - requested_pommel_position_local
+	if requested_axis.length_squared() <= 0.000001:
+		requested_axis = _resolve_motion_node_axis_or_default(motion_node)
+	return _build_noncombat_stow_segment_from_axis(pivot_position, requested_axis, contact_ratio)
+
 func _apply_resolved_segment_to_motion_node(
 	motion_node: CombatAnimationMotionNode,
 	resolved_segment: Dictionary
@@ -3991,6 +4100,8 @@ func _resolve_motion_node_segment_for_tip_target(
 ) -> Dictionary:
 	if motion_node == null:
 		return {}
+	if _is_noncombat_idle_draft(_get_active_draft()):
+		return _resolve_noncombat_stow_segment_for_tip_target(motion_node, requested_tip_position_local)
 	var constrained_tip: Vector3 = motion_node_editor.constrain_tip_to_sphere(
 		motion_node.pommel_position_local,
 		requested_tip_position_local,
@@ -4013,6 +4124,8 @@ func _resolve_motion_node_segment_for_pommel_target(
 ) -> Dictionary:
 	if motion_node == null:
 		return {}
+	if _is_noncombat_idle_draft(_get_active_draft()):
+		return _resolve_noncombat_stow_segment_for_pommel_target(motion_node, requested_pommel_position_local)
 	var pommel_translation: Vector3 = requested_pommel_position_local - motion_node.pommel_position_local
 	var resolved_segment := {
 		"tip_position_local": motion_node.tip_position_local + pommel_translation,
@@ -4031,33 +4144,56 @@ func _apply_motion_node_state(target: CombatAnimationMotionNode, source: CombatA
 		if not _can_author_motion_node_curve_handles(target):
 			return false
 		return _apply_motion_node_curve_handle_state(target, source)
+	var stored_source: CombatAnimationMotionNode = _build_stored_motion_node_state_from_preview_state(source)
 	var changed: bool = false
-	if not target.weapon_orientation_degrees.is_equal_approx(source.weapon_orientation_degrees):
-		target.weapon_orientation_degrees = source.weapon_orientation_degrees
+	if not target.weapon_orientation_degrees.is_equal_approx(stored_source.weapon_orientation_degrees):
+		target.weapon_orientation_degrees = stored_source.weapon_orientation_degrees
 		changed = true
-	if target.weapon_orientation_authored != source.weapon_orientation_authored:
-		target.weapon_orientation_authored = source.weapon_orientation_authored
+	if target.weapon_orientation_authored != stored_source.weapon_orientation_authored:
+		target.weapon_orientation_authored = stored_source.weapon_orientation_authored
 		changed = true
-	if not target.tip_position_local.is_equal_approx(source.tip_position_local):
-		target.tip_position_local = source.tip_position_local
+	if not target.tip_position_local.is_equal_approx(stored_source.tip_position_local):
+		target.tip_position_local = stored_source.tip_position_local
 		changed = true
-	if not target.pommel_position_local.is_equal_approx(source.pommel_position_local):
-		target.pommel_position_local = source.pommel_position_local
+	if not target.pommel_position_local.is_equal_approx(stored_source.pommel_position_local):
+		target.pommel_position_local = stored_source.pommel_position_local
 		changed = true
-	if not target.tip_curve_in_handle.is_equal_approx(source.tip_curve_in_handle):
-		target.tip_curve_in_handle = source.tip_curve_in_handle
+	if not target.tip_curve_in_handle.is_equal_approx(stored_source.tip_curve_in_handle):
+		target.tip_curve_in_handle = stored_source.tip_curve_in_handle
 		changed = true
-	if not target.tip_curve_out_handle.is_equal_approx(source.tip_curve_out_handle):
-		target.tip_curve_out_handle = source.tip_curve_out_handle
+	if not target.tip_curve_out_handle.is_equal_approx(stored_source.tip_curve_out_handle):
+		target.tip_curve_out_handle = stored_source.tip_curve_out_handle
 		changed = true
-	if not target.pommel_curve_in_handle.is_equal_approx(source.pommel_curve_in_handle):
-		target.pommel_curve_in_handle = source.pommel_curve_in_handle
+	if not target.pommel_curve_in_handle.is_equal_approx(stored_source.pommel_curve_in_handle):
+		target.pommel_curve_in_handle = stored_source.pommel_curve_in_handle
 		changed = true
-	if not target.pommel_curve_out_handle.is_equal_approx(source.pommel_curve_out_handle):
-		target.pommel_curve_out_handle = source.pommel_curve_out_handle
+	if not target.pommel_curve_out_handle.is_equal_approx(stored_source.pommel_curve_out_handle):
+		target.pommel_curve_out_handle = stored_source.pommel_curve_out_handle
 		changed = true
 	target.normalize()
 	return changed
+
+func _build_stored_motion_node_state_from_preview_state(source: CombatAnimationMotionNode) -> CombatAnimationMotionNode:
+	var stored_source: CombatAnimationMotionNode = source.duplicate(true) as CombatAnimationMotionNode if source != null else null
+	if stored_source == null:
+		return source
+	if not _is_noncombat_idle_draft(_get_active_draft()):
+		stored_source.normalize()
+		return stored_source
+	var stow_anchor_offset_local: Vector3 = _resolve_selected_noncombat_stow_anchor_offset_local()
+	if stow_anchor_offset_local.length_squared() > 0.000001:
+		stored_source.tip_position_local -= stow_anchor_offset_local
+		stored_source.pommel_position_local -= stow_anchor_offset_local
+	stored_source.normalize()
+	return stored_source
+
+func _resolve_selected_noncombat_stow_anchor_offset_local() -> Vector3:
+	var preview_debug_state: Dictionary = get_preview_debug_state()
+	var selected_anchor_id: StringName = preview_debug_state.get("selected_stow_anchor_marker_id", StringName()) as StringName
+	var marker_positions: Dictionary = preview_debug_state.get("stow_anchor_marker_positions_local", {}) as Dictionary
+	if selected_anchor_id == StringName() or not marker_positions.has(selected_anchor_id):
+		return Vector3.ZERO
+	return marker_positions.get(selected_anchor_id, Vector3.ZERO) as Vector3
 
 func _apply_motion_node_curve_handle_state(target: CombatAnimationMotionNode, source: CombatAnimationMotionNode) -> bool:
 	if target == null or source == null:
@@ -4146,6 +4282,8 @@ func _resolve_preview_drag_commit_motion_node(source_motion_node: CombatAnimatio
 		or source_motion_node.weapon_orientation_authored != proposed_motion_node.weapon_orientation_authored
 	)
 	if not endpoint_or_orientation_changed:
+		return {"legal": true, "motion_node": proposed_motion_node}
+	if _is_noncombat_idle_draft(_get_active_draft()):
 		return {"legal": true, "motion_node": proposed_motion_node}
 	var validation_result: Dictionary = preview_presenter.constrain_authored_segment_to_endpoint_authority(
 		preview_subviewport,
@@ -4502,6 +4640,11 @@ func _on_stow_anchor_selected(index: int) -> void:
 	var stow_mode: StringName = stow_anchor_option_button.get_item_metadata(index)
 	set_active_draft_stow_anchor_mode(stow_mode)
 
+func _on_stow_contact_ratio_changed(value: float) -> void:
+	if refreshing_controls:
+		return
+	set_active_draft_stow_contact_ratio(value)
+
 func _on_tip_position_component_changed(_value: float, axis_index: int) -> void:
 	if refreshing_controls:
 		return
@@ -4752,7 +4895,7 @@ func set_selected_motion_node_pommel_position(
 	if _is_motion_node_authoring_locked(motion_node):
 		_reject_locked_motion_node_edit()
 		return false
-	var baseline_motion_node: CombatAnimationMotionNode = _build_authoring_motion_node_baseline(motion_node)
+	var baseline_motion_node: CombatAnimationMotionNode = _build_motion_node_segment_baseline_for_direct_edit(motion_node)
 	if (
 		motion_node.pommel_position_local.is_equal_approx(pommel_position)
 		and baseline_motion_node != null

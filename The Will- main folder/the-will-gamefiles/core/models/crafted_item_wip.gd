@@ -462,8 +462,8 @@ func ensure_combat_animation_station_state() -> Resource:
 static func get_stow_position_modes() -> Array[StringName]:
 	return [
 		STOW_SHOULDER_HANGING,
-		STOW_SIDE_HIP,
-		STOW_LOWER_BACK
+		STOW_LOWER_BACK,
+		STOW_SIDE_HIP
 	]
 
 static func normalize_stow_position_mode(stow_mode: StringName) -> StringName:
@@ -474,11 +474,11 @@ static func normalize_stow_position_mode(stow_mode: StringName) -> StringName:
 static func get_stow_position_label(stow_mode: StringName) -> String:
 	match normalize_stow_position_mode(stow_mode):
 		STOW_SIDE_HIP:
-			return "Side Hip"
+			return "Hip"
 		STOW_LOWER_BACK:
 			return "Lower Back"
 		_:
-			return "Shoulder Hanging"
+			return "Upper Back"
 
 static func get_stow_position_note(stow_mode: StringName) -> String:
 	match normalize_stow_position_mode(stow_mode):

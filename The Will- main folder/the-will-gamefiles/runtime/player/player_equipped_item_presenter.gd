@@ -14,6 +14,7 @@ const HAND_MOUNT_LOCAL_TRANSFORM_META := "hand_mount_local_transform"
 const WEAPON_CLEARANCE_PROXY_OFFSET_METERS := 0.005
 const MAX_WEAPON_BODY_PROXY_SURFACE_SAMPLES := 128
 const MAX_WEAPON_BODY_PROXY_CELL_SAMPLES := 96
+const STOW_AUTHORING_ROOT_BONE := &"RL_BoneRoot"
 
 var weapon_grip_anchor_provider = WeaponGripAnchorProviderScript.new()
 var weapon_frame_solver = CombatAnimationWeaponFrameSolverScript.new()
@@ -113,17 +114,21 @@ func apply_cached_station_stow_transform(
 	var local_pommel: Vector3 = held_item.get_meta("weapon_pommel_local", Vector3.ZERO) as Vector3
 	var stow_tip_local: Vector3 = held_item.get_meta("station_stow_requested_tip_position_local", Vector3.ZERO) as Vector3
 	var stow_pommel_local: Vector3 = held_item.get_meta("station_stow_pommel_position_local", Vector3.ZERO) as Vector3
+	if held_item.has_meta("station_stow_requested_pommel_position_local"):
+		stow_pommel_local = held_item.get_meta("station_stow_requested_pommel_position_local", stow_pommel_local) as Vector3
 	if local_tip.is_equal_approx(local_pommel) or stow_tip_local.is_equal_approx(stow_pommel_local):
 		apply_hand_mount_transform(held_item)
 		held_item.set_meta("station_stow_motion_node_applied", false)
 		return false
 	var local_axis: Vector3 = (local_tip - local_pommel).normalized()
 	var local_up_reference: Vector3 = _resolve_weapon_local_up_reference(held_item, local_axis)
-	var authored_tip_world: Vector3 = anchor_node.to_global(stow_tip_local)
-	var authored_pommel_world: Vector3 = anchor_node.to_global(stow_pommel_local)
+	var stow_authoring_basis: Basis = _resolve_station_stow_authoring_basis(anchor_node)
+	var stow_anchor_world: Vector3 = anchor_node.global_position
+	var authored_tip_world: Vector3 = stow_anchor_world + stow_authoring_basis * stow_tip_local
+	var authored_pommel_world: Vector3 = stow_anchor_world + stow_authoring_basis * stow_pommel_local
 	var authored_axis_world: Vector3 = authored_tip_world - authored_pommel_world
 	if authored_axis_world.length_squared() <= 0.000001:
-		authored_axis_world = anchor_node.global_basis.z
+		authored_axis_world = stow_authoring_basis.z
 	var weapon_segment_length: float = local_tip.distance_to(local_pommel)
 	var resolved_tip_world: Vector3 = authored_pommel_world + authored_axis_world.normalized() * weapon_segment_length
 	var solved_transform: Transform3D = weapon_frame_solver.solve_transform_from_segment(
@@ -132,13 +137,15 @@ func apply_cached_station_stow_transform(
 		resolved_tip_world,
 		authored_pommel_world,
 		local_up_reference,
-		anchor_node.global_basis,
+		stow_authoring_basis,
 		held_item.get_meta("station_stow_weapon_orientation_degrees", Vector3.ZERO) as Vector3,
 		float(held_item.get_meta("station_stow_weapon_roll_degrees", 0.0))
 	)
 	held_item.global_transform = solved_transform
 	held_item.set_meta("station_stow_motion_node_applied", true)
 	held_item.set_meta("station_stow_tip_position_local", anchor_node.to_local(resolved_tip_world))
+	held_item.set_meta("station_stow_pommel_position_local", anchor_node.to_local(authored_pommel_world))
+	held_item.set_meta("station_stow_contact_ratio", held_item.get_meta("station_stow_contact_ratio", CombatAnimationDraftScript.DEFAULT_STOW_CONTACT_RATIO))
 	return true
 
 func _resolve_cached_equipped_visual_anchor(
@@ -155,6 +162,24 @@ func _resolve_cached_equipped_visual_anchor(
 		held_item.get_meta("station_stow_anchor_mode", CombatAnimationDraftScript.STOW_ANCHOR_SHOULDER_HANGING) as StringName
 	)
 	return humanoid_rig.get_weapon_stow_anchor(stow_anchor_mode, slot_id)
+
+func _resolve_station_stow_authoring_basis(stow_anchor: Node3D) -> Basis:
+	if stow_anchor == null:
+		return Basis.IDENTITY
+	var skeleton: Skeleton3D = _resolve_skeleton_from_stow_anchor(stow_anchor)
+	if skeleton != null:
+		var root_index: int = skeleton.find_bone(String(STOW_AUTHORING_ROOT_BONE))
+		if root_index >= 0:
+			return (skeleton.global_basis * skeleton.get_bone_global_pose(root_index).basis).orthonormalized()
+	return stow_anchor.global_basis.orthonormalized()
+
+func _resolve_skeleton_from_stow_anchor(stow_anchor: Node3D) -> Skeleton3D:
+	var node: Node = stow_anchor
+	while node != null:
+		if node is Skeleton3D:
+			return node as Skeleton3D
+		node = node.get_parent()
+	return null
 
 func _reparent_held_item_to_anchor(held_item: Node3D, target_anchor: Node3D) -> void:
 	if held_item == null or target_anchor == null:
@@ -338,11 +363,31 @@ func _cache_station_stow_pose_metadata(held_item: Node3D, saved_wip: CraftedItem
 	var stow_motion_node: CombatAnimationMotionNode = noncombat_idle_draft.motion_node_chain[0] as CombatAnimationMotionNode
 	if stow_motion_node == null:
 		return
+	var stow_contact_ratio: float = CombatAnimationDraftScript.normalize_stow_contact_ratio(noncombat_idle_draft.stow_contact_ratio)
+	var stow_segment: Dictionary = _resolve_station_stow_anchor_local_segment(stow_motion_node, stow_contact_ratio)
 	held_item.set_meta("station_stow_motion_node_available", true)
-	held_item.set_meta("station_stow_requested_tip_position_local", stow_motion_node.tip_position_local)
-	held_item.set_meta("station_stow_pommel_position_local", stow_motion_node.pommel_position_local)
+	held_item.set_meta("station_stow_contact_ratio", stow_contact_ratio)
+	held_item.set_meta("station_stow_requested_tip_position_local", stow_segment.get("tip_position_local", stow_motion_node.tip_position_local))
+	held_item.set_meta("station_stow_requested_pommel_position_local", stow_segment.get("pommel_position_local", stow_motion_node.pommel_position_local))
+	held_item.set_meta("station_stow_pommel_position_local", stow_segment.get("pommel_position_local", stow_motion_node.pommel_position_local))
 	held_item.set_meta("station_stow_weapon_orientation_degrees", stow_motion_node.weapon_orientation_degrees)
 	held_item.set_meta("station_stow_weapon_roll_degrees", stow_motion_node.weapon_roll_degrees)
+
+func _resolve_station_stow_anchor_local_segment(stow_motion_node: CombatAnimationMotionNode, contact_ratio: float) -> Dictionary:
+	if stow_motion_node == null:
+		return {
+			"tip_position_local": Vector3.ZERO,
+			"pommel_position_local": Vector3.ZERO,
+		}
+	var resolved_contact_ratio: float = CombatAnimationDraftScript.normalize_stow_contact_ratio(contact_ratio)
+	var contact_position_local: Vector3 = stow_motion_node.pommel_position_local.lerp(
+		stow_motion_node.tip_position_local,
+		resolved_contact_ratio
+	)
+	return {
+		"tip_position_local": stow_motion_node.tip_position_local - contact_position_local,
+		"pommel_position_local": stow_motion_node.pommel_position_local - contact_position_local,
+	}
 
 func _configure_grip_contact_guide(
 	grip_guide: Node3D,
@@ -1473,13 +1518,19 @@ func apply_station_stow_transform(
 	if stow_motion_node.tip_position_local.is_equal_approx(stow_motion_node.pommel_position_local):
 		held_item.set_meta("station_stow_motion_node_applied", false)
 		return false
+	var stow_contact_ratio: float = CombatAnimationDraftScript.normalize_stow_contact_ratio(noncombat_idle_draft.stow_contact_ratio)
+	var stow_segment: Dictionary = _resolve_station_stow_anchor_local_segment(stow_motion_node, stow_contact_ratio)
+	var stow_tip_local: Vector3 = stow_segment.get("tip_position_local", stow_motion_node.tip_position_local) as Vector3
+	var stow_pommel_local: Vector3 = stow_segment.get("pommel_position_local", stow_motion_node.pommel_position_local) as Vector3
 	var local_axis: Vector3 = (local_tip - local_pommel).normalized()
 	var local_up_reference: Vector3 = _resolve_weapon_local_up_reference(held_item, local_axis)
-	var authored_tip_world: Vector3 = anchor_node.to_global(stow_motion_node.tip_position_local)
-	var authored_pommel_world: Vector3 = anchor_node.to_global(stow_motion_node.pommel_position_local)
+	var stow_authoring_basis: Basis = _resolve_station_stow_authoring_basis(anchor_node)
+	var stow_anchor_world: Vector3 = anchor_node.global_position
+	var authored_tip_world: Vector3 = stow_anchor_world + stow_authoring_basis * stow_tip_local
+	var authored_pommel_world: Vector3 = stow_anchor_world + stow_authoring_basis * stow_pommel_local
 	var authored_axis_world: Vector3 = authored_tip_world - authored_pommel_world
 	if authored_axis_world.length_squared() <= 0.000001:
-		authored_axis_world = anchor_node.global_basis.z
+		authored_axis_world = stow_authoring_basis.z
 	var weapon_segment_length: float = local_tip.distance_to(local_pommel)
 	var resolved_tip_world: Vector3 = authored_pommel_world + authored_axis_world.normalized() * weapon_segment_length
 	var solved_transform: Transform3D = weapon_frame_solver.solve_transform_from_segment(
@@ -1488,17 +1539,20 @@ func apply_station_stow_transform(
 		resolved_tip_world,
 		authored_pommel_world,
 		local_up_reference,
-		anchor_node.global_basis,
+		stow_authoring_basis,
 		stow_motion_node.weapon_orientation_degrees,
 		stow_motion_node.weapon_roll_degrees
 	)
 	held_item.global_transform = solved_transform
 	held_item.set_meta("station_stow_motion_node_applied", true)
 	held_item.set_meta("station_stow_anchor_mode", CombatAnimationDraftScript.normalize_stow_anchor_mode(noncombat_idle_draft.stow_anchor_mode))
-	held_item.set_meta("station_stow_requested_tip_position_local", stow_motion_node.tip_position_local)
+	held_item.set_meta("station_stow_contact_ratio", stow_contact_ratio)
+	held_item.set_meta("station_stow_requested_tip_position_local", stow_tip_local)
+	held_item.set_meta("station_stow_requested_pommel_position_local", stow_pommel_local)
 	held_item.set_meta("station_stow_tip_position_local", anchor_node.to_local(resolved_tip_world))
-	held_item.set_meta("station_stow_pommel_position_local", stow_motion_node.pommel_position_local)
+	held_item.set_meta("station_stow_pommel_position_local", anchor_node.to_local(authored_pommel_world))
 	held_item.set_meta("station_stow_weapon_orientation_degrees", stow_motion_node.weapon_orientation_degrees)
+	held_item.set_meta("station_stow_weapon_roll_degrees", stow_motion_node.weapon_roll_degrees)
 	return true
 
 func _resolve_weapon_local_up_reference(held_item: Node3D, local_axis: Vector3) -> Vector3:

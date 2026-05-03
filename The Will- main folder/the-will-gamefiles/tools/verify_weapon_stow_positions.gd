@@ -8,6 +8,9 @@ const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_
 
 const RESULT_FILE_PATH := "C:/WORKSPACE/player_weapon_stow_results.txt"
 const TEMP_STATE_DIR := "C:/WORKSPACE/test_artifacts"
+const UPPER_BACK_STOW_OFFSET_METERS := 0.18
+const HIP_SIDE_STOW_OFFSET_METERS := 0.23
+const LOWER_BACK_STOW_OFFSET_METERS := 0.20
 
 func _init() -> void:
 	call_deferred("_run_verification")
@@ -48,16 +51,40 @@ func _run_verification() -> void:
 	var shoulder_right_anchor: Node3D = rig.get_weapon_stow_anchor(CraftedItemWIP.STOW_SHOULDER_HANGING, &"hand_right") if rig != null else null
 	var shoulder_right_node: Node3D = player.held_item_nodes.get(&"hand_right") as Node3D
 	var shoulder_right_parent_matches: bool = shoulder_right_node != null and shoulder_right_node.get_parent() == shoulder_right_anchor
+	var shoulder_right_anchor_bone: StringName = _resolve_attachment_bone_name(shoulder_right_anchor)
+	var shoulder_right_anchor_error: float = _resolve_anchor_offset_error(
+		rig,
+		shoulder_right_anchor,
+		&"CC_Base_L_Clavicle",
+		Vector3(0.0, 0.0, -1.0),
+		UPPER_BACK_STOW_OFFSET_METERS
+	)
 
 	var side_left_valid: bool = await _equip_and_stow(player, side_hip_wip.wip_id, &"hand_left")
 	var side_left_anchor: Node3D = rig.get_weapon_stow_anchor(CraftedItemWIP.STOW_SIDE_HIP, &"hand_left") if rig != null else null
 	var side_left_node: Node3D = player.held_item_nodes.get(&"hand_left") as Node3D
 	var side_left_parent_matches: bool = side_left_node != null and side_left_node.get_parent() == side_left_anchor
+	var side_left_anchor_bone: StringName = _resolve_attachment_bone_name(side_left_anchor)
+	var side_left_anchor_side_error: float = _resolve_side_hip_anchor_error(rig, side_left_anchor)
 
 	var lower_right_valid: bool = await _equip_and_stow(player, lower_back_wip.wip_id, &"hand_right")
 	var lower_right_anchor: Node3D = rig.get_weapon_stow_anchor(CraftedItemWIP.STOW_LOWER_BACK, &"hand_right") if rig != null else null
+	var lower_left_anchor: Node3D = rig.get_weapon_stow_anchor(CraftedItemWIP.STOW_LOWER_BACK, &"hand_left") if rig != null else null
 	var lower_right_node: Node3D = player.held_item_nodes.get(&"hand_right") as Node3D
 	var lower_right_parent_matches: bool = lower_right_node != null and lower_right_node.get_parent() == lower_right_anchor
+	var lower_right_anchor_bone: StringName = _resolve_attachment_bone_name(lower_right_anchor)
+	var lower_right_anchor_error: float = _resolve_anchor_offset_error(
+		rig,
+		lower_right_anchor,
+		&"CC_Base_Hip",
+		Vector3(0.0, 0.0, -1.0),
+		LOWER_BACK_STOW_OFFSET_METERS
+	)
+	var lower_back_shared_anchor_error: float = (
+		lower_right_anchor.global_position.distance_to(lower_left_anchor.global_position)
+		if lower_right_anchor != null and lower_left_anchor != null
+		else INF
+	)
 	var bounds_area: Area3D = lower_right_node.get_node_or_null("WeaponBoundsArea") as Area3D if lower_right_node != null else null
 	var bounds_shape: CollisionShape3D = bounds_area.get_node_or_null("WeaponBoundsShape") as CollisionShape3D if bounds_area != null else null
 	var bounds_size: Vector3 = (bounds_shape.shape as BoxShape3D).size if bounds_shape != null and bounds_shape.shape is BoxShape3D else Vector3.ZERO
@@ -68,10 +95,29 @@ func _run_verification() -> void:
 	var lines: PackedStringArray = []
 	lines.append("shoulder_right_preview_valid=%s" % str(shoulder_right_valid))
 	lines.append("shoulder_right_parent_matches=%s" % str(shoulder_right_parent_matches))
+	lines.append("shoulder_right_anchor_bone=%s" % String(shoulder_right_anchor_bone))
+	lines.append("shoulder_right_anchor_error=%s" % str(snapped(shoulder_right_anchor_error, 0.0001)))
 	lines.append("side_left_preview_valid=%s" % str(side_left_valid))
 	lines.append("side_left_parent_matches=%s" % str(side_left_parent_matches))
+	lines.append("side_left_anchor_bone=%s" % String(side_left_anchor_bone))
+	lines.append("side_left_anchor_side_error=%s" % str(snapped(side_left_anchor_side_error, 0.0001)))
 	lines.append("lower_right_preview_valid=%s" % str(lower_right_valid))
 	lines.append("lower_right_parent_matches=%s" % str(lower_right_parent_matches))
+	lines.append("lower_right_anchor_bone=%s" % String(lower_right_anchor_bone))
+	lines.append("lower_right_anchor_error=%s" % str(snapped(lower_right_anchor_error, 0.0001)))
+	lines.append("lower_back_shared_anchor_error=%s" % str(snapped(lower_back_shared_anchor_error, 0.0001)))
+	lines.append("runtime_stow_anchor_alignment_ok=%s" % str(
+		shoulder_right_anchor_bone == &"CC_Base_L_Clavicle"
+		and shoulder_right_anchor_error >= 0.0
+		and shoulder_right_anchor_error < 0.002
+		and side_left_anchor_bone == &"CC_Base_Hip"
+		and side_left_anchor_side_error >= 0.0
+		and side_left_anchor_side_error < 0.002
+		and lower_right_anchor_bone == &"CC_Base_Hip"
+		and lower_right_anchor_error >= 0.0
+		and lower_right_anchor_error < 0.002
+		and lower_back_shared_anchor_error < 0.002
+	))
 	lines.append("weapon_bounds_area_exists=%s" % str(bounds_area != null))
 	lines.append("weapon_bounds_shape_exists=%s" % str(bounds_shape != null))
 	lines.append("weapon_bounds_size=%s" % str(bounds_size))
@@ -167,6 +213,58 @@ func _resolve_stow_endpoint_error(
 		return -1.0
 	var actual_anchor_local: Vector3 = stow_anchor.to_local(held_item.to_global(weapon_endpoint_local))
 	return actual_anchor_local.distance_to(expected_anchor_local)
+
+func _resolve_attachment_bone_name(anchor: Node3D) -> StringName:
+	var attachment: BoneAttachment3D = _resolve_anchor_attachment(anchor)
+	if attachment == null:
+		return StringName()
+	return StringName(attachment.bone_name)
+
+func _resolve_anchor_attachment(anchor: Node3D) -> BoneAttachment3D:
+	var node: Node = anchor
+	while node != null:
+		if node is BoneAttachment3D:
+			return node as BoneAttachment3D
+		node = node.get_parent()
+	return null
+
+func _resolve_anchor_offset_error(
+	rig: PlayerHumanoidRig,
+	anchor: Node3D,
+	bone_name: StringName,
+	local_direction: Vector3,
+	offset_meters: float
+) -> float:
+	if rig == null or rig.skeleton == null or anchor == null or local_direction.length_squared() <= 0.000001:
+		return INF
+	var bone_index: int = rig.skeleton.find_bone(String(bone_name))
+	if bone_index < 0:
+		return INF
+	var bone_world: Transform3D = rig.skeleton.global_transform * rig.skeleton.get_bone_global_pose(bone_index)
+	var direction_world: Vector3 = (bone_world.basis.orthonormalized() * local_direction.normalized()).normalized()
+	if direction_world.length_squared() <= 0.000001:
+		return INF
+	var expected_position: Vector3 = bone_world.origin + direction_world * offset_meters
+	return expected_position.distance_to(anchor.global_position)
+
+func _resolve_side_hip_anchor_error(rig: PlayerHumanoidRig, anchor: Node3D) -> float:
+	if rig == null or rig.skeleton == null or anchor == null:
+		return INF
+	var plus_error: float = _resolve_anchor_offset_error(
+		rig,
+		anchor,
+		&"CC_Base_Hip",
+		Vector3(1.0, 0.0, 0.0),
+		HIP_SIDE_STOW_OFFSET_METERS
+	)
+	var minus_error: float = _resolve_anchor_offset_error(
+		rig,
+		anchor,
+		&"CC_Base_Hip",
+		Vector3(-1.0, 0.0, 0.0),
+		HIP_SIDE_STOW_OFFSET_METERS
+	)
+	return minf(plus_error, minus_error)
 
 func _build_handle_cells(layer_index: int) -> Array[CellAtom]:
 	var cells: Array[CellAtom] = []

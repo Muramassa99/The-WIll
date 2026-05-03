@@ -32,7 +32,7 @@ const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://co
 @export var max_pitch_degrees: float = 80.0
 @export var aim_max_range_meters: float = 60.0
 @export var interaction_distance: float = 4.5
-@export var weapons_drawn: bool = true
+@export var weapons_drawn: bool = false
 @export var combat_idle_expiry_seconds: float = 15.0
 
 @onready var visual_root: Node3D = $VisualRoot

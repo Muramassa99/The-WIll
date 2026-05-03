@@ -20,6 +20,7 @@ const RIGHT_PINKY1_BONE := &"CC_Base_R_Pinky1"
 const LEFT_PINKY1_BONE := &"CC_Base_L_Pinky1"
 const RIGHT_THIGH_BONE := &"CC_Base_R_Thigh"
 const LEFT_THIGH_BONE := &"CC_Base_L_Thigh"
+const HIP_BONE := &"CC_Base_Hip"
 const RIGHT_CLAVICLE_BONE := &"CC_Base_R_Clavicle"
 const LEFT_CLAVICLE_BONE := &"CC_Base_L_Clavicle"
 const RIGHT_UPPERARM_BONE := &"CC_Base_R_Upperarm"
@@ -54,6 +55,9 @@ const AUTHORING_JOINT_RANGE_EPSILON_DEGREES: float = 0.05
 const RUNTIME_LOCOMOTION_ANIMATION_TREE_NAME := "RuntimeLocomotionAnimationTree"
 const RUNTIME_LOCOMOTION_PLAYBACK_PATH := "parameters/playback"
 const COMBAT_AUTHORING_MODIFIER_NAME := "CombatAuthoringModifier"
+const STOW_UPPER_BACK_OFFSET_METERS := 0.18
+const STOW_HIP_SIDE_OFFSET_METERS := 0.23
+const STOW_LOWER_BACK_OFFSET_METERS := 0.20
 @export_range(1.6, 2.4, 0.01) var standing_height_meters: float = 2.0
 @export_range(0.0, 0.5, 0.01) var pole_grip_arm_reach_margin_percent: float = 0.10
 @export_range(0.50, 1.0, 0.01) var usable_arm_motion_range_ratio: float = 0.98
@@ -191,12 +195,13 @@ func _ready() -> void:
 	_ensure_combat_authoring_modifier()
 	_ensure_hand_attachment("RightHandAttachment", RIGHT_HAND_BONE, "RightHandItemAnchor", right_hand_anchor_position, right_hand_anchor_rotation_degrees)
 	_ensure_hand_attachment("LeftHandAttachment", LEFT_HAND_BONE, "LeftHandItemAnchor", left_hand_anchor_position, left_hand_anchor_rotation_degrees)
-	_ensure_stow_attachment("LeftShoulderStowAttachment", LEFT_CLAVICLE_BONE, "LeftShoulderStowAnchor", left_shoulder_stow_position, left_shoulder_stow_rotation_degrees)
-	_ensure_stow_attachment("RightShoulderStowAttachment", RIGHT_CLAVICLE_BONE, "RightShoulderStowAnchor", right_shoulder_stow_position, right_shoulder_stow_rotation_degrees)
-	_ensure_stow_attachment("LeftHipStowAttachment", LEFT_THIGH_BONE, "LeftHipStowAnchor", left_side_hip_stow_position, left_side_hip_stow_rotation_degrees)
-	_ensure_stow_attachment("RightHipStowAttachment", RIGHT_THIGH_BONE, "RightHipStowAnchor", right_side_hip_stow_position, right_side_hip_stow_rotation_degrees)
-	_ensure_stow_attachment("LeftLowerBackStowAttachment", LEFT_THIGH_BONE, "LeftLowerBackStowAnchor", left_lower_back_stow_position, left_lower_back_stow_rotation_degrees)
-	_ensure_stow_attachment("RightLowerBackStowAttachment", RIGHT_THIGH_BONE, "RightLowerBackStowAnchor", right_lower_back_stow_position, right_lower_back_stow_rotation_degrees)
+	var hip_stow_right_direction_local: Vector3 = _resolve_hip_stow_right_direction_local()
+	_ensure_stow_attachment("LeftShoulderStowAttachment", LEFT_CLAVICLE_BONE, "LeftShoulderStowAnchor", _resolve_stow_anchor_local_position(Vector3(0.0, 0.0, -1.0), STOW_UPPER_BACK_OFFSET_METERS), Vector3.ZERO)
+	_ensure_stow_attachment("RightShoulderStowAttachment", RIGHT_CLAVICLE_BONE, "RightShoulderStowAnchor", _resolve_stow_anchor_local_position(Vector3(0.0, 0.0, -1.0), STOW_UPPER_BACK_OFFSET_METERS), Vector3.ZERO)
+	_ensure_stow_attachment("LeftHipStowAttachment", HIP_BONE, "LeftHipStowAnchor", _resolve_stow_anchor_local_position(-hip_stow_right_direction_local, STOW_HIP_SIDE_OFFSET_METERS), Vector3.ZERO)
+	_ensure_stow_attachment("RightHipStowAttachment", HIP_BONE, "RightHipStowAnchor", _resolve_stow_anchor_local_position(hip_stow_right_direction_local, STOW_HIP_SIDE_OFFSET_METERS), Vector3.ZERO)
+	_ensure_stow_attachment("LeftLowerBackStowAttachment", HIP_BONE, "LeftLowerBackStowAnchor", _resolve_stow_anchor_local_position(Vector3(0.0, 0.0, -1.0), STOW_LOWER_BACK_OFFSET_METERS), Vector3.ZERO)
+	_ensure_stow_attachment("RightLowerBackStowAttachment", HIP_BONE, "RightLowerBackStowAnchor", _resolve_stow_anchor_local_position(Vector3(0.0, 0.0, -1.0), STOW_LOWER_BACK_OFFSET_METERS), Vector3.ZERO)
 	max_model_arm_reach_meters = _resolve_max_model_arm_reach_meters()
 	_apply_pole_grip_arm_reach_limits()
 	_resolve_arm_chain_reach_limits()
@@ -2385,6 +2390,32 @@ func _ensure_stow_attachment(
 		anchor_position,
 		anchor_rotation_degrees
 	)
+
+func _resolve_hip_stow_right_direction_local() -> Vector3:
+	if skeleton == null:
+		return Vector3.RIGHT
+	var hip_index: int = skeleton.find_bone(String(HIP_BONE))
+	if hip_index < 0:
+		return Vector3.RIGHT
+	var hip_basis_world: Basis = (skeleton.global_basis * skeleton.get_bone_global_pose(hip_index).basis).orthonormalized()
+	var local_plus_x_world: Vector3 = (hip_basis_world * Vector3.RIGHT).normalized()
+	var actor_right_world: Vector3 = global_basis.x.normalized()
+	if local_plus_x_world.length_squared() <= 0.000001 or actor_right_world.length_squared() <= 0.000001:
+		return Vector3.RIGHT
+	return Vector3.RIGHT if local_plus_x_world.dot(actor_right_world) >= 0.0 else Vector3.LEFT
+
+func _resolve_stow_anchor_local_position(local_direction: Vector3, world_offset_meters: float) -> Vector3:
+	if local_direction.length_squared() <= 0.000001:
+		return Vector3.ZERO
+	var normalized_direction: Vector3 = local_direction.normalized()
+	var world_units_per_local_unit: float = 1.0
+	if skeleton != null:
+		world_units_per_local_unit = (skeleton.global_basis * normalized_direction).length()
+	elif global_basis.determinant() != 0.0:
+		world_units_per_local_unit = (global_basis * normalized_direction).length()
+	if world_units_per_local_unit <= 0.000001:
+		world_units_per_local_unit = 1.0
+	return normalized_direction * (maxf(world_offset_meters, 0.0) / world_units_per_local_unit)
 
 func _ensure_support_arm_ik_modifiers() -> void:
 	var modifier_state: Dictionary = support_arm_ik_presenter.ensure_support_arm_ik_modifiers(

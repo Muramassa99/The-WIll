@@ -8,6 +8,11 @@ const IDLE_CONTEXT_NONCOMBAT: StringName = &"idle_noncombat"
 const STOW_ANCHOR_SHOULDER_HANGING: StringName = &"stow_shoulder_hanging"
 const STOW_ANCHOR_SIDE_HIP: StringName = &"stow_side_hip"
 const STOW_ANCHOR_LOWER_BACK: StringName = &"stow_lower_back"
+const CONCRETE_STOW_UPPER_BACK_L: StringName = &"stow_upper_back_l"
+const CONCRETE_STOW_UPPER_BACK_R: StringName = &"stow_upper_back_r"
+const CONCRETE_STOW_LOWER_BACK_CENTER: StringName = &"stow_lower_back_center"
+const CONCRETE_STOW_HIP_L: StringName = &"stow_hip_l"
+const CONCRETE_STOW_HIP_R: StringName = &"stow_hip_r"
 const LEGACY_SKILL_NODE_0_TIP := Vector3.ZERO
 const LEGACY_SKILL_NODE_0_POMMEL := Vector3.ZERO
 const LEGACY_SKILL_NODE_0_TIP_CURVE_OUT := Vector3(0.0, 0.0, -0.04)
@@ -18,6 +23,7 @@ const LEGACY_BASELINE_EPSILON := 0.0001
 const DEFAULT_NODE_TRANSITION_DURATION_SECONDS := 0.18
 const DEFAULT_SPEED_ACCELERATION_PERCENT := 35.0
 const DEFAULT_SPEED_DECELERATION_PERCENT := 35.0
+const DEFAULT_STOW_CONTACT_RATIO := 0.5
 
 @export var draft_id: StringName = &""
 @export var display_name: String = ""
@@ -27,6 +33,7 @@ const DEFAULT_SPEED_DECELERATION_PERCENT := 35.0
 @export var legal_slot_id: StringName = &""
 @export var preferred_grip_style_mode: StringName = &"grip_normal"
 @export var stow_anchor_mode: StringName = STOW_ANCHOR_SHOULDER_HANGING
+@export_range(0.0, 1.0, 0.01) var stow_contact_ratio: float = DEFAULT_STOW_CONTACT_RATIO
 @export var authored_for_two_hand_only: bool = false
 @export var motion_node_chain: Array[Resource] = []
 @export var selected_motion_node_index: int = 0
@@ -55,14 +62,42 @@ static func get_idle_context_ids() -> Array[StringName]:
 static func get_stow_anchor_mode_ids() -> Array[StringName]:
 	return [
 		STOW_ANCHOR_SHOULDER_HANGING,
-		STOW_ANCHOR_SIDE_HIP,
 		STOW_ANCHOR_LOWER_BACK,
+		STOW_ANCHOR_SIDE_HIP,
 	]
 
 static func normalize_stow_anchor_mode(stow_mode: StringName) -> StringName:
 	if get_stow_anchor_mode_ids().has(stow_mode):
 		return stow_mode
 	return STOW_ANCHOR_SHOULDER_HANGING
+
+static func normalize_stow_contact_ratio(contact_ratio: float) -> float:
+	return clampf(contact_ratio, 0.0, 1.0)
+
+static func normalize_stow_slot_id(slot_id: StringName) -> StringName:
+	if slot_id == &"hand_left":
+		return &"hand_left"
+	return &"hand_right"
+
+static func resolve_concrete_stow_anchor_id(stow_mode: StringName, slot_id: StringName) -> StringName:
+	var normalized_slot_id: StringName = normalize_stow_slot_id(slot_id)
+	var slot_is_right: bool = normalized_slot_id != &"hand_left"
+	match normalize_stow_anchor_mode(stow_mode):
+		STOW_ANCHOR_SIDE_HIP:
+			return CONCRETE_STOW_HIP_L if slot_is_right else CONCRETE_STOW_HIP_R
+		STOW_ANCHOR_LOWER_BACK:
+			return CONCRETE_STOW_LOWER_BACK_CENTER
+		_:
+			return CONCRETE_STOW_UPPER_BACK_L if slot_is_right else CONCRETE_STOW_UPPER_BACK_R
+
+static func resolve_stow_orientation_side(stow_mode: StringName, slot_id: StringName) -> StringName:
+	var normalized_slot_id: StringName = normalize_stow_slot_id(slot_id)
+	var slot_is_right: bool = normalized_slot_id != &"hand_left"
+	match normalize_stow_anchor_mode(stow_mode):
+		STOW_ANCHOR_LOWER_BACK:
+			return &"right" if slot_is_right else &"left"
+		_:
+			return &"left" if slot_is_right else &"right"
 
 static func create_default_skill_baseline(
 	draft_id_value: StringName,
@@ -132,6 +167,7 @@ func normalize() -> void:
 	if draft_kind == DRAFT_KIND_IDLE and not get_idle_context_ids().has(context_id):
 		context_id = IDLE_CONTEXT_COMBAT
 	stow_anchor_mode = normalize_stow_anchor_mode(stow_anchor_mode)
+	stow_contact_ratio = normalize_stow_contact_ratio(stow_contact_ratio)
 	if preview_playback_speed_scale <= 0.0:
 		preview_playback_speed_scale = 1.0
 	speed_acceleration_percent = clampf(speed_acceleration_percent, 0.0, 100.0)
@@ -195,6 +231,18 @@ func apply_weapon_geometry_seed(seed_data: Dictionary, force_reseed: bool = fals
 		return false
 	var tip_position: Vector3 = seed_data.get("tip_position_local", Vector3.ZERO) as Vector3
 	var pommel_position: Vector3 = seed_data.get("pommel_position_local", Vector3.ZERO) as Vector3
+	if draft_kind == DRAFT_KIND_IDLE and context_id == IDLE_CONTEXT_NONCOMBAT:
+		var stow_axis: Vector3 = tip_position - pommel_position
+		if stow_axis.length_squared() <= 0.000001:
+			stow_axis = Vector3.FORWARD
+		stow_axis = stow_axis.normalized()
+		var stow_length: float = maxf(
+			float(seed_data.get("weapon_total_length_meters", tip_position.distance_to(pommel_position))),
+			0.01
+		)
+		var resolved_stow_ratio: float = normalize_stow_contact_ratio(stow_contact_ratio)
+		pommel_position = -stow_axis * stow_length * resolved_stow_ratio
+		tip_position = stow_axis * stow_length * (1.0 - resolved_stow_ratio)
 	var weapon_orientation_degrees: Vector3 = seed_data.get("weapon_orientation_degrees", Vector3.ZERO) as Vector3
 	var weapon_orientation_authored: bool = bool(seed_data.get("weapon_orientation_authored", false))
 	var weapon_roll_degrees: float = float(seed_data.get("weapon_roll_degrees", 0.0))
@@ -249,6 +297,7 @@ func reset_authoring_baseline(seed_data: Dictionary = {}) -> bool:
 	preview_playback_speed_scale = 1.0
 	speed_acceleration_percent = DEFAULT_SPEED_ACCELERATION_PERCENT
 	speed_deceleration_percent = DEFAULT_SPEED_DECELERATION_PERCENT
+	stow_contact_ratio = DEFAULT_STOW_CONTACT_RATIO
 	preview_loop_enabled = draft_kind == DRAFT_KIND_IDLE
 	if not seed_data.is_empty() and apply_weapon_geometry_seed(seed_data, true):
 		normalize()
@@ -262,6 +311,7 @@ func reset_to_default_baseline() -> bool:
 	preview_playback_speed_scale = 1.0
 	speed_acceleration_percent = DEFAULT_SPEED_ACCELERATION_PERCENT
 	speed_deceleration_percent = DEFAULT_SPEED_DECELERATION_PERCENT
+	stow_contact_ratio = DEFAULT_STOW_CONTACT_RATIO
 	preview_loop_enabled = draft_kind == DRAFT_KIND_IDLE
 	ensure_minimum_baseline_nodes()
 	normalize()

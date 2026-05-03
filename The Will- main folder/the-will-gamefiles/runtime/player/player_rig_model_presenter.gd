@@ -27,6 +27,7 @@ func ensure_hand_attachment(
 		attachment.name = attachment_name
 		skeleton.add_child(attachment)
 	attachment.bone_name = bone_name
+	attachment.override_pose = false
 
 	var anchor: Node3D = attachment.get_node_or_null(anchor_name) as Node3D
 	if anchor == null:

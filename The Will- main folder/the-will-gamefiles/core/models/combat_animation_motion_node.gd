@@ -11,6 +11,7 @@ const TRANSITION_KIND_NONE: StringName = &""
 const TRANSITION_KIND_GRIP_STYLE_SWAP: StringName = &"grip_style_swap"
 const TRANSITION_KIND_PRIMARY_HAND_SWAP: StringName = &"primary_hand_swap"
 const TRANSITION_KIND_TWO_HAND_STATE_SWAP: StringName = &"two_hand_state_swap"
+const DEFAULT_GRIP_SEAT_SLIDE_OFFSET: float = 0.2
 
 @export var node_id: StringName = &""
 @export var node_index: int = 0
@@ -34,13 +35,15 @@ const TRANSITION_KIND_TWO_HAND_STATE_SWAP: StringName = &"two_hand_state_swap"
 
 ## Grip Adjustments
 @export var axial_reposition_offset: float = 0.0
-@export var grip_seat_slide_offset: float = 0.0
+@export var grip_seat_slide_offset: float = DEFAULT_GRIP_SEAT_SLIDE_OFFSET
 
 ## Timing
 @export_range(0.0, 2.0, 0.01) var transition_duration_seconds: float = 0.18
 
 ## Body
 @export_range(0.0, 1.0, 0.01) var body_support_blend: float = 0.0
+@export_range(-180.0, 180.0, 1.0) var right_upperarm_roll_degrees: float = 0.0
+@export_range(-180.0, 180.0, 1.0) var left_upperarm_roll_degrees: float = 0.0
 @export var preferred_grip_style_mode: StringName = &"grip_normal"
 @export var two_hand_state: StringName = TWO_HAND_STATE_AUTO
 @export var primary_hand_slot: StringName = PRIMARY_HAND_AUTO
@@ -88,6 +91,8 @@ func normalize() -> void:
 		two_hand_state = TWO_HAND_STATE_AUTO
 	primary_hand_slot = normalize_primary_hand_slot(primary_hand_slot)
 	weapon_roll_degrees = clampf(weapon_roll_degrees, -120.0, 120.0)
+	right_upperarm_roll_degrees = clampf(right_upperarm_roll_degrees, -180.0, 180.0)
+	left_upperarm_roll_degrees = clampf(left_upperarm_roll_degrees, -180.0, 180.0)
 	if transition_duration_seconds < 0.0:
 		transition_duration_seconds = 0.0
 	if not get_generated_transition_kind_ids().has(generated_transition_kind):

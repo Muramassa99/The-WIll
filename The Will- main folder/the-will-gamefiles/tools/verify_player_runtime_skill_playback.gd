@@ -61,10 +61,44 @@ func _run_verification() -> void:
 		if player.humanoid_rig != null and player.humanoid_rig.has_method("get_upper_body_authoring_state")
 		else {}
 	)
+	var grip_debug_state: Dictionary = (
+		player.humanoid_rig.get_grip_contact_debug_state()
+		if player.humanoid_rig != null and player.humanoid_rig.has_method("get_grip_contact_debug_state")
+		else {}
+	)
 	var spine_after: Quaternion = skeleton.get_bone_pose_rotation(spine_index) if spine_index >= 0 else Quaternion.IDENTITY
 	var right_clavicle_after: Quaternion = skeleton.get_bone_pose_rotation(right_clavicle_index) if right_clavicle_index >= 0 else Quaternion.IDENTITY
 	var right_upperarm_after: Quaternion = skeleton.get_bone_pose_rotation(right_upperarm_index) if right_upperarm_index >= 0 else Quaternion.IDENTITY
 	var right_forearm_after: Quaternion = skeleton.get_bone_pose_rotation(right_forearm_index) if right_forearm_index >= 0 else Quaternion.IDENTITY
+	var runtime_spine_changed: bool = spine_before.angle_to(spine_after) > 0.0001
+	var runtime_right_clavicle_changed: bool = right_clavicle_before.angle_to(right_clavicle_after) > 0.0001
+	var runtime_right_upperarm_changed: bool = right_upperarm_before.angle_to(right_upperarm_after) > 0.0001
+	var runtime_right_forearm_changed: bool = right_forearm_before.angle_to(right_forearm_after) > 0.0001
+	var dominant_guidance_active: bool = bool(grip_debug_state.get("right_arm_guidance_active", false))
+	var dominant_ik_active: bool = bool(grip_debug_state.get("right_arm_ik_active", false))
+	var dominant_contact_basis_active: bool = bool(grip_debug_state.get("right_authoring_contact_basis_active", false))
+	var direct_authoring_solver_mode: bool = bool(grip_debug_state.get("direct_authoring_solver_mode", false))
+	var runtime_clip_debug: Dictionary = runtime_debug_initial.get("runtime_clip_debug_state", {}) as Dictionary
+	var pose_state_after_tick: Dictionary = runtime_debug_after_tick.get("last_runtime_pose_state", {}) as Dictionary
+	var all_checks_passed: bool = (
+		bool(activation_result.get("success", false))
+		and bool(activation_result.get("runtime_playback_started", false))
+		and bool(runtime_debug_initial.get("active", false))
+		and bool(runtime_debug_initial.get("runtime_clip_active", false))
+		and int(runtime_clip_debug.get("frame_count", 0)) > 0
+		and bool(runtime_debug_after_tick.get("active", false))
+		and bool(pose_state_after_tick.has("tip_position_local"))
+		and bool(rig_state.get("active", false))
+		and runtime_spine_changed
+		and runtime_right_clavicle_changed
+		and runtime_right_upperarm_changed
+		and runtime_right_forearm_changed
+		and dominant_guidance_active
+		and direct_authoring_solver_mode
+		and not dominant_ik_active
+		and dominant_contact_basis_active
+		and bool(pose_state_after_tick.get("runtime_endpoint_authority_active", false))
+	)
 
 	var lines: PackedStringArray = []
 	lines.append("activation_success=%s" % str(bool(activation_result.get("success", false))))
@@ -74,7 +108,6 @@ func _run_verification() -> void:
 	lines.append("runtime_active_initial=%s" % str(bool(runtime_debug_initial.get("active", false))))
 	lines.append("runtime_motion_node_count=%d" % int(runtime_debug_initial.get("motion_node_count", 0)))
 	lines.append("runtime_clip_active=%s" % str(bool(runtime_debug_initial.get("runtime_clip_active", false))))
-	var runtime_clip_debug: Dictionary = runtime_debug_initial.get("runtime_clip_debug_state", {}) as Dictionary
 	lines.append("runtime_clip_frame_count=%d" % int(runtime_clip_debug.get("frame_count", 0)))
 	lines.append("runtime_clip_duration_seconds=%.2f" % float(runtime_clip_debug.get("total_duration_seconds", 0.0)))
 	lines.append("runtime_compile_diagnostic_count=%d" % int((runtime_debug_initial.get("runtime_compile_diagnostics", []) as Array).size()))
@@ -86,20 +119,28 @@ func _run_verification() -> void:
 		bool((runtime_debug_after_tick.get("last_runtime_pose_state", {}) as Dictionary).has("tip_position_local"))
 	))
 	lines.append("upper_body_authoring_active=%s" % str(bool(rig_state.get("active", false))))
-	lines.append("runtime_spine_changed=%s" % str(spine_before.angle_to(spine_after) > 0.0001))
-	lines.append("runtime_right_clavicle_changed=%s" % str(right_clavicle_before.angle_to(right_clavicle_after) > 0.0001))
-	lines.append("runtime_right_upperarm_changed=%s" % str(right_upperarm_before.angle_to(right_upperarm_after) > 0.0001))
-	lines.append("runtime_right_forearm_changed=%s" % str(right_forearm_before.angle_to(right_forearm_after) > 0.0001))
+	lines.append("runtime_spine_changed=%s" % str(runtime_spine_changed))
+	lines.append("runtime_right_clavicle_changed=%s" % str(runtime_right_clavicle_changed))
+	lines.append("runtime_right_upperarm_changed=%s" % str(runtime_right_upperarm_changed))
+	lines.append("runtime_right_forearm_changed=%s" % str(runtime_right_forearm_changed))
 	lines.append("runtime_spine_angle_delta=%s" % str(snapped(spine_before.angle_to(spine_after), 0.0001)))
 	lines.append("runtime_right_clavicle_angle_delta=%s" % str(snapped(right_clavicle_before.angle_to(right_clavicle_after), 0.0001)))
 	lines.append("runtime_right_upperarm_angle_delta=%s" % str(snapped(right_upperarm_before.angle_to(right_upperarm_after), 0.0001)))
 	lines.append("runtime_right_forearm_angle_delta=%s" % str(snapped(right_forearm_before.angle_to(right_forearm_after), 0.0001)))
+	lines.append("dominant_arm_guidance_active=%s" % str(dominant_guidance_active))
+	lines.append("dominant_arm_ik_active=%s" % str(dominant_ik_active))
+	lines.append("direct_authoring_solver_mode=%s" % str(direct_authoring_solver_mode))
+	lines.append("dominant_contact_basis_active=%s" % str(dominant_contact_basis_active))
+	lines.append("runtime_endpoint_authority_active=%s" % str(bool(pose_state_after_tick.get("runtime_endpoint_authority_active", false))))
+	lines.append("runtime_held_item_parent_path=%s" % String(pose_state_after_tick.get("held_item_parent_path", "")))
+	lines.append("dominant_hand_ik_target_distance_meters=%.4f" % float(grip_debug_state.get("right_hand_ik_target_distance_meters", -1.0)))
+	lines.append("all_checks_passed=%s" % str(all_checks_passed))
 
 	var file: FileAccess = FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)
 	if file != null:
 		file.store_string("\n".join(lines))
 		file.close()
-	quit()
+	quit(0 if all_checks_passed else 1)
 
 func _build_authored_skill_test_wip(project_name: String, slot_id: StringName, skill_name: String) -> CraftedItemWIP:
 	var wip: CraftedItemWIP = CraftedItemWIP.new()

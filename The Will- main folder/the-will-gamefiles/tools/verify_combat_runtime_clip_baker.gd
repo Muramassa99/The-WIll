@@ -42,6 +42,33 @@ func _run_verification() -> void:
 	clip_player.advance(0.125)
 	var runtime_sample_length: float = clip_player.current_tip_position.distance_to(clip_player.current_pommel_position)
 	var final_node: CombatAnimationMotionNode = chain[chain.size() - 1] as CombatAnimationMotionNode
+	var final_right_upperarm_roll: float = (
+		clip.baked_right_upperarm_roll_degrees[clip.baked_right_upperarm_roll_degrees.size() - 1]
+		if clip != null and not clip.baked_right_upperarm_roll_degrees.is_empty()
+		else INF
+	)
+	var final_left_upperarm_roll: float = (
+		clip.baked_left_upperarm_roll_degrees[clip.baked_left_upperarm_roll_degrees.size() - 1]
+		if clip != null and not clip.baked_left_upperarm_roll_degrees.is_empty()
+		else INF
+	)
+	var upperarm_roll_samples_match: bool = (
+		clip != null
+		and clip.baked_right_upperarm_roll_degrees.size() == clip.get_frame_count()
+		and clip.baked_left_upperarm_roll_degrees.size() == clip.get_frame_count()
+		and absf(final_right_upperarm_roll - final_node.right_upperarm_roll_degrees) <= 0.0001
+		and absf(final_left_upperarm_roll - final_node.left_upperarm_roll_degrees) <= 0.0001
+	)
+	var all_checks_passed: bool = (
+		clip != null
+		and clip.is_playable()
+		and clip.get_frame_count() > 2
+		and first_tip.distance_to((chain[0] as CombatAnimationMotionNode).tip_position_local) <= 0.0001
+		and final_tip.distance_to(final_node.tip_position_local) <= 0.0001
+		and clip.baked_grip_style_modes.size() == clip.get_frame_count()
+		and absf(runtime_sample_length - 0.7) <= 0.0001
+		and upperarm_roll_samples_match
+	)
 	var lines: PackedStringArray = []
 	lines.append("clip_exists=%s" % str(clip != null))
 	lines.append("clip_playable=%s" % str(clip != null and clip.is_playable()))
@@ -54,12 +81,16 @@ func _run_verification() -> void:
 	lines.append("clip_final_tip_matches=%s" % str(final_tip.distance_to(final_node.tip_position_local) <= 0.0001))
 	lines.append("clip_grip_state_samples_match=%s" % str(clip != null and clip.baked_grip_style_modes.size() == clip.get_frame_count()))
 	lines.append("clip_player_runtime_length_locked=%s" % str(absf(runtime_sample_length - 0.7) <= 0.0001))
+	lines.append("clip_upperarm_roll_samples_match=%s" % str(upperarm_roll_samples_match))
+	lines.append("clip_final_right_upperarm_roll=%.2f" % final_right_upperarm_roll)
+	lines.append("clip_final_left_upperarm_roll=%.2f" % final_left_upperarm_roll)
 	lines.append("clip_player_trajectory_source=%s" % String(clip_player.current_trajectory_volume_state.get("source", StringName())))
+	lines.append("all_checks_passed=%s" % str(all_checks_passed))
 	var file: FileAccess = FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)
 	if file != null:
 		file.store_string("\n".join(lines))
 		file.close()
-	quit()
+	quit(0 if all_checks_passed else 1)
 
 func _build_motion_node(
 	node_index: int,
@@ -79,6 +110,8 @@ func _build_motion_node(
 	motion_node.transition_duration_seconds = transition_duration_seconds
 	motion_node.weapon_orientation_degrees = Vector3(0.0, 0.0, 0.0)
 	motion_node.weapon_orientation_authored = true
+	motion_node.right_upperarm_roll_degrees = -15.0 + float(node_index) * 22.5
+	motion_node.left_upperarm_roll_degrees = 12.0 - float(node_index) * 18.0
 	motion_node.preferred_grip_style_mode = &"grip_normal"
 	motion_node.normalize()
 	return motion_node

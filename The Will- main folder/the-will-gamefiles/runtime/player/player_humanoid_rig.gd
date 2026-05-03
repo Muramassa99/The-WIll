@@ -8,6 +8,7 @@ const PlayerRigGripLayoutPresenterScript = preload("res://runtime/player/player_
 const PlayerRigSupportArmIkPresenterScript = preload("res://runtime/player/player_rig_support_arm_ik_presenter.gd")
 const PlayerRigFingerGripPresenterScript = preload("res://runtime/player/player_rig_finger_grip_presenter.gd")
 const PlayerRigUpperBodyPosePresenterScript = preload("res://runtime/player/player_rig_upper_body_pose_presenter.gd")
+const PlayerCombatAuthoringModifier3DScript = preload("res://runtime/player/player_combat_authoring_modifier_3d.gd")
 const HandTargetConstraintSolverScript = preload("res://runtime/player/hand_target_constraint_solver.gd")
 const TwoHandPoseSolverScript = preload("res://runtime/player/two_hand_pose_solver.gd")
 const GripDebugDrawScript = preload("res://runtime/player/grip_debug_draw.gd")
@@ -38,6 +39,9 @@ const AUTHORING_ARM_SPLINE_CLAVICLE_WEIGHT: float = 0.14
 const AUTHORING_ARM_SPLINE_UPPERARM_WEIGHT: float = 0.30
 const AUTHORING_ARM_SPLINE_FOREARM_WEIGHT: float = 0.50
 const AUTHORING_ARM_SPLINE_RESEAT_ITERATIONS: int = 2
+const AUTHORING_DRAG_DIRECT_ARM_SOLVE_ITERATIONS: int = AUTHORING_DIRECT_ARM_SOLVE_ITERATIONS
+const AUTHORING_DRAG_ARM_SPLINE_RESEAT_ITERATIONS: int = AUTHORING_ARM_SPLINE_RESEAT_ITERATIONS
+const AUTHORING_DRAG_CONTACT_ALIGNMENT_PASSES: int = 1
 const AUTHORING_ARM_SPLINE_CONTACT_AXIS_BIAS: float = 0.0
 const AUTHORING_LIMB_TWIST_FOREARM_SHARE: float = 0.78
 const AUTHORING_LIMB_TWIST_UPPERARM_SHARE: float = 0.22
@@ -47,6 +51,9 @@ const AUTHORING_JOINT_RANGE_DEBUG_ROOT_NAME := "AuthoringJointRangeDebugRoot"
 const AUTHORING_JOINT_RANGE_ARC_STEPS: int = 28
 const AUTHORING_JOINT_RANGE_WARNING_MARGIN_DEGREES: float = 8.0
 const AUTHORING_JOINT_RANGE_EPSILON_DEGREES: float = 0.05
+const RUNTIME_LOCOMOTION_ANIMATION_TREE_NAME := "RuntimeLocomotionAnimationTree"
+const RUNTIME_LOCOMOTION_PLAYBACK_PATH := "parameters/playback"
+const COMBAT_AUTHORING_MODIFIER_NAME := "CombatAuthoringModifier"
 @export_range(1.6, 2.4, 0.01) var standing_height_meters: float = 2.0
 @export_range(0.0, 0.5, 0.01) var pole_grip_arm_reach_margin_percent: float = 0.10
 @export_range(0.50, 1.0, 0.01) var usable_arm_motion_range_ratio: float = 0.98
@@ -124,6 +131,7 @@ const AUTHORING_JOINT_RANGE_EPSILON_DEGREES: float = 0.05
 @onready var skeleton: Skeleton3D = $JosieModel/Josie/Skeleton3D
 @onready var mesh_instance: MeshInstance3D = $JosieModel/Josie/Skeleton3D/Mesh
 @onready var animation_player: AnimationPlayer = $JosieModel/AnimationPlayer
+@onready var runtime_locomotion_animation_tree: AnimationTree = josie_model.get_node_or_null(RUNTIME_LOCOMOTION_ANIMATION_TREE_NAME) as AnimationTree
 @onready var ik_targets_root: Node3D = $IkTargets
 @onready var right_hand_ik_target: Node3D = $IkTargets/RightHandIkTarget
 @onready var left_hand_ik_target: Node3D = $IkTargets/LeftHandIkTarget
@@ -141,6 +149,7 @@ var pole_grip_negative_limit_meters: float = 0.0
 var pole_grip_positive_limit_meters: float = 0.0
 var right_arm_ik_modifier: TwoBoneIK3D = null
 var left_arm_ik_modifier: TwoBoneIK3D = null
+var combat_authoring_modifier: SkeletonModifier3D = null
 var bone_index_cache: Dictionary = {}
 var rig_model_presenter = PlayerRigModelPresenterScript.new()
 var guidance_state_presenter = PlayerRigGuidanceStatePresenterScript.new()
@@ -163,6 +172,7 @@ var dominant_grip_slot_id: StringName = StringName()
 var locomotion_grounded: bool = true
 var locomotion_horizontal_speed: float = 0.0
 var locomotion_vertical_velocity: float = 0.0
+var runtime_locomotion_state_machine_playback: AnimationNodeStateMachinePlayback = null
 var upper_body_authoring_state: Dictionary = {}
 var authoring_contact_anchor_basis_lookup: Dictionary = {}
 var authoring_limb_twist_neutral_rotation_lookup: Dictionary = {}
@@ -171,12 +181,14 @@ var last_two_hand_solve_result: Dictionary = {}
 var upper_body_authoring_auto_apply_enabled: bool = true
 var authoring_preview_mode_enabled: bool = false
 var authoring_preview_baseline_animation_name: StringName = StringName()
+var combat_authoring_modifier_processing: bool = false
 
 func _ready() -> void:
 	_apply_target_height_scale()
 	guidance_state_presenter.reset_state()
 	if skeleton != null:
 		skeleton.modifier_callback_mode_process = Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_IDLE
+	_ensure_combat_authoring_modifier()
 	_ensure_hand_attachment("RightHandAttachment", RIGHT_HAND_BONE, "RightHandItemAnchor", right_hand_anchor_position, right_hand_anchor_rotation_degrees)
 	_ensure_hand_attachment("LeftHandAttachment", LEFT_HAND_BONE, "LeftHandItemAnchor", left_hand_anchor_position, left_hand_anchor_rotation_degrees)
 	_ensure_stow_attachment("LeftShoulderStowAttachment", LEFT_CLAVICLE_BONE, "LeftShoulderStowAnchor", left_shoulder_stow_position, left_shoulder_stow_rotation_degrees)
@@ -196,12 +208,18 @@ func _ready() -> void:
 	_snap_support_arm_ik_targets_to_current_pose()
 	_refresh_support_arm_ik_influences()
 	_refresh_finger_grip_ik_influences()
+	_ensure_runtime_locomotion_animation_tree()
+	_refresh_combat_authoring_modifier_state()
 	process_priority = 10
 	set_process(true)
 	if not authoring_preview_mode_enabled:
 		_play_default_animation()
 
 func _process(delta: float) -> void:
+	_refresh_combat_authoring_modifier_state()
+	if _uses_direct_authoring_solver_mode() and not authoring_preview_mode_enabled:
+		_sync_authoring_joint_range_debug()
+		return
 	if upper_body_authoring_auto_apply_enabled:
 		_apply_upper_body_authoring_pose()
 	_update_support_arm_ik_targets(delta)
@@ -400,8 +418,7 @@ func update_locomotion_state(
 	locomotion_vertical_velocity = vertical_velocity
 	if authoring_preview_mode_enabled:
 		return
-	locomotion_presenter.update_locomotion_state(
-		animation_player,
+	var target_animation_name: StringName = locomotion_presenter.resolve_locomotion_animation_name(
 		horizontal_speed,
 		target_horizontal_speed,
 		grounded,
@@ -409,6 +426,7 @@ func update_locomotion_state(
 		sprinting,
 		_get_locomotion_config(_should_use_two_hand_idle_animation())
 	)
+	_play_runtime_locomotion_animation(target_animation_name)
 
 func set_support_hand_active(slot_id: StringName, active: bool) -> void:
 	guidance_state_presenter.set_support_hand_active(slot_id, active)
@@ -511,9 +529,11 @@ func clear_authoring_contact_anchor_bases() -> void:
 
 func set_upper_body_authoring_state(state: Dictionary) -> void:
 	upper_body_authoring_state = state.duplicate(true)
+	_refresh_combat_authoring_modifier_state()
 
 func clear_upper_body_authoring_state() -> void:
 	upper_body_authoring_state = {}
+	_refresh_combat_authoring_modifier_state()
 
 func get_upper_body_authoring_state() -> Dictionary:
 	return upper_body_authoring_state.duplicate(true)
@@ -528,6 +548,9 @@ func get_grip_contact_debug_state() -> Dictionary:
 		"left_arm_guidance_active": is_arm_guidance_active(&"hand_left"),
 		"right_authoring_contact_basis_active": authoring_contact_anchor_basis_lookup.has(&"hand_right"),
 		"left_authoring_contact_basis_active": authoring_contact_anchor_basis_lookup.has(&"hand_left"),
+		"upper_body_authoring_auto_apply_enabled": upper_body_authoring_auto_apply_enabled,
+		"direct_authoring_solver_mode": _uses_direct_authoring_solver_mode(),
+		"combat_authoring_modifier_active": combat_authoring_modifier != null and combat_authoring_modifier.active,
 		"authoring_limb_twist_distribution_enabled": enable_authoring_limb_twist_distribution,
 		"right_forearm_twist_bone_count": _count_existing_bones(RIGHT_FOREARM_TWIST_BONES),
 		"left_forearm_twist_bone_count": _count_existing_bones(LEFT_FOREARM_TWIST_BONES),
@@ -632,6 +655,7 @@ func _resolve_rest_index_pinky_axis_local(hand_index: int, index_index: int, pin
 
 func set_upper_body_authoring_auto_apply_enabled(enabled: bool) -> void:
 	upper_body_authoring_auto_apply_enabled = enabled
+	_refresh_combat_authoring_modifier_state()
 
 func apply_upper_body_authoring_pose_now() -> void:
 	_apply_upper_body_authoring_pose()
@@ -649,6 +673,52 @@ func apply_authoring_preview_frame_now() -> void:
 		_advance_skeleton_modifiers_now(1.0 / 60.0)
 		skeleton.force_update_all_bone_transforms()
 	_sync_authoring_joint_range_debug()
+
+func apply_authoring_preview_drag_frame_now() -> void:
+	_apply_upper_body_authoring_pose()
+	_refresh_support_arm_ik_influences()
+	var support_snap_delta: float = 1.0 / maxf(support_arm_ik_target_smoothing_speed, 0.001)
+	var finger_snap_delta: float = 1.0 / maxf(finger_grip_target_smoothing_speed, 0.001)
+	_update_support_arm_ik_targets(support_snap_delta)
+	_apply_authoring_contact_alignment_pose(
+		AUTHORING_DRAG_CONTACT_ALIGNMENT_PASSES,
+		AUTHORING_DRAG_DIRECT_ARM_SOLVE_ITERATIONS,
+		AUTHORING_DRAG_ARM_SPLINE_RESEAT_ITERATIONS
+	)
+	_update_finger_grip_targets(finger_snap_delta)
+	_refresh_finger_grip_ik_influences()
+	if skeleton != null:
+		_advance_skeleton_modifiers_now(1.0 / 60.0)
+		skeleton.force_update_all_bone_transforms()
+
+func apply_runtime_combat_authoring_frame_now() -> void:
+	process_combat_authoring_modifier_frame(1.0 / 60.0)
+
+func process_combat_authoring_modifier_frame(delta: float = 1.0 / 60.0) -> void:
+	if combat_authoring_modifier_processing:
+		return
+	if not _uses_direct_authoring_solver_mode() or skeleton == null:
+		return
+	combat_authoring_modifier_processing = true
+	_apply_combat_authoring_overlay_frame(maxf(delta, 0.0))
+	combat_authoring_modifier_processing = false
+
+func _apply_combat_authoring_overlay_frame(delta: float) -> void:
+	_apply_upper_body_authoring_pose()
+	_refresh_support_arm_ik_influences()
+	var support_snap_delta: float = 1.0 / maxf(support_arm_ik_target_smoothing_speed, 0.001)
+	var finger_snap_delta: float = 1.0 / maxf(finger_grip_target_smoothing_speed, 0.001)
+	_update_support_arm_ik_targets(support_snap_delta)
+	_apply_authoring_contact_alignment_pose(
+		AUTHORING_DRAG_CONTACT_ALIGNMENT_PASSES,
+		AUTHORING_DRAG_DIRECT_ARM_SOLVE_ITERATIONS,
+		AUTHORING_DRAG_ARM_SPLINE_RESEAT_ITERATIONS
+	)
+	_apply_authoring_contact_wrist_basis_pose()
+	_update_finger_grip_targets(maxf(delta, finger_snap_delta))
+	_refresh_finger_grip_ik_influences()
+	if skeleton != null:
+		skeleton.force_update_all_bone_transforms()
 
 func reset_authoring_preview_baseline_pose(baseline_animation_name: StringName = StringName()) -> void:
 	clear_upper_body_authoring_state()
@@ -671,7 +741,10 @@ func reset_authoring_preview_baseline_pose(baseline_animation_name: StringName =
 func set_authoring_preview_mode_enabled(enabled: bool, baseline_animation_name: StringName = StringName()) -> void:
 	authoring_preview_mode_enabled = enabled
 	_set_skeleton_modifier_callback_mode_for_authoring(authoring_preview_mode_enabled)
+	_refresh_combat_authoring_modifier_state()
 	if authoring_preview_mode_enabled:
+		if runtime_locomotion_animation_tree != null:
+			runtime_locomotion_animation_tree.active = false
 		locomotion_horizontal_speed = 0.0
 		locomotion_grounded = true
 		locomotion_vertical_velocity = 0.0
@@ -683,6 +756,9 @@ func set_authoring_preview_mode_enabled(enabled: bool, baseline_animation_name: 
 	authoring_preview_baseline_animation_name = StringName()
 	clear_authoring_contact_anchor_bases()
 	authoring_limb_twist_distribution_state.clear()
+	if runtime_locomotion_animation_tree != null:
+		runtime_locomotion_animation_tree.active = true
+	_refresh_combat_authoring_modifier_state()
 	_play_default_animation()
 
 func _set_skeleton_modifier_callback_mode_for_authoring(enabled: bool) -> void:
@@ -701,18 +777,22 @@ func _advance_skeleton_modifiers_now(delta: float) -> void:
 		return
 	skeleton.call("advance", maxf(delta, 0.0))
 
-func _apply_authoring_contact_alignment_pose() -> void:
-	if not authoring_preview_mode_enabled or skeleton == null:
+func _apply_authoring_contact_alignment_pose(
+	pass_count: int = 3,
+	direct_solve_iterations: int = AUTHORING_DIRECT_ARM_SOLVE_ITERATIONS,
+	reseat_iterations: int = AUTHORING_ARM_SPLINE_RESEAT_ITERATIONS
+) -> void:
+	if not _can_apply_authoring_contact_alignment() or skeleton == null:
 		return
-	_apply_authoring_direct_arm_reach_pose()
-	_apply_authoring_contact_wrist_basis_pose()
-	_apply_authoring_direct_arm_reach_pose()
-	_apply_authoring_contact_wrist_basis_pose()
-	_apply_authoring_direct_arm_reach_pose()
-	_apply_authoring_contact_wrist_basis_pose()
+	for _pass_index: int in range(maxi(pass_count, 1)):
+		_apply_authoring_direct_arm_reach_pose(direct_solve_iterations, reseat_iterations)
+		_apply_authoring_contact_wrist_basis_pose()
 
-func _apply_authoring_direct_arm_reach_pose() -> void:
-	if not authoring_preview_mode_enabled or skeleton == null:
+func _apply_authoring_direct_arm_reach_pose(
+	solve_iterations: int = AUTHORING_DIRECT_ARM_SOLVE_ITERATIONS,
+	reseat_iterations: int = AUTHORING_ARM_SPLINE_RESEAT_ITERATIONS
+) -> void:
+	if not _can_apply_authoring_contact_alignment() or skeleton == null:
 		return
 	if is_arm_guidance_active(&"hand_right") and right_hand_ik_target != null:
 		var right_hand_target_world: Vector3 = right_hand_ik_target.global_position
@@ -722,7 +802,7 @@ func _apply_authoring_direct_arm_reach_pose() -> void:
 			RIGHT_FOREARM_BONE,
 			RIGHT_HAND_BONE,
 			right_target_world,
-			AUTHORING_DIRECT_ARM_SOLVE_ITERATIONS,
+			solve_iterations,
 			AUTHORING_DIRECT_ARM_FOREARM_WEIGHT,
 			AUTHORING_DIRECT_ARM_UPPERARM_WEIGHT,
 			RIGHT_CLAVICLE_BONE,
@@ -741,11 +821,17 @@ func _apply_authoring_direct_arm_reach_pose() -> void:
 			RIGHT_FOREARM_BONE,
 			RIGHT_HAND_BONE,
 			right_target_world,
-			AUTHORING_ARM_SPLINE_RESEAT_ITERATIONS,
+			reseat_iterations,
 			AUTHORING_DIRECT_ARM_FOREARM_WEIGHT * 0.5,
 			AUTHORING_DIRECT_ARM_UPPERARM_WEIGHT * 0.5,
 			RIGHT_CLAVICLE_BONE,
 			AUTHORING_DIRECT_ARM_CLAVICLE_WEIGHT * 0.5
+		)
+		_apply_authoring_manual_upperarm_roll_pose(
+			&"hand_right",
+			RIGHT_UPPERARM_BONE,
+			RIGHT_FOREARM_BONE,
+			RIGHT_HAND_BONE
 		)
 		_enforce_authoring_elbow_max_angle(RIGHT_UPPERARM_BONE, RIGHT_FOREARM_BONE, RIGHT_HAND_BONE)
 	if is_arm_guidance_active(&"hand_left") and left_hand_ik_target != null:
@@ -756,7 +842,7 @@ func _apply_authoring_direct_arm_reach_pose() -> void:
 			LEFT_FOREARM_BONE,
 			LEFT_HAND_BONE,
 			left_target_world,
-			AUTHORING_DIRECT_ARM_SOLVE_ITERATIONS,
+			solve_iterations,
 			AUTHORING_DIRECT_ARM_FOREARM_WEIGHT,
 			AUTHORING_DIRECT_ARM_UPPERARM_WEIGHT,
 			LEFT_CLAVICLE_BONE,
@@ -775,14 +861,27 @@ func _apply_authoring_direct_arm_reach_pose() -> void:
 			LEFT_FOREARM_BONE,
 			LEFT_HAND_BONE,
 			left_target_world,
-			AUTHORING_ARM_SPLINE_RESEAT_ITERATIONS,
+			reseat_iterations,
 			AUTHORING_DIRECT_ARM_FOREARM_WEIGHT * 0.5,
 			AUTHORING_DIRECT_ARM_UPPERARM_WEIGHT * 0.5,
 			LEFT_CLAVICLE_BONE,
 			AUTHORING_DIRECT_ARM_CLAVICLE_WEIGHT * 0.5
 		)
+		_apply_authoring_manual_upperarm_roll_pose(
+			&"hand_left",
+			LEFT_UPPERARM_BONE,
+			LEFT_FOREARM_BONE,
+			LEFT_HAND_BONE
+		)
 		_enforce_authoring_elbow_max_angle(LEFT_UPPERARM_BONE, LEFT_FOREARM_BONE, LEFT_HAND_BONE)
 	skeleton.force_update_all_bone_transforms()
+
+func _can_apply_authoring_contact_alignment() -> bool:
+	if authoring_preview_mode_enabled:
+		return true
+	if upper_body_authoring_auto_apply_enabled:
+		return false
+	return not upper_body_authoring_state.is_empty() and bool(upper_body_authoring_state.get("active", false))
 
 func _apply_authoring_contact_wrist_basis_pose() -> void:
 	if skeleton == null:
@@ -2115,6 +2214,87 @@ func _apply_authoring_arm_spline_preference(
 	)
 	skeleton.force_update_all_bone_transforms()
 
+func _apply_authoring_manual_upperarm_roll_pose(
+	slot_id: StringName,
+	upperarm_bone: StringName,
+	forearm_bone: StringName,
+	hand_bone: StringName
+) -> void:
+	if skeleton == null:
+		return
+	var roll_degrees: float = _resolve_authoring_manual_upperarm_roll_degrees(slot_id)
+	if absf(roll_degrees) <= 0.0001:
+		return
+	var shoulder_world: Vector3 = _get_bone_world_position(upperarm_bone)
+	var elbow_world: Vector3 = _get_bone_world_position(forearm_bone)
+	var hand_world: Vector3 = _get_bone_world_position(hand_bone)
+	var shoulder_to_hand: Vector3 = hand_world - shoulder_world
+	if shoulder_to_hand.length_squared() <= 0.000001:
+		return
+	var roll_axis_world: Vector3 = shoulder_to_hand.normalized()
+	var shoulder_to_elbow: Vector3 = elbow_world - shoulder_world
+	var parallel_world: Vector3 = roll_axis_world * shoulder_to_elbow.dot(roll_axis_world)
+	var radial_world: Vector3 = shoulder_to_elbow - parallel_world
+	if radial_world.length_squared() <= 0.000001:
+		radial_world = _resolve_authoring_upperarm_roll_reference_world(slot_id, roll_axis_world) * maxf(shoulder_to_elbow.length(), 0.05)
+	if radial_world.length_squared() <= 0.000001:
+		return
+	var reference_world: Vector3 = _resolve_authoring_upperarm_roll_reference_world(slot_id, roll_axis_world)
+	if reference_world.length_squared() <= 0.000001:
+		return
+	var current_angle: float = _resolve_signed_planar_angle(reference_world, radial_world.normalized(), roll_axis_world)
+	var target_angle: float = deg_to_rad(clampf(roll_degrees, -180.0, 180.0))
+	var correction_angle: float = _wrap_angle_radians(target_angle - current_angle)
+	if absf(correction_angle) <= 0.0001:
+		return
+	var desired_radial_world: Vector3 = Basis(roll_axis_world, correction_angle) * radial_world
+	var desired_elbow_world: Vector3 = shoulder_world + parallel_world + desired_radial_world
+	_rotate_bone_toward_end_target(
+		upperarm_bone,
+		forearm_bone,
+		skeleton.to_local(desired_elbow_world),
+		1.0
+	)
+	_rotate_bone_toward_end_target(
+		forearm_bone,
+		hand_bone,
+		skeleton.to_local(hand_world),
+		1.0
+	)
+	skeleton.force_update_all_bone_transforms()
+
+func _resolve_authoring_manual_upperarm_roll_degrees(slot_id: StringName) -> float:
+	if upper_body_authoring_state.is_empty():
+		return 0.0
+	if slot_id == &"hand_left":
+		return clampf(float(upper_body_authoring_state.get("left_upperarm_roll_degrees", 0.0)), -180.0, 180.0)
+	return clampf(float(upper_body_authoring_state.get("right_upperarm_roll_degrees", 0.0)), -180.0, 180.0)
+
+func _resolve_authoring_upperarm_roll_reference_world(slot_id: StringName, roll_axis_world: Vector3) -> Vector3:
+	var side_reference_world: Vector3 = -global_basis.x if slot_id == &"hand_left" else global_basis.x
+	var reference_world: Vector3 = side_reference_world - roll_axis_world * side_reference_world.dot(roll_axis_world)
+	if reference_world.length_squared() <= 0.000001:
+		reference_world = global_basis.y - roll_axis_world * global_basis.y.dot(roll_axis_world)
+	if reference_world.length_squared() <= 0.000001:
+		reference_world = global_basis.z - roll_axis_world * global_basis.z.dot(roll_axis_world)
+	if reference_world.length_squared() <= 0.000001:
+		return Vector3.ZERO
+	return reference_world.normalized()
+
+func _resolve_signed_planar_angle(from_direction: Vector3, to_direction: Vector3, axis: Vector3) -> float:
+	if from_direction.length_squared() <= 0.000001 or to_direction.length_squared() <= 0.000001 or axis.length_squared() <= 0.000001:
+		return 0.0
+	var resolved_from: Vector3 = from_direction.normalized()
+	var resolved_to: Vector3 = to_direction.normalized()
+	var resolved_axis: Vector3 = axis.normalized()
+	return atan2(
+		resolved_axis.dot(resolved_from.cross(resolved_to)),
+		clampf(resolved_from.dot(resolved_to), -1.0, 1.0)
+	)
+
+func _wrap_angle_radians(angle: float) -> float:
+	return atan2(sin(angle), cos(angle))
+
 func _sample_cubic_bezier_3d(start: Vector3, control_a: Vector3, control_b: Vector3, end: Vector3, ratio: float) -> Vector3:
 	var t: float = clampf(ratio, 0.0, 1.0)
 	var inv_t: float = 1.0 - t
@@ -2278,6 +2458,16 @@ func _update_support_arm_ik_targets(delta: float) -> void:
 	) as Dictionary
 	solve_result["dominant_slot_id"] = dominant_grip_slot_id if dominant_grip_slot_id != StringName() else &"hand_right"
 	solve_result = _apply_usable_arm_reach_clamp_to_solve_result(solve_result)
+	_apply_authoring_manual_upperarm_roll_to_solve_result(
+		solve_result,
+		&"hand_right",
+		RIGHT_UPPERARM_BONE
+	)
+	_apply_authoring_manual_upperarm_roll_to_solve_result(
+		solve_result,
+		&"hand_left",
+		LEFT_UPPERARM_BONE
+	)
 	last_two_hand_solve_result = _build_two_hand_solve_debug_summary(solve_result)
 	grip_debug_draw.call("update_debug_markers", grip_solve_root, solve_result, show_two_hand_grip_debug_markers)
 	var right_solve: Dictionary = solve_result.get(&"hand_right", {})
@@ -2324,15 +2514,56 @@ func _build_slot_solve_debug_summary(slot_solve: Dictionary) -> Dictionary:
 		"used_orbit": bool(projection.get("used_orbit", false)),
 		"alternate_target_correction_disabled": bool(projection.get("alternate_target_correction_disabled", false)),
 		"weapon_body_illegal": bool(slot_solve.get("weapon_body_illegal", false)),
+		"manual_upperarm_roll_active": bool(slot_solve.get("manual_upperarm_roll_active", false)),
+		"manual_upperarm_roll_degrees": float(slot_solve.get("manual_upperarm_roll_degrees", 0.0)),
 		"arm_reach_clamped": bool(slot_solve.get("arm_reach_clamped", false)),
 		"arm_reach_limit_meters": float(slot_solve.get("arm_reach_limit_meters", 0.0)),
 		"arm_reach_before_meters": float(slot_solve.get("arm_reach_before_meters", 0.0)),
 		"arm_reach_after_meters": float(slot_solve.get("arm_reach_after_meters", 0.0)),
 	}
 
+func _apply_authoring_manual_upperarm_roll_to_solve_result(
+	solve_result: Dictionary,
+	slot_id: StringName,
+	upperarm_bone: StringName
+) -> void:
+	if solve_result.is_empty():
+		return
+	var roll_degrees: float = _resolve_authoring_manual_upperarm_roll_degrees(slot_id)
+	if absf(roll_degrees) <= 0.0001:
+		return
+	var slot_solve: Dictionary = solve_result.get(slot_id, {}) as Dictionary
+	if slot_solve.is_empty() or not bool(slot_solve.get("active", false)):
+		return
+	var target_world: Vector3 = slot_solve.get("corrected_target", slot_solve.get("desired_target", Vector3.ZERO)) as Vector3
+	var pole_world: Vector3 = slot_solve.get("pole_target", Vector3.ZERO) as Vector3
+	var shoulder_world: Vector3 = _get_bone_world_position(upperarm_bone)
+	var roll_axis_world: Vector3 = target_world - shoulder_world
+	if roll_axis_world.length_squared() <= 0.000001:
+		return
+	roll_axis_world = roll_axis_world.normalized()
+	var shoulder_to_pole: Vector3 = pole_world - shoulder_world
+	var parallel_world: Vector3 = roll_axis_world * shoulder_to_pole.dot(roll_axis_world)
+	var radial_world: Vector3 = shoulder_to_pole - parallel_world
+	if radial_world.length_squared() <= 0.000001:
+		radial_world = _resolve_authoring_upperarm_roll_reference_world(slot_id, roll_axis_world) * 0.18
+	if radial_world.length_squared() <= 0.000001:
+		return
+	var reference_world: Vector3 = _resolve_authoring_upperarm_roll_reference_world(slot_id, roll_axis_world)
+	if reference_world.length_squared() <= 0.000001:
+		return
+	var current_angle: float = _resolve_signed_planar_angle(reference_world, radial_world.normalized(), roll_axis_world)
+	var target_angle: float = deg_to_rad(clampf(roll_degrees, -180.0, 180.0))
+	var correction_angle: float = _wrap_angle_radians(target_angle - current_angle)
+	var corrected_pole_world: Vector3 = shoulder_world + parallel_world + (Basis(roll_axis_world, correction_angle) * radial_world)
+	slot_solve["pole_target"] = corrected_pole_world
+	slot_solve["manual_upperarm_roll_degrees"] = roll_degrees
+	slot_solve["manual_upperarm_roll_active"] = true
+	solve_result[slot_id] = slot_solve
+
 func _refresh_support_arm_ik_influences() -> void:
 	support_arm_ik_presenter.refresh_support_arm_ik_influences(
-		enable_support_arm_ik and not authoring_preview_mode_enabled,
+		enable_support_arm_ik and not _uses_direct_authoring_solver_mode(),
 		support_arm_ik_influence,
 		right_arm_ik_modifier,
 		left_arm_ik_modifier,
@@ -2340,6 +2571,15 @@ func _refresh_support_arm_ik_influences() -> void:
 		is_arm_guidance_active(&"hand_left"),
 		get_arm_guidance_target(&"hand_right"),
 		get_arm_guidance_target(&"hand_left")
+	)
+
+func _uses_direct_authoring_solver_mode() -> bool:
+	if authoring_preview_mode_enabled:
+		return true
+	return (
+		not upper_body_authoring_auto_apply_enabled
+		and not upper_body_authoring_state.is_empty()
+		and bool(upper_body_authoring_state.get("active", false))
 	)
 
 func _update_finger_grip_targets(delta: float) -> void:
@@ -2465,10 +2705,130 @@ func _resolve_usable_arm_target_world(slot_id: StringName, target_world: Vector3
 func _get_bone_world_position(bone_name: StringName) -> Vector3:
 	return rig_model_presenter.get_bone_world_position(global_position, skeleton, bone_name, bone_index_cache)
 
+func _ensure_combat_authoring_modifier() -> void:
+	if skeleton == null:
+		return
+	combat_authoring_modifier = skeleton.get_node_or_null(COMBAT_AUTHORING_MODIFIER_NAME) as SkeletonModifier3D
+	if combat_authoring_modifier == null:
+		combat_authoring_modifier = PlayerCombatAuthoringModifier3DScript.new()
+		combat_authoring_modifier.name = COMBAT_AUTHORING_MODIFIER_NAME
+		skeleton.add_child(combat_authoring_modifier)
+	combat_authoring_modifier.set("humanoid_rig", self)
+	combat_authoring_modifier.influence = 1.0
+	_refresh_combat_authoring_modifier_state()
+
+func _refresh_combat_authoring_modifier_state() -> void:
+	if combat_authoring_modifier == null:
+		return
+	combat_authoring_modifier.active = _uses_direct_authoring_solver_mode() and not authoring_preview_mode_enabled
+
+func _ensure_runtime_locomotion_animation_tree() -> void:
+	if josie_model == null or animation_player == null:
+		return
+	if runtime_locomotion_animation_tree == null or not is_instance_valid(runtime_locomotion_animation_tree):
+		runtime_locomotion_animation_tree = AnimationTree.new()
+		runtime_locomotion_animation_tree.name = RUNTIME_LOCOMOTION_ANIMATION_TREE_NAME
+		josie_model.add_child(runtime_locomotion_animation_tree)
+	runtime_locomotion_animation_tree.anim_player = runtime_locomotion_animation_tree.get_path_to(animation_player)
+	runtime_locomotion_animation_tree.root_node = NodePath("..")
+	runtime_locomotion_animation_tree.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_IDLE
+	var state_names: Array[StringName] = _get_runtime_locomotion_animation_state_names()
+	if state_names.is_empty():
+		runtime_locomotion_animation_tree.active = false
+		runtime_locomotion_state_machine_playback = null
+		return
+	var setup_key_parts := PackedStringArray()
+	for animation_name: StringName in state_names:
+		setup_key_parts.append(String(animation_name))
+	var setup_key: String = "|".join(setup_key_parts)
+	if runtime_locomotion_animation_tree.tree_root != null and String(runtime_locomotion_animation_tree.get_meta("runtime_locomotion_setup_key", "")) == setup_key:
+		runtime_locomotion_animation_tree.active = not authoring_preview_mode_enabled
+		runtime_locomotion_state_machine_playback = runtime_locomotion_animation_tree.get(RUNTIME_LOCOMOTION_PLAYBACK_PATH) as AnimationNodeStateMachinePlayback
+		return
+	var state_machine := AnimationNodeStateMachine.new()
+	for state_index: int in range(state_names.size()):
+		var animation_name: StringName = state_names[state_index]
+		var animation_node := AnimationNodeAnimation.new()
+		animation_node.animation = animation_name
+		state_machine.add_node(animation_name, animation_node, Vector2(float(state_index) * 180.0, 0.0))
+	for from_state: StringName in state_names:
+		for to_state: StringName in state_names:
+			if from_state == to_state:
+				continue
+			var transition := AnimationNodeStateMachineTransition.new()
+			transition.advance_mode = AnimationNodeStateMachineTransition.ADVANCE_MODE_ENABLED
+			transition.xfade_time = animation_blend_seconds
+			transition.switch_mode = AnimationNodeStateMachineTransition.SWITCH_MODE_IMMEDIATE
+			transition.reset = true
+			state_machine.add_transition(from_state, to_state, transition)
+	runtime_locomotion_animation_tree.tree_root = state_machine
+	runtime_locomotion_animation_tree.set_meta("runtime_locomotion_setup_key", setup_key)
+	runtime_locomotion_animation_tree.active = not authoring_preview_mode_enabled
+	runtime_locomotion_state_machine_playback = runtime_locomotion_animation_tree.get(RUNTIME_LOCOMOTION_PLAYBACK_PATH) as AnimationNodeStateMachinePlayback
+
+func _get_runtime_locomotion_animation_state_names() -> Array[StringName]:
+	var requested_names: Array[StringName] = [
+		default_animation_name,
+		two_hand_idle_animation_name,
+		walk_animation_name,
+		jog_animation_name,
+		sprint_animation_name,
+		jump_animation_name,
+		fall_animation_name,
+	]
+	var state_names: Array[StringName] = []
+	for animation_name: StringName in requested_names:
+		if animation_name == StringName():
+			continue
+		if state_names.has(animation_name):
+			continue
+		if not has_animation_name(animation_name):
+			continue
+		state_names.append(animation_name)
+	return state_names
+
+func _play_runtime_locomotion_animation(animation_name: StringName) -> void:
+	if authoring_preview_mode_enabled or animation_name == StringName():
+		return
+	if locomotion_presenter.current_animation_name == animation_name and _is_runtime_locomotion_state_playing(animation_name):
+		return
+	if _travel_runtime_locomotion_animation_tree(animation_name):
+		locomotion_presenter.current_animation_name = animation_name
+		return
+	locomotion_presenter.play_animation(animation_player, animation_name, animation_blend_seconds)
+
+func _is_runtime_locomotion_state_playing(animation_name: StringName) -> bool:
+	if runtime_locomotion_animation_tree == null or not runtime_locomotion_animation_tree.active:
+		return false
+	if runtime_locomotion_state_machine_playback == null:
+		runtime_locomotion_state_machine_playback = runtime_locomotion_animation_tree.get(RUNTIME_LOCOMOTION_PLAYBACK_PATH) as AnimationNodeStateMachinePlayback
+	if runtime_locomotion_state_machine_playback == null or not runtime_locomotion_state_machine_playback.is_playing():
+		return false
+	return runtime_locomotion_state_machine_playback.get_current_node() == animation_name
+
+func _travel_runtime_locomotion_animation_tree(animation_name: StringName) -> bool:
+	if animation_name == StringName() or not has_animation_name(animation_name):
+		return false
+	_ensure_runtime_locomotion_animation_tree()
+	if runtime_locomotion_animation_tree == null or not runtime_locomotion_animation_tree.active:
+		return false
+	if runtime_locomotion_state_machine_playback == null:
+		runtime_locomotion_state_machine_playback = runtime_locomotion_animation_tree.get(RUNTIME_LOCOMOTION_PLAYBACK_PATH) as AnimationNodeStateMachinePlayback
+	if runtime_locomotion_state_machine_playback == null:
+		return false
+	if not runtime_locomotion_state_machine_playback.is_playing():
+		runtime_locomotion_state_machine_playback.start(animation_name, true)
+		return true
+	runtime_locomotion_state_machine_playback.travel(animation_name, true)
+	runtime_locomotion_state_machine_playback.next()
+	if runtime_locomotion_state_machine_playback.get_current_node() != animation_name:
+		runtime_locomotion_state_machine_playback.start(animation_name, true)
+	return true
+
 func _play_default_animation() -> void:
 	if authoring_preview_mode_enabled:
 		return
-	locomotion_presenter.play_default_animation(animation_player, default_animation_name)
+	_play_runtime_locomotion_animation(default_animation_name)
 
 func _apply_authoring_preview_baseline_pose(baseline_animation_name: StringName = StringName()) -> void:
 	if skeleton != null:

@@ -33,7 +33,7 @@ func resolve_motion_seed_data(baked_profile: BakedProfile) -> Dictionary:
 		"weapon_orientation_authored": false,
 		"weapon_roll_degrees": 0.0,
 		"axial_reposition_offset": 0.0,
-		"grip_seat_slide_offset": 0.0,
+		"grip_seat_slide_offset": CombatAnimationMotionNode.DEFAULT_GRIP_SEAT_SLIDE_OFFSET,
 		"body_support_blend": 0.4,
 		"grip_axis_local": baked_profile.primary_grip_slide_axis.normalized(),
 	}

@@ -138,6 +138,8 @@ func _clear_frame_data(clip) -> void:
 	clip.baked_axial_reposition_offsets.clear()
 	clip.baked_grip_seat_slide_offsets.clear()
 	clip.baked_body_support_blends.clear()
+	clip.baked_right_upperarm_roll_degrees.clear()
+	clip.baked_left_upperarm_roll_degrees.clear()
 	clip.baked_contact_grip_axes_local.clear()
 	clip.baked_contact_axis_override_active.clear()
 	clip.baked_two_hand_states.clear()
@@ -157,6 +159,8 @@ func _append_chain_player_frame(
 	clip.baked_axial_reposition_offsets.append(chain_player.current_axial_reposition)
 	clip.baked_grip_seat_slide_offsets.append(chain_player.current_grip_seat_slide)
 	clip.baked_body_support_blends.append(chain_player.current_body_support_blend)
+	clip.baked_right_upperarm_roll_degrees.append(chain_player.current_right_upperarm_roll)
+	clip.baked_left_upperarm_roll_degrees.append(chain_player.current_left_upperarm_roll)
 	clip.baked_contact_grip_axes_local.append(chain_player.current_contact_grip_axis_local)
 	clip.baked_contact_axis_override_active.append(chain_player.current_contact_grip_axis_local_override_active)
 	clip.baked_two_hand_states.append(chain_player.current_two_hand_state)
@@ -178,6 +182,8 @@ func _append_motion_node_frame(
 	clip.baked_axial_reposition_offsets.append(motion_node.axial_reposition_offset)
 	clip.baked_grip_seat_slide_offsets.append(motion_node.grip_seat_slide_offset)
 	clip.baked_body_support_blends.append(motion_node.body_support_blend)
+	clip.baked_right_upperarm_roll_degrees.append(motion_node.right_upperarm_roll_degrees)
+	clip.baked_left_upperarm_roll_degrees.append(motion_node.left_upperarm_roll_degrees)
 	clip.baked_contact_grip_axes_local.append(_resolve_axis_between_positions(
 		motion_node.pommel_position_local,
 		motion_node.tip_position_local

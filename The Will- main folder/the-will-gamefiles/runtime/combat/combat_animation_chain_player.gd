@@ -38,6 +38,8 @@ var current_weapon_roll: float = 0.0
 var current_axial_reposition: float = 0.0
 var current_grip_seat_slide: float = 0.0
 var current_body_support_blend: float = 0.0
+var current_right_upperarm_roll: float = 0.0
+var current_left_upperarm_roll: float = 0.0
 var current_two_hand_state: StringName = CombatAnimationMotionNodeScript.TWO_HAND_STATE_AUTO
 var current_primary_hand_slot: StringName = CombatAnimationMotionNodeScript.PRIMARY_HAND_AUTO
 var current_preferred_grip_style_mode: StringName = &"grip_normal"
@@ -206,6 +208,8 @@ func _apply_runtime_clip_frame(frame_index: int) -> void:
 	current_axial_reposition = _get_runtime_clip_float("baked_axial_reposition_offsets", frame_index, current_axial_reposition)
 	current_grip_seat_slide = _get_runtime_clip_float("baked_grip_seat_slide_offsets", frame_index, current_grip_seat_slide)
 	current_body_support_blend = _get_runtime_clip_float("baked_body_support_blends", frame_index, current_body_support_blend)
+	current_right_upperarm_roll = _get_runtime_clip_float("baked_right_upperarm_roll_degrees", frame_index, current_right_upperarm_roll)
+	current_left_upperarm_roll = _get_runtime_clip_float("baked_left_upperarm_roll_degrees", frame_index, current_left_upperarm_roll)
 	current_contact_grip_axis_local = _get_runtime_clip_vector3("baked_contact_grip_axes_local", frame_index, current_contact_grip_axis_local)
 	current_contact_grip_axis_local_override_active = _get_runtime_clip_bool("baked_contact_axis_override_active", frame_index, false)
 	current_two_hand_state = _get_runtime_clip_string_name("baked_two_hand_states", frame_index, current_two_hand_state)
@@ -246,6 +250,16 @@ func _interpolate_runtime_clip_frames(from_index: int, to_index: int, ratio: flo
 	current_body_support_blend = lerpf(
 		_get_runtime_clip_float("baked_body_support_blends", from_index, current_body_support_blend),
 		_get_runtime_clip_float("baked_body_support_blends", to_index, current_body_support_blend),
+		clean_ratio
+	)
+	current_right_upperarm_roll = lerpf(
+		_get_runtime_clip_float("baked_right_upperarm_roll_degrees", from_index, current_right_upperarm_roll),
+		_get_runtime_clip_float("baked_right_upperarm_roll_degrees", to_index, current_right_upperarm_roll),
+		clean_ratio
+	)
+	current_left_upperarm_roll = lerpf(
+		_get_runtime_clip_float("baked_left_upperarm_roll_degrees", from_index, current_left_upperarm_roll),
+		_get_runtime_clip_float("baked_left_upperarm_roll_degrees", to_index, current_left_upperarm_roll),
 		clean_ratio
 	)
 	current_contact_grip_axis_local = _get_runtime_clip_vector3("baked_contact_grip_axes_local", from_index, current_contact_grip_axis_local).lerp(
@@ -360,6 +374,8 @@ func _apply_node_state(node_index: int) -> void:
 	current_axial_reposition = motion_node.axial_reposition_offset
 	current_grip_seat_slide = motion_node.grip_seat_slide_offset
 	current_body_support_blend = motion_node.body_support_blend
+	current_right_upperarm_roll = motion_node.right_upperarm_roll_degrees
+	current_left_upperarm_roll = motion_node.left_upperarm_roll_degrees
 	current_two_hand_state = motion_node.two_hand_state
 	current_primary_hand_slot = motion_node.primary_hand_slot
 	current_preferred_grip_style_mode = motion_node.preferred_grip_style_mode
@@ -410,6 +426,8 @@ func _interpolate_between_nodes(from_index: int, to_index: int, ratio: float) ->
 	current_axial_reposition = lerpf(from_node.axial_reposition_offset, to_node.axial_reposition_offset, ratio)
 	current_grip_seat_slide = lerpf(from_node.grip_seat_slide_offset, to_node.grip_seat_slide_offset, ratio)
 	current_body_support_blend = lerpf(from_node.body_support_blend, to_node.body_support_blend, ratio)
+	current_right_upperarm_roll = lerpf(from_node.right_upperarm_roll_degrees, to_node.right_upperarm_roll_degrees, ratio)
+	current_left_upperarm_roll = lerpf(from_node.left_upperarm_roll_degrees, to_node.left_upperarm_roll_degrees, ratio)
 	current_two_hand_state = from_node.two_hand_state if ratio < 0.5 else to_node.two_hand_state
 	current_primary_hand_slot = from_node.primary_hand_slot if ratio < 0.5 else to_node.primary_hand_slot
 	if _is_grip_style_swap_segment(from_node, to_node):

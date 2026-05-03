@@ -811,3 +811,30 @@ Recommended next work should be chosen from fresh testing feedback rather than t
 1. Player-facing polish on the Skill Crafter guardrail UI if the compact summary is not readable enough in live use.
 2. Fine tuning twist distribution ratios after visual inspection in normal, reverse, and hand-swap-heavy poses.
 3. Moving from diagnostic-first Bezier path legality to full handle clamp/reject behavior where the current guardrails identify bad paths.
+
+## Parked Additions From 2026-05-03 Testing
+
+### Upper Arm Roll Continuity
+
+The upper arm roll controls should not feel like they hit a hard wall at the internal `180/-180` angle seam.
+
+Required behavior:
+
+- Dragging roll should allow continuous movement through the seam, for example `179 -> 180 -> -179 -> -178`, and the reverse direction should work the same way.
+- If it proves cleaner, remap the current anatomical rest region near old `180/-180` to internal `0`, but the important rule is continuous drag behavior.
+- Angle display values are developer/debug information for now, not final player-facing UI, so the internal number may wrap as long as the control feels continuous.
+
+### Upper Arm Roll As Post-Solve Bias
+
+Pommel/tip movement must keep the automatic arm solve behavior. Authored upper-arm roll should adjust the solved pose toward a visually preferred elbow/upper-arm orientation, not become a hard legality lock that blocks endpoint movement.
+
+Required behavior:
+
+- Pommel/tip drag solves the IK chain as freely as it did before upper-arm roll authoring.
+- Authored upper-arm roll is applied after the endpoint solve as a pose preference/bias where legal.
+- If the requested roll conflicts with endpoint reach, collision legality, or weapon-in-hand truth, endpoint legality wins and roll is softened or ignored for that frame.
+- The control should help the user correct ugly elbow solves after placement, not make otherwise legal placements impossible.
+
+Test target:
+
+- Use `Test sword for animations`, `skill_slot_1`, and the real runtime/editor path after the 2026-05-03 edited animation pass.

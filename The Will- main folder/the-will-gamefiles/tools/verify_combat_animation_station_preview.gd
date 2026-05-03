@@ -378,8 +378,8 @@ func _run_verification() -> void:
 		focus_initial == CombatAnimationSessionStateScript.FOCUS_TIP
 		and focus_after_one_cycle == CombatAnimationSessionStateScript.FOCUS_POMMEL
 		and focus_after_two_cycles == CombatAnimationSessionStateScript.FOCUS_WEAPON
-		and focus_after_three_cycles == CombatAnimationSessionStateScript.FOCUS_TIP
-		and focus_after_four_cycles == CombatAnimationSessionStateScript.FOCUS_POMMEL
+		and focus_after_three_cycles == CombatAnimationSessionStateScript.FOCUS_ARM_ROLL
+		and focus_after_four_cycles == CombatAnimationSessionStateScript.FOCUS_TIP
 	))
 	lines.append("legacy_plane_removed_ok=true")
 	lines.append("authoring_tip_update_ok=%s" % str(authoring_tip_update_ok))

@@ -199,8 +199,13 @@ func apply_weapon_geometry_seed(seed_data: Dictionary, force_reseed: bool = fals
 	var weapon_orientation_authored: bool = bool(seed_data.get("weapon_orientation_authored", false))
 	var weapon_roll_degrees: float = float(seed_data.get("weapon_roll_degrees", 0.0))
 	var axial_reposition_offset: float = float(seed_data.get("axial_reposition_offset", 0.0))
-	var grip_seat_slide_offset: float = float(seed_data.get("grip_seat_slide_offset", 0.0))
+	var grip_seat_slide_offset: float = float(seed_data.get(
+		"grip_seat_slide_offset",
+		CombatAnimationMotionNode.DEFAULT_GRIP_SEAT_SLIDE_OFFSET
+	))
 	var body_support_blend: float = clampf(float(seed_data.get("body_support_blend", 0.0)), 0.0, 1.0)
+	var right_upperarm_roll_degrees: float = clampf(float(seed_data.get("right_upperarm_roll_degrees", 0.0)), -180.0, 180.0)
+	var left_upperarm_roll_degrees: float = clampf(float(seed_data.get("left_upperarm_roll_degrees", 0.0)), -180.0, 180.0)
 	var preferred_grip_mode: StringName = StringName(seed_data.get("preferred_grip_style_mode", preferred_grip_style_mode))
 	var node_two_hand_state: StringName = StringName(seed_data.get("two_hand_state", CombatAnimationMotionNode.TWO_HAND_STATE_AUTO))
 	var node_primary_hand_slot: StringName = CombatAnimationMotionNode.normalize_primary_hand_slot(StringName(seed_data.get(
@@ -222,6 +227,8 @@ func apply_weapon_geometry_seed(seed_data: Dictionary, force_reseed: bool = fals
 		motion_node.axial_reposition_offset = axial_reposition_offset
 		motion_node.grip_seat_slide_offset = grip_seat_slide_offset
 		motion_node.body_support_blend = body_support_blend
+		motion_node.right_upperarm_roll_degrees = right_upperarm_roll_degrees
+		motion_node.left_upperarm_roll_degrees = left_upperarm_roll_degrees
 		motion_node.tip_curve_in_handle = Vector3.ZERO
 		motion_node.tip_curve_out_handle = Vector3.ZERO
 		motion_node.pommel_curve_in_handle = Vector3.ZERO
@@ -415,10 +422,14 @@ func _matches_clean_skill_seed_pair(node_0: CombatAnimationMotionNode, node_1: C
 		and absf(node_1.weapon_roll_degrees) <= LEGACY_BASELINE_EPSILON
 		and absf(node_0.axial_reposition_offset) <= LEGACY_BASELINE_EPSILON
 		and absf(node_1.axial_reposition_offset) <= LEGACY_BASELINE_EPSILON
-		and absf(node_0.grip_seat_slide_offset) <= LEGACY_BASELINE_EPSILON
-		and absf(node_1.grip_seat_slide_offset) <= LEGACY_BASELINE_EPSILON
+		and _matches_clean_grip_seat_slide(node_0.grip_seat_slide_offset)
+		and _matches_clean_grip_seat_slide(node_1.grip_seat_slide_offset)
 		and absf(node_0.body_support_blend) <= LEGACY_BASELINE_EPSILON
 		and absf(node_1.body_support_blend) <= LEGACY_BASELINE_EPSILON
+		and absf(node_0.right_upperarm_roll_degrees) <= LEGACY_BASELINE_EPSILON
+		and absf(node_1.right_upperarm_roll_degrees) <= LEGACY_BASELINE_EPSILON
+		and absf(node_0.left_upperarm_roll_degrees) <= LEGACY_BASELINE_EPSILON
+		and absf(node_1.left_upperarm_roll_degrees) <= LEGACY_BASELINE_EPSILON
 		and node_0.two_hand_state == CombatAnimationMotionNode.TWO_HAND_STATE_AUTO
 		and node_1.two_hand_state == CombatAnimationMotionNode.TWO_HAND_STATE_AUTO
 		and node_0.primary_hand_slot == CombatAnimationMotionNode.PRIMARY_HAND_AUTO
@@ -427,4 +438,10 @@ func _matches_clean_skill_seed_pair(node_0: CombatAnimationMotionNode, node_1: C
 		and node_1.preferred_grip_style_mode == &"grip_normal"
 		and absf(node_0.transition_duration_seconds - DEFAULT_NODE_TRANSITION_DURATION_SECONDS) <= LEGACY_BASELINE_EPSILON
 		and absf(node_1.transition_duration_seconds - DEFAULT_NODE_TRANSITION_DURATION_SECONDS) <= LEGACY_BASELINE_EPSILON
+	)
+
+func _matches_clean_grip_seat_slide(value: float) -> bool:
+	return (
+		absf(value) <= LEGACY_BASELINE_EPSILON
+		or absf(value - CombatAnimationMotionNode.DEFAULT_GRIP_SEAT_SLIDE_OFFSET) <= LEGACY_BASELINE_EPSILON
 	)

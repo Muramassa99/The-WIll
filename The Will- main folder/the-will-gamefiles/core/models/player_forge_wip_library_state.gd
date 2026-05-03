@@ -128,6 +128,8 @@ func delete_saved_wip(saved_wip_id: StringName) -> bool:
 	return true
 
 func set_selected_wip_id(saved_wip_id: StringName) -> void:
+	if selected_wip_id == saved_wip_id:
+		return
 	selected_wip_id = saved_wip_id
 	persist()
 

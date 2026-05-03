@@ -4,6 +4,7 @@ class_name CombatAnimationSessionState
 const FOCUS_TIP: StringName = &"tip"
 const FOCUS_POMMEL: StringName = &"pommel"
 const FOCUS_WEAPON: StringName = &"weapon"
+const FOCUS_ARM_ROLL: StringName = &"arm_roll"
 
 var current_weapon_wip_id: StringName = StringName()
 var current_draft_ref: Resource = null
@@ -17,6 +18,8 @@ func cycle_focus() -> void:
 		current_focus = FOCUS_POMMEL
 	elif current_focus == FOCUS_POMMEL:
 		current_focus = FOCUS_WEAPON
+	elif current_focus == FOCUS_WEAPON:
+		current_focus = FOCUS_ARM_ROLL
 	else:
 		current_focus = FOCUS_TIP
 
@@ -28,6 +31,9 @@ func is_pommel_focused() -> bool:
 
 func is_weapon_focused() -> bool:
 	return current_focus == FOCUS_WEAPON
+
+func is_arm_roll_focused() -> bool:
+	return current_focus == FOCUS_ARM_ROLL
 
 func reset() -> void:
 	current_weapon_wip_id = StringName()

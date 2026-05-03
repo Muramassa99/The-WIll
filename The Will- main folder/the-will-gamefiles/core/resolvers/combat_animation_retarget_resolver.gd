@@ -40,6 +40,8 @@ func build_retarget_node_from_legacy_motion_node(
 	retarget_node.axial_reposition_offset = motion_node.axial_reposition_offset
 	retarget_node.grip_seat_slide_offset = motion_node.grip_seat_slide_offset
 	retarget_node.body_support_blend = motion_node.body_support_blend
+	retarget_node.right_upperarm_roll_degrees = motion_node.right_upperarm_roll_degrees
+	retarget_node.left_upperarm_roll_degrees = motion_node.left_upperarm_roll_degrees
 	retarget_node.transition_duration_seconds = motion_node.transition_duration_seconds
 	retarget_node.preferred_grip_style_mode = motion_node.preferred_grip_style_mode
 	retarget_node.two_hand_state = motion_node.two_hand_state
@@ -90,6 +92,8 @@ func resolve_motion_values_from_retarget_node(
 		"axial_reposition_offset": retarget_node.axial_reposition_offset,
 		"grip_seat_slide_offset": retarget_node.grip_seat_slide_offset,
 		"body_support_blend": retarget_node.body_support_blend,
+		"right_upperarm_roll_degrees": retarget_node.right_upperarm_roll_degrees,
+		"left_upperarm_roll_degrees": retarget_node.left_upperarm_roll_degrees,
 		"transition_duration_seconds": retarget_node.transition_duration_seconds,
 		"preferred_grip_style_mode": retarget_node.preferred_grip_style_mode,
 		"two_hand_state": retarget_node.two_hand_state,
@@ -123,6 +127,8 @@ func apply_retarget_node_to_motion_node(
 	motion_node.axial_reposition_offset = float(resolved_values.get("axial_reposition_offset", motion_node.axial_reposition_offset))
 	motion_node.grip_seat_slide_offset = float(resolved_values.get("grip_seat_slide_offset", motion_node.grip_seat_slide_offset))
 	motion_node.body_support_blend = float(resolved_values.get("body_support_blend", motion_node.body_support_blend))
+	motion_node.right_upperarm_roll_degrees = float(resolved_values.get("right_upperarm_roll_degrees", motion_node.right_upperarm_roll_degrees))
+	motion_node.left_upperarm_roll_degrees = float(resolved_values.get("left_upperarm_roll_degrees", motion_node.left_upperarm_roll_degrees))
 	motion_node.transition_duration_seconds = float(resolved_values.get("transition_duration_seconds", motion_node.transition_duration_seconds))
 	motion_node.preferred_grip_style_mode = StringName(resolved_values.get("preferred_grip_style_mode", motion_node.preferred_grip_style_mode))
 	motion_node.two_hand_state = StringName(resolved_values.get("two_hand_state", motion_node.two_hand_state))

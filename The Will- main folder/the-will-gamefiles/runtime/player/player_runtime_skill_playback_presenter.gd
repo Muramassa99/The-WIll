@@ -22,6 +22,8 @@ const NO_OP_BRIDGE_DURATION_SECONDS := 0.01
 const MOTION_NODE_POSITION_EPSILON_METERS := 0.005
 const MOTION_NODE_ANGLE_EPSILON_DEGREES := 0.5
 const MOTION_NODE_FLOAT_EPSILON := 0.01
+const RUNTIME_ENDPOINT_AUTHORITY_ROOT_NAME := "RuntimeCombatEndpointAuthorityRoot"
+const RUNTIME_ENDPOINT_AUTHORITY_ACTIVE_META := "runtime_endpoint_authority_active"
 
 var chain_player: CombatAnimationChainPlayer = CombatAnimationChainPlayerScript.new()
 var idle_chain_player: CombatAnimationChainPlayer = CombatAnimationChainPlayerScript.new()
@@ -225,7 +227,7 @@ func start_playback(
 	)
 	var was_runtime_playback_active: bool = runtime_playback_active
 	if runtime_idle_active:
-		clear_idle_pose(humanoid_rig, equipped_item_presenter, held_item_nodes, equipment_state, weapons_drawn)
+		clear_idle_pose(humanoid_rig, equipped_item_presenter, held_item_nodes, equipment_state, weapons_drawn, true)
 	if runtime_playback_active:
 		stop_playback(humanoid_rig, held_item_nodes, equipped_item_presenter, equipment_state, weapons_drawn, false, false)
 
@@ -251,6 +253,7 @@ func start_playback(
 	active_baseline_local_transform = held_item.transform
 	active_baseline_local_transform_valid = true
 	active_trajectory_volume_config = trajectory_volume_config
+	_claim_runtime_endpoint_authority(humanoid_rig, held_item)
 	mark_combat_action_used()
 	_apply_entry_bridge_debug(prepared_chain_result)
 	_begin_entry_hidden_bridge(prepared_chain_result, active_dominant_slot_id, was_runtime_playback_active, slot_activation_result)
@@ -407,7 +410,8 @@ func clear_idle_pose(
 	equipped_item_presenter: PlayerEquippedItemPresenter = null,
 	held_item_nodes: Dictionary = {},
 	equipment_state = null,
-	weapons_drawn: bool = true
+	weapons_drawn: bool = true,
+	preserve_authoring_authority: bool = false
 ) -> void:
 	if not runtime_idle_active and active_idle_dominant_slot_id == StringName():
 		_clear_pending_recovery_state()
@@ -425,9 +429,18 @@ func clear_idle_pose(
 	last_runtime_idle_pose_state = {}
 	active_idle_trajectory_volume_config = {}
 	_clear_pending_recovery_state()
-	if humanoid_rig != null and humanoid_rig.has_method("clear_upper_body_authoring_state"):
+	if humanoid_rig != null and humanoid_rig.has_method("clear_upper_body_authoring_state") and not preserve_authoring_authority:
 		humanoid_rig.call("clear_upper_body_authoring_state")
-	if equipped_item_presenter != null:
+	if humanoid_rig != null and humanoid_rig.has_method("set_upper_body_authoring_auto_apply_enabled") and not runtime_playback_active and not preserve_authoring_authority:
+		humanoid_rig.call("set_upper_body_authoring_auto_apply_enabled", true)
+	if equipped_item_presenter != null and not preserve_authoring_authority:
+		_release_runtime_endpoint_authority(
+			humanoid_rig,
+			held_item_nodes,
+			equipped_item_presenter,
+			equipment_state,
+			weapons_drawn
+		)
 		equipped_item_presenter.sync_rig_weapon_guidance(
 			humanoid_rig,
 			held_item_nodes,
@@ -447,7 +460,8 @@ func stop_playback(
 	if not runtime_playback_active and active_dominant_slot_id == StringName():
 		return
 	var held_item: Node3D = held_item_nodes.get(active_dominant_slot_id) as Node3D
-	if preserve_recovery_state and playback_finished_pending and runtime_playback_active:
+	var preserve_recovery_authority: bool = preserve_recovery_state and playback_finished_pending and runtime_playback_active
+	if preserve_recovery_authority:
 		var recovery_fallback_node: CombatAnimationMotionNode = null
 		if not active_motion_node_chain.is_empty():
 			recovery_fallback_node = active_motion_node_chain[0] as CombatAnimationMotionNode
@@ -458,13 +472,21 @@ func stop_playback(
 		pending_recovery_dominant_slot_id = active_dominant_slot_id
 	else:
 		_clear_pending_recovery_state()
-	if restore_baseline_transform and held_item != null and is_instance_valid(held_item) and active_baseline_local_transform_valid:
-		held_item.transform = active_baseline_local_transform
-	if humanoid_rig != null and humanoid_rig.has_method("clear_upper_body_authoring_state"):
+	if humanoid_rig != null and humanoid_rig.has_method("clear_upper_body_authoring_state") and not preserve_recovery_authority:
 		humanoid_rig.call("clear_upper_body_authoring_state")
-	if humanoid_rig != null and humanoid_rig.has_method("set_upper_body_authoring_auto_apply_enabled"):
+	if humanoid_rig != null and humanoid_rig.has_method("set_upper_body_authoring_auto_apply_enabled") and not preserve_recovery_authority:
 		humanoid_rig.call("set_upper_body_authoring_auto_apply_enabled", true)
-	if equipped_item_presenter != null:
+	if equipped_item_presenter != null and not preserve_recovery_authority:
+		_release_runtime_endpoint_authority(
+			humanoid_rig,
+			held_item_nodes,
+			equipped_item_presenter,
+			equipment_state,
+			weapons_drawn
+		)
+	if restore_baseline_transform and not preserve_recovery_authority and held_item != null and is_instance_valid(held_item) and active_baseline_local_transform_valid:
+		held_item.transform = active_baseline_local_transform
+	if equipped_item_presenter != null and not preserve_recovery_authority:
 		equipped_item_presenter.sync_rig_weapon_guidance(
 			humanoid_rig,
 			held_item_nodes,
@@ -511,7 +533,14 @@ func _apply_current_runtime_pose(humanoid_rig: Node3D, held_item_nodes: Dictiona
 		active_dominant_slot_id,
 		support_requested
 	)
-	_apply_runtime_support_guidance(humanoid_rig, held_item_nodes, held_item, support_requested)
+	_apply_runtime_weapon_contact_guidance_for_slots(
+		humanoid_rig,
+		held_item_nodes,
+		held_item,
+		active_dominant_slot_id,
+		active_support_slot_id,
+		support_requested
+	)
 	return resolved_pose_state
 
 func _start_idle_pose(
@@ -532,6 +561,9 @@ func _start_idle_pose(
 	)
 	active_idle_source_key = _build_idle_source_key(idle_pose_result, dominant_slot_id, motion_node_chain)
 	runtime_idle_active = true
+	if humanoid_rig != null and humanoid_rig.has_method("set_upper_body_authoring_auto_apply_enabled"):
+		humanoid_rig.call("set_upper_body_authoring_auto_apply_enabled", false)
+	_claim_runtime_endpoint_authority(humanoid_rig, held_item)
 	idle_chain_player.stop()
 	active_idle_trajectory_volume_config = {}
 	var recovery_source_node: CombatAnimationMotionNode = pending_recovery_motion_node
@@ -615,6 +647,9 @@ func _start_steady_idle_pose_after_recovery(
 		held_item,
 		dominant_slot_id
 	)
+	if humanoid_rig != null and humanoid_rig.has_method("set_upper_body_authoring_auto_apply_enabled"):
+		humanoid_rig.call("set_upper_body_authoring_auto_apply_enabled", false)
+	_claim_runtime_endpoint_authority(humanoid_rig, held_item)
 	idle_chain_player.stop()
 	if hidden_bridge_state.kind == PlayerRuntimeHiddenBridgeStateScript.KIND_SKILL_RECOVERY:
 		hidden_bridge_state.complete()
@@ -723,10 +758,11 @@ func _apply_current_idle_pose(humanoid_rig: Node3D, held_item_nodes: Dictionary)
 		active_idle_dominant_slot_id,
 		support_requested
 	)
-	_apply_runtime_support_guidance_for_slots(
+	_apply_runtime_weapon_contact_guidance_for_slots(
 		humanoid_rig,
 		held_item_nodes,
 		held_item,
+		active_idle_dominant_slot_id,
 		active_idle_support_slot_id,
 		support_requested
 	)
@@ -745,6 +781,7 @@ func _apply_lightweight_runtime_clip_pose(
 	var resolved_playback_state: Dictionary = playback_state.duplicate(true)
 	if humanoid_rig == null or held_item == null or not is_instance_valid(held_item) or effective_motion_node == null:
 		return resolved_playback_state
+	_claim_runtime_endpoint_authority(humanoid_rig, held_item)
 	var local_tip: Vector3 = held_item.get_meta("weapon_tip_local", Vector3.ZERO) as Vector3
 	var local_pommel: Vector3 = held_item.get_meta("weapon_pommel_local", Vector3.ZERO) as Vector3
 	if local_tip.is_equal_approx(local_pommel):
@@ -784,10 +821,11 @@ func _apply_lightweight_runtime_clip_pose(
 		)
 		held_item.global_transform = solved_transform
 	live_pose_presenter._apply_preview_resolved_grip_state(held_item)
-	_apply_runtime_support_guidance_for_slots(
+	_apply_runtime_weapon_contact_guidance_for_slots(
 		humanoid_rig,
 		held_item_nodes,
 		held_item,
+		dominant_slot_id,
 		support_slot_id,
 		support_requested
 	)
@@ -797,7 +835,11 @@ func _apply_lightweight_runtime_clip_pose(
 	resolved_playback_state["active"] = bool(resolved_playback_state.get("active", true))
 	resolved_playback_state["tip_position_local"] = trajectory_inverse * solved_tip_world
 	resolved_playback_state["pommel_position_local"] = trajectory_inverse * solved_pommel_world
+	resolved_playback_state["tip_world"] = solved_tip_world
+	resolved_playback_state["pommel_world"] = solved_pommel_world
 	resolved_playback_state["weapon_orientation_degrees"] = resolved_weapon_orientation_degrees
+	resolved_playback_state["runtime_endpoint_authority_active"] = bool(held_item.get_meta(RUNTIME_ENDPOINT_AUTHORITY_ACTIVE_META, false))
+	resolved_playback_state["held_item_parent_path"] = str(held_item.get_parent().get_path() if held_item.get_parent() != null else NodePath(""))
 	_apply_runtime_clip_upper_body_authoring_state(
 		humanoid_rig,
 		held_item,
@@ -866,14 +908,53 @@ func _apply_runtime_clip_upper_body_authoring_state(
 		"blend": clampf(float(playback_state.get("body_support_blend", effective_motion_node.body_support_blend)), 0.0, 1.0),
 		"two_hand": support_requested,
 		"dominant_slot_id": dominant_slot_id,
+		"right_upperarm_roll_degrees": float(playback_state.get("right_upperarm_roll_degrees", effective_motion_node.right_upperarm_roll_degrees)),
+		"left_upperarm_roll_degrees": float(playback_state.get("left_upperarm_roll_degrees", effective_motion_node.left_upperarm_roll_degrees)),
 		"primary_target_world": primary_anchor.global_position if primary_anchor != null else Vector3.ZERO,
 		"secondary_target_world": support_anchor.global_position if support_requested and support_anchor != null else Vector3.ZERO,
 		"tip_world": tip_world,
 		"pommel_world": pommel_world,
 	}
 	humanoid_rig.call("set_upper_body_authoring_state", payload)
-	if humanoid_rig.has_method("apply_upper_body_authoring_pose_now"):
+	if humanoid_rig.has_method("apply_runtime_combat_authoring_frame_now"):
+		humanoid_rig.call("apply_runtime_combat_authoring_frame_now")
+	elif humanoid_rig.has_method("apply_upper_body_authoring_pose_now"):
 		humanoid_rig.call("apply_upper_body_authoring_pose_now")
+
+func _apply_runtime_weapon_contact_guidance_for_slots(
+	humanoid_rig: Node3D,
+	held_item_nodes: Dictionary,
+	held_item: Node3D,
+	dominant_slot_id: StringName,
+	support_slot_id: StringName,
+	support_requested: bool
+) -> void:
+	if humanoid_rig == null or held_item == null or not is_instance_valid(held_item):
+		return
+	var normalized_dominant_slot_id: StringName = _normalize_hand_slot_id(dominant_slot_id)
+	held_item.set_meta("dominant_contact_slot_id", normalized_dominant_slot_id)
+	var presenter = live_pose_presenter.equipped_item_presenter if live_pose_presenter != null else null
+	if presenter != null and presenter.has_method("sync_single_weapon_contact_guidance"):
+		presenter.call(
+			"sync_single_weapon_contact_guidance",
+			humanoid_rig,
+			held_item,
+			normalized_dominant_slot_id,
+			support_requested,
+			true,
+			true,
+			support_requested,
+			true,
+			true
+		)
+		return
+	_apply_runtime_support_guidance_for_slots(
+		humanoid_rig,
+		held_item_nodes,
+		held_item,
+		support_slot_id,
+		support_requested
+	)
 
 func _apply_runtime_support_guidance(
 	humanoid_rig: Node3D,
@@ -941,6 +1022,8 @@ func _build_effective_motion_node(support_requested: bool) -> CombatAnimationMot
 	effective_motion_node.axial_reposition_offset = chain_player.current_axial_reposition
 	effective_motion_node.grip_seat_slide_offset = chain_player.current_grip_seat_slide
 	effective_motion_node.body_support_blend = chain_player.current_body_support_blend
+	effective_motion_node.right_upperarm_roll_degrees = chain_player.current_right_upperarm_roll
+	effective_motion_node.left_upperarm_roll_degrees = chain_player.current_left_upperarm_roll
 	effective_motion_node.two_hand_state = chain_player.current_two_hand_state
 	effective_motion_node.primary_hand_slot = chain_player.current_primary_hand_slot
 	effective_motion_node.preferred_grip_style_mode = chain_player.current_preferred_grip_style_mode
@@ -959,6 +1042,8 @@ func _build_playback_state() -> Dictionary:
 		"axial_reposition_offset": chain_player.current_axial_reposition,
 		"grip_seat_slide_offset": chain_player.current_grip_seat_slide,
 		"body_support_blend": chain_player.current_body_support_blend,
+		"right_upperarm_roll_degrees": chain_player.current_right_upperarm_roll,
+		"left_upperarm_roll_degrees": chain_player.current_left_upperarm_roll,
 		"two_hand_state": chain_player.current_two_hand_state,
 		"primary_hand_slot": chain_player.current_primary_hand_slot,
 		"preferred_grip_style_mode": chain_player.current_preferred_grip_style_mode,
@@ -985,6 +1070,8 @@ func _build_effective_idle_motion_node() -> CombatAnimationMotionNode:
 		effective_motion_node.axial_reposition_offset = idle_chain_player.current_axial_reposition
 		effective_motion_node.grip_seat_slide_offset = idle_chain_player.current_grip_seat_slide
 		effective_motion_node.body_support_blend = idle_chain_player.current_body_support_blend
+		effective_motion_node.right_upperarm_roll_degrees = idle_chain_player.current_right_upperarm_roll
+		effective_motion_node.left_upperarm_roll_degrees = idle_chain_player.current_left_upperarm_roll
 		effective_motion_node.two_hand_state = idle_chain_player.current_two_hand_state
 		effective_motion_node.primary_hand_slot = idle_chain_player.current_primary_hand_slot
 		effective_motion_node.preferred_grip_style_mode = idle_chain_player.current_preferred_grip_style_mode
@@ -1005,6 +1092,8 @@ func _build_idle_playback_state(effective_motion_node: CombatAnimationMotionNode
 		"axial_reposition_offset": effective_motion_node.axial_reposition_offset,
 		"grip_seat_slide_offset": effective_motion_node.grip_seat_slide_offset,
 		"body_support_blend": effective_motion_node.body_support_blend,
+		"right_upperarm_roll_degrees": effective_motion_node.right_upperarm_roll_degrees,
+		"left_upperarm_roll_degrees": effective_motion_node.left_upperarm_roll_degrees,
 		"two_hand_state": effective_motion_node.two_hand_state,
 		"primary_hand_slot": effective_motion_node.primary_hand_slot,
 		"preferred_grip_style_mode": effective_motion_node.preferred_grip_style_mode,
@@ -1111,6 +1200,60 @@ func _resolve_other_hand_slot_id(slot_id: StringName) -> StringName:
 		return &"hand_right"
 	return &"hand_left"
 
+func _claim_runtime_endpoint_authority(humanoid_rig: Node3D, held_item: Node3D) -> void:
+	if humanoid_rig == null or held_item == null or not is_instance_valid(held_item):
+		return
+	var authority_root: Node3D = _ensure_runtime_endpoint_authority_root(humanoid_rig)
+	if authority_root == null:
+		return
+	held_item.set_meta(RUNTIME_ENDPOINT_AUTHORITY_ACTIVE_META, true)
+	if held_item.get_parent() == authority_root:
+		return
+	var preserved_global_transform: Transform3D = held_item.global_transform
+	var current_parent: Node = held_item.get_parent()
+	if current_parent != null:
+		current_parent.remove_child(held_item)
+	authority_root.add_child(held_item)
+	held_item.global_transform = preserved_global_transform
+
+func _release_runtime_endpoint_authority(
+	humanoid_rig: Node3D,
+	held_item_nodes: Dictionary,
+	equipped_item_presenter: PlayerEquippedItemPresenter,
+	equipment_state,
+	weapons_drawn: bool
+) -> void:
+	if humanoid_rig == null or equipped_item_presenter == null:
+		return
+	for slot_id: StringName in [&"hand_right", &"hand_left"]:
+		var held_item: Node3D = held_item_nodes.get(slot_id) as Node3D
+		if held_item == null or not is_instance_valid(held_item):
+			continue
+		if bool(held_item.get_meta(RUNTIME_ENDPOINT_AUTHORITY_ACTIVE_META, false)):
+			held_item.set_meta(RUNTIME_ENDPOINT_AUTHORITY_ACTIVE_META, false)
+	equipped_item_presenter.reanchor_equipped_item_nodes(
+		humanoid_rig,
+		held_item_nodes,
+		equipment_state,
+		weapons_drawn
+	)
+
+func _ensure_runtime_endpoint_authority_root(humanoid_rig: Node3D) -> Node3D:
+	if humanoid_rig == null:
+		return null
+	var authority_root: Node3D = humanoid_rig.get_node_or_null(RUNTIME_ENDPOINT_AUTHORITY_ROOT_NAME) as Node3D
+	if authority_root != null:
+		return authority_root
+	authority_root = Node3D.new()
+	authority_root.name = RUNTIME_ENDPOINT_AUTHORITY_ROOT_NAME
+	humanoid_rig.add_child(authority_root)
+	return authority_root
+
+func _normalize_hand_slot_id(slot_id: StringName) -> StringName:
+	if slot_id == &"hand_left":
+		return &"hand_left"
+	return &"hand_right"
+
 func _capture_current_motion_node_for_slot(slot_id: StringName, fallback_node: CombatAnimationMotionNode = null) -> CombatAnimationMotionNode:
 	if slot_id != StringName():
 		if runtime_playback_active and active_dominant_slot_id == slot_id and not active_motion_node_chain.is_empty():
@@ -1162,6 +1305,8 @@ func _build_chain_player_motion_node_snapshot(
 	snapshot.axial_reposition_offset = source_chain_player.current_axial_reposition
 	snapshot.grip_seat_slide_offset = source_chain_player.current_grip_seat_slide
 	snapshot.body_support_blend = source_chain_player.current_body_support_blend
+	snapshot.right_upperarm_roll_degrees = source_chain_player.current_right_upperarm_roll
+	snapshot.left_upperarm_roll_degrees = source_chain_player.current_left_upperarm_roll
 	snapshot.two_hand_state = source_chain_player.current_two_hand_state
 	snapshot.primary_hand_slot = source_chain_player.current_primary_hand_slot
 	snapshot.preferred_grip_style_mode = source_chain_player.current_preferred_grip_style_mode
@@ -1188,6 +1333,8 @@ func _build_motion_node_from_pose_state(
 	snapshot.axial_reposition_offset = float(pose_state.get("axial_reposition_offset", snapshot.axial_reposition_offset))
 	snapshot.grip_seat_slide_offset = float(pose_state.get("grip_seat_slide_offset", snapshot.grip_seat_slide_offset))
 	snapshot.body_support_blend = float(pose_state.get("body_support_blend", snapshot.body_support_blend))
+	snapshot.right_upperarm_roll_degrees = float(pose_state.get("right_upperarm_roll_degrees", snapshot.right_upperarm_roll_degrees))
+	snapshot.left_upperarm_roll_degrees = float(pose_state.get("left_upperarm_roll_degrees", snapshot.left_upperarm_roll_degrees))
 	snapshot.two_hand_state = StringName(pose_state.get("two_hand_state", snapshot.two_hand_state))
 	snapshot.primary_hand_slot = StringName(pose_state.get("primary_hand_slot", snapshot.primary_hand_slot))
 	snapshot.preferred_grip_style_mode = StringName(pose_state.get("preferred_grip_style_mode", snapshot.preferred_grip_style_mode))
@@ -1314,6 +1461,10 @@ func _motion_nodes_need_bridge(from_node: CombatAnimationMotionNode, to_node: Co
 	if absf(from_node.grip_seat_slide_offset - to_node.grip_seat_slide_offset) > MOTION_NODE_FLOAT_EPSILON:
 		return true
 	if absf(from_node.body_support_blend - to_node.body_support_blend) > MOTION_NODE_FLOAT_EPSILON:
+		return true
+	if absf(from_node.right_upperarm_roll_degrees - to_node.right_upperarm_roll_degrees) > MOTION_NODE_ANGLE_EPSILON_DEGREES:
+		return true
+	if absf(from_node.left_upperarm_roll_degrees - to_node.left_upperarm_roll_degrees) > MOTION_NODE_ANGLE_EPSILON_DEGREES:
 		return true
 	if from_node.two_hand_state != to_node.two_hand_state:
 		return true

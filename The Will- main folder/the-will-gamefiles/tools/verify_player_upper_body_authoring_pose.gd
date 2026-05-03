@@ -54,6 +54,37 @@ func _run_verification() -> void:
 	var right_forearm_after: Quaternion = skeleton.get_bone_pose_rotation(right_forearm_index) if right_forearm_index >= 0 else Quaternion.IDENTITY
 	var left_forearm_after: Quaternion = skeleton.get_bone_pose_rotation(left_forearm_index) if left_forearm_index >= 0 else Quaternion.IDENTITY
 
+	var roll_zero_right_hand_world: Vector3 = _get_bone_world_position(skeleton, "CC_Base_R_Hand")
+	var roll_zero_right_elbow_world: Vector3 = _get_bone_world_position(skeleton, "CC_Base_R_Forearm")
+	var roll_zero_right_clavicle: Quaternion = skeleton.get_bone_pose_rotation(right_clavicle_index) if right_clavicle_index >= 0 else Quaternion.IDENTITY
+	var roll_zero_right_upperarm_global: Quaternion = _get_bone_global_rotation(skeleton, "CC_Base_R_Upperarm")
+	rig_root.set_upper_body_authoring_state({
+		"active": true,
+		"blend": 1.0,
+		"two_hand": true,
+		"dominant_slot_id": &"hand_right",
+		"primary_target_world": rig_root.global_position + Vector3(0.32, 1.20, -0.68),
+		"secondary_target_world": rig_root.global_position + Vector3(-0.22, 1.18, -0.52),
+		"tip_world": rig_root.global_position + Vector3(0.58, 1.42, -1.08),
+		"pommel_world": rig_root.global_position + Vector3(0.18, 1.02, -0.44),
+		"right_upperarm_roll_degrees": 55.0,
+		"left_upperarm_roll_degrees": -25.0,
+	})
+	rig_root.apply_authoring_preview_frame_now()
+	var roll_right_hand_world: Vector3 = _get_bone_world_position(skeleton, "CC_Base_R_Hand")
+	var roll_right_elbow_world: Vector3 = _get_bone_world_position(skeleton, "CC_Base_R_Forearm")
+	var roll_right_clavicle: Quaternion = skeleton.get_bone_pose_rotation(right_clavicle_index) if right_clavicle_index >= 0 else Quaternion.IDENTITY
+	var roll_right_upperarm_global: Quaternion = _get_bone_global_rotation(skeleton, "CC_Base_R_Upperarm")
+	var roll_hand_hold_error_meters: float = roll_zero_right_hand_world.distance_to(roll_right_hand_world)
+	var roll_elbow_delta_meters: float = roll_zero_right_elbow_world.distance_to(roll_right_elbow_world)
+	var roll_clavicle_delta_degrees: float = rad_to_deg(roll_zero_right_clavicle.angle_to(roll_right_clavicle))
+	var roll_upperarm_delta_degrees: float = rad_to_deg(roll_zero_right_upperarm_global.angle_to(roll_right_upperarm_global))
+	var roll_check_passed: bool = (
+		roll_hand_hold_error_meters <= 0.035
+		and roll_elbow_delta_meters > 0.01
+		and roll_upperarm_delta_degrees > 1.0
+	)
+
 	var lines: PackedStringArray = []
 	lines.append("rig_loaded=%s" % str(rig_root != null))
 	lines.append("skeleton_loaded=%s" % str(skeleton != null))
@@ -73,10 +104,27 @@ func _run_verification() -> void:
 	lines.append("left_upperarm_angle_delta=%s" % str(snapped(left_upperarm_before.angle_to(left_upperarm_after), 0.0001)))
 	lines.append("right_forearm_angle_delta=%s" % str(snapped(right_forearm_before.angle_to(right_forearm_after), 0.0001)))
 	lines.append("left_forearm_angle_delta=%s" % str(snapped(left_forearm_before.angle_to(left_forearm_after), 0.0001)))
+	lines.append("manual_upperarm_roll_hand_hold_error_meters=%.4f" % roll_hand_hold_error_meters)
+	lines.append("manual_upperarm_roll_elbow_delta_meters=%.4f" % roll_elbow_delta_meters)
+	lines.append("manual_upperarm_roll_clavicle_delta_degrees=%.2f" % roll_clavicle_delta_degrees)
+	lines.append("manual_upperarm_roll_upperarm_delta_degrees=%.2f" % roll_upperarm_delta_degrees)
+	lines.append("manual_upperarm_roll_check_passed=%s" % str(roll_check_passed))
 
 	var file: FileAccess = FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)
 	if file != null:
 		file.store_string("\n".join(lines))
 		file.close()
 
-	quit()
+	quit(0 if roll_check_passed else 1)
+
+func _get_bone_world_position(skeleton: Skeleton3D, bone_name: String) -> Vector3:
+	var bone_index: int = skeleton.find_bone(bone_name) if skeleton != null else -1
+	if bone_index < 0:
+		return Vector3.ZERO
+	return skeleton.to_global(skeleton.get_bone_global_pose(bone_index).origin)
+
+func _get_bone_global_rotation(skeleton: Skeleton3D, bone_name: String) -> Quaternion:
+	var bone_index: int = skeleton.find_bone(bone_name) if skeleton != null else -1
+	if bone_index < 0:
+		return Quaternion.IDENTITY
+	return skeleton.get_bone_global_pose(bone_index).basis.orthonormalized().get_rotation_quaternion()

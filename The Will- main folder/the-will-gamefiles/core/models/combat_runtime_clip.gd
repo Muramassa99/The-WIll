@@ -30,6 +30,8 @@ const CLIP_KIND_BRIDGE: StringName = &"bridge"
 @export var baked_axial_reposition_offsets: PackedFloat32Array = PackedFloat32Array()
 @export var baked_grip_seat_slide_offsets: PackedFloat32Array = PackedFloat32Array()
 @export var baked_body_support_blends: PackedFloat32Array = PackedFloat32Array()
+@export var baked_right_upperarm_roll_degrees: PackedFloat32Array = PackedFloat32Array()
+@export var baked_left_upperarm_roll_degrees: PackedFloat32Array = PackedFloat32Array()
 @export var baked_contact_grip_axes_local: PackedVector3Array = PackedVector3Array()
 @export var baked_contact_axis_override_active: Array = []
 @export var baked_two_hand_states: Array = []
@@ -112,6 +114,8 @@ func duplicate_clip():
 	duplicate_resource.baked_axial_reposition_offsets = baked_axial_reposition_offsets.duplicate()
 	duplicate_resource.baked_grip_seat_slide_offsets = baked_grip_seat_slide_offsets.duplicate()
 	duplicate_resource.baked_body_support_blends = baked_body_support_blends.duplicate()
+	duplicate_resource.baked_right_upperarm_roll_degrees = baked_right_upperarm_roll_degrees.duplicate()
+	duplicate_resource.baked_left_upperarm_roll_degrees = baked_left_upperarm_roll_degrees.duplicate()
 	duplicate_resource.baked_contact_grip_axes_local = baked_contact_grip_axes_local.duplicate()
 	duplicate_resource.baked_contact_axis_override_active = baked_contact_axis_override_active.duplicate(true)
 	duplicate_resource.baked_two_hand_states = baked_two_hand_states.duplicate(true)

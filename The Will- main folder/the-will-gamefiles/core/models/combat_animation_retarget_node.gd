@@ -4,6 +4,7 @@ class_name CombatAnimationRetargetNode
 const SCHEMA_ID: StringName = &"combat_animation_retarget_node_v1"
 const ORIGIN_SPACE_PRIMARY_SHOULDER: StringName = &"primary_shoulder"
 const ORIGIN_SPACE_TORSO_FRAME: StringName = &"torso_frame"
+const DEFAULT_GRIP_SEAT_SLIDE_OFFSET: float = 0.2
 
 @export var schema_id: StringName = SCHEMA_ID
 @export var enabled: bool = false
@@ -16,8 +17,10 @@ const ORIGIN_SPACE_TORSO_FRAME: StringName = &"torso_frame"
 @export var weapon_orientation_authored: bool = false
 @export var weapon_roll_degrees: float = 0.0
 @export var axial_reposition_offset: float = 0.0
-@export var grip_seat_slide_offset: float = 0.0
+@export var grip_seat_slide_offset: float = DEFAULT_GRIP_SEAT_SLIDE_OFFSET
 @export var body_support_blend: float = 0.0
+@export var right_upperarm_roll_degrees: float = 0.0
+@export var left_upperarm_roll_degrees: float = 0.0
 @export_range(0.0, 2.0, 0.01) var transition_duration_seconds: float = 0.18
 @export var preferred_grip_style_mode: StringName = &"grip_normal"
 @export var two_hand_state: StringName = &"two_hand_auto"
@@ -44,6 +47,8 @@ func normalize() -> void:
 	pivot_ratio_from_pommel = clampf(pivot_ratio_from_pommel, 0.0, 1.0)
 	weapon_roll_degrees = clampf(weapon_roll_degrees, -120.0, 120.0)
 	body_support_blend = clampf(body_support_blend, 0.0, 1.0)
+	right_upperarm_roll_degrees = clampf(right_upperarm_roll_degrees, -180.0, 180.0)
+	left_upperarm_roll_degrees = clampf(left_upperarm_roll_degrees, -180.0, 180.0)
 	transition_duration_seconds = maxf(transition_duration_seconds, 0.0)
 	source_weapon_length_meters = maxf(source_weapon_length_meters, 0.0)
 	source_min_radius_meters = maxf(source_min_radius_meters, 0.0)

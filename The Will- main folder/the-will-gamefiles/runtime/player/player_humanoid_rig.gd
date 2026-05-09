@@ -9,9 +9,14 @@ const PlayerRigSupportArmIkPresenterScript = preload("res://runtime/player/playe
 const PlayerRigFingerGripPresenterScript = preload("res://runtime/player/player_rig_finger_grip_presenter.gd")
 const PlayerRigUpperBodyPosePresenterScript = preload("res://runtime/player/player_rig_upper_body_pose_presenter.gd")
 const PlayerCombatAuthoringModifier3DScript = preload("res://runtime/player/player_combat_authoring_modifier_3d.gd")
+const PlayerRuntimeSolvedReplayModifier3DScript = preload("res://runtime/player/player_runtime_solved_replay_modifier_3d.gd")
+const PlayerRuntimeBodyRestrictionSyncModifier3DScript = preload("res://runtime/player/player_runtime_body_restriction_sync_modifier_3d.gd")
+const PlayerRuntimeBoneDebugModifier3DScript = preload("res://runtime/player/player_runtime_bone_debug_modifier_3d.gd")
 const HandTargetConstraintSolverScript = preload("res://runtime/player/hand_target_constraint_solver.gd")
 const TwoHandPoseSolverScript = preload("res://runtime/player/two_hand_pose_solver.gd")
 const GripDebugDrawScript = preload("res://runtime/player/grip_debug_draw.gd")
+const RuntimeBoneDebugDrawScript = preload("res://runtime/player/runtime_bone_debug_draw.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const RIGHT_HAND_BONE := &"CC_Base_R_Hand"
 const LEFT_HAND_BONE := &"CC_Base_L_Hand"
 const RIGHT_INDEX1_BONE := &"CC_Base_R_Index1"
@@ -21,6 +26,9 @@ const LEFT_PINKY1_BONE := &"CC_Base_L_Pinky1"
 const RIGHT_THIGH_BONE := &"CC_Base_R_Thigh"
 const LEFT_THIGH_BONE := &"CC_Base_L_Thigh"
 const HIP_BONE := &"CC_Base_Hip"
+const WAIST_BONE := &"CC_Base_Waist"
+const SPINE_01_BONE := &"CC_Base_Spine01"
+const SPINE_02_BONE := &"CC_Base_Spine02"
 const RIGHT_CLAVICLE_BONE := &"CC_Base_R_Clavicle"
 const LEFT_CLAVICLE_BONE := &"CC_Base_L_Clavicle"
 const RIGHT_UPPERARM_BONE := &"CC_Base_R_Upperarm"
@@ -31,6 +39,92 @@ const RIGHT_UPPERARM_TWIST_BONES := [&"CC_Base_R_UpperarmTwist01", &"CC_Base_R_U
 const LEFT_UPPERARM_TWIST_BONES := [&"CC_Base_L_UpperarmTwist01", &"CC_Base_L_UpperarmTwist02"]
 const RIGHT_FOREARM_TWIST_BONES := [&"CC_Base_R_ForearmTwist01", &"CC_Base_R_ForearmTwist02"]
 const LEFT_FOREARM_TWIST_BONES := [&"CC_Base_L_ForearmTwist01", &"CC_Base_L_ForearmTwist02"]
+const RIGHT_FINGER_POSE_BONES := [
+	&"CC_Base_R_Thumb1",
+	&"CC_Base_R_Thumb2",
+	&"CC_Base_R_Thumb3",
+	&"CC_Base_R_Index1",
+	&"CC_Base_R_Index2",
+	&"CC_Base_R_Index3",
+	&"CC_Base_R_Mid1",
+	&"CC_Base_R_Mid2",
+	&"CC_Base_R_Mid3",
+	&"CC_Base_R_Ring1",
+	&"CC_Base_R_Ring2",
+	&"CC_Base_R_Ring3",
+	&"CC_Base_R_Pinky1",
+	&"CC_Base_R_Pinky2",
+	&"CC_Base_R_Pinky3",
+]
+const LEFT_FINGER_POSE_BONES := [
+	&"CC_Base_L_Thumb1",
+	&"CC_Base_L_Thumb2",
+	&"CC_Base_L_Thumb3",
+	&"CC_Base_L_Index1",
+	&"CC_Base_L_Index2",
+	&"CC_Base_L_Index3",
+	&"CC_Base_L_Mid1",
+	&"CC_Base_L_Mid2",
+	&"CC_Base_L_Mid3",
+	&"CC_Base_L_Ring1",
+	&"CC_Base_L_Ring2",
+	&"CC_Base_L_Ring3",
+	&"CC_Base_L_Pinky1",
+	&"CC_Base_L_Pinky2",
+	&"CC_Base_L_Pinky3",
+]
+const RUNTIME_UPPER_BODY_POSE_BONES: Array[StringName] = [
+	HIP_BONE,
+	WAIST_BONE,
+	SPINE_01_BONE,
+	SPINE_02_BONE,
+	RIGHT_CLAVICLE_BONE,
+	LEFT_CLAVICLE_BONE,
+	RIGHT_UPPERARM_BONE,
+	LEFT_UPPERARM_BONE,
+	RIGHT_FOREARM_BONE,
+	LEFT_FOREARM_BONE,
+	RIGHT_HAND_BONE,
+	LEFT_HAND_BONE,
+	RIGHT_UPPERARM_TWIST_BONES[0],
+	RIGHT_UPPERARM_TWIST_BONES[1],
+	LEFT_UPPERARM_TWIST_BONES[0],
+	LEFT_UPPERARM_TWIST_BONES[1],
+	RIGHT_FOREARM_TWIST_BONES[0],
+	RIGHT_FOREARM_TWIST_BONES[1],
+	LEFT_FOREARM_TWIST_BONES[0],
+	LEFT_FOREARM_TWIST_BONES[1],
+	RIGHT_FINGER_POSE_BONES[0],
+	RIGHT_FINGER_POSE_BONES[1],
+	RIGHT_FINGER_POSE_BONES[2],
+	RIGHT_FINGER_POSE_BONES[3],
+	RIGHT_FINGER_POSE_BONES[4],
+	RIGHT_FINGER_POSE_BONES[5],
+	RIGHT_FINGER_POSE_BONES[6],
+	RIGHT_FINGER_POSE_BONES[7],
+	RIGHT_FINGER_POSE_BONES[8],
+	RIGHT_FINGER_POSE_BONES[9],
+	RIGHT_FINGER_POSE_BONES[10],
+	RIGHT_FINGER_POSE_BONES[11],
+	RIGHT_FINGER_POSE_BONES[12],
+	RIGHT_FINGER_POSE_BONES[13],
+	RIGHT_FINGER_POSE_BONES[14],
+	LEFT_FINGER_POSE_BONES[0],
+	LEFT_FINGER_POSE_BONES[1],
+	LEFT_FINGER_POSE_BONES[2],
+	LEFT_FINGER_POSE_BONES[3],
+	LEFT_FINGER_POSE_BONES[4],
+	LEFT_FINGER_POSE_BONES[5],
+	LEFT_FINGER_POSE_BONES[6],
+	LEFT_FINGER_POSE_BONES[7],
+	LEFT_FINGER_POSE_BONES[8],
+	LEFT_FINGER_POSE_BONES[9],
+	LEFT_FINGER_POSE_BONES[10],
+	LEFT_FINGER_POSE_BONES[11],
+	LEFT_FINGER_POSE_BONES[12],
+	LEFT_FINGER_POSE_BONES[13],
+	LEFT_FINGER_POSE_BONES[14],
+]
 const AUTHORING_DIRECT_ARM_SOLVE_ITERATIONS: int = 12
 const AUTHORING_DIRECT_ARM_SOLVE_EPSILON_METERS: float = 0.006
 const AUTHORING_DIRECT_ARM_FOREARM_WEIGHT: float = 0.86
@@ -54,6 +148,11 @@ const AUTHORING_JOINT_RANGE_WARNING_MARGIN_DEGREES: float = 8.0
 const AUTHORING_JOINT_RANGE_EPSILON_DEGREES: float = 0.05
 const RUNTIME_LOCOMOTION_ANIMATION_TREE_NAME := "RuntimeLocomotionAnimationTree"
 const RUNTIME_LOCOMOTION_PLAYBACK_PATH := "parameters/playback"
+const RUNTIME_SOLVED_REPLAY_MODIFIER_NAME := "RuntimeSolvedReplayModifier"
+const RUNTIME_SOLVED_REPLAY_REFERENCE_BONE := &"RL_BoneRoot"
+const RUNTIME_ENDPOINT_AUTHORITY_ROOT_NAME := "RuntimeCombatEndpointAuthorityRoot"
+const RUNTIME_BODY_RESTRICTION_SYNC_MODIFIER_NAME := "RuntimeBodyRestrictionSyncModifier"
+const RUNTIME_BONE_DEBUG_MODIFIER_NAME := "RuntimeBoneDebugModifier"
 const COMBAT_AUTHORING_MODIFIER_NAME := "CombatAuthoringModifier"
 const STOW_UPPER_BACK_OFFSET_METERS := 0.18
 const STOW_HIP_SIDE_OFFSET_METERS := 0.23
@@ -98,6 +197,11 @@ const STOW_LOWER_BACK_OFFSET_METERS := 0.20
 @export_range(0.0, 180.0, 1.0) var authoring_contact_wrist_twist_limit_degrees: float = 0.0
 @export var show_authoring_joint_range_debug: bool = true
 @export var show_authoring_joint_range_labels: bool = false
+@export_category("Runtime Bone Debug")
+@export var show_runtime_bone_debug: bool = false
+@export var runtime_bone_debug_draw_all_bones: bool = true
+@export var runtime_bone_debug_show_labels: bool = true
+@export_category("Upper Body Authoring")
 @export_range(0.0, 90.0, 1.0) var authoring_shoulder_min_plane_angle_degrees: float = 8.0
 @export_range(45.0, 180.0, 1.0) var authoring_shoulder_max_plane_angle_degrees: float = 155.0
 @export_range(0.0, 90.0, 1.0) var authoring_elbow_min_plane_angle_degrees: float = 20.0
@@ -154,6 +258,9 @@ var pole_grip_positive_limit_meters: float = 0.0
 var right_arm_ik_modifier: TwoBoneIK3D = null
 var left_arm_ik_modifier: TwoBoneIK3D = null
 var combat_authoring_modifier: SkeletonModifier3D = null
+var runtime_solved_replay_modifier: SkeletonModifier3D = null
+var runtime_body_restriction_sync_modifier: SkeletonModifier3D = null
+var runtime_bone_debug_modifier: SkeletonModifier3D = null
 var bone_index_cache: Dictionary = {}
 var rig_model_presenter = PlayerRigModelPresenterScript.new()
 var guidance_state_presenter = PlayerRigGuidanceStatePresenterScript.new()
@@ -165,13 +272,16 @@ var upper_body_pose_presenter = PlayerRigUpperBodyPosePresenterScript.new()
 var hand_target_constraint_solver = HandTargetConstraintSolverScript.new()
 var two_hand_pose_solver = TwoHandPoseSolverScript.new()
 var grip_debug_draw = GripDebugDrawScript.new()
+var runtime_bone_debug_draw = RuntimeBoneDebugDrawScript.new()
 var finger_grip_source_lookup: Dictionary = {}
 var finger_grip_target_lookup: Dictionary = {}
 var finger_grip_modifier_lookup: Dictionary = {}
 var body_restriction_root: Node3D = null
 var grip_solve_root: Node3D = null
+var runtime_bone_debug_root: Node3D = null
 var authoring_joint_range_debug_root: Node3D = null
 var authoring_joint_range_debug_state: Dictionary = {}
+var runtime_bone_debug_state: Dictionary = {}
 var dominant_grip_slot_id: StringName = StringName()
 var locomotion_grounded: bool = true
 var locomotion_horizontal_speed: float = 0.0
@@ -186,6 +296,9 @@ var upper_body_authoring_auto_apply_enabled: bool = true
 var authoring_preview_mode_enabled: bool = false
 var authoring_preview_baseline_animation_name: StringName = StringName()
 var combat_authoring_modifier_processing: bool = false
+var runtime_solved_replay_modifier_processing: bool = false
+var runtime_solved_replay_pose_state: Dictionary = {}
+var runtime_solved_replay_weapon_state: Dictionary = {}
 
 func _ready() -> void:
 	_apply_target_height_scale()
@@ -193,28 +306,42 @@ func _ready() -> void:
 	if skeleton != null:
 		skeleton.modifier_callback_mode_process = Skeleton3D.MODIFIER_CALLBACK_MODE_PROCESS_IDLE
 	_ensure_combat_authoring_modifier()
+	_ensure_runtime_solved_replay_modifier()
 	_ensure_hand_attachment("RightHandAttachment", RIGHT_HAND_BONE, "RightHandItemAnchor", right_hand_anchor_position, right_hand_anchor_rotation_degrees)
 	_ensure_hand_attachment("LeftHandAttachment", LEFT_HAND_BONE, "LeftHandItemAnchor", left_hand_anchor_position, left_hand_anchor_rotation_degrees)
+	var stow_anchor_origin_id: StringName = CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	var upper_back_stow_direction_local: Vector3 = Vector3(0.0, 0.0, -1.0)
+	var upper_back_stow_direction_origin_id: StringName = stow_anchor_origin_id
 	var hip_stow_right_direction_local: Vector3 = _resolve_hip_stow_right_direction_local()
-	_ensure_stow_attachment("LeftShoulderStowAttachment", LEFT_CLAVICLE_BONE, "LeftShoulderStowAnchor", _resolve_stow_anchor_local_position(Vector3(0.0, 0.0, -1.0), STOW_UPPER_BACK_OFFSET_METERS), Vector3.ZERO)
-	_ensure_stow_attachment("RightShoulderStowAttachment", RIGHT_CLAVICLE_BONE, "RightShoulderStowAnchor", _resolve_stow_anchor_local_position(Vector3(0.0, 0.0, -1.0), STOW_UPPER_BACK_OFFSET_METERS), Vector3.ZERO)
-	_ensure_stow_attachment("LeftHipStowAttachment", HIP_BONE, "LeftHipStowAnchor", _resolve_stow_anchor_local_position(-hip_stow_right_direction_local, STOW_HIP_SIDE_OFFSET_METERS), Vector3.ZERO)
-	_ensure_stow_attachment("RightHipStowAttachment", HIP_BONE, "RightHipStowAnchor", _resolve_stow_anchor_local_position(hip_stow_right_direction_local, STOW_HIP_SIDE_OFFSET_METERS), Vector3.ZERO)
-	_ensure_stow_attachment("LeftLowerBackStowAttachment", HIP_BONE, "LeftLowerBackStowAnchor", _resolve_stow_anchor_local_position(Vector3(0.0, 0.0, -1.0), STOW_LOWER_BACK_OFFSET_METERS), Vector3.ZERO)
-	_ensure_stow_attachment("RightLowerBackStowAttachment", HIP_BONE, "RightLowerBackStowAnchor", _resolve_stow_anchor_local_position(Vector3(0.0, 0.0, -1.0), STOW_LOWER_BACK_OFFSET_METERS), Vector3.ZERO)
+	var hip_stow_right_direction_origin_id: StringName = stow_anchor_origin_id
+	var hip_stow_left_direction_local: Vector3 = -hip_stow_right_direction_local
+	var hip_stow_left_direction_origin_id: StringName = hip_stow_right_direction_origin_id
+	_ensure_stow_attachment_from_direction("LeftShoulderStowAttachment", LEFT_CLAVICLE_BONE, "LeftShoulderStowAnchor", upper_back_stow_direction_local, upper_back_stow_direction_origin_id, STOW_UPPER_BACK_OFFSET_METERS)
+	_ensure_stow_attachment_from_direction("RightShoulderStowAttachment", RIGHT_CLAVICLE_BONE, "RightShoulderStowAnchor", upper_back_stow_direction_local, upper_back_stow_direction_origin_id, STOW_UPPER_BACK_OFFSET_METERS)
+	_ensure_stow_attachment_from_direction("LeftHipStowAttachment", HIP_BONE, "LeftHipStowAnchor", hip_stow_left_direction_local, hip_stow_left_direction_origin_id, STOW_HIP_SIDE_OFFSET_METERS)
+	_ensure_stow_attachment_from_direction("RightHipStowAttachment", HIP_BONE, "RightHipStowAnchor", hip_stow_right_direction_local, hip_stow_right_direction_origin_id, STOW_HIP_SIDE_OFFSET_METERS)
+	_ensure_stow_attachment_from_direction("LeftLowerBackStowAttachment", HIP_BONE, "LeftLowerBackStowAnchor", upper_back_stow_direction_local, upper_back_stow_direction_origin_id, STOW_LOWER_BACK_OFFSET_METERS)
+	_ensure_stow_attachment_from_direction("RightLowerBackStowAttachment", HIP_BONE, "RightLowerBackStowAnchor", upper_back_stow_direction_local, upper_back_stow_direction_origin_id, STOW_LOWER_BACK_OFFSET_METERS)
 	max_model_arm_reach_meters = _resolve_max_model_arm_reach_meters()
 	_apply_pole_grip_arm_reach_limits()
 	_resolve_arm_chain_reach_limits()
 	_ensure_support_arm_ik_modifiers()
 	_ensure_finger_grip_ik_targets_and_modifiers()
 	body_restriction_root = hand_target_constraint_solver.call("ensure_body_restriction_root", self, skeleton, mesh_instance, body_clearance_proxy_offset_meters) as Node3D
+	_ensure_runtime_body_restriction_sync_modifier()
+	_ensure_runtime_bone_debug_modifier()
+	_refresh_runtime_modifier_order()
 	upper_body_pose_presenter.warm_cache()
 	grip_solve_root = grip_debug_draw.call("ensure_debug_root", self) as Node3D
+	runtime_bone_debug_root = runtime_bone_debug_draw.call("ensure_debug_root", self) as Node3D
 	_snap_support_arm_ik_targets_to_current_pose()
 	_refresh_support_arm_ik_influences()
 	_refresh_finger_grip_ik_influences()
 	_ensure_runtime_locomotion_animation_tree()
 	_refresh_combat_authoring_modifier_state()
+	_refresh_runtime_solved_replay_modifier_state()
+	_refresh_runtime_body_restriction_sync_modifier_state()
+	_refresh_runtime_bone_debug_modifier_state()
 	process_priority = 10
 	set_process(true)
 	if not authoring_preview_mode_enabled:
@@ -222,6 +349,9 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_refresh_combat_authoring_modifier_state()
+	_refresh_runtime_solved_replay_modifier_state()
+	_refresh_runtime_body_restriction_sync_modifier_state()
+	_refresh_runtime_bone_debug_modifier_state()
 	if _uses_direct_authoring_solver_mode() and not authoring_preview_mode_enabled:
 		_sync_authoring_joint_range_debug()
 		return
@@ -235,6 +365,38 @@ func _process(delta: float) -> void:
 	if authoring_preview_mode_enabled:
 		_advance_skeleton_modifiers_now(delta)
 	_sync_authoring_joint_range_debug()
+
+func _unhandled_input(event: InputEvent) -> void:
+	var key_event: InputEventKey = event as InputEventKey
+	if key_event == null or not key_event.pressed or key_event.echo:
+		return
+	if key_event.physical_keycode != KEY_F9 and key_event.keycode != KEY_F9:
+		return
+	set_runtime_bone_debug_visible(not show_runtime_bone_debug)
+	get_viewport().set_input_as_handled()
+
+func set_runtime_bone_debug_visible(debug_visible: bool) -> void:
+	show_runtime_bone_debug = debug_visible
+	_refresh_runtime_bone_debug_modifier_state()
+	if not show_runtime_bone_debug:
+		process_runtime_bone_debug_modifier_frame(0.0)
+
+func get_runtime_bone_debug_state() -> Dictionary:
+	return runtime_bone_debug_state.duplicate(true)
+
+func process_runtime_bone_debug_modifier_frame(_delta: float = 1.0 / 60.0) -> void:
+	if runtime_bone_debug_root == null or not is_instance_valid(runtime_bone_debug_root):
+		runtime_bone_debug_root = runtime_bone_debug_draw.call("ensure_debug_root", self) as Node3D
+	runtime_bone_debug_state = runtime_bone_debug_draw.call(
+		"update_debug_skeleton",
+		runtime_bone_debug_root,
+		skeleton,
+		show_runtime_bone_debug,
+		RUNTIME_UPPER_BODY_POSE_BONES,
+		RUNTIME_SOLVED_REPLAY_REFERENCE_BONE,
+		runtime_bone_debug_draw_all_bones,
+		runtime_bone_debug_show_labels
+	) as Dictionary
 
 func get_standing_height_meters() -> float:
 	return standing_height_meters
@@ -309,6 +471,15 @@ func get_right_hand_item_anchor() -> Node3D:
 
 func get_left_hand_item_anchor() -> Node3D:
 	return rig_model_presenter.get_left_hand_item_anchor(self)
+
+func resolve_hand_grip_alignment_offset_origin_id(_slot_id: StringName) -> StringName:
+	return CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+
+func resolve_hand_grip_alignment_offset_state(slot_id: StringName) -> Dictionary:
+	return {
+		"hand_alignment_offset_local": resolve_hand_grip_alignment_offset_local(slot_id),
+		"hand_alignment_offset_origin_id": resolve_hand_grip_alignment_offset_origin_id(slot_id),
+	}
 
 func resolve_hand_grip_alignment_offset_local(slot_id: StringName) -> Vector3:
 	if skeleton == null:
@@ -449,6 +620,25 @@ func clear_dominant_grip_slot() -> void:
 func is_two_hand_idle_animation_active() -> bool:
 	return _should_use_two_hand_idle_animation() and get_current_animation_name() == two_hand_idle_animation_name
 
+func sync_runtime_body_restriction_root_now() -> bool:
+	if skeleton == null:
+		return false
+	if body_restriction_root == null or not is_instance_valid(body_restriction_root):
+		body_restriction_root = hand_target_constraint_solver.call(
+			"ensure_body_restriction_root",
+			self,
+			skeleton,
+			mesh_instance,
+			body_clearance_proxy_offset_meters
+		) as Node3D
+	if body_restriction_root == null or not is_instance_valid(body_restriction_root):
+		return false
+	hand_target_constraint_solver.call("sync_body_restriction_root", body_restriction_root, skeleton)
+	return true
+
+func process_runtime_body_restriction_sync_modifier_frame(_delta: float = 1.0 / 60.0) -> void:
+	sync_runtime_body_restriction_root_now()
+
 func get_body_restriction_root() -> Node3D:
 	return body_restriction_root
 
@@ -483,8 +673,7 @@ func get_body_self_collision_debug_state() -> Dictionary:
 			"allowed_overlap_pair_count": 0,
 			"illegal_pair_count": 0,
 		}
-	if skeleton != null:
-		hand_target_constraint_solver.call("sync_body_restriction_root", body_restriction_root, skeleton)
+	sync_runtime_body_restriction_root_now()
 	return hand_target_constraint_solver.call("evaluate_body_self_collision", body_restriction_root) as Dictionary
 
 func get_grip_solve_root() -> Node3D:
@@ -542,6 +731,440 @@ func clear_upper_body_authoring_state() -> void:
 
 func get_upper_body_authoring_state() -> Dictionary:
 	return upper_body_authoring_state.duplicate(true)
+
+func get_runtime_upper_body_pose_bone_names() -> Array[StringName]:
+	return RUNTIME_UPPER_BODY_POSE_BONES.duplicate()
+
+func capture_runtime_upper_body_pose_frame(bone_names: Array = []) -> Dictionary:
+	var result := {
+		"bone_names": [],
+		"pose_positions": PackedVector3Array(),
+		"pose_rotations": PackedVector4Array(),
+		"pose_scales": PackedVector3Array(),
+	}
+	if skeleton == null:
+		return result
+	var resolved_bone_names: Array = bone_names if not bone_names.is_empty() else RUNTIME_UPPER_BODY_POSE_BONES
+	var captured_names: Array[StringName] = []
+	var captured_positions := PackedVector3Array()
+	var captured_rotations := PackedVector4Array()
+	var captured_scales := PackedVector3Array()
+	for bone_name_variant: Variant in resolved_bone_names:
+		var bone_name: StringName = StringName(bone_name_variant)
+		var bone_index: int = skeleton.find_bone(String(bone_name))
+		if bone_index < 0:
+			continue
+		var pose_position: Vector3 = skeleton.get_bone_pose_position(bone_index)
+		var pose_rotation: Quaternion = skeleton.get_bone_pose_rotation(bone_index).normalized()
+		var pose_scale: Vector3 = skeleton.get_bone_pose_scale(bone_index)
+		captured_names.append(bone_name)
+		captured_positions.append(pose_position)
+		captured_rotations.append(Vector4(pose_rotation.x, pose_rotation.y, pose_rotation.z, pose_rotation.w))
+		captured_scales.append(pose_scale)
+	result["bone_names"] = captured_names
+	result["pose_positions"] = captured_positions
+	result["pose_rotations"] = captured_rotations
+	result["pose_scales"] = captured_scales
+	return result
+
+func capture_runtime_solved_replay_weapon_frame(
+	held_item: Node3D,
+	reference_bone_name: StringName = RUNTIME_SOLVED_REPLAY_REFERENCE_BONE,
+	anchor_node_paths: Array = []
+) -> Dictionary:
+	var result := {
+		"valid": false,
+		"reference_bone_name": reference_bone_name if reference_bone_name != StringName() else RUNTIME_SOLVED_REPLAY_REFERENCE_BONE,
+		"reference_origin_id": CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE,
+		"weapon_position_reference_local": Vector3.ZERO,
+		"weapon_rotation_reference_local": Quaternion.IDENTITY,
+		"weapon_scale_reference_local": Vector3.ONE,
+		"weapon_reference_origin_id": CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE,
+		"anchor_node_paths": [],
+		"anchor_positions_weapon_local": PackedVector3Array(),
+		"anchor_rotations_weapon_local": PackedVector4Array(),
+		"anchor_scales_weapon_local": PackedVector3Array(),
+		"anchor_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+	}
+	if held_item == null or not is_instance_valid(held_item):
+		return result
+	var reference_transform: Transform3D = _resolve_runtime_solved_replay_reference_transform(
+		result["reference_bone_name"] as StringName
+	)
+	var weapon_reference_transform: Transform3D = reference_transform.affine_inverse() * held_item.global_transform
+	var weapon_rotation: Quaternion = weapon_reference_transform.basis.get_rotation_quaternion().normalized()
+	var weapon_scale: Vector3 = weapon_reference_transform.basis.get_scale()
+	if (
+		not _is_finite_vector3(weapon_reference_transform.origin)
+		or not _is_finite_quaternion(weapon_rotation)
+		or not _is_finite_vector3(weapon_scale)
+	):
+		return result
+	var resolved_anchor_paths: Array = anchor_node_paths.duplicate()
+	var captured_anchor_paths: Array[StringName] = []
+	var captured_anchor_positions := PackedVector3Array()
+	var captured_anchor_rotations := PackedVector4Array()
+	var captured_anchor_scales := PackedVector3Array()
+	var weapon_inverse: Transform3D = held_item.global_transform.affine_inverse()
+	for anchor_path_variant: Variant in resolved_anchor_paths:
+		var anchor_path := NodePath(String(anchor_path_variant))
+		var anchor_node: Node3D = held_item.get_node_or_null(anchor_path) as Node3D
+		if anchor_node == null or not is_instance_valid(anchor_node):
+			return result
+		var anchor_weapon_transform: Transform3D = weapon_inverse * anchor_node.global_transform
+		var anchor_rotation: Quaternion = anchor_weapon_transform.basis.get_rotation_quaternion().normalized()
+		var anchor_scale: Vector3 = anchor_weapon_transform.basis.get_scale()
+		if (
+			not _is_finite_vector3(anchor_weapon_transform.origin)
+			or not _is_finite_quaternion(anchor_rotation)
+			or not _is_finite_vector3(anchor_scale)
+		):
+			return result
+		captured_anchor_paths.append(StringName(String(anchor_path_variant)))
+		captured_anchor_positions.append(anchor_weapon_transform.origin)
+		captured_anchor_rotations.append(Vector4(anchor_rotation.x, anchor_rotation.y, anchor_rotation.z, anchor_rotation.w))
+		captured_anchor_scales.append(anchor_scale)
+	result["valid"] = true
+	result["weapon_position_reference_local"] = weapon_reference_transform.origin
+	result["weapon_rotation_reference_local"] = weapon_rotation
+	result["weapon_scale_reference_local"] = weapon_scale
+	result["anchor_node_paths"] = captured_anchor_paths
+	result["anchor_positions_weapon_local"] = captured_anchor_positions
+	result["anchor_rotations_weapon_local"] = captured_anchor_rotations
+	result["anchor_scales_weapon_local"] = captured_anchor_scales
+	return result
+
+func apply_runtime_solved_upper_body_pose_frame(
+	bone_names: Array,
+	bone_pose_positions: Array,
+	bone_pose_rotations: Array,
+	bone_pose_scales: Array,
+	strength: float = 1.0
+) -> bool:
+	if skeleton == null:
+		return false
+	if bone_names.is_empty() or bone_pose_positions.is_empty() or bone_pose_rotations.is_empty() or bone_pose_scales.is_empty():
+		return false
+	var clean_strength: float = clampf(strength, 0.0, 1.0)
+	if clean_strength <= 0.00001:
+		return false
+	var count: int = mini(bone_names.size(), mini(bone_pose_positions.size(), mini(bone_pose_rotations.size(), bone_pose_scales.size())))
+	if count <= 0:
+		return false
+	var stored_bone_names: Array[StringName] = []
+	var stored_positions: Array = []
+	var stored_rotations: Array = []
+	var stored_scales: Array = []
+	for pose_index: int in range(count):
+		stored_bone_names.append(StringName(bone_names[pose_index]))
+		stored_positions.append(bone_pose_positions[pose_index])
+		stored_rotations.append(bone_pose_rotations[pose_index])
+		stored_scales.append(bone_pose_scales[pose_index])
+	runtime_solved_replay_pose_state = {
+		"active": true,
+		"bone_names": stored_bone_names,
+		"pose_positions": stored_positions,
+		"pose_rotations": stored_rotations,
+		"pose_scales": stored_scales,
+		"strength": clean_strength,
+	}
+	_refresh_runtime_solved_replay_modifier_state()
+	return _apply_runtime_solved_upper_body_pose_state(runtime_solved_replay_pose_state)
+
+func clear_runtime_solved_replay_pose_frame() -> void:
+	runtime_solved_replay_pose_state = {}
+	runtime_solved_replay_weapon_state = {}
+	_refresh_runtime_solved_replay_modifier_state()
+
+func process_runtime_solved_replay_modifier_frame(_delta: float = 1.0 / 60.0) -> void:
+	if runtime_solved_replay_modifier_processing:
+		return
+	if skeleton == null or (runtime_solved_replay_pose_state.is_empty() and runtime_solved_replay_weapon_state.is_empty()):
+		return
+	runtime_solved_replay_modifier_processing = true
+	_apply_runtime_solved_upper_body_pose_state(runtime_solved_replay_pose_state)
+	_apply_runtime_solved_replay_weapon_state(runtime_solved_replay_weapon_state)
+	runtime_solved_replay_modifier_processing = false
+
+func sync_runtime_endpoint_authority_root_to_reference(reference_bone_name: StringName = RUNTIME_SOLVED_REPLAY_REFERENCE_BONE) -> bool:
+	var authority_root: Node3D = _resolve_runtime_endpoint_authority_root()
+	if authority_root == null:
+		return false
+	var resolved_reference_bone_name: StringName = reference_bone_name if reference_bone_name != StringName() else RUNTIME_SOLVED_REPLAY_REFERENCE_BONE
+	var reference_transform: Transform3D = _resolve_runtime_solved_replay_reference_transform(resolved_reference_bone_name)
+	authority_root.global_transform = reference_transform
+	authority_root.set_meta("runtime_endpoint_authority_origin_id", CombatOriginRecordScript.ORIGIN_RUNTIME_ENDPOINT_AUTHORITY_ROOT)
+	authority_root.set_meta("runtime_endpoint_authority_reference_bone_name", resolved_reference_bone_name)
+	authority_root.set_meta("runtime_endpoint_authority_reference_origin_id", CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE)
+	return true
+
+func set_runtime_solved_replay_weapon_frame(
+	held_item: Node3D,
+	reference_bone_name: StringName,
+	weapon_position_reference_local: Vector3,
+	weapon_rotation_reference_local: Quaternion,
+	weapon_scale_reference_local: Vector3,
+	anchor_node_paths: Array,
+	anchor_positions_weapon_local: Array,
+	anchor_rotations_weapon_local: Array,
+	anchor_scales_weapon_local: Array,
+	bridge_anchor_lock_slot_id: StringName = StringName(),
+	reference_origin_id: StringName = CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE,
+	weapon_reference_origin_id: StringName = CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE,
+	anchor_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+) -> bool:
+	if held_item == null or not is_instance_valid(held_item):
+		return false
+	if not _is_finite_vector3(weapon_position_reference_local):
+		return false
+	if not _is_finite_quaternion(weapon_rotation_reference_local):
+		return false
+	if not _is_finite_vector3(weapon_scale_reference_local):
+		return false
+	runtime_solved_replay_weapon_state = {
+		"active": true,
+		"held_item": held_item,
+		"reference_bone_name": reference_bone_name if reference_bone_name != StringName() else RUNTIME_SOLVED_REPLAY_REFERENCE_BONE,
+		"reference_origin_id": reference_origin_id if reference_origin_id != StringName() else CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE,
+		"weapon_position_reference_local": weapon_position_reference_local,
+		"weapon_rotation_reference_local": weapon_rotation_reference_local.normalized(),
+		"weapon_scale_reference_local": weapon_scale_reference_local,
+		"weapon_reference_origin_id": weapon_reference_origin_id if weapon_reference_origin_id != StringName() else CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE,
+		"anchor_node_paths": anchor_node_paths.duplicate(),
+		"anchor_positions_weapon_local": anchor_positions_weapon_local.duplicate(),
+		"anchor_rotations_weapon_local": anchor_rotations_weapon_local.duplicate(),
+		"anchor_scales_weapon_local": anchor_scales_weapon_local.duplicate(),
+		"anchor_origin_id": anchor_origin_id if anchor_origin_id != StringName() else CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		"bridge_anchor_lock_slot_id": bridge_anchor_lock_slot_id,
+	}
+	_refresh_runtime_solved_replay_modifier_state()
+	return _apply_runtime_solved_replay_weapon_state(runtime_solved_replay_weapon_state)
+
+func _apply_runtime_solved_upper_body_pose_state(pose_state: Dictionary) -> bool:
+	if pose_state.is_empty() or not bool(pose_state.get("active", false)):
+		return false
+	return _apply_runtime_solved_upper_body_pose_values(
+		pose_state.get("bone_names", []) as Array,
+		pose_state.get("pose_positions", []) as Array,
+		pose_state.get("pose_rotations", []) as Array,
+		pose_state.get("pose_scales", []) as Array,
+		float(pose_state.get("strength", 1.0))
+	)
+
+func _apply_runtime_solved_replay_weapon_state(weapon_state: Dictionary) -> bool:
+	if weapon_state.is_empty() or not bool(weapon_state.get("active", false)):
+		return false
+	var held_item: Node3D = weapon_state.get("held_item", null) as Node3D
+	if held_item == null or not is_instance_valid(held_item):
+		return false
+	var reference_bone_name: StringName = weapon_state.get("reference_bone_name", RUNTIME_SOLVED_REPLAY_REFERENCE_BONE) as StringName
+	if reference_bone_name == StringName():
+		reference_bone_name = RUNTIME_SOLVED_REPLAY_REFERENCE_BONE
+	var reference_transform: Transform3D = _resolve_runtime_solved_replay_reference_transform(reference_bone_name)
+	var weapon_reference_transform: Transform3D = _build_runtime_solved_replay_transform(
+		weapon_state.get("weapon_position_reference_local", Vector3.ZERO) as Vector3,
+		weapon_state.get("weapon_rotation_reference_local", Quaternion.IDENTITY) as Quaternion,
+		weapon_state.get("weapon_scale_reference_local", Vector3.ONE) as Vector3
+	)
+	var authority_root: Node3D = _resolve_runtime_endpoint_authority_root()
+	if authority_root != null and held_item.get_parent() == authority_root:
+		authority_root.global_transform = reference_transform
+		held_item.transform = weapon_reference_transform
+	else:
+		held_item.global_transform = reference_transform * weapon_reference_transform
+	_apply_runtime_solved_replay_bridge_anchor_lock(
+		held_item,
+		weapon_state.get("bridge_anchor_lock_slot_id", StringName()) as StringName,
+		weapon_state.get("anchor_node_paths", []) as Array,
+		weapon_state.get("anchor_positions_weapon_local", []) as Array
+	)
+	_apply_runtime_solved_replay_anchor_state(
+		held_item,
+		weapon_state.get("anchor_node_paths", []) as Array,
+		weapon_state.get("anchor_positions_weapon_local", []) as Array,
+		weapon_state.get("anchor_rotations_weapon_local", []) as Array,
+		weapon_state.get("anchor_scales_weapon_local", []) as Array
+	)
+	return true
+
+func _apply_runtime_solved_replay_bridge_anchor_lock(
+	held_item: Node3D,
+	slot_id: StringName,
+	anchor_node_paths: Array,
+	anchor_positions_weapon_local: Array
+) -> void:
+	if slot_id == StringName() or held_item == null or not is_instance_valid(held_item):
+		return
+	if not has_method("resolve_hand_grip_alignment_world_position"):
+		return
+	var target_variant: Variant = call("resolve_hand_grip_alignment_world_position", slot_id)
+	if not (target_variant is Vector3):
+		return
+	var target_world: Vector3 = target_variant as Vector3
+	if target_world.length_squared() <= 0.000001 or not _is_finite_vector3(target_world):
+		return
+	var primary_anchor_index: int = -1
+	for anchor_index: int in range(anchor_node_paths.size()):
+		if String(anchor_node_paths[anchor_index]) == "PrimaryGripAnchor":
+			primary_anchor_index = anchor_index
+			break
+	if primary_anchor_index < 0 or primary_anchor_index >= anchor_positions_weapon_local.size():
+		return
+	var primary_anchor_weapon_local: Vector3 = _resolve_runtime_pose_vector3(
+		anchor_positions_weapon_local[primary_anchor_index],
+		Vector3.ZERO
+	)
+	var current_anchor_world: Vector3 = held_item.global_transform * primary_anchor_weapon_local
+	var correction_delta: Vector3 = target_world - current_anchor_world
+	if not _is_finite_vector3(correction_delta):
+		return
+	held_item.global_position += correction_delta
+
+func _resolve_runtime_solved_replay_reference_transform(reference_bone_name: StringName) -> Transform3D:
+	if skeleton != null and reference_bone_name != StringName():
+		var bone_index: int = skeleton.find_bone(String(reference_bone_name))
+		if bone_index >= 0:
+			var bone_pose: Transform3D = skeleton.get_bone_global_pose(bone_index)
+			var world_pose: Transform3D = skeleton.global_transform * bone_pose
+			return Transform3D(world_pose.basis.orthonormalized(), world_pose.origin)
+	return Transform3D(global_basis.orthonormalized(), global_position)
+
+func _resolve_runtime_endpoint_authority_root() -> Node3D:
+	return get_node_or_null(RUNTIME_ENDPOINT_AUTHORITY_ROOT_NAME) as Node3D
+
+func _build_runtime_solved_replay_transform(
+	replay_position: Vector3,
+	replay_rotation: Quaternion,
+	replay_scale: Vector3
+) -> Transform3D:
+	var replay_basis := Basis(replay_rotation.normalized())
+	replay_basis = replay_basis.scaled(replay_scale)
+	return Transform3D(replay_basis, replay_position)
+
+func _apply_runtime_solved_replay_anchor_state(
+	held_item: Node3D,
+	anchor_node_paths: Array,
+	anchor_positions_weapon_local: Array,
+	anchor_rotations_weapon_local: Array,
+	anchor_scales_weapon_local: Array
+) -> void:
+	if held_item == null or not is_instance_valid(held_item):
+		return
+	var count: int = mini(anchor_node_paths.size(), mini(anchor_positions_weapon_local.size(), mini(anchor_rotations_weapon_local.size(), anchor_scales_weapon_local.size())))
+	for anchor_index: int in range(count):
+		var anchor_node: Node3D = held_item.get_node_or_null(NodePath(String(anchor_node_paths[anchor_index]))) as Node3D
+		if anchor_node == null or not is_instance_valid(anchor_node):
+			continue
+		var anchor_weapon_transform: Transform3D = _build_runtime_solved_replay_transform(
+			anchor_positions_weapon_local[anchor_index] as Vector3,
+			_resolve_runtime_pose_rotation(anchor_rotations_weapon_local[anchor_index]),
+			anchor_scales_weapon_local[anchor_index] as Vector3
+		)
+		anchor_node.global_transform = held_item.global_transform * anchor_weapon_transform
+
+func _apply_runtime_solved_upper_body_pose_values(
+	bone_names: Array,
+	bone_pose_positions: Array,
+	bone_pose_rotations: Array,
+	bone_pose_scales: Array,
+	strength: float = 1.0
+) -> bool:
+	if skeleton == null:
+		return false
+	if bone_names.is_empty() or bone_pose_positions.is_empty() or bone_pose_rotations.is_empty() or bone_pose_scales.is_empty():
+		return false
+	var clean_strength: float = clampf(strength, 0.0, 1.0)
+	if clean_strength <= 0.00001:
+		return false
+	var applied: bool = false
+	var count: int = mini(bone_names.size(), mini(bone_pose_positions.size(), mini(bone_pose_rotations.size(), bone_pose_scales.size())))
+	for pose_index: int in range(count):
+		var bone_name: StringName = StringName(bone_names[pose_index])
+		var bone_index: int = skeleton.find_bone(String(bone_name))
+		if bone_index < 0:
+			continue
+		var target_position: Vector3 = _resolve_runtime_pose_vector3(bone_pose_positions[pose_index], skeleton.get_bone_pose_position(bone_index))
+		var target_rotation: Quaternion = _resolve_runtime_pose_rotation(bone_pose_rotations[pose_index]).normalized()
+		var target_scale: Vector3 = _resolve_runtime_pose_vector3(bone_pose_scales[pose_index], skeleton.get_bone_pose_scale(bone_index))
+		if not _is_finite_vector3(target_position) or not _is_finite_quaternion(target_rotation) or not _is_finite_vector3(target_scale):
+			continue
+		if clean_strength < 0.99999:
+			target_position = skeleton.get_bone_pose_position(bone_index).lerp(target_position, clean_strength)
+			target_rotation = skeleton.get_bone_pose_rotation(bone_index).normalized().slerp(target_rotation, clean_strength).normalized()
+			target_scale = skeleton.get_bone_pose_scale(bone_index).lerp(target_scale, clean_strength)
+		skeleton.set_bone_pose_position(bone_index, target_position)
+		skeleton.set_bone_pose_rotation(bone_index, target_rotation)
+		skeleton.set_bone_pose_scale(bone_index, target_scale)
+		applied = true
+	if applied:
+		skeleton.force_update_all_bone_transforms()
+	return applied
+
+func apply_runtime_upper_body_pose_frame(
+	bone_names: Array,
+	bone_pose_rotations: Array,
+	strength: float = 1.0
+) -> bool:
+	if skeleton == null:
+		return false
+	if bone_names.is_empty() or bone_pose_rotations.is_empty():
+		return false
+	var clean_strength: float = clampf(strength, 0.0, 1.0)
+	if clean_strength <= 0.00001:
+		return false
+	var applied: bool = false
+	var count: int = mini(bone_names.size(), bone_pose_rotations.size())
+	for pose_index: int in range(count):
+		var bone_name: StringName = StringName(bone_names[pose_index])
+		var bone_index: int = skeleton.find_bone(String(bone_name))
+		if bone_index < 0:
+			continue
+		var target_rotation: Quaternion = _resolve_runtime_pose_rotation(bone_pose_rotations[pose_index])
+		if not _is_finite_quaternion(target_rotation):
+			continue
+		var current_rotation: Quaternion = skeleton.get_bone_pose_rotation(bone_index).normalized()
+		var resolved_rotation: Quaternion = current_rotation.slerp(target_rotation.normalized(), clean_strength).normalized()
+		skeleton.set_bone_pose_rotation(bone_index, resolved_rotation)
+		applied = true
+	if applied:
+		skeleton.force_update_all_bone_transforms()
+	return applied
+
+func _resolve_runtime_pose_rotation(rotation_data: Variant) -> Quaternion:
+	if rotation_data is Quaternion:
+		return rotation_data as Quaternion
+	if rotation_data is Vector4:
+		var vector_rotation: Vector4 = rotation_data as Vector4
+		return Quaternion(vector_rotation.x, vector_rotation.y, vector_rotation.z, vector_rotation.w)
+	return Quaternion.IDENTITY
+
+func _resolve_runtime_pose_vector3(vector_data: Variant, fallback: Vector3 = Vector3.ZERO) -> Vector3:
+	if vector_data is Vector3:
+		return vector_data as Vector3
+	return fallback
+
+func _is_finite_vector3(value: Vector3) -> bool:
+	return (
+		not is_nan(value.x)
+		and not is_nan(value.y)
+		and not is_nan(value.z)
+		and not is_inf(value.x)
+		and not is_inf(value.y)
+		and not is_inf(value.z)
+	)
+
+func _is_finite_quaternion(value: Quaternion) -> bool:
+	return (
+		not is_nan(value.x)
+		and not is_nan(value.y)
+		and not is_nan(value.z)
+		and not is_nan(value.w)
+		and not is_inf(value.x)
+		and not is_inf(value.y)
+		and not is_inf(value.z)
+		and not is_inf(value.w)
+		and (value.x * value.x + value.y * value.y + value.z * value.z + value.w * value.w) > 0.000001
+	)
 
 func get_grip_contact_debug_state() -> Dictionary:
 	return {
@@ -699,6 +1322,15 @@ func apply_authoring_preview_drag_frame_now() -> void:
 func apply_runtime_combat_authoring_frame_now() -> void:
 	process_combat_authoring_modifier_frame(1.0 / 60.0)
 
+func apply_runtime_contact_group_frame_now(delta: float = 1.0 / 60.0) -> void:
+	if skeleton == null:
+		return
+	_apply_authoring_contact_wrist_basis_pose()
+	var finger_snap_delta: float = 1.0 / maxf(finger_grip_target_smoothing_speed, 0.001)
+	_update_finger_grip_targets(maxf(delta, finger_snap_delta))
+	_refresh_finger_grip_ik_influences()
+	skeleton.force_update_all_bone_transforms()
+
 func process_combat_authoring_modifier_frame(delta: float = 1.0 / 60.0) -> void:
 	if combat_authoring_modifier_processing:
 		return
@@ -747,6 +1379,9 @@ func set_authoring_preview_mode_enabled(enabled: bool, baseline_animation_name: 
 	authoring_preview_mode_enabled = enabled
 	_set_skeleton_modifier_callback_mode_for_authoring(authoring_preview_mode_enabled)
 	_refresh_combat_authoring_modifier_state()
+	_refresh_runtime_solved_replay_modifier_state()
+	_refresh_runtime_body_restriction_sync_modifier_state()
+	_refresh_runtime_bone_debug_modifier_state()
 	if authoring_preview_mode_enabled:
 		if runtime_locomotion_animation_tree != null:
 			runtime_locomotion_animation_tree.active = false
@@ -764,6 +1399,9 @@ func set_authoring_preview_mode_enabled(enabled: bool, baseline_animation_name: 
 	if runtime_locomotion_animation_tree != null:
 		runtime_locomotion_animation_tree.active = true
 	_refresh_combat_authoring_modifier_state()
+	_refresh_runtime_solved_replay_modifier_state()
+	_refresh_runtime_body_restriction_sync_modifier_state()
+	_refresh_runtime_bone_debug_modifier_state()
 	_play_default_animation()
 
 func _set_skeleton_modifier_callback_mode_for_authoring(enabled: bool) -> void:
@@ -2380,7 +3018,9 @@ func _ensure_stow_attachment(
 		bone_name: StringName,
 		anchor_name: String,
 		anchor_position: Vector3,
-		anchor_rotation_degrees: Vector3
+		anchor_rotation_degrees: Vector3,
+		anchor_position_origin_id: StringName,
+		anchor_rotation_degrees_origin_id: StringName
 ) -> void:
 	rig_model_presenter.ensure_stow_attachment(
 		skeleton,
@@ -2388,8 +3028,40 @@ func _ensure_stow_attachment(
 		bone_name,
 		anchor_name,
 		anchor_position,
-		anchor_rotation_degrees
+		anchor_rotation_degrees,
+		anchor_position_origin_id,
+		anchor_rotation_degrees_origin_id
 	)
+
+func _ensure_stow_attachment_from_direction(
+		attachment_name: String,
+		bone_name: StringName,
+		anchor_name: String,
+		anchor_direction_local: Vector3,
+		anchor_direction_origin_id: StringName,
+		world_offset_meters: float
+) -> void:
+	var anchor_position_origin_id: StringName = _resolve_stow_anchor_position_origin_id(anchor_direction_origin_id)
+	var anchor_position_local: Vector3 = _resolve_stow_anchor_local_position(anchor_direction_local, world_offset_meters)
+	var anchor_rotation_degrees_origin_id: StringName = CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	var anchor_rotation_degrees_local: Vector3 = _resolve_stow_anchor_rotation_degrees_local(anchor_rotation_degrees_origin_id)
+	_ensure_stow_attachment(
+		attachment_name,
+		bone_name,
+		anchor_name,
+		anchor_position_local,
+		anchor_rotation_degrees_local,
+		anchor_position_origin_id,
+		anchor_rotation_degrees_origin_id
+	)
+
+func _resolve_stow_anchor_position_origin_id(anchor_direction_origin_id: StringName) -> StringName:
+	if anchor_direction_origin_id != StringName():
+		return anchor_direction_origin_id
+	return CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+
+func _resolve_stow_anchor_rotation_degrees_local(_anchor_rotation_degrees_origin_id: StringName) -> Vector3:
+	return Vector3.ZERO
 
 func _resolve_hip_stow_right_direction_local() -> Vector3:
 	if skeleton == null:
@@ -2461,9 +3133,7 @@ func _snap_support_arm_ik_targets_to_current_pose() -> void:
 func _update_support_arm_ik_targets(delta: float) -> void:
 	if skeleton == null or not enable_support_arm_ik:
 		return
-	if body_restriction_root == null or not is_instance_valid(body_restriction_root):
-		body_restriction_root = hand_target_constraint_solver.call("ensure_body_restriction_root", self, skeleton, mesh_instance, body_clearance_proxy_offset_meters) as Node3D
-	hand_target_constraint_solver.call("sync_body_restriction_root", body_restriction_root, skeleton)
+	sync_runtime_body_restriction_root_now()
 	if grip_solve_root == null or not is_instance_valid(grip_solve_root):
 		grip_solve_root = grip_debug_draw.call("ensure_debug_root", self) as Node3D
 	var solve_result: Dictionary = two_hand_pose_solver.call(
@@ -2752,6 +3422,83 @@ func _refresh_combat_authoring_modifier_state() -> void:
 	if combat_authoring_modifier == null:
 		return
 	combat_authoring_modifier.active = _uses_direct_authoring_solver_mode() and not authoring_preview_mode_enabled
+
+func _ensure_runtime_solved_replay_modifier() -> void:
+	if skeleton == null:
+		return
+	runtime_solved_replay_modifier = skeleton.get_node_or_null(RUNTIME_SOLVED_REPLAY_MODIFIER_NAME) as SkeletonModifier3D
+	if runtime_solved_replay_modifier == null:
+		runtime_solved_replay_modifier = PlayerRuntimeSolvedReplayModifier3DScript.new()
+		runtime_solved_replay_modifier.name = RUNTIME_SOLVED_REPLAY_MODIFIER_NAME
+		skeleton.add_child(runtime_solved_replay_modifier)
+	runtime_solved_replay_modifier.set("humanoid_rig", self)
+	runtime_solved_replay_modifier.influence = 1.0
+	_refresh_runtime_solved_replay_modifier_state()
+	_refresh_runtime_modifier_order()
+
+func _refresh_runtime_solved_replay_modifier_state() -> void:
+	if runtime_solved_replay_modifier == null:
+		return
+	runtime_solved_replay_modifier.active = (
+		not authoring_preview_mode_enabled
+		and (
+			(not runtime_solved_replay_pose_state.is_empty() and bool(runtime_solved_replay_pose_state.get("active", false)))
+			or (not runtime_solved_replay_weapon_state.is_empty() and bool(runtime_solved_replay_weapon_state.get("active", false)))
+		)
+	)
+
+func _ensure_runtime_body_restriction_sync_modifier() -> void:
+	if skeleton == null:
+		return
+	runtime_body_restriction_sync_modifier = skeleton.get_node_or_null(RUNTIME_BODY_RESTRICTION_SYNC_MODIFIER_NAME) as SkeletonModifier3D
+	if runtime_body_restriction_sync_modifier == null:
+		runtime_body_restriction_sync_modifier = PlayerRuntimeBodyRestrictionSyncModifier3DScript.new()
+		runtime_body_restriction_sync_modifier.name = RUNTIME_BODY_RESTRICTION_SYNC_MODIFIER_NAME
+		skeleton.add_child(runtime_body_restriction_sync_modifier)
+	runtime_body_restriction_sync_modifier.set("humanoid_rig", self)
+	runtime_body_restriction_sync_modifier.influence = 1.0
+	_refresh_runtime_body_restriction_sync_modifier_state()
+	_refresh_runtime_modifier_order()
+
+func _refresh_runtime_body_restriction_sync_modifier_state() -> void:
+	if runtime_body_restriction_sync_modifier == null:
+		return
+	runtime_body_restriction_sync_modifier.active = not authoring_preview_mode_enabled and body_restriction_root != null
+
+func _ensure_runtime_bone_debug_modifier() -> void:
+	if skeleton == null:
+		return
+	runtime_bone_debug_modifier = skeleton.get_node_or_null(RUNTIME_BONE_DEBUG_MODIFIER_NAME) as SkeletonModifier3D
+	if runtime_bone_debug_modifier == null:
+		runtime_bone_debug_modifier = PlayerRuntimeBoneDebugModifier3DScript.new()
+		runtime_bone_debug_modifier.name = RUNTIME_BONE_DEBUG_MODIFIER_NAME
+		skeleton.add_child(runtime_bone_debug_modifier)
+	runtime_bone_debug_modifier.set("humanoid_rig", self)
+	runtime_bone_debug_modifier.influence = 1.0
+	_refresh_runtime_bone_debug_modifier_state()
+	_refresh_runtime_modifier_order()
+
+func _refresh_runtime_modifier_order() -> void:
+	if skeleton == null:
+		return
+	_move_skeleton_modifier_to_tail(runtime_solved_replay_modifier)
+	_move_skeleton_modifier_to_tail(runtime_body_restriction_sync_modifier)
+	_move_skeleton_modifier_to_tail(runtime_bone_debug_modifier)
+
+func _move_skeleton_modifier_to_tail(modifier: SkeletonModifier3D) -> void:
+	if modifier == null or not is_instance_valid(modifier):
+		return
+	if modifier.get_parent() != skeleton:
+		return
+	var target_index: int = skeleton.get_child_count() - 1
+	if modifier.get_index() == target_index:
+		return
+	skeleton.move_child(modifier, target_index)
+
+func _refresh_runtime_bone_debug_modifier_state() -> void:
+	if runtime_bone_debug_modifier == null:
+		return
+	runtime_bone_debug_modifier.active = show_runtime_bone_debug and not authoring_preview_mode_enabled
 
 func _ensure_runtime_locomotion_animation_tree() -> void:
 	if josie_model == null or animation_player == null:

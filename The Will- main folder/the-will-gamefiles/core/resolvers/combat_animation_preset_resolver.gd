@@ -7,6 +7,7 @@ const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animat
 const CombatAnimationDraftScript = preload("res://core/models/combat_animation_draft.gd")
 const CombatAnimationRetargetResolverScript = preload("res://core/resolvers/combat_animation_retarget_resolver.gd")
 const CombatAnimationDraftValidatorScript = preload("res://core/resolvers/combat_animation_draft_validator.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
 const PRESET_FORWARD_CUT: StringName = &"preset_forward_cut"
 
@@ -133,7 +134,9 @@ func _build_motion_node_from_resolved_values(
 	motion_node.node_index = node_index
 	motion_node.node_id = StringName("motion_node_%02d" % node_index)
 	motion_node.tip_position_local = resolved_values.get("tip_position_local", Vector3.ZERO) as Vector3
+	motion_node.tip_position_origin_id = StringName(resolved_values.get("tip_position_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING))
 	motion_node.pommel_position_local = resolved_values.get("pommel_position_local", Vector3.ZERO) as Vector3
+	motion_node.pommel_position_origin_id = StringName(resolved_values.get("pommel_position_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING))
 	motion_node.weapon_orientation_degrees = resolved_values.get("weapon_orientation_degrees", Vector3.ZERO) as Vector3
 	motion_node.weapon_orientation_authored = bool(resolved_values.get("weapon_orientation_authored", false))
 	motion_node.weapon_roll_degrees = float(resolved_values.get("weapon_roll_degrees", 0.0))
@@ -141,6 +144,10 @@ func _build_motion_node_from_resolved_values(
 	motion_node.grip_seat_slide_offset = float(resolved_values.get(
 		"grip_seat_slide_offset",
 		CombatAnimationMotionNodeScript.DEFAULT_GRIP_SEAT_SLIDE_OFFSET
+	))
+	motion_node.secondary_grip_seat_slide_offset = float(resolved_values.get(
+		"secondary_grip_seat_slide_offset",
+		CombatAnimationMotionNodeScript.DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET
 	))
 	motion_node.body_support_blend = float(resolved_values.get("body_support_blend", 0.0))
 	motion_node.right_upperarm_roll_degrees = float(resolved_values.get("right_upperarm_roll_degrees", 0.0))

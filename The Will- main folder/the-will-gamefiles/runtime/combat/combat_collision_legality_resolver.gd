@@ -1,6 +1,8 @@
 extends RefCounted
 class_name CombatCollisionLegalityResolver
 
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+
 func evaluate_weapon_pose(
 	body_restriction_root: Node3D,
 	held_item: Node3D,
@@ -25,7 +27,17 @@ func evaluate_weapon_pose(
 		return result
 	var min_clearance: float = INF
 	for sample: Dictionary in samples:
-		var sample_world: Vector3 = solved_transform * (sample.get("local_position", Vector3.ZERO) as Vector3)
+		var sample_position_origin_id: StringName = StringName(sample.get(
+			"local_position_origin_id",
+			CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		))
+		if sample_position_origin_id == StringName():
+			sample_position_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		var fallback_position_origin_id: StringName = sample_position_origin_id
+		var fallback_position_local: Vector3 = Vector3.ZERO
+		sample["local_position_origin_id"] = fallback_position_origin_id
+		var sample_position_local: Vector3 = sample.get("local_position", fallback_position_local) as Vector3
+		var sample_world: Vector3 = solved_transform * sample_position_local
 		var point_result: Dictionary = _query_body_point(
 			body_restriction_root,
 			sample_world,
@@ -120,6 +132,7 @@ func _collect_weapon_proxy_local_samples(held_item: Node3D) -> Array[Dictionary]
 		samples.append({
 			"name": String(sample.name),
 			"local_position": held_item.to_local(sample.global_position),
+			"local_position_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
 		})
 	return samples
 

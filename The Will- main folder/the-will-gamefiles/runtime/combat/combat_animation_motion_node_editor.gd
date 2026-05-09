@@ -13,6 +13,8 @@ const DRAG_TARGET_TIP_CURVE_IN: StringName = &"tip_curve_in"
 const DRAG_TARGET_TIP_CURVE_OUT: StringName = &"tip_curve_out"
 const DRAG_TARGET_POMMEL_CURVE_IN: StringName = &"pommel_curve_in"
 const DRAG_TARGET_POMMEL_CURVE_OUT: StringName = &"pommel_curve_out"
+const DRAG_TARGET_RIGHT_UPPERARM_ROLL: StringName = &"right_upperarm_roll"
+const DRAG_TARGET_LEFT_UPPERARM_ROLL: StringName = &"left_upperarm_roll"
 const CONTROL_SCREEN_PICK_RADIUS_PIXELS: float = 20.0
 const CURVE_HANDLE_SCREEN_PICK_RADIUS_PIXELS: float = 34.0
 const CURVE_HANDLE_MIN_LENGTH_METERS: float = 0.0001
@@ -23,6 +25,7 @@ const WEAPON_ROTATION_HANDLE_DISTANCE_METERS: float = 0.22
 
 var _dragging: bool = false
 var _drag_target: StringName = StringName()
+var _arm_roll_drag_state: Dictionary = {}
 
 ## Intersect a camera ray with a camera-facing drag plane through the current
 ## pommel. The pommel is the free translation handle for the whole weapon.
@@ -260,6 +263,7 @@ func begin_drag(target: StringName, _screen_position: Vector2 = Vector2.ZERO, _m
 func end_drag() -> void:
 	_dragging = false
 	_drag_target = StringName()
+	_arm_roll_drag_state = {}
 
 func is_dragging() -> bool:
 	return _dragging
@@ -293,6 +297,36 @@ func resolve_weapon_orientation_drag(
 	if desired_normal.length_squared() < 0.000001:
 		return motion_node.weapon_orientation_degrees
 	return _resolve_orientation_from_normal(desired_normal.normalized())
+
+func begin_upperarm_roll_drag(target: StringName, roll_state: Dictionary) -> void:
+	begin_drag(target)
+	_arm_roll_drag_state = roll_state.duplicate(true)
+
+func resolve_upperarm_roll_drag(camera: Camera3D, screen_position: Vector2) -> Variant:
+	if camera == null or _arm_roll_drag_state.is_empty():
+		return null
+	var center_global: Vector3 = _arm_roll_drag_state.get("center_global", Vector3.ZERO) as Vector3
+	var axis_global: Vector3 = _arm_roll_drag_state.get("axis_global", Vector3.ZERO) as Vector3
+	var initial_normal_global: Vector3 = _arm_roll_drag_state.get("initial_normal_global", Vector3.ZERO) as Vector3
+	var initial_roll_degrees: float = float(_arm_roll_drag_state.get("initial_roll_degrees", 0.0))
+	var radius: float = maxf(float(_arm_roll_drag_state.get("radius_meters", 0.12)), 0.01)
+	if axis_global.length_squared() <= 0.000001 or initial_normal_global.length_squared() <= 0.000001:
+		return null
+	axis_global = axis_global.normalized()
+	initial_normal_global = initial_normal_global.normalized()
+	var hit_global: Variant = _raycast_global_sphere(camera, screen_position, center_global, radius)
+	if hit_global == null:
+		return null
+	var desired_normal_global: Vector3 = (hit_global as Vector3) - center_global
+	desired_normal_global -= axis_global * desired_normal_global.dot(axis_global)
+	if desired_normal_global.length_squared() <= 0.000001:
+		return null
+	desired_normal_global = desired_normal_global.normalized()
+	var angle_delta: float = atan2(
+		axis_global.dot(initial_normal_global.cross(desired_normal_global)),
+		clampf(initial_normal_global.dot(desired_normal_global), -1.0, 1.0)
+	)
+	return wrapf(initial_roll_degrees + rad_to_deg(angle_delta) + 180.0, 0.0, 360.0) - 180.0
 
 func _get_screen_pick_distance_pixels(
 	camera: Camera3D,

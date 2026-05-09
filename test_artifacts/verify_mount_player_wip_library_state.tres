@@ -24,6 +24,8 @@ preview_loop_enabled = true
 [sub_resource type="Resource" id="Resource_43rxm"]
 script = ExtResource("2_hei1f")
 node_id = &"motion_node_00"
+tip_position_origin_id = &"StowAnchorOrigin"
+pommel_position_origin_id = &"StowAnchorOrigin"
 
 [sub_resource type="Resource" id="Resource_dabj6"]
 script = ExtResource("3_8lq0n")
@@ -1499,7 +1501,7 @@ script = ExtResource("1_jp12v")
 wip_id = &"verify_mount_right_normal"
 forge_project_name = "verify_mount_right_normal"
 creator_id = &"verify"
-created_timestamp = 1777691102.749
+created_timestamp = 1778352760.53
 combat_animation_station_state = SubResource("Resource_jy2nu")
 forge_intent = &"intent_melee"
 equipment_context = &"ctx_weapon"
@@ -1522,6 +1524,8 @@ preview_loop_enabled = true
 [sub_resource type="Resource" id="Resource_8lq0n"]
 script = ExtResource("2_hei1f")
 node_id = &"motion_node_00"
+tip_position_origin_id = &"StowAnchorOrigin"
+pommel_position_origin_id = &"StowAnchorOrigin"
 
 [sub_resource type="Resource" id="Resource_tht4c"]
 script = ExtResource("3_8lq0n")
@@ -3011,7 +3015,7 @@ script = ExtResource("1_jp12v")
 wip_id = &"verify_mount_right_reverse"
 forge_project_name = "verify_mount_right_reverse"
 creator_id = &"verify"
-created_timestamp = 1777691102.758
+created_timestamp = 1778352760.541
 combat_animation_station_state = SubResource("Resource_5mrir")
 forge_intent = &"intent_melee"
 equipment_context = &"ctx_weapon"
@@ -3034,6 +3038,8 @@ preview_loop_enabled = true
 [sub_resource type="Resource" id="Resource_isc1a"]
 script = ExtResource("2_hei1f")
 node_id = &"motion_node_00"
+tip_position_origin_id = &"StowAnchorOrigin"
+pommel_position_origin_id = &"StowAnchorOrigin"
 
 [sub_resource type="Resource" id="Resource_h264b"]
 script = ExtResource("3_8lq0n")
@@ -4509,7 +4515,7 @@ script = ExtResource("1_jp12v")
 wip_id = &"verify_mount_left_normal"
 forge_project_name = "verify_mount_left_normal"
 creator_id = &"verify"
-created_timestamp = 1777691102.774
+created_timestamp = 1778352760.557
 combat_animation_station_state = SubResource("Resource_nvr06")
 forge_intent = &"intent_melee"
 equipment_context = &"ctx_weapon"
@@ -4532,6 +4538,8 @@ preview_loop_enabled = true
 [sub_resource type="Resource" id="Resource_gv2ja"]
 script = ExtResource("2_hei1f")
 node_id = &"motion_node_00"
+tip_position_origin_id = &"StowAnchorOrigin"
+pommel_position_origin_id = &"StowAnchorOrigin"
 
 [sub_resource type="Resource" id="Resource_ya5e2"]
 script = ExtResource("3_8lq0n")
@@ -6021,7 +6029,7 @@ script = ExtResource("1_jp12v")
 wip_id = &"verify_mount_left_reverse"
 forge_project_name = "verify_mount_left_reverse"
 creator_id = &"verify"
-created_timestamp = 1777691102.795
+created_timestamp = 1778352760.579
 combat_animation_station_state = SubResource("Resource_yc8qj")
 forge_intent = &"intent_melee"
 equipment_context = &"ctx_weapon"

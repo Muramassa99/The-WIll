@@ -1,6 +1,8 @@
 extends RefCounted
 class_name WeaponGripAnchorProvider
 
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+
 const PRIMARY_GRIP_ANCHOR_NAME := "PrimaryGripAnchor"
 const SUPPORT_GRIP_ANCHOR_NAME := "SupportGripAnchor"
 const PRIMARY_GRIP_BASIS_ANCHOR_NAME := "PrimaryGripBasisAnchor"
@@ -26,12 +28,16 @@ func get_primary_grip_basis_anchor(held_item: Node3D) -> Node3D:
 	if held_item == null:
 		return null
 	var basis_anchor: Node3D = held_item.get_node_or_null(PRIMARY_GRIP_BASIS_ANCHOR_NAME) as Node3D
+	if basis_anchor == null:
+		basis_anchor = held_item.get_node_or_null("%s/%s" % [PRIMARY_GRIP_ANCHOR_NAME, PRIMARY_GRIP_BASIS_ANCHOR_NAME]) as Node3D
 	return basis_anchor if basis_anchor != null else get_primary_grip_anchor(held_item)
 
 func get_support_grip_basis_anchor(held_item: Node3D) -> Node3D:
 	if held_item == null:
 		return null
 	var basis_anchor: Node3D = held_item.get_node_or_null(SUPPORT_GRIP_BASIS_ANCHOR_NAME) as Node3D
+	if basis_anchor == null:
+		basis_anchor = held_item.get_node_or_null("%s/%s" % [SUPPORT_GRIP_ANCHOR_NAME, SUPPORT_GRIP_BASIS_ANCHOR_NAME]) as Node3D
 	return basis_anchor if basis_anchor != null else get_support_grip_anchor(held_item)
 
 func _ensure_anchor_from_guide(
@@ -65,8 +71,26 @@ func _configure_basis_anchor_from_guide(basis_anchor: Node3D, source_guide: Node
 	var grip_center: Node3D = source_guide.get_node_or_null("GripShellCenter") as Node3D
 	if grip_center == null:
 		grip_center = source_guide
+	var major_axis_origin_id: StringName = StringName(grip_center.get_meta(
+		"grip_shell_major_axis_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	))
+	if major_axis_origin_id == StringName():
+		major_axis_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var major_axis_local: Vector3 = grip_center.get_meta("grip_shell_major_axis_local", Vector3.ZERO) as Vector3
+	var minor_axis_a_origin_id: StringName = StringName(grip_center.get_meta(
+		"grip_shell_minor_axis_a_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	))
+	if minor_axis_a_origin_id == StringName():
+		minor_axis_a_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var minor_axis_a_local: Vector3 = grip_center.get_meta("grip_shell_minor_axis_a_local", Vector3.ZERO) as Vector3
+	var minor_axis_b_origin_id: StringName = StringName(grip_center.get_meta(
+		"grip_shell_minor_axis_b_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	))
+	if minor_axis_b_origin_id == StringName():
+		minor_axis_b_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var minor_axis_b_local: Vector3 = grip_center.get_meta("grip_shell_minor_axis_b_local", Vector3.ZERO) as Vector3
 	if major_axis_local.length_squared() <= 0.000001:
 		return
@@ -91,5 +115,8 @@ func _configure_basis_anchor_from_guide(basis_anchor: Node3D, source_guide: Node
 	basis_anchor.transform = Transform3D(basis, Vector3.ZERO)
 	basis_anchor.set_meta("grip_basis_valid", true)
 	basis_anchor.set_meta("grip_basis_major_axis_local", handle_axis)
+	basis_anchor.set_meta("grip_basis_major_axis_origin_id", major_axis_origin_id)
 	basis_anchor.set_meta("grip_basis_minor_axis_a_local", corrected_right)
+	basis_anchor.set_meta("grip_basis_minor_axis_a_origin_id", minor_axis_a_origin_id)
 	basis_anchor.set_meta("grip_basis_minor_axis_b_local", corrected_up)
+	basis_anchor.set_meta("grip_basis_minor_axis_b_origin_id", minor_axis_b_origin_id)

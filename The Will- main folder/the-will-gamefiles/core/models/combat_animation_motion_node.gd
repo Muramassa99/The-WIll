@@ -1,6 +1,8 @@
 extends Resource
 class_name CombatAnimationMotionNode
 
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+
 const TWO_HAND_STATE_AUTO: StringName = &"two_hand_auto"
 const TWO_HAND_STATE_ONE_HAND: StringName = &"two_hand_one_hand"
 const TWO_HAND_STATE_TWO_HAND: StringName = &"two_hand_two_hand"
@@ -12,6 +14,7 @@ const TRANSITION_KIND_GRIP_STYLE_SWAP: StringName = &"grip_style_swap"
 const TRANSITION_KIND_PRIMARY_HAND_SWAP: StringName = &"primary_hand_swap"
 const TRANSITION_KIND_TWO_HAND_STATE_SWAP: StringName = &"two_hand_state_swap"
 const DEFAULT_GRIP_SEAT_SLIDE_OFFSET: float = 0.2
+const DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET: float = 0.0
 
 @export var node_id: StringName = &""
 @export var node_index: int = 0
@@ -22,11 +25,13 @@ const DEFAULT_GRIP_SEAT_SLIDE_OFFSET: float = 0.2
 
 ## Tip Control - authored weapon tip position in the local authoring frame.
 @export var tip_position_local: Vector3 = Vector3.ZERO
+@export var tip_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 @export var tip_curve_in_handle: Vector3 = Vector3.ZERO
 @export var tip_curve_out_handle: Vector3 = Vector3.ZERO
 
 ## Pommel Control - authored weapon pommel position in the local authoring frame.
 @export var pommel_position_local: Vector3 = Vector3.ZERO
+@export var pommel_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 @export var pommel_curve_in_handle: Vector3 = Vector3.ZERO
 @export var pommel_curve_out_handle: Vector3 = Vector3.ZERO
 
@@ -36,6 +41,7 @@ const DEFAULT_GRIP_SEAT_SLIDE_OFFSET: float = 0.2
 ## Grip Adjustments
 @export var axial_reposition_offset: float = 0.0
 @export var grip_seat_slide_offset: float = DEFAULT_GRIP_SEAT_SLIDE_OFFSET
+@export var secondary_grip_seat_slide_offset: float = DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET
 
 ## Timing
 @export_range(0.0, 2.0, 0.01) var transition_duration_seconds: float = 0.18
@@ -87,9 +93,16 @@ static func get_generated_transition_kind_ids() -> Array[StringName]:
 func normalize() -> void:
 	if node_id == StringName():
 		node_id = StringName("motion_node_%02d" % maxi(node_index, 0))
+	if tip_position_origin_id == StringName():
+		tip_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	if pommel_position_origin_id == StringName():
+		pommel_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 	if not get_two_hand_state_ids().has(two_hand_state):
 		two_hand_state = TWO_HAND_STATE_AUTO
 	primary_hand_slot = normalize_primary_hand_slot(primary_hand_slot)
+	axial_reposition_offset = clampf(axial_reposition_offset, -1.0, 1.0)
+	grip_seat_slide_offset = clampf(grip_seat_slide_offset, -1.0, 1.0)
+	secondary_grip_seat_slide_offset = clampf(secondary_grip_seat_slide_offset, -1.0, 1.0)
 	weapon_roll_degrees = clampf(weapon_roll_degrees, -120.0, 120.0)
 	right_upperarm_roll_degrees = clampf(right_upperarm_roll_degrees, -180.0, 180.0)
 	left_upperarm_roll_degrees = clampf(left_upperarm_roll_degrees, -180.0, 180.0)

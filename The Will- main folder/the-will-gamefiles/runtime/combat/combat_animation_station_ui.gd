@@ -16,6 +16,7 @@ const CombatAnimationWeaponGeometryResolverScript = preload("res://core/resolver
 const CombatAnimationRetargetResolverScript = preload("res://core/resolvers/combat_animation_retarget_resolver.gd")
 const CombatRuntimeClipBakerScript = preload("res://core/resolvers/combat_runtime_clip_baker.gd")
 const CombatAnimationRuntimeChainCompilerScript = preload("res://core/resolvers/combat_animation_runtime_chain_compiler.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_state.gd")
 const UserSettingsStateScript = preload("res://core/models/user_settings_state.gd")
 const UserSettingsRuntimeScript = preload("res://runtime/system/user_settings_runtime.gd")
@@ -172,13 +173,18 @@ var pommel_curve_out_z_spin_box: SpinBox = null
 var weapon_roll_spin_box: SpinBox = null
 var axial_reposition_spin_box: SpinBox = null
 var grip_seat_slide_spin_box: SpinBox = null
+var secondary_grip_seat_slide_spin_box: SpinBox = null
+var right_upperarm_roll_spin_box: SpinBox = null
+var left_upperarm_roll_spin_box: SpinBox = null
 var draft_notes_edit: TextEdit = null
 var summary_label: Label = null
+var debugger_view_button: Button = null
 var footer_status_label: Label = null
 var close_button: Button = null
 var tip_section_foldable: FoldableContainer = null
 var pommel_section_foldable: FoldableContainer = null
 var weapon_section_foldable: FoldableContainer = null
+var arm_roll_section_foldable: FoldableContainer = null
 
 var active_player = null
 var active_wip_library: PlayerForgeWipLibraryState = null
@@ -199,6 +205,8 @@ var preview_drag_override_node: CombatAnimationMotionNode = null
 var preview_drag_has_moved: bool = false
 var preview_drag_refresh_pending: bool = false
 var preview_drag_last_refresh_msec: int = 0
+var preview_drag_first_pending_msec: int = 0
+var debugger_view_enabled: bool = false
 var draft_validator: CombatAnimationDraftValidator = CombatAnimationDraftValidatorScript.new()
 var weapon_geometry_resolver = CombatAnimationWeaponGeometryResolverScript.new()
 var retarget_resolver = CombatAnimationRetargetResolverScript.new()
@@ -214,7 +222,8 @@ var pending_weapon_open_primary_slot_id: StringName = HAND_SLOT_RIGHT
 var active_preview_dominant_slot_id: StringName = HAND_SLOT_RIGHT
 var active_preview_default_two_hand: bool = false
 
-const PREVIEW_DRAG_REFRESH_INTERVAL_MSEC: int = 50
+const PREVIEW_DRAG_REFRESH_INTERVAL_MSEC: int = 83
+const PREVIEW_DRAG_INITIAL_SOLVE_DELAY_MSEC: int = 16
 const PREVIEW_CAMERA_POST_COMMIT_MOTION_GUARD_MSEC: int = 350
 var last_station_retarget_result: Dictionary = {}
 
@@ -233,6 +242,7 @@ func _ready() -> void:
 	reset_draft_button.pressed.connect(_on_reset_draft_pressed)
 	set_continuity_button.pressed.connect(_on_set_continuity_pressed)
 	play_preview_button.pressed.connect(_on_play_preview_pressed)
+	debugger_view_button.toggled.connect(_on_debugger_view_toggled)
 	draft_name_edit.text_submitted.connect(_on_draft_name_submitted)
 	draft_name_edit.focus_exited.connect(_on_draft_name_focus_exited)
 	skill_name_edit.text_submitted.connect(_on_skill_name_submitted)
@@ -276,6 +286,9 @@ func _ready() -> void:
 	weapon_roll_spin_box.value_changed.connect(_on_weapon_roll_changed)
 	axial_reposition_spin_box.value_changed.connect(_on_axial_reposition_changed)
 	grip_seat_slide_spin_box.value_changed.connect(_on_grip_seat_slide_changed)
+	secondary_grip_seat_slide_spin_box.value_changed.connect(_on_secondary_grip_seat_slide_changed)
+	right_upperarm_roll_spin_box.value_changed.connect(_on_right_upperarm_roll_changed)
+	left_upperarm_roll_spin_box.value_changed.connect(_on_left_upperarm_roll_changed)
 	draft_notes_edit.focus_exited.connect(_on_draft_notes_focus_exited)
 	back_button.pressed.connect(_navigate_back)
 	close_button.pressed.connect(close_ui)
@@ -366,7 +379,8 @@ func open_for(player, bench_name: String) -> void:
 	_hide_weapon_open_popups()
 	_reset_active_weapon_open_config()
 	session_state.reset()
-	_select_initial_wip()
+	active_wip = null
+	active_saved_wip_id = _resolve_initial_project_list_selection_id()
 	workflow_step = WORKFLOW_STEP_WEAPON_SELECT
 	_refresh_all("Select a weapon to begin.")
 
@@ -845,6 +859,40 @@ func set_selected_motion_node_body_support_blend(
 	motion_node.normalize()
 	_apply_motion_node_change(
 		"Motion node body-support blend updated.",
+		persist_change,
+		refresh_list,
+		refresh_fields,
+		refresh_preview,
+		refresh_summary
+	)
+	return true
+
+func set_selected_motion_node_upperarm_roll(
+	slot_id: StringName,
+	roll_degrees: float,
+	persist_change: bool = true,
+	refresh_list: bool = true,
+	refresh_fields: bool = true,
+	refresh_preview: bool = true,
+	refresh_summary: bool = true
+) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
+		return false
+	if _is_motion_node_authoring_locked(motion_node):
+		_reject_locked_motion_node_edit()
+		return false
+	var resolved_roll: float = _wrap_degrees_signed(roll_degrees)
+	var previous_roll: float = motion_node.left_upperarm_roll_degrees if slot_id == HAND_SLOT_LEFT else motion_node.right_upperarm_roll_degrees
+	if is_equal_approx(previous_roll, resolved_roll):
+		return false
+	if slot_id == HAND_SLOT_LEFT:
+		motion_node.left_upperarm_roll_degrees = resolved_roll
+	else:
+		motion_node.right_upperarm_roll_degrees = resolved_roll
+	motion_node.normalize()
+	_apply_motion_node_change(
+		"Upper arm roll updated.",
 		persist_change,
 		refresh_list,
 		refresh_fields,
@@ -1343,7 +1391,7 @@ func _build_preview_shortcut_overlay_text() -> String:
 		_get_action_binding_label(ACTION_NEW_NODE),
 		_get_action_binding_label(ACTION_DELETE_NODE),
 	])
-	lines.append("%s  Cycle Tip / Pommel / Weapon" % _get_action_binding_label(ACTION_CYCLE_FOCUS))
+	lines.append("%s  Cycle Tip / Pommel / Weapon / Arm Roll" % _get_action_binding_label(ACTION_CYCLE_FOCUS))
 	lines.append("%s  Preview / Stop" % _get_action_binding_label(ACTION_PREVIEW_PLAYBACK))
 	lines.append("LMB  Drag Active Control / Bezier Handles")
 	lines.append("Weapon Center  Rotate  |  Green Orb  Weapon Orientation")
@@ -1359,6 +1407,8 @@ func _get_focus_display_name(focus_id: StringName) -> String:
 			return "Pommel"
 		CombatAnimationSessionStateScript.FOCUS_WEAPON:
 			return "Weapon Orientation"
+		CombatAnimationSessionStateScript.FOCUS_ARM_ROLL:
+			return "Upper Arm Roll"
 		_:
 			return String(focus_id)
 
@@ -1774,6 +1824,10 @@ func _build_right_inspector(parent: HBoxContainer) -> void:
 	summary_label.add_theme_color_override("font_color", COLOR_TEXT_DIM)
 	summary_label.text = "No weapon selected."
 	summary_content.add_child(summary_label)
+	debugger_view_button = _build_styled_button(summary_content, "Debug View: OFF")
+	debugger_view_button.toggle_mode = true
+	debugger_view_button.button_pressed = debugger_view_enabled
+	debugger_view_button.tooltip_text = "Show or hide editor-only collision, joint range, and grip debug visuals."
 	var tip_section: Dictionary = _build_foldable_section(vbox, "TIP POSITION", true)
 	tip_section_foldable = tip_section.get("foldable", null) as FoldableContainer
 	var tip_content: VBoxContainer = tip_section.get("content", null) as VBoxContainer
@@ -1821,12 +1875,18 @@ func _build_right_inspector(parent: HBoxContainer) -> void:
 	weapon_rotation_z_spin_box = weapon_plane[2]
 	weapon_roll_spin_box = _build_labeled_spinbox(orientation_content, "Weapon Roll (deg)", -120.0, 120.0, 1.0)
 	axial_reposition_spin_box = _build_labeled_spinbox(orientation_content, "Axial Reposition", -1.0, 1.0, 0.01)
-	grip_seat_slide_spin_box = _build_labeled_spinbox(orientation_content, "Grip Seat Slide", -1.0, 1.0, 0.01)
+	grip_seat_slide_spin_box = _build_labeled_spinbox(orientation_content, "Primary Grip Seat Slide", -1.0, 1.0, 0.01)
+	secondary_grip_seat_slide_spin_box = _build_labeled_spinbox(orientation_content, "Secondary Grip Seat Slide", -1.0, 1.0, 0.01)
 	var timing_section: Dictionary = _build_foldable_section(vbox, "TIMING & BEHAVIOR", true)
 	var timing_content: VBoxContainer = timing_section.get("content", null) as VBoxContainer
 	_build_helper_text(timing_content, "Transition time is the travel time from the previous motion node into the selected node. Node 01 is the starting baseline, so its transition value is not used during preview.")
 	transition_spin_box = _build_labeled_spinbox(timing_content, "Time From Previous Node (s)", 0.0, 2.0, 0.01)
 	body_support_spin_box = _build_labeled_spinbox(timing_content, "Body Support", 0.0, 1.0, 0.05)
+	var arm_roll_section: Dictionary = _build_foldable_section(timing_content, "UPPER ARM ROLL", true)
+	arm_roll_section_foldable = arm_roll_section.get("foldable", null) as FoldableContainer
+	var arm_roll_content: VBoxContainer = arm_roll_section.get("content", null) as VBoxContainer
+	right_upperarm_roll_spin_box = _build_labeled_spinbox(arm_roll_content, "Right Upper Arm Roll (deg)", -180.0, 180.0, 1.0)
+	left_upperarm_roll_spin_box = _build_labeled_spinbox(arm_roll_content, "Left Upper Arm Roll (deg)", -180.0, 180.0, 1.0)
 	_build_field_label(timing_content, "Two-Hand State")
 	two_hand_state_option_button = OptionButton.new()
 	_style_option_button(two_hand_state_option_button)
@@ -2231,10 +2291,26 @@ func _select_initial_wip() -> void:
 	else:
 		select_unarmed_authoring(false)
 
+func _resolve_initial_project_list_selection_id() -> StringName:
+	if active_wip_library == null:
+		return StringName()
+	var selected_id: StringName = active_wip_library.selected_wip_id
+	if _is_unarmed_authoring_wip_id(selected_id):
+		return selected_id
+	if selected_id != StringName() and active_wip_library.get_saved_wip(selected_id) != null:
+		return selected_id
+	return StringName()
+
 func _refresh_all(status_message: String = "") -> void:
 	_ensure_valid_editor_motion_node_selection()
 	_enforce_active_idle_authority(true)
+	_refresh_debugger_view_button()
 	_refresh_project_list()
+	if workflow_step == WORKFLOW_STEP_WEAPON_SELECT and active_wip == null:
+		_refresh_summary(status_message)
+		_refresh_workflow_visibility()
+		_refresh_header_state()
+		return
 	_refresh_authoring_mode_selector()
 	_refresh_draft_list()
 	_refresh_skill_slot_selector()
@@ -2244,6 +2320,12 @@ func _refresh_all(status_message: String = "") -> void:
 	_refresh_summary(status_message)
 	_refresh_workflow_visibility()
 	_refresh_header_state()
+
+func _refresh_debugger_view_button() -> void:
+	if debugger_view_button == null:
+		return
+	debugger_view_button.set_pressed_no_signal(debugger_view_enabled)
+	debugger_view_button.text = "Debug View: ON" if debugger_view_enabled else "Debug View: OFF"
 
 func _refresh_project_list() -> void:
 	project_list.clear()
@@ -2526,6 +2608,9 @@ func _refresh_editor_fields() -> void:
 	weapon_roll_spin_box.editable = motion_node_editable
 	axial_reposition_spin_box.editable = motion_node_editable
 	grip_seat_slide_spin_box.editable = motion_node_editable
+	secondary_grip_seat_slide_spin_box.editable = motion_node_editable
+	right_upperarm_roll_spin_box.editable = motion_node_editable
+	left_upperarm_roll_spin_box.editable = motion_node_editable
 	draft_notes_edit.editable = has_draft
 	draft_notes_edit.text = String(draft.get("draft_notes")) if has_draft else ""
 	if motion_node_available:
@@ -2555,6 +2640,9 @@ func _refresh_editor_fields() -> void:
 		weapon_roll_spin_box.value = motion_node.weapon_roll_degrees
 		axial_reposition_spin_box.value = motion_node.axial_reposition_offset
 		grip_seat_slide_spin_box.value = motion_node.grip_seat_slide_offset
+		secondary_grip_seat_slide_spin_box.value = motion_node.secondary_grip_seat_slide_offset
+		right_upperarm_roll_spin_box.value = motion_node.right_upperarm_roll_degrees
+		left_upperarm_roll_spin_box.value = motion_node.left_upperarm_roll_degrees
 		_select_option_by_metadata(two_hand_state_option_button, motion_node.two_hand_state)
 		_select_option_by_metadata(primary_hand_option_button, motion_node.primary_hand_slot)
 		_select_option_by_metadata(grip_mode_option_button, motion_node.preferred_grip_style_mode)
@@ -2585,6 +2673,9 @@ func _refresh_editor_fields() -> void:
 		weapon_roll_spin_box.value = 0.0
 		axial_reposition_spin_box.value = 0.0
 		grip_seat_slide_spin_box.value = 0.0
+		secondary_grip_seat_slide_spin_box.value = 0.0
+		right_upperarm_roll_spin_box.value = 0.0
+		left_upperarm_roll_spin_box.value = 0.0
 		_select_option_by_metadata(primary_hand_option_button, CombatAnimationMotionNodeScript.PRIMARY_HAND_AUTO)
 	refreshing_controls = false
 
@@ -2883,8 +2974,16 @@ func _refresh_summary(status_message: String = "") -> void:
 			lines.append("Weapon Orientation: %s" % _snapped_vector3_text(motion_node.weapon_orientation_degrees, 0.01))
 			lines.append("Two-Hand State: %s" % TWO_HAND_STATE_LABELS.get(motion_node.two_hand_state, String(motion_node.two_hand_state)))
 			lines.append("Primary Hand: %s" % PRIMARY_HAND_LABELS.get(motion_node.primary_hand_slot, String(motion_node.primary_hand_slot)))
+			lines.append("Grip Seat Slide P/S: %s / %s" % [
+				str(snapped(motion_node.grip_seat_slide_offset, 0.01)),
+				str(snapped(motion_node.secondary_grip_seat_slide_offset, 0.01)),
+			])
 			lines.append("Body Support Blend: %s" % str(snapped(motion_node.body_support_blend, 0.01)))
 			lines.append("Weapon Roll: %s deg" % str(snapped(motion_node.weapon_roll_degrees, 0.1)))
+			lines.append("Upper Arm Roll R/L: %s / %s deg" % [
+				str(snapped(motion_node.right_upperarm_roll_degrees, 0.1)),
+				str(snapped(motion_node.left_upperarm_roll_degrees, 0.1)),
+			])
 		lines.append("Station Truth: Stage 1 = %s | Stage 2 = %s" % [
 			str(bool(station_state.get("uses_stage1_geometry_truth"))),
 			str(bool(station_state.get("uses_stage2_geometry_truth"))),
@@ -2960,7 +3059,8 @@ func _refresh_preview_scene() -> void:
 	var playback_state: Dictionary = _build_preview_playback_state()
 	if motion_node_editor.is_dragging() and preview_drag_override_node != null:
 		playback_state["authoring_drag_active"] = true
-		playback_state["authoring_drag_lightweight"] = true
+		playback_state["authoring_drag_lightweight"] = false
+		playback_state["authoring_drag_budgeted_visuals"] = true
 		playback_state["authoring_drag_target"] = motion_node_editor.get_drag_target()
 	preview_presenter.configure_preview_hand_setup(_resolve_active_motion_node_primary_slot_id(), active_preview_default_two_hand)
 	preview_presenter.refresh_preview(
@@ -2977,14 +3077,8 @@ func _refresh_preview_scene() -> void:
 
 func _queue_preview_drag_refresh() -> void:
 	var now_msec: int = Time.get_ticks_msec()
-	if (
-		preview_drag_last_refresh_msec <= 0
-		or now_msec - preview_drag_last_refresh_msec >= PREVIEW_DRAG_REFRESH_INTERVAL_MSEC
-	):
-		preview_drag_refresh_pending = false
-		preview_drag_last_refresh_msec = now_msec
-		_refresh_preview_scene()
-		return
+	if not preview_drag_refresh_pending:
+		preview_drag_first_pending_msec = now_msec
 	preview_drag_refresh_pending = true
 
 func _flush_pending_preview_drag_refresh() -> void:
@@ -2992,11 +3086,19 @@ func _flush_pending_preview_drag_refresh() -> void:
 		return
 	if not motion_node_editor.is_dragging():
 		preview_drag_refresh_pending = false
+		preview_drag_first_pending_msec = 0
 		return
 	var now_msec: int = Time.get_ticks_msec()
+	if (
+		preview_drag_last_refresh_msec <= 0
+		and preview_drag_first_pending_msec > 0
+		and now_msec - preview_drag_first_pending_msec < PREVIEW_DRAG_INITIAL_SOLVE_DELAY_MSEC
+	):
+		return
 	if preview_drag_last_refresh_msec > 0 and now_msec - preview_drag_last_refresh_msec < PREVIEW_DRAG_REFRESH_INTERVAL_MSEC:
 		return
 	preview_drag_refresh_pending = false
+	preview_drag_first_pending_msec = 0
 	preview_drag_last_refresh_msec = now_msec
 	_refresh_preview_scene()
 
@@ -3031,6 +3133,65 @@ func _get_active_baked_profile() -> BakedProfile:
 		return null
 	return preview_presenter.ensure_baked_profile_snapshot(active_wip)
 
+func _normalize_seed_origin_id(origin_id: StringName, fallback_origin_id: StringName) -> StringName:
+	if origin_id != StringName():
+		return origin_id
+	if fallback_origin_id != StringName():
+		return fallback_origin_id
+	return CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+
+func _resolve_seed_origin_id(seed_data: Dictionary, origin_key: String, fallback_origin_id: StringName) -> StringName:
+	var resolved_origin_id: StringName = _normalize_seed_origin_id(
+		StringName(seed_data.get(origin_key, StringName())),
+		fallback_origin_id
+	)
+	seed_data[origin_key] = resolved_origin_id
+	return resolved_origin_id
+
+func _ensure_motion_seed_position_origins(seed_data: Dictionary, fallback_origin_id: StringName) -> void:
+	if seed_data.is_empty():
+		return
+	_resolve_seed_origin_id(seed_data, "tip_position_origin_id", fallback_origin_id)
+	_resolve_seed_origin_id(seed_data, "pommel_position_origin_id", fallback_origin_id)
+
+func _get_origin_tracked_seed_vector3(
+	seed_data: Dictionary,
+	value_key: String,
+	origin_key: String,
+	fallback_value: Vector3,
+	fallback_origin_id: StringName
+) -> Vector3:
+	_resolve_seed_origin_id(seed_data, origin_key, fallback_origin_id)
+	var stored_value: Variant = seed_data.get(value_key, fallback_value)
+	if stored_value is Vector3:
+		return stored_value as Vector3
+	return fallback_value
+
+func _resolve_origin_meta_value(target: Object, origin_meta_name: StringName, fallback_origin_id: StringName) -> StringName:
+	var resolved_origin_id: StringName = _normalize_seed_origin_id(StringName(), fallback_origin_id)
+	if target == null:
+		return resolved_origin_id
+	var stored_origin_id: StringName = StringName(target.get_meta(origin_meta_name, StringName()))
+	if stored_origin_id != StringName():
+		return stored_origin_id
+	target.set_meta(origin_meta_name, resolved_origin_id)
+	return resolved_origin_id
+
+func _get_origin_tracked_vector3_meta(
+	target: Object,
+	value_meta_name: StringName,
+	origin_meta_name: StringName,
+	fallback_value: Vector3,
+	fallback_origin_id: StringName
+) -> Vector3:
+	_resolve_origin_meta_value(target, origin_meta_name, fallback_origin_id)
+	if target == null or not target.has_meta(value_meta_name):
+		return fallback_value
+	var stored_value: Variant = target.get_meta(value_meta_name)
+	if stored_value is Vector3:
+		return stored_value as Vector3
+	return fallback_value
+
 func _resolve_active_weapon_motion_seed(
 	use_cached_baseline_seed: bool = false,
 	preferred_grip_style_override: StringName = StringName()
@@ -3043,6 +3204,7 @@ func _resolve_active_weapon_motion_seed(
 	var geometry_seed: Dictionary = _resolve_active_weapon_geometry_seed_base(baked_profile)
 	if geometry_seed.is_empty():
 		return {}
+	_ensure_motion_seed_position_origins(geometry_seed, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
 	if preferred_grip_style_override != StringName():
 		geometry_seed["preferred_grip_style_mode"] = CraftedItemWIPScript.resolve_supported_grip_style(
 			preferred_grip_style_override,
@@ -3061,6 +3223,7 @@ func _resolve_active_weapon_motion_seed(
 		geometry_seed,
 		active_wip.wip_id if active_wip != null else StringName()
 	)
+	_ensure_motion_seed_position_origins(resolved_seed, CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
 	if use_cached_baseline_seed and not _motion_seed_matches_base_geometry_seed(resolved_seed, geometry_seed):
 		cached_active_weapon_baseline_seed = resolved_seed.duplicate(true)
 		cached_active_weapon_baseline_seed_signature = seed_signature
@@ -3073,6 +3236,7 @@ func _resolve_active_unarmed_motion_seed(
 	var geometry_seed: Dictionary = _resolve_active_unarmed_geometry_seed_base()
 	if geometry_seed.is_empty():
 		return {}
+	_ensure_motion_seed_position_origins(geometry_seed, CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT)
 	var seed_signature: String = _build_active_weapon_baseline_seed_signature(geometry_seed)
 	if (
 		use_cached_baseline_seed
@@ -3087,8 +3251,21 @@ func _resolve_active_unarmed_motion_seed(
 	)
 	if resolved_seed.is_empty():
 		resolved_seed = geometry_seed.duplicate(true)
-	var seeded_tip: Vector3 = resolved_seed.get("tip_position_local", Vector3.ZERO) as Vector3
-	var seeded_pommel: Vector3 = resolved_seed.get("pommel_position_local", Vector3.ZERO) as Vector3
+	_ensure_motion_seed_position_origins(resolved_seed, CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	var seeded_tip: Vector3 = _get_origin_tracked_seed_vector3(
+		resolved_seed,
+		"tip_position_local",
+		"tip_position_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	var seeded_pommel: Vector3 = _get_origin_tracked_seed_vector3(
+		resolved_seed,
+		"pommel_position_local",
+		"pommel_position_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 	resolved_seed["weapon_total_length_meters"] = maxf(seeded_tip.distance_to(seeded_pommel), 0.001)
 	if use_cached_baseline_seed:
 		cached_active_weapon_baseline_seed = resolved_seed.duplicate(true)
@@ -3116,12 +3293,38 @@ func _clear_active_weapon_baseline_seed_cache() -> void:
 func _motion_seed_matches_base_geometry_seed(motion_seed: Dictionary, geometry_seed: Dictionary) -> bool:
 	if motion_seed.is_empty() or geometry_seed.is_empty():
 		return false
+	_ensure_motion_seed_position_origins(motion_seed, CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	_ensure_motion_seed_position_origins(geometry_seed, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
 	return (
-		(motion_seed.get("tip_position_local", Vector3.INF) as Vector3).is_equal_approx(
-			geometry_seed.get("tip_position_local", Vector3.ZERO) as Vector3
+		_get_origin_tracked_seed_vector3(
+			motion_seed,
+			"tip_position_local",
+			"tip_position_origin_id",
+			Vector3.INF,
+			CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		).is_equal_approx(
+			_get_origin_tracked_seed_vector3(
+				geometry_seed,
+				"tip_position_local",
+				"tip_position_origin_id",
+				Vector3.ZERO,
+				CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+			)
 		)
-		and (motion_seed.get("pommel_position_local", Vector3.INF) as Vector3).is_equal_approx(
-			geometry_seed.get("pommel_position_local", Vector3.ZERO) as Vector3
+		and _get_origin_tracked_seed_vector3(
+			motion_seed,
+			"pommel_position_local",
+			"pommel_position_origin_id",
+			Vector3.INF,
+			CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		).is_equal_approx(
+			_get_origin_tracked_seed_vector3(
+				geometry_seed,
+				"pommel_position_local",
+				"pommel_position_origin_id",
+				Vector3.ZERO,
+				CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+			)
 		)
 		and (motion_seed.get("weapon_orientation_degrees", Vector3.INF) as Vector3).is_equal_approx(
 			geometry_seed.get("weapon_orientation_degrees", Vector3.ZERO) as Vector3
@@ -3137,6 +3340,7 @@ func _resolve_active_weapon_geometry_seed_base(baked_profile: BakedProfile = nul
 	var geometry_seed: Dictionary = weapon_geometry_resolver.resolve_motion_seed_data(resolved_profile)
 	if geometry_seed.is_empty():
 		return {}
+	_ensure_motion_seed_position_origins(geometry_seed, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
 	geometry_seed["preferred_grip_style_mode"] = active_wip.grip_style_mode if active_wip != null else &"grip_normal"
 	geometry_seed["two_hand_state"] = (
 		CombatAnimationMotionNodeScript.TWO_HAND_STATE_TWO_HAND
@@ -3155,6 +3359,7 @@ func _resolve_active_unarmed_geometry_seed_base() -> Dictionary:
 	)
 	if unarmed_geometry_seed.is_empty():
 		unarmed_geometry_seed = _build_fallback_unarmed_geometry_seed()
+	_ensure_motion_seed_position_origins(unarmed_geometry_seed, CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT)
 	unarmed_geometry_seed["preferred_grip_style_mode"] = CraftedItemWIPScript.GRIP_NORMAL
 	unarmed_geometry_seed["two_hand_state"] = CombatAnimationMotionNodeScript.TWO_HAND_STATE_ONE_HAND
 	unarmed_geometry_seed["primary_hand_slot"] = _resolve_active_authoring_primary_slot_id()
@@ -3164,17 +3369,32 @@ func _resolve_active_unarmed_geometry_seed_base() -> Dictionary:
 	unarmed_geometry_seed["weapon_roll_degrees"] = 0.0
 	unarmed_geometry_seed["axial_reposition_offset"] = 0.0
 	unarmed_geometry_seed["grip_seat_slide_offset"] = 0.0
+	unarmed_geometry_seed["secondary_grip_seat_slide_offset"] = CombatAnimationMotionNodeScript.DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET
 	unarmed_geometry_seed["body_support_blend"] = 0.0
 	unarmed_geometry_seed["unarmed_hand_proxy"] = true
-	var seeded_tip: Vector3 = unarmed_geometry_seed.get("tip_position_local", Vector3(0.12, 0.0, 0.0)) as Vector3
-	var seeded_pommel: Vector3 = unarmed_geometry_seed.get("pommel_position_local", Vector3(-0.12, 0.0, 0.0)) as Vector3
+	var seeded_tip: Vector3 = _get_origin_tracked_seed_vector3(
+		unarmed_geometry_seed,
+		"tip_position_local",
+		"tip_position_origin_id",
+		Vector3(0.12, 0.0, 0.0),
+		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	)
+	var seeded_pommel: Vector3 = _get_origin_tracked_seed_vector3(
+		unarmed_geometry_seed,
+		"pommel_position_local",
+		"pommel_position_origin_id",
+		Vector3(-0.12, 0.0, 0.0),
+		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	)
 	unarmed_geometry_seed["weapon_total_length_meters"] = maxf(seeded_tip.distance_to(seeded_pommel), 0.001)
 	return unarmed_geometry_seed
 
 func _build_fallback_unarmed_geometry_seed() -> Dictionary:
 	return {
 		"tip_position_local": Vector3(0.12, 0.0, 0.0),
+		"tip_position_origin_id": CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT,
 		"pommel_position_local": Vector3(-0.12, 0.0, 0.0),
+		"pommel_position_origin_id": CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT,
 		"weapon_total_length_meters": 0.24,
 	}
 
@@ -3188,13 +3408,30 @@ func _draft_matches_raw_weapon_geometry_baseline(draft: Resource) -> bool:
 	var first_motion_node: CombatAnimationMotionNode = typed_draft.motion_node_chain[0] as CombatAnimationMotionNode
 	if first_motion_node == null:
 		return false
-	var seeded_tip: Vector3 = authored_seed.get("tip_position_local", Vector3.ZERO) as Vector3
-	var seeded_pommel: Vector3 = authored_seed.get("pommel_position_local", Vector3.ZERO) as Vector3
+	_ensure_motion_seed_position_origins(authored_seed, CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	var seeded_tip: Vector3 = _get_origin_tracked_seed_vector3(
+		authored_seed,
+		"tip_position_local",
+		"tip_position_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	var seeded_pommel: Vector3 = _get_origin_tracked_seed_vector3(
+		authored_seed,
+		"pommel_position_local",
+		"pommel_position_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 	var seeded_weapon_orientation: Vector3 = authored_seed.get("weapon_orientation_degrees", Vector3.ZERO) as Vector3
 	var seeded_weapon_orientation_authored: bool = bool(authored_seed.get("weapon_orientation_authored", false))
 	var seeded_weapon_roll: float = float(authored_seed.get("weapon_roll_degrees", 0.0))
 	var seeded_axial_reposition: float = float(authored_seed.get("axial_reposition_offset", 0.0))
 	var seeded_grip_slide: float = float(authored_seed.get("grip_seat_slide_offset", 0.0))
+	var seeded_secondary_grip_slide: float = float(authored_seed.get(
+		"secondary_grip_seat_slide_offset",
+		CombatAnimationMotionNodeScript.DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET
+	))
 	var seeded_body_support_blend: float = clampf(float(authored_seed.get("body_support_blend", 0.0)), 0.0, 1.0)
 	var seeded_grip_mode: StringName = StringName(authored_seed.get("preferred_grip_style_mode", typed_draft.preferred_grip_style_mode))
 	var seeded_two_hand_state: StringName = StringName(authored_seed.get("two_hand_state", first_motion_node.two_hand_state))
@@ -3211,6 +3448,7 @@ func _draft_matches_raw_weapon_geometry_baseline(draft: Resource) -> bool:
 		and is_equal_approx(first_motion_node.weapon_roll_degrees, seeded_weapon_roll)
 		and is_equal_approx(first_motion_node.axial_reposition_offset, seeded_axial_reposition)
 		and is_equal_approx(first_motion_node.grip_seat_slide_offset, seeded_grip_slide)
+		and is_equal_approx(first_motion_node.secondary_grip_seat_slide_offset, seeded_secondary_grip_slide)
 		and is_equal_approx(first_motion_node.body_support_blend, seeded_body_support_blend)
 		and typed_draft.preferred_grip_style_mode == seeded_grip_mode
 		and first_motion_node.two_hand_state == seeded_two_hand_state
@@ -3627,14 +3865,39 @@ func _resolve_active_retarget_volume_config() -> Dictionary:
 	var geometry_seed: Dictionary = _resolve_active_weapon_geometry_seed_base()
 	var pivot_ratio: float = _resolve_retarget_pivot_ratio_from_geometry_seed(geometry_seed)
 	config["origin_space"] = &"primary_shoulder"
+	config["origin_id"] = _normalize_seed_origin_id(
+		StringName(config.get("origin_id", CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER)),
+		CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER
+	)
+	config["parent_origin_id"] = _normalize_seed_origin_id(
+		StringName(config.get("parent_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)),
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	config["origin_local_origin_id"] = _normalize_seed_origin_id(
+		StringName(config.get("origin_local_origin_id", config["parent_origin_id"])),
+		StringName(config["parent_origin_id"])
+	)
 	config["pivot_ratio_from_pommel"] = pivot_ratio
 	if not config.has("origin_local"):
 		config["origin_local"] = Vector3.ZERO
 	if not config.has("min_radius_meters"):
 		config["min_radius_meters"] = 0.0
 	if not config.has("max_radius_meters") or float(config.get("max_radius_meters", 0.0)) <= 0.0:
-		var tip_position: Vector3 = geometry_seed.get("tip_position_local", Vector3.ZERO) as Vector3
-		var pommel_position: Vector3 = geometry_seed.get("pommel_position_local", Vector3.ZERO) as Vector3
+		_ensure_motion_seed_position_origins(geometry_seed, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+		var tip_position: Vector3 = _get_origin_tracked_seed_vector3(
+			geometry_seed,
+			"tip_position_local",
+			"tip_position_origin_id",
+			Vector3.ZERO,
+			CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		)
+		var pommel_position: Vector3 = _get_origin_tracked_seed_vector3(
+			geometry_seed,
+			"pommel_position_local",
+			"pommel_position_origin_id",
+			Vector3.ZERO,
+			CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		)
 		var segment_length: float = tip_position.distance_to(pommel_position)
 		var weapon_length: float = float(geometry_seed.get("weapon_total_length_meters", segment_length))
 		var pivot_position: Vector3 = pommel_position.lerp(tip_position, pivot_ratio)
@@ -3646,13 +3909,28 @@ func _resolve_active_retarget_volume_config() -> Dictionary:
 func _resolve_retarget_pivot_ratio_from_geometry_seed(geometry_seed: Dictionary) -> float:
 	if geometry_seed.is_empty():
 		return 0.5
-	var tip_position: Vector3 = geometry_seed.get("tip_position_local", Vector3.ZERO) as Vector3
-	var pommel_position: Vector3 = geometry_seed.get("pommel_position_local", Vector3.ZERO) as Vector3
+	_ensure_motion_seed_position_origins(geometry_seed, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	var tip_position: Vector3 = _get_origin_tracked_seed_vector3(
+		geometry_seed,
+		"tip_position_local",
+		"tip_position_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var pommel_position: Vector3 = _get_origin_tracked_seed_vector3(
+		geometry_seed,
+		"pommel_position_local",
+		"pommel_position_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
 	var axis: Vector3 = tip_position - pommel_position
 	var axis_length_squared: float = axis.length_squared()
 	if axis_length_squared <= 0.000001:
 		return 0.5
-	return clampf((Vector3.ZERO - pommel_position).dot(axis) / axis_length_squared, 0.0, 1.0)
+	_resolve_seed_origin_id(geometry_seed, "pivot_target_position_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	var pivot_target_position: Vector3 = Vector3.ZERO
+	return clampf((pivot_target_position - pommel_position).dot(axis) / axis_length_squared, 0.0, 1.0)
 
 func _accumulate_retarget_result(total: Dictionary, next_result: Dictionary) -> void:
 	if bool(next_result.get("changed", false)):
@@ -3662,25 +3940,33 @@ func _accumulate_retarget_result(total: Dictionary, next_result: Dictionary) -> 
 	total["endpoint_changed_count"] = int(total.get("endpoint_changed_count", 0)) + int(next_result.get("endpoint_changed_count", 0))
 
 func _build_preview_playback_state() -> Dictionary:
-	if not session_state.playback_active or not chain_player.is_playing():
-		return {}
-	return {
-		"active": true,
-		"runtime_clip_playback": chain_player.current_trajectory_volume_state.get("source", StringName()) == &"baked_runtime_clip",
-		"tip_position_local": chain_player.current_tip_position,
-		"pommel_position_local": chain_player.current_pommel_position,
-		"weapon_orientation_degrees": chain_player.current_weapon_orientation_degrees,
-		"weapon_roll_degrees": chain_player.current_weapon_roll,
-		"axial_reposition_offset": chain_player.current_axial_reposition,
-		"grip_seat_slide_offset": chain_player.current_grip_seat_slide,
-		"body_support_blend": chain_player.current_body_support_blend,
-		"two_hand_state": chain_player.current_two_hand_state,
-		"primary_hand_slot": chain_player.current_primary_hand_slot,
-		"preferred_grip_style_mode": chain_player.current_preferred_grip_style_mode,
-		"contact_grip_axis_local": chain_player.current_contact_grip_axis_local,
-		"contact_grip_axis_local_override_active": chain_player.current_contact_grip_axis_local_override_active,
-		"trajectory_volume_state": chain_player.current_trajectory_volume_state,
+	var playback_state: Dictionary = {
+		"debugger_view_enabled": debugger_view_enabled,
 	}
+	if not session_state.playback_active or not chain_player.is_playing():
+		return playback_state
+	playback_state["active"] = true
+	playback_state["runtime_clip_playback"] = chain_player.current_trajectory_volume_state.get("source", StringName()) == &"baked_runtime_clip"
+	playback_state["tip_position_local"] = chain_player.current_tip_position
+	playback_state["tip_position_origin_id"] = chain_player.current_tip_position_origin_id
+	playback_state["pommel_position_local"] = chain_player.current_pommel_position
+	playback_state["pommel_position_origin_id"] = chain_player.current_pommel_position_origin_id
+	playback_state["weapon_orientation_degrees"] = chain_player.current_weapon_orientation_degrees
+	playback_state["weapon_roll_degrees"] = chain_player.current_weapon_roll
+	playback_state["axial_reposition_offset"] = chain_player.current_axial_reposition
+	playback_state["grip_seat_slide_offset"] = chain_player.current_grip_seat_slide
+	playback_state["secondary_grip_seat_slide_offset"] = chain_player.current_secondary_grip_seat_slide
+	playback_state["body_support_blend"] = chain_player.current_body_support_blend
+	playback_state["right_upperarm_roll_degrees"] = chain_player.current_right_upperarm_roll
+	playback_state["left_upperarm_roll_degrees"] = chain_player.current_left_upperarm_roll
+	playback_state["two_hand_state"] = chain_player.current_two_hand_state
+	playback_state["primary_hand_slot"] = chain_player.current_primary_hand_slot
+	playback_state["preferred_grip_style_mode"] = chain_player.current_preferred_grip_style_mode
+	playback_state["contact_grip_axis_local"] = chain_player.current_contact_grip_axis_local
+	playback_state["contact_grip_axis_origin_id"] = chain_player.current_contact_grip_axis_origin_id
+	playback_state["contact_grip_axis_local_override_active"] = chain_player.current_contact_grip_axis_local_override_active
+	playback_state["trajectory_volume_state"] = chain_player.current_trajectory_volume_state
+	return playback_state
 
 func _get_forge_wip_library_state() -> PlayerForgeWipLibraryState:
 	if active_player == null or not active_player.has_method("get_forge_wip_library_state"):
@@ -3811,10 +4097,16 @@ func _ensure_valid_draft_selection() -> void:
 		station_state.set("selected_skill_id", first_identifier)
 
 func _persist_active_wip(status_message: String = "") -> void:
+	if bool(get_meta("verification_skip_persistence", false)):
+		editor_state_dirty = false
+		if footer_status_label != null and not status_message.strip_edges().is_empty():
+			footer_status_label.text = status_message
+		return
 	if active_wip_library == null or active_wip == null:
 		return
 	active_wip.ensure_combat_animation_station_state()
 	_refresh_active_station_retarget_authoring_snapshot()
+	_refresh_station_runtime_clip_cache()
 	if _is_active_unarmed_authoring_wip():
 		_normalize_unarmed_authoring_wip(active_wip)
 		var saved_unarmed_clone: CraftedItemWIP = active_wip_library.save_unarmed_authoring_wip(active_wip)
@@ -3832,6 +4124,178 @@ func _persist_active_wip(status_message: String = "") -> void:
 	editor_state_dirty = false
 	if not status_message.strip_edges().is_empty():
 		footer_status_label.text = status_message
+
+func _refresh_station_runtime_clip_cache() -> Dictionary:
+	var result := {
+		"cached_count": 0,
+		"failed_count": 0,
+		"cleared_noncombat_count": 0,
+		"results": [],
+		"reason": "",
+	}
+	if active_wip == null or runtime_clip_baker == null:
+		result["reason"] = "missing_runtime_clip_context"
+		return result
+	var drafts: Array[Resource] = _collect_runtime_clip_cache_drafts()
+	if drafts.is_empty():
+		result["reason"] = "no_runtime_clip_drafts"
+		return result
+	for draft: Resource in drafts:
+		var cache_result: Dictionary = _refresh_runtime_clip_cache_for_draft(draft)
+		(result["results"] as Array).append(cache_result)
+		if bool(cache_result.get("cached", false)):
+			result["cached_count"] = int(result.get("cached_count", 0)) + 1
+			continue
+		var reason: String = String(cache_result.get("reason", ""))
+		if reason == "noncombat_stow_uses_body_anchor_not_hand_pose":
+			result["cleared_noncombat_count"] = int(result.get("cleared_noncombat_count", 0)) + 1
+		else:
+			result["failed_count"] = int(result.get("failed_count", 0)) + 1
+	return result
+
+func _collect_runtime_clip_cache_drafts() -> Array[Resource]:
+	var station_state: Resource = _get_active_station_state()
+	if station_state == null:
+		return []
+	var drafts: Array[Resource] = []
+	var seen_keys: Dictionary = {}
+	var active_draft: Resource = _get_active_draft()
+	if active_draft != null:
+		_append_unique_runtime_clip_cache_draft(drafts, seen_keys, active_draft)
+	var skill_drafts: Array = station_state.get("skill_drafts") as Array
+	for draft_variant: Variant in skill_drafts:
+		var draft: Resource = draft_variant as Resource
+		if draft == null:
+			continue
+		_append_unique_runtime_clip_cache_draft(drafts, seen_keys, draft)
+	var idle_drafts: Array = station_state.get("idle_drafts") as Array
+	for draft_variant: Variant in idle_drafts:
+		var draft: Resource = draft_variant as Resource
+		if draft == null:
+			continue
+		var context_id: StringName = StringName(draft.get("context_id"))
+		if (
+			context_id != CombatAnimationDraftScript.IDLE_CONTEXT_COMBAT
+			and context_id != CombatAnimationDraftScript.IDLE_CONTEXT_NONCOMBAT
+		):
+			continue
+		_append_unique_runtime_clip_cache_draft(drafts, seen_keys, draft)
+	return drafts
+
+func _append_unique_runtime_clip_cache_draft(
+	drafts: Array[Resource],
+	seen_keys: Dictionary,
+	draft: Resource
+) -> void:
+	var draft_key: String = _build_runtime_clip_cache_draft_key(draft)
+	if draft_key.is_empty() or seen_keys.has(draft_key):
+		return
+	seen_keys[draft_key] = true
+	drafts.append(draft)
+
+func _build_runtime_clip_cache_draft_key(draft: Resource) -> String:
+	if draft == null:
+		return ""
+	if _is_idle_draft(draft):
+		return "idle:%s" % String(draft.get("context_id"))
+	var slot_id: StringName = _resolve_draft_skill_slot_id_for_runtime_cache(draft)
+	if slot_id != StringName():
+		return "skill:%s" % String(slot_id)
+	return "draft:%s" % String(draft.get("draft_id"))
+
+func _refresh_active_draft_runtime_clip_cache() -> Dictionary:
+	return _refresh_runtime_clip_cache_for_draft(_get_active_draft())
+
+func _refresh_runtime_clip_cache_for_draft(draft: Resource) -> Dictionary:
+	var result := {
+		"cached": false,
+		"reason": "",
+		"frame_count": 0,
+		"upper_body_pose_track": false,
+		"solved_replay_track": false,
+	}
+	if active_wip == null or runtime_clip_baker == null or preview_presenter == null:
+		result["reason"] = "missing_runtime_clip_context"
+		return result
+	if draft == null:
+		result["reason"] = "no_draft"
+		return result
+	if _is_noncombat_idle_draft(draft):
+		draft.set("baked_runtime_clip", null)
+		result["reason"] = "noncombat_stow_uses_body_anchor_not_hand_pose"
+		return result
+	var motion_node_chain: Array = draft.get("motion_node_chain") as Array
+	if motion_node_chain.is_empty():
+		draft.set("baked_runtime_clip", null)
+		result["reason"] = "empty_motion_node_chain"
+		return result
+	var trajectory_volume_config: Dictionary = _resolve_preview_trajectory_volume_config()
+	var runtime_chain_result: Dictionary = {}
+	var playable_motion_node_chain: Array = motion_node_chain
+	if motion_node_chain.size() >= 2:
+		runtime_chain_result = _build_preview_runtime_motion_chain(motion_node_chain, trajectory_volume_config)
+		playable_motion_node_chain = runtime_chain_result.get("motion_node_chain", motion_node_chain) as Array
+	if playable_motion_node_chain.is_empty():
+		draft.set("baked_runtime_clip", null)
+		result["reason"] = "runtime_chain_empty"
+		return result
+	var clip_kind: StringName = &"skill_playback"
+	if _is_idle_draft(draft):
+		clip_kind = &"idle"
+	var runtime_clip = runtime_clip_baker.bake_from_motion_node_chain(
+		playable_motion_node_chain,
+		{
+			"clip_kind": clip_kind,
+			"source_draft_id": StringName(draft.get("draft_id")),
+			"source_skill_slot_id": _resolve_draft_skill_slot_id_for_runtime_cache(draft) if not _is_idle_draft(draft) else StringName(),
+			"source_idle_context_id": StringName(draft.get("context_id")) if _is_idle_draft(draft) else StringName(),
+			"source_weapon_wip_id": active_wip.wip_id,
+			"source_weapon_length_meters": _get_active_weapon_total_length(),
+			"playback_speed_scale": float(draft.get("preview_playback_speed_scale")),
+			"loop_enabled": bool(draft.get("preview_loop_enabled")),
+			"sample_rate_hz": PREVIEW_RUNTIME_CLIP_SAMPLE_RATE_HZ,
+			"trajectory_volume_config": trajectory_volume_config,
+			"compile_diagnostics": runtime_chain_result.get("diagnostics", []),
+			"degraded_node_count": int(runtime_chain_result.get("degraded_node_count", 0)),
+			"hand_swap_bridge_count": int(runtime_chain_result.get("hand_swap_bridge_count", 0)),
+			"retargeted_count": int(runtime_chain_result.get("retargeted_count", 0)),
+		}
+	)
+	if runtime_clip == null or not runtime_clip.has_method("get_frame_count") or int(runtime_clip.call("get_frame_count")) <= 0:
+		draft.set("baked_runtime_clip", null)
+		result["reason"] = "runtime_clip_bake_failed"
+		return result
+	var selected_node_index: int = clampi(
+		int(draft.get("selected_motion_node_index")),
+		0,
+		maxi(playable_motion_node_chain.size() - 1, 0)
+	)
+	var pose_track_result: Dictionary = preview_presenter.bake_runtime_clip_upper_body_pose_track(
+		preview_view_container,
+		preview_subviewport,
+		active_wip,
+		draft,
+		runtime_clip,
+		selected_node_index
+	)
+	draft.set("baked_runtime_clip", runtime_clip)
+	result["cached"] = true
+	result["frame_count"] = int(runtime_clip.call("get_frame_count"))
+	result["upper_body_pose_track"] = bool(pose_track_result.get("baked", false))
+	result["solved_replay_track"] = bool(pose_track_result.get("solved_replay_track", false))
+	result["reason"] = String(pose_track_result.get("reason", ""))
+	return result
+
+func _resolve_draft_skill_slot_id_for_runtime_cache(draft: Resource) -> StringName:
+	if draft == null or _is_idle_draft(draft):
+		return StringName()
+	var slot_id: StringName = StringName(draft.get("legal_slot_id"))
+	if _is_authoring_skill_slot_id(slot_id):
+		return slot_id
+	var owning_skill_id: StringName = StringName(draft.get("owning_skill_id"))
+	if _is_authoring_skill_slot_id(owning_skill_id):
+		return owning_skill_id
+	return StringName()
 
 func _apply_motion_node_change(
 	status_message: String,
@@ -3870,6 +4334,7 @@ func _clear_preview_drag_override() -> void:
 	preview_drag_has_moved = false
 	preview_drag_refresh_pending = false
 	preview_drag_last_refresh_msec = 0
+	preview_drag_first_pending_msec = 0
 
 func _begin_preview_drag_override(source_motion_node: CombatAnimationMotionNode) -> void:
 	if source_motion_node == null:
@@ -3877,11 +4342,13 @@ func _begin_preview_drag_override(source_motion_node: CombatAnimationMotionNode)
 		preview_drag_has_moved = false
 		preview_drag_refresh_pending = false
 		preview_drag_last_refresh_msec = 0
+		preview_drag_first_pending_msec = 0
 		return
 	preview_drag_override_node = source_motion_node.duplicate(true) as CombatAnimationMotionNode
 	preview_drag_has_moved = false
 	preview_drag_refresh_pending = false
 	preview_drag_last_refresh_msec = 0
+	preview_drag_first_pending_msec = 0
 	if preview_drag_override_node != null:
 		preview_drag_override_node.normalize()
 
@@ -3925,15 +4392,31 @@ func _build_display_motion_node_for_viewport_pick(source_motion_node: CombatAnim
 		display_motion_node.normalize()
 		return display_motion_node
 	if preview_root.has_meta("display_selected_tip_position_local"):
-		display_motion_node.tip_position_local = preview_root.get_meta(
+		display_motion_node.tip_position_origin_id = _resolve_origin_meta_value(
+			preview_root,
+			"display_selected_tip_position_origin_id",
+			display_motion_node.tip_position_origin_id
+		)
+		display_motion_node.tip_position_local = _get_origin_tracked_vector3_meta(
+			preview_root,
 			"display_selected_tip_position_local",
-			display_motion_node.tip_position_local
-		) as Vector3
+			"display_selected_tip_position_origin_id",
+			display_motion_node.tip_position_local,
+			display_motion_node.tip_position_origin_id
+		)
 	if preview_root.has_meta("display_selected_pommel_position_local"):
-		display_motion_node.pommel_position_local = preview_root.get_meta(
+		display_motion_node.pommel_position_origin_id = _resolve_origin_meta_value(
+			preview_root,
+			"display_selected_pommel_position_origin_id",
+			display_motion_node.pommel_position_origin_id
+		)
+		display_motion_node.pommel_position_local = _get_origin_tracked_vector3_meta(
+			preview_root,
 			"display_selected_pommel_position_local",
-			display_motion_node.pommel_position_local
-		) as Vector3
+			"display_selected_pommel_position_origin_id",
+			display_motion_node.pommel_position_local,
+			display_motion_node.pommel_position_origin_id
+		)
 	var draft: Resource = _get_active_draft()
 	if draft != null:
 		var visible_chain: Array = _get_visible_motion_node_chain_for_draft(draft)
@@ -4017,42 +4500,51 @@ func _resolve_motion_node_axis_or_default(motion_node: CombatAnimationMotionNode
 func _build_noncombat_stow_segment_from_axis(
 	pivot_position_local: Vector3,
 	axis_direction: Vector3,
-	contact_ratio: float
+	contact_ratio: float,
+	pivot_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
 ) -> Dictionary:
+	var resolved_pivot_origin_id: StringName = _normalize_seed_origin_id(pivot_position_origin_id, CombatOriginRecordScript.ORIGIN_STOW_ANCHOR)
 	var resolved_axis: Vector3 = axis_direction.normalized() if axis_direction.length_squared() > 0.000001 else Vector3.FORWARD
 	var resolved_ratio: float = CombatAnimationDraftScript.normalize_stow_contact_ratio(contact_ratio)
 	var weapon_total_length: float = maxf(_get_active_weapon_total_length(), 0.01)
 	return {
+		"pivot_position_origin_id": resolved_pivot_origin_id,
 		"tip_position_local": pivot_position_local + resolved_axis * weapon_total_length * (1.0 - resolved_ratio),
+		"tip_position_origin_id": resolved_pivot_origin_id,
 		"pommel_position_local": pivot_position_local - resolved_axis * weapon_total_length * resolved_ratio,
+		"pommel_position_origin_id": resolved_pivot_origin_id,
 		"progress": 1.0,
 	}
 
 func _resolve_noncombat_stow_segment_for_tip_target(
 	motion_node: CombatAnimationMotionNode,
-	requested_tip_position_local: Vector3
+	requested_tip_position_local: Vector3,
+	requested_tip_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
 ) -> Dictionary:
 	if motion_node == null:
 		return {}
+	var resolved_requested_tip_origin_id: StringName = _normalize_seed_origin_id(requested_tip_position_origin_id, CombatOriginRecordScript.ORIGIN_STOW_ANCHOR)
 	var contact_ratio: float = _resolve_active_noncombat_stow_contact_ratio()
 	var pivot_position: Vector3 = motion_node.pommel_position_local.lerp(motion_node.tip_position_local, contact_ratio)
 	var requested_axis: Vector3 = requested_tip_position_local - pivot_position
 	if requested_axis.length_squared() <= 0.000001:
 		requested_axis = _resolve_motion_node_axis_or_default(motion_node)
-	return _build_noncombat_stow_segment_from_axis(pivot_position, requested_axis, contact_ratio)
+	return _build_noncombat_stow_segment_from_axis(pivot_position, requested_axis, contact_ratio, resolved_requested_tip_origin_id)
 
 func _resolve_noncombat_stow_segment_for_pommel_target(
 	motion_node: CombatAnimationMotionNode,
-	requested_pommel_position_local: Vector3
+	requested_pommel_position_local: Vector3,
+	requested_pommel_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
 ) -> Dictionary:
 	if motion_node == null:
 		return {}
+	var resolved_requested_pommel_origin_id: StringName = _normalize_seed_origin_id(requested_pommel_position_origin_id, CombatOriginRecordScript.ORIGIN_STOW_ANCHOR)
 	var contact_ratio: float = _resolve_active_noncombat_stow_contact_ratio()
 	var pivot_position: Vector3 = motion_node.pommel_position_local.lerp(motion_node.tip_position_local, contact_ratio)
 	var requested_axis: Vector3 = pivot_position - requested_pommel_position_local
 	if requested_axis.length_squared() <= 0.000001:
 		requested_axis = _resolve_motion_node_axis_or_default(motion_node)
-	return _build_noncombat_stow_segment_from_axis(pivot_position, requested_axis, contact_ratio)
+	return _build_noncombat_stow_segment_from_axis(pivot_position, requested_axis, contact_ratio, resolved_requested_pommel_origin_id)
 
 func _apply_resolved_segment_to_motion_node(
 	motion_node: CombatAnimationMotionNode,
@@ -4062,12 +4554,20 @@ func _apply_resolved_segment_to_motion_node(
 		return false
 	var resolved_tip: Vector3 = resolved_segment.get("tip_position_local", motion_node.tip_position_local) as Vector3
 	var resolved_pommel: Vector3 = resolved_segment.get("pommel_position_local", motion_node.pommel_position_local) as Vector3
+	var resolved_tip_origin_id: StringName = StringName(resolved_segment.get("tip_position_origin_id", motion_node.tip_position_origin_id))
+	var resolved_pommel_origin_id: StringName = StringName(resolved_segment.get("pommel_position_origin_id", motion_node.pommel_position_origin_id))
 	var changed: bool = false
 	if not motion_node.tip_position_local.is_equal_approx(resolved_tip):
 		motion_node.tip_position_local = resolved_tip
 		changed = true
+	if motion_node.tip_position_origin_id != resolved_tip_origin_id:
+		motion_node.tip_position_origin_id = resolved_tip_origin_id
+		changed = true
 	if not motion_node.pommel_position_local.is_equal_approx(resolved_pommel):
 		motion_node.pommel_position_local = resolved_pommel
+		changed = true
+	if motion_node.pommel_position_origin_id != resolved_pommel_origin_id:
+		motion_node.pommel_position_origin_id = resolved_pommel_origin_id
 		changed = true
 	return changed
 
@@ -4096,12 +4596,16 @@ func _apply_contact_tether_to_segment(
 func _resolve_motion_node_segment_for_tip_target(
 	motion_node: CombatAnimationMotionNode,
 	requested_tip_position_local: Vector3,
-	apply_endpoint_authority: bool = true
+	apply_endpoint_authority: bool = true,
+	requested_tip_position_origin_id: StringName = StringName()
 ) -> Dictionary:
 	if motion_node == null:
 		return {}
 	if _is_noncombat_idle_draft(_get_active_draft()):
 		return _resolve_noncombat_stow_segment_for_tip_target(motion_node, requested_tip_position_local)
+	var current_tip_origin_id: StringName = _normalize_seed_origin_id(motion_node.tip_position_origin_id, CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	var resolved_tip_origin_id: StringName = _normalize_seed_origin_id(requested_tip_position_origin_id, current_tip_origin_id)
+	var resolved_pommel_origin_id: StringName = _normalize_seed_origin_id(motion_node.pommel_position_origin_id, resolved_tip_origin_id)
 	var constrained_tip: Vector3 = motion_node_editor.constrain_tip_to_sphere(
 		motion_node.pommel_position_local,
 		requested_tip_position_local,
@@ -4109,7 +4613,9 @@ func _resolve_motion_node_segment_for_tip_target(
 	)
 	var resolved_segment := {
 		"tip_position_local": constrained_tip,
+		"tip_position_origin_id": resolved_tip_origin_id,
 		"pommel_position_local": motion_node.pommel_position_local,
+		"pommel_position_origin_id": resolved_pommel_origin_id,
 		"progress": 1.0,
 	}
 	if not apply_endpoint_authority:
@@ -4120,16 +4626,22 @@ func _resolve_motion_node_segment_for_tip_target(
 func _resolve_motion_node_segment_for_pommel_target(
 	motion_node: CombatAnimationMotionNode,
 	requested_pommel_position_local: Vector3,
-	apply_endpoint_authority: bool = true
+	apply_endpoint_authority: bool = true,
+	requested_pommel_position_origin_id: StringName = StringName()
 ) -> Dictionary:
 	if motion_node == null:
 		return {}
 	if _is_noncombat_idle_draft(_get_active_draft()):
 		return _resolve_noncombat_stow_segment_for_pommel_target(motion_node, requested_pommel_position_local)
+	var current_pommel_origin_id: StringName = _normalize_seed_origin_id(motion_node.pommel_position_origin_id, CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	var resolved_pommel_origin_id: StringName = _normalize_seed_origin_id(requested_pommel_position_origin_id, current_pommel_origin_id)
+	var resolved_tip_origin_id: StringName = _normalize_seed_origin_id(motion_node.tip_position_origin_id, resolved_pommel_origin_id)
 	var pommel_translation: Vector3 = requested_pommel_position_local - motion_node.pommel_position_local
 	var resolved_segment := {
 		"tip_position_local": motion_node.tip_position_local + pommel_translation,
+		"tip_position_origin_id": resolved_tip_origin_id,
 		"pommel_position_local": requested_pommel_position_local,
+		"pommel_position_origin_id": resolved_pommel_origin_id,
 		"progress": 1.0,
 	}
 	if not apply_endpoint_authority:
@@ -4170,6 +4682,12 @@ func _apply_motion_node_state(target: CombatAnimationMotionNode, source: CombatA
 	if not target.pommel_curve_out_handle.is_equal_approx(stored_source.pommel_curve_out_handle):
 		target.pommel_curve_out_handle = stored_source.pommel_curve_out_handle
 		changed = true
+	if not is_equal_approx(target.right_upperarm_roll_degrees, stored_source.right_upperarm_roll_degrees):
+		target.right_upperarm_roll_degrees = stored_source.right_upperarm_roll_degrees
+		changed = true
+	if not is_equal_approx(target.left_upperarm_roll_degrees, stored_source.left_upperarm_roll_degrees):
+		target.left_upperarm_roll_degrees = stored_source.left_upperarm_roll_degrees
+		changed = true
 	target.normalize()
 	return changed
 
@@ -4184,6 +4702,8 @@ func _build_stored_motion_node_state_from_preview_state(source: CombatAnimationM
 	if stow_anchor_offset_local.length_squared() > 0.000001:
 		stored_source.tip_position_local -= stow_anchor_offset_local
 		stored_source.pommel_position_local -= stow_anchor_offset_local
+	stored_source.tip_position_origin_id = CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	stored_source.pommel_position_origin_id = CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
 	stored_source.normalize()
 	return stored_source
 
@@ -4191,6 +4711,11 @@ func _resolve_selected_noncombat_stow_anchor_offset_local() -> Vector3:
 	var preview_debug_state: Dictionary = get_preview_debug_state()
 	var selected_anchor_id: StringName = preview_debug_state.get("selected_stow_anchor_marker_id", StringName()) as StringName
 	var marker_positions: Dictionary = preview_debug_state.get("stow_anchor_marker_positions_local", {}) as Dictionary
+	var marker_positions_origin_id: StringName = _normalize_seed_origin_id(
+		StringName(preview_debug_state.get("stow_anchor_marker_positions_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)),
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	preview_debug_state["stow_anchor_marker_positions_origin_id"] = marker_positions_origin_id
 	if selected_anchor_id == StringName() or not marker_positions.has(selected_anchor_id):
 		return Vector3.ZERO
 	return marker_positions.get(selected_anchor_id, Vector3.ZERO) as Vector3
@@ -4367,8 +4892,32 @@ func _apply_motion_seed_to_motion_node(
 ) -> void:
 	if motion_node == null or geometry_seed.is_empty():
 		return
-	motion_node.tip_position_local = geometry_seed.get("tip_position_local", motion_node.tip_position_local) as Vector3
-	motion_node.pommel_position_local = geometry_seed.get("pommel_position_local", motion_node.pommel_position_local) as Vector3
+	var seed_tip_origin_id: StringName = _resolve_seed_origin_id(
+		geometry_seed,
+		"tip_position_origin_id",
+		motion_node.tip_position_origin_id
+	)
+	motion_node.tip_position_local = _get_origin_tracked_seed_vector3(
+		geometry_seed,
+		"tip_position_local",
+		"tip_position_origin_id",
+		motion_node.tip_position_local,
+		seed_tip_origin_id
+	)
+	motion_node.tip_position_origin_id = seed_tip_origin_id
+	var seed_pommel_origin_id: StringName = _resolve_seed_origin_id(
+		geometry_seed,
+		"pommel_position_origin_id",
+		motion_node.pommel_position_origin_id
+	)
+	motion_node.pommel_position_local = _get_origin_tracked_seed_vector3(
+		geometry_seed,
+		"pommel_position_local",
+		"pommel_position_origin_id",
+		motion_node.pommel_position_local,
+		seed_pommel_origin_id
+	)
+	motion_node.pommel_position_origin_id = seed_pommel_origin_id
 	if not motion_node.weapon_orientation_authored:
 		motion_node.weapon_orientation_degrees = geometry_seed.get(
 			"weapon_orientation_degrees",
@@ -4381,6 +4930,10 @@ func _apply_motion_seed_to_motion_node(
 	motion_node.weapon_roll_degrees = float(geometry_seed.get("weapon_roll_degrees", motion_node.weapon_roll_degrees))
 	motion_node.axial_reposition_offset = float(geometry_seed.get("axial_reposition_offset", motion_node.axial_reposition_offset))
 	motion_node.grip_seat_slide_offset = float(geometry_seed.get("grip_seat_slide_offset", motion_node.grip_seat_slide_offset))
+	motion_node.secondary_grip_seat_slide_offset = float(geometry_seed.get(
+		"secondary_grip_seat_slide_offset",
+		motion_node.secondary_grip_seat_slide_offset
+	))
 	motion_node.body_support_blend = float(geometry_seed.get("body_support_blend", motion_node.body_support_blend))
 	motion_node.preferred_grip_style_mode = StringName(geometry_seed.get(
 		"preferred_grip_style_mode",
@@ -4746,6 +5299,7 @@ func _refresh_focus_indicators() -> void:
 	var tip_active: bool = session_state.is_tip_focused()
 	var pommel_active: bool = session_state.is_pommel_focused()
 	var weapon_active: bool = session_state.is_weapon_focused()
+	var arm_roll_active: bool = session_state.current_focus == CombatAnimationSessionStateScript.FOCUS_ARM_ROLL
 	if tip_section_foldable != null:
 		tip_section_foldable.title = "TIP POSITION [ACTIVE]" if tip_active else "TIP POSITION"
 		tip_section_foldable.add_theme_color_override("font_color", COLOR_TEXT_TITLE if tip_active else COLOR_TEXT_HEADER)
@@ -4755,6 +5309,9 @@ func _refresh_focus_indicators() -> void:
 	if weapon_section_foldable != null:
 		weapon_section_foldable.title = "WEAPON ORIENTATION [ACTIVE]" if weapon_active else "WEAPON ORIENTATION"
 		weapon_section_foldable.add_theme_color_override("font_color", COLOR_TEXT_TITLE if weapon_active else COLOR_TEXT_HEADER)
+	if arm_roll_section_foldable != null:
+		arm_roll_section_foldable.title = "UPPER ARM ROLL [ACTIVE]" if arm_roll_active else "UPPER ARM ROLL"
+		arm_roll_section_foldable.add_theme_color_override("font_color", COLOR_TEXT_TITLE if arm_roll_active else COLOR_TEXT_HEADER)
 
 func _toggle_preview_playback() -> void:
 	if chain_player.is_playing():
@@ -4797,6 +5354,14 @@ func _toggle_preview_playback() -> void:
 		}
 	)
 	if runtime_clip != null and runtime_clip.has_method("get_frame_count") and int(runtime_clip.call("get_frame_count")) > 0:
+		preview_presenter.bake_runtime_clip_upper_body_pose_track(
+			preview_view_container,
+			preview_subviewport,
+			active_wip,
+			draft,
+			runtime_clip,
+			clampi(int(draft.get("selected_motion_node_index")), 0, maxi(playable_motion_node_chain.size() - 1, 0))
+		)
 		chain_player.prepare_runtime_clip(runtime_clip, playback_speed, should_loop)
 	else:
 		chain_player.prepare(
@@ -5063,6 +5628,35 @@ func set_selected_motion_node_grip_seat_slide(
 	)
 	return true
 
+func set_selected_motion_node_secondary_grip_seat_slide(
+	slide_value: float,
+	persist_change: bool = true,
+	refresh_list: bool = true,
+	refresh_fields: bool = true,
+	refresh_preview: bool = true,
+	refresh_summary: bool = true
+) -> bool:
+	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion_node == null:
+		return false
+	if _is_motion_node_authoring_locked(motion_node):
+		_reject_locked_motion_node_edit()
+		return false
+	var resolved_slide_value: float = clampf(slide_value, -1.0, 1.0)
+	if is_equal_approx(motion_node.secondary_grip_seat_slide_offset, resolved_slide_value):
+		return false
+	motion_node.secondary_grip_seat_slide_offset = resolved_slide_value
+	motion_node.normalize()
+	_apply_motion_node_change(
+		"Secondary grip seat slide updated.",
+		persist_change,
+		refresh_list,
+		refresh_fields,
+		refresh_preview,
+		refresh_summary
+	)
+	return true
+
 func _on_skill_name_submitted(new_text: String) -> void:
 	if refreshing_controls:
 		return
@@ -5108,8 +5702,32 @@ func _on_grip_seat_slide_changed(value: float) -> void:
 		return
 	set_selected_motion_node_grip_seat_slide(value, false)
 
+func _on_secondary_grip_seat_slide_changed(value: float) -> void:
+	if refreshing_controls:
+		return
+	set_selected_motion_node_secondary_grip_seat_slide(value, false)
+
+func _on_right_upperarm_roll_changed(value: float) -> void:
+	if refreshing_controls:
+		return
+	set_selected_motion_node_upperarm_roll(HAND_SLOT_RIGHT, value, false)
+
+func _on_left_upperarm_roll_changed(value: float) -> void:
+	if refreshing_controls:
+		return
+	set_selected_motion_node_upperarm_roll(HAND_SLOT_LEFT, value, false)
+
 func _on_play_preview_pressed() -> void:
 	_toggle_preview_playback()
+
+func _on_debugger_view_toggled(enabled: bool) -> void:
+	debugger_view_enabled = enabled
+	_refresh_debugger_view_button()
+	if debugger_view_enabled:
+		_refresh_preview_scene()
+	else:
+		preview_presenter.set_debugger_view_enabled(preview_subviewport, false)
+		_refresh_preview_scene()
 
 func _on_preview_gui_input(event: InputEvent) -> void:
 	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
@@ -5137,13 +5755,23 @@ func _on_preview_gui_input(event: InputEvent) -> void:
 				var camera: Camera3D = _get_preview_camera()
 				var trajectory_root: Node3D = _get_preview_trajectory_root()
 				var pick_motion_node: CombatAnimationMotionNode = _build_display_motion_node_for_viewport_pick(motion_node)
-				var drag_target: StringName = motion_node_editor.pick_drag_target(
-					camera,
-					mb.position,
-					pick_motion_node,
-					trajectory_root,
-					session_state.current_focus
-				)
+				var arm_roll_pick: Dictionary = {}
+				var drag_target: StringName = StringName()
+				if session_state.current_focus == CombatAnimationSessionStateScript.FOCUS_ARM_ROLL:
+					arm_roll_pick = preview_presenter.resolve_upperarm_roll_drag_state(
+						preview_subviewport,
+						camera,
+						mb.position
+					)
+					drag_target = arm_roll_pick.get("drag_target", StringName()) as StringName
+				else:
+					drag_target = motion_node_editor.pick_drag_target(
+						camera,
+						mb.position,
+						pick_motion_node,
+						trajectory_root,
+						session_state.current_focus
+					)
 				if drag_target == StringName():
 					return
 				if (
@@ -5157,8 +5785,15 @@ func _on_preview_gui_input(event: InputEvent) -> void:
 					preview_view_container.accept_event()
 					return
 				_begin_preview_drag_override(pick_motion_node)
-				motion_node_editor.begin_drag(drag_target, mb.position, pick_motion_node)
+				if session_state.current_focus == CombatAnimationSessionStateScript.FOCUS_ARM_ROLL:
+					motion_node_editor.begin_upperarm_roll_drag(drag_target, arm_roll_pick.get("roll_state", {}) as Dictionary)
+				else:
+					motion_node_editor.begin_drag(drag_target, mb.position, pick_motion_node)
 				match drag_target:
+					CombatAnimationMotionNodeEditorScript.DRAG_TARGET_RIGHT_UPPERARM_ROLL:
+						footer_status_label.text = "Dragging right upper arm roll."
+					CombatAnimationMotionNodeEditorScript.DRAG_TARGET_LEFT_UPPERARM_ROLL:
+						footer_status_label.text = "Dragging left upper arm roll."
 					CombatAnimationMotionNodeEditorScript.DRAG_TARGET_POMMEL:
 						footer_status_label.text = "Dragging pommel control."
 					CombatAnimationMotionNodeEditorScript.DRAG_TARGET_WEAPON_ROTATION:
@@ -5207,7 +5842,24 @@ func _handle_preview_drag(screen_position: Vector2) -> void:
 		)
 	):
 		return
-	if drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP:
+	if (
+		drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_RIGHT_UPPERARM_ROLL
+		or drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_LEFT_UPPERARM_ROLL
+	):
+		var resolved_upperarm_roll: Variant = motion_node_editor.resolve_upperarm_roll_drag(camera, screen_position)
+		if resolved_upperarm_roll != null:
+			var slot_id: StringName = HAND_SLOT_LEFT if drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_LEFT_UPPERARM_ROLL else HAND_SLOT_RIGHT
+			var next_roll: float = _wrap_degrees_signed(float(resolved_upperarm_roll))
+			var previous_roll: float = editable_motion_node.left_upperarm_roll_degrees if slot_id == HAND_SLOT_LEFT else editable_motion_node.right_upperarm_roll_degrees
+			if not is_equal_approx(previous_roll, next_roll):
+				if slot_id == HAND_SLOT_LEFT:
+					editable_motion_node.left_upperarm_roll_degrees = next_roll
+				else:
+					editable_motion_node.right_upperarm_roll_degrees = next_roll
+				preview_drag_has_moved = true
+				editable_motion_node.normalize()
+				_queue_preview_drag_refresh()
+	elif drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP:
 		var hit: Variant = motion_node_editor.raycast_tip_on_view_drag_plane(
 			camera,
 			screen_position,
@@ -5275,6 +5927,9 @@ func _set_preview_drag_blocked_status(resolved_segment: Dictionary) -> void:
 		return
 	footer_status_label.text = "Blocked by body clearance near %s." % region
 
+func _wrap_degrees_signed(degrees: float) -> float:
+	return wrapf(degrees + 180.0, 0.0, 360.0) - 180.0
+
 func _is_curve_handle_drag_target(drag_target: StringName) -> bool:
 	return (
 		drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP_CURVE_IN
@@ -5286,31 +5941,51 @@ func _is_curve_handle_drag_target(drag_target: StringName) -> bool:
 func _apply_curve_handle_drag(
 	motion_node: CombatAnimationMotionNode,
 	drag_target: StringName,
-	handle_position_local: Vector3
+	handle_position_local: Vector3,
+	handle_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 ) -> bool:
 	if motion_node == null:
 		return false
+	var handle_position_state := {
+		"handle_position_local": handle_position_local,
+		"handle_position_origin_id": _normalize_seed_origin_id(
+			handle_position_origin_id,
+			CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		),
+	}
+	var resolved_handle_position_origin_id: StringName = _resolve_seed_origin_id(
+		handle_position_state,
+		"handle_position_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	var resolved_handle_position: Vector3 = _get_origin_tracked_seed_vector3(
+		handle_position_state,
+		"handle_position_local",
+		"handle_position_origin_id",
+		handle_position_local,
+		resolved_handle_position_origin_id
+	)
 	match drag_target:
 		CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP_CURVE_IN:
-			var next_tip_in: Vector3 = handle_position_local - motion_node.tip_position_local
+			var next_tip_in: Vector3 = resolved_handle_position - motion_node.tip_position_local
 			if motion_node.tip_curve_in_handle.is_equal_approx(next_tip_in):
 				return false
 			motion_node.tip_curve_in_handle = next_tip_in
 			return true
 		CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP_CURVE_OUT:
-			var next_tip_out: Vector3 = handle_position_local - motion_node.tip_position_local
+			var next_tip_out: Vector3 = resolved_handle_position - motion_node.tip_position_local
 			if motion_node.tip_curve_out_handle.is_equal_approx(next_tip_out):
 				return false
 			motion_node.tip_curve_out_handle = next_tip_out
 			return true
 		CombatAnimationMotionNodeEditorScript.DRAG_TARGET_POMMEL_CURVE_IN:
-			var next_pommel_in: Vector3 = handle_position_local - motion_node.pommel_position_local
+			var next_pommel_in: Vector3 = resolved_handle_position - motion_node.pommel_position_local
 			if motion_node.pommel_curve_in_handle.is_equal_approx(next_pommel_in):
 				return false
 			motion_node.pommel_curve_in_handle = next_pommel_in
 			return true
 		CombatAnimationMotionNodeEditorScript.DRAG_TARGET_POMMEL_CURVE_OUT:
-			var next_pommel_out: Vector3 = handle_position_local - motion_node.pommel_position_local
+			var next_pommel_out: Vector3 = resolved_handle_position - motion_node.pommel_position_local
 			if motion_node.pommel_curve_out_handle.is_equal_approx(next_pommel_out):
 				return false
 			motion_node.pommel_curve_out_handle = next_pommel_out

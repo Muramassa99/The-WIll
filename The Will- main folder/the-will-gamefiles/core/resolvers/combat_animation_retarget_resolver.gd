@@ -3,8 +3,11 @@ class_name CombatAnimationRetargetResolver
 
 const CombatAnimationRetargetNodeScript = preload("res://core/models/combat_animation_retarget_node.gd")
 const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const DEFAULT_PIVOT_RATIO_FROM_POMMEL := 0.5
 const DEFAULT_ORIGIN_SPACE: StringName = &"primary_shoulder"
+const DEFAULT_ORIGIN_ID: StringName = CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER
+const DEFAULT_PARENT_ORIGIN_ID: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 const DEFAULT_LENGTH_EPSILON_METERS := 0.001
 
 func build_retarget_node_from_legacy_motion_node(
@@ -13,15 +16,17 @@ func build_retarget_node_from_legacy_motion_node(
 ):
 	if motion_node == null:
 		return null
+	var resolved_config: Dictionary = _build_node_safe_volume_config(motion_node, volume_config)
 	var retarget_node = CombatAnimationRetargetNodeScript.new()
 	var pivot_ratio: float = clampf(
-		float(volume_config.get("pivot_ratio_from_pommel", DEFAULT_PIVOT_RATIO_FROM_POMMEL)),
+		float(resolved_config.get("pivot_ratio_from_pommel", DEFAULT_PIVOT_RATIO_FROM_POMMEL)),
 		0.0,
 		1.0
 	)
-	var origin_local: Vector3 = volume_config.get("origin_local", Vector3.ZERO) as Vector3
-	var min_radius: float = maxf(float(volume_config.get("min_radius_meters", 0.0)), 0.0)
-	var max_radius: float = maxf(float(volume_config.get("max_radius_meters", 0.0)), min_radius)
+	var origin_local_origin_id: StringName = StringName(resolved_config.get("origin_local_origin_id", DEFAULT_PARENT_ORIGIN_ID))
+	var origin_local: Vector3 = resolved_config["origin_local"] as Vector3
+	var min_radius: float = maxf(float(resolved_config.get("min_radius_meters", 0.0)), 0.0)
+	var max_radius: float = maxf(float(resolved_config.get("max_radius_meters", 0.0)), min_radius)
 	var pivot_position: Vector3 = motion_node.pommel_position_local.lerp(motion_node.tip_position_local, pivot_ratio)
 	var origin_to_pivot: Vector3 = pivot_position - origin_local
 	var distance: float = origin_to_pivot.length()
@@ -29,16 +34,24 @@ func build_retarget_node_from_legacy_motion_node(
 	var curve_scale: float = _resolve_curve_handle_scale(range_span)
 	var segment_axis: Vector3 = motion_node.tip_position_local - motion_node.pommel_position_local
 	retarget_node.enabled = true
-	retarget_node.origin_space = StringName(volume_config.get("origin_space", DEFAULT_ORIGIN_SPACE))
+	retarget_node.origin_space = StringName(resolved_config.get("origin_space", DEFAULT_ORIGIN_SPACE))
+	retarget_node.origin_id = StringName(resolved_config.get("origin_id", _resolve_origin_id_for_space(retarget_node.origin_space)))
+	retarget_node.parent_origin_id = StringName(resolved_config.get("parent_origin_id", DEFAULT_PARENT_ORIGIN_ID))
+	if origin_local_origin_id == StringName():
+		origin_local_origin_id = retarget_node.parent_origin_id
+	resolved_config["origin_local_origin_id"] = origin_local_origin_id
 	retarget_node.pivot_direction_local = _resolve_safe_direction(origin_to_pivot, segment_axis)
+	retarget_node.pivot_direction_origin_id = retarget_node.origin_id
 	retarget_node.pivot_range_percent = clampf((distance - min_radius) / range_span, 0.0, 1.0)
 	retarget_node.pivot_ratio_from_pommel = pivot_ratio
 	retarget_node.weapon_axis_local = _resolve_safe_direction(segment_axis, retarget_node.pivot_direction_local)
+	retarget_node.weapon_axis_origin_id = retarget_node.origin_id
 	retarget_node.weapon_orientation_degrees = motion_node.weapon_orientation_degrees
 	retarget_node.weapon_orientation_authored = motion_node.weapon_orientation_authored
 	retarget_node.weapon_roll_degrees = motion_node.weapon_roll_degrees
 	retarget_node.axial_reposition_offset = motion_node.axial_reposition_offset
 	retarget_node.grip_seat_slide_offset = motion_node.grip_seat_slide_offset
+	retarget_node.secondary_grip_seat_slide_offset = motion_node.secondary_grip_seat_slide_offset
 	retarget_node.body_support_blend = motion_node.body_support_blend
 	retarget_node.right_upperarm_roll_degrees = motion_node.right_upperarm_roll_degrees
 	retarget_node.left_upperarm_roll_degrees = motion_node.left_upperarm_roll_degrees
@@ -64,9 +77,16 @@ func resolve_motion_values_from_retarget_node(
 	if retarget_node == null:
 		return {}
 	retarget_node.normalize()
-	var origin_local: Vector3 = volume_config.get("origin_local", Vector3.ZERO) as Vector3
-	var min_radius: float = maxf(float(volume_config.get("min_radius_meters", retarget_node.source_min_radius_meters)), 0.0)
-	var max_radius: float = maxf(float(volume_config.get("max_radius_meters", retarget_node.source_max_radius_meters)), min_radius)
+	var resolved_config: Dictionary = _normalize_volume_config(
+		volume_config,
+		retarget_node.parent_origin_id,
+		retarget_node.origin_id,
+		retarget_node.origin_space
+	)
+	var origin_local_origin_id: StringName = StringName(resolved_config.get("origin_local_origin_id", retarget_node.parent_origin_id))
+	var origin_local: Vector3 = resolved_config["origin_local"] as Vector3
+	var min_radius: float = maxf(float(resolved_config.get("min_radius_meters", retarget_node.source_min_radius_meters)), 0.0)
+	var max_radius: float = maxf(float(resolved_config.get("max_radius_meters", retarget_node.source_max_radius_meters)), min_radius)
 	var range_span: float = maxf(max_radius - min_radius, 0.0)
 	var curve_scale: float = _resolve_curve_handle_scale(range_span)
 	var radius: float = min_radius + range_span * clampf(retarget_node.pivot_range_percent, 0.0, 1.0)
@@ -83,7 +103,14 @@ func resolve_motion_values_from_retarget_node(
 		"pommel_position_local": pommel_position,
 		"retarget_resolved": true,
 		"origin_space": retarget_node.origin_space,
+		"origin_id": retarget_node.origin_id,
+		"parent_origin_id": retarget_node.parent_origin_id,
+		"tip_position_origin_id": retarget_node.parent_origin_id,
+		"pommel_position_origin_id": retarget_node.parent_origin_id,
+		"origin_local": origin_local,
+		"origin_local_origin_id": origin_local_origin_id,
 		"pivot_position_local": pivot_position,
+		"pivot_position_origin_id": retarget_node.parent_origin_id,
 		"pivot_range_percent": retarget_node.pivot_range_percent,
 		"pivot_ratio_from_pommel": pivot_ratio,
 		"weapon_orientation_degrees": retarget_node.weapon_orientation_degrees,
@@ -91,6 +118,7 @@ func resolve_motion_values_from_retarget_node(
 		"weapon_roll_degrees": retarget_node.weapon_roll_degrees,
 		"axial_reposition_offset": retarget_node.axial_reposition_offset,
 		"grip_seat_slide_offset": retarget_node.grip_seat_slide_offset,
+		"secondary_grip_seat_slide_offset": retarget_node.secondary_grip_seat_slide_offset,
 		"body_support_blend": retarget_node.body_support_blend,
 		"right_upperarm_roll_degrees": retarget_node.right_upperarm_roll_degrees,
 		"left_upperarm_roll_degrees": retarget_node.left_upperarm_roll_degrees,
@@ -120,12 +148,18 @@ func apply_retarget_node_to_motion_node(
 	if resolved_values.is_empty():
 		return false
 	motion_node.tip_position_local = resolved_values.get("tip_position_local", motion_node.tip_position_local) as Vector3
+	motion_node.tip_position_origin_id = StringName(resolved_values.get("tip_position_origin_id", motion_node.tip_position_origin_id))
 	motion_node.pommel_position_local = resolved_values.get("pommel_position_local", motion_node.pommel_position_local) as Vector3
+	motion_node.pommel_position_origin_id = StringName(resolved_values.get("pommel_position_origin_id", motion_node.pommel_position_origin_id))
 	motion_node.weapon_orientation_degrees = resolved_values.get("weapon_orientation_degrees", motion_node.weapon_orientation_degrees) as Vector3
 	motion_node.weapon_orientation_authored = bool(resolved_values.get("weapon_orientation_authored", motion_node.weapon_orientation_authored))
 	motion_node.weapon_roll_degrees = float(resolved_values.get("weapon_roll_degrees", motion_node.weapon_roll_degrees))
 	motion_node.axial_reposition_offset = float(resolved_values.get("axial_reposition_offset", motion_node.axial_reposition_offset))
 	motion_node.grip_seat_slide_offset = float(resolved_values.get("grip_seat_slide_offset", motion_node.grip_seat_slide_offset))
+	motion_node.secondary_grip_seat_slide_offset = float(resolved_values.get(
+		"secondary_grip_seat_slide_offset",
+		motion_node.secondary_grip_seat_slide_offset
+	))
 	motion_node.body_support_blend = float(resolved_values.get("body_support_blend", motion_node.body_support_blend))
 	motion_node.right_upperarm_roll_degrees = float(resolved_values.get("right_upperarm_roll_degrees", motion_node.right_upperarm_roll_degrees))
 	motion_node.left_upperarm_roll_degrees = float(resolved_values.get("left_upperarm_roll_degrees", motion_node.left_upperarm_roll_degrees))
@@ -286,11 +320,7 @@ func _resolve_curve_handle_scale(range_span: float) -> float:
 	return maxf(range_span, 1.0)
 
 func _build_node_safe_volume_config(motion_node, volume_config: Dictionary) -> Dictionary:
-	var config: Dictionary = volume_config.duplicate(true)
-	if not config.has("origin_space"):
-		config["origin_space"] = DEFAULT_ORIGIN_SPACE
-	if not config.has("origin_local"):
-		config["origin_local"] = Vector3.ZERO
+	var config: Dictionary = _normalize_volume_config(volume_config)
 	if not config.has("pivot_ratio_from_pommel"):
 		config["pivot_ratio_from_pommel"] = DEFAULT_PIVOT_RATIO_FROM_POMMEL
 	var pivot_ratio: float = clampf(
@@ -298,7 +328,11 @@ func _build_node_safe_volume_config(motion_node, volume_config: Dictionary) -> D
 		0.0,
 		1.0
 	)
-	var origin_local: Vector3 = config.get("origin_local", Vector3.ZERO) as Vector3
+	var origin_local_origin_id: StringName = StringName(config.get("origin_local_origin_id", DEFAULT_PARENT_ORIGIN_ID))
+	var origin_local: Vector3 = config["origin_local"] as Vector3
+	if origin_local_origin_id == StringName():
+		origin_local_origin_id = DEFAULT_PARENT_ORIGIN_ID
+	config["origin_local_origin_id"] = origin_local_origin_id
 	var pivot_position: Vector3 = motion_node.pommel_position_local.lerp(motion_node.tip_position_local, pivot_ratio)
 	var distance_to_origin: float = pivot_position.distance_to(origin_local)
 	var segment_length: float = motion_node.tip_position_local.distance_to(motion_node.pommel_position_local)
@@ -310,3 +344,48 @@ func _build_node_safe_volume_config(motion_node, volume_config: Dictionary) -> D
 		fallback_max = maxf(fallback_max, segment_length * 3.0)
 		config["max_radius_meters"] = fallback_max
 	return config
+
+func _normalize_volume_config(
+	volume_config: Dictionary,
+	parent_origin_fallback: StringName = DEFAULT_PARENT_ORIGIN_ID,
+	origin_fallback: StringName = DEFAULT_ORIGIN_ID,
+	origin_space_fallback: StringName = DEFAULT_ORIGIN_SPACE
+) -> Dictionary:
+	var config: Dictionary = volume_config.duplicate(true)
+	var origin_space: StringName = StringName(config.get("origin_space", origin_space_fallback))
+	if origin_space == StringName():
+		origin_space = origin_space_fallback
+	config["origin_space"] = origin_space
+	var parent_origin_id: StringName = StringName(config.get("parent_origin_id", parent_origin_fallback))
+	if parent_origin_id == StringName():
+		parent_origin_id = parent_origin_fallback
+	config["parent_origin_id"] = parent_origin_id
+	var origin_id: StringName = (
+		StringName(config.get("origin_id", StringName()))
+		if config.has("origin_id")
+		else _resolve_origin_id_for_space(origin_space)
+	)
+	if origin_id == StringName():
+		origin_id = origin_fallback
+	config["origin_id"] = origin_id
+	if not config.has("origin_local"):
+		config["origin_local"] = Vector3.ZERO
+	var origin_local_origin_id: StringName = StringName(config.get("origin_local_origin_id", parent_origin_id))
+	if origin_local_origin_id == StringName():
+		origin_local_origin_id = parent_origin_id
+	config["origin_local_origin_id"] = origin_local_origin_id
+	if config.has("fallback_direction_local"):
+		var fallback_direction_origin_id: StringName = StringName(config.get("fallback_direction_origin_id", parent_origin_id))
+		if fallback_direction_origin_id == StringName():
+			fallback_direction_origin_id = parent_origin_id
+		config["fallback_direction_origin_id"] = fallback_direction_origin_id
+	return config
+
+static func _resolve_origin_id_for_space(space_id: StringName) -> StringName:
+	match space_id:
+		CombatAnimationRetargetNodeScript.ORIGIN_SPACE_PRIMARY_SHOULDER:
+			return CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER
+		CombatAnimationRetargetNodeScript.ORIGIN_SPACE_TORSO_FRAME:
+			return CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE
+		_:
+			return DEFAULT_ORIGIN_ID

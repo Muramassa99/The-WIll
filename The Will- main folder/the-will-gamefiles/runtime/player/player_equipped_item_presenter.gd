@@ -6,11 +6,16 @@ const WeaponGripAnchorProviderScript = preload("res://runtime/player/weapon_grip
 const CombatAnimationStationStateScript = preload("res://core/models/combat_animation_station_state.gd")
 const CombatAnimationDraftScript = preload("res://core/models/combat_animation_draft.gd")
 const CombatAnimationWeaponFrameSolverScript = preload("res://runtime/combat/combat_animation_weapon_frame_solver.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const BASE_WEAPON_HOLD_ROTATION_DEGREES := Vector3(180.0, 0.0, 0.0)
 const LEFT_HAND_WEAPON_HOLD_ROTATION_DEGREES := Vector3(0.0, 180.0, 0.0)
 const REVERSE_GRIP_ROTATION_DEGREES := Vector3(0.0, 180.0, 0.0)
 const GRIP_CONTACT_COLLISION_LAYER := 1 << 24
 const HAND_MOUNT_LOCAL_TRANSFORM_META := "hand_mount_local_transform"
+const HAND_MOUNT_LOCAL_TRANSFORM_ORIGIN_META := "hand_mount_local_transform_origin_id"
+const EQUIPPED_VISUAL_ANCHOR_ORIGIN_META := "equipped_visual_anchor_origin_id"
+const EQUIPPED_REANCHOR_SOURCE_ORIGIN_META := "equipped_reanchor_source_origin_id"
+const EQUIPPED_REANCHOR_TARGET_ORIGIN_META := "equipped_reanchor_target_origin_id"
 const WEAPON_CLEARANCE_PROXY_OFFSET_METERS := 0.005
 const MAX_WEAPON_BODY_PROXY_SURFACE_SAMPLES := 128
 const MAX_WEAPON_BODY_PROXY_CELL_SAMPLES := 96
@@ -18,6 +23,143 @@ const STOW_AUTHORING_ROOT_BONE := &"RL_BoneRoot"
 
 var weapon_grip_anchor_provider = WeaponGripAnchorProviderScript.new()
 var weapon_frame_solver = CombatAnimationWeaponFrameSolverScript.new()
+
+func _ensure_origin_meta(target: Object, meta_name: String, fallback_origin_id: StringName) -> void:
+	if target == null:
+		return
+	var origin_id: StringName = StringName(target.get_meta(meta_name, StringName()))
+	if origin_id == StringName():
+		target.set_meta(meta_name, fallback_origin_id)
+
+func _resolve_origin_meta_value(target: Object, meta_name: String, fallback_origin_id: StringName) -> StringName:
+	var resolved_origin_id: StringName = fallback_origin_id
+	if resolved_origin_id == StringName():
+		resolved_origin_id = CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+	if target == null:
+		return resolved_origin_id
+	var origin_id: StringName = StringName(target.get_meta(meta_name, StringName()))
+	if origin_id != StringName():
+		return origin_id
+	target.set_meta(meta_name, resolved_origin_id)
+	return resolved_origin_id
+
+func _get_origin_tracked_vector3_meta(
+	target: Object,
+	value_meta_name: String,
+	origin_meta_name: String,
+	fallback_value: Vector3,
+	fallback_origin_id: StringName
+) -> Vector3:
+	_resolve_origin_meta_value(target, origin_meta_name, fallback_origin_id)
+	if target == null or not target.has_meta(value_meta_name):
+		return fallback_value
+	var value: Variant = target.get_meta(value_meta_name)
+	if value is Vector3:
+		return value as Vector3
+	return fallback_value
+
+func _resolve_origin_tracked_state_origin_id(
+	source_state: Dictionary,
+	origin_key: String,
+	fallback_origin_id: StringName
+) -> StringName:
+	var resolved_origin_id: StringName = fallback_origin_id
+	if resolved_origin_id == StringName():
+		resolved_origin_id = CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+	if not source_state.has(origin_key):
+		source_state[origin_key] = resolved_origin_id
+		return resolved_origin_id
+	var origin_id: StringName = StringName(source_state.get(origin_key, StringName()))
+	if origin_id == StringName():
+		source_state[origin_key] = resolved_origin_id
+		return resolved_origin_id
+	return origin_id
+
+func _get_origin_tracked_vector3_state(
+	source_state: Dictionary,
+	value_key: String,
+	origin_key: String,
+	fallback_value: Vector3,
+	fallback_origin_id: StringName
+) -> Vector3:
+	_resolve_origin_tracked_state_origin_id(source_state, origin_key, fallback_origin_id)
+	if not source_state.has(value_key):
+		return fallback_value
+	var value: Variant = source_state.get(value_key, fallback_value)
+	if value is Vector3:
+		return value as Vector3
+	return fallback_value
+
+func _resolve_hand_alignment_offset_state(humanoid_rig: Node3D, slot_id: StringName) -> Dictionary:
+	var result := {
+		"hand_alignment_offset_local": Vector3.ZERO,
+		"hand_alignment_offset_origin_id": CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT,
+	}
+	if humanoid_rig == null:
+		return result
+	if humanoid_rig.has_method("resolve_hand_grip_alignment_offset_state"):
+		var state_variant: Variant = humanoid_rig.call("resolve_hand_grip_alignment_offset_state", slot_id)
+		if state_variant is Dictionary:
+			var source_state: Dictionary = state_variant as Dictionary
+			_resolve_origin_tracked_state_origin_id(
+				source_state,
+				"hand_alignment_offset_origin_id",
+				CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+			)
+			return source_state
+	if humanoid_rig.has_method("resolve_hand_grip_alignment_offset_origin_id"):
+		var origin_variant: Variant = humanoid_rig.call("resolve_hand_grip_alignment_offset_origin_id", slot_id)
+		if origin_variant is StringName or origin_variant is String:
+			var origin_id: StringName = StringName(origin_variant)
+			if origin_id != StringName():
+				result["hand_alignment_offset_origin_id"] = origin_id
+	if humanoid_rig.has_method("resolve_hand_grip_alignment_offset_local"):
+		var alignment_variant: Variant = humanoid_rig.call("resolve_hand_grip_alignment_offset_local", slot_id)
+		if alignment_variant is Vector3:
+			result["hand_alignment_offset_local"] = alignment_variant
+	return result
+
+func _set_origin_tracked_vector3_meta(
+	target: Object,
+	value_meta_name: String,
+	origin_meta_name: String,
+	value: Vector3,
+	origin_id: StringName
+) -> void:
+	if target == null:
+		return
+	var resolved_origin_id: StringName = origin_id
+	if resolved_origin_id == StringName():
+		resolved_origin_id = CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+	target.set_meta(value_meta_name, value)
+	target.set_meta(origin_meta_name, resolved_origin_id)
+
+func _get_weapon_tip_meta(held_item: Object) -> Vector3:
+	return _get_origin_tracked_vector3_meta(
+		held_item,
+		"weapon_tip_local",
+		"weapon_tip_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+
+func _get_weapon_pommel_meta(held_item: Object) -> Vector3:
+	return _get_origin_tracked_vector3_meta(
+		held_item,
+		"weapon_pommel_local",
+		"weapon_pommel_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+
+func _get_primary_grip_contact_meta(held_item: Object) -> Vector3:
+	return _get_origin_tracked_vector3_meta(
+		held_item,
+		"primary_grip_contact_local",
+		"primary_grip_contact_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
 
 func get_hand_anchor(humanoid_rig: Node3D, slot_id: StringName) -> Node3D:
 	if humanoid_rig == null:
@@ -84,7 +226,14 @@ func reanchor_equipped_item_nodes(
 		var target_anchor: Node3D = _resolve_cached_equipped_visual_anchor(humanoid_rig, weapons_drawn, slot_id, held_item)
 		if target_anchor == null:
 			return false
-		_reparent_held_item_to_anchor(held_item, target_anchor)
+		var source_anchor_origin_id: StringName = _resolve_current_equipped_anchor_origin_id(held_item)
+		var target_anchor_origin_id: StringName = _resolve_equipped_visual_anchor_origin_id(weapons_drawn)
+		_reparent_held_item_to_anchor(
+			held_item,
+			target_anchor,
+			source_anchor_origin_id,
+			target_anchor_origin_id
+		)
 		if weapons_drawn:
 			apply_hand_mount_transform(held_item)
 		else:
@@ -95,6 +244,7 @@ func reanchor_equipped_item_nodes(
 func apply_hand_mount_transform(held_item: Node3D) -> void:
 	if held_item == null:
 		return
+	_ensure_origin_meta(held_item, HAND_MOUNT_LOCAL_TRANSFORM_ORIGIN_META, CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT)
 	held_item.transform = held_item.get_meta(HAND_MOUNT_LOCAL_TRANSFORM_META, held_item.transform) as Transform3D
 
 func apply_cached_station_stow_transform(
@@ -110,18 +260,63 @@ func apply_cached_station_stow_transform(
 		apply_hand_mount_transform(held_item)
 		held_item.set_meta("station_stow_motion_node_applied", false)
 		return false
-	var local_tip: Vector3 = held_item.get_meta("weapon_tip_local", Vector3.ZERO) as Vector3
-	var local_pommel: Vector3 = held_item.get_meta("weapon_pommel_local", Vector3.ZERO) as Vector3
-	var stow_tip_local: Vector3 = held_item.get_meta("station_stow_requested_tip_position_local", Vector3.ZERO) as Vector3
-	var stow_pommel_local: Vector3 = held_item.get_meta("station_stow_pommel_position_local", Vector3.ZERO) as Vector3
+	_ensure_origin_meta(held_item, "weapon_tip_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	_ensure_origin_meta(held_item, "weapon_pommel_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	_ensure_origin_meta(held_item, "station_stow_requested_tip_position_origin_id", CombatOriginRecordScript.ORIGIN_STOW_ANCHOR)
+	_ensure_origin_meta(held_item, "station_stow_requested_pommel_position_origin_id", CombatOriginRecordScript.ORIGIN_STOW_ANCHOR)
+	_ensure_origin_meta(held_item, "station_stow_pommel_position_origin_id", CombatOriginRecordScript.ORIGIN_STOW_ANCHOR)
+	var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
+	var local_tip_origin_id: StringName = _resolve_origin_meta_value(held_item, "weapon_tip_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	var local_pommel: Vector3 = _get_weapon_pommel_meta(held_item)
+	var local_pommel_origin_id: StringName = _resolve_origin_meta_value(held_item, "weapon_pommel_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	var stow_tip_local: Vector3 = _get_origin_tracked_vector3_meta(
+		held_item,
+		"station_stow_requested_tip_position_local",
+		"station_stow_requested_tip_position_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	)
+	var stow_tip_origin_id: StringName = _resolve_origin_meta_value(held_item, "station_stow_requested_tip_position_origin_id", CombatOriginRecordScript.ORIGIN_STOW_ANCHOR)
+	var stow_pommel_local: Vector3 = _get_origin_tracked_vector3_meta(
+		held_item,
+		"station_stow_pommel_position_local",
+		"station_stow_pommel_position_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	)
+	var stow_pommel_origin_id: StringName = _resolve_origin_meta_value(held_item, "station_stow_pommel_position_origin_id", CombatOriginRecordScript.ORIGIN_STOW_ANCHOR)
 	if held_item.has_meta("station_stow_requested_pommel_position_local"):
-		stow_pommel_local = held_item.get_meta("station_stow_requested_pommel_position_local", stow_pommel_local) as Vector3
+		stow_pommel_local = _get_origin_tracked_vector3_meta(
+			held_item,
+			"station_stow_requested_pommel_position_local",
+			"station_stow_requested_pommel_position_origin_id",
+			stow_pommel_local,
+			CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+		)
+		stow_pommel_origin_id = _resolve_origin_meta_value(held_item, "station_stow_requested_pommel_position_origin_id", stow_pommel_origin_id)
 	if local_tip.is_equal_approx(local_pommel) or stow_tip_local.is_equal_approx(stow_pommel_local):
 		apply_hand_mount_transform(held_item)
 		held_item.set_meta("station_stow_motion_node_applied", false)
 		return false
+	held_item.set_meta("cached_stow_compare_tip_origin_id", local_tip_origin_id)
+	held_item.set_meta("cached_stow_compare_pommel_origin_id", local_pommel_origin_id)
+	held_item.set_meta("cached_stow_compare_stow_tip_origin_id", stow_tip_origin_id)
+	held_item.set_meta("cached_stow_compare_stow_pommel_origin_id", stow_pommel_origin_id)
 	var local_axis: Vector3 = (local_tip - local_pommel).normalized()
-	var local_up_reference: Vector3 = _resolve_weapon_local_up_reference(held_item, local_axis)
+	var local_axis_origin_id: StringName = local_tip_origin_id
+	var local_up_reference_state: Dictionary = _resolve_weapon_local_up_reference_state(held_item, local_axis, local_axis_origin_id)
+	var local_up_reference_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		local_up_reference_state,
+		"up_reference_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var local_up_reference: Vector3 = _get_origin_tracked_vector3_state(
+		local_up_reference_state,
+		"local_up_reference",
+		"up_reference_origin_id",
+		Vector3.UP,
+		local_up_reference_origin_id
+	)
 	var stow_authoring_basis: Basis = _resolve_station_stow_authoring_basis(anchor_node)
 	var stow_anchor_world: Vector3 = anchor_node.global_position
 	var authored_tip_world: Vector3 = stow_anchor_world + stow_authoring_basis * stow_tip_local
@@ -131,6 +326,12 @@ func apply_cached_station_stow_transform(
 		authored_axis_world = stow_authoring_basis.z
 	var weapon_segment_length: float = local_tip.distance_to(local_pommel)
 	var resolved_tip_world: Vector3 = authored_pommel_world + authored_axis_world.normalized() * weapon_segment_length
+	var segment_tip_origin_id: StringName = local_tip_origin_id
+	var segment_pommel_origin_id: StringName = local_pommel_origin_id
+	var segment_up_reference_origin_id: StringName = local_up_reference_origin_id
+	held_item.set_meta("cached_stow_segment_tip_origin_id", segment_tip_origin_id)
+	held_item.set_meta("cached_stow_segment_pommel_origin_id", segment_pommel_origin_id)
+	held_item.set_meta("cached_stow_segment_up_reference_origin_id", segment_up_reference_origin_id)
 	var solved_transform: Transform3D = weapon_frame_solver.solve_transform_from_segment(
 		local_tip,
 		local_pommel,
@@ -139,12 +340,29 @@ func apply_cached_station_stow_transform(
 		local_up_reference,
 		stow_authoring_basis,
 		held_item.get_meta("station_stow_weapon_orientation_degrees", Vector3.ZERO) as Vector3,
-		float(held_item.get_meta("station_stow_weapon_roll_degrees", 0.0))
+		float(held_item.get_meta("station_stow_weapon_roll_degrees", 0.0)),
+		segment_tip_origin_id,
+		segment_pommel_origin_id,
+		segment_up_reference_origin_id
 	)
 	held_item.global_transform = solved_transform
 	held_item.set_meta("station_stow_motion_node_applied", true)
-	held_item.set_meta("station_stow_tip_position_local", anchor_node.to_local(resolved_tip_world))
-	held_item.set_meta("station_stow_pommel_position_local", anchor_node.to_local(authored_pommel_world))
+	held_item.set_meta("station_stow_origin_id", CombatOriginRecordScript.ORIGIN_NONCOMBAT_STOW)
+	held_item.set_meta("station_stow_anchor_origin_id", CombatOriginRecordScript.ORIGIN_STOW_ANCHOR)
+	_set_origin_tracked_vector3_meta(
+		held_item,
+		"station_stow_tip_position_local",
+		"station_stow_tip_position_origin_id",
+		anchor_node.to_local(resolved_tip_world),
+		CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	)
+	_set_origin_tracked_vector3_meta(
+		held_item,
+		"station_stow_pommel_position_local",
+		"station_stow_pommel_position_origin_id",
+		anchor_node.to_local(authored_pommel_world),
+		CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	)
 	held_item.set_meta("station_stow_contact_ratio", held_item.get_meta("station_stow_contact_ratio", CombatAnimationDraftScript.DEFAULT_STOW_CONTACT_RATIO))
 	return true
 
@@ -162,6 +380,30 @@ func _resolve_cached_equipped_visual_anchor(
 		held_item.get_meta("station_stow_anchor_mode", CombatAnimationDraftScript.STOW_ANCHOR_SHOULDER_HANGING) as StringName
 	)
 	return humanoid_rig.get_weapon_stow_anchor(stow_anchor_mode, slot_id)
+
+func _resolve_equipped_visual_anchor_origin_id(weapons_drawn: bool) -> StringName:
+	if weapons_drawn:
+		return CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	return CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+
+func _resolve_current_equipped_anchor_origin_id(held_item: Node3D) -> StringName:
+	if held_item == null:
+		return CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+	var runtime_endpoint_origin_id: StringName = StringName(held_item.get_meta(
+		"runtime_endpoint_authority_origin_id",
+		StringName()
+	))
+	if bool(held_item.get_meta("runtime_endpoint_authority_active", false)) and runtime_endpoint_origin_id != StringName():
+		return runtime_endpoint_origin_id
+	var equipped_anchor_origin_id: StringName = StringName(held_item.get_meta(
+		EQUIPPED_VISUAL_ANCHOR_ORIGIN_META,
+		StringName()
+	))
+	if equipped_anchor_origin_id != StringName():
+		return equipped_anchor_origin_id
+	if bool(held_item.get_meta("station_stow_motion_node_applied", false)):
+		return CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	return CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
 
 func _resolve_station_stow_authoring_basis(stow_anchor: Node3D) -> Basis:
 	if stow_anchor == null:
@@ -181,9 +423,23 @@ func _resolve_skeleton_from_stow_anchor(stow_anchor: Node3D) -> Skeleton3D:
 		node = node.get_parent()
 	return null
 
-func _reparent_held_item_to_anchor(held_item: Node3D, target_anchor: Node3D) -> void:
+func _reparent_held_item_to_anchor(
+	held_item: Node3D,
+	target_anchor: Node3D,
+	source_anchor_origin_id: StringName = StringName(),
+	target_anchor_origin_id: StringName = StringName()
+) -> void:
 	if held_item == null or target_anchor == null:
 		return
+	var resolved_source_origin_id: StringName = source_anchor_origin_id
+	if resolved_source_origin_id == StringName():
+		resolved_source_origin_id = _resolve_current_equipped_anchor_origin_id(held_item)
+	var resolved_target_origin_id: StringName = target_anchor_origin_id
+	if resolved_target_origin_id == StringName():
+		resolved_target_origin_id = CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	held_item.set_meta(EQUIPPED_REANCHOR_SOURCE_ORIGIN_META, resolved_source_origin_id)
+	held_item.set_meta(EQUIPPED_REANCHOR_TARGET_ORIGIN_META, resolved_target_origin_id)
+	held_item.set_meta(EQUIPPED_VISUAL_ANCHOR_ORIGIN_META, resolved_target_origin_id)
 	if held_item.get_parent() == target_anchor:
 		return
 	var current_parent: Node = held_item.get_parent()
@@ -232,70 +488,156 @@ func build_equipped_item_node(
 	var grip_hold_layout: Dictionary = {}
 	if humanoid_rig != null and humanoid_rig.has_method("resolve_grip_hold_layout"):
 		grip_hold_layout = humanoid_rig.resolve_grip_hold_layout(test_print.baked_profile, slot_id, cell_world_size)
-	held_root.set_meta("grip_hold_layout", grip_hold_layout)
 	var dominant_hand_local_position: Vector3 = test_print.baked_profile.primary_grip_contact_position
+	var dominant_hand_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var support_hand_local_position: Vector3 = Vector3.ZERO
+	var support_hand_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var two_hand_character_eligible: bool = false
 	if bool(grip_hold_layout.get("valid", false)):
-		var dominant_variant: Variant = grip_hold_layout.get("dominant_hand_local_position", dominant_hand_local_position)
-		if dominant_variant is Vector3:
-			dominant_hand_local_position = dominant_variant
-		var support_variant: Variant = grip_hold_layout.get("support_hand_local_position", Vector3.ZERO)
-		if support_variant is Vector3:
-			support_hand_local_position = support_variant
+		dominant_hand_position_origin_id = _resolve_origin_tracked_state_origin_id(
+			grip_hold_layout,
+			"dominant_hand_position_origin_id",
+			dominant_hand_position_origin_id
+		)
+		dominant_hand_local_position = _get_origin_tracked_vector3_state(
+			grip_hold_layout,
+			"dominant_hand_local_position",
+			"dominant_hand_position_origin_id",
+			dominant_hand_local_position,
+			dominant_hand_position_origin_id
+		)
+		support_hand_position_origin_id = _resolve_origin_tracked_state_origin_id(
+			grip_hold_layout,
+			"support_hand_position_origin_id",
+			support_hand_position_origin_id
+		)
+		support_hand_local_position = _get_origin_tracked_vector3_state(
+			grip_hold_layout,
+			"support_hand_local_position",
+			"support_hand_position_origin_id",
+			support_hand_local_position,
+			support_hand_position_origin_id
+		)
 		two_hand_character_eligible = bool(grip_hold_layout.get("two_hand_character_eligible", false))
+	else:
+		grip_hold_layout["dominant_hand_position_origin_id"] = dominant_hand_position_origin_id
+		grip_hold_layout["support_hand_position_origin_id"] = support_hand_position_origin_id
+	held_root.set_meta("grip_hold_layout", grip_hold_layout)
 	held_root.set_meta("two_hand_character_eligible", two_hand_character_eligible)
 	var dominant_grip_shell_data: Dictionary = _build_grip_contact_shell_data(
 		test_print.display_cells,
 		dominant_hand_local_position,
 		cell_world_size,
-		test_print.baked_profile
+		test_print.baked_profile,
+		dominant_hand_position_origin_id
 	)
-	var dominant_grip_center_local: Vector3 = dominant_grip_shell_data.get(
-		"slice_center_local",
-		dominant_hand_local_position
-	)
+	var dominant_grip_center_origin_id: StringName = dominant_hand_position_origin_id
+	var dominant_grip_center_local: Vector3 = dominant_hand_local_position
+	if not dominant_grip_shell_data.is_empty():
+		dominant_grip_center_origin_id = _resolve_origin_tracked_state_origin_id(
+			dominant_grip_shell_data,
+			"slice_center_origin_id",
+			dominant_grip_center_origin_id
+		)
+		dominant_grip_center_local = _get_origin_tracked_vector3_state(
+			dominant_grip_shell_data,
+			"slice_center_local",
+			"slice_center_origin_id",
+			dominant_hand_local_position,
+			dominant_hand_position_origin_id
+		)
 	var support_grip_shell_data: Dictionary = {}
 	var support_grip_center_local: Vector3 = support_hand_local_position
+	var support_grip_center_origin_id: StringName = support_hand_position_origin_id
 	if resolved_grip_style != CraftedItemWIP.GRIP_REVERSE and two_hand_character_eligible:
 		support_grip_shell_data = _build_grip_contact_shell_data(
 			test_print.display_cells,
 			support_hand_local_position,
 			cell_world_size,
-			test_print.baked_profile
+			test_print.baked_profile,
+			support_hand_position_origin_id
 		)
-		support_grip_center_local = support_grip_shell_data.get(
-			"slice_center_local",
-			support_hand_local_position
-		)
-	var hand_alignment_offset_local: Vector3 = Vector3.ZERO
-	if humanoid_rig != null and humanoid_rig.has_method("resolve_hand_grip_alignment_offset_local"):
-		var alignment_variant: Variant = humanoid_rig.call("resolve_hand_grip_alignment_offset_local", slot_id)
-		if alignment_variant is Vector3:
-			hand_alignment_offset_local = alignment_variant
+		if not support_grip_shell_data.is_empty():
+			support_grip_center_origin_id = _resolve_origin_tracked_state_origin_id(
+				support_grip_shell_data,
+				"slice_center_origin_id",
+				support_grip_center_origin_id
+			)
+			support_grip_center_local = _get_origin_tracked_vector3_state(
+				support_grip_shell_data,
+				"slice_center_local",
+				"slice_center_origin_id",
+				support_hand_local_position,
+				support_hand_position_origin_id
+			)
+	var hand_alignment_offset_state: Dictionary = _resolve_hand_alignment_offset_state(humanoid_rig, slot_id)
+	var hand_alignment_offset_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		hand_alignment_offset_state,
+		"hand_alignment_offset_origin_id",
+		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	)
+	var hand_alignment_offset_local: Vector3 = _get_origin_tracked_vector3_state(
+		hand_alignment_offset_state,
+		"hand_alignment_offset_local",
+		"hand_alignment_offset_origin_id",
+		Vector3.ZERO,
+		hand_alignment_offset_origin_id
+	)
 	mesh_instance.scale = Vector3.ONE * cell_world_size
-	mesh_instance.position = -dominant_grip_center_local * cell_world_size
+	var dominant_grip_center_mesh_origin_id: StringName = dominant_grip_center_origin_id
+	var mesh_visual_offset_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	var mesh_visual_offset_local: Vector3 = -dominant_grip_center_local * cell_world_size
+	mesh_instance.position = mesh_visual_offset_local
+	mesh_instance.set_meta("dominant_grip_center_origin_id", dominant_grip_center_mesh_origin_id)
+	_set_origin_tracked_vector3_meta(
+		mesh_instance,
+		"mesh_visual_offset_local",
+		"mesh_visual_offset_origin_id",
+		mesh_visual_offset_local,
+		mesh_visual_offset_origin_id
+	)
 	held_root.add_child(mesh_instance)
 	var primary_grip_guide := Node3D.new()
 	primary_grip_guide.name = "PrimaryGripGuide"
 	held_root.add_child(primary_grip_guide)
+	var dominant_hand_position_guide_origin_id: StringName = dominant_hand_position_origin_id
+	primary_grip_guide.set_meta("dominant_hand_position_origin_id", dominant_hand_position_guide_origin_id)
 	if dominant_grip_shell_data.is_empty():
 		_configure_grip_contact_guide(
 			primary_grip_guide,
 			test_print.display_cells,
 			dominant_hand_local_position,
 			cell_world_size,
-			test_print.baked_profile
+			test_print.baked_profile,
+			dominant_hand_position_guide_origin_id
 		)
 	else:
 		_configure_grip_contact_guide_from_shell_data(primary_grip_guide, dominant_grip_shell_data, cell_world_size)
 	var secondary_grip_guide: Node3D = null
+	var support_grip_contact_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	var support_grip_contact_local: Vector3 = Vector3.ZERO
 	if resolved_grip_style != CraftedItemWIP.GRIP_REVERSE and two_hand_character_eligible:
+		var support_hand_position_guide_origin_id: StringName = support_hand_position_origin_id
+		var support_grip_center_offset_origin_id: StringName = support_grip_center_origin_id
+		var dominant_grip_center_offset_origin_id: StringName = dominant_grip_center_origin_id
+		var support_offset_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 		var support_local_offset: Vector3 = (support_grip_center_local - dominant_grip_center_local) * cell_world_size
 		if not support_local_offset.is_zero_approx():
 			secondary_grip_guide = Node3D.new()
 			secondary_grip_guide.name = "SecondaryGripGuide"
 			secondary_grip_guide.position = support_local_offset
+			secondary_grip_guide.set_meta("support_hand_position_origin_id", support_hand_position_guide_origin_id)
+			secondary_grip_guide.set_meta("support_grip_center_origin_id", support_grip_center_offset_origin_id)
+			secondary_grip_guide.set_meta("dominant_grip_center_origin_id", dominant_grip_center_offset_origin_id)
+			_set_origin_tracked_vector3_meta(
+				secondary_grip_guide,
+				"support_local_offset",
+				"support_offset_origin_id",
+				support_local_offset,
+				support_offset_origin_id
+			)
+			support_grip_contact_origin_id = support_offset_origin_id
+			support_grip_contact_local = support_local_offset
 			held_root.add_child(secondary_grip_guide)
 			if support_grip_shell_data.is_empty():
 				_configure_grip_contact_guide(
@@ -303,47 +645,70 @@ func build_equipped_item_node(
 					test_print.display_cells,
 					support_hand_local_position,
 					cell_world_size,
-					test_print.baked_profile
+					test_print.baked_profile,
+					support_hand_position_guide_origin_id
 				)
 			else:
 				_configure_grip_contact_guide_from_shell_data(secondary_grip_guide, support_grip_shell_data, cell_world_size)
+	var dominant_grip_center_weapon_origin_id: StringName = dominant_grip_center_origin_id
+	var weapon_tip_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var weapon_tip_local: Vector3 = (test_print.baked_profile.weapon_tip_point - dominant_grip_center_local) * cell_world_size
+	var weapon_pommel_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var weapon_pommel_local: Vector3 = (test_print.baked_profile.weapon_pommel_point - dominant_grip_center_local) * cell_world_size
+	var primary_grip_contact_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var primary_grip_contact_local: Vector3 = (test_print.baked_profile.primary_grip_contact_position - dominant_grip_center_local) * cell_world_size
+	var primary_grip_span_start_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var primary_grip_span_start_local: Vector3 = (test_print.baked_profile.primary_grip_span_start - dominant_grip_center_local) * cell_world_size
+	var primary_grip_span_end_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var primary_grip_span_end_local: Vector3 = (test_print.baked_profile.primary_grip_span_end - dominant_grip_center_local) * cell_world_size
+	var primary_grip_slide_axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var primary_grip_slide_axis_local: Vector3 = test_print.baked_profile.primary_grip_slide_axis.normalized()
+	held_root.set_meta("dominant_grip_center_weapon_origin_id", dominant_grip_center_weapon_origin_id)
+	held_root.set_meta("weapon_tip_origin_id", weapon_tip_origin_id)
+	held_root.set_meta("primary_grip_contact_origin_id", primary_grip_contact_origin_id)
 	held_root.transform.basis = _resolve_signed_contact_axis_weapon_hold_basis(
 		humanoid_rig,
 		slot_id,
 		resolved_grip_style,
 		weapon_tip_local,
+		weapon_tip_origin_id,
 		primary_grip_contact_local,
+		primary_grip_contact_origin_id,
 		held_root.transform.basis
 	)
 	held_root.position = _resolve_hand_mount_origin_local(
 		hand_alignment_offset_local,
+		hand_alignment_offset_origin_id,
 		primary_grip_contact_local,
+		primary_grip_contact_origin_id,
 		held_root.transform.basis
 	)
 	held_root.set_meta(HAND_MOUNT_LOCAL_TRANSFORM_META, held_root.transform)
-	held_root.set_meta("weapon_tip_local", weapon_tip_local)
-	held_root.set_meta("weapon_pommel_local", weapon_pommel_local)
+	held_root.set_meta(HAND_MOUNT_LOCAL_TRANSFORM_ORIGIN_META, CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT)
+	_set_origin_tracked_vector3_meta(held_root, "hand_alignment_offset_local", "hand_alignment_offset_origin_id", hand_alignment_offset_local, hand_alignment_offset_origin_id)
+	_set_origin_tracked_vector3_meta(held_root, "weapon_tip_local", "weapon_tip_origin_id", weapon_tip_local, weapon_tip_origin_id)
+	_set_origin_tracked_vector3_meta(held_root, "weapon_pommel_local", "weapon_pommel_origin_id", weapon_pommel_local, weapon_pommel_origin_id)
 	held_root.set_meta("weapon_total_length_meters", float(test_print.baked_profile.weapon_total_length_meters))
-	held_root.set_meta("primary_grip_contact_local", primary_grip_contact_local)
+	_set_origin_tracked_vector3_meta(held_root, "primary_grip_contact_local", "primary_grip_contact_origin_id", primary_grip_contact_local, primary_grip_contact_origin_id)
 	held_root.set_meta("primary_grip_span_start_local", primary_grip_span_start_local)
+	held_root.set_meta("primary_grip_span_start_origin_id", primary_grip_span_start_origin_id)
 	held_root.set_meta("primary_grip_span_end_local", primary_grip_span_end_local)
+	held_root.set_meta("primary_grip_span_end_origin_id", primary_grip_span_end_origin_id)
 	held_root.set_meta("primary_grip_axis_ratio_from_span_start", float(test_print.baked_profile.primary_grip_axis_ratio_from_span_start))
 	held_root.set_meta("primary_grip_slide_axis_local", primary_grip_slide_axis_local)
+	held_root.set_meta("primary_grip_slide_axis_origin_id", primary_grip_slide_axis_origin_id)
+	if secondary_grip_guide != null:
+		_set_origin_tracked_vector3_meta(held_root, "support_grip_contact_local", "support_grip_contact_origin_id", support_grip_contact_local, support_grip_contact_origin_id)
 	_cache_station_stow_pose_metadata(held_root, saved_wip)
 	weapon_grip_anchor_provider.ensure_grip_anchor_nodes(held_root, primary_grip_guide, secondary_grip_guide)
-	attach_weapon_bounds_area(held_root, canonical_geometry, dominant_grip_center_local, cell_world_size, held_item_mesh_builder)
+	attach_weapon_bounds_area(held_root, canonical_geometry, dominant_grip_center_local, dominant_grip_center_origin_id, cell_world_size, held_item_mesh_builder)
 	_attach_weapon_body_restriction_proxy(
 		held_root,
 		mesh,
 		test_print.display_cells,
 		dominant_grip_shell_data,
 		dominant_grip_center_local,
+		dominant_grip_center_origin_id,
 		cell_world_size
 	)
 	return held_root
@@ -366,10 +731,54 @@ func _cache_station_stow_pose_metadata(held_item: Node3D, saved_wip: CraftedItem
 	var stow_contact_ratio: float = CombatAnimationDraftScript.normalize_stow_contact_ratio(noncombat_idle_draft.stow_contact_ratio)
 	var stow_segment: Dictionary = _resolve_station_stow_anchor_local_segment(stow_motion_node, stow_contact_ratio)
 	held_item.set_meta("station_stow_motion_node_available", true)
+	held_item.set_meta("station_stow_origin_id", CombatOriginRecordScript.ORIGIN_NONCOMBAT_STOW)
+	held_item.set_meta("station_stow_anchor_origin_id", CombatOriginRecordScript.ORIGIN_STOW_ANCHOR)
 	held_item.set_meta("station_stow_contact_ratio", stow_contact_ratio)
-	held_item.set_meta("station_stow_requested_tip_position_local", stow_segment.get("tip_position_local", stow_motion_node.tip_position_local))
-	held_item.set_meta("station_stow_requested_pommel_position_local", stow_segment.get("pommel_position_local", stow_motion_node.pommel_position_local))
-	held_item.set_meta("station_stow_pommel_position_local", stow_segment.get("pommel_position_local", stow_motion_node.pommel_position_local))
+	var stow_tip_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		stow_segment,
+		"tip_position_origin_id",
+		CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	)
+	var stow_tip_local: Vector3 = _get_origin_tracked_vector3_state(
+		stow_segment,
+		"tip_position_local",
+		"tip_position_origin_id",
+		stow_motion_node.tip_position_local,
+		stow_tip_origin_id
+	)
+	var stow_pommel_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		stow_segment,
+		"pommel_position_origin_id",
+		CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	)
+	var stow_pommel_local: Vector3 = _get_origin_tracked_vector3_state(
+		stow_segment,
+		"pommel_position_local",
+		"pommel_position_origin_id",
+		stow_motion_node.pommel_position_local,
+		stow_pommel_origin_id
+	)
+	_set_origin_tracked_vector3_meta(
+		held_item,
+		"station_stow_requested_tip_position_local",
+		"station_stow_requested_tip_position_origin_id",
+		stow_tip_local,
+		stow_tip_origin_id
+	)
+	_set_origin_tracked_vector3_meta(
+		held_item,
+		"station_stow_requested_pommel_position_local",
+		"station_stow_requested_pommel_position_origin_id",
+		stow_pommel_local,
+		stow_pommel_origin_id
+	)
+	_set_origin_tracked_vector3_meta(
+		held_item,
+		"station_stow_pommel_position_local",
+		"station_stow_pommel_position_origin_id",
+		stow_pommel_local,
+		stow_pommel_origin_id
+	)
 	held_item.set_meta("station_stow_weapon_orientation_degrees", stow_motion_node.weapon_orientation_degrees)
 	held_item.set_meta("station_stow_weapon_roll_degrees", stow_motion_node.weapon_roll_degrees)
 
@@ -377,16 +786,35 @@ func _resolve_station_stow_anchor_local_segment(stow_motion_node: CombatAnimatio
 	if stow_motion_node == null:
 		return {
 			"tip_position_local": Vector3.ZERO,
+			"tip_position_origin_id": CombatOriginRecordScript.ORIGIN_STOW_ANCHOR,
 			"pommel_position_local": Vector3.ZERO,
+			"pommel_position_origin_id": CombatOriginRecordScript.ORIGIN_STOW_ANCHOR,
+			"contact_position_local": Vector3.ZERO,
+			"contact_position_origin_id": CombatOriginRecordScript.ORIGIN_STOW_ANCHOR,
 		}
 	var resolved_contact_ratio: float = CombatAnimationDraftScript.normalize_stow_contact_ratio(contact_ratio)
-	var contact_position_local: Vector3 = stow_motion_node.pommel_position_local.lerp(
-		stow_motion_node.tip_position_local,
-		resolved_contact_ratio
+	var contact_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	var contact_position_state := {
+		"contact_position_local": stow_motion_node.pommel_position_local.lerp(
+			stow_motion_node.tip_position_local,
+			resolved_contact_ratio
+		),
+		"contact_position_origin_id": contact_position_origin_id,
+	}
+	var contact_position_local: Vector3 = _get_origin_tracked_vector3_state(
+		contact_position_state,
+		"contact_position_local",
+		"contact_position_origin_id",
+		Vector3.ZERO,
+		contact_position_origin_id
 	)
 	return {
 		"tip_position_local": stow_motion_node.tip_position_local - contact_position_local,
+		"tip_position_origin_id": CombatOriginRecordScript.ORIGIN_STOW_ANCHOR,
 		"pommel_position_local": stow_motion_node.pommel_position_local - contact_position_local,
+		"pommel_position_origin_id": CombatOriginRecordScript.ORIGIN_STOW_ANCHOR,
+		"contact_position_local": contact_position_local,
+		"contact_position_origin_id": contact_position_origin_id,
 	}
 
 func _configure_grip_contact_guide(
@@ -394,7 +822,8 @@ func _configure_grip_contact_guide(
 	display_cells: Array[CellAtom],
 	contact_position_local: Vector3,
 	cell_world_size: float,
-	baked_profile: BakedProfile
+	baked_profile: BakedProfile,
+	contact_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 ) -> void:
 	if grip_guide == null or display_cells.is_empty() or baked_profile == null:
 		return
@@ -402,7 +831,8 @@ func _configure_grip_contact_guide(
 		display_cells,
 		contact_position_local,
 		cell_world_size,
-		baked_profile
+		baked_profile,
+		contact_position_origin_id
 	)
 	if grip_shell_data.is_empty():
 		return
@@ -423,11 +853,79 @@ func _configure_grip_contact_guide_from_shell_data(
 	grip_center.position = Vector3.ZERO
 	grip_center.set_meta("grip_shell_valid", true)
 	grip_center.set_meta("grip_shell_cell_world_size", cell_world_size)
-	grip_center.set_meta("grip_shell_major_axis_local", grip_shell_data.get("major_axis_local", Vector3.ZERO))
-	grip_center.set_meta("grip_shell_minor_axis_a_local", grip_shell_data.get("minor_axis_a_local", Vector3.ZERO))
-	grip_center.set_meta("grip_shell_minor_axis_b_local", grip_shell_data.get("minor_axis_b_local", Vector3.ZERO))
+	var major_axis_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		grip_shell_data,
+		"major_axis_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	_set_origin_tracked_vector3_meta(
+		grip_center,
+		"grip_shell_major_axis_local",
+		"grip_shell_major_axis_origin_id",
+		_get_origin_tracked_vector3_state(
+			grip_shell_data,
+			"major_axis_local",
+			"major_axis_origin_id",
+			Vector3.ZERO,
+			major_axis_origin_id
+		),
+		major_axis_origin_id
+	)
+	var minor_axis_a_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		grip_shell_data,
+		"minor_axis_a_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	_set_origin_tracked_vector3_meta(
+		grip_center,
+		"grip_shell_minor_axis_a_local",
+		"grip_shell_minor_axis_a_origin_id",
+		_get_origin_tracked_vector3_state(
+			grip_shell_data,
+			"minor_axis_a_local",
+			"minor_axis_a_origin_id",
+			Vector3.ZERO,
+			minor_axis_a_origin_id
+		),
+		minor_axis_a_origin_id
+	)
+	var minor_axis_b_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		grip_shell_data,
+		"minor_axis_b_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	_set_origin_tracked_vector3_meta(
+		grip_center,
+		"grip_shell_minor_axis_b_local",
+		"grip_shell_minor_axis_b_origin_id",
+		_get_origin_tracked_vector3_state(
+			grip_shell_data,
+			"minor_axis_b_local",
+			"minor_axis_b_origin_id",
+			Vector3.ZERO,
+			minor_axis_b_origin_id
+		),
+		minor_axis_b_origin_id
+	)
 	grip_center.set_meta("grip_shell_profile_offsets_minor", grip_shell_data.get("profile_offsets_minor", []))
-	grip_center.set_meta("grip_shell_slice_center_local", grip_shell_data.get("slice_center_local", Vector3.ZERO))
+	var slice_center_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		grip_shell_data,
+		"slice_center_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	_set_origin_tracked_vector3_meta(
+		grip_center,
+		"grip_shell_slice_center_local",
+		"grip_shell_slice_center_origin_id",
+		_get_origin_tracked_vector3_state(
+			grip_shell_data,
+			"slice_center_local",
+			"slice_center_origin_id",
+			Vector3.ZERO,
+			slice_center_origin_id
+		),
+		slice_center_origin_id
+	)
 	grip_center.set_meta("grip_shell_collision_layer", GRIP_CONTACT_COLLISION_LAYER)
 	_attach_grip_contact_area(grip_center, grip_shell_data, cell_world_size)
 
@@ -435,16 +933,34 @@ func _build_grip_contact_shell_data(
 	display_cells: Array[CellAtom],
 	contact_position_local: Vector3,
 	cell_world_size: float,
-	baked_profile: BakedProfile
+	baked_profile: BakedProfile,
+	contact_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 ) -> Dictionary:
+	var contact_position_state := {
+		"contact_position_local": contact_position_local,
+		"contact_position_origin_id": contact_position_origin_id,
+	}
+	var resolved_contact_position_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		contact_position_state,
+		"contact_position_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var resolved_contact_position_local: Vector3 = _get_origin_tracked_vector3_state(
+		contact_position_state,
+		"contact_position_local",
+		"contact_position_origin_id",
+		contact_position_local,
+		resolved_contact_position_origin_id
+	)
 	var major_axis_local: Vector3 = _resolve_primary_axis_vector(baked_profile.primary_grip_slide_axis)
-	if major_axis_local == Vector3.ZERO:
+	var major_axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	if major_axis_local.length_squared() <= 0.000001:
 		return {}
 	var major_axis_index: int = _resolve_axis_index(major_axis_local)
 	if major_axis_index < 0:
 		return {}
 	var minor_axis_indices: Array[int] = _resolve_minor_axis_indices(major_axis_index)
-	var slice_index: int = int(round(_get_vector_component(contact_position_local, major_axis_index)))
+	var slice_index: int = int(round(_get_vector_component(resolved_contact_position_local, major_axis_index)))
 	var slice_cells: Array[CellAtom] = []
 	for cell: CellAtom in display_cells:
 		if cell == null:
@@ -484,16 +1000,29 @@ func _build_grip_contact_shell_data(
 		if canonical_key.is_empty() or not valid_mask_lookup.has(canonical_key):
 			continue
 		var component_center_local: Vector3 = _average_cell_positions(component_cells)
-		var distance_squared: float = component_center_local.distance_squared_to(contact_position_local)
+		var component_center_origin_id: StringName = resolved_contact_position_origin_id
+		var distance_squared: float = component_center_local.distance_squared_to(resolved_contact_position_local)
 		if best_component.is_empty() or distance_squared < best_distance_squared:
 			best_distance_squared = distance_squared
 			best_component = {
 				"positions": component_coords,
 				"center_local": component_center_local,
+				"center_origin_id": component_center_origin_id,
 			}
 	if best_component.is_empty():
 		return {}
-	var center_local: Vector3 = best_component.get("center_local", contact_position_local)
+	var center_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		best_component,
+		"center_origin_id",
+		resolved_contact_position_origin_id
+	)
+	var center_local: Vector3 = _get_origin_tracked_vector3_state(
+		best_component,
+		"center_local",
+		"center_origin_id",
+		resolved_contact_position_local,
+		center_origin_id
+	)
 	var center_minor_a: float = _get_vector_component(center_local, minor_axis_indices[0])
 	var center_minor_b: float = _get_vector_component(center_local, minor_axis_indices[1])
 	var profile_offsets_minor: Array = []
@@ -503,12 +1032,22 @@ func _build_grip_contact_shell_data(
 			(float(coord.x) - center_minor_a) * cell_world_size,
 			(float(coord.y) - center_minor_b) * cell_world_size
 		))
+	var guide_center_offset_origin_id: StringName = center_origin_id
+	var guide_center_offset_local: Vector3 = (center_local - resolved_contact_position_local) * cell_world_size
+	var slice_center_origin_id: StringName = center_origin_id
+	var minor_axis_a_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	var minor_axis_b_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	return {
-		"guide_center_offset_local": (center_local - contact_position_local) * cell_world_size,
+		"guide_center_offset_local": guide_center_offset_local,
+		"guide_center_offset_origin_id": guide_center_offset_origin_id,
 		"slice_center_local": center_local,
+		"slice_center_origin_id": slice_center_origin_id,
 		"major_axis_local": major_axis_local,
+		"major_axis_origin_id": major_axis_origin_id,
 		"minor_axis_a_local": _axis_index_to_vector3(minor_axis_indices[0]),
+		"minor_axis_a_origin_id": minor_axis_a_origin_id,
 		"minor_axis_b_local": _axis_index_to_vector3(minor_axis_indices[1]),
+		"minor_axis_b_origin_id": minor_axis_b_origin_id,
 		"profile_offsets_minor": profile_offsets_minor,
 	}
 
@@ -526,12 +1065,46 @@ func _attach_grip_contact_area(grip_center: Node3D, grip_shell_data: Dictionary,
 	grip_area.monitorable = true
 	for child_node: Node in grip_area.get_children():
 		child_node.queue_free()
-	var major_axis_index: int = _resolve_axis_index(grip_shell_data.get("major_axis_local", Vector3.ZERO))
+	var major_axis_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		grip_shell_data,
+		"major_axis_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var major_axis_index: int = _resolve_axis_index(_get_origin_tracked_vector3_state(
+		grip_shell_data,
+		"major_axis_local",
+		"major_axis_origin_id",
+		Vector3.ZERO,
+		major_axis_origin_id
+	))
 	if major_axis_index < 0:
 		return
 	var profile_offsets: Array = grip_shell_data.get("profile_offsets_minor", [])
-	var minor_axis_a_local: Vector3 = grip_shell_data.get("minor_axis_a_local", Vector3.RIGHT)
-	var minor_axis_b_local: Vector3 = grip_shell_data.get("minor_axis_b_local", Vector3.UP)
+	var minor_axis_a_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		grip_shell_data,
+		"minor_axis_a_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var minor_axis_a_local: Vector3 = _get_origin_tracked_vector3_state(
+		grip_shell_data,
+		"minor_axis_a_local",
+		"minor_axis_a_origin_id",
+		Vector3.RIGHT,
+		minor_axis_a_origin_id
+	)
+	var minor_axis_b_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		grip_shell_data,
+		"minor_axis_b_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var minor_axis_b_local: Vector3 = _get_origin_tracked_vector3_state(
+		grip_shell_data,
+		"minor_axis_b_local",
+		"minor_axis_b_origin_id",
+		Vector3.UP,
+		minor_axis_b_origin_id
+	)
+	var shape_size_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var local_shape_size: Vector3 = Vector3.ONE * cell_world_size
 	local_shape_size = _set_axis_component(local_shape_size, major_axis_index, cell_world_size)
 	for profile_index: int in range(profile_offsets.size()):
@@ -541,10 +1114,24 @@ func _attach_grip_contact_area(grip_center: Node3D, grip_shell_data: Dictionary,
 		var box_shape := BoxShape3D.new()
 		box_shape.size = local_shape_size
 		collision_shape.shape = box_shape
-		collision_shape.position = (
+		collision_shape.set_meta("grip_contact_shape_size_origin_id", shape_size_origin_id)
+		var minor_axis_a_offset_origin_id: StringName = minor_axis_a_origin_id
+		var minor_axis_b_offset_origin_id: StringName = minor_axis_b_origin_id
+		var contact_cell_offset_origin_id: StringName = minor_axis_a_offset_origin_id
+		var contact_cell_offset_local: Vector3 = (
 			minor_axis_a_local * offset_minor.x
 			+ minor_axis_b_local * offset_minor.y
 		)
+		collision_shape.position = contact_cell_offset_local
+		_set_origin_tracked_vector3_meta(
+			collision_shape,
+			"grip_contact_offset_local",
+			"grip_contact_offset_origin_id",
+			contact_cell_offset_local,
+			contact_cell_offset_origin_id
+		)
+		collision_shape.set_meta("grip_contact_offset_minor_axis_a_origin_id", minor_axis_a_offset_origin_id)
+		collision_shape.set_meta("grip_contact_offset_minor_axis_b_origin_id", minor_axis_b_offset_origin_id)
 		grip_area.add_child(collision_shape)
 
 func build_weapon_hold_basis(grip_style_mode: StringName, slot_id: StringName) -> Basis:
@@ -573,7 +1160,8 @@ func basis_from_rotation_degrees(rotation_vector_degrees: Vector3) -> Basis:
 func attach_weapon_bounds_area(
 		held_root: Node3D,
 		canonical_geometry,
-		grip_contact_position: Vector3,
+		grip_contact_position_local: Vector3,
+		grip_contact_position_origin_id: StringName,
 		cell_world_size: float,
 		held_item_mesh_builder: TestPrintMeshBuilder
 	) -> void:
@@ -590,16 +1178,35 @@ func attach_weapon_bounds_area(
 	var box_shape := BoxShape3D.new()
 	var bounds_data: Dictionary = held_item_mesh_builder.build_bounds_data_from_canonical_geometry(
 		canonical_geometry,
-		grip_contact_position,
+		grip_contact_position_local,
 		cell_world_size,
 		1
 	)
 	box_shape.size = bounds_data.get("size_meters", Vector3.ONE)
 	collision_shape.shape = box_shape
-	collision_shape.position = bounds_data.get("center_local", Vector3.ZERO)
+	var bounds_center_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		bounds_data,
+		"center_origin_id",
+		grip_contact_position_origin_id
+	)
+	var bounds_center_local: Vector3 = _get_origin_tracked_vector3_state(
+		bounds_data,
+		"center_local",
+		"center_origin_id",
+		Vector3.ZERO,
+		bounds_center_origin_id
+	)
+	collision_shape.position = bounds_center_local
+	collision_shape.set_meta("weapon_bounds_center_origin_id", bounds_center_origin_id)
 	bounds_area.add_child(collision_shape)
 	held_root.add_child(bounds_area)
-	held_root.set_meta("weapon_bounds_center_local", collision_shape.position)
+	_set_origin_tracked_vector3_meta(
+		held_root,
+		"weapon_bounds_center_local",
+		"weapon_bounds_center_origin_id",
+		bounds_center_local,
+		bounds_center_origin_id
+	)
 	held_root.set_meta("weapon_bounds_size_meters", box_shape.size)
 	held_root.set_meta("weapon_bounds_padding_cells", 1)
 
@@ -617,6 +1224,7 @@ func _attach_weapon_body_restriction_proxy(
 	display_cells: Array[CellAtom],
 	grip_shell_data: Dictionary,
 	grip_center_local: Vector3,
+	grip_center_origin_id: StringName,
 	cell_world_size: float
 ) -> void:
 	if held_root == null:
@@ -633,10 +1241,16 @@ func _attach_weapon_body_restriction_proxy(
 		display_cells,
 		grip_shell_data,
 		grip_center_local,
+		grip_center_origin_id,
 		cell_world_size,
 		WEAPON_CLEARANCE_PROXY_OFFSET_METERS
 	)
 	var sample_offsets_meters: Array[Vector3] = sample_data.get("samples", []) as Array[Vector3]
+	var sample_offsets_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		sample_data,
+		"samples_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
 	var desired_names: Array[String] = []
 	for sample_index: int in range(sample_offsets_meters.size()):
 		var sample_name: String = "WeaponBodySample_%d" % sample_index
@@ -647,6 +1261,13 @@ func _attach_weapon_body_restriction_proxy(
 			sample_node.name = sample_name
 			proxy_root.add_child(sample_node)
 		sample_node.position = sample_offsets_meters[sample_index]
+		_set_origin_tracked_vector3_meta(
+			sample_node,
+			"weapon_proxy_sample_local",
+			"weapon_proxy_sample_origin_id",
+			sample_offsets_meters[sample_index],
+			sample_offsets_origin_id
+		)
 		sample_node.set_meta("proxy_source", &"stage2_geometry_derived")
 		sample_node.set_meta("clearance_offset_meters", WEAPON_CLEARANCE_PROXY_OFFSET_METERS)
 	for child_node: Node in proxy_root.get_children():
@@ -655,6 +1276,8 @@ func _attach_weapon_body_restriction_proxy(
 		proxy_root.remove_child(child_node)
 		child_node.queue_free()
 	proxy_root.set_meta("proxy_source", sample_data.get("source", &"stage2_geometry_derived") as StringName)
+	proxy_root.set_meta("grip_center_origin_id", grip_center_origin_id)
+	proxy_root.set_meta("weapon_proxy_sample_origin_id", sample_offsets_origin_id)
 	proxy_root.set_meta("clearance_offset_meters", WEAPON_CLEARANCE_PROXY_OFFSET_METERS)
 	proxy_root.set_meta("weapon_proxy_sample_count", sample_offsets_meters.size())
 	proxy_root.set_meta("weapon_proxy_uses_full_geometry", bool(sample_data.get("uses_full_geometry", false)))
@@ -665,15 +1288,33 @@ func _build_weapon_body_proxy_samples(
 	display_cells: Array[CellAtom],
 	grip_shell_data: Dictionary,
 	grip_center_local: Vector3,
+	grip_center_origin_id: StringName,
 	cell_world_size: float,
 	clearance_offset_meters: float
 ) -> Dictionary:
+	var grip_center_state := {
+		"grip_center_local": grip_center_local,
+		"grip_center_origin_id": grip_center_origin_id,
+	}
+	var resolved_grip_center_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		grip_center_state,
+		"grip_center_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var resolved_grip_center_local: Vector3 = _get_origin_tracked_vector3_state(
+		grip_center_state,
+		"grip_center_local",
+		"grip_center_origin_id",
+		grip_center_local,
+		resolved_grip_center_origin_id
+	)
 	var samples: Array[Vector3] = []
 	_append_unique_proxy_sample(samples, Vector3.ZERO)
 	var mesh_sample_count: int = _append_visual_mesh_proxy_samples(
 		samples,
 		visual_mesh,
-		grip_center_local,
+		resolved_grip_center_local,
+		resolved_grip_center_origin_id,
 		cell_world_size,
 		clearance_offset_meters
 	)
@@ -682,30 +1323,53 @@ func _build_weapon_body_proxy_samples(
 		_append_display_cell_proxy_samples(
 			samples,
 			display_cells,
-			grip_center_local,
+			resolved_grip_center_local,
+			resolved_grip_center_origin_id,
 			cell_world_size,
 			clearance_offset_meters
 		)
 		source = &"display_cell_surface"
-	var tip_local: Vector3 = held_root.get_meta("weapon_tip_local", Vector3.ZERO) as Vector3
-	var pommel_local: Vector3 = held_root.get_meta("weapon_pommel_local", Vector3.ZERO) as Vector3
+	_ensure_origin_meta(held_root, "weapon_tip_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	_ensure_origin_meta(held_root, "weapon_pommel_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	var tip_local: Vector3 = _get_weapon_tip_meta(held_root)
+	var pommel_local: Vector3 = _get_weapon_pommel_meta(held_root)
 	if tip_local.length_squared() > 0.000001 or pommel_local.length_squared() > 0.000001:
 		_append_unique_proxy_sample(samples, tip_local)
 		_append_unique_proxy_sample(samples, pommel_local)
 		for step_index: int in range(1, 6):
 			_append_unique_proxy_sample(samples, pommel_local.lerp(tip_local, float(step_index) / 6.0))
+	var slice_center_offset_origin_id: StringName = resolved_grip_center_origin_id
 	if not grip_shell_data.is_empty():
-		var slice_center_local: Vector3 = grip_shell_data.get("slice_center_local", grip_center_local) as Vector3
-		var major_axis_local: Vector3 = (grip_shell_data.get("major_axis_local", Vector3.FORWARD) as Vector3).normalized()
+		var slice_center_local: Vector3 = _get_origin_tracked_vector3_state(
+			grip_shell_data,
+			"slice_center_local",
+			"slice_center_origin_id",
+			resolved_grip_center_local,
+			CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		)
+		var major_axis_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+			grip_shell_data,
+			"major_axis_origin_id",
+			CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		)
+		var major_axis_local: Vector3 = _get_origin_tracked_vector3_state(
+			grip_shell_data,
+			"major_axis_local",
+			"major_axis_origin_id",
+			Vector3.FORWARD,
+			major_axis_origin_id
+		).normalized()
 		if major_axis_local.length_squared() <= 0.000001:
 			major_axis_local = Vector3.FORWARD
-		var slice_center_offset_meters: Vector3 = (slice_center_local - grip_center_local) * cell_world_size
+		var slice_center_offset_meters: Vector3 = (slice_center_local - resolved_grip_center_local) * cell_world_size
 		_append_unique_proxy_sample(samples, slice_center_offset_meters)
 		_append_unique_proxy_sample(samples, slice_center_offset_meters + major_axis_local * cell_world_size * 2.0)
 		_append_unique_proxy_sample(samples, slice_center_offset_meters - major_axis_local * cell_world_size * 2.0)
 	return {
 		"samples": samples,
 		"source": source,
+		"samples_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		"slice_center_offset_origin_id": slice_center_offset_origin_id,
 		"uses_full_geometry": mesh_sample_count > 0 or not display_cells.is_empty(),
 	}
 
@@ -713,11 +1377,28 @@ func _append_visual_mesh_proxy_samples(
 	samples: Array[Vector3],
 	visual_mesh: ArrayMesh,
 	grip_center_local: Vector3,
+	grip_center_origin_id: StringName,
 	cell_world_size: float,
 	clearance_offset_meters: float
 ) -> int:
 	if visual_mesh == null or visual_mesh.get_surface_count() <= 0:
 		return 0
+	var grip_center_state := {
+		"grip_center_local": grip_center_local,
+		"grip_center_origin_id": grip_center_origin_id,
+	}
+	var resolved_grip_center_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		grip_center_state,
+		"grip_center_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var resolved_grip_center_local: Vector3 = _get_origin_tracked_vector3_state(
+		grip_center_state,
+		"grip_center_local",
+		"grip_center_origin_id",
+		grip_center_local,
+		resolved_grip_center_origin_id
+	)
 	var mesh_positions: Array[Vector3] = []
 	for surface_index: int in range(visual_mesh.get_surface_count()):
 		var surface_arrays: Array = visual_mesh.surface_get_arrays(surface_index)
@@ -728,17 +1409,21 @@ func _append_visual_mesh_proxy_samples(
 			continue
 		var vertices: PackedVector3Array = vertices_variant
 		for vertex: Vector3 in vertices:
+			var proxy_surface_position_origin_id: StringName = resolved_grip_center_origin_id
+			var proxy_surface_position_local: Vector3 = (vertex - resolved_grip_center_local) * cell_world_size
 			_append_unique_proxy_sample(
 				mesh_positions,
 				_expand_weapon_proxy_surface_point(
-					(vertex - grip_center_local) * cell_world_size,
-					clearance_offset_meters
+					proxy_surface_position_local,
+					clearance_offset_meters,
+					proxy_surface_position_origin_id
 				)
 			)
 		_append_visual_mesh_triangle_centroid_samples(
 			mesh_positions,
 			surface_arrays,
-			grip_center_local,
+			resolved_grip_center_local,
+			resolved_grip_center_origin_id,
 			cell_world_size,
 			clearance_offset_meters
 		)
@@ -757,11 +1442,28 @@ func _append_visual_mesh_triangle_centroid_samples(
 	mesh_positions: Array[Vector3],
 	surface_arrays: Array,
 	grip_center_local: Vector3,
+	grip_center_origin_id: StringName,
 	cell_world_size: float,
 	clearance_offset_meters: float
 ) -> void:
 	if surface_arrays.size() <= Mesh.ARRAY_VERTEX:
 		return
+	var grip_center_state := {
+		"grip_center_local": grip_center_local,
+		"grip_center_origin_id": grip_center_origin_id,
+	}
+	var resolved_grip_center_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		grip_center_state,
+		"grip_center_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var resolved_grip_center_local: Vector3 = _get_origin_tracked_vector3_state(
+		grip_center_state,
+		"grip_center_local",
+		"grip_center_origin_id",
+		grip_center_local,
+		resolved_grip_center_origin_id
+	)
 	var vertices_variant: Variant = surface_arrays[Mesh.ARRAY_VERTEX]
 	if vertices_variant is not PackedVector3Array:
 		return
@@ -781,29 +1483,55 @@ func _append_visual_mesh_triangle_centroid_samples(
 			if a_index >= vertices.size() or b_index >= vertices.size() or c_index >= vertices.size():
 				continue
 			var centroid: Vector3 = (vertices[a_index] + vertices[b_index] + vertices[c_index]) / 3.0
+			var proxy_surface_position_origin_id: StringName = resolved_grip_center_origin_id
+			var proxy_surface_position_local: Vector3 = (centroid - resolved_grip_center_local) * cell_world_size
 			_append_unique_proxy_sample(
 				mesh_positions,
 				_expand_weapon_proxy_surface_point(
-					(centroid - grip_center_local) * cell_world_size,
-					clearance_offset_meters
+					proxy_surface_position_local,
+					clearance_offset_meters,
+					proxy_surface_position_origin_id
 				)
 			)
 		return
 	for vertex_offset: int in range(0, vertices.size() - 2, 3):
 		var centroid: Vector3 = (vertices[vertex_offset] + vertices[vertex_offset + 1] + vertices[vertex_offset + 2]) / 3.0
+		var proxy_surface_position_origin_id: StringName = resolved_grip_center_origin_id
+		var proxy_surface_position_local: Vector3 = (centroid - resolved_grip_center_local) * cell_world_size
 		_append_unique_proxy_sample(
 			mesh_positions,
 			_expand_weapon_proxy_surface_point(
-				(centroid - grip_center_local) * cell_world_size,
-				clearance_offset_meters
+				proxy_surface_position_local,
+				clearance_offset_meters,
+				proxy_surface_position_origin_id
 			)
 		)
 
-func _expand_weapon_proxy_surface_point(local_position_meters: Vector3, clearance_offset_meters: float) -> Vector3:
+func _expand_weapon_proxy_surface_point(
+	position_meters_local: Vector3,
+	clearance_offset_meters: float,
+	position_meters_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+) -> Vector3:
+	var position_meters_state := {
+		"position_meters_local": position_meters_local,
+		"position_meters_origin_id": position_meters_origin_id,
+	}
+	var resolved_position_meters_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		position_meters_state,
+		"position_meters_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var resolved_position_meters_local: Vector3 = _get_origin_tracked_vector3_state(
+		position_meters_state,
+		"position_meters_local",
+		"position_meters_origin_id",
+		position_meters_local,
+		resolved_position_meters_origin_id
+	)
 	var clearance: float = maxf(clearance_offset_meters, 0.0)
-	if clearance <= 0.000001 or local_position_meters.length_squared() <= 0.000001:
-		return local_position_meters
-	return local_position_meters + local_position_meters.normalized() * clearance
+	if clearance <= 0.000001 or resolved_position_meters_local.length_squared() <= 0.000001:
+		return resolved_position_meters_local
+	return resolved_position_meters_local + resolved_position_meters_local.normalized() * clearance
 
 func _append_extreme_proxy_samples(samples: Array[Vector3], mesh_positions: Array[Vector3]) -> void:
 	if mesh_positions.is_empty():
@@ -833,23 +1561,44 @@ func _append_extreme_proxy_samples(samples: Array[Vector3], mesh_positions: Arra
 func _resolve_weapon_display_cell_bounds(
 	display_cells: Array[CellAtom],
 	grip_center_local: Vector3,
+	grip_center_origin_id: StringName,
 	cell_world_size: float,
 	clearance_offset_meters: float
 ) -> Dictionary:
 	if display_cells.is_empty():
 		return {"valid": false}
+	var grip_center_state := {
+		"grip_center_local": grip_center_local,
+		"grip_center_origin_id": grip_center_origin_id,
+	}
+	var resolved_grip_center_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		grip_center_state,
+		"grip_center_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var resolved_grip_center_local: Vector3 = _get_origin_tracked_vector3_state(
+		grip_center_state,
+		"grip_center_local",
+		"grip_center_origin_id",
+		grip_center_local,
+		resolved_grip_center_origin_id
+	)
 	var min_local := Vector3(INF, INF, INF)
 	var max_local := Vector3(-INF, -INF, -INF)
 	var half_cell := Vector3.ONE * cell_world_size * 0.5
+	var cell_origin_id: StringName = resolved_grip_center_origin_id
+	var min_origin_id: StringName = cell_origin_id
+	var max_origin_id: StringName = cell_origin_id
 	for cell: CellAtom in display_cells:
 		if cell == null:
 			continue
-		var cell_local: Vector3 = (cell.get_center_position() - grip_center_local) * cell_world_size
+		var cell_local: Vector3 = (cell.get_center_position() - resolved_grip_center_local) * cell_world_size
 		min_local = Vector3(
 			minf(min_local.x, cell_local.x - half_cell.x),
 			minf(min_local.y, cell_local.y - half_cell.y),
 			minf(min_local.z, cell_local.z - half_cell.z)
 		)
+		max_origin_id = cell_origin_id
 		max_local = Vector3(
 			maxf(max_local.x, cell_local.x + half_cell.x),
 			maxf(max_local.y, cell_local.y + half_cell.y),
@@ -861,7 +1610,9 @@ func _resolve_weapon_display_cell_bounds(
 	return {
 		"valid": true,
 		"min": min_local - clearance,
+		"min_origin_id": min_origin_id,
 		"max": max_local + clearance,
+		"max_origin_id": max_origin_id,
 	}
 
 func _append_box_proxy_samples(samples: Array[Vector3], bounds_min: Vector3, bounds_max: Vector3) -> void:
@@ -885,11 +1636,28 @@ func _append_display_cell_proxy_samples(
 	samples: Array[Vector3],
 	display_cells: Array[CellAtom],
 	grip_center_local: Vector3,
+	grip_center_origin_id: StringName,
 	cell_world_size: float,
 	clearance_offset_meters: float
 ) -> void:
 	if display_cells.is_empty():
 		return
+	var grip_center_state := {
+		"grip_center_local": grip_center_local,
+		"grip_center_origin_id": grip_center_origin_id,
+	}
+	var resolved_grip_center_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		grip_center_state,
+		"grip_center_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var resolved_grip_center_local: Vector3 = _get_origin_tracked_vector3_state(
+		grip_center_state,
+		"grip_center_local",
+		"grip_center_origin_id",
+		grip_center_local,
+		resolved_grip_center_origin_id
+	)
 	var stride: int = maxi(1, int(ceil(float(display_cells.size()) / float(MAX_WEAPON_BODY_PROXY_CELL_SAMPLES))))
 	var occupied_lookup: Dictionary = {}
 	for cell: CellAtom in display_cells:
@@ -902,7 +1670,22 @@ func _append_display_cell_proxy_samples(
 		var cell: CellAtom = display_cells[cell_index]
 		if cell == null:
 			continue
-		var cell_center_local: Vector3 = (cell.get_center_position() - grip_center_local) * cell_world_size
+		var cell_center_state := {
+			"cell_center_local": (cell.get_center_position() - resolved_grip_center_local) * cell_world_size,
+			"cell_center_origin_id": resolved_grip_center_origin_id,
+		}
+		var cell_center_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+			cell_center_state,
+			"cell_center_origin_id",
+			resolved_grip_center_origin_id
+		)
+		var cell_center_local: Vector3 = _get_origin_tracked_vector3_state(
+			cell_center_state,
+			"cell_center_local",
+			"cell_center_origin_id",
+			Vector3.ZERO,
+			cell_center_origin_id
+		)
 		_append_unique_proxy_sample(samples, cell_center_local)
 		for normal: Vector3i in [
 			Vector3i(1, 0, 0),
@@ -915,7 +1698,24 @@ func _append_display_cell_proxy_samples(
 			if occupied_lookup.has(cell.grid_position + normal):
 				continue
 			var face_offset: Vector3 = Vector3(normal) * ((cell_world_size * 0.5) + maxf(clearance_offset_meters, 0.0))
-			_append_unique_proxy_sample(samples, cell_center_local + face_offset)
+			var face_sample_origin_id: StringName = cell_center_origin_id
+			var face_sample_state := {
+				"face_sample_local": cell_center_local + face_offset,
+				"face_sample_origin_id": face_sample_origin_id,
+			}
+			face_sample_origin_id = _resolve_origin_tracked_state_origin_id(
+				face_sample_state,
+				"face_sample_origin_id",
+				cell_center_origin_id
+			)
+			var face_sample_local: Vector3 = _get_origin_tracked_vector3_state(
+				face_sample_state,
+				"face_sample_local",
+				"face_sample_origin_id",
+				cell_center_local,
+				face_sample_origin_id
+			)
+			_append_unique_proxy_sample(samples, face_sample_local)
 
 func _append_unique_proxy_sample(samples: Array[Vector3], sample_position: Vector3) -> void:
 	for existing: Vector3 in samples:
@@ -926,6 +1726,7 @@ func _append_unique_proxy_sample(samples: Array[Vector3], sample_position: Vecto
 func resolve_hand_mount_local_transform(held_item: Node3D) -> Transform3D:
 	if held_item == null:
 		return Transform3D.IDENTITY
+	_ensure_origin_meta(held_item, HAND_MOUNT_LOCAL_TRANSFORM_ORIGIN_META, CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT)
 	var stored_transform: Variant = held_item.get_meta(HAND_MOUNT_LOCAL_TRANSFORM_META, held_item.transform)
 	return stored_transform as Transform3D if stored_transform is Transform3D else held_item.transform
 
@@ -939,30 +1740,49 @@ func apply_held_item_grip_style_mode(
 		return
 	var resolved_grip_style: StringName = CraftedItemWIP.normalize_grip_style_mode(grip_style_mode)
 	held_item.set_meta("grip_style_mode", resolved_grip_style)
-	var local_tip: Vector3 = held_item.get_meta("weapon_tip_local", Vector3.ZERO) as Vector3
-	var primary_grip_contact_local: Vector3 = held_item.get_meta("primary_grip_contact_local", Vector3.ZERO) as Vector3
+	_ensure_origin_meta(held_item, "weapon_tip_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	_ensure_origin_meta(held_item, "primary_grip_contact_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
+	var local_tip_origin_id: StringName = _resolve_origin_meta_value(held_item, "weapon_tip_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	var primary_grip_contact_local: Vector3 = _get_primary_grip_contact_meta(held_item)
+	var primary_grip_contact_origin_id: StringName = _resolve_origin_meta_value(held_item, "primary_grip_contact_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
 	var fallback_basis: Basis = build_weapon_hold_basis(resolved_grip_style, slot_id)
 	var resolved_basis: Basis = _resolve_signed_contact_axis_weapon_hold_basis(
 		humanoid_rig,
 		slot_id,
 		resolved_grip_style,
 		local_tip,
+		local_tip_origin_id,
 		primary_grip_contact_local,
+		primary_grip_contact_origin_id,
 		fallback_basis
 	)
 	var mount_transform: Transform3D = resolve_hand_mount_local_transform(held_item)
 	var target_contact_local: Vector3 = mount_transform.origin + mount_transform.basis * primary_grip_contact_local
-	if humanoid_rig != null and humanoid_rig.has_method("resolve_hand_grip_alignment_offset_local"):
-		var alignment_variant: Variant = humanoid_rig.call("resolve_hand_grip_alignment_offset_local", slot_id)
-		if alignment_variant is Vector3:
-			target_contact_local = alignment_variant as Vector3
+	var hand_alignment_offset_state: Dictionary = _resolve_hand_alignment_offset_state(humanoid_rig, slot_id)
+	var target_contact_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		hand_alignment_offset_state,
+		"hand_alignment_offset_origin_id",
+		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	)
+	target_contact_local = _get_origin_tracked_vector3_state(
+		hand_alignment_offset_state,
+		"hand_alignment_offset_local",
+		"hand_alignment_offset_origin_id",
+		target_contact_local,
+		target_contact_origin_id
+	)
 	mount_transform.basis = resolved_basis.orthonormalized()
 	mount_transform.origin = _resolve_hand_mount_origin_local(
 		target_contact_local,
+		target_contact_origin_id,
 		primary_grip_contact_local,
+		primary_grip_contact_origin_id,
 		mount_transform.basis
 	)
 	held_item.set_meta(HAND_MOUNT_LOCAL_TRANSFORM_META, mount_transform)
+	held_item.set_meta(HAND_MOUNT_LOCAL_TRANSFORM_ORIGIN_META, CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT)
+	_set_origin_tracked_vector3_meta(held_item, "hand_alignment_offset_local", "hand_alignment_offset_origin_id", target_contact_local, target_contact_origin_id)
 
 func clear_rig_weapon_contact_guidance(humanoid_rig: Node3D) -> void:
 	if humanoid_rig == null:
@@ -1126,7 +1946,19 @@ func _resolve_slot_contact_hand_basis_world(
 		finger_guide_node,
 		desired_contact_axis_world
 	)
-	var contact_axis_local: Vector3 = _resolve_slot_contact_axis_local(humanoid_rig, _slot_id)
+	var contact_axis_state: Dictionary = _resolve_slot_contact_axis_state(humanoid_rig, _slot_id)
+	var contact_axis_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		contact_axis_state,
+		"contact_axis_origin_id",
+		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	)
+	var contact_axis_local: Vector3 = _get_origin_tracked_vector3_state(
+		contact_axis_state,
+		"contact_axis_local",
+		"contact_axis_origin_id",
+		Vector3.RIGHT,
+		contact_axis_origin_id
+	)
 	return _build_basis_aligning_local_axis(
 		contact_axis_local,
 		desired_contact_axis_world,
@@ -1134,11 +1966,35 @@ func _resolve_slot_contact_hand_basis_world(
 	)
 
 func _resolve_slot_contact_axis_local(humanoid_rig: Node3D, slot_id: StringName) -> Vector3:
+	var contact_axis_state: Dictionary = _resolve_slot_contact_axis_state(humanoid_rig, slot_id)
+	var contact_axis_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		contact_axis_state,
+		"contact_axis_origin_id",
+		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	)
+	return _get_origin_tracked_vector3_state(
+		contact_axis_state,
+		"contact_axis_local",
+		"contact_axis_origin_id",
+		Vector3.RIGHT,
+		contact_axis_origin_id
+	)
+
+func _resolve_slot_contact_axis_state(humanoid_rig: Node3D, slot_id: StringName) -> Dictionary:
+	var resolve_hand_index_pinky_axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
 	if humanoid_rig != null and humanoid_rig.has_method("resolve_hand_index_pinky_axis_local"):
 		var resolved_axis: Vector3 = humanoid_rig.call("resolve_hand_index_pinky_axis_local", slot_id) as Vector3
 		if resolved_axis.length_squared() > 0.000001:
-			return resolved_axis.normalized()
-	return Vector3.RIGHT
+			return {
+				"contact_axis_local": resolved_axis.normalized(),
+				"contact_axis_origin_id": resolve_hand_index_pinky_axis_origin_id,
+				"resolve_hand_index_pinky_axis_origin_id": resolve_hand_index_pinky_axis_origin_id,
+			}
+	return {
+		"contact_axis_local": Vector3.RIGHT,
+		"contact_axis_origin_id": resolve_hand_index_pinky_axis_origin_id,
+		"resolve_hand_index_pinky_axis_origin_id": resolve_hand_index_pinky_axis_origin_id,
+	}
 
 func _resolve_contact_hand_up_reference_world(
 	humanoid_rig: Node3D,
@@ -1179,27 +2035,126 @@ func _resolve_weapon_tip_axis_world(held_item: Node3D, finger_guide_node: Node3D
 	var contact_axis_override_world: Vector3 = held_item.get_meta("authoring_contact_grip_axis_world_override", Vector3.ZERO) as Vector3
 	if contact_axis_override_world.length_squared() > 0.000001:
 		return contact_axis_override_world.normalized()
+	_ensure_origin_meta(held_item, "weapon_tip_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	var local_tip_origin_id: StringName = _resolve_origin_meta_value(held_item, "weapon_tip_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	var guide_origin_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var guide_local_origin: Vector3 = finger_guide_node.position if finger_guide_node != null else Vector3.ZERO
 	var grip_center: Node3D = finger_guide_node.get_node_or_null("GripShellCenter") as Node3D if finger_guide_node != null else null
 	if grip_center != null:
+		guide_origin_origin_id = _resolve_origin_meta_value(grip_center, "grip_shell_slice_center_origin_id", guide_origin_origin_id)
 		guide_local_origin += grip_center.position
-	var local_tip: Vector3 = held_item.get_meta("weapon_tip_local", Vector3.ZERO) as Vector3
-	var local_tip_direction: Vector3 = local_tip - guide_local_origin
+	var guide_origin_state := {
+		"guide_origin_local": guide_local_origin,
+		"guide_origin_origin_id": guide_origin_origin_id,
+	}
+	guide_local_origin = _get_origin_tracked_vector3_state(
+		guide_origin_state,
+		"guide_origin_local",
+		"guide_origin_origin_id",
+		Vector3.ZERO,
+		guide_origin_origin_id
+	)
+	var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
+	var tip_direction_origin_id: StringName = local_tip_origin_id
+	var tip_direction_state := {
+		"tip_direction_local": local_tip - guide_local_origin,
+		"tip_direction_origin_id": tip_direction_origin_id,
+	}
+	var local_tip_direction: Vector3 = _get_origin_tracked_vector3_state(
+		tip_direction_state,
+		"tip_direction_local",
+		"tip_direction_origin_id",
+		Vector3.ZERO,
+		tip_direction_origin_id
+	)
 	if local_tip_direction.length_squared() > 0.000001:
 		return (held_item.global_basis * local_tip_direction.normalized()).normalized()
 	var grip_axis_local: Vector3 = Vector3.ZERO
+	var grip_axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	if grip_center != null:
-		grip_axis_local = grip_center.get_meta("grip_shell_major_axis_local", Vector3.ZERO) as Vector3
+		grip_axis_origin_id = _resolve_origin_meta_value(
+			grip_center,
+			"grip_shell_major_axis_origin_id",
+			CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		)
+		grip_axis_local = _get_origin_tracked_vector3_meta(
+			grip_center,
+			"grip_shell_major_axis_local",
+			"grip_shell_major_axis_origin_id",
+			Vector3.ZERO,
+			grip_axis_origin_id
+		)
 	if grip_axis_local.length_squared() <= 0.000001:
-		grip_axis_local = held_item.get_meta("primary_grip_slide_axis_local", Vector3.ZERO) as Vector3
+		grip_axis_origin_id = _resolve_origin_meta_value(
+			held_item,
+			"primary_grip_slide_axis_origin_id",
+			CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		)
+		grip_axis_local = _get_origin_tracked_vector3_meta(
+			held_item,
+			"primary_grip_slide_axis_local",
+			"primary_grip_slide_axis_origin_id",
+			Vector3.ZERO,
+			grip_axis_origin_id
+		)
 	if grip_axis_local.length_squared() <= 0.000001:
+		grip_axis_origin_id = tip_direction_origin_id
 		grip_axis_local = local_tip_direction
 	if grip_axis_local.length_squared() <= 0.000001:
 		return Vector3.ZERO
-	grip_axis_local = grip_axis_local.normalized()
-	if local_tip_direction.length_squared() > 0.000001 and grip_axis_local.dot(local_tip_direction.normalized()) < 0.0:
-		grip_axis_local = -grip_axis_local
-	return (held_item.global_basis * grip_axis_local).normalized()
+	var grip_axis_state := {
+		"grip_axis_local": grip_axis_local.normalized(),
+		"grip_axis_origin_id": grip_axis_origin_id,
+	}
+	grip_axis_origin_id = _resolve_origin_tracked_state_origin_id(
+		grip_axis_state,
+		"grip_axis_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	grip_axis_local = _get_origin_tracked_vector3_state(
+		grip_axis_state,
+		"grip_axis_local",
+		"grip_axis_origin_id",
+		Vector3.FORWARD,
+		grip_axis_origin_id
+	)
+	var tip_direction_alignment_origin_id: StringName = tip_direction_origin_id
+	var tip_direction_alignment_state := {
+		"tip_direction_alignment_local": local_tip_direction,
+		"tip_direction_alignment_origin_id": tip_direction_alignment_origin_id,
+	}
+	var tip_direction_alignment_local: Vector3 = _get_origin_tracked_vector3_state(
+		tip_direction_alignment_state,
+		"tip_direction_alignment_local",
+		"tip_direction_alignment_origin_id",
+		Vector3.ZERO,
+		tip_direction_alignment_origin_id
+	)
+	tip_direction_alignment_origin_id = _resolve_origin_tracked_state_origin_id(
+		tip_direction_alignment_state,
+		"tip_direction_alignment_origin_id",
+		tip_direction_alignment_origin_id
+	)
+	var grip_axis_alignment_origin_id: StringName = grip_axis_origin_id
+	var grip_axis_alignment_state := {
+		"grip_axis_alignment_local": grip_axis_local,
+		"grip_axis_alignment_origin_id": grip_axis_alignment_origin_id,
+	}
+	var grip_axis_alignment_local: Vector3 = _get_origin_tracked_vector3_state(
+		grip_axis_alignment_state,
+		"grip_axis_alignment_local",
+		"grip_axis_alignment_origin_id",
+		Vector3.FORWARD,
+		grip_axis_alignment_origin_id
+	)
+	tip_direction_alignment_origin_id = _resolve_origin_tracked_state_origin_id(
+		tip_direction_alignment_state,
+		"tip_direction_alignment_origin_id",
+		tip_direction_alignment_origin_id
+	)
+	if tip_direction_alignment_local.length_squared() > 0.000001 and grip_axis_alignment_local.dot(tip_direction_alignment_local.normalized()) < 0.0:
+		grip_axis_alignment_local = -grip_axis_alignment_local
+	return (held_item.global_basis * grip_axis_alignment_local).normalized()
 
 func _resolve_grip_minor_axis_world(finger_guide_node: Node3D, axis_id: StringName) -> Vector3:
 	if finger_guide_node == null:
@@ -1208,7 +2163,14 @@ func _resolve_grip_minor_axis_world(finger_guide_node: Node3D, axis_id: StringNa
 	if grip_center == null:
 		return Vector3.ZERO
 	var meta_name: String = "grip_shell_minor_axis_b_local" if axis_id == &"b" else "grip_shell_minor_axis_a_local"
-	var minor_axis_local: Vector3 = grip_center.get_meta(meta_name, Vector3.ZERO) as Vector3
+	var origin_meta_name: String = "grip_shell_minor_axis_b_origin_id" if axis_id == &"b" else "grip_shell_minor_axis_a_origin_id"
+	var minor_axis_local: Vector3 = _get_origin_tracked_vector3_meta(
+		grip_center,
+		meta_name,
+		origin_meta_name,
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
 	if minor_axis_local.length_squared() <= 0.000001:
 		return Vector3.ZERO
 	return (grip_center.global_basis * minor_axis_local.normalized()).normalized()
@@ -1218,15 +2180,44 @@ func _resolve_signed_contact_axis_weapon_hold_basis(
 	slot_id: StringName,
 	grip_style_mode: StringName,
 	weapon_tip_local: Vector3,
+	weapon_tip_origin_id: StringName,
 	primary_grip_contact_local: Vector3,
+	primary_grip_contact_origin_id: StringName,
 	fallback_basis: Basis
 ) -> Basis:
-	var local_tip_axis: Vector3 = weapon_tip_local - primary_grip_contact_local
+	var tip_axis_origin_id: StringName = weapon_tip_origin_id
+	if tip_axis_origin_id == StringName():
+		tip_axis_origin_id = primary_grip_contact_origin_id
+	if tip_axis_origin_id == StringName():
+		tip_axis_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	var tip_axis_state := {
+		"tip_axis_local": weapon_tip_local - primary_grip_contact_local,
+		"tip_axis_origin_id": tip_axis_origin_id,
+	}
+	var local_tip_axis: Vector3 = _get_origin_tracked_vector3_state(
+		tip_axis_state,
+		"tip_axis_local",
+		"tip_axis_origin_id",
+		Vector3.ZERO,
+		tip_axis_origin_id
+	)
 	if local_tip_axis.length_squared() <= 0.000001:
 		return fallback_basis.orthonormalized()
 	local_tip_axis = local_tip_axis.normalized()
 	var hand_anchor: Node3D = get_hand_anchor(humanoid_rig, slot_id)
-	var target_contact_axis_local: Vector3 = _resolve_slot_contact_axis_local(humanoid_rig, slot_id)
+	var target_contact_axis_state: Dictionary = _resolve_slot_contact_axis_state(humanoid_rig, slot_id)
+	var target_contact_axis_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		target_contact_axis_state,
+		"contact_axis_origin_id",
+		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	)
+	var target_contact_axis_local: Vector3 = _get_origin_tracked_vector3_state(
+		target_contact_axis_state,
+		"contact_axis_local",
+		"contact_axis_origin_id",
+		Vector3.RIGHT,
+		target_contact_axis_origin_id
+	)
 	if grip_style_mode == CraftedItemWIP.GRIP_REVERSE:
 		target_contact_axis_local = -target_contact_axis_local
 	var target_anchor_axis: Vector3 = target_contact_axis_local
@@ -1235,14 +2226,44 @@ func _resolve_signed_contact_axis_weapon_hold_basis(
 	if target_anchor_axis.length_squared() <= 0.000001:
 		target_anchor_axis = target_contact_axis_local
 	var up_reference: Vector3 = fallback_basis.y.normalized()
-	return _build_basis_aligning_local_axis(local_tip_axis, target_anchor_axis.normalized(), up_reference)
+	var tip_axis_alignment_origin_id: StringName = tip_axis_origin_id
+	var tip_axis_alignment_state := {
+		"tip_axis_alignment_local": local_tip_axis,
+		"tip_axis_alignment_origin_id": tip_axis_alignment_origin_id,
+	}
+	var tip_axis_alignment_local: Vector3 = _get_origin_tracked_vector3_state(
+		tip_axis_alignment_state,
+		"tip_axis_alignment_local",
+		"tip_axis_alignment_origin_id",
+		Vector3.FORWARD,
+		tip_axis_alignment_origin_id
+	)
+	return _build_basis_aligning_local_axis(tip_axis_alignment_local, target_anchor_axis.normalized(), up_reference)
 
 func _resolve_hand_mount_origin_local(
 	target_contact_local: Vector3,
+	target_contact_origin_id: StringName,
 	primary_grip_contact_local: Vector3,
+	primary_grip_contact_origin_id: StringName,
 	mount_basis: Basis
 ) -> Vector3:
-	return target_contact_local - mount_basis.orthonormalized() * primary_grip_contact_local
+	var mount_origin_origin_id: StringName = target_contact_origin_id
+	if mount_origin_origin_id == StringName():
+		mount_origin_origin_id = primary_grip_contact_origin_id
+	if mount_origin_origin_id == StringName():
+		mount_origin_origin_id = CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	var mount_origin_local: Vector3 = target_contact_local - mount_basis.orthonormalized() * primary_grip_contact_local
+	var mount_origin_state := {
+		"mount_origin_local": mount_origin_local,
+		"mount_origin_origin_id": mount_origin_origin_id,
+	}
+	return _get_origin_tracked_vector3_state(
+		mount_origin_state,
+		"mount_origin_local",
+		"mount_origin_origin_id",
+		mount_origin_local,
+		mount_origin_origin_id
+	)
 
 func _build_basis_aligning_local_axis(local_axis: Vector3, target_axis: Vector3, up_reference: Vector3) -> Basis:
 	var source_axis: Vector3 = local_axis.normalized()
@@ -1484,6 +2505,10 @@ func sync_equipped_slot_visual(
 	if equipped_item_node == null:
 		return
 	visual_anchor.add_child(equipped_item_node)
+	equipped_item_node.set_meta(
+		EQUIPPED_VISUAL_ANCHOR_ORIGIN_META,
+		_resolve_equipped_visual_anchor_origin_id(weapons_drawn)
+	)
 	if not weapons_drawn:
 		apply_station_stow_transform(equipped_item_node, saved_wip, visual_anchor)
 	held_item_nodes[slot_id] = equipped_item_node
@@ -1510,8 +2535,12 @@ func apply_station_stow_transform(
 	if stow_motion_node == null:
 		held_item.set_meta("station_stow_motion_node_applied", false)
 		return false
-	var local_tip: Vector3 = held_item.get_meta("weapon_tip_local", Vector3.ZERO) as Vector3
-	var local_pommel: Vector3 = held_item.get_meta("weapon_pommel_local", Vector3.ZERO) as Vector3
+	_ensure_origin_meta(held_item, "weapon_tip_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	_ensure_origin_meta(held_item, "weapon_pommel_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
+	var local_tip_origin_id: StringName = _resolve_origin_meta_value(held_item, "weapon_tip_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	var local_pommel: Vector3 = _get_weapon_pommel_meta(held_item)
+	var local_pommel_origin_id: StringName = _resolve_origin_meta_value(held_item, "weapon_pommel_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
 	if local_tip.is_equal_approx(local_pommel):
 		held_item.set_meta("station_stow_motion_node_applied", false)
 		return false
@@ -1520,10 +2549,45 @@ func apply_station_stow_transform(
 		return false
 	var stow_contact_ratio: float = CombatAnimationDraftScript.normalize_stow_contact_ratio(noncombat_idle_draft.stow_contact_ratio)
 	var stow_segment: Dictionary = _resolve_station_stow_anchor_local_segment(stow_motion_node, stow_contact_ratio)
-	var stow_tip_local: Vector3 = stow_segment.get("tip_position_local", stow_motion_node.tip_position_local) as Vector3
-	var stow_pommel_local: Vector3 = stow_segment.get("pommel_position_local", stow_motion_node.pommel_position_local) as Vector3
+	var stow_tip_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		stow_segment,
+		"tip_position_origin_id",
+		CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	)
+	var stow_tip_local: Vector3 = _get_origin_tracked_vector3_state(
+		stow_segment,
+		"tip_position_local",
+		"tip_position_origin_id",
+		stow_motion_node.tip_position_local,
+		stow_tip_origin_id
+	)
+	var stow_pommel_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		stow_segment,
+		"pommel_position_origin_id",
+		CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	)
+	var stow_pommel_local: Vector3 = _get_origin_tracked_vector3_state(
+		stow_segment,
+		"pommel_position_local",
+		"pommel_position_origin_id",
+		stow_motion_node.pommel_position_local,
+		stow_pommel_origin_id
+	)
 	var local_axis: Vector3 = (local_tip - local_pommel).normalized()
-	var local_up_reference: Vector3 = _resolve_weapon_local_up_reference(held_item, local_axis)
+	var local_axis_origin_id: StringName = local_tip_origin_id
+	var local_up_reference_state: Dictionary = _resolve_weapon_local_up_reference_state(held_item, local_axis, local_axis_origin_id)
+	var local_up_reference_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+		local_up_reference_state,
+		"up_reference_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var local_up_reference: Vector3 = _get_origin_tracked_vector3_state(
+		local_up_reference_state,
+		"local_up_reference",
+		"up_reference_origin_id",
+		Vector3.UP,
+		local_up_reference_origin_id
+	)
 	var stow_authoring_basis: Basis = _resolve_station_stow_authoring_basis(anchor_node)
 	var stow_anchor_world: Vector3 = anchor_node.global_position
 	var authored_tip_world: Vector3 = stow_anchor_world + stow_authoring_basis * stow_tip_local
@@ -1533,6 +2597,9 @@ func apply_station_stow_transform(
 		authored_axis_world = stow_authoring_basis.z
 	var weapon_segment_length: float = local_tip.distance_to(local_pommel)
 	var resolved_tip_world: Vector3 = authored_pommel_world + authored_axis_world.normalized() * weapon_segment_length
+	held_item.set_meta("station_stow_segment_tip_origin_id", local_tip_origin_id)
+	held_item.set_meta("station_stow_segment_pommel_origin_id", local_pommel_origin_id)
+	held_item.set_meta("station_stow_segment_up_reference_origin_id", local_up_reference_origin_id)
 	var solved_transform: Transform3D = weapon_frame_solver.solve_transform_from_segment(
 		local_tip,
 		local_pommel,
@@ -1541,21 +2608,72 @@ func apply_station_stow_transform(
 		local_up_reference,
 		stow_authoring_basis,
 		stow_motion_node.weapon_orientation_degrees,
-		stow_motion_node.weapon_roll_degrees
+		stow_motion_node.weapon_roll_degrees,
+		local_tip_origin_id,
+		local_pommel_origin_id,
+		local_up_reference_origin_id
 	)
 	held_item.global_transform = solved_transform
 	held_item.set_meta("station_stow_motion_node_applied", true)
 	held_item.set_meta("station_stow_anchor_mode", CombatAnimationDraftScript.normalize_stow_anchor_mode(noncombat_idle_draft.stow_anchor_mode))
+	held_item.set_meta("station_stow_origin_id", CombatOriginRecordScript.ORIGIN_NONCOMBAT_STOW)
+	held_item.set_meta("station_stow_anchor_origin_id", CombatOriginRecordScript.ORIGIN_STOW_ANCHOR)
 	held_item.set_meta("station_stow_contact_ratio", stow_contact_ratio)
-	held_item.set_meta("station_stow_requested_tip_position_local", stow_tip_local)
-	held_item.set_meta("station_stow_requested_pommel_position_local", stow_pommel_local)
-	held_item.set_meta("station_stow_tip_position_local", anchor_node.to_local(resolved_tip_world))
-	held_item.set_meta("station_stow_pommel_position_local", anchor_node.to_local(authored_pommel_world))
+	_set_origin_tracked_vector3_meta(
+		held_item,
+		"station_stow_requested_tip_position_local",
+		"station_stow_requested_tip_position_origin_id",
+		stow_tip_local,
+		stow_tip_origin_id
+	)
+	_set_origin_tracked_vector3_meta(
+		held_item,
+		"station_stow_requested_pommel_position_local",
+		"station_stow_requested_pommel_position_origin_id",
+		stow_pommel_local,
+		stow_pommel_origin_id
+	)
+	_set_origin_tracked_vector3_meta(
+		held_item,
+		"station_stow_tip_position_local",
+		"station_stow_tip_position_origin_id",
+		anchor_node.to_local(resolved_tip_world),
+		CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	)
+	_set_origin_tracked_vector3_meta(
+		held_item,
+		"station_stow_pommel_position_local",
+		"station_stow_pommel_position_origin_id",
+		anchor_node.to_local(authored_pommel_world),
+		CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	)
 	held_item.set_meta("station_stow_weapon_orientation_degrees", stow_motion_node.weapon_orientation_degrees)
 	held_item.set_meta("station_stow_weapon_roll_degrees", stow_motion_node.weapon_roll_degrees)
 	return true
 
 func _resolve_weapon_local_up_reference(held_item: Node3D, local_axis: Vector3) -> Vector3:
+	var axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	var up_reference_state: Dictionary = _resolve_weapon_local_up_reference_state(
+		held_item,
+		local_axis,
+		axis_origin_id
+	)
+	return _get_origin_tracked_vector3_state(
+		up_reference_state,
+		"local_up_reference",
+		"up_reference_origin_id",
+		Vector3.UP,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+
+func _resolve_weapon_local_up_reference_state(
+	held_item: Node3D,
+	local_axis: Vector3,
+	local_axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+) -> Dictionary:
+	var resolved_local_axis_origin_id: StringName = local_axis_origin_id
+	if resolved_local_axis_origin_id == StringName():
+		resolved_local_axis_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var basis_anchor: Node3D = weapon_grip_anchor_provider.get_primary_grip_basis_anchor(held_item)
 	var local_up_reference: Vector3 = basis_anchor.transform.basis.y if basis_anchor != null else Vector3.UP
 	local_up_reference = local_up_reference - local_axis * local_up_reference.dot(local_axis)
@@ -1563,7 +2681,11 @@ func _resolve_weapon_local_up_reference(held_item: Node3D, local_axis: Vector3) 
 		local_up_reference = Vector3.UP - local_axis * Vector3.UP.dot(local_axis)
 	if local_up_reference.length_squared() <= 0.000001:
 		local_up_reference = Vector3.RIGHT - local_axis * Vector3.RIGHT.dot(local_axis)
-	return local_up_reference.normalized()
+	return {
+		"local_up_reference": local_up_reference.normalized(),
+		"up_reference_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		"local_axis_origin_id": resolved_local_axis_origin_id,
+	}
 
 func clear_hand_slot_visual(slot_id: StringName, held_item_nodes: Dictionary) -> void:
 	var existing_node: Node3D = held_item_nodes.get(slot_id) as Node3D

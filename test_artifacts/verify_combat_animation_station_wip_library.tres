@@ -23,6 +23,8 @@ preview_loop_enabled = true
 [sub_resource type="Resource" id="Resource_5y6a7"]
 script = ExtResource("2_0e8x7")
 node_id = &"motion_node_00"
+tip_position_origin_id = &"StowAnchorOrigin"
+pommel_position_origin_id = &"StowAnchorOrigin"
 
 [sub_resource type="Resource" id="Resource_1mhh0"]
 script = ExtResource("3_ww4cm")
@@ -315,7 +317,7 @@ default_skill_package_initialized = true
 
 [sub_resource type="Resource" id="Resource_vqqcw"]
 script = ExtResource("1_if2lj")
-wip_id = &"player_wip_1777502960.03_1"
+wip_id = &"player_wip_1778352829.264_1"
 forge_project_name = "Combat Animation Foundation Test"
 combat_animation_station_state = SubResource("Resource_8gmbe")
 forge_intent = &"intent_melee"
@@ -324,5 +326,5 @@ equipment_context = &"ctx_weapon"
 [resource]
 script = ExtResource("6_my4tn")
 saved_wips = Array[ExtResource("1_if2lj")]([SubResource("Resource_vqqcw")])
-selected_wip_id = &"player_wip_1777502960.03_1"
+selected_wip_id = &"player_wip_1778352829.264_1"
 save_file_path = "C:/WORKSPACE/test_artifacts/verify_combat_animation_station_wip_library.tres"

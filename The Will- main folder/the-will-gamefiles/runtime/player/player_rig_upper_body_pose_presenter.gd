@@ -3,6 +3,7 @@ class_name PlayerRigUpperBodyPosePresenter
 
 const JosieRigScene = preload("res://Josie/josie.tscn")
 const CharacterFrameResolverScript = preload("res://runtime/player/character_frame_resolver.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
 const SLOT_RIGHT: StringName = &"hand_right"
 const SLOT_LEFT: StringName = &"hand_left"
@@ -211,7 +212,10 @@ func _sample_animation_upper_body_pose(animation_name: StringName, sample_ratio:
 			continue
 		rotation_lookup[bone_name] = skeleton.get_bone_pose_rotation(bone_index).normalized()
 	josie_root.free()
-	return rotation_lookup
+	return {
+		"rotations": rotation_lookup,
+		"rotation_origin_id": CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE,
+	}
 
 func _resolve_effective_support_blend(two_hand: bool, authored_blend: float) -> float:
 	var base_support: float = TWO_HAND_BASE_SUPPORT_BLEND if two_hand else ONE_HAND_BASE_SUPPORT_BLEND
@@ -344,10 +348,12 @@ func _apply_bone_group(
 		if parent_index < 0:
 			continue
 		var current_local_rotation: Quaternion = skeleton.get_bone_pose_rotation(bone_index).normalized()
+		var current_rotation_origin_id: StringName = CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE
 		var reference_local_rotation: Quaternion = _resolve_reference_pose_rotation(
 			bone_name,
 			pose_blend,
-			current_local_rotation
+			current_local_rotation,
+			current_rotation_origin_id
 		)
 		var parent_global_basis: Basis = skeleton.get_bone_global_pose(parent_index).basis
 		var base_global_basis: Basis = parent_global_basis * Basis(reference_local_rotation)
@@ -376,13 +382,66 @@ func _apply_bone_group(
 func _resolve_reference_pose_rotation(
 	bone_name: StringName,
 	pose_blend: float,
-	current_local_rotation: Quaternion
+	current_local_rotation: Quaternion,
+	current_rotation_origin_id: StringName
 ) -> Quaternion:
-	var idle_lookup: Dictionary = upper_body_pose_cache.get(POSE_IDLE, {})
-	var two_hand_lookup: Dictionary = upper_body_pose_cache.get(POSE_TWO_HAND, {})
-	var idle_rotation: Quaternion = idle_lookup.get(bone_name, current_local_rotation) as Quaternion
-	var two_hand_rotation: Quaternion = two_hand_lookup.get(bone_name, idle_rotation) as Quaternion
+	var fallback_rotation_origin_id: StringName = _normalize_reference_rotation_origin_id(current_rotation_origin_id)
+	var idle_pose_state: Dictionary = upper_body_pose_cache.get(POSE_IDLE, {}) as Dictionary
+	var two_hand_pose_state: Dictionary = upper_body_pose_cache.get(POSE_TWO_HAND, {}) as Dictionary
+	var idle_lookup: Dictionary = _resolve_pose_rotation_lookup(idle_pose_state)
+	var two_hand_lookup: Dictionary = _resolve_pose_rotation_lookup(two_hand_pose_state)
+	var idle_rotation_origin_id: StringName = _resolve_pose_rotation_origin_id(idle_pose_state, fallback_rotation_origin_id)
+	var two_hand_rotation_origin_id: StringName = _resolve_pose_rotation_origin_id(two_hand_pose_state, idle_rotation_origin_id)
+	var idle_rotation: Quaternion = _get_origin_tracked_pose_rotation(
+		idle_lookup,
+		bone_name,
+		current_local_rotation,
+		fallback_rotation_origin_id,
+		idle_rotation_origin_id
+	)
+	var two_hand_rotation: Quaternion = _get_origin_tracked_pose_rotation(
+		two_hand_lookup,
+		bone_name,
+		idle_rotation,
+		idle_rotation_origin_id,
+		two_hand_rotation_origin_id
+	)
 	return idle_rotation.slerp(two_hand_rotation, clampf(pose_blend, 0.0, 1.0)).normalized()
+
+func _resolve_pose_rotation_lookup(pose_state: Dictionary) -> Dictionary:
+	if pose_state.has("rotations"):
+		return pose_state.get("rotations", {}) as Dictionary
+	return pose_state
+
+func _resolve_pose_rotation_origin_id(pose_state: Dictionary, fallback_origin_id: StringName) -> StringName:
+	var resolved_origin_id: StringName = _normalize_reference_rotation_origin_id(fallback_origin_id)
+	if pose_state.has("rotation_origin_id"):
+		resolved_origin_id = _normalize_reference_rotation_origin_id(
+			StringName(pose_state.get("rotation_origin_id", resolved_origin_id))
+		)
+	else:
+		pose_state["rotation_origin_id"] = resolved_origin_id
+	return resolved_origin_id
+
+func _get_origin_tracked_pose_rotation(
+	rotation_lookup: Dictionary,
+	bone_name: StringName,
+	fallback_rotation: Quaternion,
+	_fallback_rotation_origin_id: StringName,
+	rotation_origin_id: StringName
+) -> Quaternion:
+	var resolved_rotation_origin_id: StringName = _normalize_reference_rotation_origin_id(rotation_origin_id)
+	if resolved_rotation_origin_id == StringName():
+		return fallback_rotation.normalized()
+	var stored_rotation: Variant = rotation_lookup.get(bone_name, fallback_rotation)
+	if stored_rotation is Quaternion:
+		return (stored_rotation as Quaternion).normalized()
+	return fallback_rotation.normalized()
+
+func _normalize_reference_rotation_origin_id(origin_id: StringName) -> StringName:
+	if origin_id == StringName():
+		return CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE
+	return origin_id
 
 func _resolve_application_weight(bone_name: StringName, dominant_slot_id: StringName, two_hand: bool) -> float:
 	return float(APPLICATION_WEIGHTS.get(bone_name, 1.0)) * _resolve_side_weight_multiplier(

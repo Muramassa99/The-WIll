@@ -17,7 +17,9 @@ func ensure_hand_attachment(
 	bone_name: StringName,
 	anchor_name: String,
 	anchor_position: Vector3,
-	anchor_rotation_degrees: Vector3
+	anchor_rotation_degrees: Vector3,
+	anchor_position_origin_id: StringName = StringName(),
+	anchor_rotation_degrees_origin_id: StringName = StringName()
 ) -> void:
 	if skeleton == null:
 		return
@@ -36,6 +38,12 @@ func ensure_hand_attachment(
 		attachment.add_child(anchor)
 	anchor.position = anchor_position
 	anchor.rotation_degrees = anchor_rotation_degrees
+	if anchor_position_origin_id != StringName():
+		anchor.set_meta("anchor_position_local", anchor_position)
+		anchor.set_meta("anchor_position_origin_id", anchor_position_origin_id)
+	if anchor_rotation_degrees_origin_id != StringName():
+		anchor.set_meta("anchor_rotation_degrees_local", anchor_rotation_degrees)
+		anchor.set_meta("anchor_rotation_degrees_origin_id", anchor_rotation_degrees_origin_id)
 
 func ensure_stow_attachment(
 	skeleton: Skeleton3D,
@@ -43,9 +51,20 @@ func ensure_stow_attachment(
 	bone_name: StringName,
 	anchor_name: String,
 	anchor_position: Vector3,
-	anchor_rotation_degrees: Vector3
+	anchor_rotation_degrees: Vector3,
+	anchor_position_origin_id: StringName = StringName(),
+	anchor_rotation_degrees_origin_id: StringName = StringName()
 ) -> void:
-	ensure_hand_attachment(skeleton, attachment_name, bone_name, anchor_name, anchor_position, anchor_rotation_degrees)
+	ensure_hand_attachment(
+		skeleton,
+		attachment_name,
+		bone_name,
+		anchor_name,
+		anchor_position,
+		anchor_rotation_degrees,
+		anchor_position_origin_id,
+		anchor_rotation_degrees_origin_id
+	)
 
 func get_right_hand_item_anchor(root: Node) -> Node3D:
 	return root.get_node_or_null("JosieModel/Josie/Skeleton3D/RightHandAttachment/RightHandItemAnchor") as Node3D

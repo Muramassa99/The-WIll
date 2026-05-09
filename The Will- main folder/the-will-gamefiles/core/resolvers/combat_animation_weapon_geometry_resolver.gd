@@ -2,6 +2,7 @@ extends RefCounted
 class_name CombatAnimationWeaponGeometryResolver
 
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
 var forge_rules: ForgeRulesDef = DEFAULT_FORGE_RULES_RESOURCE
 
@@ -27,15 +28,19 @@ func resolve_motion_seed_data(baked_profile: BakedProfile) -> Dictionary:
 	)
 	return {
 		"tip_position_local": tip_position_local,
+		"tip_position_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
 		"pommel_position_local": pommel_position_local,
+		"pommel_position_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
 		"weapon_total_length_meters": weapon_total_length_meters,
 		"weapon_orientation_degrees": weapon_orientation_degrees,
 		"weapon_orientation_authored": false,
 		"weapon_roll_degrees": 0.0,
 		"axial_reposition_offset": 0.0,
 		"grip_seat_slide_offset": CombatAnimationMotionNode.DEFAULT_GRIP_SEAT_SLIDE_OFFSET,
+		"secondary_grip_seat_slide_offset": CombatAnimationMotionNode.DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET,
 		"body_support_blend": 0.4,
 		"grip_axis_local": baked_profile.primary_grip_slide_axis.normalized(),
+		"grip_axis_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
 	}
 
 func _resolve_default_weapon_orientation_degrees(grip_axis: Vector3) -> Vector3:

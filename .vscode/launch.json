@@ -1,0 +1,28 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "name": "GDScript: Launch The Will",
+            "type": "godot",
+            "request": "launch",
+            "project": "${workspaceFolder}\\The Will- main folder\\the-will-gamefiles",
+            "scene": "main",
+            "debug_collisions": false,
+            "debug_paths": false,
+            "debug_navigation": false,
+            "additional_options": ""
+        },
+        {
+            "name": "GDScript: Launch The Will Visual Debug",
+            "type": "godot",
+            "request": "launch",
+            "project": "${workspaceFolder}\\The Will- main folder\\the-will-gamefiles",
+            "scene": "main",
+            "debug_collisions": true,
+            "debug_paths": false,
+            "debug_navigation": false,
+            "additional_options": ""
+        }
+    ]
+}

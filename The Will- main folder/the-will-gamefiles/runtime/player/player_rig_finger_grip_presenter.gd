@@ -2,6 +2,7 @@ extends RefCounted
 class_name PlayerRigFingerGripPresenter
 
 const JosieRigScene = preload("res://Josie/josie.tscn")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const SLOT_RIGHT: StringName = &"hand_right"
 const SLOT_LEFT: StringName = &"hand_left"
 const FINGER_IDS: Array[StringName] = [&"thumb", &"index", &"middle", &"ring", &"pinky"]
@@ -224,9 +225,24 @@ func update_finger_grip_targets(
 		var cell_world_size: float = float(grip_center_node.get_meta("grip_shell_cell_world_size", 0.0))
 		if cell_world_size <= 0.0:
 			continue
-		var major_axis_local: Vector3 = grip_center_node.get_meta("grip_shell_major_axis_local", Vector3.FORWARD)
-		var minor_axis_a_local: Vector3 = grip_center_node.get_meta("grip_shell_minor_axis_a_local", Vector3.RIGHT)
-		var minor_axis_b_local: Vector3 = grip_center_node.get_meta("grip_shell_minor_axis_b_local", Vector3.UP)
+		var major_axis_local: Vector3 = _resolve_grip_shell_axis_local(
+			grip_center_node,
+			&"grip_shell_major_axis_local",
+			&"grip_shell_major_axis_origin_id",
+			Vector3.FORWARD
+		)
+		var minor_axis_a_local: Vector3 = _resolve_grip_shell_axis_local(
+			grip_center_node,
+			&"grip_shell_minor_axis_a_local",
+			&"grip_shell_minor_axis_a_origin_id",
+			Vector3.RIGHT
+		)
+		var minor_axis_b_local: Vector3 = _resolve_grip_shell_axis_local(
+			grip_center_node,
+			&"grip_shell_minor_axis_b_local",
+			&"grip_shell_minor_axis_b_origin_id",
+			Vector3.UP
+		)
 		var center_world: Vector3 = grip_center_node.global_position
 		var major_axis_world: Vector3 = (grip_center_node.global_basis * major_axis_local).normalized()
 		var minor_axis_a_world: Vector3 = (grip_center_node.global_basis * minor_axis_a_local).normalized()
@@ -406,6 +422,56 @@ func _resolve_grip_center_node(grip_guide: Node3D) -> Node3D:
 		return null
 	var grip_center_node: Node3D = grip_guide.get_node_or_null("GripShellCenter") as Node3D
 	return grip_center_node if grip_center_node != null else grip_guide
+
+func _resolve_grip_shell_axis_local(
+	grip_center_node: Node3D,
+	value_meta_name: StringName,
+	origin_meta_name: StringName,
+	fallback_value: Vector3
+) -> Vector3:
+	var resolved_origin_id: StringName = _resolve_origin_meta_value(
+		grip_center_node,
+		origin_meta_name,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var resolved_axis_vector: Vector3 = _get_origin_tracked_vector3_meta(
+		grip_center_node,
+		value_meta_name,
+		origin_meta_name,
+		fallback_value,
+		resolved_origin_id
+	)
+	if resolved_axis_vector.length_squared() > 0.000001:
+		return resolved_axis_vector
+	return fallback_value
+
+func _resolve_origin_meta_value(target: Object, origin_meta_name: StringName, fallback_origin_id: StringName) -> StringName:
+	var resolved_origin_id: StringName = fallback_origin_id
+	if resolved_origin_id == StringName():
+		resolved_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	if target == null:
+		return resolved_origin_id
+	var stored_origin_id: StringName = StringName(target.get_meta(origin_meta_name, StringName()))
+	if stored_origin_id != StringName():
+		return stored_origin_id
+	target.set_meta(origin_meta_name, resolved_origin_id)
+	return resolved_origin_id
+
+func _get_origin_tracked_vector3_meta(
+	target: Object,
+	value_meta_name: StringName,
+	origin_meta_name: StringName,
+	fallback_value: Vector3,
+	fallback_origin_id: StringName
+) -> Vector3:
+	_resolve_origin_meta_value(target, origin_meta_name, fallback_origin_id)
+	if target == null:
+		return fallback_value
+	var stored_value: Variant = target.get_meta(value_meta_name, fallback_value)
+	if stored_value is Vector3:
+		return stored_value as Vector3
+	target.set_meta(value_meta_name, fallback_value)
+	return fallback_value
 
 func _build_palm_frame(
 	slot_id: StringName,
@@ -921,7 +987,9 @@ func _build_animation_pose_cache(animation_names: Array[StringName], sample_rati
 		baseline_cache[slot_id] = {
 			"rotations": {},
 			"tip_offsets": {},
+			"tip_offset_origin_id": CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT,
 			"joint_offsets": {},
+			"joint_offset_origin_id": CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT,
 		}
 		rotation_counts[slot_id] = {}
 		tip_counts[slot_id] = {}
@@ -1060,7 +1128,9 @@ func _sample_animation_hand_pose(animation_name: StringName, sample_ratio: float
 		sample[slot_id] = {
 			"rotations": rotation_lookup,
 			"tip_offsets": tip_lookup,
+			"tip_offset_origin_id": CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT,
 			"joint_offsets": joint_lookup,
+			"joint_offset_origin_id": CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT,
 		}
 	josie_root.free()
 	return sample
@@ -1121,6 +1191,13 @@ func _resolve_animation_baseline_tip_world_position_from_cache(
 	var slot_cache: Dictionary = pose_cache.get(slot_id, {})
 	if slot_cache.is_empty():
 		return Vector3.ZERO
+	var tip_offset_origin_id: StringName = StringName(slot_cache.get(
+		"tip_offset_origin_id",
+		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	))
+	if tip_offset_origin_id == StringName():
+		tip_offset_origin_id = CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	slot_cache["tip_offset_origin_id"] = tip_offset_origin_id
 	var local_tip_offset: Vector3 = (slot_cache.get("tip_offsets", {}) as Dictionary).get(finger_id, Vector3.ZERO) as Vector3
 	if local_tip_offset.length_squared() <= 0.000001:
 		return Vector3.ZERO
@@ -1142,6 +1219,13 @@ func _resolve_animation_joint_world_position_from_cache(
 	var slot_cache: Dictionary = pose_cache.get(slot_id, {})
 	if slot_cache.is_empty():
 		return Vector3.ZERO
+	var joint_offset_origin_id: StringName = StringName(slot_cache.get(
+		"joint_offset_origin_id",
+		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	))
+	if joint_offset_origin_id == StringName():
+		joint_offset_origin_id = CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	slot_cache["joint_offset_origin_id"] = joint_offset_origin_id
 	var local_joint_offset: Vector3 = ((slot_cache.get("joint_offsets", {}) as Dictionary).get(finger_id, {}) as Dictionary).get(
 		joint_key,
 		Vector3.ZERO
@@ -1348,8 +1432,18 @@ func _resolve_contact_hit_against_profile_cells(
 			finger_id,
 			ray_context
 		)
-	var minor_axis_a_local: Vector3 = grip_center_node.get_meta("grip_shell_minor_axis_a_local", Vector3.RIGHT) as Vector3
-	var minor_axis_b_local: Vector3 = grip_center_node.get_meta("grip_shell_minor_axis_b_local", Vector3.UP) as Vector3
+	var minor_axis_a_local: Vector3 = _resolve_grip_shell_axis_local(
+		grip_center_node,
+		&"grip_shell_minor_axis_a_local",
+		&"grip_shell_minor_axis_a_origin_id",
+		Vector3.RIGHT
+	)
+	var minor_axis_b_local: Vector3 = _resolve_grip_shell_axis_local(
+		grip_center_node,
+		&"grip_shell_minor_axis_b_local",
+		&"grip_shell_minor_axis_b_origin_id",
+		Vector3.UP
+	)
 	var minor_axis_a_world: Vector3 = (grip_center_node.global_basis * minor_axis_a_local).normalized()
 	var minor_axis_b_world: Vector3 = (grip_center_node.global_basis * minor_axis_b_local).normalized()
 	if minor_axis_a_world.length_squared() <= 0.000001:

@@ -39,6 +39,9 @@ func _run_verification() -> void:
 	root.add_child(player)
 	await process_frame
 	await physics_frame
+	player.set_weapons_drawn(true)
+	await process_frame
+	await physics_frame
 	await process_frame
 	await physics_frame
 
@@ -50,6 +53,13 @@ func _run_verification() -> void:
 		else {}
 	)
 	var pose_state: Dictionary = idle_debug.get("last_runtime_idle_pose_state", {}) as Dictionary
+	var idle_primary_grip_alignment_error: float = float(pose_state.get("primary_grip_alignment_error_meters", -1.0))
+	var idle_compile_ok: bool = (
+		bool(idle_debug.get("active", false))
+		and int(idle_debug.get("runtime_compile_source_node_count", 0)) == 1
+		and int(idle_debug.get("runtime_compile_effective_node_count", 0)) >= 1
+		and int(idle_debug.get("runtime_compile_retargeted_count", 0)) >= 1
+	)
 
 	player.set_weapons_drawn(false)
 	await physics_frame
@@ -105,7 +115,12 @@ func _run_verification() -> void:
 	lines.append("idle_runtime_clip_active=%s" % str(bool(idle_debug.get("runtime_clip_active", false))))
 	var idle_clip_debug: Dictionary = idle_debug.get("runtime_clip_debug_state", {}) as Dictionary
 	lines.append("idle_runtime_clip_frame_count=%d" % int(idle_clip_debug.get("frame_count", 0)))
+	lines.append("idle_runtime_compile_ok=%s" % str(idle_compile_ok))
+	lines.append("idle_runtime_compile_source_node_count=%d" % int(idle_debug.get("runtime_compile_source_node_count", -1)))
+	lines.append("idle_runtime_compile_effective_node_count=%d" % int(idle_debug.get("runtime_compile_effective_node_count", -1)))
+	lines.append("idle_runtime_compile_retargeted_count=%d" % int(idle_debug.get("runtime_compile_retargeted_count", -1)))
 	lines.append("idle_pose_has_tip=%s" % str(pose_state.has("tip_position_local")))
+	lines.append("idle_primary_grip_alignment_error_meters=%.4f" % idle_primary_grip_alignment_error)
 	lines.append("upper_body_authoring_active=%s" % str(bool(rig_state.get("active", false))))
 	lines.append("runtime_skill_active=%s" % str(player.is_runtime_skill_playback_active()))
 	lines.append("stowed_idle_resolved=%s" % str(bool(stowed_idle_result.get("success", false))))

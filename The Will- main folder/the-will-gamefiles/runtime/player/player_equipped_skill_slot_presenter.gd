@@ -105,6 +105,7 @@ func resolve_runtime_skill_slot(
 	result["preferred_grip_style_mode"] = draft.preferred_grip_style_mode
 	result["motion_node_count"] = draft.motion_node_chain.size()
 	result["motion_node_chain"] = draft.motion_node_chain
+	result["baked_runtime_clip"] = draft.baked_runtime_clip
 	result["preview_playback_speed_scale"] = draft.preview_playback_speed_scale
 	result["speed_acceleration_percent"] = draft.speed_acceleration_percent
 	result["speed_deceleration_percent"] = draft.speed_deceleration_percent
@@ -181,6 +182,7 @@ func resolve_runtime_idle_pose(
 		)
 		result["motion_node_count"] = draft.motion_node_chain.size() if draft != null else 0
 		result["motion_node_chain"] = draft.motion_node_chain if draft != null else []
+		result["baked_runtime_clip"] = draft.baked_runtime_clip if draft != null else null
 		result["speed_acceleration_percent"] = draft.speed_acceleration_percent if draft != null else CombatAnimationDraft.DEFAULT_SPEED_ACCELERATION_PERCENT
 		result["speed_deceleration_percent"] = draft.speed_deceleration_percent if draft != null else CombatAnimationDraft.DEFAULT_SPEED_DECELERATION_PERCENT
 		result["preview_loop_enabled"] = bool(draft.preview_loop_enabled) if draft != null else false
@@ -206,6 +208,7 @@ func resolve_runtime_idle_pose(
 	result["preferred_grip_style_mode"] = draft.preferred_grip_style_mode
 	result["motion_node_count"] = draft.motion_node_chain.size()
 	result["motion_node_chain"] = draft.motion_node_chain
+	result["baked_runtime_clip"] = draft.baked_runtime_clip
 	result["preview_playback_speed_scale"] = draft.preview_playback_speed_scale
 	result["speed_acceleration_percent"] = draft.speed_acceleration_percent
 	result["speed_deceleration_percent"] = draft.speed_deceleration_percent

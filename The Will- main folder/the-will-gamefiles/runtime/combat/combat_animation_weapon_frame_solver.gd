@@ -1,6 +1,8 @@
 extends RefCounted
 class_name CombatAnimationWeaponFrameSolver
 
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+
 ## Clean weapon-frame solve for the Skill Crafter rebuild.
 ## The authored segment owns weapon placement; no separate helper surface is
 ## part of this authority path.
@@ -13,8 +15,12 @@ func solve_transform_from_segment(
 	local_up_reference: Vector3,
 	authoring_root_basis: Basis,
 	weapon_orientation_degrees: Vector3,
-	weapon_roll_degrees: float
+	weapon_roll_degrees: float,
+	tip_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+	pommel_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+	up_reference_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 ) -> Transform3D:
+	_validate_weapon_frame_origin_ids(tip_origin_id, pommel_origin_id, up_reference_origin_id)
 	var local_axis: Vector3 = _resolve_safe_axis(local_tip - local_pommel, Vector3.FORWARD)
 	var world_axis: Vector3 = _resolve_safe_axis(authored_tip_world - authored_pommel_world, authoring_root_basis.z.normalized())
 	var local_basis: Basis = _build_basis_from_axis_and_up(local_axis, local_up_reference)
@@ -37,8 +43,12 @@ func solve_transform_from_tip_and_grip(
 	local_up_reference: Vector3,
 	authoring_root_basis: Basis,
 	weapon_orientation_degrees: Vector3,
-	weapon_roll_degrees: float
+	weapon_roll_degrees: float,
+	tip_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+	grip_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+	up_reference_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 ) -> Transform3D:
+	_validate_weapon_frame_origin_ids(tip_origin_id, grip_origin_id, up_reference_origin_id)
 	var local_axis: Vector3 = _resolve_safe_axis(local_tip - local_grip, Vector3.FORWARD)
 	var world_axis: Vector3 = _resolve_safe_axis(authored_tip_world - authored_grip_world, authoring_root_basis.z.normalized())
 	var local_basis: Basis = _build_basis_from_axis_and_up(local_axis, local_up_reference)
@@ -52,6 +62,20 @@ func solve_transform_from_tip_and_grip(
 	var solved_basis: Basis = (world_basis * local_basis.inverse()).orthonormalized()
 	var solved_origin: Vector3 = authored_grip_world - solved_basis * local_grip
 	return Transform3D(solved_basis, solved_origin)
+
+func _validate_weapon_frame_origin_ids(
+	first_origin_id: StringName,
+	second_origin_id: StringName,
+	up_reference_origin_id: StringName
+) -> void:
+	_normalize_weapon_frame_origin_id(first_origin_id)
+	_normalize_weapon_frame_origin_id(second_origin_id)
+	_normalize_weapon_frame_origin_id(up_reference_origin_id)
+
+func _normalize_weapon_frame_origin_id(origin_id: StringName) -> StringName:
+	if origin_id != StringName():
+		return origin_id
+	return CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 
 func _resolve_safe_axis(axis: Vector3, fallback: Vector3) -> Vector3:
 	if axis.length_squared() > 0.000001:

@@ -3,6 +3,7 @@ extends SceneTree
 const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
 const CombatAnimationRetargetNodeScript = preload("res://core/models/combat_animation_retarget_node.gd")
 const CombatAnimationRetargetResolverScript = preload("res://core/resolvers/combat_animation_retarget_resolver.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
 const RESULT_FILE_PATH := "C:/WORKSPACE/combat_retarget_resolver_results.txt"
 const EPSILON := 0.001
@@ -24,6 +25,7 @@ func _run_verification() -> void:
 	source_node.weapon_roll_degrees = 35.0
 	source_node.axial_reposition_offset = 0.07
 	source_node.grip_seat_slide_offset = -0.03
+	source_node.secondary_grip_seat_slide_offset = 0.28
 	source_node.body_support_blend = 0.42
 	source_node.transition_duration_seconds = 0.27
 	source_node.preferred_grip_style_mode = &"grip_reverse"
@@ -125,6 +127,8 @@ func _run_verification() -> void:
 		and StringName(same_length_values.get("two_hand_state", &"")) == source_node.two_hand_state
 		and StringName(same_length_values.get("primary_hand_slot", &"")) == source_node.primary_hand_slot
 		and _float_close(float(same_length_values.get("transition_duration_seconds", -1.0)), source_node.transition_duration_seconds)
+		and _float_close(float(same_length_values.get("grip_seat_slide_offset", 999.0)), source_node.grip_seat_slide_offset)
+		and _float_close(float(same_length_values.get("secondary_grip_seat_slide_offset", 999.0)), source_node.secondary_grip_seat_slide_offset)
 	)
 	var curve_handles_roundtrip_ok: bool = (
 		_vector_close(same_length_values.get("tip_curve_in_handle", Vector3.INF) as Vector3, source_node.tip_curve_in_handle)
@@ -151,10 +155,32 @@ func _run_verification() -> void:
 		and _float_close(float(chain_node.retarget_node.source_weapon_length_meters), source_length * 2.0)
 		and int(stable_second_pass.get("retargeted_count", 0)) == 0
 	)
+	var retarget_origin_ids_ok: bool = (
+		retarget_node != null
+		and retarget_node.origin_id == CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE
+		and retarget_node.parent_origin_id == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and retarget_node.pivot_direction_origin_id == CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE
+		and retarget_node.weapon_axis_origin_id == CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE
+	)
+	var resolved_values_origin_ids_ok: bool = (
+		StringName(same_length_values.get("origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE
+		and StringName(same_length_values.get("parent_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and StringName(same_length_values.get("origin_local_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and StringName(same_length_values.get("tip_position_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and StringName(same_length_values.get("pommel_position_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and StringName(same_length_values.get("pivot_position_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	var applied_origin_ids_ok: bool = (
+		applied_node.tip_position_origin_id == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and applied_node.pommel_position_origin_id == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 	var all_checks_passed: bool = (
 		retarget_node != null
 		and retarget_node.enabled
 		and retarget_node.origin_space == CombatAnimationRetargetNodeScript.ORIGIN_SPACE_TORSO_FRAME
+		and retarget_origin_ids_ok
+		and resolved_values_origin_ids_ok
+		and applied_origin_ids_ok
 		and bool(same_length_values.get("retarget_resolved", false))
 		and same_tip_ok
 		and same_pommel_ok
@@ -173,6 +199,9 @@ func _run_verification() -> void:
 	lines.append("retarget_node_created=%s" % str(retarget_node != null))
 	lines.append("retarget_node_enabled=%s" % str(retarget_node.enabled if retarget_node != null else false))
 	lines.append("origin_space=%s" % String(retarget_node.origin_space if retarget_node != null else StringName()))
+	lines.append("retarget_origin_ids_ok=%s" % str(retarget_origin_ids_ok))
+	lines.append("resolved_values_origin_ids_ok=%s" % str(resolved_values_origin_ids_ok))
+	lines.append("applied_origin_ids_ok=%s" % str(applied_origin_ids_ok))
 	lines.append("pivot_range_percent=%.4f" % float(retarget_node.pivot_range_percent if retarget_node != null else -1.0))
 	lines.append("same_length_tip_roundtrip_ok=%s" % str(same_tip_ok))
 	lines.append("same_length_pommel_roundtrip_ok=%s" % str(same_pommel_ok))

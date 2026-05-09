@@ -2,6 +2,7 @@ extends SceneTree
 
 const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
 const CombatAnimationRuntimeChainCompilerScript = preload("res://core/resolvers/combat_animation_runtime_chain_compiler.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
 const RESULT_FILE_PATH := "C:/WORKSPACE/combat_runtime_chain_compiler_results.txt"
 const EPSILON := 0.001
@@ -40,8 +41,19 @@ func _run_verification() -> void:
 			"two_hand_allowed": true,
 		}
 	)
+	var idle_result: Dictionary = compiler.call(
+		"compile_idle_chain",
+		[authored_chain[0]],
+		0.8,
+		volume_config,
+		{
+			"support_hand_available": false,
+			"two_hand_allowed": false,
+		}
+	)
 	var blocked_chain: Array = blocked_result.get("motion_node_chain", []) as Array
 	var allowed_chain: Array = allowed_result.get("motion_node_chain", []) as Array
+	var idle_chain: Array = idle_result.get("motion_node_chain", []) as Array
 	var blocked_bridge = blocked_chain[1] if blocked_chain.size() > 1 else null
 	var blocked_second = blocked_chain[2] if blocked_chain.size() > 2 else null
 	var allowed_bridge = allowed_chain[1] if allowed_chain.size() > 1 else null
@@ -85,6 +97,25 @@ func _run_verification() -> void:
 		and int(blocked_result.get("retarget_seeded_count", 0)) == authored_chain.size()
 		and int(blocked_result.get("retargeted_count", 0)) == authored_chain.size()
 	)
+	var idle_single_node_compile_ok: bool = (
+		bool(idle_result.get("compiled", false))
+		and idle_chain.size() == 1
+		and idle_chain[0] != authored_chain[0]
+		and _chain_lengths_match(idle_chain, 0.8)
+		and int(idle_result.get("retarget_seeded_count", 0)) == 1
+		and int(idle_result.get("retargeted_count", 0)) == 1
+		and int(idle_result.get("hand_swap_bridge_count", -1)) == 0
+	)
+	var origin_metadata_ok: bool = (
+		_result_origin_metadata_ok(blocked_result)
+		and _result_origin_metadata_ok(allowed_result)
+		and _result_origin_metadata_ok(idle_result)
+	)
+	var compiled_node_origin_ids_ok: bool = (
+		_chain_origin_ids_ok(blocked_chain)
+		and _chain_origin_ids_ok(allowed_chain)
+		and _chain_origin_ids_ok(idle_chain)
+	)
 	var all_checks_passed: bool = (
 		compiled_ok
 		and duplicated_ok
@@ -93,6 +124,9 @@ func _run_verification() -> void:
 		and allowed_preserves_two_hand_ok
 		and hand_swap_bridge_ok
 		and retarget_ok
+		and idle_single_node_compile_ok
+		and origin_metadata_ok
+		and compiled_node_origin_ids_ok
 	)
 
 	var lines: PackedStringArray = []
@@ -103,10 +137,16 @@ func _run_verification() -> void:
 	lines.append("allowed_preserves_two_hand_ok=%s" % str(allowed_preserves_two_hand_ok))
 	lines.append("hand_swap_bridge_ok=%s" % str(hand_swap_bridge_ok))
 	lines.append("retarget_ok=%s" % str(retarget_ok))
+	lines.append("idle_single_node_compile_ok=%s" % str(idle_single_node_compile_ok))
+	lines.append("origin_metadata_ok=%s" % str(origin_metadata_ok))
+	lines.append("compiled_node_origin_ids_ok=%s" % str(compiled_node_origin_ids_ok))
 	lines.append("blocked_degraded_node_count=%d" % int(blocked_result.get("degraded_node_count", -1)))
 	lines.append("blocked_hand_swap_bridge_count=%d" % int(blocked_result.get("hand_swap_bridge_count", -1)))
 	lines.append("blocked_retarget_seeded_count=%d" % int(blocked_result.get("retarget_seeded_count", -1)))
 	lines.append("blocked_retargeted_count=%d" % int(blocked_result.get("retargeted_count", -1)))
+	lines.append("idle_effective_node_count=%d" % int(idle_result.get("effective_node_count", -1)))
+	lines.append("idle_retarget_seeded_count=%d" % int(idle_result.get("retarget_seeded_count", -1)))
+	lines.append("idle_retargeted_count=%d" % int(idle_result.get("retargeted_count", -1)))
 	lines.append("all_checks_passed=%s" % str(all_checks_passed))
 
 	var file: FileAccess = FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)
@@ -146,6 +186,26 @@ func _chain_lengths_match(chain: Array, expected_length: float) -> bool:
 		if absf(node.tip_position_local.distance_to(node.pommel_position_local) - expected_length) > EPSILON:
 			return false
 	return true
+
+func _chain_origin_ids_ok(chain: Array) -> bool:
+	if chain.is_empty():
+		return false
+	for node_variant: Variant in chain:
+		var node = node_variant
+		if node == null:
+			return false
+		if node.tip_position_origin_id != CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING:
+			return false
+		if node.pommel_position_origin_id != CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING:
+			return false
+	return true
+
+func _result_origin_metadata_ok(result: Dictionary) -> bool:
+	return (
+		StringName(result.get("trajectory_volume_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER
+		and StringName(result.get("trajectory_volume_parent_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and StringName(result.get("trajectory_volume_origin_local_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 
 func _diagnostics_have_code(diagnostics: Array, code: StringName) -> bool:
 	for diagnostic_variant: Variant in diagnostics:

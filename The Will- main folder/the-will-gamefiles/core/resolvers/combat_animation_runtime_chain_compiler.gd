@@ -3,6 +3,7 @@ class_name CombatAnimationRuntimeChainCompiler
 
 const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
 const CombatAnimationRetargetResolverScript = preload("res://core/resolvers/combat_animation_retarget_resolver.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
 const DIAG_TWO_HAND_DEGRADED: StringName = &"two_hand_degraded_to_one_hand"
 const DIAG_AUTO_TWO_HAND_RESOLVED_ONE_HAND: StringName = &"auto_two_hand_resolved_one_hand"
@@ -17,26 +18,54 @@ func compile_skill_chain(
 	volume_config: Dictionary = {},
 	equipment_context: Dictionary = {}
 ) -> Dictionary:
-	var result: Dictionary = {
-		"compiled": false,
-		"motion_node_chain": [],
-		"diagnostics": [],
-		"source_node_count": authored_motion_node_chain.size(),
-		"effective_node_count": 0,
-		"retarget_seeded_count": 0,
-		"retargeted_count": 0,
-		"degraded_node_count": 0,
-		"hand_swap_bridge_count": 0,
-		"saved_authoring_mutated": false,
-	}
+	return _compile_motion_chain(
+		authored_motion_node_chain,
+		current_weapon_length_meters,
+		volume_config,
+		equipment_context,
+		2,
+		&"too_few_runtime_nodes",
+		"Runtime chain needs at least 2 motion nodes."
+	)
+
+func compile_idle_chain(
+	authored_motion_node_chain: Array,
+	current_weapon_length_meters: float,
+	volume_config: Dictionary = {},
+	equipment_context: Dictionary = {}
+) -> Dictionary:
+	return _compile_motion_chain(
+		authored_motion_node_chain,
+		current_weapon_length_meters,
+		volume_config,
+		equipment_context,
+		1,
+		&"no_runtime_idle_nodes",
+		"Runtime idle needs at least 1 motion node."
+	)
+
+func _compile_motion_chain(
+	authored_motion_node_chain: Array,
+	current_weapon_length_meters: float,
+	volume_config: Dictionary,
+	equipment_context: Dictionary,
+	minimum_node_count: int,
+	too_few_nodes_code: StringName,
+	too_few_nodes_message: String
+) -> Dictionary:
+	var result: Dictionary = _build_base_compile_result(authored_motion_node_chain.size())
+	var resolved_volume_config: Dictionary = _normalize_volume_config(volume_config)
+	result["trajectory_volume_origin_id"] = resolved_volume_config.get("origin_id", CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER)
+	result["trajectory_volume_parent_origin_id"] = resolved_volume_config.get("parent_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	result["trajectory_volume_origin_local_origin_id"] = resolved_volume_config.get("origin_local_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
 	var effective_chain: Array = _duplicate_motion_node_chain(authored_motion_node_chain)
-	if effective_chain.size() < 2:
-		result["diagnostics"].append(_make_diagnostic(&"error", &"too_few_runtime_nodes", -1, "Runtime chain needs at least 2 motion nodes."))
+	if effective_chain.size() < minimum_node_count:
+		result["diagnostics"].append(_make_diagnostic(&"error", too_few_nodes_code, -1, too_few_nodes_message))
 		return result
 	var retarget_result: Dictionary = retarget_resolver.retarget_motion_chain_for_weapon_length(
 		effective_chain,
 		current_weapon_length_meters,
-		volume_config,
+		resolved_volume_config,
 		0.001,
 		true
 	)
@@ -51,10 +80,27 @@ func compile_skill_chain(
 		motion_node.node_index = node_index
 		if motion_node.has_method("normalize"):
 			motion_node.call("normalize")
-	result["compiled"] = effective_chain.size() >= 2
+	result["compiled"] = effective_chain.size() >= minimum_node_count
 	result["motion_node_chain"] = effective_chain
 	result["effective_node_count"] = effective_chain.size()
 	return result
+
+func _build_base_compile_result(source_node_count: int) -> Dictionary:
+	return {
+		"compiled": false,
+		"motion_node_chain": [],
+		"diagnostics": [],
+		"source_node_count": source_node_count,
+		"effective_node_count": 0,
+		"retarget_seeded_count": 0,
+		"retargeted_count": 0,
+		"degraded_node_count": 0,
+		"hand_swap_bridge_count": 0,
+		"saved_authoring_mutated": false,
+		"trajectory_volume_origin_id": CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER,
+		"trajectory_volume_parent_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+		"trajectory_volume_origin_local_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+	}
 
 func _duplicate_motion_node_chain(authored_motion_node_chain: Array) -> Array:
 	var duplicated_chain: Array = []
@@ -168,3 +214,32 @@ func _make_diagnostic(
 		"node_index": node_index,
 		"message": message,
 	}
+
+func _normalize_volume_config(volume_config: Dictionary) -> Dictionary:
+	var config: Dictionary = volume_config.duplicate(true)
+	var parent_origin_id: StringName = StringName(config.get(
+		"parent_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	))
+	if parent_origin_id == StringName():
+		parent_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	config["parent_origin_id"] = parent_origin_id
+	var origin_id: StringName = StringName(config.get(
+		"origin_id",
+		CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER
+	))
+	if origin_id == StringName():
+		origin_id = CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER
+	config["origin_id"] = origin_id
+	if not config.has("origin_local"):
+		config["origin_local"] = Vector3.ZERO
+	var origin_local_origin_id: StringName = StringName(config.get("origin_local_origin_id", parent_origin_id))
+	if origin_local_origin_id == StringName():
+		origin_local_origin_id = parent_origin_id
+	config["origin_local_origin_id"] = origin_local_origin_id
+	if config.has("fallback_direction_local"):
+		var fallback_direction_origin_id: StringName = StringName(config.get("fallback_direction_origin_id", parent_origin_id))
+		if fallback_direction_origin_id == StringName():
+			fallback_direction_origin_id = parent_origin_id
+		config["fallback_direction_origin_id"] = fallback_direction_origin_id
+	return config

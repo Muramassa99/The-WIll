@@ -1,6 +1,8 @@
 extends Resource
 class_name CombatAnimationDraft
 
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+
 const DRAFT_KIND_SKILL: StringName = &"draft_skill"
 const DRAFT_KIND_IDLE: StringName = &"draft_idle"
 const IDLE_CONTEXT_COMBAT: StringName = &"idle_combat"
@@ -36,6 +38,7 @@ const DEFAULT_STOW_CONTACT_RATIO := 0.5
 @export_range(0.0, 1.0, 0.01) var stow_contact_ratio: float = DEFAULT_STOW_CONTACT_RATIO
 @export var authored_for_two_hand_only: bool = false
 @export var motion_node_chain: Array[Resource] = []
+@export var baked_runtime_clip: Resource = null
 @export var selected_motion_node_index: int = 0
 @export var continuity_motion_node_index: int = 0
 @export_range(0.0, 3.0, 0.01) var preview_playback_speed_scale: float = 1.0
@@ -114,10 +117,14 @@ static func create_default_skill_baseline(
 	draft.draft_kind = DRAFT_KIND_SKILL
 	draft.owning_skill_id = skill_id
 	draft.legal_slot_id = slot_id
-	draft.motion_node_chain = [
-		_build_default_motion_node(0, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3(0.0, 0.0, -0.04)),
-		_build_default_motion_node(1, Vector3(0.0, 0.0, -0.12), Vector3(0.0, 0.0, -0.12), Vector3(0.0, 0.0, 0.04), Vector3.ZERO),
-	]
+	var default_nodes: Array[Resource] = []
+	var node_0: Resource = _build_default_motion_node(0, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3(0.0, 0.0, -0.04)) as Resource
+	var node_1: Resource = _build_default_motion_node(1, Vector3(0.0, 0.0, -0.12), Vector3(0.0, 0.0, -0.12), Vector3(0.0, 0.0, 0.04), Vector3.ZERO) as Resource
+	if node_0 != null:
+		default_nodes.append(node_0)
+	if node_1 != null:
+		default_nodes.append(node_1)
+	draft.motion_node_chain = default_nodes
 	draft.normalize()
 	return draft
 
@@ -135,9 +142,20 @@ static func create_default_idle_baseline(
 	draft.draft_kind = DRAFT_KIND_IDLE
 	draft.context_id = idle_context_id
 	draft.preview_loop_enabled = true
-	draft.motion_node_chain = [
-		_build_default_motion_node(0, Vector3.ZERO, Vector3.ZERO),
-	]
+	var default_origin_id: StringName = _resolve_default_motion_node_origin_id(DRAFT_KIND_IDLE, idle_context_id)
+	var default_nodes: Array[Resource] = []
+	var node_0: Resource = _build_default_motion_node(
+		0,
+		Vector3.ZERO,
+		Vector3.ZERO,
+		Vector3.ZERO,
+		Vector3.ZERO,
+		default_origin_id,
+		default_origin_id
+	) as Resource
+	if node_0 != null:
+		default_nodes.append(node_0)
+	draft.motion_node_chain = default_nodes
 	draft.normalize()
 	return draft
 
@@ -146,20 +164,36 @@ static func _build_default_motion_node(
 	tip_position: Vector3,
 	pommel_position: Vector3,
 	tip_curve_in: Vector3 = Vector3.ZERO,
-	tip_curve_out: Vector3 = Vector3.ZERO
+	tip_curve_out: Vector3 = Vector3.ZERO,
+	tip_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+	pommel_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 ):
 	var node_script: Script = load("res://core/models/combat_animation_motion_node.gd") as Script
 	var motion_node = node_script.new() if node_script != null else null
 	if motion_node == null:
 		return null
+	var resolved_tip_origin_id: StringName = _normalize_motion_node_position_origin_id(tip_position_origin_id)
+	var resolved_pommel_origin_id: StringName = _normalize_motion_node_position_origin_id(pommel_position_origin_id)
 	motion_node.node_index = index
 	motion_node.node_id = StringName("motion_node_%02d" % index)
 	motion_node.tip_position_local = tip_position
+	motion_node.tip_position_origin_id = resolved_tip_origin_id
 	motion_node.pommel_position_local = pommel_position
+	motion_node.pommel_position_origin_id = resolved_pommel_origin_id
 	motion_node.tip_curve_in_handle = tip_curve_in
 	motion_node.tip_curve_out_handle = tip_curve_out
 	motion_node.normalize()
 	return motion_node
+
+static func _normalize_motion_node_position_origin_id(origin_id: StringName) -> StringName:
+	if origin_id == StringName():
+		return CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	return origin_id
+
+static func _resolve_default_motion_node_origin_id(draft_kind_value: StringName, context_id_value: StringName) -> StringName:
+	if draft_kind_value == DRAFT_KIND_IDLE and context_id_value == IDLE_CONTEXT_NONCOMBAT:
+		return CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+	return CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 
 func normalize() -> void:
 	if not get_draft_kind_ids().has(draft_kind):
@@ -198,12 +232,29 @@ func ensure_minimum_baseline_nodes() -> void:
 		normalize()
 		return
 	if draft_kind == DRAFT_KIND_IDLE:
-		motion_node_chain = [_build_default_motion_node(0, Vector3.ZERO, Vector3.ZERO)]
+		var default_idle_origin_id: StringName = _resolve_default_motion_node_origin_id(draft_kind, context_id)
+		var default_idle_nodes: Array[Resource] = []
+		var idle_node: Resource = _build_default_motion_node(
+			0,
+			Vector3.ZERO,
+			Vector3.ZERO,
+			Vector3.ZERO,
+			Vector3.ZERO,
+			default_idle_origin_id,
+			default_idle_origin_id
+		) as Resource
+		if idle_node != null:
+			default_idle_nodes.append(idle_node)
+		motion_node_chain = default_idle_nodes
 	else:
-		motion_node_chain = [
-			_build_default_motion_node(0, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3(0.0, 0.0, -0.04)),
-			_build_default_motion_node(1, Vector3(0.0, 0.0, -0.12), Vector3(0.0, 0.0, -0.12), Vector3(0.0, 0.0, 0.04), Vector3.ZERO),
-		]
+		var default_skill_nodes: Array[Resource] = []
+		var skill_node_0: Resource = _build_default_motion_node(0, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3(0.0, 0.0, -0.04)) as Resource
+		var skill_node_1: Resource = _build_default_motion_node(1, Vector3(0.0, 0.0, -0.12), Vector3(0.0, 0.0, -0.12), Vector3(0.0, 0.0, 0.04), Vector3.ZERO) as Resource
+		if skill_node_0 != null:
+			default_skill_nodes.append(skill_node_0)
+		if skill_node_1 != null:
+			default_skill_nodes.append(skill_node_1)
+		motion_node_chain = default_skill_nodes
 	normalize()
 
 func needs_weapon_geometry_seed() -> bool:
@@ -230,8 +281,12 @@ func apply_weapon_geometry_seed(seed_data: Dictionary, force_reseed: bool = fals
 	if not force_reseed and not needs_weapon_geometry_seed():
 		return false
 	var tip_position: Vector3 = seed_data.get("tip_position_local", Vector3.ZERO) as Vector3
+	var tip_position_origin_id: StringName = StringName(seed_data.get("tip_position_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING))
 	var pommel_position: Vector3 = seed_data.get("pommel_position_local", Vector3.ZERO) as Vector3
+	var pommel_position_origin_id: StringName = StringName(seed_data.get("pommel_position_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING))
 	if draft_kind == DRAFT_KIND_IDLE and context_id == IDLE_CONTEXT_NONCOMBAT:
+		tip_position_origin_id = CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
+		pommel_position_origin_id = CombatOriginRecordScript.ORIGIN_STOW_ANCHOR
 		var stow_axis: Vector3 = tip_position - pommel_position
 		if stow_axis.length_squared() <= 0.000001:
 			stow_axis = Vector3.FORWARD
@@ -251,6 +306,10 @@ func apply_weapon_geometry_seed(seed_data: Dictionary, force_reseed: bool = fals
 		"grip_seat_slide_offset",
 		CombatAnimationMotionNode.DEFAULT_GRIP_SEAT_SLIDE_OFFSET
 	))
+	var secondary_grip_seat_slide_offset: float = float(seed_data.get(
+		"secondary_grip_seat_slide_offset",
+		CombatAnimationMotionNode.DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET
+	))
 	var body_support_blend: float = clampf(float(seed_data.get("body_support_blend", 0.0)), 0.0, 1.0)
 	var right_upperarm_roll_degrees: float = clampf(float(seed_data.get("right_upperarm_roll_degrees", 0.0)), -180.0, 180.0)
 	var left_upperarm_roll_degrees: float = clampf(float(seed_data.get("left_upperarm_roll_degrees", 0.0)), -180.0, 180.0)
@@ -266,7 +325,15 @@ func apply_weapon_geometry_seed(seed_data: Dictionary, force_reseed: bool = fals
 	authored_for_two_hand_only = authored_two_hand_only
 	motion_node_chain.clear()
 	for node_index: int in range(baseline_count):
-		var motion_node = _build_default_motion_node(node_index, tip_position, pommel_position)
+		var motion_node = _build_default_motion_node(
+			node_index,
+			tip_position,
+			pommel_position,
+			Vector3.ZERO,
+			Vector3.ZERO,
+			tip_position_origin_id,
+			pommel_position_origin_id
+		)
 		if motion_node == null:
 			continue
 		motion_node.weapon_orientation_degrees = weapon_orientation_degrees
@@ -274,6 +341,7 @@ func apply_weapon_geometry_seed(seed_data: Dictionary, force_reseed: bool = fals
 		motion_node.weapon_roll_degrees = weapon_roll_degrees
 		motion_node.axial_reposition_offset = axial_reposition_offset
 		motion_node.grip_seat_slide_offset = grip_seat_slide_offset
+		motion_node.secondary_grip_seat_slide_offset = secondary_grip_seat_slide_offset
 		motion_node.body_support_blend = body_support_blend
 		motion_node.right_upperarm_roll_degrees = right_upperarm_roll_degrees
 		motion_node.left_upperarm_roll_degrees = left_upperarm_roll_degrees
@@ -474,6 +542,8 @@ func _matches_clean_skill_seed_pair(node_0: CombatAnimationMotionNode, node_1: C
 		and absf(node_1.axial_reposition_offset) <= LEGACY_BASELINE_EPSILON
 		and _matches_clean_grip_seat_slide(node_0.grip_seat_slide_offset)
 		and _matches_clean_grip_seat_slide(node_1.grip_seat_slide_offset)
+		and absf(node_0.secondary_grip_seat_slide_offset) <= LEGACY_BASELINE_EPSILON
+		and absf(node_1.secondary_grip_seat_slide_offset) <= LEGACY_BASELINE_EPSILON
 		and absf(node_0.body_support_blend) <= LEGACY_BASELINE_EPSILON
 		and absf(node_1.body_support_blend) <= LEGACY_BASELINE_EPSILON
 		and absf(node_0.right_upperarm_roll_degrees) <= LEGACY_BASELINE_EPSILON

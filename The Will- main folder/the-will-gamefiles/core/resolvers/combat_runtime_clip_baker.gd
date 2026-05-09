@@ -4,6 +4,7 @@ class_name CombatRuntimeClipBaker
 const CombatRuntimeClipScript = preload("res://core/models/combat_runtime_clip.gd")
 const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
 const CombatAnimationChainPlayerScript = preload("res://runtime/combat/combat_animation_chain_player.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
 const DEFAULT_SAMPLE_RATE_HZ := 30.0
 
@@ -24,11 +25,24 @@ func bake_from_motion_node_chain(motion_node_chain: Array, options: Dictionary =
 	clip.retargeted_count = int(options.get("retargeted_count", 0))
 	clip.degraded_node_count = int(options.get("degraded_node_count", 0))
 	clip.hand_swap_bridge_count = int(options.get("hand_swap_bridge_count", 0))
+	var trajectory_volume_config: Dictionary = _normalize_trajectory_volume_config(
+		options.get("trajectory_volume_config", {}) as Dictionary
+	)
+	var baked_positions_origin_id: StringName = StringName(trajectory_volume_config.get(
+		"parent_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	))
+	clip.baked_tip_positions_origin_id = StringName(options.get("baked_tip_positions_origin_id", baked_positions_origin_id))
+	clip.baked_pommel_positions_origin_id = StringName(options.get("baked_pommel_positions_origin_id", baked_positions_origin_id))
+	clip.baked_contact_grip_axes_origin_id = StringName(options.get("baked_contact_grip_axes_origin_id", baked_positions_origin_id))
+	clip.solved_replay_reference_origin_id = StringName(options.get("solved_replay_reference_origin_id", CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE))
+	clip.baked_solved_weapon_reference_origin_id = StringName(options.get("baked_solved_weapon_reference_origin_id", CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE))
+	clip.baked_solved_anchor_origin_id = StringName(options.get("baked_solved_anchor_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT))
 	clip.motion_node_chain = _duplicate_motion_node_chain(motion_node_chain)
 	clip.total_duration_seconds = _resolve_total_duration_seconds(clip.motion_node_chain)
 	_sample_clip_frames(
 		clip,
-		options.get("trajectory_volume_config", {}) as Dictionary
+		trajectory_volume_config
 	)
 	clip.normalize()
 	return clip
@@ -137,6 +151,7 @@ func _clear_frame_data(clip) -> void:
 	clip.baked_weapon_roll_degrees.clear()
 	clip.baked_axial_reposition_offsets.clear()
 	clip.baked_grip_seat_slide_offsets.clear()
+	clip.baked_secondary_grip_seat_slide_offsets.clear()
 	clip.baked_body_support_blends.clear()
 	clip.baked_right_upperarm_roll_degrees.clear()
 	clip.baked_left_upperarm_roll_degrees.clear()
@@ -145,6 +160,23 @@ func _clear_frame_data(clip) -> void:
 	clip.baked_two_hand_states.clear()
 	clip.baked_primary_hand_slots.clear()
 	clip.baked_grip_style_modes.clear()
+	clip.baked_upper_body_bone_names.clear()
+	clip.baked_upper_body_bone_pose_rotations.clear()
+	clip.upper_body_pose_track_source = StringName()
+	clip.solved_replay_track_source = StringName()
+	clip.solved_replay_reference_bone_name = CombatRuntimeClipScript.SOLVED_REPLAY_REFERENCE_BONE_NAME
+	clip.baked_solved_replay_frame_available.clear()
+	clip.baked_solved_upper_body_bone_names.clear()
+	clip.baked_solved_upper_body_pose_positions.clear()
+	clip.baked_solved_upper_body_pose_rotations.clear()
+	clip.baked_solved_upper_body_pose_scales.clear()
+	clip.baked_solved_weapon_positions_reference_local.clear()
+	clip.baked_solved_weapon_rotations_reference_local.clear()
+	clip.baked_solved_weapon_scales_reference_local.clear()
+	clip.baked_solved_anchor_node_paths.clear()
+	clip.baked_solved_anchor_positions_weapon_local.clear()
+	clip.baked_solved_anchor_rotations_weapon_local.clear()
+	clip.baked_solved_anchor_scales_weapon_local.clear()
 
 func _append_chain_player_frame(
 	clip,
@@ -158,6 +190,7 @@ func _append_chain_player_frame(
 	clip.baked_weapon_roll_degrees.append(chain_player.current_weapon_roll)
 	clip.baked_axial_reposition_offsets.append(chain_player.current_axial_reposition)
 	clip.baked_grip_seat_slide_offsets.append(chain_player.current_grip_seat_slide)
+	clip.baked_secondary_grip_seat_slide_offsets.append(chain_player.current_secondary_grip_seat_slide)
 	clip.baked_body_support_blends.append(chain_player.current_body_support_blend)
 	clip.baked_right_upperarm_roll_degrees.append(chain_player.current_right_upperarm_roll)
 	clip.baked_left_upperarm_roll_degrees.append(chain_player.current_left_upperarm_roll)
@@ -181,6 +214,7 @@ func _append_motion_node_frame(
 	clip.baked_weapon_roll_degrees.append(motion_node.weapon_roll_degrees)
 	clip.baked_axial_reposition_offsets.append(motion_node.axial_reposition_offset)
 	clip.baked_grip_seat_slide_offsets.append(motion_node.grip_seat_slide_offset)
+	clip.baked_secondary_grip_seat_slide_offsets.append(motion_node.secondary_grip_seat_slide_offset)
 	clip.baked_body_support_blends.append(motion_node.body_support_blend)
 	clip.baked_right_upperarm_roll_degrees.append(motion_node.right_upperarm_roll_degrees)
 	clip.baked_left_upperarm_roll_degrees.append(motion_node.left_upperarm_roll_degrees)
@@ -207,3 +241,31 @@ func _resolve_axis_between_positions(from_position: Vector3, to_position: Vector
 	if axis.length_squared() <= 0.000001:
 		return Vector3.ZERO
 	return axis.normalized()
+
+func _normalize_trajectory_volume_config(config: Dictionary) -> Dictionary:
+	var resolved_config: Dictionary = config.duplicate(true)
+	var parent_origin_id: StringName = StringName(resolved_config.get(
+		"parent_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	))
+	if parent_origin_id == StringName():
+		parent_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	resolved_config["parent_origin_id"] = parent_origin_id
+	var origin_id: StringName = StringName(resolved_config.get(
+		"origin_id",
+		CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER
+	))
+	if origin_id == StringName():
+		origin_id = CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER
+	resolved_config["origin_id"] = origin_id
+	if resolved_config.has("origin_local"):
+		var origin_local_origin_id: StringName = StringName(resolved_config.get("origin_local_origin_id", parent_origin_id))
+		if origin_local_origin_id == StringName():
+			origin_local_origin_id = parent_origin_id
+		resolved_config["origin_local_origin_id"] = origin_local_origin_id
+	if resolved_config.has("fallback_direction_local"):
+		var fallback_direction_origin_id: StringName = StringName(resolved_config.get("fallback_direction_origin_id", parent_origin_id))
+		if fallback_direction_origin_id == StringName():
+			fallback_direction_origin_id = parent_origin_id
+		resolved_config["fallback_direction_origin_id"] = fallback_direction_origin_id
+	return resolved_config

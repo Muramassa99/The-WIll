@@ -24,6 +24,8 @@ preview_loop_enabled = true
 [sub_resource type="Resource" id="Resource_371yp"]
 script = ExtResource("2_grdf4")
 node_id = &"motion_node_00"
+tip_position_origin_id = &"StowAnchorOrigin"
+pommel_position_origin_id = &"StowAnchorOrigin"
 
 [sub_resource type="Resource" id="Resource_ohha2"]
 script = ExtResource("3_uyuco")
@@ -1499,7 +1501,7 @@ script = ExtResource("1_1vjgr")
 wip_id = &"verify_two_hand_guidance_wip"
 forge_project_name = "Verify Two Hand Guidance Sword"
 creator_id = &"verify"
-created_timestamp = 1777633691.948
+created_timestamp = 1778352767.114
 combat_animation_station_state = SubResource("Resource_dnsja")
 forge_intent = &"intent_melee"
 equipment_context = &"ctx_weapon"

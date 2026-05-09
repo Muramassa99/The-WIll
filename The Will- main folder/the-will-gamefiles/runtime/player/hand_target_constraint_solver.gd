@@ -1,6 +1,7 @@
 extends RefCounted
 class_name HandTargetConstraintSolver
 
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const ClearanceProxyBuilderScript = preload("res://runtime/player/clearance_proxy_builder.gd")
 
 const BODY_RESTRICTION_COLLISION_LAYER := 1 << 25
@@ -127,6 +128,7 @@ func ensure_body_restriction_root(
 		"ChestRestrictionAttachment",
 		CHEST_BONE,
 		Vector3(0.0, 0.02, 0.03),
+		CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT,
 		0.21,
 		0.40,
 		Color(0.85, 0.20, 0.20, 0.18)
@@ -136,6 +138,7 @@ func ensure_body_restriction_root(
 		"AbdomenRestrictionAttachment",
 		ABDOMEN_BONE,
 		Vector3(0.0, 0.00, 0.02),
+		CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT,
 		0.18,
 		0.36,
 		Color(0.90, 0.52, 0.12, 0.18)
@@ -145,6 +148,7 @@ func ensure_body_restriction_root(
 		"HipRestrictionAttachment",
 		HIP_BONE,
 		Vector3(0.0, 0.00, 0.02),
+		CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT,
 		0.20,
 		0.32,
 		Color(0.20, 0.48, 0.90, 0.18)
@@ -154,6 +158,7 @@ func ensure_body_restriction_root(
 		"LeftShoulderRestrictionAttachment",
 		LEFT_SHOULDER_BONE,
 		Vector3(0.04, -0.02, 0.00),
+		CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT,
 		0.09,
 		0.22,
 		Color(0.55, 0.30, 0.90, 0.16)
@@ -163,6 +168,7 @@ func ensure_body_restriction_root(
 		"RightShoulderRestrictionAttachment",
 		RIGHT_SHOULDER_BONE,
 		Vector3(-0.04, -0.02, 0.00),
+		CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT,
 		0.09,
 		0.22,
 		Color(0.55, 0.30, 0.90, 0.16)
@@ -172,6 +178,7 @@ func ensure_body_restriction_root(
 		"LeftUpperarmRestrictionAttachment",
 		LEFT_UPPERARM_BONE,
 		Vector3(0.0, -0.13, 0.0),
+		CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT,
 		0.055,
 		0.26,
 		Color(0.20, 0.75, 0.45, 0.16)
@@ -181,6 +188,7 @@ func ensure_body_restriction_root(
 		"LeftForearmRestrictionAttachment",
 		LEFT_FOREARM_BONE,
 		Vector3(0.0, -0.12, 0.0),
+		CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT,
 		0.045,
 		0.24,
 		Color(0.20, 0.75, 0.45, 0.16)
@@ -190,6 +198,7 @@ func ensure_body_restriction_root(
 		"RightUpperarmRestrictionAttachment",
 		RIGHT_UPPERARM_BONE,
 		Vector3(0.0, -0.13, 0.0),
+		CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT,
 		0.055,
 		0.26,
 		Color(0.20, 0.75, 0.45, 0.16)
@@ -199,6 +208,7 @@ func ensure_body_restriction_root(
 		"RightForearmRestrictionAttachment",
 		RIGHT_FOREARM_BONE,
 		Vector3(0.0, -0.12, 0.0),
+		CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT,
 		0.045,
 		0.24,
 		Color(0.20, 0.75, 0.45, 0.16)
@@ -404,6 +414,7 @@ func _ensure_restriction_attachment(
 	attachment_name: String,
 	bone_name: StringName,
 	local_offset: Vector3,
+	offset_origin_id: StringName,
 	box_size: Vector3,
 	debug_color: Color,
 	metadata: Dictionary = {}
@@ -414,7 +425,7 @@ func _ensure_restriction_attachment(
 		attachment.name = attachment_name
 		restriction_root.add_child(attachment)
 	attachment.set_meta("bone_name", bone_name)
-	_apply_attachment_metadata(attachment, &"box", local_offset, metadata)
+	_apply_attachment_metadata(attachment, &"box", local_offset, offset_origin_id, metadata)
 	attachment.position = Vector3.ZERO
 	attachment.rotation = Vector3.ZERO
 	var area: Area3D = attachment.get_node_or_null("RestrictionArea") as Area3D
@@ -436,7 +447,7 @@ func _ensure_restriction_attachment(
 		box_shape = BoxShape3D.new()
 		collision_shape.shape = box_shape
 	box_shape.size = box_size
-	collision_shape.position = local_offset
+	_apply_restriction_child_local_position(collision_shape, local_offset, offset_origin_id)
 	var debug_mesh: MeshInstance3D = attachment.get_node_or_null("RestrictionDebug") as MeshInstance3D
 	if debug_mesh == null:
 		debug_mesh = MeshInstance3D.new()
@@ -447,7 +458,7 @@ func _ensure_restriction_attachment(
 		box_mesh = BoxMesh.new()
 		debug_mesh.mesh = box_mesh
 	box_mesh.size = box_size
-	debug_mesh.position = local_offset
+	_apply_restriction_child_local_position(debug_mesh, local_offset, offset_origin_id)
 	var debug_material: StandardMaterial3D = debug_mesh.material_override as StandardMaterial3D
 	if debug_material == null:
 		debug_material = StandardMaterial3D.new()
@@ -464,6 +475,7 @@ func _ensure_capsule_restriction_attachment(
 	attachment_name: String,
 	bone_name: StringName,
 	local_offset: Vector3,
+	offset_origin_id: StringName,
 	capsule_radius: float,
 	capsule_height: float,
 	debug_color: Color,
@@ -475,7 +487,7 @@ func _ensure_capsule_restriction_attachment(
 		attachment.name = attachment_name
 		restriction_root.add_child(attachment)
 	attachment.set_meta("bone_name", bone_name)
-	_apply_attachment_metadata(attachment, &"capsule", local_offset, metadata)
+	_apply_attachment_metadata(attachment, &"capsule", local_offset, offset_origin_id, metadata)
 	attachment.position = Vector3.ZERO
 	attachment.rotation = Vector3.ZERO
 	var area: Area3D = attachment.get_node_or_null("RestrictionArea") as Area3D
@@ -498,7 +510,7 @@ func _ensure_capsule_restriction_attachment(
 		collision_shape.shape = capsule_shape
 	capsule_shape.radius = capsule_radius
 	capsule_shape.height = capsule_height
-	collision_shape.position = local_offset
+	_apply_restriction_child_local_position(collision_shape, local_offset, offset_origin_id)
 	var debug_mesh: MeshInstance3D = attachment.get_node_or_null("RestrictionDebug") as MeshInstance3D
 	if debug_mesh == null:
 		debug_mesh = MeshInstance3D.new()
@@ -510,7 +522,7 @@ func _ensure_capsule_restriction_attachment(
 		debug_mesh.mesh = capsule_mesh
 	capsule_mesh.radius = capsule_radius
 	capsule_mesh.height = capsule_height
-	debug_mesh.position = local_offset
+	_apply_restriction_child_local_position(debug_mesh, local_offset, offset_origin_id)
 	var debug_material: StandardMaterial3D = debug_mesh.material_override as StandardMaterial3D
 	if debug_material == null:
 		debug_material = StandardMaterial3D.new()
@@ -536,22 +548,46 @@ func _apply_body_restriction_descriptors(restriction_root: Node3D, descriptors: 
 			continue
 		var shape_kind: StringName = descriptor.get("shape", &"box") as StringName
 		if shape_kind == &"capsule":
+			var capsule_offset_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+				descriptor,
+				"offset_origin_id",
+				CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT
+			)
 			_ensure_capsule_restriction_attachment(
 				restriction_root,
 				attachment_name,
 				descriptor.get("bone_name", StringName()) as StringName,
-				descriptor.get("local_offset", Vector3.ZERO) as Vector3,
+				_get_origin_tracked_vector3_state(
+					descriptor,
+					"local_offset",
+					"offset_origin_id",
+					Vector3.ZERO,
+					capsule_offset_origin_id
+				),
+				capsule_offset_origin_id,
 				maxf(float(descriptor.get("capsule_radius", 0.025)), 0.005),
 				maxf(float(descriptor.get("capsule_height", 0.05)), 0.01),
 				descriptor.get("debug_color", Color(0.20, 0.75, 0.45, 0.16)) as Color,
 				descriptor
 			)
 			continue
+		var box_offset_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+			descriptor,
+			"offset_origin_id",
+			CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT
+		)
 		_ensure_restriction_attachment(
 			restriction_root,
 			attachment_name,
 			descriptor.get("bone_name", StringName()) as StringName,
-			descriptor.get("local_offset", Vector3.ZERO) as Vector3,
+			_get_origin_tracked_vector3_state(
+				descriptor,
+				"local_offset",
+				"offset_origin_id",
+				Vector3.ZERO,
+				box_offset_origin_id
+			),
+			box_offset_origin_id,
 			descriptor.get("box_size", Vector3.ONE * 0.1) as Vector3,
 			descriptor.get("debug_color", Color(0.85, 0.20, 0.20, 0.18)) as Color,
 			descriptor
@@ -570,12 +606,15 @@ func _apply_attachment_metadata(
 	attachment: Node3D,
 	shape_kind: StringName,
 	local_offset: Vector3,
-	metadata: Dictionary
+	offset_origin_id: StringName,
+	metadata: Dictionary = {}
 ) -> void:
 	if attachment == null:
 		return
+	var resolved_offset_origin_id: StringName = _resolve_body_restriction_offset_origin_id(metadata, offset_origin_id)
 	attachment.set_meta("proxy_shape", shape_kind)
 	attachment.set_meta("restriction_local_offset", local_offset)
+	attachment.set_meta("restriction_offset_origin_id", resolved_offset_origin_id)
 	attachment.set_meta("proxy_source", metadata.get("proxy_source", ClearanceProxyBuilderScript.SOURCE_FALLBACK_ANATOMY))
 	attachment.set_meta("proxy_region", String(metadata.get("region", "")))
 	attachment.set_meta("clearance_offset_meters", float(metadata.get("clearance_offset_meters", 0.0)))
@@ -583,6 +622,58 @@ func _apply_attachment_metadata(
 		attachment.set_meta("source_mesh_aabb_size", metadata.get("source_mesh_aabb_size"))
 	if metadata.has("end_bone_name"):
 		attachment.set_meta("end_bone_name", metadata.get("end_bone_name"))
+
+func _apply_restriction_child_local_position(
+	target_node: Node3D,
+	local_offset: Vector3,
+	offset_origin_id: StringName
+) -> void:
+	if target_node == null:
+		return
+	target_node.position = local_offset
+	target_node.set_meta("restriction_offset_origin_id", offset_origin_id)
+
+func _resolve_body_restriction_offset_origin_id(metadata: Dictionary, fallback_origin_id: StringName) -> StringName:
+	var resolved_origin_id: StringName = fallback_origin_id
+	if resolved_origin_id == StringName():
+		resolved_origin_id = CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT
+	if metadata.has("offset_origin_id"):
+		var stored_origin_id: StringName = StringName(metadata.get("offset_origin_id", StringName()))
+		if stored_origin_id != StringName():
+			return stored_origin_id
+	return resolved_origin_id
+
+func _resolve_origin_tracked_state_origin_id(
+	source_state: Dictionary,
+	origin_key: StringName,
+	fallback_origin_id: StringName
+) -> StringName:
+	var resolved_origin_id: StringName = fallback_origin_id
+	if resolved_origin_id == StringName():
+		resolved_origin_id = CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT
+	if not source_state.has(origin_key):
+		source_state[origin_key] = resolved_origin_id
+		return resolved_origin_id
+	var stored_origin_id: StringName = StringName(source_state.get(origin_key, StringName()))
+	if stored_origin_id == StringName():
+		source_state[origin_key] = resolved_origin_id
+		return resolved_origin_id
+	return stored_origin_id
+
+func _get_origin_tracked_vector3_state(
+	source_state: Dictionary,
+	value_key: StringName,
+	origin_key: StringName,
+	fallback_value: Vector3,
+	fallback_origin_id: StringName
+) -> Vector3:
+	_resolve_origin_tracked_state_origin_id(source_state, origin_key, fallback_origin_id)
+	if not source_state.has(value_key):
+		return fallback_value
+	var stored_value: Variant = source_state.get(value_key, fallback_value)
+	if stored_value is Vector3:
+		return stored_value as Vector3
+	return fallback_value
 
 func _collect_attachment_area_rids(body_restriction_root: Node3D, attachment_names: Array[String]) -> Array:
 	var exclusions: Array = []

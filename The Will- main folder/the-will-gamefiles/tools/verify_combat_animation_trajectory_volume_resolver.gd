@@ -3,6 +3,7 @@ extends SceneTree
 const CombatAnimationTrajectoryVolumeResolverScript = preload("res://core/resolvers/combat_animation_trajectory_volume_resolver.gd")
 const CombatAnimationChainPlayerScript = preload("res://runtime/combat/combat_animation_chain_player.gd")
 const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
 const RESULT_FILE_PATH := "C:/WORKSPACE/combat_animation_trajectory_volume_results.txt"
 
@@ -14,6 +15,12 @@ func _run_verification() -> void:
 	var lines: PackedStringArray = []
 
 	var max_config: Dictionary = resolver.make_shell_config(Vector3.ZERO, 0.0, 1.0, 0.5, true)
+	var max_config_origins_ok: bool = (
+		StringName(max_config.get("origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER
+		and StringName(max_config.get("parent_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and StringName(max_config.get("origin_local_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and StringName(max_config.get("fallback_direction_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 	var max_result: Dictionary = resolver.project_segment_to_valid_volume(
 		Vector3(1.4, 0.0, 0.0),
 		Vector3(1.0, 0.0, 0.0),
@@ -21,6 +28,15 @@ func _run_verification() -> void:
 	)
 	var max_tip: Vector3 = max_result.get("tip_position", Vector3.ZERO) as Vector3
 	var max_pommel: Vector3 = max_result.get("pommel_position", Vector3.ZERO) as Vector3
+	var max_result_origins_ok: bool = (
+		StringName(max_result.get("tip_position_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and StringName(max_result.get("pommel_position_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and StringName(max_result.get("pivot_position_before_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and StringName(max_result.get("pivot_position_after_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and StringName(max_result.get("origin_local_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	lines.append("max_config_origins_ok=%s" % str(max_config_origins_ok))
+	lines.append("max_result_origins_ok=%s" % str(max_result_origins_ok))
 	lines.append("max_clamped=%s" % str(bool(max_result.get("max_clamped", false))))
 	lines.append("max_distance_after=%.4f" % float(max_result.get("distance_after_meters", -1.0)))
 	lines.append("max_segment_length_preserved=%s" % str(absf(max_tip.distance_to(max_pommel) - 0.4) <= 0.0001))
@@ -41,6 +57,10 @@ func _run_verification() -> void:
 	)
 	var min_tip: Vector3 = min_result.get("tip_position", Vector3.ZERO) as Vector3
 	var min_pommel: Vector3 = min_result.get("pommel_position", Vector3.ZERO) as Vector3
+	var min_fallback_origin_ok: bool = (
+		StringName(min_result.get("fallback_direction_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	lines.append("min_fallback_origin_ok=%s" % str(min_fallback_origin_ok))
 	lines.append("min_clamped=%s" % str(bool(min_result.get("min_clamped", false))))
 	lines.append("min_distance_after=%.4f" % float(min_result.get("distance_after_meters", -1.0)))
 	lines.append("min_segment_length_preserved=%s" % str(absf(min_tip.distance_to(min_pommel) - 0.2) <= 0.0001))
@@ -70,13 +90,35 @@ func _run_verification() -> void:
 	chain_player.start()
 	chain_player.advance(0.5)
 	var chain_pivot: Vector3 = chain_player.current_pommel_position.lerp(chain_player.current_tip_position, 0.5)
+	var chain_origins_ok: bool = (
+		chain_player.current_tip_position_origin_id == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and chain_player.current_pommel_position_origin_id == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and StringName(chain_player.current_trajectory_volume_state.get("origin_local_origin_id", StringName())) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	lines.append("chain_origins_ok=%s" % str(chain_origins_ok))
 	lines.append("chain_volume_clamped=%s" % str(bool(chain_player.current_trajectory_volume_state.get("clamped", false))))
 	lines.append("chain_pivot_distance=%.4f" % chain_pivot.length())
 	lines.append("chain_segment_length_preserved=%s" % str(absf(chain_player.current_tip_position.distance_to(chain_player.current_pommel_position) - 0.2) <= 0.0001))
 	lines.append("chain_pivot_on_shell_ok=%s" % str(absf(chain_pivot.length() - 1.0) <= 0.0001))
+	var all_checks_passed: bool = (
+		max_config_origins_ok
+		and max_result_origins_ok
+		and bool(max_result.get("max_clamped", false))
+		and absf(max_tip.distance_to(max_pommel) - 0.4) <= 0.0001
+		and absf(float(max_result.get("distance_after_meters", 0.0)) - 1.0) <= 0.0001
+		and min_fallback_origin_ok
+		and bool(min_result.get("min_clamped", false))
+		and absf(min_tip.distance_to(min_pommel) - 0.2) <= 0.0001
+		and absf(float(min_result.get("distance_after_meters", 0.0)) - 0.5) <= 0.0001
+		and chain_origins_ok
+		and bool(chain_player.current_trajectory_volume_state.get("clamped", false))
+		and absf(chain_player.current_tip_position.distance_to(chain_player.current_pommel_position) - 0.2) <= 0.0001
+		and absf(chain_pivot.length() - 1.0) <= 0.0001
+	)
+	lines.append("all_checks_passed=%s" % str(all_checks_passed))
 
 	var file: FileAccess = FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)
 	if file != null:
 		file.store_string("\n".join(lines))
 		file.close()
-	quit()
+	quit(0 if all_checks_passed else 1)

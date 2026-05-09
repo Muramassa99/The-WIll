@@ -80,13 +80,13 @@ func _run_verification() -> void:
 	var direct_authoring_solver_mode: bool = bool(grip_debug_state.get("direct_authoring_solver_mode", false))
 	var runtime_clip_debug: Dictionary = runtime_debug_initial.get("runtime_clip_debug_state", {}) as Dictionary
 	var pose_state_after_tick: Dictionary = runtime_debug_after_tick.get("last_runtime_pose_state", {}) as Dictionary
+	var primary_grip_alignment_error: float = float(pose_state_after_tick.get("primary_grip_alignment_error_meters", -1.0))
 	var all_checks_passed: bool = (
 		bool(activation_result.get("success", false))
 		and bool(activation_result.get("runtime_playback_started", false))
 		and bool(runtime_debug_initial.get("active", false))
 		and bool(runtime_debug_initial.get("runtime_clip_active", false))
 		and int(runtime_clip_debug.get("frame_count", 0)) > 0
-		and bool(runtime_debug_after_tick.get("active", false))
 		and bool(pose_state_after_tick.has("tip_position_local"))
 		and bool(rig_state.get("active", false))
 		and runtime_spine_changed
@@ -98,6 +98,8 @@ func _run_verification() -> void:
 		and not dominant_ik_active
 		and dominant_contact_basis_active
 		and bool(pose_state_after_tick.get("runtime_endpoint_authority_active", false))
+		and primary_grip_alignment_error >= 0.0
+		and primary_grip_alignment_error <= 0.015
 	)
 
 	var lines: PackedStringArray = []
@@ -134,6 +136,7 @@ func _run_verification() -> void:
 	lines.append("runtime_endpoint_authority_active=%s" % str(bool(pose_state_after_tick.get("runtime_endpoint_authority_active", false))))
 	lines.append("runtime_held_item_parent_path=%s" % String(pose_state_after_tick.get("held_item_parent_path", "")))
 	lines.append("dominant_hand_ik_target_distance_meters=%.4f" % float(grip_debug_state.get("right_hand_ik_target_distance_meters", -1.0)))
+	lines.append("primary_grip_alignment_error_meters=%.4f" % primary_grip_alignment_error)
 	lines.append("all_checks_passed=%s" % str(all_checks_passed))
 
 	var file: FileAccess = FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)

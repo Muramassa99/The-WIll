@@ -6,8 +6,10 @@ signal node_reached(node_index: int)
 
 const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
 const CombatAnimationTrajectoryVolumeResolverScript = preload("res://core/resolvers/combat_animation_trajectory_volume_resolver.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
 const CURVE_INTERVAL_EPSILON_METERS := 0.000001
+const CURVE_SEGMENT_SAMPLE_STEPS := 12
 
 var tip_curve: Curve3D = null
 var pommel_curve: Curve3D = null
@@ -32,11 +34,14 @@ var _clip_frame_index: int = 0
 var _clip_total_duration: float = 0.0
 
 var current_tip_position: Vector3 = Vector3.ZERO
+var current_tip_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 var current_pommel_position: Vector3 = Vector3.ZERO
+var current_pommel_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 var current_weapon_orientation_degrees: Vector3 = Vector3.ZERO
 var current_weapon_roll: float = 0.0
 var current_axial_reposition: float = 0.0
 var current_grip_seat_slide: float = 0.0
+var current_secondary_grip_seat_slide: float = 0.0
 var current_body_support_blend: float = 0.0
 var current_right_upperarm_roll: float = 0.0
 var current_left_upperarm_roll: float = 0.0
@@ -44,7 +49,28 @@ var current_two_hand_state: StringName = CombatAnimationMotionNodeScript.TWO_HAN
 var current_primary_hand_slot: StringName = CombatAnimationMotionNodeScript.PRIMARY_HAND_AUTO
 var current_preferred_grip_style_mode: StringName = &"grip_normal"
 var current_contact_grip_axis_local: Vector3 = Vector3.ZERO
+var current_contact_grip_axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 var current_contact_grip_axis_local_override_active: bool = false
+var current_upper_body_pose_available: bool = false
+var current_upper_body_bone_names: Array[StringName] = []
+var current_upper_body_bone_pose_rotations: Array[Quaternion] = []
+var current_solved_replay_available: bool = false
+var current_solved_replay_reference_bone_name: StringName = &""
+var current_solved_replay_reference_origin_id: StringName = CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE
+var current_solved_upper_body_bone_names: Array[StringName] = []
+var current_solved_upper_body_pose_positions: Array[Vector3] = []
+var current_solved_upper_body_pose_rotations: Array[Quaternion] = []
+var current_solved_upper_body_pose_scales: Array[Vector3] = []
+var current_solved_weapon_position_reference_local: Vector3 = Vector3.ZERO
+var current_solved_weapon_rotation_reference_local: Quaternion = Quaternion.IDENTITY
+var current_solved_weapon_scale_reference_local: Vector3 = Vector3.ONE
+var current_solved_weapon_reference_origin_id: StringName = CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE
+var current_solved_anchor_node_paths: Array[StringName] = []
+var current_solved_anchor_positions_weapon_local: Array[Vector3] = []
+var current_solved_anchor_rotations_weapon_local: Array[Quaternion] = []
+var current_solved_anchor_scales_weapon_local: Array[Vector3] = []
+var current_solved_anchor_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+var current_solved_replay_bridge_frame: bool = false
 var current_trajectory_volume_state: Dictionary = {}
 
 func is_playing() -> bool:
@@ -66,6 +92,7 @@ func prepare(
 	trajectory_volume_config = valid_volume_config.duplicate(true)
 	runtime_clip = null
 	_uses_runtime_clip = false
+	_clear_current_solved_replay_pose(true)
 	_build_segment_data()
 
 func prepare_runtime_clip(clip, playback_speed: float = 1.0, should_loop: bool = false) -> void:
@@ -80,6 +107,9 @@ func prepare_runtime_clip(clip, playback_speed: float = 1.0, should_loop: bool =
 	_clip_elapsed = 0.0
 	_clip_frame_index = 0
 	_clip_total_duration = _resolve_runtime_clip_total_duration()
+	_sync_runtime_clip_upper_body_bone_names()
+	_sync_runtime_clip_solved_replay_metadata()
+	_sync_runtime_clip_origin_metadata()
 
 func set_trajectory_volume_config(valid_volume_config: Dictionary) -> void:
 	trajectory_volume_config = valid_volume_config.duplicate(true)
@@ -201,12 +231,14 @@ func _apply_runtime_clip_sample(time_seconds: float) -> void:
 	_interpolate_runtime_clip_frames(from_index, to_index, ratio)
 
 func _apply_runtime_clip_frame(frame_index: int) -> void:
+	_sync_runtime_clip_origin_metadata()
 	current_tip_position = _get_runtime_clip_vector3("baked_tip_positions_local", frame_index, current_tip_position)
 	current_pommel_position = _get_runtime_clip_vector3("baked_pommel_positions_local", frame_index, current_pommel_position)
 	current_weapon_orientation_degrees = _get_runtime_clip_vector3("baked_weapon_orientation_degrees", frame_index, current_weapon_orientation_degrees)
 	current_weapon_roll = _get_runtime_clip_float("baked_weapon_roll_degrees", frame_index, current_weapon_roll)
 	current_axial_reposition = _get_runtime_clip_float("baked_axial_reposition_offsets", frame_index, current_axial_reposition)
 	current_grip_seat_slide = _get_runtime_clip_float("baked_grip_seat_slide_offsets", frame_index, current_grip_seat_slide)
+	current_secondary_grip_seat_slide = _get_runtime_clip_float("baked_secondary_grip_seat_slide_offsets", frame_index, current_secondary_grip_seat_slide)
 	current_body_support_blend = _get_runtime_clip_float("baked_body_support_blends", frame_index, current_body_support_blend)
 	current_right_upperarm_roll = _get_runtime_clip_float("baked_right_upperarm_roll_degrees", frame_index, current_right_upperarm_roll)
 	current_left_upperarm_roll = _get_runtime_clip_float("baked_left_upperarm_roll_degrees", frame_index, current_left_upperarm_roll)
@@ -215,9 +247,12 @@ func _apply_runtime_clip_frame(frame_index: int) -> void:
 	current_two_hand_state = _get_runtime_clip_string_name("baked_two_hand_states", frame_index, current_two_hand_state)
 	current_primary_hand_slot = _get_runtime_clip_string_name("baked_primary_hand_slots", frame_index, current_primary_hand_slot)
 	current_preferred_grip_style_mode = _get_runtime_clip_string_name("baked_grip_style_modes", frame_index, current_preferred_grip_style_mode)
+	_apply_runtime_clip_upper_body_pose_frame(frame_index)
+	_apply_runtime_clip_solved_replay_frame(frame_index)
 	current_trajectory_volume_state = {"source": &"baked_runtime_clip"}
 
 func _interpolate_runtime_clip_frames(from_index: int, to_index: int, ratio: float) -> void:
+	_sync_runtime_clip_origin_metadata()
 	var clean_ratio: float = clampf(ratio, 0.0, 1.0)
 	current_tip_position = _get_runtime_clip_vector3("baked_tip_positions_local", from_index, current_tip_position).lerp(
 		_get_runtime_clip_vector3("baked_tip_positions_local", to_index, current_tip_position),
@@ -245,6 +280,11 @@ func _interpolate_runtime_clip_frames(from_index: int, to_index: int, ratio: flo
 	current_grip_seat_slide = lerpf(
 		_get_runtime_clip_float("baked_grip_seat_slide_offsets", from_index, current_grip_seat_slide),
 		_get_runtime_clip_float("baked_grip_seat_slide_offsets", to_index, current_grip_seat_slide),
+		clean_ratio
+	)
+	current_secondary_grip_seat_slide = lerpf(
+		_get_runtime_clip_float("baked_secondary_grip_seat_slide_offsets", from_index, current_secondary_grip_seat_slide),
+		_get_runtime_clip_float("baked_secondary_grip_seat_slide_offsets", to_index, current_secondary_grip_seat_slide),
 		clean_ratio
 	)
 	current_body_support_blend = lerpf(
@@ -286,6 +326,8 @@ func _interpolate_runtime_clip_frames(from_index: int, to_index: int, ratio: flo
 		if clean_ratio < 0.5
 		else _get_runtime_clip_string_name("baked_grip_style_modes", to_index, current_preferred_grip_style_mode)
 	)
+	_interpolate_runtime_clip_upper_body_pose_frames(from_index, to_index, clean_ratio)
+	_interpolate_runtime_clip_solved_replay_frames(from_index, to_index, clean_ratio)
 	current_trajectory_volume_state = {"source": &"baked_runtime_clip"}
 
 func _apply_runtime_clip_length_lock(from_index: int, to_index: int, ratio: float) -> void:
@@ -340,6 +382,318 @@ func _get_runtime_clip_string_name(property_name: StringName, frame_index: int, 
 		return fallback
 	return StringName(values[frame_index])
 
+func _get_runtime_clip_origin_id(property_name: StringName, fallback: StringName) -> StringName:
+	if runtime_clip == null:
+		return fallback
+	var origin_id := StringName(runtime_clip.get(property_name))
+	if origin_id == StringName():
+		return fallback
+	return origin_id
+
+func _sync_runtime_clip_upper_body_bone_names() -> void:
+	current_upper_body_pose_available = false
+	current_upper_body_bone_names.clear()
+	current_upper_body_bone_pose_rotations.clear()
+	if runtime_clip == null:
+		return
+	var bone_names: Array = runtime_clip.get("baked_upper_body_bone_names") as Array
+	for bone_name_variant: Variant in bone_names:
+		current_upper_body_bone_names.append(StringName(bone_name_variant))
+
+func _sync_runtime_clip_solved_replay_metadata() -> void:
+	_clear_current_solved_replay_pose(true)
+	if runtime_clip == null:
+		return
+	if not runtime_clip.has_method("has_solved_replay_track") or not bool(runtime_clip.call("has_solved_replay_track")):
+		return
+	current_solved_replay_reference_bone_name = StringName(runtime_clip.get("solved_replay_reference_bone_name"))
+	current_solved_replay_reference_origin_id = _get_runtime_clip_origin_id(
+		"solved_replay_reference_origin_id",
+		CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE
+	)
+	var bone_names: Array = runtime_clip.get("baked_solved_upper_body_bone_names") as Array
+	for bone_name_variant: Variant in bone_names:
+		current_solved_upper_body_bone_names.append(StringName(bone_name_variant))
+	var anchor_paths: Array = runtime_clip.get("baked_solved_anchor_node_paths") as Array
+	for path_variant: Variant in anchor_paths:
+		current_solved_anchor_node_paths.append(StringName(path_variant))
+
+func _sync_runtime_clip_origin_metadata() -> void:
+	if runtime_clip == null:
+		current_tip_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		current_pommel_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		current_contact_grip_axis_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		return
+	current_tip_position_origin_id = _get_runtime_clip_origin_id(
+		"baked_tip_positions_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	current_pommel_position_origin_id = _get_runtime_clip_origin_id(
+		"baked_pommel_positions_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	current_contact_grip_axis_origin_id = _get_runtime_clip_origin_id(
+		"baked_contact_grip_axes_origin_id",
+		current_tip_position_origin_id
+	)
+	current_solved_replay_reference_origin_id = _get_runtime_clip_origin_id(
+		"solved_replay_reference_origin_id",
+		CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE
+	)
+	current_solved_weapon_reference_origin_id = _get_runtime_clip_origin_id(
+		"baked_solved_weapon_reference_origin_id",
+		current_solved_replay_reference_origin_id
+	)
+	current_solved_anchor_origin_id = _get_runtime_clip_origin_id(
+		"baked_solved_anchor_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+
+func _apply_runtime_clip_upper_body_pose_frame(frame_index: int) -> void:
+	current_upper_body_pose_available = false
+	current_upper_body_bone_pose_rotations.clear()
+	if runtime_clip == null or current_upper_body_bone_names.is_empty():
+		return
+	var frames: Array = runtime_clip.get("baked_upper_body_bone_pose_rotations") as Array
+	if frame_index < 0 or frame_index >= frames.size():
+		return
+	var rotations: Array[Quaternion] = _decode_runtime_clip_upper_body_pose_frame(frames[frame_index])
+	if rotations.size() != current_upper_body_bone_names.size():
+		current_upper_body_bone_pose_rotations.clear()
+		return
+	current_upper_body_bone_pose_rotations = rotations
+	current_upper_body_pose_available = true
+
+func _interpolate_runtime_clip_upper_body_pose_frames(from_index: int, to_index: int, ratio: float) -> void:
+	current_upper_body_pose_available = false
+	current_upper_body_bone_pose_rotations.clear()
+	if runtime_clip == null or current_upper_body_bone_names.is_empty():
+		return
+	var frames: Array = runtime_clip.get("baked_upper_body_bone_pose_rotations") as Array
+	if from_index < 0 or to_index < 0 or from_index >= frames.size() or to_index >= frames.size():
+		return
+	var from_rotations: Array[Quaternion] = _decode_runtime_clip_upper_body_pose_frame(frames[from_index])
+	var to_rotations: Array[Quaternion] = _decode_runtime_clip_upper_body_pose_frame(frames[to_index])
+	if from_rotations.size() != current_upper_body_bone_names.size() or to_rotations.size() != current_upper_body_bone_names.size():
+		return
+	var clean_ratio: float = clampf(ratio, 0.0, 1.0)
+	for rotation_index: int in range(current_upper_body_bone_names.size()):
+		current_upper_body_bone_pose_rotations.append(from_rotations[rotation_index].slerp(to_rotations[rotation_index], clean_ratio).normalized())
+	current_upper_body_pose_available = true
+
+func _decode_runtime_clip_upper_body_pose_frame(frame_data: Variant) -> Array[Quaternion]:
+	var rotations: Array[Quaternion] = []
+	if frame_data is PackedVector4Array:
+		var packed_rotations: PackedVector4Array = frame_data as PackedVector4Array
+		for vector_value: Vector4 in packed_rotations:
+			rotations.append(Quaternion(vector_value.x, vector_value.y, vector_value.z, vector_value.w).normalized())
+		return rotations
+	if frame_data is Array:
+		var rotation_array: Array = frame_data as Array
+		for rotation_variant: Variant in rotation_array:
+			if rotation_variant is Quaternion:
+				rotations.append((rotation_variant as Quaternion).normalized())
+			elif rotation_variant is Vector4:
+				var vector_rotation: Vector4 = rotation_variant as Vector4
+				rotations.append(Quaternion(vector_rotation.x, vector_rotation.y, vector_rotation.z, vector_rotation.w).normalized())
+	return rotations
+
+func _apply_runtime_clip_solved_replay_frame(frame_index: int) -> void:
+	_clear_current_solved_replay_pose(false)
+	if runtime_clip == null or current_solved_upper_body_bone_names.is_empty():
+		return
+	if not _is_runtime_clip_solved_replay_frame_available(frame_index):
+		return
+	var position_frames: Array = runtime_clip.get("baked_solved_upper_body_pose_positions") as Array
+	var rotation_frames: Array = runtime_clip.get("baked_solved_upper_body_pose_rotations") as Array
+	var scale_frames: Array = runtime_clip.get("baked_solved_upper_body_pose_scales") as Array
+	if frame_index < 0 or frame_index >= position_frames.size() or frame_index >= rotation_frames.size() or frame_index >= scale_frames.size():
+		return
+	var positions: Array[Vector3] = _decode_runtime_clip_vector3_frame(position_frames[frame_index], current_solved_upper_body_bone_names.size())
+	var rotations: Array[Quaternion] = _decode_runtime_clip_upper_body_pose_frame(rotation_frames[frame_index])
+	var scales: Array[Vector3] = _decode_runtime_clip_vector3_frame(scale_frames[frame_index], current_solved_upper_body_bone_names.size())
+	if positions.size() != current_solved_upper_body_bone_names.size() or rotations.size() != current_solved_upper_body_bone_names.size() or scales.size() != current_solved_upper_body_bone_names.size():
+		return
+	var anchor_position_frames: Array = runtime_clip.get("baked_solved_anchor_positions_weapon_local") as Array
+	var anchor_rotation_frames: Array = runtime_clip.get("baked_solved_anchor_rotations_weapon_local") as Array
+	var anchor_scale_frames: Array = runtime_clip.get("baked_solved_anchor_scales_weapon_local") as Array
+	if frame_index < 0 or frame_index >= anchor_position_frames.size() or frame_index >= anchor_rotation_frames.size() or frame_index >= anchor_scale_frames.size():
+		return
+	var anchor_positions: Array[Vector3] = _decode_runtime_clip_vector3_frame(anchor_position_frames[frame_index], current_solved_anchor_node_paths.size())
+	var anchor_rotations: Array[Quaternion] = _decode_runtime_clip_upper_body_pose_frame(anchor_rotation_frames[frame_index])
+	var anchor_scales: Array[Vector3] = _decode_runtime_clip_vector3_frame(anchor_scale_frames[frame_index], current_solved_anchor_node_paths.size())
+	if anchor_positions.size() != current_solved_anchor_node_paths.size() or anchor_rotations.size() != current_solved_anchor_node_paths.size() or anchor_scales.size() != current_solved_anchor_node_paths.size():
+		return
+	current_solved_upper_body_pose_positions = positions
+	current_solved_upper_body_pose_rotations = rotations
+	current_solved_upper_body_pose_scales = scales
+	current_solved_weapon_position_reference_local = _get_runtime_clip_vector3("baked_solved_weapon_positions_reference_local", frame_index, Vector3.ZERO)
+	current_solved_weapon_rotation_reference_local = _get_runtime_clip_quaternion("baked_solved_weapon_rotations_reference_local", frame_index, Quaternion.IDENTITY)
+	current_solved_weapon_scale_reference_local = _get_runtime_clip_vector3("baked_solved_weapon_scales_reference_local", frame_index, Vector3.ONE)
+	current_solved_weapon_reference_origin_id = _get_runtime_clip_origin_id(
+		"baked_solved_weapon_reference_origin_id",
+		current_solved_replay_reference_origin_id
+	)
+	current_solved_anchor_positions_weapon_local = anchor_positions
+	current_solved_anchor_rotations_weapon_local = anchor_rotations
+	current_solved_anchor_scales_weapon_local = anchor_scales
+	current_solved_anchor_origin_id = _get_runtime_clip_origin_id(
+		"baked_solved_anchor_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	current_solved_replay_bridge_frame = _is_runtime_clip_solved_replay_bridge_frame(frame_index)
+	current_solved_replay_available = true
+
+func _interpolate_runtime_clip_solved_replay_frames(from_index: int, to_index: int, ratio: float) -> void:
+	_clear_current_solved_replay_pose(false)
+	if runtime_clip == null or current_solved_upper_body_bone_names.is_empty():
+		return
+	var from_available: bool = _is_runtime_clip_solved_replay_frame_available(from_index)
+	var to_available: bool = _is_runtime_clip_solved_replay_frame_available(to_index)
+	var clean_ratio: float = clampf(ratio, 0.0, 1.0)
+	var nearest_index: int = from_index if clean_ratio < 0.5 else to_index
+	if _is_runtime_clip_solved_replay_frame_available(nearest_index):
+		_apply_runtime_clip_solved_replay_frame(nearest_index)
+		return
+	if not from_available or not to_available:
+		if to_available and clean_ratio >= 0.5:
+			_apply_runtime_clip_solved_replay_frame(to_index)
+		elif from_available:
+			_apply_runtime_clip_solved_replay_frame(from_index)
+		return
+	var position_frames: Array = runtime_clip.get("baked_solved_upper_body_pose_positions") as Array
+	var rotation_frames: Array = runtime_clip.get("baked_solved_upper_body_pose_rotations") as Array
+	var scale_frames: Array = runtime_clip.get("baked_solved_upper_body_pose_scales") as Array
+	var from_positions: Array[Vector3] = _decode_runtime_clip_vector3_frame(position_frames[from_index], current_solved_upper_body_bone_names.size())
+	var to_positions: Array[Vector3] = _decode_runtime_clip_vector3_frame(position_frames[to_index], current_solved_upper_body_bone_names.size())
+	var from_rotations: Array[Quaternion] = _decode_runtime_clip_upper_body_pose_frame(rotation_frames[from_index])
+	var to_rotations: Array[Quaternion] = _decode_runtime_clip_upper_body_pose_frame(rotation_frames[to_index])
+	var from_scales: Array[Vector3] = _decode_runtime_clip_vector3_frame(scale_frames[from_index], current_solved_upper_body_bone_names.size())
+	var to_scales: Array[Vector3] = _decode_runtime_clip_vector3_frame(scale_frames[to_index], current_solved_upper_body_bone_names.size())
+	if (
+		from_positions.size() != current_solved_upper_body_bone_names.size()
+		or to_positions.size() != current_solved_upper_body_bone_names.size()
+		or from_rotations.size() != current_solved_upper_body_bone_names.size()
+		or to_rotations.size() != current_solved_upper_body_bone_names.size()
+		or from_scales.size() != current_solved_upper_body_bone_names.size()
+		or to_scales.size() != current_solved_upper_body_bone_names.size()
+	):
+		return
+	for pose_index: int in range(current_solved_upper_body_bone_names.size()):
+		current_solved_upper_body_pose_positions.append(from_positions[pose_index].lerp(to_positions[pose_index], clean_ratio))
+		current_solved_upper_body_pose_rotations.append(from_rotations[pose_index].slerp(to_rotations[pose_index], clean_ratio).normalized())
+		current_solved_upper_body_pose_scales.append(from_scales[pose_index].lerp(to_scales[pose_index], clean_ratio))
+	current_solved_weapon_position_reference_local = _get_runtime_clip_vector3("baked_solved_weapon_positions_reference_local", from_index, Vector3.ZERO).lerp(
+		_get_runtime_clip_vector3("baked_solved_weapon_positions_reference_local", to_index, Vector3.ZERO),
+		clean_ratio
+	)
+	current_solved_weapon_rotation_reference_local = _get_runtime_clip_quaternion("baked_solved_weapon_rotations_reference_local", from_index, Quaternion.IDENTITY).slerp(
+		_get_runtime_clip_quaternion("baked_solved_weapon_rotations_reference_local", to_index, Quaternion.IDENTITY),
+		clean_ratio
+	).normalized()
+	current_solved_weapon_scale_reference_local = _get_runtime_clip_vector3("baked_solved_weapon_scales_reference_local", from_index, Vector3.ONE).lerp(
+		_get_runtime_clip_vector3("baked_solved_weapon_scales_reference_local", to_index, Vector3.ONE),
+		clean_ratio
+	)
+	current_solved_weapon_reference_origin_id = _get_runtime_clip_origin_id(
+		"baked_solved_weapon_reference_origin_id",
+		current_solved_replay_reference_origin_id
+	)
+	var anchor_position_frames: Array = runtime_clip.get("baked_solved_anchor_positions_weapon_local") as Array
+	var anchor_rotation_frames: Array = runtime_clip.get("baked_solved_anchor_rotations_weapon_local") as Array
+	var anchor_scale_frames: Array = runtime_clip.get("baked_solved_anchor_scales_weapon_local") as Array
+	var from_anchor_positions: Array[Vector3] = _decode_runtime_clip_vector3_frame(anchor_position_frames[from_index], current_solved_anchor_node_paths.size())
+	var to_anchor_positions: Array[Vector3] = _decode_runtime_clip_vector3_frame(anchor_position_frames[to_index], current_solved_anchor_node_paths.size())
+	var from_anchor_rotations: Array[Quaternion] = _decode_runtime_clip_upper_body_pose_frame(anchor_rotation_frames[from_index])
+	var to_anchor_rotations: Array[Quaternion] = _decode_runtime_clip_upper_body_pose_frame(anchor_rotation_frames[to_index])
+	var from_anchor_scales: Array[Vector3] = _decode_runtime_clip_vector3_frame(anchor_scale_frames[from_index], current_solved_anchor_node_paths.size())
+	var to_anchor_scales: Array[Vector3] = _decode_runtime_clip_vector3_frame(anchor_scale_frames[to_index], current_solved_anchor_node_paths.size())
+	if (
+		from_anchor_positions.size() != current_solved_anchor_node_paths.size()
+		or to_anchor_positions.size() != current_solved_anchor_node_paths.size()
+		or from_anchor_rotations.size() != current_solved_anchor_node_paths.size()
+		or to_anchor_rotations.size() != current_solved_anchor_node_paths.size()
+		or from_anchor_scales.size() != current_solved_anchor_node_paths.size()
+		or to_anchor_scales.size() != current_solved_anchor_node_paths.size()
+	):
+		return
+	for anchor_index: int in range(current_solved_anchor_node_paths.size()):
+		current_solved_anchor_positions_weapon_local.append(from_anchor_positions[anchor_index].lerp(to_anchor_positions[anchor_index], clean_ratio))
+		current_solved_anchor_rotations_weapon_local.append(from_anchor_rotations[anchor_index].slerp(to_anchor_rotations[anchor_index], clean_ratio).normalized())
+		current_solved_anchor_scales_weapon_local.append(from_anchor_scales[anchor_index].lerp(to_anchor_scales[anchor_index], clean_ratio))
+	current_solved_anchor_origin_id = _get_runtime_clip_origin_id(
+		"baked_solved_anchor_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	current_solved_replay_available = true
+
+func _decode_runtime_clip_vector3_frame(frame_data: Variant, expected_count: int) -> Array[Vector3]:
+	var values: Array[Vector3] = []
+	if expected_count <= 0:
+		return values
+	if frame_data is PackedVector3Array:
+		var packed_values: PackedVector3Array = frame_data as PackedVector3Array
+		if packed_values.size() != expected_count:
+			return values
+		for value: Vector3 in packed_values:
+			values.append(value)
+		return values
+	if frame_data is Array:
+		var value_array: Array = frame_data as Array
+		if value_array.size() != expected_count:
+			return values
+		for value_variant: Variant in value_array:
+			if value_variant is Vector3:
+				values.append(value_variant as Vector3)
+	return values
+
+func _get_runtime_clip_quaternion(property_name: StringName, frame_index: int, fallback: Quaternion) -> Quaternion:
+	if runtime_clip == null:
+		return fallback
+	var values: PackedVector4Array = runtime_clip.get(property_name) as PackedVector4Array
+	if frame_index < 0 or frame_index >= values.size():
+		return fallback
+	var vector_rotation: Vector4 = values[frame_index]
+	return Quaternion(vector_rotation.x, vector_rotation.y, vector_rotation.z, vector_rotation.w).normalized()
+
+func _is_runtime_clip_solved_replay_frame_available(frame_index: int) -> bool:
+	if runtime_clip == null:
+		return false
+	var availability: Array = runtime_clip.get("baked_solved_replay_frame_available") as Array
+	if frame_index < 0 or frame_index >= availability.size():
+		return false
+	return bool(availability[frame_index])
+
+func _clear_current_solved_replay_pose(clear_metadata: bool = false) -> void:
+	current_solved_replay_available = false
+	current_solved_upper_body_pose_positions.clear()
+	current_solved_upper_body_pose_rotations.clear()
+	current_solved_upper_body_pose_scales.clear()
+	current_solved_weapon_position_reference_local = Vector3.ZERO
+	current_solved_weapon_rotation_reference_local = Quaternion.IDENTITY
+	current_solved_weapon_scale_reference_local = Vector3.ONE
+	current_solved_anchor_positions_weapon_local.clear()
+	current_solved_anchor_rotations_weapon_local.clear()
+	current_solved_anchor_scales_weapon_local.clear()
+	current_solved_replay_bridge_frame = false
+	if clear_metadata:
+		current_solved_replay_reference_bone_name = StringName()
+		current_solved_replay_reference_origin_id = CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE
+		current_solved_weapon_reference_origin_id = CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE
+		current_solved_anchor_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		current_solved_upper_body_bone_names.clear()
+		current_solved_anchor_node_paths.clear()
+
+func _is_runtime_clip_solved_replay_bridge_frame(frame_index: int) -> bool:
+	if runtime_clip == null:
+		return false
+	if not runtime_clip.has_meta("baked_solved_replay_bridge_frame"):
+		return false
+	var flags: Array = runtime_clip.get_meta("baked_solved_replay_bridge_frame") as Array
+	if frame_index < 0 or frame_index >= flags.size():
+		return false
+	return bool(flags[frame_index])
+
 func _build_segment_data() -> void:
 	_segment_durations.clear()
 	_segment_tip_offsets.clear()
@@ -368,11 +722,22 @@ func _apply_node_state(node_index: int) -> void:
 	if motion_node == null:
 		return
 	current_tip_position = motion_node.tip_position_local
+	current_tip_position_origin_id = _resolve_motion_node_origin_id(
+		motion_node,
+		"tip_position_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 	current_pommel_position = motion_node.pommel_position_local
+	current_pommel_position_origin_id = _resolve_motion_node_origin_id(
+		motion_node,
+		"pommel_position_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 	current_weapon_orientation_degrees = _resolve_effective_weapon_orientation_degrees(motion_node)
 	current_weapon_roll = motion_node.weapon_roll_degrees
 	current_axial_reposition = motion_node.axial_reposition_offset
 	current_grip_seat_slide = motion_node.grip_seat_slide_offset
+	current_secondary_grip_seat_slide = motion_node.secondary_grip_seat_slide_offset
 	current_body_support_blend = motion_node.body_support_blend
 	current_right_upperarm_roll = motion_node.right_upperarm_roll_degrees
 	current_left_upperarm_roll = motion_node.left_upperarm_roll_degrees
@@ -380,7 +745,12 @@ func _apply_node_state(node_index: int) -> void:
 	current_primary_hand_slot = motion_node.primary_hand_slot
 	current_preferred_grip_style_mode = motion_node.preferred_grip_style_mode
 	current_contact_grip_axis_local = _resolve_motion_node_contact_axis(motion_node)
+	current_contact_grip_axis_origin_id = current_tip_position_origin_id
 	current_contact_grip_axis_local_override_active = false
+	current_upper_body_pose_available = false
+	current_upper_body_bone_names.clear()
+	current_upper_body_bone_pose_rotations.clear()
+	_clear_current_solved_replay_pose(true)
 	current_trajectory_volume_state = {}
 
 func _interpolate_between_nodes(from_index: int, to_index: int, ratio: float) -> void:
@@ -416,7 +786,19 @@ func _interpolate_between_nodes(from_index: int, to_index: int, ratio: float) ->
 		sampled_pommel_position
 	)
 	current_tip_position = resolved_segment.get("tip_position", sampled_tip_position) as Vector3
+	current_tip_position_origin_id = _resolve_interpolated_origin_id(
+		from_node.tip_position_origin_id,
+		to_node.tip_position_origin_id,
+		ratio,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 	current_pommel_position = resolved_segment.get("pommel_position", sampled_pommel_position) as Vector3
+	current_pommel_position_origin_id = _resolve_interpolated_origin_id(
+		from_node.pommel_position_origin_id,
+		to_node.pommel_position_origin_id,
+		ratio,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 	_apply_trajectory_volume_to_current_segment(from_node, to_node)
 	current_weapon_orientation_degrees = _resolve_effective_weapon_orientation_degrees(from_node).lerp(
 		_resolve_effective_weapon_orientation_degrees(to_node),
@@ -425,6 +807,7 @@ func _interpolate_between_nodes(from_index: int, to_index: int, ratio: float) ->
 	current_weapon_roll = lerpf(from_node.weapon_roll_degrees, to_node.weapon_roll_degrees, ratio)
 	current_axial_reposition = lerpf(from_node.axial_reposition_offset, to_node.axial_reposition_offset, ratio)
 	current_grip_seat_slide = lerpf(from_node.grip_seat_slide_offset, to_node.grip_seat_slide_offset, ratio)
+	current_secondary_grip_seat_slide = lerpf(from_node.secondary_grip_seat_slide_offset, to_node.secondary_grip_seat_slide_offset, ratio)
 	current_body_support_blend = lerpf(from_node.body_support_blend, to_node.body_support_blend, ratio)
 	current_right_upperarm_roll = lerpf(from_node.right_upperarm_roll_degrees, to_node.right_upperarm_roll_degrees, ratio)
 	current_left_upperarm_roll = lerpf(from_node.left_upperarm_roll_degrees, to_node.left_upperarm_roll_degrees, ratio)
@@ -433,28 +816,29 @@ func _interpolate_between_nodes(from_index: int, to_index: int, ratio: float) ->
 	if _is_grip_style_swap_segment(from_node, to_node):
 		current_preferred_grip_style_mode = from_node.preferred_grip_style_mode
 		current_contact_grip_axis_local = _resolve_grip_swap_source_contact_axis(from_node, to_node)
+		current_contact_grip_axis_origin_id = current_tip_position_origin_id
 		current_contact_grip_axis_local_override_active = true
 	else:
 		current_preferred_grip_style_mode = from_node.preferred_grip_style_mode if ratio < 0.5 else to_node.preferred_grip_style_mode
 		current_contact_grip_axis_local = _resolve_axis_between_positions(current_pommel_position, current_tip_position)
+		current_contact_grip_axis_origin_id = current_tip_position_origin_id
 		current_contact_grip_axis_local_override_active = false
+	current_upper_body_pose_available = false
+	current_upper_body_bone_names.clear()
+	current_upper_body_bone_pose_rotations.clear()
+	_clear_current_solved_replay_pose(true)
 
 func _resolve_curve_point_offset(curve: Curve3D, node_index: int, fallback_offset: float, total_length: float) -> float:
 	if curve == null or node_index < 0 or node_index >= curve.point_count:
 		return _sanitize_curve_offset(fallback_offset, 0.0, total_length)
 	if total_length <= CURVE_INTERVAL_EPSILON_METERS:
 		return 0.0
-	var point_position: Vector3 = curve.get_point_position(node_index)
-	if not _is_finite_vector3(point_position):
-		return _sanitize_curve_offset(fallback_offset, 0.0, total_length)
-	return _sanitize_curve_offset(curve.get_closest_offset(point_position), fallback_offset, total_length)
+	return _sanitize_curve_offset(_resolve_curve_polyline_length(curve, node_index), fallback_offset, total_length)
 
 func _resolve_safe_curve_baked_length(curve: Curve3D) -> float:
 	if curve == null or curve.point_count < 2:
 		return 0.0
-	if not _curve_has_non_zero_interval(curve):
-		return 0.0
-	return _sanitize_curve_length(curve.get_baked_length())
+	return _sanitize_curve_length(_resolve_curve_polyline_length(curve, curve.point_count - 1))
 
 func _curve_has_non_zero_interval(curve: Curve3D) -> bool:
 	if curve == null or curve.point_count < 2:
@@ -490,33 +874,70 @@ func _sample_curve_segment_position(
 	var to_offset_raw: float = segment_offsets[to_index] if to_index >= 0 and to_index < segment_offsets.size() else from_offset
 	var to_offset: float = _sanitize_curve_offset(to_offset_raw, from_offset, total_length)
 	var current_offset: float = _sanitize_curve_offset(lerpf(from_offset, to_offset, clean_ratio), from_offset, total_length)
-	return _sample_baked_polyline_position(curve, current_offset, fallback_position)
+	return _sample_curve_polyline_position(curve, current_offset, fallback_position)
 
-func _sample_baked_polyline_position(curve: Curve3D, offset: float, fallback_position: Vector3) -> Vector3:
-	var baked_points: PackedVector3Array = curve.get_baked_points()
-	if baked_points.is_empty():
+func _sample_curve_polyline_position(curve: Curve3D, offset: float, fallback_position: Vector3) -> Vector3:
+	if curve == null or curve.point_count <= 0:
 		return fallback_position
-	var previous_point: Vector3 = baked_points[0]
+	var previous_point: Vector3 = curve.get_point_position(0)
 	if not _is_finite_vector3(previous_point):
 		return fallback_position
-	if baked_points.size() == 1 or offset <= 0.0:
+	if curve.point_count == 1 or offset <= 0.0:
 		return previous_point
 	var walked_length: float = 0.0
-	for point_index: int in range(1, baked_points.size()):
-		var current_point: Vector3 = baked_points[point_index]
-		if not _is_finite_vector3(current_point):
-			continue
-		var interval_length: float = previous_point.distance_to(current_point)
-		if interval_length <= 0.000001:
+	for segment_index: int in range(curve.point_count - 1):
+		for sample_index: int in range(1, CURVE_SEGMENT_SAMPLE_STEPS + 1):
+			var sample_ratio: float = float(sample_index) / float(CURVE_SEGMENT_SAMPLE_STEPS)
+			var current_point: Vector3 = _sample_curve_segment_point(curve, segment_index, sample_ratio)
+			if not _is_finite_vector3(current_point):
+				continue
+			var interval_length: float = previous_point.distance_to(current_point)
+			if interval_length <= CURVE_INTERVAL_EPSILON_METERS:
+				previous_point = current_point
+				continue
+			var next_walked_length: float = walked_length + interval_length
+			if next_walked_length >= offset:
+				var interval_ratio: float = clampf((offset - walked_length) / interval_length, 0.0, 1.0)
+				return previous_point.lerp(current_point, interval_ratio)
+			walked_length = next_walked_length
 			previous_point = current_point
-			continue
-		var next_walked_length: float = walked_length + interval_length
-		if next_walked_length >= offset:
-			var interval_ratio: float = clampf((offset - walked_length) / interval_length, 0.0, 1.0)
-			return previous_point.lerp(current_point, interval_ratio)
-		walked_length = next_walked_length
-		previous_point = current_point
 	return previous_point
+
+func _resolve_curve_polyline_length(curve: Curve3D, end_point_index: int) -> float:
+	if curve == null or curve.point_count < 2 or end_point_index <= 0:
+		return 0.0
+	var end_segment_index: int = mini(end_point_index, curve.point_count - 1)
+	var previous_point: Vector3 = curve.get_point_position(0)
+	if not _is_finite_vector3(previous_point):
+		return 0.0
+	var walked_length := 0.0
+	for segment_index: int in range(end_segment_index):
+		for sample_index: int in range(1, CURVE_SEGMENT_SAMPLE_STEPS + 1):
+			var sample_ratio: float = float(sample_index) / float(CURVE_SEGMENT_SAMPLE_STEPS)
+			var current_point: Vector3 = _sample_curve_segment_point(curve, segment_index, sample_ratio)
+			if not _is_finite_vector3(current_point):
+				continue
+			var interval_length: float = previous_point.distance_to(current_point)
+			if interval_length > CURVE_INTERVAL_EPSILON_METERS:
+				walked_length += interval_length
+			previous_point = current_point
+	return walked_length
+
+func _sample_curve_segment_point(curve: Curve3D, segment_index: int, ratio: float) -> Vector3:
+	var clean_ratio: float = clampf(ratio, 0.0, 1.0)
+	var p0: Vector3 = curve.get_point_position(segment_index)
+	var p3: Vector3 = curve.get_point_position(segment_index + 1)
+	var p1: Vector3 = p0 + curve.get_point_out(segment_index)
+	var p2: Vector3 = p3 + curve.get_point_in(segment_index + 1)
+	if not _is_finite_vector3(p0) or not _is_finite_vector3(p1) or not _is_finite_vector3(p2) or not _is_finite_vector3(p3):
+		return p0.lerp(p3, clean_ratio)
+	var inverse_ratio: float = 1.0 - clean_ratio
+	return (
+		p0 * inverse_ratio * inverse_ratio * inverse_ratio
+		+ p1 * 3.0 * inverse_ratio * inverse_ratio * clean_ratio
+		+ p2 * 3.0 * inverse_ratio * clean_ratio * clean_ratio
+		+ p3 * clean_ratio * clean_ratio * clean_ratio
+	)
 
 func _sanitize_curve_length(length: float) -> float:
 	return length if _is_finite_float(length) and length > 0.0 else 0.0
@@ -661,8 +1082,25 @@ func _apply_trajectory_volume_to_current_segment(from_node: CombatAnimationMotio
 		resolved_config
 	)
 	current_tip_position = volume_result.get("tip_position", current_tip_position) as Vector3
+	current_tip_position_origin_id = StringName(volume_result.get("tip_position_origin_id", current_tip_position_origin_id))
 	current_pommel_position = volume_result.get("pommel_position", current_pommel_position) as Vector3
+	current_pommel_position_origin_id = StringName(volume_result.get("pommel_position_origin_id", current_pommel_position_origin_id))
 	current_trajectory_volume_state = volume_result
+
+func _resolve_motion_node_origin_id(motion_node: Resource, property_name: StringName, fallback: StringName) -> StringName:
+	if motion_node == null:
+		return fallback
+	var origin_id := StringName(motion_node.get(property_name))
+	if origin_id == StringName():
+		return fallback
+	return origin_id
+
+func _resolve_interpolated_origin_id(from_origin_id: StringName, to_origin_id: StringName, ratio: float, fallback: StringName) -> StringName:
+	var clean_from := from_origin_id if from_origin_id != StringName() else fallback
+	var clean_to := to_origin_id if to_origin_id != StringName() else fallback
+	if clean_from == clean_to:
+		return clean_from
+	return clean_from if ratio < 0.5 else clean_to
 
 func _resolve_effective_weapon_orientation_degrees(motion_node: CombatAnimationMotionNode) -> Vector3:
 	if motion_node == null:

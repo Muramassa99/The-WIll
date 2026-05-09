@@ -1,6 +1,8 @@
 extends RefCounted
 class_name CombatAnimationTrajectoryVolumeResolver
 
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+
 const DEFAULT_PIVOT_RATIO_FROM_POMMEL := 0.5
 
 func make_shell_config(
@@ -8,14 +10,25 @@ func make_shell_config(
 	min_radius_meters: float,
 	max_radius_meters: float,
 	pivot_ratio_from_pommel: float = DEFAULT_PIVOT_RATIO_FROM_POMMEL,
-	enabled: bool = true
+	enabled: bool = true,
+	origin_id: StringName = CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER,
+	parent_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+	origin_local_origin_id: StringName = StringName()
 ) -> Dictionary:
+	var resolved_parent_origin_id: StringName = _normalize_origin_id(
+		parent_origin_id,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 	return {
 		"enabled": enabled,
+		"origin_id": _normalize_origin_id(origin_id, CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER),
+		"parent_origin_id": resolved_parent_origin_id,
 		"origin_local": origin_local,
+		"origin_local_origin_id": _normalize_origin_id(origin_local_origin_id, resolved_parent_origin_id),
 		"min_radius_meters": maxf(min_radius_meters, 0.0),
 		"max_radius_meters": maxf(max_radius_meters, 0.0),
 		"pivot_ratio_from_pommel": clampf(pivot_ratio_from_pommel, 0.0, 1.0),
+		"fallback_direction_origin_id": resolved_parent_origin_id,
 	}
 
 func project_segment_to_valid_volume(
@@ -23,16 +36,30 @@ func project_segment_to_valid_volume(
 	pommel_position_local: Vector3,
 	config: Dictionary = {}
 ) -> Dictionary:
+	var resolved_config: Dictionary = _normalize_shell_config(config)
 	var pivot_ratio: float = clampf(
-		float(config.get("pivot_ratio_from_pommel", DEFAULT_PIVOT_RATIO_FROM_POMMEL)),
+		float(resolved_config.get("pivot_ratio_from_pommel", DEFAULT_PIVOT_RATIO_FROM_POMMEL)),
 		0.0,
 		1.0
 	)
+	var origin_id: StringName = StringName(resolved_config.get("origin_id", CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER))
+	var parent_origin_id: StringName = StringName(resolved_config.get("parent_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING))
+	var origin_local_origin_id: StringName = StringName(resolved_config.get("origin_local_origin_id", parent_origin_id))
+	var origin_local: Vector3 = resolved_config["origin_local"] as Vector3
 	var pivot_before: Vector3 = pommel_position_local.lerp(tip_position_local, pivot_ratio)
 	var result := {
+		"origin_id": origin_id,
+		"parent_origin_id": parent_origin_id,
+		"tip_position_origin_id": parent_origin_id,
 		"tip_position": tip_position_local,
+		"pommel_position_origin_id": parent_origin_id,
 		"pommel_position": pommel_position_local,
+		"origin_local": origin_local,
+		"origin_local_origin_id": origin_local_origin_id,
+		"fallback_direction_origin_id": StringName(resolved_config.get("fallback_direction_origin_id", parent_origin_id)),
+		"pivot_position_before_origin_id": parent_origin_id,
 		"pivot_position_before": pivot_before,
+		"pivot_position_after_origin_id": parent_origin_id,
 		"pivot_position_after": pivot_before,
 		"distance_before_meters": 0.0,
 		"distance_after_meters": 0.0,
@@ -42,11 +69,10 @@ func project_segment_to_valid_volume(
 		"min_clamped": false,
 		"max_clamped": false,
 	}
-	if not bool(config.get("enabled", false)):
+	if not bool(resolved_config.get("enabled", false)):
 		return result
-	var origin_local: Vector3 = config.get("origin_local", Vector3.ZERO) as Vector3
-	var min_radius: float = maxf(float(config.get("min_radius_meters", 0.0)), 0.0)
-	var max_radius: float = maxf(float(config.get("max_radius_meters", 0.0)), 0.0)
+	var min_radius: float = maxf(float(resolved_config.get("min_radius_meters", 0.0)), 0.0)
+	var max_radius: float = maxf(float(resolved_config.get("max_radius_meters", 0.0)), 0.0)
 	if max_radius > 0.0 and min_radius > max_radius:
 		min_radius = max_radius
 	result["min_radius_meters"] = min_radius
@@ -55,7 +81,7 @@ func project_segment_to_valid_volume(
 	var distance_before: float = origin_to_pivot.length()
 	result["distance_before_meters"] = distance_before
 	var projected_pivot: Vector3 = pivot_before
-	var direction: Vector3 = _resolve_projection_direction(origin_to_pivot, config)
+	var direction: Vector3 = _resolve_projection_direction(origin_to_pivot, resolved_config)
 	if max_radius > 0.0 and distance_before > max_radius:
 		projected_pivot = origin_local + direction * max_radius
 		result["clamped"] = true
@@ -66,16 +92,25 @@ func project_segment_to_valid_volume(
 		result["min_clamped"] = true
 	var translation: Vector3 = projected_pivot - pivot_before
 	result["tip_position"] = tip_position_local + translation
+	result["tip_position_origin_id"] = parent_origin_id
 	result["pommel_position"] = pommel_position_local + translation
+	result["pommel_position_origin_id"] = parent_origin_id
 	result["pivot_position_after"] = projected_pivot
+	result["pivot_position_after_origin_id"] = parent_origin_id
 	result["distance_after_meters"] = projected_pivot.distance_to(origin_local)
 	return result
 
 func project_point_to_valid_volume(point_local: Vector3, config: Dictionary = {}) -> Dictionary:
 	var result: Dictionary = project_segment_to_valid_volume(point_local, point_local, config)
 	return {
+		"origin_id": result.get("origin_id", CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER),
+		"parent_origin_id": result.get("parent_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING),
+		"point_position_origin_id": result.get("tip_position_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING),
 		"point_position": result.get("pivot_position_after", point_local),
+		"point_position_before_origin_id": result.get("tip_position_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING),
 		"point_position_before": point_local,
+		"origin_local": result["origin_local"],
+		"origin_local_origin_id": result.get("origin_local_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING),
 		"distance_before_meters": result.get("distance_before_meters", 0.0),
 		"distance_after_meters": result.get("distance_after_meters", 0.0),
 		"min_radius_meters": result.get("min_radius_meters", 0.0),
@@ -88,7 +123,43 @@ func project_point_to_valid_volume(point_local: Vector3, config: Dictionary = {}
 func _resolve_projection_direction(origin_to_pivot: Vector3, config: Dictionary) -> Vector3:
 	if origin_to_pivot.length_squared() > 0.000001:
 		return origin_to_pivot.normalized()
+	var fallback_direction_origin_id: StringName = _normalize_origin_id(
+		StringName(config.get("fallback_direction_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)),
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	config["fallback_direction_origin_id"] = fallback_direction_origin_id
 	var fallback_direction: Vector3 = config.get("fallback_direction_local", Vector3.FORWARD) as Vector3
 	if fallback_direction.length_squared() <= 0.000001:
 		fallback_direction = Vector3.FORWARD
 	return fallback_direction.normalized()
+
+func _normalize_shell_config(config: Dictionary) -> Dictionary:
+	var resolved_config: Dictionary = config.duplicate(true)
+	var parent_origin_id: StringName = _normalize_origin_id(
+		StringName(resolved_config.get("parent_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)),
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	resolved_config["parent_origin_id"] = parent_origin_id
+	resolved_config["origin_id"] = _normalize_origin_id(
+		StringName(resolved_config.get("origin_id", CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER)),
+		CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER
+	)
+	if not resolved_config.has("origin_local"):
+		resolved_config["origin_local"] = Vector3.ZERO
+	resolved_config["origin_local_origin_id"] = _normalize_origin_id(
+		StringName(resolved_config.get("origin_local_origin_id", parent_origin_id)),
+		parent_origin_id
+	)
+	if resolved_config.has("fallback_direction_local"):
+		resolved_config["fallback_direction_origin_id"] = _normalize_origin_id(
+			StringName(resolved_config.get("fallback_direction_origin_id", parent_origin_id)),
+			parent_origin_id
+		)
+	else:
+		resolved_config["fallback_direction_origin_id"] = parent_origin_id
+	return resolved_config
+
+func _normalize_origin_id(origin_id: StringName, fallback_origin_id: StringName) -> StringName:
+	if origin_id == StringName():
+		return fallback_origin_id
+	return origin_id

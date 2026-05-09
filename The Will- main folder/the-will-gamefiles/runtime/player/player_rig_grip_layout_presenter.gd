@@ -1,6 +1,8 @@
 extends RefCounted
 class_name PlayerRigGripLayoutPresenter
 
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+
 func resolve_grip_hold_layout(
 	baked_profile: BakedProfile,
 	dominant_slot_id: StringName,
@@ -14,7 +16,9 @@ func resolve_grip_hold_layout(
 		"dominant_slot_id": resolved_dominant_slot_id,
 		"support_slot_id": support_slot_id,
 		"dominant_hand_local_position": Vector3.ZERO,
+		"dominant_hand_position_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
 		"support_hand_local_position": Vector3.ZERO,
+		"support_hand_position_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
 		"dominant_hand_axis_ratio_from_span_start": 0.0,
 		"support_hand_axis_ratio_from_span_start": 0.0,
 		"dominant_hand_contact_percent": 0.0,
@@ -39,6 +43,7 @@ func resolve_grip_hold_layout(
 	var dominant_position: Vector3 = baked_profile.primary_grip_contact_position
 	layout.valid = true
 	layout.dominant_hand_local_position = dominant_position
+	layout.dominant_hand_position_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	layout.dominant_hand_axis_ratio_from_span_start = project_axis_ratio_on_profile_span(dominant_position, baked_profile)
 	layout.dominant_hand_contact_percent = resolve_profile_contact_percent(float(layout.dominant_hand_axis_ratio_from_span_start), baked_profile)
 	layout.two_hand_weapon_eligible = baked_profile.primary_grip_two_hand_eligible
@@ -68,7 +73,9 @@ func resolve_grip_hold_layout(
 		dominant_position = baked_profile.primary_grip_center_balance_origin + slide_axis * dominant_offset_units
 		var balanced_support_position: Vector3 = baked_profile.primary_grip_center_balance_origin + slide_axis * support_offset_units
 		layout.dominant_hand_local_position = dominant_position
+		layout.dominant_hand_position_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 		layout.support_hand_local_position = balanced_support_position
+		layout.support_hand_position_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 		layout.dominant_hand_axis_ratio_from_span_start = project_axis_ratio_on_profile_span(dominant_position, baked_profile)
 		layout.support_hand_axis_ratio_from_span_start = project_axis_ratio_on_profile_span(balanced_support_position, baked_profile)
 		layout.dominant_hand_contact_percent = resolve_profile_contact_percent(float(layout.dominant_hand_axis_ratio_from_span_start), baked_profile)
@@ -90,6 +97,7 @@ func resolve_grip_hold_layout(
 		return layout
 	var far_side_support_position: Vector3 = dominant_position + support_direction.normalized() * (effective_support_distance_meters / safe_cell_world_size_meters)
 	layout.support_hand_local_position = far_side_support_position
+	layout.support_hand_position_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	layout.support_hand_axis_ratio_from_span_start = project_axis_ratio_on_profile_span(far_side_support_position, baked_profile)
 	layout.support_hand_contact_percent = resolve_profile_contact_percent(float(layout.support_hand_axis_ratio_from_span_start), baked_profile)
 	layout.effective_two_hand_span_meters = effective_support_distance_meters

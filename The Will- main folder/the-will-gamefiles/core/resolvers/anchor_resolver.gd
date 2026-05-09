@@ -37,13 +37,18 @@ func build_primary_grip_anchor(segment: SegmentAtom, grip_span: Dictionary = {})
 	anchor.anchor_id = StringName("primary_grip_%s_%d_%d" % [String(segment.segment_id), span_start_index, span_end_index])
 	anchor.anchor_type = "primary_grip"
 	anchor.local_position = grip_span.get("center_position", _calculate_segment_center(segment))
+	anchor.position_origin_id = AnchorAtom.DEFAULT_ANCHOR_ORIGIN_ID
 	anchor.local_axis = _calculate_segment_axis(segment)
+	anchor.axis_origin_id = AnchorAtom.DEFAULT_ANCHOR_ORIGIN_ID
 	anchor.span_length = int(grip_span.get("span_length", segment.length_voxels))
 	anchor.span_start_local_position = grip_span.get("start_position", anchor.local_position)
+	anchor.span_start_position_origin_id = AnchorAtom.DEFAULT_ANCHOR_ORIGIN_ID
 	anchor.span_end_local_position = grip_span.get("end_position", anchor.local_position)
+	anchor.span_end_position_origin_id = AnchorAtom.DEFAULT_ANCHOR_ORIGIN_ID
 	anchor.span_start_index = span_start_index
 	anchor.span_end_index = span_end_index
 	anchor.span_anchor_material_ratio = float(grip_span.get("anchor_material_ratio", segment.anchor_material_ratio))
+	anchor.normalize()
 	return anchor
 
 func calculate_primary_grip_offset(center_of_mass: Vector3, grip_position: Vector3) -> Vector3:

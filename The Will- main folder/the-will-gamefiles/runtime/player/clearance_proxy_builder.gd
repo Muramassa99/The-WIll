@@ -1,6 +1,8 @@
 extends RefCounted
 class_name ClearanceProxyBuilder
 
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+
 const SOURCE_MESH_DERIVED: StringName = &"mesh_derived"
 const SOURCE_FALLBACK_ANATOMY: StringName = &"fallback_anatomy_blocks"
 const DEFAULT_CLEARANCE_OFFSET_METERS := 0.005
@@ -296,6 +298,7 @@ func _append_box_descriptor(
 		"region": region_name,
 		"bone_name": bone_name,
 		"local_offset": _resolve_bone_local_offset(skeleton, bone_name, center_world),
+		"offset_origin_id": CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT,
 		"box_size": _sanitize_box_size(box_size),
 		"debug_color": debug_color,
 		"proxy_source": SOURCE_MESH_DERIVED,
@@ -341,6 +344,7 @@ func _append_rounded_band_descriptors(
 			"region": region_name,
 			"bone_name": bone_name,
 			"local_offset": _resolve_bone_local_offset(skeleton, bone_name, center_world + right_world * lateral_offset),
+			"offset_origin_id": CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT,
 			"capsule_radius": capsule_radius,
 			"capsule_height": capsule_height,
 			"debug_color": debug_color,
@@ -377,6 +381,7 @@ func _append_capsule_descriptor(
 		"region": region_name,
 		"bone_name": bone_name,
 		"local_offset": _resolve_bone_local_offset(skeleton, bone_name, center_world),
+		"offset_origin_id": CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT,
 		"capsule_radius": capsule_radius,
 		"capsule_height": capsule_height,
 		"debug_color": debug_color,
@@ -457,6 +462,7 @@ func _append_limb_capsule_descriptor(
 		"bone_name": bone_name,
 		"end_bone_name": end_bone_name,
 		"local_offset": _resolve_bone_local_offset(skeleton, bone_name, center_world),
+		"offset_origin_id": CombatOriginRecordScript.ORIGIN_BODY_RESTRICTION_ATTACHMENT,
 		"capsule_radius": capsule_radius,
 		"capsule_height": length + clearance_offset_meters * 2.0 + BODY_PROXY_OVERLAP_METERS,
 		"debug_color": debug_color,

@@ -35,7 +35,7 @@ func _run_verification() -> void:
 		CraftedItemWIPScript.BUILDER_PATH_MELEE,
 		CraftedItemWIPScript.BUILDER_COMPONENT_PRIMARY
 	)
-	library_state.save_wip(source_wip)
+	var saved_wip: CraftedItemWIP = library_state.save_wip(source_wip)
 
 	var fake_player := FakePlayer.new()
 	fake_player.forge_wip_library_state = library_state
@@ -45,6 +45,8 @@ func _run_verification() -> void:
 	get_root().add_child(ui)
 	await process_frame
 	ui.open_for(fake_player, "TimelineVerifier")
+	await process_frame
+	ui.open_saved_wip_with_hand_setup(saved_wip.wip_id if saved_wip != null else StringName(), &"hand_right", false, true)
 	await process_frame
 	ui.select_skill_slot(&"skill_slot_6")
 	ui.set_active_draft_skill_name("Timeline Alpha")

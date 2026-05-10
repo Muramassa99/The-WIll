@@ -45,6 +45,8 @@ func _run_verification() -> void:
 	await process_frame
 	ui.open_for(fake_player, "PreviewVerifier")
 	await process_frame
+	ui.open_saved_wip_with_hand_setup(saved_wip.wip_id if saved_wip != null else StringName(), &"hand_right", false, true)
+	await process_frame
 	ui.select_skill_slot(&"skill_slot_3")
 	ui.set_active_draft_skill_name("Preview Alpha")
 	await process_frame

@@ -26,11 +26,11 @@ func get_saved_wip(saved_wip_id: StringName) -> CraftedItemWIP:
 			return saved_wip
 	return null
 
-func get_saved_wip_clone(saved_wip_id: StringName) -> CraftedItemWIP:
+func get_saved_wip_clone(saved_wip_id: StringName, include_runtime_caches: bool = true) -> CraftedItemWIP:
 	var saved_wip: CraftedItemWIP = get_saved_wip(saved_wip_id)
 	if saved_wip == null:
 		return null
-	var saved_clone: CraftedItemWIP = saved_wip.duplicate(true) as CraftedItemWIP
+	var saved_clone: CraftedItemWIP = _duplicate_wip_for_reader(saved_wip, include_runtime_caches)
 	if saved_clone != null and saved_clone.has_method("ensure_combat_animation_station_state"):
 		saved_clone.call("ensure_combat_animation_station_state")
 	return saved_clone
@@ -40,14 +40,56 @@ func get_unarmed_authoring_wip() -> CraftedItemWIP:
 		return unarmed_authoring_wip
 	return get_saved_wip(CraftedItemWIP.UNARMED_AUTHORING_WIP_ID)
 
-func get_unarmed_authoring_wip_clone() -> CraftedItemWIP:
+func get_unarmed_authoring_wip_clone(include_runtime_caches: bool = true) -> CraftedItemWIP:
 	var source_wip: CraftedItemWIP = get_unarmed_authoring_wip()
 	if source_wip == null:
 		return null
-	var saved_clone: CraftedItemWIP = source_wip.duplicate(true) as CraftedItemWIP
+	var saved_clone: CraftedItemWIP = _duplicate_wip_for_reader(source_wip, include_runtime_caches)
 	if saved_clone != null and saved_clone.has_method("ensure_combat_animation_station_state"):
 		saved_clone.call("ensure_combat_animation_station_state")
 	return saved_clone
+
+func get_saved_draft_runtime_clip_cache(
+	saved_wip_id: StringName,
+	draft_identifier: StringName,
+	use_idle_identifier: bool = false
+) -> Dictionary:
+	var result := {
+		"found": false,
+		"runtime_clip": null,
+		"runtime_cache_signature": "",
+		"frame_count": 0,
+	}
+	var source_wip: CraftedItemWIP = get_saved_wip(saved_wip_id)
+	if source_wip == null and saved_wip_id == CraftedItemWIP.UNARMED_AUTHORING_WIP_ID:
+		source_wip = get_unarmed_authoring_wip()
+	if source_wip == null or draft_identifier == StringName():
+		return result
+	var station_state: Resource = source_wip.combat_animation_station_state as Resource
+	if station_state == null:
+		return result
+	var property_name: StringName = &"idle_drafts" if use_idle_identifier else &"skill_drafts"
+	var drafts: Array = station_state.get(property_name) as Array
+	for draft_variant: Variant in drafts:
+		var draft: Resource = draft_variant as Resource
+		if draft == null:
+			continue
+		var candidate_identifier: StringName = StringName(draft.get("context_id")) if use_idle_identifier else StringName(draft.get("owning_skill_id"))
+		if candidate_identifier != draft_identifier:
+			continue
+		var runtime_clip = draft.get("baked_runtime_clip")
+		if runtime_clip == null:
+			return result
+		var runtime_clip_copy = runtime_clip.call("duplicate_clip") if runtime_clip.has_method("duplicate_clip") else runtime_clip.duplicate(true)
+		if runtime_clip_copy == null:
+			return result
+		result["found"] = true
+		result["runtime_clip"] = runtime_clip_copy
+		result["runtime_cache_signature"] = String(draft.get("runtime_cache_signature")) if _resource_has_property(draft, "runtime_cache_signature") else ""
+		if runtime_clip_copy.has_method("get_frame_count"):
+			result["frame_count"] = int(runtime_clip_copy.call("get_frame_count"))
+		return result
+	return result
 
 func save_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 	if source_wip == null:
@@ -127,14 +169,51 @@ func delete_saved_wip(saved_wip_id: StringName) -> bool:
 	persist()
 	return true
 
-func set_selected_wip_id(saved_wip_id: StringName) -> void:
+func set_selected_wip_id(saved_wip_id: StringName, persist_selection: bool = true) -> void:
 	if selected_wip_id == saved_wip_id:
 		return
 	selected_wip_id = saved_wip_id
-	persist()
+	if persist_selection:
+		persist()
 
 func persist() -> bool:
 	return PersistentResourceStateIOScript.persist_resource(self, save_file_path)
+
+func _duplicate_wip_for_reader(source_wip: CraftedItemWIP, include_runtime_caches: bool) -> CraftedItemWIP:
+	if source_wip == null:
+		return null
+	if include_runtime_caches:
+		return source_wip.duplicate(true) as CraftedItemWIP
+	var authoring_clone: CraftedItemWIP = source_wip.duplicate(false) as CraftedItemWIP
+	if authoring_clone == null:
+		return null
+	var station_state: Resource = source_wip.combat_animation_station_state as Resource
+	if station_state != null:
+		var station_clone: Resource = station_state.duplicate(true) as Resource
+		_clear_station_runtime_clip_caches(station_clone)
+		authoring_clone.combat_animation_station_state = station_clone
+	return authoring_clone
+
+func _clear_station_runtime_clip_caches(station_state: Resource) -> void:
+	if station_state == null:
+		return
+	for property_name in [&"skill_drafts", &"idle_drafts"]:
+		var drafts: Array = station_state.get(property_name) as Array
+		for draft_variant: Variant in drafts:
+			var draft: Resource = draft_variant as Resource
+			if draft == null:
+				continue
+			draft.set("baked_runtime_clip", null)
+			if _resource_has_property(draft, "runtime_cache_signature"):
+				draft.set("runtime_cache_signature", "")
+
+func _resource_has_property(target: Object, property_name: String) -> bool:
+	if target == null:
+		return false
+	for property_info: Dictionary in target.get_property_list():
+		if String(property_info.get("name", "")) == property_name:
+			return true
+	return false
 
 func _find_saved_wip_index(saved_wip_id: StringName) -> int:
 	for index: int in range(saved_wips.size()):

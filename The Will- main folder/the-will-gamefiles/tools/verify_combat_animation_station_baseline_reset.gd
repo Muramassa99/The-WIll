@@ -109,6 +109,7 @@ func _run_verification() -> void:
 
 	var reset_ok: bool = ui.reset_active_draft_to_baseline()
 	await process_frame
+	var dirty_after_first_reset: bool = bool(ui.get("editor_state_dirty"))
 	var active_draft_after_reset: CombatAnimationDraft = ui.call("_get_active_draft") as CombatAnimationDraft
 	var after_reset_first_node: CombatAnimationMotionNode = _get_motion_node(active_draft_after_reset, 0)
 	var after_reset_second_node: CombatAnimationMotionNode = _get_motion_node(active_draft_after_reset, 1)
@@ -131,16 +132,36 @@ func _run_verification() -> void:
 		&"skill_slot_1"
 	)
 	var saved_library_first_node_after_reset: CombatAnimationMotionNode = _get_motion_node(saved_library_draft_after_reset, 0)
+	var saved_library_before_manual_save_two_hand_state: StringName = (
+		saved_library_first_node_after_reset.two_hand_state
+		if saved_library_first_node_after_reset != null
+		else StringName()
+	)
 	var after_reset_debug: Dictionary = ui.get_preview_debug_state()
 	var first_reset_signature: Dictionary = _build_reset_signature(after_reset_first_node, after_reset_second_node)
 	var seed_after_first_reset: Dictionary = ui.call("_resolve_active_weapon_authored_baseline_seed") as Dictionary
 	var second_reset_ok: bool = ui.reset_active_draft_to_baseline()
 	await process_frame
+	var dirty_before_manual_save: bool = bool(ui.get("editor_state_dirty"))
 	var active_draft_after_second_reset: CombatAnimationDraft = ui.call("_get_active_draft") as CombatAnimationDraft
 	var after_second_reset_first_node: CombatAnimationMotionNode = _get_motion_node(active_draft_after_second_reset, 0)
 	var after_second_reset_second_node: CombatAnimationMotionNode = _get_motion_node(active_draft_after_second_reset, 1)
 	var second_reset_signature: Dictionary = _build_reset_signature(after_second_reset_first_node, after_second_reset_second_node)
 	var seed_after_second_reset: Dictionary = ui.call("_resolve_active_weapon_authored_baseline_seed") as Dictionary
+	ui.call("_manual_save_active_editor_state")
+	await _wait_for_manual_save(ui)
+	var dirty_after_manual_save: bool = bool(ui.get("editor_state_dirty"))
+	var saved_library_wip_after_manual_save: CraftedItemWIP = ui.active_wip_library.get_saved_wip(
+		saved_wip.wip_id if saved_wip != null else StringName()
+	) if ui.active_wip_library != null else null
+	var saved_library_station_after_manual_save: CombatAnimationStationState = null
+	if saved_library_wip_after_manual_save != null:
+		saved_library_station_after_manual_save = saved_library_wip_after_manual_save.combat_animation_station_state as CombatAnimationStationState
+	var saved_library_draft_after_manual_save: CombatAnimationDraft = _find_skill_draft(
+		saved_library_station_after_manual_save.skill_drafts if saved_library_station_after_manual_save != null else [],
+		&"skill_slot_1"
+	)
+	var saved_library_first_node_after_manual_save: CombatAnimationMotionNode = _get_motion_node(saved_library_draft_after_manual_save, 0)
 	var persisted_file_text: String = FileAccess.get_file_as_string(TEMP_SAVE_FILE_PATH) if FileAccess.file_exists(TEMP_SAVE_FILE_PATH) else ""
 	var persisted_slot_1_anchor: String = "draft_id = &\"skill_slot_1_draft\""
 	var persisted_slot_1_anchor_index: int = persisted_file_text.find(persisted_slot_1_anchor)
@@ -177,6 +198,7 @@ func _run_verification() -> void:
 	lines.append("before_reset_preview_slot=%s" % String(ui.get_active_open_dominant_slot_id()))
 	lines.append("before_reset_preview_two_hand=%s" % str(ui.is_active_open_two_hand()))
 	lines.append("reset_ok=%s" % str(reset_ok))
+	lines.append("dirty_after_first_reset=%s" % str(dirty_after_first_reset))
 	lines.append("after_reset_active_draft_identifier=%s" % String(ui.get_active_draft_identifier()))
 	lines.append("after_reset_active_slot=%s" % String(ui.get_active_open_dominant_slot_id()))
 	lines.append("after_reset_active_two_hand=%s" % str(ui.is_active_open_two_hand()))
@@ -187,9 +209,7 @@ func _run_verification() -> void:
 	lines.append("after_reset_station_first_node_two_hand_state=%s" % String(
 		active_station_first_node_after_reset.two_hand_state if active_station_first_node_after_reset != null else StringName()
 	))
-	lines.append("saved_library_first_node_two_hand_state=%s" % String(
-		saved_library_first_node_after_reset.two_hand_state if saved_library_first_node_after_reset != null else StringName()
-	))
+	lines.append("saved_library_before_manual_save_first_node_two_hand_state=%s" % String(saved_library_before_manual_save_two_hand_state))
 	lines.append("after_reset_first_node_tip_matches_expected=%s" % str(
 		after_reset_first_node != null and after_reset_first_node.tip_position_local.is_equal_approx(expected_reset_tip)
 	))
@@ -203,6 +223,11 @@ func _run_verification() -> void:
 		after_reset_first_node != null and after_reset_first_node.weapon_orientation_degrees.is_equal_approx(expected_reset_weapon_orientation)
 	))
 	lines.append("second_reset_ok=%s" % str(second_reset_ok))
+	lines.append("dirty_before_manual_save=%s" % str(dirty_before_manual_save))
+	lines.append("dirty_after_manual_save=%s" % str(dirty_after_manual_save))
+	lines.append("saved_library_after_manual_save_first_node_two_hand_state=%s" % String(
+		saved_library_first_node_after_manual_save.two_hand_state if saved_library_first_node_after_manual_save != null else StringName()
+	))
 	lines.append("repeated_reset_first_second_same=%s" % str(_reset_signatures_match(first_reset_signature, second_reset_signature)))
 	lines.append("repeated_reset_seed_tip_stable=%s" % str(
 		(seed_after_first_reset.get("tip_position_local", Vector3.ZERO) as Vector3).is_equal_approx(
@@ -290,3 +315,9 @@ func _get_motion_node(draft: CombatAnimationDraft, index: int) -> CombatAnimatio
 	if draft == null or index < 0 or index >= draft.motion_node_chain.size():
 		return null
 	return draft.motion_node_chain[index] as CombatAnimationMotionNode
+
+func _wait_for_manual_save(ui) -> void:
+	var frame_count: int = 0
+	while ui != null and bool(ui.get("manual_save_in_progress")) and frame_count < 240:
+		await process_frame
+		frame_count += 1

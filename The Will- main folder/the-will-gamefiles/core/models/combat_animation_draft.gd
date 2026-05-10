@@ -39,6 +39,7 @@ const DEFAULT_STOW_CONTACT_RATIO := 0.5
 @export var authored_for_two_hand_only: bool = false
 @export var motion_node_chain: Array[Resource] = []
 @export var baked_runtime_clip: Resource = null
+@export var runtime_cache_signature: String = ""
 @export var selected_motion_node_index: int = 0
 @export var continuity_motion_node_index: int = 0
 @export_range(0.0, 3.0, 0.01) var preview_playback_speed_scale: float = 1.0

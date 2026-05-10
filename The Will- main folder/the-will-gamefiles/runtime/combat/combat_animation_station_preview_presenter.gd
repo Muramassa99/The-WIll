@@ -311,6 +311,11 @@ func apply_runtime_authored_weapon_pose(
 	configure_preview_hand_setup(previous_slot_id, previous_default_two_hand)
 	return resolved_playback_state
 
+func _append_latency_trace_elapsed(trace: Array, label: String, start_usec: int) -> int:
+	var now_usec: int = Time.get_ticks_usec()
+	trace.append("%s_ms=%.3f" % [label, float(now_usec - start_usec) / 1000.0])
+	return now_usec
+
 func refresh_preview(
 	preview_container: SubViewportContainer,
 	preview_subviewport: SubViewport,
@@ -331,13 +336,14 @@ func refresh_preview(
 	var playback_motion_node: CombatAnimationMotionNode = _build_effective_preview_motion_node(selected_motion_node, playback_state)
 	_refresh_actor_and_weapon(state, active_wip, playback_motion_node, active_draft)
 	_prepare_trajectory_root_for_authoring(state)
-	var open_mount_seed: Dictionary = {}
+	var open_mount_seed: Dictionary = playback_state.get("open_mount_seed", {}) as Dictionary
 	if active_wip != null and not bool(playback_state.get("active", false)):
-		open_mount_seed = resolve_preview_hand_mounted_motion_seed(
-			preview_subviewport,
-			{},
-			active_wip.wip_id
-		)
+		if open_mount_seed.is_empty():
+			open_mount_seed = resolve_preview_hand_mounted_motion_seed(
+				preview_subviewport,
+				{},
+				active_wip.wip_id
+			)
 	var use_open_mount_baseline: bool = (
 		not _is_noncombat_idle_draft(active_draft)
 		and _motion_node_matches_hand_mounted_seed(playback_motion_node, open_mount_seed)
@@ -376,13 +382,20 @@ func refresh_preview(
 			active_draft
 		)
 	else:
+		var speed_state_config: Dictionary = _build_speed_state_config(active_draft)
+		resolved_playback_state["trajectory_static_visual_signature"] = _build_trajectory_static_visual_signature(
+			visible_motion_node_chain,
+			speed_state_config,
+			active_draft,
+			bool(resolved_playback_state.get("authoring_drag_lightweight", false))
+		)
 		_refresh_trajectory_visuals(
 			state,
 			display_motion_node_chain,
 			visible_selected_node_index,
 			active_focus,
 			resolved_playback_state,
-			_build_speed_state_config(active_draft),
+			speed_state_config,
 			active_draft
 		)
 		_refresh_weapon_and_sphere_visuals(state, display_motion_node_chain, visible_selected_node_index, active_focus, baked_profile)
@@ -402,22 +415,36 @@ func sync_preview_pose(
 	active_focus: StringName = &"tip",
 	baked_profile: BakedProfile = null
 ) -> void:
+	var trace_enabled: bool = bool(get_meta("trace_preview_latency", false))
+	var trace: Array = []
+	var trace_step_usec: int = Time.get_ticks_usec()
 	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
 	_sync_preview_size(preview_container, preview_subviewport)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "ensure_nodes_and_size", trace_step_usec)
 	var effective_motion_node_chain: Array = _build_effective_motion_node_chain(active_draft, selected_node_index, live_motion_node_override)
 	var selected_motion_node: CombatAnimationMotionNode = _resolve_selected_motion_node(effective_motion_node_chain, selected_node_index)
 	var visible_motion_node_chain: Array = _build_visible_motion_node_chain(active_draft, effective_motion_node_chain)
 	var visible_selected_node_index: int = _resolve_visible_selected_motion_node_index(active_draft, selected_node_index, visible_motion_node_chain.size())
 	var playback_motion_node: CombatAnimationMotionNode = _build_effective_preview_motion_node(selected_motion_node, playback_state)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "build_motion_chain", trace_step_usec)
 	_refresh_actor_and_weapon(state, active_wip, playback_motion_node, active_draft)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_actor_and_weapon", trace_step_usec)
 	_prepare_trajectory_root_for_authoring(state)
-	var open_mount_seed: Dictionary = {}
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "prepare_trajectory_root", trace_step_usec)
+	var open_mount_seed: Dictionary = playback_state.get("open_mount_seed", {}) as Dictionary
 	if active_wip != null and not bool(playback_state.get("active", false)):
-		open_mount_seed = resolve_preview_hand_mounted_motion_seed(
-			preview_subviewport,
-			{},
-			active_wip.wip_id
-		)
+		if open_mount_seed.is_empty():
+			open_mount_seed = resolve_preview_hand_mounted_motion_seed(
+				preview_subviewport,
+				{},
+				active_wip.wip_id
+			)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "resolve_open_mount_seed", trace_step_usec)
 	var use_open_mount_baseline: bool = (
 		not _is_noncombat_idle_draft(active_draft)
 		and _motion_node_matches_hand_mounted_seed(playback_motion_node, open_mount_seed)
@@ -441,12 +468,16 @@ func sync_preview_pose(
 			live_motion_node_override != null
 		)
 	)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "apply_authoring_pose", trace_step_usec)
 	var debugger_view_enabled: bool = _resolve_debugger_view_enabled(state, resolved_playback_state)
 	var display_motion_node_chain: Array = _build_resolved_display_motion_node_chain(
 		visible_motion_node_chain,
 		visible_selected_node_index,
 		resolved_playback_state
 	)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "build_display_chain", trace_step_usec)
 	if bool(resolved_playback_state.get("authoring_drag_budgeted_visuals", false)):
 		_refresh_drag_budgeted_visuals(
 			state,
@@ -455,21 +486,40 @@ func sync_preview_pose(
 			active_focus,
 			active_draft
 		)
+		if trace_enabled:
+			trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_drag_budgeted_visuals", trace_step_usec)
 	else:
+		var speed_state_config: Dictionary = _build_speed_state_config(active_draft)
+		resolved_playback_state["trajectory_static_visual_signature"] = _build_trajectory_static_visual_signature(
+			visible_motion_node_chain,
+			speed_state_config,
+			active_draft,
+			bool(resolved_playback_state.get("authoring_drag_lightweight", false))
+		)
 		_refresh_trajectory_visuals(
 			state,
 			display_motion_node_chain,
 			visible_selected_node_index,
 			active_focus,
 			resolved_playback_state,
-			_build_speed_state_config(active_draft),
+			speed_state_config,
 			active_draft
 		)
+		if trace_enabled:
+			trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_trajectory_visuals", trace_step_usec)
 		_refresh_weapon_and_sphere_visuals(state, display_motion_node_chain, visible_selected_node_index, active_focus, baked_profile)
+		if trace_enabled:
+			trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_weapon_and_sphere_visuals", trace_step_usec)
 	if not bool(resolved_playback_state.get("authoring_drag_active", false)):
 		_refresh_collision_debug_visuals(state)
+		if trace_enabled:
+			trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_collision_debug_visuals", trace_step_usec)
 	else:
 		_apply_debugger_view_visibility(state, debugger_view_enabled)
+		if trace_enabled:
+			trace_step_usec = _append_latency_trace_elapsed(trace, "apply_debugger_view_visibility", trace_step_usec)
+	if trace_enabled:
+		set_meta("last_sync_preview_pose_latency_trace", trace)
 
 func sync_playback_pose(
 	preview_container: SubViewportContainer,
@@ -482,6 +532,12 @@ func sync_playback_pose(
 ) -> void:
 	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
 	_sync_preview_size(preview_container, preview_subviewport)
+	if bool(playback_state.get("runtime_clip_playback", false)) and bool(playback_state.get("solved_replay_available", false)):
+		var fast_playback_state: Dictionary = _apply_solved_runtime_clip_preview_pose(state, active_wip, playback_state)
+		if bool(fast_playback_state.get("solved_replay_applied", false)):
+			_resolve_debugger_view_enabled(state, fast_playback_state)
+			_refresh_live_playback_markers(state, fast_playback_state)
+			return
 	var effective_motion_node_chain: Array = _build_effective_motion_node_chain(active_draft, selected_node_index, live_motion_node_override)
 	var selected_motion_node: CombatAnimationMotionNode = _resolve_selected_motion_node(effective_motion_node_chain, selected_node_index)
 	var playback_motion_node: CombatAnimationMotionNode = _build_effective_preview_motion_node(selected_motion_node, playback_state)
@@ -1136,13 +1192,20 @@ func refresh_focus_visuals(
 		visible_selected_node_index,
 		resolved_playback_state
 	)
+	var speed_state_config: Dictionary = _build_speed_state_config(active_draft)
+	resolved_playback_state["trajectory_static_visual_signature"] = _build_trajectory_static_visual_signature(
+		visible_motion_node_chain,
+		speed_state_config,
+		active_draft,
+		bool(resolved_playback_state.get("authoring_drag_lightweight", false))
+	)
 	_refresh_trajectory_visuals(
 		state,
 		display_motion_node_chain,
 		visible_selected_node_index,
 		active_focus,
 		resolved_playback_state,
-		_build_speed_state_config(active_draft),
+		speed_state_config,
 		active_draft
 	)
 	_refresh_weapon_and_sphere_visuals(state, display_motion_node_chain, visible_selected_node_index, active_focus, baked_profile)
@@ -2038,6 +2101,7 @@ func _refresh_actor_and_weapon(
 		if actor.has_method("set_upper_body_authoring_auto_apply_enabled"):
 			actor.call("set_upper_body_authoring_auto_apply_enabled", false)
 		actor.set_process(false)
+	_clear_preview_runtime_solved_replay_state(actor, preview_root)
 	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
 	var current_wip_id: StringName = _get_node_meta_or_default(preview_root, "preview_wip_id", StringName()) as StringName
 	var current_slot_id: StringName = _get_node_meta_or_default(preview_root, PREVIEW_ACTIVE_SLOT_ID_META, &"hand_right") as StringName
@@ -2334,6 +2398,31 @@ func _refresh_trajectory_visuals(
 	var onion_skin_root: Node3D = state.get("onion_skin_root", null) as Node3D
 	if preview_root == null or trajectory_root == null or marker_root == null or trajectory_mesh_instance == null or control_mesh_instance == null:
 		return
+	var playback_active: bool = bool(playback_state.get("active", false))
+	var authoring_drag_active: bool = bool(playback_state.get("authoring_drag_active", false))
+	var authoring_drag_lightweight: bool = authoring_drag_active and bool(playback_state.get("authoring_drag_lightweight", false))
+	var static_visual_signature: String = _build_trajectory_static_visual_signature(
+		motion_node_chain,
+		speed_state_config,
+		active_draft,
+		authoring_drag_lightweight
+	)
+	var requested_static_signature: String = String(playback_state.get("trajectory_static_visual_signature", ""))
+	if not requested_static_signature.is_empty():
+		static_visual_signature = requested_static_signature
+	if (
+		not playback_active
+		and not authoring_drag_active
+		and String(preview_root.get_meta("trajectory_static_visual_signature", "")) == static_visual_signature
+	):
+		_refresh_trajectory_selection_visuals(
+			state,
+			motion_node_chain,
+			selected_node_index,
+			active_focus,
+			active_draft
+		)
+		return
 	preview_root.set_meta("drag_budgeted_markers_active", false)
 	_prepare_trajectory_root_for_authoring(state)
 	for child_node: Node in marker_root.get_children():
@@ -2346,9 +2435,6 @@ func _refresh_trajectory_visuals(
 	var node_marker_count: int = 0
 	var handle_marker_count: int = 0
 	var stow_anchor_result: Dictionary = _refresh_noncombat_stow_anchor_markers(state, active_draft)
-	var playback_active: bool = bool(playback_state.get("active", false))
-	var authoring_drag_active: bool = bool(playback_state.get("authoring_drag_active", false))
-	var authoring_drag_lightweight: bool = authoring_drag_active and bool(playback_state.get("authoring_drag_lightweight", false))
 	var tip_is_active_focus: bool = active_focus == CombatAnimationSessionStateScript.FOCUS_TIP and not playback_active
 	var pommel_is_active_focus: bool = active_focus == CombatAnimationSessionStateScript.FOCUS_POMMEL and not playback_active
 	_set_origin_tracked_vector3_meta(
@@ -2471,6 +2557,138 @@ func _refresh_trajectory_visuals(
 	preview_root.set_meta("selected_stow_anchor_orientation_side", stow_anchor_result.get("orientation_side", StringName()))
 	preview_root.set_meta("selected_motion_node_index", selected_node_index)
 	preview_root.set_meta("selected_point_index", selected_node_index)
+	preview_root.set_meta("trajectory_static_visual_signature", static_visual_signature if not playback_active and not authoring_drag_active else "")
+
+func _refresh_trajectory_selection_visuals(
+	state: Dictionary,
+	motion_node_chain: Array,
+	selected_node_index: int,
+	active_focus: StringName = &"tip",
+	active_draft: Resource = null
+) -> void:
+	var preview_root: Node3D = state.get("preview_root", null) as Node3D
+	var marker_root: Node3D = state.get("marker_root", null) as Node3D
+	var control_mesh_instance: MeshInstance3D = state.get("control_mesh", null) as MeshInstance3D
+	if preview_root == null or marker_root == null or control_mesh_instance == null:
+		return
+	for child_node: Node in marker_root.get_children():
+		child_node.queue_free()
+	var node_marker_count: int = 0
+	var handle_marker_count: int = 0
+	var stow_anchor_result: Dictionary = _refresh_noncombat_stow_anchor_markers(state, active_draft)
+	var tip_is_active_focus: bool = active_focus == CombatAnimationSessionStateScript.FOCUS_TIP
+	var pommel_is_active_focus: bool = active_focus == CombatAnimationSessionStateScript.FOCUS_POMMEL
+	_set_origin_tracked_vector3_meta(
+		preview_root,
+		"display_selected_tip_position_local",
+		"display_selected_tip_position_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	_set_origin_tracked_vector3_meta(
+		preview_root,
+		"display_selected_pommel_position_local",
+		"display_selected_pommel_position_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	for node_index: int in range(motion_node_chain.size()):
+		var motion_node: CombatAnimationMotionNode = motion_node_chain[node_index] as CombatAnimationMotionNode
+		if motion_node == null:
+			continue
+		var is_selected: bool = node_index == selected_node_index
+		_create_point_marker(marker_root, motion_node.tip_position_local, is_selected and tip_is_active_focus)
+		_create_point_marker(marker_root, motion_node.pommel_position_local, is_selected and pommel_is_active_focus)
+		if is_selected:
+			_set_origin_tracked_vector3_meta(
+				preview_root,
+				"display_selected_tip_position_local",
+				"display_selected_tip_position_origin_id",
+				motion_node.tip_position_local,
+				motion_node.tip_position_origin_id
+			)
+			_set_origin_tracked_vector3_meta(
+				preview_root,
+				"display_selected_pommel_position_local",
+				"display_selected_pommel_position_origin_id",
+				motion_node.pommel_position_local,
+				motion_node.pommel_position_origin_id
+			)
+			var tip_curve_in_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, node_index, true, true)
+			var tip_curve_out_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, node_index, true, false)
+			var pommel_curve_in_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, node_index, false, true)
+			var pommel_curve_out_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, node_index, false, false)
+			if tip_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+				_create_handle_marker(marker_root, motion_node.tip_position_local + tip_curve_in_handle, Color(0.2, 0.75, 1.0, 1.0), "TipIn")
+				handle_marker_count += 1
+			if tip_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+				_create_handle_marker(marker_root, motion_node.tip_position_local + tip_curve_out_handle, Color(1.0, 0.55, 0.12, 1.0), "TipOut")
+				handle_marker_count += 1
+			if pommel_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+				_create_handle_marker(marker_root, motion_node.pommel_position_local + pommel_curve_in_handle, Color(0.2, 0.55, 0.85, 1.0), "PomIn")
+				handle_marker_count += 1
+			if pommel_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+				_create_handle_marker(marker_root, motion_node.pommel_position_local + pommel_curve_out_handle, Color(0.85, 0.4, 0.12, 1.0), "PomOut")
+				handle_marker_count += 1
+		node_marker_count += 2
+	_render_control_lines(control_mesh_instance.mesh as ImmediateMesh, motion_node_chain, selected_node_index)
+	preview_root.set_meta("selected_motion_node_index", selected_node_index)
+	preview_root.set_meta("selected_point_index", selected_node_index)
+	preview_root.set_meta("motion_node_marker_count", node_marker_count)
+	preview_root.set_meta("point_marker_count", node_marker_count)
+	preview_root.set_meta("control_handle_marker_count", handle_marker_count)
+	preview_root.set_meta("stow_anchor_marker_count", int(stow_anchor_result.get("count", 0)))
+	preview_root.set_meta("stow_anchor_marker_ids", stow_anchor_result.get("ids", []))
+	preview_root.set_meta("stow_anchor_marker_positions_local", stow_anchor_result.get("positions_local", {}))
+	preview_root.set_meta("stow_anchor_marker_positions_origin_id", stow_anchor_result.get("positions_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING))
+	preview_root.set_meta("stow_anchor_marker_position_origin_ids", stow_anchor_result.get("position_origin_ids", {}))
+	preview_root.set_meta("selected_stow_anchor_marker_id", stow_anchor_result.get("selected_id", StringName()))
+	preview_root.set_meta("selected_stow_anchor_slot_id", stow_anchor_result.get("slot_id", StringName()))
+	preview_root.set_meta("selected_stow_anchor_mode", stow_anchor_result.get("mode", StringName()))
+	preview_root.set_meta("selected_stow_anchor_orientation_side", stow_anchor_result.get("orientation_side", StringName()))
+
+func _build_trajectory_static_visual_signature(
+	motion_node_chain: Array,
+	speed_state_config: Dictionary,
+	active_draft: Resource,
+	authoring_drag_lightweight: bool
+) -> String:
+	var parts := PackedStringArray()
+	parts.append("trajectory_static_v1")
+	parts.append(str(authoring_drag_lightweight))
+	parts.append(str(speed_state_config))
+	if active_draft != null:
+		parts.append(String(active_draft.get("draft_id")))
+		parts.append(String(active_draft.get("draft_kind")))
+		parts.append(String(active_draft.get("stow_anchor_mode")))
+		parts.append(str(snapped(float(active_draft.get("stow_contact_ratio")), 0.0001)))
+	parts.append(str(motion_node_chain.size()))
+	for motion_node_variant: Variant in motion_node_chain:
+		var motion_node: CombatAnimationMotionNode = motion_node_variant as CombatAnimationMotionNode
+		parts.append(_build_motion_node_static_visual_signature(motion_node))
+	return "|".join(parts)
+
+func _build_motion_node_static_visual_signature(motion_node: CombatAnimationMotionNode) -> String:
+	if motion_node == null:
+		return "null"
+	var parts := PackedStringArray()
+	parts.append(String(motion_node.node_id))
+	parts.append(str(motion_node.node_index))
+	parts.append(str(motion_node.tip_position_local.snapped(Vector3(0.0001, 0.0001, 0.0001))))
+	parts.append(String(motion_node.tip_position_origin_id))
+	parts.append(str(motion_node.pommel_position_local.snapped(Vector3(0.0001, 0.0001, 0.0001))))
+	parts.append(String(motion_node.pommel_position_origin_id))
+	parts.append(str(motion_node.tip_curve_in_handle.snapped(Vector3(0.0001, 0.0001, 0.0001))))
+	parts.append(str(motion_node.tip_curve_out_handle.snapped(Vector3(0.0001, 0.0001, 0.0001))))
+	parts.append(str(motion_node.pommel_curve_in_handle.snapped(Vector3(0.0001, 0.0001, 0.0001))))
+	parts.append(str(motion_node.pommel_curve_out_handle.snapped(Vector3(0.0001, 0.0001, 0.0001))))
+	parts.append(str(motion_node.weapon_orientation_degrees.snapped(Vector3(0.0001, 0.0001, 0.0001))))
+	parts.append(str(snapped(motion_node.weapon_roll_degrees, 0.0001)))
+	parts.append(str(snapped(motion_node.transition_duration_seconds, 0.0001)))
+	parts.append(String(motion_node.two_hand_state))
+	parts.append(String(motion_node.primary_hand_slot))
+	parts.append(String(motion_node.preferred_grip_style_mode))
+	return ",".join(parts)
 
 func _evaluate_preview_collision_path(
 	state: Dictionary,
@@ -2629,6 +2847,156 @@ func _apply_runtime_clip_preview_pose(
 		false,
 		active_draft
 	)
+
+func _apply_solved_runtime_clip_preview_pose(
+	state: Dictionary,
+	active_wip: CraftedItemWIP,
+	playback_state: Dictionary
+) -> Dictionary:
+	var resolved_playback_state: Dictionary = playback_state.duplicate(false)
+	var preview_root: Node3D = state.get("preview_root", null) as Node3D
+	var actor_pivot: Node3D = state.get("actor_pivot", null) as Node3D
+	if preview_root == null or actor_pivot == null or active_wip == null:
+		return resolved_playback_state
+	var actor: Node3D = actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D
+	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
+	if actor == null or held_item == null or not is_instance_valid(held_item):
+		return resolved_playback_state
+	var current_wip_id: StringName = _get_node_meta_or_default(preview_root, "preview_wip_id", StringName()) as StringName
+	var current_slot_id: StringName = _get_node_meta_or_default(preview_root, PREVIEW_ACTIVE_SLOT_ID_META, &"hand_right") as StringName
+	var target_slot_id: StringName = _resolve_preview_dominant_slot_id()
+	if current_wip_id != active_wip.wip_id or current_slot_id != target_slot_id:
+		return resolved_playback_state
+	if not actor.has_method("apply_runtime_solved_upper_body_pose_frame"):
+		return resolved_playback_state
+	var bone_names: Array = playback_state.get("solved_upper_body_bone_names", []) as Array
+	var bone_positions: Array = playback_state.get("solved_upper_body_pose_positions", []) as Array
+	var bone_rotations: Array = playback_state.get("solved_upper_body_pose_rotations", []) as Array
+	var bone_scales: Array = playback_state.get("solved_upper_body_pose_scales", []) as Array
+	if bone_names.is_empty() or bone_positions.is_empty() or bone_rotations.is_empty() or bone_scales.is_empty():
+		return resolved_playback_state
+	if not bool(preview_root.get_meta("preview_runtime_solved_replay_fast_path_active", false)):
+		_clear_preview_actor_weapon_coupling(actor)
+		if actor.has_method("clear_authoring_contact_anchor_bases"):
+			actor.call("clear_authoring_contact_anchor_bases")
+		preview_root.set_meta("preview_runtime_solved_replay_fast_path_active", true)
+	var pose_applied: bool = bool(actor.call(
+		"apply_runtime_solved_upper_body_pose_frame",
+		bone_names,
+		bone_positions,
+		bone_rotations,
+		bone_scales,
+		1.0
+	))
+	if not pose_applied:
+		return resolved_playback_state
+	var reference_bone_name: StringName = playback_state.get("solved_replay_reference_bone_name", PREVIEW_ROOT_BONE) as StringName
+	if reference_bone_name == StringName():
+		reference_bone_name = PREVIEW_ROOT_BONE
+	var weapon_position_reference_local: Vector3 = playback_state.get("solved_weapon_position_reference_local", Vector3.ZERO) as Vector3
+	var weapon_rotation_reference_local: Quaternion = playback_state.get("solved_weapon_rotation_reference_local", Quaternion.IDENTITY) as Quaternion
+	var weapon_scale_reference_local: Vector3 = playback_state.get("solved_weapon_scale_reference_local", Vector3.ONE) as Vector3
+	var anchor_paths: Array = playback_state.get("solved_anchor_node_paths", []) as Array
+	var anchor_positions: Array = playback_state.get("solved_anchor_positions_weapon_local", []) as Array
+	var anchor_rotations: Array = playback_state.get("solved_anchor_rotations_weapon_local", []) as Array
+	var anchor_scales: Array = playback_state.get("solved_anchor_scales_weapon_local", []) as Array
+	var weapon_frame_registered: bool = false
+	if actor.has_method("set_runtime_solved_replay_weapon_frame"):
+		weapon_frame_registered = bool(actor.call(
+			"set_runtime_solved_replay_weapon_frame",
+			held_item,
+			reference_bone_name,
+			weapon_position_reference_local,
+			weapon_rotation_reference_local,
+			weapon_scale_reference_local,
+			anchor_paths,
+			anchor_positions,
+			anchor_rotations,
+			anchor_scales,
+			target_slot_id if bool(playback_state.get("solved_replay_bridge_frame", false)) else StringName(),
+			StringName(playback_state.get("solved_replay_reference_origin_id", CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE)),
+			StringName(playback_state.get("solved_weapon_reference_origin_id", CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE)),
+			StringName(playback_state.get("solved_anchor_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT))
+		))
+	if not weapon_frame_registered:
+		var reference_transform: Transform3D = _resolve_preview_solved_replay_reference_transform(actor, reference_bone_name)
+		held_item.global_transform = reference_transform * _build_preview_replay_transform(
+			weapon_position_reference_local,
+			weapon_rotation_reference_local,
+			weapon_scale_reference_local
+		)
+		_apply_preview_solved_replay_anchor_transforms(held_item, anchor_paths, anchor_positions, anchor_rotations, anchor_scales)
+	held_item.set_meta("dominant_contact_slot_id", target_slot_id)
+	var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
+	var local_pommel: Vector3 = _get_weapon_pommel_meta(held_item)
+	var solved_tip_world: Vector3 = held_item.to_global(local_tip)
+	var solved_pommel_world: Vector3 = held_item.to_global(local_pommel)
+	var trajectory_reference: Transform3D = _resolve_trajectory_authoring_transform(actor)
+	var reference_inverse: Transform3D = trajectory_reference.affine_inverse()
+	resolved_playback_state["active"] = bool(resolved_playback_state.get("active", true))
+	resolved_playback_state["tip_position_local"] = reference_inverse * solved_tip_world
+	resolved_playback_state["tip_position_origin_id"] = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	resolved_playback_state["pommel_position_local"] = reference_inverse * solved_pommel_world
+	resolved_playback_state["pommel_position_origin_id"] = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	resolved_playback_state["tip_world"] = solved_tip_world
+	resolved_playback_state["pommel_world"] = solved_pommel_world
+	resolved_playback_state["solved_replay_applied"] = true
+	preview_root.set_meta(PREVIEW_POSE_MODE_META, PREVIEW_POSE_MODE_HAND_AUTHORED)
+	preview_root.set_meta("resolved_playback_state", resolved_playback_state)
+	preview_root.set_meta("weapon_tip_alignment_error_meters", 0.0)
+	preview_root.set_meta("weapon_pommel_alignment_error_meters", 0.0)
+	preview_root.set_meta("collision_pose_legal", true)
+	preview_root.set_meta("collision_pose_deferred", true)
+	return resolved_playback_state
+
+func _clear_preview_runtime_solved_replay_state(actor: Node3D, preview_root: Node3D = null) -> void:
+	if actor != null and actor.has_method("clear_runtime_solved_replay_pose_frame"):
+		actor.call("clear_runtime_solved_replay_pose_frame")
+	if preview_root != null:
+		preview_root.set_meta("preview_runtime_solved_replay_fast_path_active", false)
+
+func _resolve_preview_solved_replay_reference_transform(actor: Node3D, reference_bone_name: StringName) -> Transform3D:
+	if actor == null:
+		return Transform3D(Basis.IDENTITY, AUTHORING_ROOT_FALLBACK_LOCAL_OFFSET)
+	var resolved_bone_name: StringName = reference_bone_name if reference_bone_name != StringName() else PREVIEW_ROOT_BONE
+	var skeleton: Skeleton3D = actor.get_node_or_null(PREVIEW_SKELETON_PATH) as Skeleton3D
+	if skeleton != null and skeleton.find_bone(String(resolved_bone_name)) >= 0:
+		return _get_skeleton_bone_world_transform(skeleton, resolved_bone_name)
+	return _resolve_trajectory_authoring_transform(actor)
+
+func _build_preview_replay_transform(position: Vector3, rotation: Quaternion, scale: Vector3) -> Transform3D:
+	var basis := Basis(rotation.normalized())
+	basis = basis.scaled(scale)
+	return Transform3D(basis, position)
+
+func _apply_preview_solved_replay_anchor_transforms(
+	held_item: Node3D,
+	anchor_paths: Array,
+	anchor_positions: Array,
+	anchor_rotations: Array,
+	anchor_scales: Array
+) -> void:
+	if held_item == null or not is_instance_valid(held_item):
+		return
+	var count: int = mini(anchor_paths.size(), mini(anchor_positions.size(), mini(anchor_rotations.size(), anchor_scales.size())))
+	for anchor_index: int in range(count):
+		var anchor_node: Node3D = held_item.get_node_or_null(NodePath(String(anchor_paths[anchor_index]))) as Node3D
+		if anchor_node == null or not is_instance_valid(anchor_node):
+			continue
+		var anchor_weapon_transform: Transform3D = _build_preview_replay_transform(
+			anchor_positions[anchor_index] as Vector3,
+			_resolve_preview_replay_rotation(anchor_rotations[anchor_index]),
+			anchor_scales[anchor_index] as Vector3
+		)
+		anchor_node.global_transform = held_item.global_transform * anchor_weapon_transform
+
+func _resolve_preview_replay_rotation(rotation_data: Variant) -> Quaternion:
+	if rotation_data is Quaternion:
+		return rotation_data as Quaternion
+	if rotation_data is Vector4:
+		var vector_rotation: Vector4 = rotation_data as Vector4
+		return Quaternion(vector_rotation.x, vector_rotation.y, vector_rotation.z, vector_rotation.w)
+	return Quaternion.IDENTITY
 
 func _apply_authored_weapon_pose(
 	state: Dictionary,
@@ -3403,7 +3771,8 @@ func _build_weapon_preview_node(preview_root: Node3D, actor: Node3D, active_wip:
 		held_item_mesh_builder,
 		actor,
 		DEFAULT_FORGE_RULES_RESOURCE,
-		DEFAULT_FORGE_VIEW_TUNING_RESOURCE
+		DEFAULT_FORGE_VIEW_TUNING_RESOURCE,
+		true
 	)
 	if held_item == null:
 		return null

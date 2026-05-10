@@ -94,6 +94,11 @@ const HAND_SLOT_LEFT: StringName = &"hand_left"
 const UNARMED_PROJECT_LIST_LABEL := "- Unarmed"
 const UNARMED_BUILDER_SCOPE_LABEL := "Empty Hand"
 const PREVIEW_RUNTIME_CLIP_SAMPLE_RATE_HZ := 60.0
+const PERSIST_RUNTIME_CACHE_KEEP: StringName = &"runtime_cache_keep"
+const PERSIST_RUNTIME_CACHE_DIRTY_ACTIVE: StringName = &"runtime_cache_dirty_active"
+const PERSIST_RUNTIME_CACHE_DIRTY_ALL: StringName = &"runtime_cache_dirty_all"
+const PERSIST_RUNTIME_CACHE_REFRESH_ACTIVE: StringName = &"runtime_cache_refresh_active"
+const PERSIST_RUNTIME_CACHE_REFRESH_ALL: StringName = &"runtime_cache_refresh_all"
 const WEAPON_OPEN_PRIMARY_MENU_ID_LEFT := 1001
 const WEAPON_OPEN_PRIMARY_MENU_ID_RIGHT := 1002
 const WEAPON_OPEN_VARIANT_MENU_ID_ONE_HAND := 1101
@@ -127,8 +132,10 @@ var add_point_button: Button = null
 var duplicate_point_button: Button = null
 var remove_point_button: Button = null
 var reset_draft_button: Button = null
-var set_continuity_button: Button = null
+var save_button: Button = null
 var play_preview_button: Button = null
+var save_progress_bar: ProgressBar = null
+var save_progress_label: Label = null
 var draft_name_edit: LineEdit = null
 var skill_name_edit: LineEdit = null
 var skill_slot_edit: LineEdit = null
@@ -221,6 +228,8 @@ var pending_weapon_open_wip_id: StringName = StringName()
 var pending_weapon_open_primary_slot_id: StringName = HAND_SLOT_RIGHT
 var active_preview_dominant_slot_id: StringName = HAND_SLOT_RIGHT
 var active_preview_default_two_hand: bool = false
+var manual_save_in_progress: bool = false
+var manual_save_start_msec: int = 0
 
 const PREVIEW_DRAG_REFRESH_INTERVAL_MSEC: int = 83
 const PREVIEW_DRAG_INITIAL_SOLVE_DELAY_MSEC: int = 16
@@ -240,7 +249,7 @@ func _ready() -> void:
 	duplicate_point_button.pressed.connect(_on_duplicate_motion_node_pressed)
 	remove_point_button.pressed.connect(_on_remove_motion_node_pressed)
 	reset_draft_button.pressed.connect(_on_reset_draft_pressed)
-	set_continuity_button.pressed.connect(_on_set_continuity_pressed)
+	save_button.pressed.connect(_on_manual_save_pressed)
 	play_preview_button.pressed.connect(_on_play_preview_pressed)
 	debugger_view_button.toggled.connect(_on_debugger_view_toggled)
 	draft_name_edit.text_submitted.connect(_on_draft_name_submitted)
@@ -315,8 +324,10 @@ func _process(delta: float) -> void:
 		_refresh_preview_scene()
 	if not chain_player.is_playing():
 		session_state.playback_active = false
-		_refresh_preview_scene()
 		footer_status_label.text = "Preview finished."
+
+func _input(event: InputEvent) -> void:
+	_capture_editor_cycle_focus_event(event)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not panel.visible:
@@ -347,9 +358,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		remove_selected_motion_node()
 		get_viewport().set_input_as_handled()
 		return
-	if _event_matches_any_action(event, [ACTION_CYCLE_FOCUS, LEGACY_ACTION_CYCLE_FOCUS]):
-		_cycle_focus()
-		get_viewport().set_input_as_handled()
+	if _capture_editor_cycle_focus_event(event):
 		return
 	if _event_matches_any_action(event, [ACTION_PREVIEW_PLAYBACK]):
 		_toggle_preview_playback()
@@ -392,8 +401,8 @@ func close_ui() -> void:
 	if motion_node_editor.is_dragging():
 		motion_node_editor.end_drag()
 	_finalize_preview_drag("Motion node edit locked in.")
-	_commit_editor_state_to_disk("Combat animation station closed.")
 	editor_state_dirty = false
+	_set_manual_save_progress(0.0, "", false)
 	preview_drag_override_node = null
 	panel.visible = false
 	backdrop.visible = false
@@ -420,6 +429,9 @@ func select_saved_wip(
 	advance_workflow: bool = true,
 	opening_config: Dictionary = {}
 ) -> bool:
+	var open_perf_trace: Array = []
+	var open_perf_step_usec: int = Time.get_ticks_usec()
+	var trace_open_latency: bool = bool(get_meta("trace_open_latency", false))
 	if _is_unarmed_authoring_wip_id(saved_wip_id):
 		return select_unarmed_authoring(advance_workflow, opening_config)
 	if active_wip_library == null:
@@ -427,34 +439,73 @@ func select_saved_wip(
 	if active_wip != null and active_saved_wip_id != StringName():
 		_finalize_preview_drag("Motion node edit locked in.")
 	if active_wip != null and active_saved_wip_id != StringName() and active_saved_wip_id != saved_wip_id:
-		_commit_editor_state_to_disk("Saved current weapon edits.")
+		editor_state_dirty = false
+	if trace_open_latency:
+		open_perf_step_usec = _append_perf_trace_elapsed(open_perf_trace, "pre_clone", open_perf_step_usec)
 	var reusing_active_wip: bool = active_wip != null and active_saved_wip_id == saved_wip_id
-	var selected_clone: CraftedItemWIP = active_wip if reusing_active_wip else active_wip_library.get_saved_wip_clone(saved_wip_id)
+	var selected_clone: CraftedItemWIP = (
+		active_wip
+		if reusing_active_wip
+		else active_wip_library.get_saved_wip_clone(saved_wip_id, false)
+	)
+	if trace_open_latency:
+		open_perf_step_usec = _append_perf_trace_elapsed(open_perf_trace, "get_saved_wip_clone", open_perf_step_usec)
 	if selected_clone == null:
 		return false
 	selected_clone.ensure_combat_animation_station_state()
+	if trace_open_latency:
+		open_perf_step_usec = _append_perf_trace_elapsed(open_perf_trace, "ensure_station_state", open_perf_step_usec)
 	active_saved_wip_id = saved_wip_id
 	active_wip = selected_clone
-	active_wip_library.set_selected_wip_id(saved_wip_id)
+	editor_state_dirty = false
+	_set_manual_save_progress(0.0, "", false)
+	active_wip_library.set_selected_wip_id(saved_wip_id, false)
 	session_state.current_weapon_wip_id = saved_wip_id
 	_apply_active_weapon_open_config(_normalize_weapon_open_config(opening_config, selected_clone))
+	if trace_open_latency:
+		open_perf_step_usec = _append_perf_trace_elapsed(open_perf_trace, "apply_open_config", open_perf_step_usec)
 	var geometry_seeded: bool = false
 	if not reusing_active_wip:
 		geometry_seeded = _seed_active_station_drafts_from_weapon_geometry()
-	var retarget_result: Dictionary = _retarget_active_station_drafts_for_current_weapon_geometry()
+	if trace_open_latency:
+		open_perf_step_usec = _append_perf_trace_elapsed(open_perf_trace, "seed_station_geometry", open_perf_step_usec)
+	var retarget_result: Dictionary = (
+		_retarget_active_station_drafts_for_current_weapon_geometry()
+		if geometry_seeded or _active_station_retarget_requires_weapon_length_update()
+		else {
+			"changed": false,
+			"seeded_count": 0,
+			"retargeted_count": 0,
+			"endpoint_changed_count": 0,
+			"draft_count": 0,
+			"skipped": true,
+			"reason": "saved_weapon_geometry_unchanged",
+		}
+	)
 	last_station_retarget_result = retarget_result.duplicate(true)
+	if trace_open_latency:
+		open_perf_step_usec = _append_perf_trace_elapsed(open_perf_trace, "retarget_station_geometry", open_perf_step_usec)
 	if geometry_seeded:
-		_persist_active_wip("Aligned baseline motion nodes with stage-1 weapon geometry.")
+		_stage_active_wip_edit("Aligned baseline motion nodes with stage-1 weapon geometry.", PERSIST_RUNTIME_CACHE_DIRTY_ALL)
+		if trace_open_latency:
+			open_perf_step_usec = _append_perf_trace_elapsed(open_perf_trace, "stage_seeded_geometry", open_perf_step_usec)
 	var load_message: String = "Loaded %s." % selected_clone.forge_project_name
 	if int(retarget_result.get("retargeted_count", 0)) > 0:
 		load_message = "%s Retargeted motion preview to current weapon geometry." % load_message
 	_refresh_all(load_message)
+	if trace_open_latency:
+		open_perf_step_usec = _append_perf_trace_elapsed(open_perf_trace, "refresh_all", open_perf_step_usec)
 	if geometry_seeded and _realign_active_draft_to_preview_open_baseline(true):
 		var baseline_message: String = "Aligned active draft baseline with the current hand mount."
-		_persist_active_wip(baseline_message)
+		_stage_active_wip_edit(baseline_message, PERSIST_RUNTIME_CACHE_DIRTY_ACTIVE)
 		_refresh_all(baseline_message)
+		if trace_open_latency:
+			open_perf_step_usec = _append_perf_trace_elapsed(open_perf_trace, "realign_active_baseline", open_perf_step_usec)
 	if advance_workflow:
 		_set_workflow_step(WORKFLOW_STEP_SKILL_SELECT, "Loaded %s. Select a skill slot or idle draft." % selected_clone.forge_project_name)
+	if trace_open_latency:
+		_append_perf_trace_elapsed(open_perf_trace, "advance_workflow", open_perf_step_usec)
+		set_meta("last_open_latency_trace", open_perf_trace)
 	return true
 
 func select_unarmed_authoring(
@@ -467,7 +518,7 @@ func select_unarmed_authoring(
 	if active_wip != null and active_saved_wip_id != StringName():
 		_finalize_preview_drag("Motion node edit locked in.")
 	if active_wip != null and active_saved_wip_id != StringName() and active_saved_wip_id != unarmed_wip_id:
-		_commit_editor_state_to_disk("Saved current weapon edits.")
+		editor_state_dirty = false
 	var reusing_active_wip: bool = active_wip != null and active_saved_wip_id == unarmed_wip_id
 	var selected_clone: CraftedItemWIP = active_wip if reusing_active_wip else _get_or_create_unarmed_authoring_wip_clone()
 	if selected_clone == null:
@@ -475,7 +526,9 @@ func select_unarmed_authoring(
 	_normalize_unarmed_authoring_wip(selected_clone)
 	active_saved_wip_id = unarmed_wip_id
 	active_wip = selected_clone
-	active_wip_library.set_selected_wip_id(unarmed_wip_id)
+	editor_state_dirty = false
+	_set_manual_save_progress(0.0, "", false)
+	active_wip_library.set_selected_wip_id(unarmed_wip_id, false)
 	session_state.current_weapon_wip_id = unarmed_wip_id
 	_apply_active_weapon_open_config(_normalize_weapon_open_config(opening_config, selected_clone))
 	var geometry_seeded: bool = false
@@ -485,14 +538,14 @@ func select_unarmed_authoring(
 	var retarget_result: Dictionary = _retarget_active_station_drafts_for_current_weapon_geometry()
 	last_station_retarget_result = retarget_result.duplicate(true)
 	if geometry_seeded:
-		_persist_active_wip("Aligned unarmed motion nodes with the hand authoring frame.")
+		_stage_active_wip_edit("Aligned unarmed motion nodes with the hand authoring frame.", PERSIST_RUNTIME_CACHE_DIRTY_ALL)
 	var load_message: String = "Loaded %s." % selected_clone.forge_project_name
 	if int(retarget_result.get("retargeted_count", 0)) > 0:
 		load_message = "%s Retargeted motion preview to current hand authoring frame." % load_message
 	_refresh_all(load_message)
 	if geometry_seeded and _realign_active_draft_to_preview_open_baseline(true):
 		var baseline_message: String = "Aligned active draft baseline with the current empty-hand frame."
-		_persist_active_wip(baseline_message)
+		_stage_active_wip_edit(baseline_message, PERSIST_RUNTIME_CACHE_DIRTY_ACTIVE)
 		_refresh_all(baseline_message)
 	if advance_workflow:
 		_set_workflow_step(WORKFLOW_STEP_SKILL_SELECT, "Loaded %s. Select a skill slot or idle draft." % selected_clone.forge_project_name)
@@ -539,13 +592,15 @@ func select_draft(draft_identifier: StringName, advance_workflow: bool = true) -
 	var selected_node_index: int = int(draft.get("selected_motion_node_index"))
 	draft.set("selected_motion_node_index", clampi(selected_node_index, 0, maxi(int((draft.get("motion_node_chain") as Array).size()) - 1, 0)))
 	session_state.current_draft_ref = draft
+	if advance_workflow:
+		_set_workflow_step(WORKFLOW_STEP_EDITOR)
 	if _is_noncombat_idle_draft(draft):
 		var stow_segment_changed: bool = _recenter_active_noncombat_stow_segment()
 		if stow_segment_changed:
-			_persist_active_wip("Noncombat stow pivot centered.")
+			_stage_active_wip_edit("Noncombat stow pivot centered.")
 	_refresh_all("Draft selection updated.")
-	if advance_workflow:
-		_set_workflow_step(WORKFLOW_STEP_EDITOR, "Editing %s." % String(draft.get("display_name")))
+	if advance_workflow and footer_status_label != null:
+		footer_status_label.text = "Editing %s." % String(draft.get("display_name"))
 	return true
 
 func select_skill_slot(slot_id: StringName, advance_workflow: bool = true) -> bool:
@@ -577,13 +632,15 @@ func select_skill_slot(slot_id: StringName, advance_workflow: bool = true) -> bo
 	var should_realign_baseline: bool = created_new_draft or _draft_matches_raw_weapon_geometry_baseline(draft)
 	station_state.set("selected_skill_id", StringName(draft.get("owning_skill_id")))
 	session_state.current_draft_ref = draft
+	if advance_workflow:
+		_set_workflow_step(WORKFLOW_STEP_EDITOR)
 	_refresh_all("Selected %s." % display_name)
 	if should_realign_baseline and _realign_active_draft_to_preview_open_baseline(true):
 		var baseline_message: String = "Aligned %s baseline with the active hand mount." % display_name
-		_persist_active_wip(baseline_message)
+		_stage_active_wip_edit(baseline_message, PERSIST_RUNTIME_CACHE_DIRTY_ACTIVE)
 		_refresh_all(baseline_message)
-	if advance_workflow:
-		_set_workflow_step(WORKFLOW_STEP_EDITOR, "Editing %s." % display_name)
+	if advance_workflow and footer_status_label != null:
+		footer_status_label.text = "Editing %s." % display_name
 	return true
 
 func create_skill_draft(skill_id: StringName = StringName(), display_name: String = "") -> StringName:
@@ -607,7 +664,7 @@ func select_motion_node(node_index: int) -> bool:
 	_finalize_preview_drag("Motion node edit locked in.")
 	draft.set("selected_motion_node_index", clampi(node_index, 0, motion_node_chain.size() - 1))
 	session_state.current_motion_node_index = int(draft.get("selected_motion_node_index"))
-	_refresh_all("Motion node selection updated.")
+	_refresh_active_editor_surface("Motion node selection updated.")
 	return true
 
 func insert_motion_node_after_selection() -> bool:
@@ -634,8 +691,8 @@ func insert_motion_node_after_selection() -> bool:
 		motion_node_chain.insert(insert_index, new_node)
 		draft.set("selected_motion_node_index", insert_index)
 	_normalize_draft(draft)
-	_persist_active_wip("Inserted motion node %d." % insert_index)
-	_refresh_all("Inserted motion node %d." % insert_index)
+	_stage_active_wip_edit("Inserted motion node %d." % insert_index)
+	_refresh_active_editor_surface("Inserted motion node %d." % insert_index)
 	return true
 
 func duplicate_selected_motion_node() -> bool:
@@ -665,8 +722,8 @@ func duplicate_selected_motion_node() -> bool:
 		motion_node_chain.insert(selected_index + 1, duplicate_node)
 		draft.set("selected_motion_node_index", selected_index + 1)
 	_normalize_draft(draft)
-	_persist_active_wip("Duplicated motion node %d." % selected_index)
-	_refresh_all("Duplicated motion node %d." % selected_index)
+	_stage_active_wip_edit("Duplicated motion node %d." % selected_index)
+	_refresh_active_editor_surface("Duplicated motion node %d." % selected_index)
 	return true
 
 func remove_selected_motion_node() -> bool:
@@ -694,8 +751,8 @@ func remove_selected_motion_node() -> bool:
 		draft.set("selected_motion_node_index", clampi(selected_index, 0, motion_node_chain.size() - 1))
 		draft.set("continuity_motion_node_index", clampi(int(draft.get("continuity_motion_node_index")), 0, motion_node_chain.size() - 1))
 	_normalize_draft(draft)
-	_persist_active_wip("Removed motion node %d." % selected_index)
-	_refresh_all("Removed motion node %d." % selected_index)
+	_stage_active_wip_edit("Removed motion node %d." % selected_index)
+	_refresh_active_editor_surface("Removed motion node %d." % selected_index)
 	return true
 
 func reset_active_draft_to_baseline() -> bool:
@@ -725,8 +782,8 @@ func reset_active_draft_to_baseline() -> bool:
 	_normalize_draft(draft)
 	_enforce_idle_authority(draft, false)
 	var status_message: String = "Draft reset to active weapon and grip baseline." if used_weapon_seed else "Draft reset to default baseline."
-	_persist_active_wip(status_message)
-	_refresh_all(status_message)
+	_stage_active_wip_edit(status_message)
+	_refresh_active_editor_surface(status_message)
 	return true
 
 func set_selected_motion_node_as_continuity() -> bool:
@@ -737,8 +794,8 @@ func set_selected_motion_node_as_continuity() -> bool:
 		_reject_locked_motion_node_edit()
 		return false
 	draft.set("continuity_motion_node_index", int(draft.get("selected_motion_node_index")))
-	editor_state_dirty = true
-	_refresh_all("Continuity motion node updated.")
+	_stage_active_wip_edit("Continuity motion node updated.")
+	_refresh_active_editor_surface("Continuity motion node updated.")
 	return true
 
 func set_selected_motion_node_tip_position(
@@ -1146,7 +1203,7 @@ func set_active_draft_display_name(display_name: String) -> bool:
 		return false
 	draft.set("display_name", display_name.strip_edges())
 	_normalize_draft(draft)
-	_persist_active_wip("Draft display name updated.")
+	_stage_active_wip_edit("Draft display name updated.", PERSIST_RUNTIME_CACHE_KEEP)
 	_refresh_draft_list()
 	_refresh_editor_fields()
 	_refresh_summary("Draft display name updated.")
@@ -1160,7 +1217,7 @@ func set_active_draft_slot_id(slot_id: StringName) -> bool:
 		return false
 	draft.set("legal_slot_id", slot_id)
 	_normalize_draft(draft)
-	_persist_active_wip("Draft slot updated.")
+	_stage_active_wip_edit("Draft slot updated.")
 	_refresh_draft_list()
 	_refresh_skill_slot_selector()
 	_refresh_editor_fields()
@@ -1173,7 +1230,7 @@ func set_active_draft_preview_speed(speed_scale: float) -> bool:
 		return false
 	draft.set("preview_playback_speed_scale", maxf(speed_scale, 0.01))
 	_normalize_draft(draft)
-	_persist_active_wip("Preview speed updated.")
+	_stage_active_wip_edit("Preview speed updated.")
 	_refresh_editor_fields()
 	_refresh_summary("Preview speed updated.")
 	return true
@@ -1184,7 +1241,7 @@ func set_active_draft_speed_acceleration_percent(percent_value: float) -> bool:
 		return false
 	draft.set("speed_acceleration_percent", clampf(percent_value, 0.0, 100.0))
 	_normalize_draft(draft)
-	_persist_active_wip("Acceleration tuning updated.")
+	_stage_active_wip_edit("Acceleration tuning updated.")
 	_refresh_editor_fields()
 	_refresh_preview_scene()
 	_refresh_summary("Acceleration tuning updated.")
@@ -1196,7 +1253,7 @@ func set_active_draft_speed_deceleration_percent(percent_value: float) -> bool:
 		return false
 	draft.set("speed_deceleration_percent", clampf(percent_value, 0.0, 100.0))
 	_normalize_draft(draft)
-	_persist_active_wip("Deceleration tuning updated.")
+	_stage_active_wip_edit("Deceleration tuning updated.")
 	_refresh_editor_fields()
 	_refresh_preview_scene()
 	_refresh_summary("Deceleration tuning updated.")
@@ -1212,7 +1269,7 @@ func set_active_draft_stow_anchor_mode(stow_mode: StringName) -> bool:
 	draft.set("stow_anchor_mode", resolved_stow_mode)
 	_normalize_draft(draft)
 	_recenter_active_noncombat_stow_segment()
-	_persist_active_wip("Noncombat stow anchor updated.")
+	_stage_active_wip_edit("Noncombat stow anchor updated.")
 	_refresh_editor_fields()
 	_refresh_preview_scene()
 	_refresh_summary("Noncombat stow anchor updated.")
@@ -1228,7 +1285,7 @@ func set_active_draft_stow_contact_ratio(contact_ratio: float) -> bool:
 	draft.set("stow_contact_ratio", resolved_contact_ratio)
 	_normalize_draft(draft)
 	_recenter_active_noncombat_stow_segment()
-	_persist_active_wip("Noncombat stow contact updated.")
+	_stage_active_wip_edit("Noncombat stow contact updated.")
 	_refresh_editor_fields()
 	_refresh_preview_scene()
 	_refresh_summary("Noncombat stow contact updated.")
@@ -1240,7 +1297,7 @@ func set_active_draft_preview_loop(loop_enabled: bool) -> bool:
 		return false
 	draft.set("preview_loop_enabled", loop_enabled)
 	_normalize_draft(draft)
-	_persist_active_wip("Preview loop updated.")
+	_stage_active_wip_edit("Preview loop updated.")
 	_refresh_editor_fields()
 	_refresh_summary("Preview loop updated.")
 	return true
@@ -1251,7 +1308,7 @@ func set_active_draft_notes(notes_text: String) -> bool:
 		return false
 	draft.set("draft_notes", notes_text)
 	_normalize_draft(draft)
-	_persist_active_wip("Draft notes updated.")
+	_stage_active_wip_edit("Draft notes updated.", PERSIST_RUNTIME_CACHE_KEEP)
 	_refresh_summary("Draft notes updated.")
 	return true
 
@@ -1296,6 +1353,41 @@ func _event_matches_any_action(event: InputEvent, action_names: Array[StringName
 		if not InputMap.has_action(action_name):
 			continue
 		if event.is_action_pressed(action_name):
+			return true
+	return false
+
+func _capture_editor_cycle_focus_event(event: InputEvent) -> bool:
+	if not _should_capture_editor_cycle_focus_event(event):
+		return false
+	_cycle_focus()
+	get_viewport().set_input_as_handled()
+	return true
+
+func _should_capture_editor_cycle_focus_event(event: InputEvent) -> bool:
+	if panel == null or not panel.visible or workflow_step != WORKFLOW_STEP_EDITOR:
+		return false
+	if not _event_matches_any_action(event, [ACTION_CYCLE_FOCUS, LEGACY_ACTION_CYCLE_FOCUS]):
+		return false
+	if _is_text_entry_focus_active() or _is_editor_option_popup_visible():
+		return false
+	return true
+
+func _is_text_entry_focus_active() -> bool:
+	var focus_owner: Control = get_viewport().gui_get_focus_owner()
+	return focus_owner is LineEdit or focus_owner is TextEdit
+
+func _is_editor_option_popup_visible() -> bool:
+	for option_button in [
+		authoring_mode_option_button,
+		two_hand_state_option_button,
+		primary_hand_option_button,
+		grip_mode_option_button,
+		stow_anchor_option_button,
+	]:
+		if option_button == null:
+			continue
+		var popup: PopupMenu = option_button.get_popup()
+		if popup != null and popup.visible:
 			return true
 	return false
 
@@ -1795,7 +1887,8 @@ func _build_center_column(parent: HBoxContainer) -> void:
 	remove_point_button = _build_styled_button(action_row, "Delete [T]")
 	reset_draft_button = _build_styled_button(action_row, "Reset")
 	reset_draft_button.tooltip_text = "Reset the current draft to the active weapon and grip baseline when available, otherwise fall back to the default baseline."
-	set_continuity_button = _build_styled_button(action_row, "Continuity")
+	save_button = _build_styled_button(action_row, "Save")
+	save_button.tooltip_text = "Save current skill edits and rebuild the preview playback cache."
 	play_preview_button = _build_styled_button(action_row, "Play [F]")
 
 func _build_right_inspector(parent: HBoxContainer) -> void:
@@ -1973,6 +2066,20 @@ func _build_footer(parent: VBoxContainer) -> void:
 	footer_status_label.add_theme_color_override("font_color", COLOR_TEXT_DIM)
 	footer_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	parent.add_child(footer_status_label)
+	save_progress_bar = ProgressBar.new()
+	save_progress_bar.min_value = 0.0
+	save_progress_bar.max_value = 100.0
+	save_progress_bar.value = 0.0
+	save_progress_bar.visible = false
+	save_progress_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(save_progress_bar)
+	save_progress_label = Label.new()
+	save_progress_label.text = ""
+	save_progress_label.visible = false
+	save_progress_label.add_theme_font_size_override("font_size", FONT_HINT)
+	save_progress_label.add_theme_color_override("font_color", COLOR_TEXT_DIM)
+	save_progress_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	parent.add_child(save_progress_label)
 
 func _build_section_panel(parent: Control, expand: bool) -> VBoxContainer:
 	var section := PanelContainer.new()
@@ -2100,6 +2207,7 @@ func _build_labeled_spinbox(parent: Control, label_text: String, min_val: float,
 func _build_styled_button(parent: Control, text: String) -> Button:
 	var btn := Button.new()
 	btn.text = text
+	btn.focus_mode = Control.FOCUS_NONE
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn.begin_bulk_theme_override()
 	var normal := StyleBoxFlat.new()
@@ -2314,11 +2422,26 @@ func _refresh_all(status_message: String = "") -> void:
 	_refresh_authoring_mode_selector()
 	_refresh_draft_list()
 	_refresh_skill_slot_selector()
+	if workflow_step != WORKFLOW_STEP_EDITOR:
+		_refresh_summary(status_message)
+		_refresh_workflow_visibility()
+		_refresh_header_state()
+		return
 	_refresh_motion_node_list()
 	_refresh_editor_fields()
 	_refresh_preview_scene()
 	_refresh_summary(status_message)
 	_refresh_workflow_visibility()
+	_refresh_header_state()
+
+func _refresh_active_editor_surface(status_message: String = "") -> void:
+	_ensure_valid_editor_motion_node_selection()
+	_enforce_active_idle_authority(true)
+	_refresh_debugger_view_button()
+	_refresh_motion_node_list()
+	_refresh_editor_fields()
+	_refresh_preview_scene()
+	_refresh_summary(status_message)
 	_refresh_header_state()
 
 func _refresh_debugger_view_button() -> void:
@@ -2577,8 +2700,7 @@ func _refresh_editor_fields() -> void:
 		or (has_draft and int((draft.get("motion_node_chain") as Array).size()) <= _get_minimum_motion_node_count(draft))
 	)
 	reset_draft_button.disabled = not has_draft
-	set_continuity_button.disabled = not motion_node_editable or idle_draft_locked
-	play_preview_button.disabled = not has_draft
+	_refresh_manual_save_controls(draft)
 	position_x_spin_box.editable = motion_node_editable
 	position_y_spin_box.editable = motion_node_editable
 	position_z_spin_box.editable = motion_node_editable
@@ -2988,68 +3110,69 @@ func _refresh_summary(status_message: String = "") -> void:
 			str(bool(station_state.get("uses_stage1_geometry_truth"))),
 			str(bool(station_state.get("uses_stage2_geometry_truth"))),
 		])
-		var preview_debug_state: Dictionary = get_preview_debug_state()
-		if int(preview_debug_state.get("speed_state_sample_count", 0)) > 0:
-			lines.append("Speed Samples: %d total | armed %d | reset %d" % [
-				int(preview_debug_state.get("speed_state_sample_count", 0)),
-				int(preview_debug_state.get("speed_state_armed_sample_count", 0)),
-				int(preview_debug_state.get("speed_state_reset_sample_count", 0)),
-			])
-		if int(preview_debug_state.get("collision_path_sample_count", 0)) > 0:
-			var pose_legal_text: String = "legal" if bool(preview_debug_state.get("collision_pose_legal", true)) else "blocked"
-			var path_legal_text: String = "legal" if bool(preview_debug_state.get("collision_path_legal", true)) else "blocked"
-			lines.append("Collision: pose %s | path %s" % [pose_legal_text, path_legal_text])
-			if not bool(preview_debug_state.get("collision_pose_legal", true)):
-				lines.append("Collision Region: %s" % String(preview_debug_state.get("collision_pose_region", "")))
-		if int(preview_debug_state.get("body_self_collision_checked_pair_count", 0)) > 0:
-			var self_collision_text: String = "legal" if bool(preview_debug_state.get("body_self_collision_legal", true)) else "blocked"
-			lines.append("Body Self: %s | allowed overlaps %d | illegal %d" % [
-				self_collision_text,
-				int(preview_debug_state.get("body_self_collision_allowed_overlap_pair_count", 0)),
-				int(preview_debug_state.get("body_self_collision_illegal_pair_count", 0)),
-			])
-		var guardrail_state: Dictionary = preview_debug_state.get("editor_guardrail_state", {}) as Dictionary
-		if not guardrail_state.is_empty():
-			var guardrail_error_count: int = int(guardrail_state.get("error_count", 0))
-			var guardrail_warning_count: int = int(guardrail_state.get("warning_count", 0))
-			var guardrail_info_count: int = int(guardrail_state.get("info_count", 0))
-			if guardrail_error_count > 0 or guardrail_warning_count > 0:
-				lines.append("Guardrails: %d error(s) / %d warning(s)" % [guardrail_error_count, guardrail_warning_count])
-			else:
-				lines.append("Guardrails: OK (%d info)" % guardrail_info_count)
-			var guardrail_entries: Array = guardrail_state.get("entries", []) as Array
-			var appended_guardrail_count: int = 0
-			for entry_variant: Variant in guardrail_entries:
-				if appended_guardrail_count >= 3:
-					break
-				var entry: Dictionary = entry_variant as Dictionary
-				if entry.is_empty():
-					continue
-				var severity: StringName = StringName(entry.get("severity", StringName()))
-				if severity == GUARDRAIL_SEVERITY_INFO and (guardrail_error_count > 0 or guardrail_warning_count > 0):
-					continue
-				lines.append("Guardrail: %s" % String(entry.get("message", "")))
-				appended_guardrail_count += 1
-			var debug_views: Dictionary = guardrail_state.get("debug_views", {}) as Dictionary
-			if not debug_views.is_empty():
-				lines.append("Debug Views: body %s | weapon %s | joint %s | reach %s | clearance %s | pivot %s" % [
-					_guardrail_flag_text(bool(debug_views.get("body_clearance_proxy_visible", false))),
-					_guardrail_flag_text(bool(debug_views.get("weapon_clearance_proxy_visible", false))),
-					_guardrail_flag_text(bool(debug_views.get("joint_range_plane_available", false))),
-					_guardrail_flag_text(bool(debug_views.get("max_reach_boundary_available", false))),
-					_guardrail_flag_text(bool(debug_views.get("min_clearance_boundary_available", false))),
-					_guardrail_flag_text(bool(debug_views.get("normalized_pivot_path_available", false))),
+		if workflow_step == WORKFLOW_STEP_EDITOR:
+			var preview_debug_state: Dictionary = get_preview_debug_state()
+			if int(preview_debug_state.get("speed_state_sample_count", 0)) > 0:
+				lines.append("Speed Samples: %d total | armed %d | reset %d" % [
+					int(preview_debug_state.get("speed_state_sample_count", 0)),
+					int(preview_debug_state.get("speed_state_armed_sample_count", 0)),
+					int(preview_debug_state.get("speed_state_reset_sample_count", 0)),
 				])
-		_append_contact_ray_summary_lines(
-			lines,
-			"Dominant",
-			preview_debug_state.get("dominant_finger_contact_ray_debug", []) as Array
-		)
-		_append_contact_ray_summary_lines(
-			lines,
-			"Support",
-			preview_debug_state.get("support_finger_contact_ray_debug", []) as Array
-		)
+			if int(preview_debug_state.get("collision_path_sample_count", 0)) > 0:
+				var pose_legal_text: String = "legal" if bool(preview_debug_state.get("collision_pose_legal", true)) else "blocked"
+				var path_legal_text: String = "legal" if bool(preview_debug_state.get("collision_path_legal", true)) else "blocked"
+				lines.append("Collision: pose %s | path %s" % [pose_legal_text, path_legal_text])
+				if not bool(preview_debug_state.get("collision_pose_legal", true)):
+					lines.append("Collision Region: %s" % String(preview_debug_state.get("collision_pose_region", "")))
+			if int(preview_debug_state.get("body_self_collision_checked_pair_count", 0)) > 0:
+				var self_collision_text: String = "legal" if bool(preview_debug_state.get("body_self_collision_legal", true)) else "blocked"
+				lines.append("Body Self: %s | allowed overlaps %d | illegal %d" % [
+					self_collision_text,
+					int(preview_debug_state.get("body_self_collision_allowed_overlap_pair_count", 0)),
+					int(preview_debug_state.get("body_self_collision_illegal_pair_count", 0)),
+				])
+			var guardrail_state: Dictionary = preview_debug_state.get("editor_guardrail_state", {}) as Dictionary
+			if not guardrail_state.is_empty():
+				var guardrail_error_count: int = int(guardrail_state.get("error_count", 0))
+				var guardrail_warning_count: int = int(guardrail_state.get("warning_count", 0))
+				var guardrail_info_count: int = int(guardrail_state.get("info_count", 0))
+				if guardrail_error_count > 0 or guardrail_warning_count > 0:
+					lines.append("Guardrails: %d error(s) / %d warning(s)" % [guardrail_error_count, guardrail_warning_count])
+				else:
+					lines.append("Guardrails: OK (%d info)" % guardrail_info_count)
+				var guardrail_entries: Array = guardrail_state.get("entries", []) as Array
+				var appended_guardrail_count: int = 0
+				for entry_variant: Variant in guardrail_entries:
+					if appended_guardrail_count >= 3:
+						break
+					var entry: Dictionary = entry_variant as Dictionary
+					if entry.is_empty():
+						continue
+					var severity: StringName = StringName(entry.get("severity", StringName()))
+					if severity == GUARDRAIL_SEVERITY_INFO and (guardrail_error_count > 0 or guardrail_warning_count > 0):
+						continue
+					lines.append("Guardrail: %s" % String(entry.get("message", "")))
+					appended_guardrail_count += 1
+				var debug_views: Dictionary = guardrail_state.get("debug_views", {}) as Dictionary
+				if not debug_views.is_empty():
+					lines.append("Debug Views: body %s | weapon %s | joint %s | reach %s | clearance %s | pivot %s" % [
+						_guardrail_flag_text(bool(debug_views.get("body_clearance_proxy_visible", false))),
+						_guardrail_flag_text(bool(debug_views.get("weapon_clearance_proxy_visible", false))),
+						_guardrail_flag_text(bool(debug_views.get("joint_range_plane_available", false))),
+						_guardrail_flag_text(bool(debug_views.get("max_reach_boundary_available", false))),
+						_guardrail_flag_text(bool(debug_views.get("min_clearance_boundary_available", false))),
+						_guardrail_flag_text(bool(debug_views.get("normalized_pivot_path_available", false))),
+					])
+			_append_contact_ray_summary_lines(
+				lines,
+				"Dominant",
+				preview_debug_state.get("dominant_finger_contact_ray_debug", []) as Array
+			)
+			_append_contact_ray_summary_lines(
+				lines,
+				"Support",
+				preview_debug_state.get("support_finger_contact_ray_debug", []) as Array
+			)
 	if not status_message.strip_edges().is_empty():
 		footer_status_label.text = status_message
 	summary_label.text = "\n".join(lines)
@@ -3224,7 +3347,7 @@ func _resolve_active_weapon_motion_seed(
 		active_wip.wip_id if active_wip != null else StringName()
 	)
 	_ensure_motion_seed_position_origins(resolved_seed, CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
-	if use_cached_baseline_seed and not _motion_seed_matches_base_geometry_seed(resolved_seed, geometry_seed):
+	if use_cached_baseline_seed:
 		cached_active_weapon_baseline_seed = resolved_seed.duplicate(true)
 		cached_active_weapon_baseline_seed_signature = seed_signature
 	return resolved_seed
@@ -3551,7 +3674,7 @@ func _enforce_idle_authority(draft: Resource, mark_dirty: bool = false) -> bool:
 	if _is_combat_idle_draft(draft):
 		preview_presenter.configure_preview_hand_setup(resolved_primary_slot_id, active_preview_default_two_hand)
 	if draft_changed and mark_dirty:
-		editor_state_dirty = true
+		_stage_active_wip_edit("", PERSIST_RUNTIME_CACHE_DIRTY_ACTIVE)
 	return draft_changed
 
 func _resolve_active_authoring_primary_slot_id() -> StringName:
@@ -3614,7 +3737,7 @@ func _add_unarmed_project_list_item() -> void:
 
 func _get_or_create_unarmed_authoring_wip_clone() -> CraftedItemWIP:
 	if active_wip_library != null:
-		var saved_clone: CraftedItemWIP = active_wip_library.get_unarmed_authoring_wip_clone()
+		var saved_clone: CraftedItemWIP = active_wip_library.get_unarmed_authoring_wip_clone(false)
 		if saved_clone != null:
 			_normalize_unarmed_authoring_wip(saved_clone)
 			return saved_clone
@@ -3801,6 +3924,36 @@ func _realign_active_draft_to_preview_open_baseline(force_reseed: bool = false) 
 		return false
 	return _seed_draft_from_active_weapon_geometry(draft, force_reseed)
 
+func _active_station_retarget_requires_weapon_length_update() -> bool:
+	var station_state: Resource = _get_active_station_state()
+	if station_state == null:
+		return false
+	var current_weapon_length: float = _get_active_weapon_total_length()
+	if current_weapon_length <= 0.001:
+		return false
+	var motion_node_count: int = 0
+	for property_name in [&"idle_drafts", &"skill_drafts"]:
+		var drafts: Array = station_state.get(property_name) as Array
+		for draft_variant: Variant in drafts:
+			var draft: Resource = draft_variant as Resource
+			if draft == null:
+				continue
+			var motion_node_chain: Array = draft.get("motion_node_chain") as Array
+			for motion_node_variant: Variant in motion_node_chain:
+				var motion_node: CombatAnimationMotionNode = motion_node_variant as CombatAnimationMotionNode
+				if motion_node == null:
+					continue
+				motion_node_count += 1
+				var retarget_node: Resource = motion_node.retarget_node
+				if retarget_node == null:
+					return true
+				var source_length: float = maxf(float(retarget_node.get("source_weapon_length_meters")), 0.0)
+				if source_length <= 0.001:
+					return true
+				if absf(source_length - current_weapon_length) > 0.001:
+					return true
+	return motion_node_count <= 0
+
 func _retarget_active_station_drafts_for_current_weapon_geometry() -> Dictionary:
 	var result: Dictionary = {
 		"changed": false,
@@ -3944,6 +4097,7 @@ func _build_preview_playback_state() -> Dictionary:
 		"debugger_view_enabled": debugger_view_enabled,
 	}
 	if not session_state.playback_active or not chain_player.is_playing():
+		playback_state["open_mount_seed"] = _resolve_active_weapon_authored_baseline_seed(true)
 		return playback_state
 	playback_state["active"] = true
 	playback_state["runtime_clip_playback"] = chain_player.current_trajectory_volume_state.get("source", StringName()) == &"baked_runtime_clip"
@@ -3965,6 +4119,26 @@ func _build_preview_playback_state() -> Dictionary:
 	playback_state["contact_grip_axis_local"] = chain_player.current_contact_grip_axis_local
 	playback_state["contact_grip_axis_origin_id"] = chain_player.current_contact_grip_axis_origin_id
 	playback_state["contact_grip_axis_local_override_active"] = chain_player.current_contact_grip_axis_local_override_active
+	playback_state["upper_body_pose_available"] = chain_player.current_upper_body_pose_available
+	playback_state["upper_body_bone_names"] = chain_player.current_upper_body_bone_names
+	playback_state["upper_body_bone_pose_rotations"] = chain_player.current_upper_body_bone_pose_rotations
+	playback_state["solved_replay_available"] = chain_player.current_solved_replay_available
+	playback_state["solved_replay_reference_bone_name"] = chain_player.current_solved_replay_reference_bone_name
+	playback_state["solved_replay_reference_origin_id"] = chain_player.current_solved_replay_reference_origin_id
+	playback_state["solved_upper_body_bone_names"] = chain_player.current_solved_upper_body_bone_names
+	playback_state["solved_upper_body_pose_positions"] = chain_player.current_solved_upper_body_pose_positions
+	playback_state["solved_upper_body_pose_rotations"] = chain_player.current_solved_upper_body_pose_rotations
+	playback_state["solved_upper_body_pose_scales"] = chain_player.current_solved_upper_body_pose_scales
+	playback_state["solved_weapon_position_reference_local"] = chain_player.current_solved_weapon_position_reference_local
+	playback_state["solved_weapon_rotation_reference_local"] = chain_player.current_solved_weapon_rotation_reference_local
+	playback_state["solved_weapon_scale_reference_local"] = chain_player.current_solved_weapon_scale_reference_local
+	playback_state["solved_weapon_reference_origin_id"] = chain_player.current_solved_weapon_reference_origin_id
+	playback_state["solved_anchor_node_paths"] = chain_player.current_solved_anchor_node_paths
+	playback_state["solved_anchor_positions_weapon_local"] = chain_player.current_solved_anchor_positions_weapon_local
+	playback_state["solved_anchor_rotations_weapon_local"] = chain_player.current_solved_anchor_rotations_weapon_local
+	playback_state["solved_anchor_scales_weapon_local"] = chain_player.current_solved_anchor_scales_weapon_local
+	playback_state["solved_anchor_origin_id"] = chain_player.current_solved_anchor_origin_id
+	playback_state["solved_replay_bridge_frame"] = chain_player.current_solved_replay_bridge_frame
 	playback_state["trajectory_volume_state"] = chain_player.current_trajectory_volume_state
 	return playback_state
 
@@ -4096,17 +4270,21 @@ func _ensure_valid_draft_selection() -> void:
 	else:
 		station_state.set("selected_skill_id", first_identifier)
 
-func _persist_active_wip(status_message: String = "") -> void:
+func _persist_active_wip(
+	status_message: String = "",
+	runtime_cache_mode: StringName = PERSIST_RUNTIME_CACHE_DIRTY_ACTIVE
+) -> void:
 	if bool(get_meta("verification_skip_persistence", false)):
 		editor_state_dirty = false
 		if footer_status_label != null and not status_message.strip_edges().is_empty():
 			footer_status_label.text = status_message
+		_refresh_manual_save_controls()
 		return
 	if active_wip_library == null or active_wip == null:
 		return
 	active_wip.ensure_combat_animation_station_state()
 	_refresh_active_station_retarget_authoring_snapshot()
-	_refresh_station_runtime_clip_cache()
+	_apply_runtime_cache_persistence_mode(runtime_cache_mode)
 	if _is_active_unarmed_authoring_wip():
 		_normalize_unarmed_authoring_wip(active_wip)
 		var saved_unarmed_clone: CraftedItemWIP = active_wip_library.save_unarmed_authoring_wip(active_wip)
@@ -4114,6 +4292,7 @@ func _persist_active_wip(status_message: String = "") -> void:
 			active_saved_wip_id = CraftedItemWIPScript.UNARMED_AUTHORING_WIP_ID
 			active_wip = saved_unarmed_clone
 		editor_state_dirty = false
+		_refresh_manual_save_controls()
 		if not status_message.strip_edges().is_empty():
 			footer_status_label.text = status_message
 		return
@@ -4122,12 +4301,73 @@ func _persist_active_wip(status_message: String = "") -> void:
 		active_saved_wip_id = saved_clone.wip_id
 		active_wip.wip_id = saved_clone.wip_id
 	editor_state_dirty = false
+	_refresh_manual_save_controls()
 	if not status_message.strip_edges().is_empty():
 		footer_status_label.text = status_message
+
+func _stage_active_wip_edit(
+	status_message: String = "",
+	runtime_cache_mode: StringName = PERSIST_RUNTIME_CACHE_DIRTY_ACTIVE
+) -> void:
+	if active_wip == null:
+		return
+	active_wip.ensure_combat_animation_station_state()
+	_apply_runtime_cache_persistence_mode(runtime_cache_mode)
+	if bool(get_meta("verification_skip_persistence", false)):
+		editor_state_dirty = false
+		if footer_status_label != null and not status_message.strip_edges().is_empty():
+			footer_status_label.text = status_message
+		_refresh_manual_save_controls()
+		return
+	editor_state_dirty = true
+	_refresh_manual_save_controls()
+	if footer_status_label != null and not status_message.strip_edges().is_empty():
+		footer_status_label.text = status_message
+
+func _apply_runtime_cache_persistence_mode(runtime_cache_mode: StringName) -> void:
+	match runtime_cache_mode:
+		PERSIST_RUNTIME_CACHE_KEEP:
+			return
+		PERSIST_RUNTIME_CACHE_DIRTY_ALL:
+			_mark_all_runtime_clip_caches_dirty()
+		PERSIST_RUNTIME_CACHE_REFRESH_ACTIVE:
+			_refresh_active_draft_runtime_clip_cache()
+		PERSIST_RUNTIME_CACHE_REFRESH_ALL:
+			_refresh_station_runtime_clip_cache()
+		_:
+			_mark_active_draft_runtime_clip_cache_dirty()
+
+func _mark_active_draft_runtime_clip_cache_dirty() -> void:
+	_mark_draft_runtime_clip_cache_dirty(_get_active_draft())
+
+func _mark_all_runtime_clip_caches_dirty() -> void:
+	var station_state: Resource = _get_active_station_state()
+	if station_state == null:
+		return
+	for property_name in [&"skill_drafts", &"idle_drafts"]:
+		var drafts: Array = station_state.get(property_name) as Array
+		for draft_variant: Variant in drafts:
+			_mark_draft_runtime_clip_cache_dirty(draft_variant as Resource)
+
+func _mark_draft_runtime_clip_cache_dirty(draft: Resource) -> void:
+	if draft == null:
+		return
+	draft.set("baked_runtime_clip", null)
+	if _object_has_property(draft, "runtime_cache_signature"):
+		draft.set("runtime_cache_signature", "")
+
+func _object_has_property(target: Object, property_name: String) -> bool:
+	if target == null:
+		return false
+	for property_info: Dictionary in target.get_property_list():
+		if String(property_info.get("name", "")) == property_name:
+			return true
+	return false
 
 func _refresh_station_runtime_clip_cache() -> Dictionary:
 	var result := {
 		"cached_count": 0,
+		"skipped_count": 0,
 		"failed_count": 0,
 		"cleared_noncombat_count": 0,
 		"results": [],
@@ -4145,6 +4385,8 @@ func _refresh_station_runtime_clip_cache() -> Dictionary:
 		(result["results"] as Array).append(cache_result)
 		if bool(cache_result.get("cached", false)):
 			result["cached_count"] = int(result.get("cached_count", 0)) + 1
+			if bool(cache_result.get("skipped", false)):
+				result["skipped_count"] = int(result.get("skipped_count", 0)) + 1
 			continue
 		var reason: String = String(cache_result.get("reason", ""))
 		if reason == "noncombat_stow_uses_body_anchor_not_hand_pose":
@@ -4209,6 +4451,7 @@ func _refresh_active_draft_runtime_clip_cache() -> Dictionary:
 func _refresh_runtime_clip_cache_for_draft(draft: Resource) -> Dictionary:
 	var result := {
 		"cached": false,
+		"skipped": false,
 		"reason": "",
 		"frame_count": 0,
 		"upper_body_pose_track": false,
@@ -4222,12 +4465,30 @@ func _refresh_runtime_clip_cache_for_draft(draft: Resource) -> Dictionary:
 		return result
 	if _is_noncombat_idle_draft(draft):
 		draft.set("baked_runtime_clip", null)
+		_set_draft_runtime_cache_signature(draft, "")
 		result["reason"] = "noncombat_stow_uses_body_anchor_not_hand_pose"
 		return result
 	var motion_node_chain: Array = draft.get("motion_node_chain") as Array
 	if motion_node_chain.is_empty():
 		draft.set("baked_runtime_clip", null)
+		_set_draft_runtime_cache_signature(draft, "")
 		result["reason"] = "empty_motion_node_chain"
+		return result
+	var cache_signature: String = _build_runtime_clip_cache_signature(draft)
+	var existing_runtime_clip = draft.get("baked_runtime_clip")
+	if _can_reuse_runtime_clip_cache(draft, existing_runtime_clip, cache_signature):
+		_set_draft_runtime_cache_signature(draft, cache_signature)
+		result["cached"] = true
+		result["skipped"] = true
+		result["frame_count"] = int(existing_runtime_clip.call("get_frame_count"))
+		result["upper_body_pose_track"] = (
+			existing_runtime_clip.has_method("has_upper_body_pose_track")
+			and bool(existing_runtime_clip.call("has_upper_body_pose_track"))
+		)
+		result["solved_replay_track"] = (
+			existing_runtime_clip.has_method("has_solved_replay_track")
+			and bool(existing_runtime_clip.call("has_solved_replay_track"))
+		)
 		return result
 	var trajectory_volume_config: Dictionary = _resolve_preview_trajectory_volume_config()
 	var runtime_chain_result: Dictionary = {}
@@ -4237,6 +4498,7 @@ func _refresh_runtime_clip_cache_for_draft(draft: Resource) -> Dictionary:
 		playable_motion_node_chain = runtime_chain_result.get("motion_node_chain", motion_node_chain) as Array
 	if playable_motion_node_chain.is_empty():
 		draft.set("baked_runtime_clip", null)
+		_set_draft_runtime_cache_signature(draft, "")
 		result["reason"] = "runtime_chain_empty"
 		return result
 	var clip_kind: StringName = &"skill_playback"
@@ -4263,6 +4525,7 @@ func _refresh_runtime_clip_cache_for_draft(draft: Resource) -> Dictionary:
 	)
 	if runtime_clip == null or not runtime_clip.has_method("get_frame_count") or int(runtime_clip.call("get_frame_count")) <= 0:
 		draft.set("baked_runtime_clip", null)
+		_set_draft_runtime_cache_signature(draft, "")
 		result["reason"] = "runtime_clip_bake_failed"
 		return result
 	var selected_node_index: int = clampi(
@@ -4279,12 +4542,266 @@ func _refresh_runtime_clip_cache_for_draft(draft: Resource) -> Dictionary:
 		selected_node_index
 	)
 	draft.set("baked_runtime_clip", runtime_clip)
+	_set_draft_runtime_cache_signature(draft, cache_signature)
 	result["cached"] = true
 	result["frame_count"] = int(runtime_clip.call("get_frame_count"))
 	result["upper_body_pose_track"] = bool(pose_track_result.get("baked", false))
 	result["solved_replay_track"] = bool(pose_track_result.get("solved_replay_track", false))
 	result["reason"] = String(pose_track_result.get("reason", ""))
 	return result
+
+func _can_reuse_runtime_clip_cache(draft: Resource, runtime_clip, cache_signature: String) -> bool:
+	if draft == null or runtime_clip == null or cache_signature.is_empty():
+		return false
+	if not runtime_clip.has_method("get_frame_count") or int(runtime_clip.call("get_frame_count")) <= 0:
+		return false
+	var stored_signature: String = _get_draft_runtime_cache_signature(draft)
+	if not stored_signature.is_empty() and stored_signature != cache_signature:
+		return false
+	var source_weapon_wip_id: StringName = StringName(runtime_clip.get("source_weapon_wip_id"))
+	if (
+		active_wip != null
+		and source_weapon_wip_id != StringName()
+		and source_weapon_wip_id != active_wip.wip_id
+	):
+		return false
+	if _is_idle_draft(draft):
+		var idle_context_id: StringName = StringName(draft.get("context_id"))
+		var clip_idle_context_id: StringName = StringName(runtime_clip.get("source_idle_context_id"))
+		return clip_idle_context_id == StringName() or clip_idle_context_id == idle_context_id
+	var draft_id: StringName = StringName(draft.get("draft_id"))
+	var clip_draft_id: StringName = StringName(runtime_clip.get("source_draft_id"))
+	if clip_draft_id != StringName() and clip_draft_id != draft_id:
+		return false
+	var slot_id: StringName = _resolve_draft_skill_slot_id_for_runtime_cache(draft)
+	var clip_slot_id: StringName = StringName(runtime_clip.get("source_skill_slot_id"))
+	return clip_slot_id == StringName() or slot_id == StringName() or clip_slot_id == slot_id
+
+func _refresh_manual_save_controls(draft: Resource = null) -> void:
+	var active_draft: Resource = draft if draft != null else _get_active_draft()
+	var has_draft: bool = active_draft != null
+	var save_required: bool = has_draft and _active_draft_requires_manual_save(active_draft)
+	var can_save: bool = has_draft and save_required and not manual_save_in_progress and not chain_player.is_playing()
+	if save_button != null:
+		save_button.disabled = not can_save
+	if play_preview_button != null:
+		play_preview_button.disabled = (
+			manual_save_in_progress
+			or (
+				not chain_player.is_playing()
+				and (not has_draft or save_required)
+			)
+		)
+
+func _active_draft_requires_manual_save(draft: Resource = null) -> bool:
+	var active_draft: Resource = draft if draft != null else _get_active_draft()
+	if active_draft == null:
+		return false
+	if editor_state_dirty:
+		return true
+	return not _active_draft_has_valid_preview_cache(active_draft)
+
+func _active_draft_has_valid_preview_cache(draft: Resource) -> bool:
+	if draft == null:
+		return false
+	var cache_signature: String = _build_runtime_clip_cache_signature(draft)
+	if cache_signature.is_empty():
+		return false
+	var runtime_clip = draft.get("baked_runtime_clip")
+	if _can_reuse_runtime_clip_cache(draft, runtime_clip, cache_signature) and _runtime_clip_has_solved_replay_track(runtime_clip):
+		return true
+	return _saved_draft_runtime_clip_cache_matches(draft, cache_signature)
+
+func _saved_draft_runtime_clip_cache_matches(draft: Resource, cache_signature: String) -> bool:
+	if active_wip_library == null or active_wip == null or draft == null or cache_signature.is_empty():
+		return false
+	var saved_wip_id: StringName = active_saved_wip_id
+	if saved_wip_id == StringName():
+		saved_wip_id = active_wip.wip_id
+	var draft_identifier: StringName = _resolve_draft_identifier_for_saved_cache(draft)
+	if saved_wip_id == StringName() or draft_identifier == StringName():
+		return false
+	var cache_data: Dictionary = active_wip_library.get_saved_draft_runtime_clip_cache(
+		saved_wip_id,
+		draft_identifier,
+		_is_idle_draft(draft)
+	)
+	if not bool(cache_data.get("found", false)):
+		return false
+	var stored_signature: String = String(cache_data.get("runtime_cache_signature", ""))
+	if stored_signature.is_empty() or stored_signature != cache_signature:
+		return false
+	var runtime_clip = cache_data.get("runtime_clip")
+	return _can_reuse_runtime_clip_cache(draft, runtime_clip, cache_signature) and _runtime_clip_has_solved_replay_track(runtime_clip)
+
+func _resolve_draft_identifier_for_saved_cache(draft: Resource) -> StringName:
+	if draft == null:
+		return StringName()
+	return StringName(draft.get("context_id")) if _is_idle_draft(draft) else StringName(draft.get("owning_skill_id"))
+
+func _prepare_cached_preview_playback(draft: Resource, playback_speed: float, should_loop: bool) -> bool:
+	if draft == null:
+		return false
+	var cache_signature: String = _build_runtime_clip_cache_signature(draft)
+	var runtime_clip = draft.get("baked_runtime_clip")
+	if (
+		not _can_reuse_runtime_clip_cache(draft, runtime_clip, cache_signature)
+		or not _runtime_clip_has_solved_replay_track(runtime_clip)
+	):
+		if not _restore_active_draft_runtime_clip_cache(draft, cache_signature):
+			return false
+		runtime_clip = draft.get("baked_runtime_clip")
+	if not _can_reuse_runtime_clip_cache(draft, runtime_clip, cache_signature):
+		return false
+	if not _runtime_clip_has_solved_replay_track(runtime_clip):
+		return false
+	_set_draft_runtime_cache_signature(draft, cache_signature)
+	chain_player.prepare_runtime_clip(runtime_clip, playback_speed, should_loop)
+	return true
+
+func _restore_active_draft_runtime_clip_cache(draft: Resource, cache_signature: String) -> bool:
+	if active_wip_library == null or active_wip == null or draft == null or cache_signature.is_empty():
+		return false
+	var saved_wip_id: StringName = active_saved_wip_id
+	if saved_wip_id == StringName():
+		saved_wip_id = active_wip.wip_id
+	var draft_identifier: StringName = _resolve_draft_identifier_for_saved_cache(draft)
+	if saved_wip_id == StringName() or draft_identifier == StringName():
+		return false
+	var cache_data: Dictionary = active_wip_library.get_saved_draft_runtime_clip_cache(
+		saved_wip_id,
+		draft_identifier,
+		_is_idle_draft(draft)
+	)
+	if not bool(cache_data.get("found", false)):
+		return false
+	var stored_signature: String = String(cache_data.get("runtime_cache_signature", ""))
+	if stored_signature.is_empty() or stored_signature != cache_signature:
+		return false
+	var runtime_clip = cache_data.get("runtime_clip")
+	if not _can_reuse_runtime_clip_cache(draft, runtime_clip, cache_signature):
+		return false
+	if not _runtime_clip_has_solved_replay_track(runtime_clip):
+		return false
+	draft.set("baked_runtime_clip", runtime_clip)
+	_set_draft_runtime_cache_signature(draft, stored_signature)
+	return true
+
+func _runtime_clip_has_solved_replay_track(runtime_clip) -> bool:
+	return (
+		runtime_clip != null
+		and runtime_clip.has_method("has_solved_replay_track")
+		and bool(runtime_clip.call("has_solved_replay_track"))
+	)
+
+func _get_draft_runtime_cache_signature(draft: Resource) -> String:
+	if draft == null or not _object_has_property(draft, "runtime_cache_signature"):
+		return ""
+	return String(draft.get("runtime_cache_signature"))
+
+func _set_draft_runtime_cache_signature(draft: Resource, cache_signature: String) -> void:
+	if draft == null or not _object_has_property(draft, "runtime_cache_signature"):
+		return
+	draft.set("runtime_cache_signature", cache_signature)
+
+func _build_runtime_clip_cache_signature(draft: Resource) -> String:
+	if draft == null:
+		return ""
+	var parts := PackedStringArray()
+	parts.append("runtime_cache_v2")
+	parts.append(String(active_wip.wip_id) if active_wip != null else "")
+	parts.append(String(draft.get("draft_id")))
+	parts.append(String(draft.get("draft_kind")))
+	parts.append(String(draft.get("context_id")))
+	parts.append(String(draft.get("owning_skill_id")))
+	parts.append(String(draft.get("legal_slot_id")))
+	parts.append(String(draft.get("preferred_grip_style_mode")))
+	parts.append(String(draft.get("stow_anchor_mode")))
+	parts.append(str(snapped(float(draft.get("stow_contact_ratio")), 0.0001)))
+	parts.append(str(bool(draft.get("authored_for_two_hand_only"))))
+	parts.append(str(snapped(float(draft.get("preview_playback_speed_scale")), 0.0001)))
+	parts.append(str(bool(draft.get("preview_loop_enabled"))))
+	parts.append(str(snapped(float(draft.get("speed_acceleration_percent")), 0.0001)))
+	parts.append(str(snapped(float(draft.get("speed_deceleration_percent")), 0.0001)))
+	parts.append(str(snapped(_get_active_weapon_total_length(), 0.0001)))
+	var motion_node_chain: Array = draft.get("motion_node_chain") as Array
+	parts.append(str(motion_node_chain.size()))
+	for motion_node_variant: Variant in motion_node_chain:
+		parts.append(_build_motion_node_runtime_cache_signature(motion_node_variant as CombatAnimationMotionNode))
+	return "|".join(parts)
+
+func _build_motion_node_runtime_cache_signature(motion_node: CombatAnimationMotionNode) -> String:
+	if motion_node == null:
+		return "null_node"
+	var parts := PackedStringArray()
+	parts.append(String(motion_node.node_id))
+	parts.append(str(motion_node.node_index))
+	parts.append(str(motion_node.weapon_orientation_degrees.snapped(Vector3(0.0001, 0.0001, 0.0001))))
+	parts.append(str(motion_node.weapon_orientation_authored))
+	parts.append(str(motion_node.tip_position_local.snapped(Vector3(0.0001, 0.0001, 0.0001))))
+	parts.append(String(motion_node.tip_position_origin_id))
+	parts.append(str(motion_node.tip_curve_in_handle.snapped(Vector3(0.0001, 0.0001, 0.0001))))
+	parts.append(str(motion_node.tip_curve_out_handle.snapped(Vector3(0.0001, 0.0001, 0.0001))))
+	parts.append(str(motion_node.pommel_position_local.snapped(Vector3(0.0001, 0.0001, 0.0001))))
+	parts.append(String(motion_node.pommel_position_origin_id))
+	parts.append(str(motion_node.pommel_curve_in_handle.snapped(Vector3(0.0001, 0.0001, 0.0001))))
+	parts.append(str(motion_node.pommel_curve_out_handle.snapped(Vector3(0.0001, 0.0001, 0.0001))))
+	parts.append(str(snapped(motion_node.weapon_roll_degrees, 0.0001)))
+	parts.append(str(snapped(motion_node.axial_reposition_offset, 0.0001)))
+	parts.append(str(snapped(motion_node.grip_seat_slide_offset, 0.0001)))
+	parts.append(str(snapped(motion_node.secondary_grip_seat_slide_offset, 0.0001)))
+	parts.append(str(snapped(motion_node.transition_duration_seconds, 0.0001)))
+	parts.append(str(snapped(motion_node.body_support_blend, 0.0001)))
+	parts.append(str(snapped(motion_node.right_upperarm_roll_degrees, 0.0001)))
+	parts.append(str(snapped(motion_node.left_upperarm_roll_degrees, 0.0001)))
+	parts.append(String(motion_node.preferred_grip_style_mode))
+	parts.append(String(motion_node.two_hand_state))
+	parts.append(String(motion_node.primary_hand_slot))
+	parts.append(str(motion_node.generated_transition_node))
+	parts.append(String(motion_node.generated_transition_kind))
+	parts.append(str(motion_node.locked_for_authoring))
+	parts.append(_build_retarget_node_runtime_cache_signature(motion_node.retarget_node))
+	return ",".join(parts)
+
+func _build_retarget_node_runtime_cache_signature(retarget_node: Resource) -> String:
+	if retarget_node == null:
+		return "retarget:none"
+	var parts := PackedStringArray()
+	parts.append("retarget")
+	for property_name in [
+		"enabled",
+		"origin_space",
+		"origin_id",
+		"parent_origin_id",
+		"pivot_direction_local",
+		"pivot_direction_origin_id",
+		"pivot_range_percent",
+		"pivot_ratio_from_pommel",
+		"weapon_axis_local",
+		"weapon_axis_origin_id",
+		"weapon_orientation_degrees",
+		"weapon_orientation_authored",
+		"weapon_roll_degrees",
+		"axial_reposition_offset",
+		"grip_seat_slide_offset",
+		"secondary_grip_seat_slide_offset",
+		"body_support_blend",
+		"right_upperarm_roll_degrees",
+		"left_upperarm_roll_degrees",
+		"transition_duration_seconds",
+		"preferred_grip_style_mode",
+		"two_hand_state",
+		"primary_hand_slot",
+		"source_weapon_length_meters",
+		"source_min_radius_meters",
+		"source_max_radius_meters",
+		"tip_curve_in_normalized",
+		"tip_curve_out_normalized",
+		"pommel_curve_in_normalized",
+		"pommel_curve_out_normalized",
+	]:
+		parts.append("%s=%s" % [property_name, str(retarget_node.get(StringName(property_name)))])
+	return ",".join(parts)
 
 func _resolve_draft_skill_slot_id_for_runtime_cache(draft: Resource) -> StringName:
 	if draft == null or _is_idle_draft(draft):
@@ -4306,12 +4823,9 @@ func _apply_motion_node_change(
 	refresh_summary: bool = true
 ) -> void:
 	if persist_change:
-		editor_state_dirty = false
-		_persist_active_wip(status_message)
+		_stage_active_wip_edit(status_message)
 	else:
-		editor_state_dirty = true
-		if not status_message.strip_edges().is_empty():
-			footer_status_label.text = status_message
+		_stage_active_wip_edit(status_message)
 	if refresh_list:
 		_refresh_motion_node_list()
 	if refresh_fields:
@@ -4321,13 +4835,78 @@ func _apply_motion_node_change(
 	if refresh_summary:
 		_refresh_summary(status_message)
 
-func _commit_editor_state_to_disk(status_message: String = "Editor state saved.") -> void:
-	if not editor_state_dirty:
-		if not status_message.strip_edges().is_empty():
-			footer_status_label.text = status_message
+func _manual_save_active_editor_state() -> void:
+	if manual_save_in_progress:
 		return
+	var draft: Resource = _get_active_draft()
+	if active_wip == null or active_wip_library == null or draft == null:
+		if footer_status_label != null:
+			footer_status_label.text = "No active skill draft to save."
+		return
+	if chain_player.is_playing():
+		if footer_status_label != null:
+			footer_status_label.text = "Stop preview playback before saving."
+		return
+	if not _active_draft_requires_manual_save(draft):
+		_refresh_manual_save_controls(draft)
+		_set_manual_save_progress(100.0, "Already saved. Preview ready.", true)
+		if footer_status_label != null:
+			footer_status_label.text = "Already saved. Preview ready."
+		return
+	manual_save_in_progress = true
+	manual_save_start_msec = Time.get_ticks_msec()
+	_refresh_manual_save_controls(draft)
+	_set_manual_save_progress(5.0, "Preparing save...")
+	await get_tree().process_frame
+	if motion_node_editor.is_dragging():
+		motion_node_editor.end_drag()
+	_finalize_preview_drag("")
+	draft = _get_active_draft()
+	if draft == null:
+		manual_save_in_progress = false
+		_set_manual_save_progress(0.0, "", false)
+		_refresh_manual_save_controls()
+		if footer_status_label != null:
+			footer_status_label.text = "No active skill draft to save."
+		return
+	_set_manual_save_progress(20.0, "Refreshing authoring data...")
+	active_wip.ensure_combat_animation_station_state()
+	_refresh_active_station_retarget_authoring_snapshot()
+	await get_tree().process_frame
+	_set_manual_save_progress(45.0, "Building preview cache...")
+	var cache_result: Dictionary = _refresh_active_draft_runtime_clip_cache()
+	await get_tree().process_frame
+	_set_manual_save_progress(85.0, "Writing save file...")
+	_persist_active_wip("", PERSIST_RUNTIME_CACHE_KEEP)
+	await get_tree().process_frame
+	manual_save_in_progress = false
+	var elapsed_seconds: float = float(Time.get_ticks_msec() - manual_save_start_msec) / 1000.0
+	var cache_ready: bool = bool(cache_result.get("cached", false)) and bool(cache_result.get("solved_replay_track", false))
+	var completion_text: String = (
+		"Saved in %.2fs. Preview ready." % elapsed_seconds
+		if cache_ready
+		else "Saved in %.2fs. Preview cache needs review: %s" % [elapsed_seconds, String(cache_result.get("reason", "unknown"))]
+	)
+	_set_manual_save_progress(100.0, completion_text, true)
 	editor_state_dirty = false
-	_persist_active_wip(status_message)
+	_refresh_manual_save_controls(draft)
+	_refresh_editor_fields()
+	_refresh_summary(completion_text)
+	if footer_status_label != null:
+		footer_status_label.text = completion_text
+
+func _set_manual_save_progress(percent: float, status_text: String = "", visible: bool = true) -> void:
+	if save_progress_bar != null:
+		save_progress_bar.visible = visible
+		save_progress_bar.value = clampf(percent, 0.0, 100.0)
+	if save_progress_label != null:
+		save_progress_label.visible = visible
+		save_progress_label.text = status_text
+
+func _append_perf_trace_elapsed(trace: Array, label: String, start_usec: int) -> int:
+	var now_usec: int = Time.get_ticks_usec()
+	trace.append("%s_ms=%.3f" % [label, float(now_usec - start_usec) / 1000.0])
+	return now_usec
 
 func _clear_preview_drag_override() -> void:
 	preview_drag_override_node = null
@@ -4763,7 +5342,7 @@ func _finalize_preview_drag(status_message: String = "Motion node edit locked in
 	var changed: bool = _apply_motion_node_state(motion_node, commit_motion_node)
 	_clear_preview_drag_override()
 	if changed:
-		editor_state_dirty = true
+		_stage_active_wip_edit(status_message)
 		_refresh_motion_node_list()
 		_refresh_editor_fields()
 		_refresh_preview_scene()
@@ -5329,52 +5908,17 @@ func _toggle_preview_playback() -> void:
 		return
 	var playback_speed: float = float(draft.get("preview_playback_speed_scale"))
 	var should_loop: bool = bool(draft.get("preview_loop_enabled"))
-	var trajectory_volume_config: Dictionary = _resolve_preview_trajectory_volume_config()
-	var runtime_chain_result: Dictionary = _build_preview_runtime_motion_chain(motion_node_chain, trajectory_volume_config)
-	var playable_motion_node_chain: Array = runtime_chain_result.get("motion_node_chain", motion_node_chain) as Array
-	if playable_motion_node_chain.size() < 2:
-		footer_status_label.text = "Runtime preview compilation did not produce a playable chain."
+	if _active_draft_requires_manual_save(draft):
+		_refresh_manual_save_controls(draft)
+		footer_status_label.text = "Save current edits before previewing."
 		return
-	var runtime_clip = runtime_clip_baker.bake_from_motion_node_chain(
-		playable_motion_node_chain,
-		{
-			"clip_kind": &"skill_playback",
-			"source_draft_id": StringName(draft.get("draft_id")),
-			"source_skill_slot_id": _get_active_skill_slot_id(),
-			"source_weapon_wip_id": active_wip.wip_id if active_wip != null else StringName(),
-			"source_weapon_length_meters": _get_active_weapon_total_length(),
-			"playback_speed_scale": playback_speed,
-			"loop_enabled": should_loop,
-			"sample_rate_hz": PREVIEW_RUNTIME_CLIP_SAMPLE_RATE_HZ,
-			"trajectory_volume_config": trajectory_volume_config,
-			"compile_diagnostics": runtime_chain_result.get("diagnostics", []),
-			"degraded_node_count": int(runtime_chain_result.get("degraded_node_count", 0)),
-			"hand_swap_bridge_count": int(runtime_chain_result.get("hand_swap_bridge_count", 0)),
-			"retargeted_count": int(runtime_chain_result.get("retargeted_count", 0)),
-		}
-	)
-	if runtime_clip != null and runtime_clip.has_method("get_frame_count") and int(runtime_clip.call("get_frame_count")) > 0:
-		preview_presenter.bake_runtime_clip_upper_body_pose_track(
-			preview_view_container,
-			preview_subviewport,
-			active_wip,
-			draft,
-			runtime_clip,
-			clampi(int(draft.get("selected_motion_node_index")), 0, maxi(playable_motion_node_chain.size() - 1, 0))
-		)
-		chain_player.prepare_runtime_clip(runtime_clip, playback_speed, should_loop)
-	else:
-		chain_player.prepare(
-			playable_motion_node_chain,
-			motion_node_editor.build_tip_curve(playable_motion_node_chain),
-			motion_node_editor.build_pommel_curve(playable_motion_node_chain),
-			playback_speed,
-			should_loop,
-			trajectory_volume_config
-		)
+	if not _prepare_cached_preview_playback(draft, playback_speed, should_loop):
+		_refresh_manual_save_controls(draft)
+		footer_status_label.text = "Preview cache is missing or stale. Save current edits before previewing."
+		return
 	chain_player.start()
 	session_state.playback_active = true
-	_refresh_preview_scene()
+	_sync_preview_playback_pose_only()
 	footer_status_label.text = "Preview playing... (F to stop)"
 
 func _build_preview_runtime_motion_chain(motion_node_chain: Array, trajectory_volume_config: Dictionary) -> Dictionary:
@@ -5430,7 +5974,7 @@ func set_active_draft_skill_name(name_text: String) -> bool:
 		return false
 	draft.set("skill_name", name_text.strip_edges())
 	_normalize_draft(draft)
-	_persist_active_wip("Skill name updated.")
+	_stage_active_wip_edit("Skill name updated.", PERSIST_RUNTIME_CACHE_KEEP)
 	_refresh_draft_list()
 	_refresh_editor_fields()
 	_refresh_summary("Skill name updated.")
@@ -5442,7 +5986,7 @@ func set_active_draft_skill_description(description_text: String) -> bool:
 		return false
 	draft.set("skill_description", description_text)
 	_normalize_draft(draft)
-	_persist_active_wip("Skill description updated.")
+	_stage_active_wip_edit("Skill description updated.", PERSIST_RUNTIME_CACHE_KEEP)
 	_refresh_summary("Skill description updated.")
 	return true
 
@@ -5719,6 +6263,9 @@ func _on_left_upperarm_roll_changed(value: float) -> void:
 
 func _on_play_preview_pressed() -> void:
 	_toggle_preview_playback()
+
+func _on_manual_save_pressed() -> void:
+	_manual_save_active_editor_state()
 
 func _on_debugger_view_toggled(enabled: bool) -> void:
 	debugger_view_enabled = enabled

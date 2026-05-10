@@ -92,9 +92,14 @@ func build_test_print_from_wip(
 		material_lookup: Dictionary = {},
 		shape_data: Dictionary = {},
 		joint_data: Dictionary = {},
-		bow_data: Dictionary = {}
+		bow_data: Dictionary = {},
+		prefer_cached_profile: bool = false
 	) -> TestPrintInstance:
-	var profile: BakedProfile = bake_wip(wip, material_lookup, shape_data, joint_data, bow_data)
+	var profile: BakedProfile = (
+		wip.latest_baked_profile_snapshot.duplicate(true) as BakedProfile
+		if prefer_cached_profile and wip != null and wip.latest_baked_profile_snapshot != null
+		else bake_wip(wip, material_lookup, shape_data, joint_data, bow_data)
+	)
 	if profile == null:
 		return null
 

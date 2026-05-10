@@ -48,6 +48,13 @@ func _run_verification() -> void:
 	await process_frame
 
 	var opened: bool = ui.is_open()
+	var open_saved_ok: bool = ui.open_saved_wip_with_hand_setup(
+		saved_wip.wip_id if saved_wip != null else StringName(),
+		&"hand_right",
+		false,
+		true
+	)
+	await process_frame
 	var selected_wip_before: StringName = ui.get_active_saved_wip_id()
 	var created_skill_id: StringName = &"skill_slot_4"
 	var slot_select_ok: bool = ui.select_skill_slot(created_skill_id)
@@ -67,6 +74,10 @@ func _run_verification() -> void:
 	var notes_ok: bool = ui.set_active_draft_notes("Verifier notes")
 	var reset_ok: bool = ui.reset_active_draft_to_baseline()
 	await process_frame
+	var dirty_before_manual_save: bool = bool(ui.get("editor_state_dirty"))
+	ui.call("_manual_save_active_editor_state")
+	await _wait_for_manual_save(ui)
+	var dirty_after_manual_save: bool = bool(ui.get("editor_state_dirty"))
 
 	var reloaded_library: PlayerForgeWipLibraryState = PlayerForgeWipLibraryStateScript.load_or_create(TEMP_SAVE_FILE_PATH)
 	var reloaded_wip: CraftedItemWIP = reloaded_library.get_saved_wip(saved_wip.wip_id if saved_wip != null else StringName())
@@ -82,6 +93,7 @@ func _run_verification() -> void:
 	var lines: PackedStringArray = []
 	lines.append("station_opened=%s" % str(opened))
 	lines.append("player_ui_mode_enabled=%s" % str(fake_player.ui_mode_enabled))
+	lines.append("open_saved_ok=%s" % str(open_saved_ok))
 	lines.append("selected_wip_before=%s" % String(selected_wip_before))
 	lines.append("slot_select_ok=%s" % str(slot_select_ok))
 	lines.append("created_skill_id=%s" % String(created_skill_id))
@@ -99,6 +111,8 @@ func _run_verification() -> void:
 	lines.append("primary_hand_ok=%s" % str(primary_hand_ok))
 	lines.append("notes_ok=%s" % str(notes_ok))
 	lines.append("reset_ok=%s" % str(reset_ok))
+	lines.append("dirty_before_manual_save=%s" % str(dirty_before_manual_save))
+	lines.append("dirty_after_manual_save=%s" % str(dirty_after_manual_save))
 	lines.append("reloaded_selected_motion_node_index=%d" % int(reloaded_custom_draft.get("selected_motion_node_index") if reloaded_custom_draft != null else -1))
 	lines.append("reloaded_preview_speed=%s" % str(snapped(float(reloaded_custom_draft.get("preview_playback_speed_scale")) if reloaded_custom_draft != null else -1.0, 0.0001)))
 	lines.append("reloaded_first_node_tip_position=%s" % str(reloaded_first_node.get("tip_position_local") if reloaded_first_node != null else Vector3.ZERO))
@@ -125,3 +139,9 @@ func _find_skill_draft(skill_drafts: Array, skill_id: StringName) -> Resource:
 		if draft != null and draft.get("owning_skill_id") == skill_id:
 			return draft
 	return null
+
+func _wait_for_manual_save(ui) -> void:
+	var frame_count: int = 0
+	while ui != null and bool(ui.get("manual_save_in_progress")) and frame_count < 240:
+		await process_frame
+		frame_count += 1

@@ -4,7 +4,7 @@ const PlayerForgeWipLibraryStateScript = preload("res://core/models/player_forge
 const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_state.gd")
 const CombatAnimationStationUIScene = preload("res://scenes/ui/combat_animation_station_ui.tscn")
 
-const RESULT_FILE_PATH := "C:/WORKSPACE/DEBUG-LOGS/skill_editor_action_latency_2026-05-09.log"
+const RESULT_FILE_PATH := "C:/WORKSPACE/DEBUG-LOGS/skill_editor_action_latency_2026-05-10.log"
 const TARGET_SLOT_ID: StringName = &"skill_slot_1"
 
 class FakePlayer:
@@ -57,6 +57,8 @@ func _run_diagnostic() -> void:
 	root.add_child(fake_player)
 
 	var ui: CombatAnimationStationUI = CombatAnimationStationUIScene.instantiate() as CombatAnimationStationUI
+	ui.set_meta("trace_open_latency", true)
+	ui.preview_presenter.set_meta("trace_preview_latency", true)
 	root.add_child(ui)
 	await process_frame
 
@@ -68,6 +70,7 @@ func _run_diagnostic() -> void:
 	start_usec = Time.get_ticks_usec()
 	var open_ok: bool = ui.open_saved_wip_with_hand_setup(target_wip_id, &"hand_right", false, false)
 	_append_elapsed("open_saved_wip_with_hand_setup_call", start_usec)
+	lines.append_array(_build_meta_trace_lines(ui, "open_trace", "last_open_latency_trace"))
 	await _wait_frames(4)
 
 	start_usec = Time.get_ticks_usec()
@@ -82,31 +85,46 @@ func _run_diagnostic() -> void:
 	_write_results()
 
 	start_usec = Time.get_ticks_usec()
+	ui.call("_refresh_motion_node_list")
+	_append_elapsed("refresh_motion_node_list_only_call", start_usec)
+
+	start_usec = Time.get_ticks_usec()
+	ui.call("_refresh_editor_fields")
+	_append_elapsed("refresh_editor_fields_only_call", start_usec)
+
+	start_usec = Time.get_ticks_usec()
+	ui.call("_sync_preview_pose_only")
+	_append_elapsed("sync_preview_pose_only_call", start_usec)
+	lines.append_array(_build_meta_trace_lines(ui.preview_presenter, "sync_preview_trace", "last_sync_preview_pose_latency_trace"))
+
+	start_usec = Time.get_ticks_usec()
+	ui.call("_refresh_preview_scene")
+	_append_elapsed("refresh_preview_scene_only_call", start_usec)
+	_write_results()
+
+	start_usec = Time.get_ticks_usec()
+	ui.call("_navigate_motion_node", -1)
+	_append_elapsed("key_Q_prev_motion_node_call", start_usec)
+	lines.append_array(_build_active_draft_lines(ui, "after_Q_prev"))
+	await _wait_frames(2)
+
+	start_usec = Time.get_ticks_usec()
+	ui.call("_navigate_motion_node", 1)
+	_append_elapsed("key_E_next_motion_node_call", start_usec)
+	lines.append_array(_build_active_draft_lines(ui, "after_E_next"))
+	_write_results()
+
+	start_usec = Time.get_ticks_usec()
 	ui.call("_refresh_all", "Latency probe refresh.")
 	_append_elapsed("refresh_all_call", start_usec)
 	await _wait_frames(2)
-
-	start_usec = Time.get_ticks_usec()
-	var cache_result: Dictionary = ui.call("_refresh_station_runtime_clip_cache") as Dictionary
-	_append_elapsed("refresh_station_runtime_clip_cache_call", start_usec)
-	lines.append("cache_result_cached_count=%d" % int(cache_result.get("cached_count", -1)))
-	lines.append("cache_result_failed_count=%d" % int(cache_result.get("failed_count", -1)))
-	lines.append("cache_result_cleared_noncombat_count=%d" % int(cache_result.get("cleared_noncombat_count", -1)))
-	lines.append_array(_build_runtime_cache_draft_lines(ui))
 	_write_results()
-
-	start_usec = Time.get_ticks_usec()
-	var saved_clone: CraftedItemWIP = library_state.save_wip(ui.active_wip)
-	_append_elapsed("save_wip_only_call", start_usec)
-	lines.append("save_wip_only_saved_clone=%s" % str(saved_clone != null))
-	lines.append("library_file_bytes_after_save_only=%d" % _get_file_length(ProjectSettings.globalize_path(library_state.save_file_path)))
-	_write_results()
-	await _wait_frames(2)
 
 	start_usec = Time.get_ticks_usec()
 	var insert_ok: bool = ui.insert_motion_node_after_selection()
 	_append_elapsed("key_R_insert_motion_node_call", start_usec)
 	lines.append("key_R_insert_ok=%s" % str(insert_ok))
+	lines.append("key_R_editor_dirty=%s" % str(bool(ui.get("editor_state_dirty"))))
 	lines.append_array(_build_active_draft_lines(ui, "after_R_insert"))
 	_write_results()
 	await _wait_frames(2)
@@ -115,6 +133,7 @@ func _run_diagnostic() -> void:
 	var delete_ok: bool = ui.remove_selected_motion_node()
 	_append_elapsed("key_T_delete_motion_node_call", start_usec)
 	lines.append("key_T_delete_ok=%s" % str(delete_ok))
+	lines.append("key_T_editor_dirty=%s" % str(bool(ui.get("editor_state_dirty"))))
 	lines.append_array(_build_active_draft_lines(ui, "after_T_delete"))
 	_write_results()
 	await _wait_frames(2)
@@ -123,6 +142,7 @@ func _run_diagnostic() -> void:
 	var reset_ok: bool = ui.reset_active_draft_to_baseline()
 	_append_elapsed("reset_active_draft_to_baseline_call", start_usec)
 	lines.append("reset_ok=%s" % str(reset_ok))
+	lines.append("reset_editor_dirty=%s" % str(bool(ui.get("editor_state_dirty"))))
 	lines.append_array(_build_active_draft_lines(ui, "after_reset"))
 	lines.append("library_file_bytes_after_all=%d" % _get_file_length(ProjectSettings.globalize_path(library_state.save_file_path)))
 	_write_results()
@@ -184,6 +204,17 @@ func _build_runtime_cache_draft_lines(ui: CombatAnimationStationUI) -> PackedStr
 			motion_node_chain.size(),
 			frame_count,
 		])
+	return result
+
+func _build_meta_trace_lines(ui: Object, prefix: String, meta_name: String) -> PackedStringArray:
+	var result: PackedStringArray = []
+	if ui == null or not ui.has_meta(meta_name):
+		result.append("%s_available=false" % prefix)
+		return result
+	result.append("%s_available=true" % prefix)
+	var trace: Array = ui.get_meta(meta_name, []) as Array
+	for trace_index: int in range(trace.size()):
+		result.append("%s_%d=%s" % [prefix, trace_index, String(trace[trace_index])])
 	return result
 
 func _append_elapsed(label: String, start_usec: int) -> void:

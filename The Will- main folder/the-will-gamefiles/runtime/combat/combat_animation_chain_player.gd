@@ -551,15 +551,14 @@ func _interpolate_runtime_clip_solved_replay_frames(from_index: int, to_index: i
 	var from_available: bool = _is_runtime_clip_solved_replay_frame_available(from_index)
 	var to_available: bool = _is_runtime_clip_solved_replay_frame_available(to_index)
 	var clean_ratio: float = clampf(ratio, 0.0, 1.0)
-	var nearest_index: int = from_index if clean_ratio < 0.5 else to_index
-	if _is_runtime_clip_solved_replay_frame_available(nearest_index):
-		_apply_runtime_clip_solved_replay_frame(nearest_index)
-		return
 	if not from_available or not to_available:
+		var nearest_index: int = from_index if clean_ratio < 0.5 else to_index
 		if to_available and clean_ratio >= 0.5:
 			_apply_runtime_clip_solved_replay_frame(to_index)
 		elif from_available:
 			_apply_runtime_clip_solved_replay_frame(from_index)
+		elif _is_runtime_clip_solved_replay_frame_available(nearest_index):
+			_apply_runtime_clip_solved_replay_frame(nearest_index)
 		return
 	var position_frames: Array = runtime_clip.get("baked_solved_upper_body_pose_positions") as Array
 	var rotation_frames: Array = runtime_clip.get("baked_solved_upper_body_pose_rotations") as Array

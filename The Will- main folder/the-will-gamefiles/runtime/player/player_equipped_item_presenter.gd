@@ -455,7 +455,8 @@ func build_equipped_item_node(
 	held_item_mesh_builder: TestPrintMeshBuilder,
 	humanoid_rig: Node3D,
 	forge_rules: ForgeRulesDef,
-	forge_view_tuning: ForgeViewTuningDef
+	forge_view_tuning: ForgeViewTuningDef,
+	prefer_cached_profile: bool = false
 ) -> Node3D:
 	if saved_wip == null:
 		return null
@@ -464,14 +465,25 @@ func build_equipped_item_node(
 		if saved_wip.latest_baked_profile_snapshot != null
 		else null
 	)
-	var test_print: TestPrintInstance = forge_service.build_test_print_from_wip(saved_wip, material_lookup)
+	var test_print: TestPrintInstance = forge_service.build_test_print_from_wip(
+		saved_wip,
+		material_lookup,
+		{},
+		{},
+		{},
+		prefer_cached_profile
+	)
 	if test_print == null or test_print.baked_profile == null or not test_print.baked_profile.primary_grip_valid:
 		if preserved_baked_profile_snapshot != null:
 			saved_wip.latest_baked_profile_snapshot = preserved_baked_profile_snapshot
 		return null
 	var canonical_solid = test_print.canonical_solid if test_print.canonical_solid != null else held_item_mesh_builder.build_canonical_solid(test_print.display_cells)
 	var canonical_geometry = test_print.canonical_geometry if test_print.canonical_geometry != null else held_item_mesh_builder.build_canonical_geometry(canonical_solid)
-	var mesh: ArrayMesh = held_item_mesh_builder.build_mesh_from_test_print(test_print, material_lookup)
+	var mesh: ArrayMesh = (
+		held_item_mesh_builder.build_mesh_from_canonical_geometry(canonical_geometry, material_lookup)
+		if prefer_cached_profile
+		else held_item_mesh_builder.build_mesh_from_test_print(test_print, material_lookup)
+	)
 	if mesh == null or mesh.get_surface_count() == 0:
 		return null
 	var held_root := Node3D.new()
@@ -483,7 +495,7 @@ func build_equipped_item_node(
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.mesh = mesh
 	mesh_instance.material_override = build_held_item_material(forge_view_tuning)
-	mesh_instance.set_meta("visual_mesh_source", test_print.visual_mesh_source)
+	mesh_instance.set_meta("visual_mesh_source", &"canonical_geometry_fast_preview" if prefer_cached_profile else test_print.visual_mesh_source)
 	var cell_world_size: float = forge_rules.cell_world_size_meters
 	var grip_hold_layout: Dictionary = {}
 	if humanoid_rig != null and humanoid_rig.has_method("resolve_grip_hold_layout"):

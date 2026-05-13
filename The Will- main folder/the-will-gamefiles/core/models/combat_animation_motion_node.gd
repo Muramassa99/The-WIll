@@ -54,6 +54,20 @@ const DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET: float = 0.0
 @export var two_hand_state: StringName = TWO_HAND_STATE_AUTO
 @export var primary_hand_slot: StringName = PRIMARY_HAND_AUTO
 
+## Hand proxy authoring. These are the same tip/pommel style controls used by
+## unarmed authoring, but stored per hand so available hands can be posed without
+## stealing weapon endpoint authority.
+@export var right_hand_proxy_authored: bool = false
+@export var right_hand_proxy_tip_position_local: Vector3 = Vector3.ZERO
+@export var right_hand_proxy_tip_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+@export var right_hand_proxy_pommel_position_local: Vector3 = Vector3.ZERO
+@export var right_hand_proxy_pommel_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+@export var left_hand_proxy_authored: bool = false
+@export var left_hand_proxy_tip_position_local: Vector3 = Vector3.ZERO
+@export var left_hand_proxy_tip_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+@export var left_hand_proxy_pommel_position_local: Vector3 = Vector3.ZERO
+@export var left_hand_proxy_pommel_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+
 ## Optional normalized motion intent used by retarget-aware resolvers.
 @export var retarget_node: Resource = null
 
@@ -100,6 +114,14 @@ func normalize() -> void:
 	if not get_two_hand_state_ids().has(two_hand_state):
 		two_hand_state = TWO_HAND_STATE_AUTO
 	primary_hand_slot = normalize_primary_hand_slot(primary_hand_slot)
+	if right_hand_proxy_tip_position_origin_id == StringName():
+		right_hand_proxy_tip_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	if right_hand_proxy_pommel_position_origin_id == StringName():
+		right_hand_proxy_pommel_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	if left_hand_proxy_tip_position_origin_id == StringName():
+		left_hand_proxy_tip_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	if left_hand_proxy_pommel_position_origin_id == StringName():
+		left_hand_proxy_pommel_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 	axial_reposition_offset = clampf(axial_reposition_offset, -1.0, 1.0)
 	grip_seat_slide_offset = clampf(grip_seat_slide_offset, -1.0, 1.0)
 	secondary_grip_seat_slide_offset = clampf(secondary_grip_seat_slide_offset, -1.0, 1.0)

@@ -3,6 +3,8 @@ class_name CombatCollisionLegalityResolver
 
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
+const WEAPON_PROXY_LOCAL_SAMPLE_CACHE_META: StringName = &"combat_collision_proxy_local_samples_cache"
+
 func evaluate_weapon_pose(
 	body_restriction_root: Node3D,
 	held_item: Node3D,
@@ -120,6 +122,10 @@ func _collect_weapon_proxy_local_samples(held_item: Node3D) -> Array[Dictionary]
 	var samples: Array[Dictionary] = []
 	if held_item == null:
 		return samples
+	if held_item.has_meta(WEAPON_PROXY_LOCAL_SAMPLE_CACHE_META):
+		for cached_sample: Variant in (held_item.get_meta(WEAPON_PROXY_LOCAL_SAMPLE_CACHE_META) as Array):
+			samples.append(cached_sample as Dictionary)
+		return samples
 	var proxy_root: Node3D = held_item.get_node_or_null("WeaponBodyRestrictionProxy") as Node3D
 	if proxy_root == null:
 		return samples
@@ -134,6 +140,8 @@ func _collect_weapon_proxy_local_samples(held_item: Node3D) -> Array[Dictionary]
 			"local_position": held_item.to_local(sample.global_position),
 			"local_position_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
 		})
+	if not samples.is_empty():
+		held_item.set_meta(WEAPON_PROXY_LOCAL_SAMPLE_CACHE_META, samples)
 	return samples
 
 func _query_body_point(

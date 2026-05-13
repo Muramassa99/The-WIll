@@ -3,7 +3,7 @@ class_name CombatRuntimeClip
 
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
-const SCHEMA_VERSION := 6
+const SCHEMA_VERSION := 7
 const UPPER_BODY_POSE_TRACK_SOURCE_SKILL_CRAFTER_AUTHORED_POSE: StringName = &"skill_crafter_authored_pose"
 const SOLVED_REPLAY_TRACK_SOURCE_SKILL_CRAFTER_F_PLAYBACK: StringName = &"skill_crafter_f_playback"
 const SOLVED_REPLAY_REFERENCE_BONE_NAME: StringName = &"RL_BoneRoot"
@@ -40,6 +40,16 @@ const CLIP_KIND_BRIDGE: StringName = &"bridge"
 @export var baked_body_support_blends: PackedFloat32Array = PackedFloat32Array()
 @export var baked_right_upperarm_roll_degrees: PackedFloat32Array = PackedFloat32Array()
 @export var baked_left_upperarm_roll_degrees: PackedFloat32Array = PackedFloat32Array()
+@export var baked_right_hand_proxy_authored: Array = []
+@export var baked_right_hand_proxy_tip_positions_local: PackedVector3Array = PackedVector3Array()
+@export var baked_right_hand_proxy_tip_positions_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+@export var baked_right_hand_proxy_pommel_positions_local: PackedVector3Array = PackedVector3Array()
+@export var baked_right_hand_proxy_pommel_positions_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+@export var baked_left_hand_proxy_authored: Array = []
+@export var baked_left_hand_proxy_tip_positions_local: PackedVector3Array = PackedVector3Array()
+@export var baked_left_hand_proxy_tip_positions_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+@export var baked_left_hand_proxy_pommel_positions_local: PackedVector3Array = PackedVector3Array()
+@export var baked_left_hand_proxy_pommel_positions_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 @export var baked_contact_grip_axes_local: PackedVector3Array = PackedVector3Array()
 @export var baked_contact_grip_axes_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 @export var baked_contact_axis_override_active: Array = []
@@ -187,6 +197,16 @@ func duplicate_clip():
 	duplicate_resource.baked_body_support_blends = baked_body_support_blends.duplicate()
 	duplicate_resource.baked_right_upperarm_roll_degrees = baked_right_upperarm_roll_degrees.duplicate()
 	duplicate_resource.baked_left_upperarm_roll_degrees = baked_left_upperarm_roll_degrees.duplicate()
+	duplicate_resource.baked_right_hand_proxy_authored = baked_right_hand_proxy_authored.duplicate(true)
+	duplicate_resource.baked_right_hand_proxy_tip_positions_local = baked_right_hand_proxy_tip_positions_local.duplicate()
+	duplicate_resource.baked_right_hand_proxy_tip_positions_origin_id = baked_right_hand_proxy_tip_positions_origin_id
+	duplicate_resource.baked_right_hand_proxy_pommel_positions_local = baked_right_hand_proxy_pommel_positions_local.duplicate()
+	duplicate_resource.baked_right_hand_proxy_pommel_positions_origin_id = baked_right_hand_proxy_pommel_positions_origin_id
+	duplicate_resource.baked_left_hand_proxy_authored = baked_left_hand_proxy_authored.duplicate(true)
+	duplicate_resource.baked_left_hand_proxy_tip_positions_local = baked_left_hand_proxy_tip_positions_local.duplicate()
+	duplicate_resource.baked_left_hand_proxy_tip_positions_origin_id = baked_left_hand_proxy_tip_positions_origin_id
+	duplicate_resource.baked_left_hand_proxy_pommel_positions_local = baked_left_hand_proxy_pommel_positions_local.duplicate()
+	duplicate_resource.baked_left_hand_proxy_pommel_positions_origin_id = baked_left_hand_proxy_pommel_positions_origin_id
 	duplicate_resource.baked_contact_grip_axes_local = baked_contact_grip_axes_local.duplicate()
 	duplicate_resource.baked_contact_grip_axes_origin_id = baked_contact_grip_axes_origin_id
 	duplicate_resource.baked_contact_axis_override_active = baked_contact_axis_override_active.duplicate(true)
@@ -225,6 +245,14 @@ func _normalize_origin_ids() -> void:
 		baked_tip_positions_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 	if baked_pommel_positions_origin_id == StringName():
 		baked_pommel_positions_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	if baked_right_hand_proxy_tip_positions_origin_id == StringName():
+		baked_right_hand_proxy_tip_positions_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	if baked_right_hand_proxy_pommel_positions_origin_id == StringName():
+		baked_right_hand_proxy_pommel_positions_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	if baked_left_hand_proxy_tip_positions_origin_id == StringName():
+		baked_left_hand_proxy_tip_positions_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	if baked_left_hand_proxy_pommel_positions_origin_id == StringName():
+		baked_left_hand_proxy_pommel_positions_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 	if baked_contact_grip_axes_origin_id == StringName():
 		baked_contact_grip_axes_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 	if solved_replay_reference_origin_id == StringName():

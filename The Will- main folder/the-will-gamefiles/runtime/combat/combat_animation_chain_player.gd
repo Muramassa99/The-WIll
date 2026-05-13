@@ -45,6 +45,16 @@ var current_secondary_grip_seat_slide: float = 0.0
 var current_body_support_blend: float = 0.0
 var current_right_upperarm_roll: float = 0.0
 var current_left_upperarm_roll: float = 0.0
+var current_right_hand_proxy_authored: bool = false
+var current_right_hand_proxy_tip_position: Vector3 = Vector3.ZERO
+var current_right_hand_proxy_tip_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+var current_right_hand_proxy_pommel_position: Vector3 = Vector3.ZERO
+var current_right_hand_proxy_pommel_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+var current_left_hand_proxy_authored: bool = false
+var current_left_hand_proxy_tip_position: Vector3 = Vector3.ZERO
+var current_left_hand_proxy_tip_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+var current_left_hand_proxy_pommel_position: Vector3 = Vector3.ZERO
+var current_left_hand_proxy_pommel_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 var current_two_hand_state: StringName = CombatAnimationMotionNodeScript.TWO_HAND_STATE_AUTO
 var current_primary_hand_slot: StringName = CombatAnimationMotionNodeScript.PRIMARY_HAND_AUTO
 var current_preferred_grip_style_mode: StringName = &"grip_normal"
@@ -242,6 +252,16 @@ func _apply_runtime_clip_frame(frame_index: int) -> void:
 	current_body_support_blend = _get_runtime_clip_float("baked_body_support_blends", frame_index, current_body_support_blend)
 	current_right_upperarm_roll = _get_runtime_clip_float("baked_right_upperarm_roll_degrees", frame_index, current_right_upperarm_roll)
 	current_left_upperarm_roll = _get_runtime_clip_float("baked_left_upperarm_roll_degrees", frame_index, current_left_upperarm_roll)
+	current_right_hand_proxy_authored = _get_runtime_clip_bool("baked_right_hand_proxy_authored", frame_index, current_right_hand_proxy_authored)
+	current_right_hand_proxy_tip_position = _get_runtime_clip_vector3("baked_right_hand_proxy_tip_positions_local", frame_index, current_right_hand_proxy_tip_position)
+	current_right_hand_proxy_tip_position_origin_id = _get_runtime_clip_origin_id("baked_right_hand_proxy_tip_positions_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	current_right_hand_proxy_pommel_position = _get_runtime_clip_vector3("baked_right_hand_proxy_pommel_positions_local", frame_index, current_right_hand_proxy_pommel_position)
+	current_right_hand_proxy_pommel_position_origin_id = _get_runtime_clip_origin_id("baked_right_hand_proxy_pommel_positions_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	current_left_hand_proxy_authored = _get_runtime_clip_bool("baked_left_hand_proxy_authored", frame_index, current_left_hand_proxy_authored)
+	current_left_hand_proxy_tip_position = _get_runtime_clip_vector3("baked_left_hand_proxy_tip_positions_local", frame_index, current_left_hand_proxy_tip_position)
+	current_left_hand_proxy_tip_position_origin_id = _get_runtime_clip_origin_id("baked_left_hand_proxy_tip_positions_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	current_left_hand_proxy_pommel_position = _get_runtime_clip_vector3("baked_left_hand_proxy_pommel_positions_local", frame_index, current_left_hand_proxy_pommel_position)
+	current_left_hand_proxy_pommel_position_origin_id = _get_runtime_clip_origin_id("baked_left_hand_proxy_pommel_positions_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
 	current_contact_grip_axis_local = _get_runtime_clip_vector3("baked_contact_grip_axes_local", frame_index, current_contact_grip_axis_local)
 	current_contact_grip_axis_local_override_active = _get_runtime_clip_bool("baked_contact_axis_override_active", frame_index, false)
 	current_two_hand_state = _get_runtime_clip_string_name("baked_two_hand_states", frame_index, current_two_hand_state)
@@ -302,6 +322,36 @@ func _interpolate_runtime_clip_frames(from_index: int, to_index: int, ratio: flo
 		_get_runtime_clip_float("baked_left_upperarm_roll_degrees", to_index, current_left_upperarm_roll),
 		clean_ratio
 	)
+	current_right_hand_proxy_authored = (
+		_get_runtime_clip_bool("baked_right_hand_proxy_authored", from_index, current_right_hand_proxy_authored)
+		if clean_ratio < 0.5
+		else _get_runtime_clip_bool("baked_right_hand_proxy_authored", to_index, current_right_hand_proxy_authored)
+	)
+	current_right_hand_proxy_tip_position = _get_runtime_clip_vector3("baked_right_hand_proxy_tip_positions_local", from_index, current_right_hand_proxy_tip_position).lerp(
+		_get_runtime_clip_vector3("baked_right_hand_proxy_tip_positions_local", to_index, current_right_hand_proxy_tip_position),
+		clean_ratio
+	)
+	current_right_hand_proxy_tip_position_origin_id = _get_runtime_clip_origin_id("baked_right_hand_proxy_tip_positions_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	current_right_hand_proxy_pommel_position = _get_runtime_clip_vector3("baked_right_hand_proxy_pommel_positions_local", from_index, current_right_hand_proxy_pommel_position).lerp(
+		_get_runtime_clip_vector3("baked_right_hand_proxy_pommel_positions_local", to_index, current_right_hand_proxy_pommel_position),
+		clean_ratio
+	)
+	current_right_hand_proxy_pommel_position_origin_id = _get_runtime_clip_origin_id("baked_right_hand_proxy_pommel_positions_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	current_left_hand_proxy_authored = (
+		_get_runtime_clip_bool("baked_left_hand_proxy_authored", from_index, current_left_hand_proxy_authored)
+		if clean_ratio < 0.5
+		else _get_runtime_clip_bool("baked_left_hand_proxy_authored", to_index, current_left_hand_proxy_authored)
+	)
+	current_left_hand_proxy_tip_position = _get_runtime_clip_vector3("baked_left_hand_proxy_tip_positions_local", from_index, current_left_hand_proxy_tip_position).lerp(
+		_get_runtime_clip_vector3("baked_left_hand_proxy_tip_positions_local", to_index, current_left_hand_proxy_tip_position),
+		clean_ratio
+	)
+	current_left_hand_proxy_tip_position_origin_id = _get_runtime_clip_origin_id("baked_left_hand_proxy_tip_positions_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	current_left_hand_proxy_pommel_position = _get_runtime_clip_vector3("baked_left_hand_proxy_pommel_positions_local", from_index, current_left_hand_proxy_pommel_position).lerp(
+		_get_runtime_clip_vector3("baked_left_hand_proxy_pommel_positions_local", to_index, current_left_hand_proxy_pommel_position),
+		clean_ratio
+	)
+	current_left_hand_proxy_pommel_position_origin_id = _get_runtime_clip_origin_id("baked_left_hand_proxy_pommel_positions_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
 	current_contact_grip_axis_local = _get_runtime_clip_vector3("baked_contact_grip_axes_local", from_index, current_contact_grip_axis_local).lerp(
 		_get_runtime_clip_vector3("baked_contact_grip_axes_local", to_index, current_contact_grip_axis_local),
 		clean_ratio
@@ -422,6 +472,10 @@ func _sync_runtime_clip_origin_metadata() -> void:
 	if runtime_clip == null:
 		current_tip_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 		current_pommel_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		current_right_hand_proxy_tip_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		current_right_hand_proxy_pommel_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		current_left_hand_proxy_tip_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		current_left_hand_proxy_pommel_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 		current_contact_grip_axis_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 		return
 	current_tip_position_origin_id = _get_runtime_clip_origin_id(
@@ -430,6 +484,22 @@ func _sync_runtime_clip_origin_metadata() -> void:
 	)
 	current_pommel_position_origin_id = _get_runtime_clip_origin_id(
 		"baked_pommel_positions_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	current_right_hand_proxy_tip_position_origin_id = _get_runtime_clip_origin_id(
+		"baked_right_hand_proxy_tip_positions_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	current_right_hand_proxy_pommel_position_origin_id = _get_runtime_clip_origin_id(
+		"baked_right_hand_proxy_pommel_positions_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	current_left_hand_proxy_tip_position_origin_id = _get_runtime_clip_origin_id(
+		"baked_left_hand_proxy_tip_positions_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	current_left_hand_proxy_pommel_position_origin_id = _get_runtime_clip_origin_id(
+		"baked_left_hand_proxy_pommel_positions_origin_id",
 		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 	)
 	current_contact_grip_axis_origin_id = _get_runtime_clip_origin_id(
@@ -740,6 +810,32 @@ func _apply_node_state(node_index: int) -> void:
 	current_body_support_blend = motion_node.body_support_blend
 	current_right_upperarm_roll = motion_node.right_upperarm_roll_degrees
 	current_left_upperarm_roll = motion_node.left_upperarm_roll_degrees
+	current_right_hand_proxy_authored = motion_node.right_hand_proxy_authored
+	current_right_hand_proxy_tip_position = motion_node.right_hand_proxy_tip_position_local
+	current_right_hand_proxy_tip_position_origin_id = _resolve_motion_node_origin_id(
+		motion_node,
+		"right_hand_proxy_tip_position_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	current_right_hand_proxy_pommel_position = motion_node.right_hand_proxy_pommel_position_local
+	current_right_hand_proxy_pommel_position_origin_id = _resolve_motion_node_origin_id(
+		motion_node,
+		"right_hand_proxy_pommel_position_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	current_left_hand_proxy_authored = motion_node.left_hand_proxy_authored
+	current_left_hand_proxy_tip_position = motion_node.left_hand_proxy_tip_position_local
+	current_left_hand_proxy_tip_position_origin_id = _resolve_motion_node_origin_id(
+		motion_node,
+		"left_hand_proxy_tip_position_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	current_left_hand_proxy_pommel_position = motion_node.left_hand_proxy_pommel_position_local
+	current_left_hand_proxy_pommel_position_origin_id = _resolve_motion_node_origin_id(
+		motion_node,
+		"left_hand_proxy_pommel_position_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 	current_two_hand_state = motion_node.two_hand_state
 	current_primary_hand_slot = motion_node.primary_hand_slot
 	current_preferred_grip_style_mode = motion_node.preferred_grip_style_mode
@@ -810,6 +906,36 @@ func _interpolate_between_nodes(from_index: int, to_index: int, ratio: float) ->
 	current_body_support_blend = lerpf(from_node.body_support_blend, to_node.body_support_blend, ratio)
 	current_right_upperarm_roll = lerpf(from_node.right_upperarm_roll_degrees, to_node.right_upperarm_roll_degrees, ratio)
 	current_left_upperarm_roll = lerpf(from_node.left_upperarm_roll_degrees, to_node.left_upperarm_roll_degrees, ratio)
+	current_right_hand_proxy_authored = from_node.right_hand_proxy_authored if ratio < 0.5 else to_node.right_hand_proxy_authored
+	current_right_hand_proxy_tip_position = from_node.right_hand_proxy_tip_position_local.lerp(to_node.right_hand_proxy_tip_position_local, ratio)
+	current_right_hand_proxy_tip_position_origin_id = _resolve_interpolated_origin_id(
+		from_node.right_hand_proxy_tip_position_origin_id,
+		to_node.right_hand_proxy_tip_position_origin_id,
+		ratio,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	current_right_hand_proxy_pommel_position = from_node.right_hand_proxy_pommel_position_local.lerp(to_node.right_hand_proxy_pommel_position_local, ratio)
+	current_right_hand_proxy_pommel_position_origin_id = _resolve_interpolated_origin_id(
+		from_node.right_hand_proxy_pommel_position_origin_id,
+		to_node.right_hand_proxy_pommel_position_origin_id,
+		ratio,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	current_left_hand_proxy_authored = from_node.left_hand_proxy_authored if ratio < 0.5 else to_node.left_hand_proxy_authored
+	current_left_hand_proxy_tip_position = from_node.left_hand_proxy_tip_position_local.lerp(to_node.left_hand_proxy_tip_position_local, ratio)
+	current_left_hand_proxy_tip_position_origin_id = _resolve_interpolated_origin_id(
+		from_node.left_hand_proxy_tip_position_origin_id,
+		to_node.left_hand_proxy_tip_position_origin_id,
+		ratio,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	current_left_hand_proxy_pommel_position = from_node.left_hand_proxy_pommel_position_local.lerp(to_node.left_hand_proxy_pommel_position_local, ratio)
+	current_left_hand_proxy_pommel_position_origin_id = _resolve_interpolated_origin_id(
+		from_node.left_hand_proxy_pommel_position_origin_id,
+		to_node.left_hand_proxy_pommel_position_origin_id,
+		ratio,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 	current_two_hand_state = from_node.two_hand_state if ratio < 0.5 else to_node.two_hand_state
 	current_primary_hand_slot = from_node.primary_hand_slot if ratio < 0.5 else to_node.primary_hand_slot
 	if _is_grip_style_swap_segment(from_node, to_node):

@@ -329,10 +329,24 @@ func refresh_preview(
 ) -> void:
 	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
 	_sync_preview_size(preview_container, preview_subviewport)
-	var effective_motion_node_chain: Array = _build_effective_motion_node_chain(active_draft, selected_node_index, live_motion_node_override)
+	var cached_effective_chain: Array = playback_state.get("authoring_drag_effective_motion_node_chain", []) as Array
+	var effective_motion_node_chain: Array = (
+		cached_effective_chain
+		if not cached_effective_chain.is_empty()
+		else _build_effective_motion_node_chain(active_draft, selected_node_index, live_motion_node_override)
+	)
 	var selected_motion_node: CombatAnimationMotionNode = _resolve_selected_motion_node(effective_motion_node_chain, selected_node_index)
-	var visible_motion_node_chain: Array = _build_visible_motion_node_chain(active_draft, effective_motion_node_chain)
-	var visible_selected_node_index: int = _resolve_visible_selected_motion_node_index(active_draft, selected_node_index, visible_motion_node_chain.size())
+	var cached_visible_chain: Array = playback_state.get("authoring_drag_visible_motion_node_chain", []) as Array
+	var visible_motion_node_chain: Array = (
+		cached_visible_chain
+		if not cached_visible_chain.is_empty()
+		else _build_visible_motion_node_chain(active_draft, effective_motion_node_chain)
+	)
+	var visible_selected_node_index: int = (
+		int(playback_state.get("authoring_drag_visible_selected_node_index", -1))
+		if not cached_visible_chain.is_empty()
+		else _resolve_visible_selected_motion_node_index(active_draft, selected_node_index, visible_motion_node_chain.size())
+	)
 	var playback_motion_node: CombatAnimationMotionNode = _build_effective_preview_motion_node(selected_motion_node, playback_state)
 	_refresh_actor_and_weapon(state, active_wip, playback_motion_node, active_draft)
 	_prepare_trajectory_root_for_authoring(state)
@@ -368,11 +382,13 @@ func refresh_preview(
 		)
 	)
 	var debugger_view_enabled: bool = _resolve_debugger_view_enabled(state, resolved_playback_state)
-	var display_motion_node_chain: Array = _build_resolved_display_motion_node_chain(
-		visible_motion_node_chain,
-		visible_selected_node_index,
-		resolved_playback_state
-	)
+	var display_motion_node_chain: Array = visible_motion_node_chain
+	if not (bool(resolved_playback_state.get("authoring_drag_budgeted_visuals", false)) and live_motion_node_override != null):
+		display_motion_node_chain = _build_resolved_display_motion_node_chain(
+			visible_motion_node_chain,
+			visible_selected_node_index,
+			resolved_playback_state
+		)
 	if bool(resolved_playback_state.get("authoring_drag_budgeted_visuals", false)):
 		_refresh_drag_budgeted_visuals(
 			state,
@@ -422,10 +438,24 @@ func sync_preview_pose(
 	_sync_preview_size(preview_container, preview_subviewport)
 	if trace_enabled:
 		trace_step_usec = _append_latency_trace_elapsed(trace, "ensure_nodes_and_size", trace_step_usec)
-	var effective_motion_node_chain: Array = _build_effective_motion_node_chain(active_draft, selected_node_index, live_motion_node_override)
+	var cached_effective_chain: Array = playback_state.get("authoring_drag_effective_motion_node_chain", []) as Array
+	var effective_motion_node_chain: Array = (
+		cached_effective_chain
+		if not cached_effective_chain.is_empty()
+		else _build_effective_motion_node_chain(active_draft, selected_node_index, live_motion_node_override)
+	)
 	var selected_motion_node: CombatAnimationMotionNode = _resolve_selected_motion_node(effective_motion_node_chain, selected_node_index)
-	var visible_motion_node_chain: Array = _build_visible_motion_node_chain(active_draft, effective_motion_node_chain)
-	var visible_selected_node_index: int = _resolve_visible_selected_motion_node_index(active_draft, selected_node_index, visible_motion_node_chain.size())
+	var cached_visible_chain: Array = playback_state.get("authoring_drag_visible_motion_node_chain", []) as Array
+	var visible_motion_node_chain: Array = (
+		cached_visible_chain
+		if not cached_visible_chain.is_empty()
+		else _build_visible_motion_node_chain(active_draft, effective_motion_node_chain)
+	)
+	var visible_selected_node_index: int = (
+		int(playback_state.get("authoring_drag_visible_selected_node_index", -1))
+		if not cached_visible_chain.is_empty()
+		else _resolve_visible_selected_motion_node_index(active_draft, selected_node_index, visible_motion_node_chain.size())
+	)
 	var playback_motion_node: CombatAnimationMotionNode = _build_effective_preview_motion_node(selected_motion_node, playback_state)
 	if trace_enabled:
 		trace_step_usec = _append_latency_trace_elapsed(trace, "build_motion_chain", trace_step_usec)
@@ -471,11 +501,13 @@ func sync_preview_pose(
 	if trace_enabled:
 		trace_step_usec = _append_latency_trace_elapsed(trace, "apply_authoring_pose", trace_step_usec)
 	var debugger_view_enabled: bool = _resolve_debugger_view_enabled(state, resolved_playback_state)
-	var display_motion_node_chain: Array = _build_resolved_display_motion_node_chain(
-		visible_motion_node_chain,
-		visible_selected_node_index,
-		resolved_playback_state
-	)
+	var display_motion_node_chain: Array = visible_motion_node_chain
+	if not (bool(resolved_playback_state.get("authoring_drag_budgeted_visuals", false)) and live_motion_node_override != null):
+		display_motion_node_chain = _build_resolved_display_motion_node_chain(
+			visible_motion_node_chain,
+			visible_selected_node_index,
+			resolved_playback_state
+		)
 	if trace_enabled:
 		trace_step_usec = _append_latency_trace_elapsed(trace, "build_display_chain", trace_step_usec)
 	if bool(resolved_playback_state.get("authoring_drag_budgeted_visuals", false)):
@@ -871,6 +903,62 @@ func _build_runtime_clip_frame_motion_node(
 		frame_index,
 		motion_node.left_upperarm_roll_degrees
 	)
+	motion_node.right_hand_proxy_authored = _get_runtime_clip_frame_bool(
+		runtime_clip,
+		&"baked_right_hand_proxy_authored",
+		frame_index,
+		motion_node.right_hand_proxy_authored
+	)
+	motion_node.right_hand_proxy_tip_position_local = _get_runtime_clip_frame_vector3(
+		runtime_clip,
+		&"baked_right_hand_proxy_tip_positions_local",
+		frame_index,
+		motion_node.right_hand_proxy_tip_position_local
+	)
+	motion_node.right_hand_proxy_tip_position_origin_id = _get_runtime_clip_origin_id(
+		runtime_clip,
+		&"baked_right_hand_proxy_tip_positions_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	motion_node.right_hand_proxy_pommel_position_local = _get_runtime_clip_frame_vector3(
+		runtime_clip,
+		&"baked_right_hand_proxy_pommel_positions_local",
+		frame_index,
+		motion_node.right_hand_proxy_pommel_position_local
+	)
+	motion_node.right_hand_proxy_pommel_position_origin_id = _get_runtime_clip_origin_id(
+		runtime_clip,
+		&"baked_right_hand_proxy_pommel_positions_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	motion_node.left_hand_proxy_authored = _get_runtime_clip_frame_bool(
+		runtime_clip,
+		&"baked_left_hand_proxy_authored",
+		frame_index,
+		motion_node.left_hand_proxy_authored
+	)
+	motion_node.left_hand_proxy_tip_position_local = _get_runtime_clip_frame_vector3(
+		runtime_clip,
+		&"baked_left_hand_proxy_tip_positions_local",
+		frame_index,
+		motion_node.left_hand_proxy_tip_position_local
+	)
+	motion_node.left_hand_proxy_tip_position_origin_id = _get_runtime_clip_origin_id(
+		runtime_clip,
+		&"baked_left_hand_proxy_tip_positions_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	motion_node.left_hand_proxy_pommel_position_local = _get_runtime_clip_frame_vector3(
+		runtime_clip,
+		&"baked_left_hand_proxy_pommel_positions_local",
+		frame_index,
+		motion_node.left_hand_proxy_pommel_position_local
+	)
+	motion_node.left_hand_proxy_pommel_position_origin_id = _get_runtime_clip_origin_id(
+		runtime_clip,
+		&"baked_left_hand_proxy_pommel_positions_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 	motion_node.two_hand_state = _get_runtime_clip_frame_string_name(
 		runtime_clip,
 		&"baked_two_hand_states",
@@ -911,6 +999,16 @@ func _build_runtime_clip_frame_playback_state(
 		"body_support_blend": motion_node.body_support_blend,
 		"right_upperarm_roll_degrees": motion_node.right_upperarm_roll_degrees,
 		"left_upperarm_roll_degrees": motion_node.left_upperarm_roll_degrees,
+		"right_hand_proxy_authored": motion_node.right_hand_proxy_authored,
+		"right_hand_proxy_tip_position_local": motion_node.right_hand_proxy_tip_position_local,
+		"right_hand_proxy_tip_position_origin_id": motion_node.right_hand_proxy_tip_position_origin_id,
+		"right_hand_proxy_pommel_position_local": motion_node.right_hand_proxy_pommel_position_local,
+		"right_hand_proxy_pommel_position_origin_id": motion_node.right_hand_proxy_pommel_position_origin_id,
+		"left_hand_proxy_authored": motion_node.left_hand_proxy_authored,
+		"left_hand_proxy_tip_position_local": motion_node.left_hand_proxy_tip_position_local,
+		"left_hand_proxy_tip_position_origin_id": motion_node.left_hand_proxy_tip_position_origin_id,
+		"left_hand_proxy_pommel_position_local": motion_node.left_hand_proxy_pommel_position_local,
+		"left_hand_proxy_pommel_position_origin_id": motion_node.left_hand_proxy_pommel_position_origin_id,
 		"two_hand_state": motion_node.two_hand_state,
 		"primary_hand_slot": motion_node.primary_hand_slot,
 		"preferred_grip_style_mode": motion_node.preferred_grip_style_mode,
@@ -1210,7 +1308,32 @@ func refresh_focus_visuals(
 	)
 	_refresh_weapon_and_sphere_visuals(state, display_motion_node_chain, visible_selected_node_index, active_focus, baked_profile)
 
-func resolve_upperarm_roll_drag_state(preview_subviewport: SubViewport, camera: Camera3D, screen_position: Vector2) -> Dictionary:
+func refresh_selection_visuals(
+	preview_container: SubViewportContainer,
+	preview_subviewport: SubViewport,
+	active_draft: Resource,
+	selected_node_index: int,
+	active_focus: StringName = &"tip"
+) -> void:
+	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
+	_sync_preview_size(preview_container, preview_subviewport)
+	var effective_motion_node_chain: Array = _build_effective_motion_node_chain(active_draft, selected_node_index, null)
+	var visible_motion_node_chain: Array = _build_visible_motion_node_chain(active_draft, effective_motion_node_chain)
+	var visible_selected_node_index: int = _resolve_visible_selected_motion_node_index(active_draft, selected_node_index, visible_motion_node_chain.size())
+	_refresh_trajectory_selection_visuals(
+		state,
+		visible_motion_node_chain,
+		visible_selected_node_index,
+		active_focus,
+		active_draft
+	)
+
+func resolve_upperarm_roll_drag_state(
+	preview_subviewport: SubViewport,
+	camera: Camera3D,
+	screen_position: Vector2,
+	active_focus: StringName = CombatAnimationSessionStateScript.FOCUS_ARM_ROLL
+) -> Dictionary:
 	if preview_subviewport == null or camera == null:
 		return {}
 	var preview_root: Node3D = preview_subviewport.get_node_or_null(PREVIEW_ROOT_NAME) as Node3D
@@ -1222,6 +1345,10 @@ func resolve_upperarm_roll_drag_state(preview_subviewport: SubViewport, camera: 
 	var best_state: Dictionary = {}
 	var best_distance: float = INF
 	for slot_key in [&"hand_right", &"hand_left"]:
+		if active_focus == CombatAnimationSessionStateScript.FOCUS_RIGHT_ARM_ROLL and slot_key != &"hand_right":
+			continue
+		if active_focus == CombatAnimationSessionStateScript.FOCUS_LEFT_ARM_ROLL and slot_key != &"hand_left":
+			continue
 		var slot_state: Dictionary = gizmo_state.get(slot_key, {}) as Dictionary
 		if slot_state.is_empty():
 			continue
@@ -1501,6 +1628,7 @@ func resolve_preview_hand_mounted_motion_seed(
 	resolved_seed["pommel_position_local"] = pommel_local
 	resolved_seed["pommel_position_origin_id"] = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 	resolved_seed["weapon_total_length_meters"] = maxf(tip_local.distance_to(pommel_local), 0.001)
+	resolved_seed["hand_mount_seed_resolved"] = true
 	return resolved_seed
 
 func resolve_unarmed_hand_authoring_seed(
@@ -1552,6 +1680,216 @@ func resolve_unarmed_hand_authoring_seed(
 		"weapon_total_length_meters": tip_world.distance_to(pommel_world),
 		"unarmed_hand_proxy": true,
 	}
+
+func resolve_hand_proxy_authoring_segment_state(
+	preview_subviewport: SubViewport,
+	motion_node: CombatAnimationMotionNode,
+	slot_id: StringName
+) -> Dictionary:
+	var preview_root: Node3D = _get_preview_root(preview_subviewport)
+	if preview_root == null:
+		return {"available": false}
+	var actor: Node3D = preview_root.get_node_or_null(PREVIEW_ACTOR_PIVOT_NAME + "/" + PREVIEW_ACTOR_NAME) as Node3D
+	var trajectory_root: Node3D = preview_root.find_child(TRAJECTORY_ROOT_NAME, true, false) as Node3D
+	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
+	return _resolve_hand_proxy_authoring_segment_state(
+		actor,
+		held_item,
+		trajectory_root,
+		motion_node,
+		slot_id
+	)
+
+func _resolve_hand_proxy_authoring_segment_state(
+	actor: Node3D,
+	held_item: Node3D,
+	trajectory_root: Node3D,
+	motion_node: CombatAnimationMotionNode,
+	slot_id: StringName,
+	playback_state: Dictionary = {}
+) -> Dictionary:
+	var resolved_slot_id: StringName = _normalize_preview_slot_id(slot_id)
+	var result: Dictionary = {
+		"available": false,
+		"slot_id": resolved_slot_id,
+		"authored": false,
+		"uses_primary_motion_segment": false,
+		"tip_position_local": Vector3.ZERO,
+		"tip_position_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+		"pommel_position_local": Vector3.ZERO,
+		"pommel_position_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+		"contact_center_local": Vector3.ZERO,
+		"contact_center_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+	}
+	if actor == null or trajectory_root == null or motion_node == null:
+		return result
+	if not _is_hand_proxy_authoring_slot_available(held_item, motion_node, resolved_slot_id):
+		return result
+	result["available"] = true
+	if _is_unarmed_preview_item(held_item) and resolved_slot_id == _resolve_preview_dominant_slot_id():
+		result["authored"] = true
+		result["uses_primary_motion_segment"] = true
+		result["tip_position_local"] = _get_origin_tracked_vector3_state(
+			playback_state,
+			"tip_position_local",
+			"tip_position_origin_id",
+			motion_node.tip_position_local,
+			motion_node.tip_position_origin_id
+		)
+		result["tip_position_origin_id"] = _resolve_origin_tracked_state_origin_id(
+			playback_state,
+			"tip_position_origin_id",
+			motion_node.tip_position_origin_id
+		)
+		result["pommel_position_local"] = _get_origin_tracked_vector3_state(
+			playback_state,
+			"pommel_position_local",
+			"pommel_position_origin_id",
+			motion_node.pommel_position_local,
+			motion_node.pommel_position_origin_id
+		)
+		result["pommel_position_origin_id"] = _resolve_origin_tracked_state_origin_id(
+			playback_state,
+			"pommel_position_origin_id",
+			motion_node.pommel_position_origin_id
+		)
+		result["contact_center_local"] = (result["pommel_position_local"] as Vector3).lerp(result["tip_position_local"] as Vector3, 0.5)
+		return result
+	if _motion_node_has_hand_proxy_authoring(motion_node, resolved_slot_id, playback_state):
+		result["authored"] = true
+		result["tip_position_local"] = _get_hand_proxy_state_vector3(
+			motion_node,
+			playback_state,
+			resolved_slot_id,
+			true
+		)
+		result["tip_position_origin_id"] = _get_hand_proxy_state_origin_id(
+			motion_node,
+			playback_state,
+			resolved_slot_id,
+			true
+		)
+		result["pommel_position_local"] = _get_hand_proxy_state_vector3(
+			motion_node,
+			playback_state,
+			resolved_slot_id,
+			false
+		)
+		result["pommel_position_origin_id"] = _get_hand_proxy_state_origin_id(
+			motion_node,
+			playback_state,
+			resolved_slot_id,
+			false
+		)
+		result["contact_center_local"] = (result["pommel_position_local"] as Vector3).lerp(result["tip_position_local"] as Vector3, 0.5)
+		return result
+	var default_state: Dictionary = _resolve_hand_proxy_default_trajectory_segment_state(
+		actor,
+		trajectory_root,
+		resolved_slot_id
+	)
+	if default_state.is_empty():
+		return result
+	result.merge(default_state, true)
+	return result
+
+func _resolve_hand_proxy_default_trajectory_segment_state(
+	actor: Node3D,
+	trajectory_root: Node3D,
+	slot_id: StringName
+) -> Dictionary:
+	if actor == null or trajectory_root == null:
+		return {}
+	var hand_proxy_points_state: Dictionary = _resolve_hand_authoring_proxy_points_state(actor, slot_id)
+	var tip_local_to_hand: Vector3 = _resolve_hand_authoring_local_tip(hand_proxy_points_state)
+	var pommel_local_to_hand: Vector3 = _resolve_hand_authoring_local_pommel(hand_proxy_points_state)
+	var contact_center_local_to_hand: Vector3 = _resolve_hand_authoring_contact_center(hand_proxy_points_state)
+	var hand_anchor: Node3D = _resolve_preview_mount_anchor_for_slot(actor, slot_id)
+	var grip_world: Vector3 = _resolve_preview_hand_grip_target_world(actor, slot_id)
+	if hand_anchor == null or not is_instance_valid(hand_anchor) or grip_world.length_squared() <= 0.000001:
+		return {}
+	var hand_basis: Basis = hand_anchor.global_basis.orthonormalized()
+	var tip_world: Vector3 = grip_world + hand_basis * tip_local_to_hand
+	var pommel_world: Vector3 = grip_world + hand_basis * pommel_local_to_hand
+	var contact_center_world: Vector3 = grip_world + hand_basis * contact_center_local_to_hand
+	return {
+		"available": true,
+		"authored": false,
+		"tip_position_local": trajectory_root.to_local(tip_world),
+		"tip_position_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+		"pommel_position_local": trajectory_root.to_local(pommel_world),
+		"pommel_position_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+		"contact_center_local": trajectory_root.to_local(contact_center_world),
+		"contact_center_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+	}
+
+func _is_hand_proxy_authoring_slot_available(
+	held_item: Node3D,
+	motion_node: CombatAnimationMotionNode,
+	slot_id: StringName
+) -> bool:
+	var resolved_slot_id: StringName = _normalize_preview_slot_id(slot_id)
+	if _is_unarmed_preview_item(held_item):
+		return true
+	if held_item == null or not is_instance_valid(held_item):
+		return true
+	if _should_preview_use_support_hand(held_item, motion_node):
+		return false
+	return resolved_slot_id != _resolve_preview_dominant_slot_id()
+
+func _motion_node_has_hand_proxy_authoring(
+	motion_node: CombatAnimationMotionNode,
+	slot_id: StringName,
+	playback_state: Dictionary = {}
+) -> bool:
+	if slot_id == &"hand_left":
+		if playback_state.has("left_hand_proxy_authored"):
+			return bool(playback_state.get("left_hand_proxy_authored", false))
+		return motion_node != null and motion_node.left_hand_proxy_authored
+	if playback_state.has("right_hand_proxy_authored"):
+		return bool(playback_state.get("right_hand_proxy_authored", false))
+	return motion_node != null and motion_node.right_hand_proxy_authored
+
+func _get_hand_proxy_state_vector3(
+	motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary,
+	slot_id: StringName,
+	use_tip_endpoint: bool
+) -> Vector3:
+	var prefix: String = "left_hand_proxy_" if slot_id == &"hand_left" else "right_hand_proxy_"
+	var value_key: String = "%s%s_position_local" % [prefix, "tip" if use_tip_endpoint else "pommel"]
+	var origin_key: String = "%s%s_position_origin_id" % [prefix, "tip" if use_tip_endpoint else "pommel"]
+	var fallback_value: Vector3 = Vector3.ZERO
+	var fallback_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	if motion_node != null:
+		fallback_value = motion_node.left_hand_proxy_tip_position_local if slot_id == &"hand_left" and use_tip_endpoint else fallback_value
+		fallback_value = motion_node.left_hand_proxy_pommel_position_local if slot_id == &"hand_left" and not use_tip_endpoint else fallback_value
+		fallback_value = motion_node.right_hand_proxy_tip_position_local if slot_id != &"hand_left" and use_tip_endpoint else fallback_value
+		fallback_value = motion_node.right_hand_proxy_pommel_position_local if slot_id != &"hand_left" and not use_tip_endpoint else fallback_value
+		fallback_origin_id = _get_hand_proxy_state_origin_id(motion_node, {}, slot_id, use_tip_endpoint)
+	return _get_origin_tracked_vector3_state(
+		playback_state,
+		StringName(value_key),
+		StringName(origin_key),
+		fallback_value,
+		fallback_origin_id
+	)
+
+func _get_hand_proxy_state_origin_id(
+	motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary,
+	slot_id: StringName,
+	use_tip_endpoint: bool
+) -> StringName:
+	var prefix: String = "left_hand_proxy_" if slot_id == &"hand_left" else "right_hand_proxy_"
+	var origin_key: String = "%s%s_position_origin_id" % [prefix, "tip" if use_tip_endpoint else "pommel"]
+	var fallback_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	if motion_node != null:
+		if slot_id == &"hand_left":
+			fallback_origin_id = motion_node.left_hand_proxy_tip_position_origin_id if use_tip_endpoint else motion_node.left_hand_proxy_pommel_position_origin_id
+		else:
+			fallback_origin_id = motion_node.right_hand_proxy_tip_position_origin_id if use_tip_endpoint else motion_node.right_hand_proxy_pommel_position_origin_id
+	return _resolve_origin_tracked_state_origin_id(playback_state, StringName(origin_key), fallback_origin_id)
 
 func reset_preview_actor_to_mount_seed_baseline(preview_subviewport: SubViewport) -> void:
 	var preview_root: Node3D = _get_preview_root(preview_subviewport)
@@ -2107,6 +2445,7 @@ func _refresh_actor_and_weapon(
 	var current_slot_id: StringName = _get_node_meta_or_default(preview_root, PREVIEW_ACTIVE_SLOT_ID_META, &"hand_right") as StringName
 	var target_slot_id: StringName = _resolve_preview_dominant_slot_id()
 	if active_wip == null:
+		_clear_hand_authoring_slot_proxy_nodes(preview_root)
 		if actor != null and actor.has_method("clear_arm_guidance_target"):
 			actor.call("clear_arm_guidance_target", &"hand_right")
 			actor.call("clear_arm_guidance_target", &"hand_left")
@@ -2129,6 +2468,7 @@ func _refresh_actor_and_weapon(
 		_update_camera(preview_root, null)
 		return
 	if held_item == null or not is_instance_valid(held_item) or current_wip_id != active_wip.wip_id or current_slot_id != target_slot_id:
+		_clear_hand_authoring_slot_proxy_nodes(preview_root)
 		if held_item != null and is_instance_valid(held_item):
 			held_item.queue_free()
 		held_item = _build_weapon_preview_node(preview_root, actor, active_wip)
@@ -2222,6 +2562,8 @@ func _refresh_drag_budgeted_visuals(
 	preview_root.set_meta("weapon_gizmo_marker_count", 0)
 	preview_root.set_meta("upperarm_roll_gizmo_state", {})
 	preview_root.set_meta("upperarm_roll_gizmo_count", 0)
+	preview_root.set_meta("hand_proxy_gizmo_state", {})
+	preview_root.set_meta("hand_proxy_gizmo_count", 0)
 	_clear_stow_anchor_markers(marker_root)
 	var stow_anchor_result: Dictionary = _refresh_noncombat_stow_anchor_markers(state, active_draft)
 	preview_root.set_meta("stow_anchor_marker_count", int(stow_anchor_result.get("count", 0)))
@@ -2261,12 +2603,17 @@ func _refresh_drag_budgeted_visuals(
 	_sync_drag_curve_handle_markers(marker_root, motion_node_chain, selected_node_index, motion_node)
 	_sync_drag_weapon_orientation_markers(marker_root, motion_node, active_focus)
 	var upperarm_marker_count: int = 0
+	_clear_hand_proxy_gizmo_markers(marker_root)
 	if active_focus == CombatAnimationSessionStateScript.FOCUS_ARM_ROLL:
 		_clear_upperarm_roll_gizmo_markers(marker_root)
 		upperarm_marker_count = _create_upperarm_roll_gizmo_markers(state, motion_node, active_focus)
+	elif active_focus == CombatAnimationSessionStateScript.FOCUS_RIGHT_ARM_ROLL or active_focus == CombatAnimationSessionStateScript.FOCUS_LEFT_ARM_ROLL:
+		_clear_upperarm_roll_gizmo_markers(marker_root)
+		upperarm_marker_count = _create_upperarm_roll_gizmo_markers(state, motion_node, active_focus)
+	var hand_proxy_marker_count: int = _create_hand_proxy_gizmo_markers(state, motion_node, active_focus)
 	preview_root.set_meta("motion_node_marker_count", 2)
 	preview_root.set_meta("point_marker_count", 2)
-	preview_root.set_meta("weapon_gizmo_marker_count", 2 + upperarm_marker_count)
+	preview_root.set_meta("weapon_gizmo_marker_count", 2 + upperarm_marker_count + hand_proxy_marker_count)
 
 func _clear_child_nodes(root: Node) -> void:
 	if root == null:
@@ -2370,6 +2717,15 @@ func _clear_upperarm_roll_gizmo_markers(marker_root: Node3D) -> void:
 	for child_node: Node in marker_root.get_children():
 		var child_name: String = String(child_node.name)
 		if child_name.begins_with("RightUpperarmRoll") or child_name.begins_with("LeftUpperarmRoll"):
+			marker_root.remove_child(child_node)
+			child_node.queue_free()
+
+func _clear_hand_proxy_gizmo_markers(marker_root: Node3D) -> void:
+	if marker_root == null:
+		return
+	for child_node: Node in marker_root.get_children():
+		var child_name: String = String(child_node.name)
+		if child_name.begins_with("RightHandProxy") or child_name.begins_with("LeftHandProxy"):
 			marker_root.remove_child(child_node)
 			child_node.queue_free()
 
@@ -2632,6 +2988,8 @@ func _refresh_trajectory_selection_visuals(
 				handle_marker_count += 1
 		node_marker_count += 2
 	_render_control_lines(control_mesh_instance.mesh as ImmediateMesh, motion_node_chain, selected_node_index)
+	preview_root.set_meta("motion_node_count", motion_node_chain.size())
+	preview_root.set_meta("draft_point_count", motion_node_chain.size())
 	preview_root.set_meta("selected_motion_node_index", selected_node_index)
 	preview_root.set_meta("selected_point_index", selected_node_index)
 	preview_root.set_meta("motion_node_marker_count", node_marker_count)
@@ -3014,6 +3372,9 @@ func _apply_authored_weapon_pose(
 	if preview_root == null or trajectory_root == null:
 		return playback_state
 	var authoring_drag_lightweight: bool = bool(playback_state.get("authoring_drag_lightweight", false))
+	var authoring_drag_active: bool = bool(playback_state.get("authoring_drag_active", false))
+	var authoring_drag_budgeted_visuals: bool = bool(playback_state.get("authoring_drag_budgeted_visuals", false))
+	var authoring_drag_endpoint_prevalidated: bool = bool(playback_state.get("authoring_drag_endpoint_authority_prevalidated", false))
 	preview_root.set_meta("weapon_tip_alignment_error_meters", -1.0)
 	preview_root.set_meta("weapon_pommel_alignment_error_meters", -1.0)
 	preview_root.set_meta("authoring_endpoint_legality_result", {})
@@ -3074,17 +3435,22 @@ func _apply_authored_weapon_pose(
 				authored_pommel_world_for_pose,
 				resolved_weapon_orientation_degrees
 			)
-		_apply_preview_upper_body_authoring_state(
-			actor,
-			held_item,
-			selected_motion_node,
-			playback_state,
-			authored_tip_world_for_pose,
-			authored_pommel_world_for_pose,
-			authored_pose_transform,
-			true
+		var needs_initial_authoring_pose: bool = not (
+			authoring_drag_budgeted_visuals
+			and authoring_drag_endpoint_prevalidated
 		)
-		_apply_preview_actor_upper_body_pose_now(actor)
+		if needs_initial_authoring_pose:
+			_apply_preview_upper_body_authoring_state(
+				actor,
+				held_item,
+				selected_motion_node,
+				playback_state,
+				authored_tip_world_for_pose,
+				authored_pommel_world_for_pose,
+				authored_pose_transform,
+				true
+			)
+			_apply_preview_actor_upper_body_pose_now(actor, authoring_drag_active)
 		if authoring_drag_lightweight:
 			var deferred_legality_result: Dictionary = {
 				"legal": true,
@@ -3094,12 +3460,19 @@ func _apply_authored_weapon_pose(
 			preview_root.set_meta("authoring_endpoint_legality_result", deferred_legality_result)
 			use_free_authoring_endpoint_authority = true
 		elif allow_free_authoring_endpoint_authority:
-			var authored_legality_result: Dictionary = _evaluate_preview_segment_legality(
-				actor,
-				held_item,
-				authored_pose_transform,
-				selected_motion_node
-			)
+			var authored_legality_result: Dictionary = {}
+			if authoring_drag_endpoint_prevalidated:
+				authored_legality_result = (playback_state.get("authoring_drag_endpoint_validation_result", {}) as Dictionary).duplicate(true)
+				if authored_legality_result.is_empty():
+					authored_legality_result = {"legal": true}
+				authored_legality_result["prevalidated_drag_authority"] = true
+			else:
+				authored_legality_result = _evaluate_preview_segment_legality(
+					actor,
+					held_item,
+					authored_pose_transform,
+					selected_motion_node
+				)
 			preview_root.set_meta("authoring_endpoint_legality_result", authored_legality_result)
 			use_free_authoring_endpoint_authority = bool(authored_legality_result.get("legal", true))
 		if not use_free_authoring_endpoint_authority:
@@ -3161,7 +3534,7 @@ func _apply_authored_weapon_pose(
 		if actor != null:
 			_apply_two_hand_preview_state(actor, held_item, selected_motion_node)
 			_apply_preview_upper_body_authoring_state(actor, held_item, selected_motion_node, resolved_playback_state)
-			_apply_preview_actor_upper_body_pose_now(actor)
+			_apply_preview_actor_upper_body_pose_now(actor, bool(resolved_playback_state.get("authoring_drag_active", false)))
 		var deferred_metrics: Dictionary = {
 			"stopped_reason": "authoring_drag_lightweight",
 			"weapon_locked_to_moving_hand": false,
@@ -3179,9 +3552,6 @@ func _apply_authored_weapon_pose(
 		preview_root.set_meta("collision_pose_clearance_meters", -1.0)
 		return resolved_playback_state
 	if actor != null:
-		_apply_two_hand_preview_state(actor, held_item, selected_motion_node)
-		_apply_preview_upper_body_authoring_state(actor, held_item, selected_motion_node, resolved_playback_state)
-		_apply_preview_actor_upper_body_pose_now(actor)
 		if use_free_authoring_endpoint_authority:
 			preview_root.set_meta("contact_coupling_metrics", {
 				"authoring_endpoint_authority": true,
@@ -3198,6 +3568,9 @@ func _apply_authored_weapon_pose(
 			preview_root.set_meta("resolved_playback_state", resolved_playback_state)
 			_settle_preview_contact_group_on_resolved_weapon(actor, held_item, selected_motion_node, resolved_playback_state)
 		else:
+			_apply_two_hand_preview_state(actor, held_item, selected_motion_node)
+			_apply_preview_upper_body_authoring_state(actor, held_item, selected_motion_node, resolved_playback_state)
+			_apply_preview_actor_upper_body_pose_now(actor, bool(resolved_playback_state.get("authoring_drag_active", false)))
 			var final_primary_local: Vector3 = _get_preview_primary_grip_seat_meta(held_item)
 			held_item.global_transform = _lock_preview_transform_to_dominant_grip_target(
 				held_item.global_transform,
@@ -3568,6 +3941,7 @@ func _build_resolved_display_motion_node_chain(
 			display_motion_node.weapon_orientation_degrees
 		) as Vector3
 		display_motion_node.weapon_orientation_authored = true
+	_apply_playback_hand_proxy_state_to_motion_node(display_motion_node, resolved_playback_state)
 	display_motion_node.normalize()
 	var display_chain: Array = motion_node_chain.duplicate()
 	display_chain[selected_node_index] = display_motion_node
@@ -3594,6 +3968,8 @@ func _motion_node_matches_hand_mounted_seed(
 	hand_mount_seed: Dictionary
 ) -> bool:
 	if motion_node == null or hand_mount_seed.is_empty():
+		return false
+	if motion_node.right_hand_proxy_authored or motion_node.left_hand_proxy_authored:
 		return false
 	var seed_tip: Vector3 = hand_mount_seed.get("tip_position_local", Vector3.INF) as Vector3
 	var seed_tip_origin_id: StringName = StringName(hand_mount_seed.get(
@@ -3645,16 +4021,18 @@ func _apply_preview_open_mount_pose(
 	playback_state: Dictionary,
 	update_camera: bool = true
 ) -> Dictionary:
+	var resolved_playback_state: Dictionary = playback_state.duplicate(true)
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D
 	var actor_pivot: Node3D = state.get("actor_pivot", null) as Node3D
+	var trajectory_root: Node3D = state.get("trajectory_root", null) as Node3D
 	if preview_root == null:
-		return playback_state
+		return resolved_playback_state
 	preview_root.set_meta("weapon_tip_alignment_error_meters", 0.0)
 	preview_root.set_meta("weapon_pommel_alignment_error_meters", 0.0)
 	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
 	var actor: Node3D = actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D if actor_pivot != null else null
 	if held_item == null or not is_instance_valid(held_item):
-		return playback_state
+		return resolved_playback_state
 	if actor != null:
 		if actor.has_method("reset_authoring_preview_baseline_pose"):
 			actor.call("reset_authoring_preview_baseline_pose", _resolve_preview_authoring_baseline_animation_name(actor, held_item, selected_motion_node))
@@ -3666,11 +4044,23 @@ func _apply_preview_open_mount_pose(
 	_apply_preview_motion_grip_state(held_item, selected_motion_node, playback_state, actor)
 	_apply_preview_hand_mounted_transform(actor, held_item)
 	_apply_preview_resolved_grip_state(held_item)
+	if trajectory_root != null:
+		var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
+		var local_pommel: Vector3 = _get_weapon_pommel_meta(held_item)
+		if not local_tip.is_equal_approx(local_pommel):
+			_set_tip_pommel_position_state(
+				resolved_playback_state,
+				trajectory_root.to_local(held_item.to_global(local_tip)),
+				trajectory_root.to_local(held_item.to_global(local_pommel)),
+				CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+			)
+			resolved_playback_state["weapon_orientation_degrees"] = _resolve_motion_node_weapon_orientation_degrees(selected_motion_node)
 	if actor != null:
 		equipped_item_presenter.clear_rig_weapon_contact_guidance(actor)
 	if update_camera:
 		_update_camera(preview_root, weapon_grip_anchor_provider.get_primary_grip_anchor(held_item))
-	return playback_state.duplicate(true)
+	preview_root.set_meta("resolved_playback_state", resolved_playback_state)
+	return resolved_playback_state
 
 func _build_effective_preview_motion_node(
 	selected_motion_node: CombatAnimationMotionNode,
@@ -3755,8 +4145,72 @@ func _build_effective_preview_motion_node(
 			"preferred_grip_style_mode",
 			effective_motion_node.preferred_grip_style_mode
 		))
+	_apply_playback_hand_proxy_state_to_motion_node(effective_motion_node, playback_state)
 	effective_motion_node.normalize()
 	return effective_motion_node
+
+func _apply_playback_hand_proxy_state_to_motion_node(
+	motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary
+) -> void:
+	if motion_node == null or playback_state.is_empty():
+		return
+	if playback_state.has("right_hand_proxy_authored"):
+		motion_node.right_hand_proxy_authored = bool(playback_state.get("right_hand_proxy_authored", motion_node.right_hand_proxy_authored))
+	if playback_state.has("right_hand_proxy_tip_position_local"):
+		motion_node.right_hand_proxy_tip_position_local = _get_origin_tracked_vector3_state(
+			playback_state,
+			"right_hand_proxy_tip_position_local",
+			"right_hand_proxy_tip_position_origin_id",
+			motion_node.right_hand_proxy_tip_position_local,
+			motion_node.right_hand_proxy_tip_position_origin_id
+		)
+		motion_node.right_hand_proxy_tip_position_origin_id = _resolve_origin_tracked_state_origin_id(
+			playback_state,
+			"right_hand_proxy_tip_position_origin_id",
+			motion_node.right_hand_proxy_tip_position_origin_id
+		)
+	if playback_state.has("right_hand_proxy_pommel_position_local"):
+		motion_node.right_hand_proxy_pommel_position_local = _get_origin_tracked_vector3_state(
+			playback_state,
+			"right_hand_proxy_pommel_position_local",
+			"right_hand_proxy_pommel_position_origin_id",
+			motion_node.right_hand_proxy_pommel_position_local,
+			motion_node.right_hand_proxy_pommel_position_origin_id
+		)
+		motion_node.right_hand_proxy_pommel_position_origin_id = _resolve_origin_tracked_state_origin_id(
+			playback_state,
+			"right_hand_proxy_pommel_position_origin_id",
+			motion_node.right_hand_proxy_pommel_position_origin_id
+		)
+	if playback_state.has("left_hand_proxy_authored"):
+		motion_node.left_hand_proxy_authored = bool(playback_state.get("left_hand_proxy_authored", motion_node.left_hand_proxy_authored))
+	if playback_state.has("left_hand_proxy_tip_position_local"):
+		motion_node.left_hand_proxy_tip_position_local = _get_origin_tracked_vector3_state(
+			playback_state,
+			"left_hand_proxy_tip_position_local",
+			"left_hand_proxy_tip_position_origin_id",
+			motion_node.left_hand_proxy_tip_position_local,
+			motion_node.left_hand_proxy_tip_position_origin_id
+		)
+		motion_node.left_hand_proxy_tip_position_origin_id = _resolve_origin_tracked_state_origin_id(
+			playback_state,
+			"left_hand_proxy_tip_position_origin_id",
+			motion_node.left_hand_proxy_tip_position_origin_id
+		)
+	if playback_state.has("left_hand_proxy_pommel_position_local"):
+		motion_node.left_hand_proxy_pommel_position_local = _get_origin_tracked_vector3_state(
+			playback_state,
+			"left_hand_proxy_pommel_position_local",
+			"left_hand_proxy_pommel_position_origin_id",
+			motion_node.left_hand_proxy_pommel_position_local,
+			motion_node.left_hand_proxy_pommel_position_origin_id
+		)
+		motion_node.left_hand_proxy_pommel_position_origin_id = _resolve_origin_tracked_state_origin_id(
+			playback_state,
+			"left_hand_proxy_pommel_position_origin_id",
+			motion_node.left_hand_proxy_pommel_position_origin_id
+		)
 
 func _build_weapon_preview_node(preview_root: Node3D, actor: Node3D, active_wip: CraftedItemWIP) -> Node3D:
 	if preview_root == null or actor == null or active_wip == null:
@@ -3786,63 +4240,53 @@ func _build_unarmed_preview_node(preview_root: Node3D, actor: Node3D, active_wip
 	var held_root := Node3D.new()
 	held_root.name = "UnarmedHandProxy"
 	held_root.set_meta("unarmed_hand_proxy", true)
+	held_root.set_meta("hand_authoring_proxy", true)
 	held_root.set_meta("source_wip_id", active_wip.wip_id)
 	held_root.set_meta("grip_style_mode", CraftedItemWIP.GRIP_NORMAL)
 	held_root.set_meta("two_hand_character_eligible", false)
-	var hand_proxy_points_state: Dictionary = _resolve_unarmed_hand_proxy_points_state(actor, _resolve_preview_dominant_slot_id())
-	if hand_proxy_points_state.is_empty():
-		hand_proxy_points_state = _build_fallback_unarmed_proxy_points_state()
-	var local_tip: Vector3 = _get_origin_tracked_vector3_state(
-		hand_proxy_points_state,
-		"tip_local",
-		"tip_origin_id",
-		Vector3(0.12, 0.0, 0.0),
+	var proxy_points_state: Dictionary = _resolve_hand_authoring_proxy_points_state(actor, _resolve_preview_dominant_slot_id())
+	_configure_hand_authoring_proxy_node(
+		held_root,
+		_resolve_hand_authoring_local_tip(proxy_points_state),
+		_resolve_hand_authoring_local_pommel(proxy_points_state),
+		_resolve_hand_authoring_contact_center(proxy_points_state),
 		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
 	)
-	var local_pommel: Vector3 = _get_origin_tracked_vector3_state(
-		hand_proxy_points_state,
-		"pommel_local",
-		"pommel_origin_id",
-		Vector3(-0.12, 0.0, 0.0),
-		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
-	)
-	var contact_center_local: Vector3 = _get_origin_tracked_vector3_state(
-		hand_proxy_points_state,
-		"contact_center_local",
-		"contact_center_origin_id",
-		local_pommel.lerp(local_tip, 0.5),
-		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
-	)
-	if local_tip.is_equal_approx(local_pommel):
-		hand_proxy_points_state = _build_fallback_unarmed_proxy_points_state()
-		local_tip = _get_origin_tracked_vector3_state(
-			hand_proxy_points_state,
-			"tip_local",
-			"tip_origin_id",
-			Vector3(0.12, 0.0, 0.0),
-			CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
-		)
-		local_pommel = _get_origin_tracked_vector3_state(
-			hand_proxy_points_state,
-			"pommel_local",
-			"pommel_origin_id",
-			Vector3(-0.12, 0.0, 0.0),
-			CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
-		)
-		contact_center_local = _get_origin_tracked_vector3_state(
-			hand_proxy_points_state,
-			"contact_center_local",
-			"contact_center_origin_id",
-			Vector3.ZERO,
-			CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
-		)
-	var grip_axis_local: Vector3 = (local_tip - local_pommel).normalized()
+	preview_root.add_child(held_root)
+	_apply_preview_hand_mounted_transform(actor, held_root)
+	return held_root
+
+func _configure_hand_authoring_proxy_node(
+	proxy_root: Node3D,
+	local_tip: Vector3,
+	local_pommel: Vector3,
+	contact_center_local: Vector3,
+	hand_mount_origin_id: StringName = CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+) -> void:
+	if proxy_root == null:
+		return
+	for child_node: Node in proxy_root.get_children():
+		proxy_root.remove_child(child_node)
+		child_node.queue_free()
+	var resolved_tip: Vector3 = local_tip
+	var resolved_pommel: Vector3 = local_pommel
+	var resolved_contact_center: Vector3 = contact_center_local
+	if resolved_tip.is_equal_approx(resolved_pommel):
+		var fallback_state: Dictionary = _build_fallback_unarmed_proxy_points_state()
+		resolved_tip = _resolve_hand_authoring_local_tip(fallback_state)
+		resolved_pommel = _resolve_hand_authoring_local_pommel(fallback_state)
+		resolved_contact_center = _resolve_hand_authoring_contact_center(fallback_state)
+	var grip_axis_local: Vector3 = resolved_tip - resolved_pommel
+	if grip_axis_local.length_squared() <= 0.000001:
+		grip_axis_local = Vector3.RIGHT
+	else:
+		grip_axis_local = grip_axis_local.normalized()
 	var grip_axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
-	var span_half: float = clampf(local_tip.distance_to(local_pommel) * 0.16, 0.025, 0.055)
+	var span_half: float = clampf(resolved_tip.distance_to(resolved_pommel) * 0.16, 0.025, 0.055)
 	var primary_grip_guide := Node3D.new()
 	primary_grip_guide.name = "PrimaryGripGuide"
-	primary_grip_guide.position = contact_center_local
-	held_root.add_child(primary_grip_guide)
+	primary_grip_guide.position = resolved_contact_center
+	proxy_root.add_child(primary_grip_guide)
 	var grip_center := Node3D.new()
 	grip_center.name = "GripShellCenter"
 	primary_grip_guide.add_child(grip_center)
@@ -3862,45 +4306,42 @@ func _build_unarmed_preview_node(preview_root: Node3D, actor: Node3D, active_wip
 	grip_center.set_meta("grip_shell_minor_axis_b_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
 	grip_center.set_meta("grip_shell_slice_center_local", Vector3.ZERO)
 	grip_center.set_meta("grip_shell_slice_center_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
-	held_root.set_meta(PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_META, Transform3D.IDENTITY)
-	held_root.set_meta(PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_ORIGIN_META, CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT)
-	_set_origin_tracked_vector3_meta(held_root, "weapon_tip_local", "weapon_tip_origin_id", local_tip, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
-	_set_origin_tracked_vector3_meta(held_root, "weapon_pommel_local", "weapon_pommel_origin_id", local_pommel, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
-	held_root.set_meta("weapon_total_length_meters", local_tip.distance_to(local_pommel))
-	_set_origin_tracked_vector3_meta(held_root, "primary_grip_contact_local", "primary_grip_contact_origin_id", contact_center_local, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	proxy_root.set_meta(PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_META, Transform3D.IDENTITY)
+	proxy_root.set_meta(PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_ORIGIN_META, hand_mount_origin_id)
+	_set_origin_tracked_vector3_meta(proxy_root, "weapon_tip_local", "weapon_tip_origin_id", resolved_tip, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	_set_origin_tracked_vector3_meta(proxy_root, "weapon_pommel_local", "weapon_pommel_origin_id", resolved_pommel, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	proxy_root.set_meta("weapon_total_length_meters", resolved_tip.distance_to(resolved_pommel))
+	_set_origin_tracked_vector3_meta(proxy_root, "primary_grip_contact_local", "primary_grip_contact_origin_id", resolved_contact_center, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
 	_set_origin_tracked_vector3_meta(
-		held_root,
+		proxy_root,
 		"primary_grip_span_start_local",
 		"primary_grip_span_start_origin_id",
-		contact_center_local - grip_axis_local * span_half,
+		resolved_contact_center - grip_axis_local * span_half,
 		grip_axis_origin_id
 	)
 	_set_origin_tracked_vector3_meta(
-		held_root,
+		proxy_root,
 		"primary_grip_span_end_local",
 		"primary_grip_span_end_origin_id",
-		contact_center_local + grip_axis_local * span_half,
+		resolved_contact_center + grip_axis_local * span_half,
 		grip_axis_origin_id
 	)
-	held_root.set_meta("primary_grip_axis_ratio_from_span_start", 0.5)
+	proxy_root.set_meta("primary_grip_axis_ratio_from_span_start", 0.5)
 	_set_origin_tracked_vector3_meta(
-		held_root,
+		proxy_root,
 		"primary_grip_slide_axis_local",
 		"primary_grip_slide_axis_origin_id",
 		grip_axis_local,
 		grip_axis_origin_id
 	)
 	_set_origin_tracked_vector3_meta(
-		held_root,
+		proxy_root,
 		PREVIEW_PRIMARY_GRIP_SEAT_LOCAL_META,
 		PREVIEW_PRIMARY_GRIP_SEAT_ORIGIN_META,
-		contact_center_local,
+		resolved_contact_center,
 		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	)
-	weapon_grip_anchor_provider.ensure_grip_anchor_nodes(held_root, primary_grip_guide, null)
-	preview_root.add_child(held_root)
-	_apply_preview_hand_mounted_transform(actor, held_root)
-	return held_root
+	weapon_grip_anchor_provider.ensure_grip_anchor_nodes(proxy_root, primary_grip_guide, null)
 
 func _ensure_preview_weapon_parent(preview_root: Node3D, held_item: Node3D) -> void:
 	if preview_root == null or held_item == null or not is_instance_valid(held_item):
@@ -4208,6 +4649,7 @@ func _apply_preview_upper_body_authoring_state(
 	if payload.is_empty():
 		return
 	actor.call("set_upper_body_authoring_state", payload)
+	_apply_hand_authoring_slot_proxy_preview_state(actor, held_item, selected_motion_node, playback_state)
 
 func _build_preview_upper_body_authoring_payload(
 	held_item: Node3D,
@@ -4264,8 +4706,129 @@ func _build_preview_upper_body_authoring_payload(
 		"pommel_world": resolved_pommel_world,
 	}
 
-func _apply_preview_actor_upper_body_pose_now(actor: Node3D) -> void:
+func _apply_hand_authoring_slot_proxy_preview_state(
+	actor: Node3D,
+	held_item: Node3D,
+	selected_motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary = {}
+) -> void:
+	if actor == null or selected_motion_node == null:
+		return
+	var preview_root: Node3D = _resolve_preview_root_from_actor(actor)
+	var trajectory_root: Node3D = preview_root.find_child(TRAJECTORY_ROOT_NAME, true, false) as Node3D if preview_root != null else null
+	if preview_root == null or trajectory_root == null:
+		return
+	var active_slots: Array[StringName] = []
+	for slot_id: StringName in [&"hand_right", &"hand_left"]:
+		if not _is_hand_proxy_authoring_slot_available(held_item, selected_motion_node, slot_id):
+			continue
+		if _is_unarmed_preview_item(held_item) and slot_id == _resolve_preview_dominant_slot_id():
+			continue
+		var segment_state: Dictionary = _resolve_hand_proxy_authoring_segment_state(
+			actor,
+			held_item,
+			trajectory_root,
+			selected_motion_node,
+			slot_id,
+			playback_state
+		)
+		if not bool(segment_state.get("available", false)):
+			continue
+		if not bool(segment_state.get("authored", false)):
+			_clear_hand_authoring_slot_guidance(actor, slot_id)
+			continue
+		var proxy_node: Node3D = _ensure_hand_authoring_slot_proxy_node(
+			preview_root,
+			trajectory_root,
+			slot_id,
+			segment_state
+		)
+		if proxy_node == null:
+			continue
+		equipped_item_presenter.sync_single_weapon_contact_guidance(
+			actor,
+			proxy_node,
+			slot_id,
+			false,
+			false,
+			true,
+			false,
+			true,
+			false
+		)
+		active_slots.append(slot_id)
+	preview_root.set_meta("hand_authoring_proxy_slots", active_slots)
+
+func _ensure_hand_authoring_slot_proxy_node(
+	preview_root: Node3D,
+	trajectory_root: Node3D,
+	slot_id: StringName,
+	segment_state: Dictionary
+) -> Node3D:
+	if preview_root == null or trajectory_root == null:
+		return null
+	var resolved_slot_id: StringName = _normalize_preview_slot_id(slot_id)
+	var node_name: String = "HandAuthoringProxy_%s" % String(resolved_slot_id)
+	var proxy_node: Node3D = preview_root.get_node_or_null(NodePath(node_name)) as Node3D
+	if proxy_node == null or not is_instance_valid(proxy_node):
+		proxy_node = Node3D.new()
+		proxy_node.name = node_name
+		proxy_node.set_meta("hand_authoring_proxy", true)
+		proxy_node.set_meta("hand_authoring_slot_proxy", true)
+		proxy_node.set_meta("slot_id", resolved_slot_id)
+		proxy_node.set_meta("grip_style_mode", CraftedItemWIP.GRIP_NORMAL)
+		proxy_node.set_meta("two_hand_character_eligible", false)
+		preview_root.add_child(proxy_node)
+	proxy_node.global_transform = trajectory_root.global_transform
+	var tip_local: Vector3 = segment_state.get("tip_position_local", Vector3(0.12, 0.0, 0.0)) as Vector3
+	var pommel_local: Vector3 = segment_state.get("pommel_position_local", Vector3(-0.12, 0.0, 0.0)) as Vector3
+	var contact_center_local: Vector3 = segment_state.get("contact_center_local", pommel_local.lerp(tip_local, 0.5)) as Vector3
+	_configure_hand_authoring_proxy_node(
+		proxy_node,
+		tip_local,
+		pommel_local,
+		contact_center_local,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	proxy_node.global_transform = trajectory_root.global_transform
+	return proxy_node
+
+func _clear_hand_authoring_slot_guidance(actor: Node3D, slot_id: StringName) -> void:
 	if actor == null:
+		return
+	if actor.has_method("clear_arm_guidance_target"):
+		actor.call("clear_arm_guidance_target", slot_id)
+	if actor.has_method("clear_arm_guidance_active"):
+		actor.call("clear_arm_guidance_active", slot_id)
+	if actor.has_method("clear_finger_grip_target"):
+		actor.call("clear_finger_grip_target", slot_id)
+	if actor.has_method("clear_authoring_contact_anchor_basis"):
+		actor.call("clear_authoring_contact_anchor_basis", slot_id)
+	if actor.has_method("set_support_hand_active"):
+		actor.call("set_support_hand_active", slot_id, false)
+
+func _clear_hand_authoring_slot_proxy_nodes(preview_root: Node3D) -> void:
+	if preview_root == null:
+		return
+	for child_node: Node in preview_root.get_children():
+		if String(child_node.name).begins_with("HandAuthoringProxy_"):
+			preview_root.remove_child(child_node)
+			child_node.queue_free()
+	preview_root.set_meta("hand_authoring_proxy_slots", [])
+
+func _resolve_preview_root_from_actor(actor: Node3D) -> Node3D:
+	var cursor: Node = actor
+	while cursor != null:
+		if String(cursor.name) == PREVIEW_ROOT_NAME:
+			return cursor as Node3D
+		cursor = cursor.get_parent()
+	return null
+
+func _apply_preview_actor_upper_body_pose_now(actor: Node3D, use_drag_frame: bool = false) -> void:
+	if actor == null:
+		return
+	if use_drag_frame and actor.has_method("apply_authoring_preview_drag_frame_now"):
+		actor.call("apply_authoring_preview_drag_frame_now")
 		return
 	if actor.has_method("apply_authoring_preview_frame_now"):
 		actor.call("apply_authoring_preview_frame_now")
@@ -4288,7 +4851,7 @@ func _settle_preview_contact_group_on_resolved_weapon(
 	# frame, not the pre-coupled authoring frame.
 	_apply_two_hand_preview_state(actor, held_item, selected_motion_node)
 	_apply_preview_upper_body_authoring_state(actor, held_item, selected_motion_node, resolved_playback_state)
-	_apply_preview_actor_upper_body_pose_now(actor)
+	_apply_preview_actor_upper_body_pose_now(actor, bool(resolved_playback_state.get("authoring_drag_active", false)))
 
 func _settle_preview_contact_and_body_clearance(
 	actor: Node3D,
@@ -6542,6 +7105,45 @@ func _resolve_unarmed_hand_proxy_points_state(actor: Node3D, slot_id: StringName
 		"pinky1_world": pinky_world,
 	}
 
+func _resolve_hand_authoring_proxy_points_state(actor: Node3D, slot_id: StringName) -> Dictionary:
+	var hand_proxy_points_state: Dictionary = _resolve_unarmed_hand_proxy_points_state(actor, slot_id)
+	if hand_proxy_points_state.is_empty():
+		return _build_fallback_unarmed_proxy_points_state()
+	var tip_local: Vector3 = _resolve_hand_authoring_local_tip(hand_proxy_points_state)
+	var pommel_local: Vector3 = _resolve_hand_authoring_local_pommel(hand_proxy_points_state)
+	if tip_local.is_equal_approx(pommel_local):
+		return _build_fallback_unarmed_proxy_points_state()
+	return hand_proxy_points_state
+
+func _resolve_hand_authoring_local_tip(hand_proxy_points_state: Dictionary) -> Vector3:
+	return _get_origin_tracked_vector3_state(
+		hand_proxy_points_state,
+		"tip_local",
+		"tip_origin_id",
+		Vector3(0.12, 0.0, 0.0),
+		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	)
+
+func _resolve_hand_authoring_local_pommel(hand_proxy_points_state: Dictionary) -> Vector3:
+	return _get_origin_tracked_vector3_state(
+		hand_proxy_points_state,
+		"pommel_local",
+		"pommel_origin_id",
+		Vector3(-0.12, 0.0, 0.0),
+		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	)
+
+func _resolve_hand_authoring_contact_center(hand_proxy_points_state: Dictionary) -> Vector3:
+	var fallback_tip: Vector3 = _resolve_hand_authoring_local_tip(hand_proxy_points_state)
+	var fallback_pommel: Vector3 = _resolve_hand_authoring_local_pommel(hand_proxy_points_state)
+	return _get_origin_tracked_vector3_state(
+		hand_proxy_points_state,
+		"contact_center_local",
+		"contact_center_origin_id",
+		fallback_pommel.lerp(fallback_tip, 0.5),
+		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+	)
+
 func _build_fallback_unarmed_proxy_points_state() -> Dictionary:
 	return {
 		"tip_local": Vector3(0.12, 0.0, 0.0),
@@ -6875,6 +7477,8 @@ func _refresh_weapon_and_sphere_visuals(state: Dictionary, motion_node_chain: Ar
 		preview_root.set_meta("weapon_gizmo_marker_count", 0)
 		preview_root.set_meta("upperarm_roll_gizmo_state", {})
 		preview_root.set_meta("upperarm_roll_gizmo_count", 0)
+		preview_root.set_meta("hand_proxy_gizmo_state", {})
+		preview_root.set_meta("hand_proxy_gizmo_count", 0)
 	if selected_node_index < 0 or selected_node_index >= motion_node_chain.size():
 		return
 	var motion_node: CombatAnimationMotionNode = motion_node_chain[selected_node_index] as CombatAnimationMotionNode
@@ -6882,9 +7486,11 @@ func _refresh_weapon_and_sphere_visuals(state: Dictionary, motion_node_chain: Ar
 		return
 	var gizmo_marker_count: int = 0
 	if marker_root != null:
+		_clear_hand_proxy_gizmo_markers(marker_root)
 		_create_weapon_rotation_gizmo_markers(marker_root, motion_node, active_focus)
 		gizmo_marker_count += 2
 		gizmo_marker_count += _create_upperarm_roll_gizmo_markers(state, motion_node, active_focus)
+		gizmo_marker_count += _create_hand_proxy_gizmo_markers(state, motion_node, active_focus)
 		if preview_root != null:
 			preview_root.set_meta("weapon_gizmo_marker_count", gizmo_marker_count)
 	if sphere_viz_mesh != null and active_focus == CombatAnimationSessionStateScript.FOCUS_TIP:
@@ -6901,6 +7507,48 @@ func _create_weapon_rotation_gizmo_markers(marker_root: Node3D, motion_node: Com
 	var normal_color: Color = Color(0.42, 0.98, 0.72, 1.0) if weapon_focus_active else Color(0.28, 0.72, 0.56, 0.95)
 	_create_control_gizmo_marker(marker_root, weapon_center, center_color, 0.019 if weapon_focus_active else 0.016, "WeaponCenter", WEAPON_ROLL_MARKER_EXTRA_SCALE)
 	_create_control_gizmo_marker(marker_root, weapon_normal_handle, normal_color, 0.021 if weapon_focus_active else 0.018, "WeaponNormal")
+
+func _create_hand_proxy_gizmo_markers(state: Dictionary, motion_node: CombatAnimationMotionNode, active_focus: StringName) -> int:
+	var preview_root: Node3D = state.get("preview_root", null) as Node3D
+	var trajectory_root: Node3D = state.get("trajectory_root", null) as Node3D
+	var marker_root: Node3D = state.get("marker_root", null) as Node3D
+	var actor_pivot: Node3D = state.get("actor_pivot", null) as Node3D
+	if preview_root == null or trajectory_root == null or marker_root == null or actor_pivot == null or motion_node == null:
+		return 0
+	var slot_id: StringName = StringName()
+	if active_focus == CombatAnimationSessionStateScript.FOCUS_RIGHT_HAND_PROXY:
+		slot_id = &"hand_right"
+	elif active_focus == CombatAnimationSessionStateScript.FOCUS_LEFT_HAND_PROXY:
+		slot_id = &"hand_left"
+	else:
+		preview_root.set_meta("hand_proxy_gizmo_state", {})
+		preview_root.set_meta("hand_proxy_gizmo_count", 0)
+		return 0
+	var actor: Node3D = actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D
+	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
+	var resolved_state: Dictionary = _get_node_meta_or_default(preview_root, "resolved_playback_state", {}) as Dictionary
+	var segment_state: Dictionary = _resolve_hand_proxy_authoring_segment_state(
+		actor,
+		held_item,
+		trajectory_root,
+		motion_node,
+		slot_id,
+		resolved_state
+	)
+	if not bool(segment_state.get("available", false)):
+		preview_root.set_meta("hand_proxy_gizmo_state", {})
+		preview_root.set_meta("hand_proxy_gizmo_count", 0)
+		return 0
+	var color: Color = Color(0.25, 0.72, 1.0, 0.95) if slot_id == &"hand_left" else Color(0.3, 0.95, 0.45, 0.95)
+	var prefix: String = "LeftHandProxy" if slot_id == &"hand_left" else "RightHandProxy"
+	var tip_local: Vector3 = segment_state.get("tip_position_local", Vector3.ZERO) as Vector3
+	var pommel_local: Vector3 = segment_state.get("pommel_position_local", Vector3.ZERO) as Vector3
+	_create_control_gizmo_marker(marker_root, tip_local, color, 0.019, "%sTip" % prefix, 0.9)
+	_create_control_gizmo_marker(marker_root, pommel_local, Color(color.r, color.g, color.b, 0.72), 0.017, "%sPommel" % prefix, 0.82)
+	_create_line_gizmo_marker(marker_root, pommel_local, tip_local, Color(color.r, color.g, color.b, 0.58), "%sSegment" % prefix)
+	preview_root.set_meta("hand_proxy_gizmo_state", {slot_id: segment_state})
+	preview_root.set_meta("hand_proxy_gizmo_count", 3)
+	return 3
 
 func _create_upperarm_roll_gizmo_markers(state: Dictionary, motion_node: CombatAnimationMotionNode, active_focus: StringName) -> int:
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D
@@ -6921,6 +7569,10 @@ func _create_upperarm_roll_gizmo_markers(state: Dictionary, motion_node: CombatA
 	var active_slots: Array[StringName] = [dominant_slot_id]
 	if two_hand_active:
 		active_slots.append(support_slot_id)
+	if active_focus == CombatAnimationSessionStateScript.FOCUS_RIGHT_ARM_ROLL:
+		active_slots = [&"hand_right"]
+	elif active_focus == CombatAnimationSessionStateScript.FOCUS_LEFT_ARM_ROLL:
+		active_slots = [&"hand_left"]
 	var gizmo_state: Dictionary = {}
 	var marker_count: int = 0
 	for slot_id in active_slots:
@@ -6997,7 +7649,12 @@ func _draw_upperarm_roll_gizmo(
 	color: Color,
 	prefix: String
 ) -> int:
-	var focus_active: bool = active_focus == CombatAnimationSessionStateScript.FOCUS_ARM_ROLL
+	var slot_id: StringName = roll_state.get("slot_id", StringName()) as StringName
+	var focus_active: bool = (
+		active_focus == CombatAnimationSessionStateScript.FOCUS_ARM_ROLL
+		or (active_focus == CombatAnimationSessionStateScript.FOCUS_RIGHT_ARM_ROLL and slot_id == &"hand_right")
+		or (active_focus == CombatAnimationSessionStateScript.FOCUS_LEFT_ARM_ROLL and slot_id == &"hand_left")
+	)
 	var center_local: Vector3 = _get_origin_tracked_vector3_state(
 		roll_state,
 		"center_local",

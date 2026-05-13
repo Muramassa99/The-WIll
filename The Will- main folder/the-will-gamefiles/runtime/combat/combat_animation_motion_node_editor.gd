@@ -15,6 +15,10 @@ const DRAG_TARGET_POMMEL_CURVE_IN: StringName = &"pommel_curve_in"
 const DRAG_TARGET_POMMEL_CURVE_OUT: StringName = &"pommel_curve_out"
 const DRAG_TARGET_RIGHT_UPPERARM_ROLL: StringName = &"right_upperarm_roll"
 const DRAG_TARGET_LEFT_UPPERARM_ROLL: StringName = &"left_upperarm_roll"
+const DRAG_TARGET_RIGHT_HAND_PROXY_TIP: StringName = &"right_hand_proxy_tip"
+const DRAG_TARGET_RIGHT_HAND_PROXY_POMMEL: StringName = &"right_hand_proxy_pommel"
+const DRAG_TARGET_LEFT_HAND_PROXY_TIP: StringName = &"left_hand_proxy_tip"
+const DRAG_TARGET_LEFT_HAND_PROXY_POMMEL: StringName = &"left_hand_proxy_pommel"
 const CONTROL_SCREEN_PICK_RADIUS_PIXELS: float = 20.0
 const CURVE_HANDLE_SCREEN_PICK_RADIUS_PIXELS: float = 34.0
 const CURVE_HANDLE_MIN_LENGTH_METERS: float = 0.0001
@@ -91,6 +95,24 @@ func raycast_tip_on_view_drag_plane(
 		return null
 	var plane_normal: Vector3 = camera.global_transform.basis.z.normalized()
 	var plane_origin: Vector3 = trajectory_root.global_transform * motion_node.tip_position_local
+	var hit_plane := Plane(plane_normal.normalized(), plane_origin)
+	var ray_origin: Vector3 = camera.project_ray_origin(screen_position)
+	var ray_direction: Vector3 = camera.project_ray_normal(screen_position)
+	var intersection: Variant = hit_plane.intersects_ray(ray_origin, ray_direction)
+	if intersection == null:
+		return null
+	return trajectory_root.global_transform.affine_inverse() * (intersection as Vector3)
+
+func raycast_local_point_on_view_drag_plane(
+	camera: Camera3D,
+	screen_position: Vector2,
+	trajectory_root: Node3D,
+	local_point: Vector3
+) -> Variant:
+	if camera == null or trajectory_root == null:
+		return null
+	var plane_normal: Vector3 = camera.global_transform.basis.z.normalized()
+	var plane_origin: Vector3 = trajectory_root.global_transform * local_point
 	var hit_plane := Plane(plane_normal.normalized(), plane_origin)
 	var ray_origin: Vector3 = camera.project_ray_origin(screen_position)
 	var ray_direction: Vector3 = camera.project_ray_normal(screen_position)
@@ -234,6 +256,29 @@ func pick_drag_target(
 		trajectory_root,
 		screen_position,
 		tip_candidates
+	)
+
+func pick_hand_proxy_drag_target(
+	camera: Camera3D,
+	screen_position: Vector2,
+	hand_proxy_state: Dictionary,
+	trajectory_root: Node3D,
+	slot_id: StringName
+) -> StringName:
+	if camera == null or trajectory_root == null or hand_proxy_state.is_empty():
+		return StringName()
+	if not bool(hand_proxy_state.get("available", false)):
+		return StringName()
+	var tip_target: StringName = DRAG_TARGET_LEFT_HAND_PROXY_TIP if slot_id == &"hand_left" else DRAG_TARGET_RIGHT_HAND_PROXY_TIP
+	var pommel_target: StringName = DRAG_TARGET_LEFT_HAND_PROXY_POMMEL if slot_id == &"hand_left" else DRAG_TARGET_RIGHT_HAND_PROXY_POMMEL
+	var candidates: Array = []
+	candidates.append([tip_target, hand_proxy_state.get("tip_position_local", Vector3.ZERO) as Vector3, CONTROL_SCREEN_PICK_RADIUS_PIXELS])
+	candidates.append([pommel_target, hand_proxy_state.get("pommel_position_local", Vector3.ZERO) as Vector3, CONTROL_SCREEN_PICK_RADIUS_PIXELS])
+	return _pick_best_screen_target(
+		camera,
+		trajectory_root,
+		screen_position,
+		candidates
 	)
 
 func raycast_curve_handle_on_view_drag_plane(

@@ -63,6 +63,10 @@ const ANATOMICAL_SOFT_CONTACT_REGION_PAIRS: Array[Array] = [
 	["pelvis", "right_forearm"],
 ]
 
+const BODY_SELF_COLLISION_EXEMPT_REGION_PAIRS: Array[Array] = [
+	["left_forearm", "right_forearm"],
+]
+
 const DEFAULT_SETTINGS := {
 	"safety_margin_meters": 0.08,
 	"front_bias_amount": 0.18,
@@ -822,10 +826,24 @@ func _body_proxy_pair_allows_anatomical_overlap(first_proxy: Dictionary, second_
 		return true
 	if second_end_bone != StringName() and second_end_bone == first_bone:
 		return true
+	if _regions_are_body_self_collision_exempt(first_region, second_region):
+		return true
 	if _regions_are_anatomical_neighbors(first_region, second_region):
 		return true
 	if _regions_are_soft_contact_neighbors(first_region, second_region):
 		return clearance_meters >= -ANATOMICAL_SOFT_CONTACT_OVERLAP_TOLERANCE_METERS
+	return false
+
+func _regions_are_body_self_collision_exempt(first_region: String, second_region: String) -> bool:
+	if first_region.is_empty() or second_region.is_empty():
+		return false
+	for pair: Array in BODY_SELF_COLLISION_EXEMPT_REGION_PAIRS:
+		if pair.size() < 2:
+			continue
+		var region_a: String = String(pair[0])
+		var region_b: String = String(pair[1])
+		if (first_region == region_a and second_region == region_b) or (first_region == region_b and second_region == region_a):
+			return true
 	return false
 
 func _regions_are_anatomical_neighbors(first_region: String, second_region: String) -> bool:

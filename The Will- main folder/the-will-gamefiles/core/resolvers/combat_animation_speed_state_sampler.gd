@@ -32,8 +32,10 @@ func sample_motion_chain(
 	var startup_segment_count: int = maxi(int(config.get("startup_segment_count", DEFAULT_STARTUP_SEGMENT_COUNT)), 0)
 	var total_duration: float = _resolve_total_duration(motion_node_chain)
 	var segment_count: int = motion_node_chain.size() - 1
-	var total_tip_length: float = _resolve_curve_length(tip_curve)
-	var total_pommel_length: float = _resolve_curve_length(pommel_curve)
+	var sampled_tip_curve: Curve3D = _resolve_bake_safe_curve(tip_curve)
+	var sampled_pommel_curve: Curve3D = _resolve_bake_safe_curve(pommel_curve)
+	var total_tip_length: float = _resolve_curve_length(sampled_tip_curve)
+	var total_pommel_length: float = _resolve_curve_length(sampled_pommel_curve)
 	var elapsed_time: float = 0.0
 	var previous_tip: Vector3 = Vector3.ZERO
 	var previous_pommel: Vector3 = Vector3.ZERO
@@ -52,7 +54,7 @@ func sample_motion_chain(
 			var chain_ratio: float = (float(segment_index - 1) + local_ratio) / float(segment_count)
 			var sample_time: float = elapsed_time + segment_duration * local_ratio
 			var tip_position: Vector3 = _sample_curve_or_lerp(
-				tip_curve,
+				sampled_tip_curve,
 				total_tip_length,
 				chain_ratio,
 				prev_node.tip_position_local,
@@ -60,7 +62,7 @@ func sample_motion_chain(
 				local_ratio
 			)
 			var pommel_position: Vector3 = _sample_curve_or_lerp(
-				pommel_curve,
+				sampled_pommel_curve,
 				total_pommel_length,
 				chain_ratio,
 				prev_node.pommel_position_local,
@@ -231,6 +233,9 @@ func _sanitize_curve_length(value: float) -> float:
 func _resolve_curve_length(curve: Curve3D) -> float:
 	if curve == null or curve.get_point_count() < 2:
 		return 0.0
+	curve = _resolve_bake_safe_curve(curve)
+	if curve == null or curve.get_point_count() < 2:
+		return 0.0
 	var first_point: Vector3 = curve.get_point_position(0)
 	var has_distinct_point: bool = false
 	for point_index: int in range(1, curve.get_point_count()):
@@ -240,6 +245,36 @@ func _resolve_curve_length(curve: Curve3D) -> float:
 	if not has_distinct_point:
 		return 0.0
 	return _sanitize_curve_length(_resolve_baked_polyline_length(curve))
+
+func _resolve_bake_safe_curve(curve: Curve3D) -> Curve3D:
+	if curve == null or curve.get_point_count() < 2:
+		return curve
+	var requires_sanitized_curve: bool = false
+	var previous_position: Vector3 = curve.get_point_position(0)
+	for point_index: int in range(1, curve.get_point_count()):
+		var current_position: Vector3 = curve.get_point_position(point_index)
+		if previous_position.distance_squared_to(current_position) <= 0.00000025:
+			requires_sanitized_curve = true
+			break
+		previous_position = current_position
+	if not requires_sanitized_curve:
+		return curve
+	var sanitized_curve := Curve3D.new()
+	sanitized_curve.bake_interval = curve.bake_interval
+	for point_index: int in range(curve.get_point_count()):
+		var point_position: Vector3 = curve.get_point_position(point_index)
+		if not _is_finite_vector3(point_position):
+			continue
+		if sanitized_curve.get_point_count() > 0:
+			var last_position: Vector3 = sanitized_curve.get_point_position(sanitized_curve.get_point_count() - 1)
+			if last_position.distance_squared_to(point_position) <= 0.00000025:
+				continue
+		sanitized_curve.add_point(
+			point_position,
+			curve.get_point_in(point_index),
+			curve.get_point_out(point_index)
+		)
+	return sanitized_curve if sanitized_curve.get_point_count() >= 2 else null
 
 func _resolve_baked_polyline_length(curve: Curve3D) -> float:
 	if curve == null:

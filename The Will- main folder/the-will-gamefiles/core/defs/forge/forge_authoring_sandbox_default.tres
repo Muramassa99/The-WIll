@@ -11,4 +11,4 @@ sample_grip_preset_id = &""
 sample_flex_preset_id = &""
 sample_bow_preset_id = &""
 inventory_seed_def = ExtResource("5_inventory_seed")
-inventory_seed_bonus_quantity = 5000
+inventory_seed_bonus_quantity = 55000

@@ -25,6 +25,7 @@ const DEFAULT_RESOLUTION := Vector2i(1600, 900)
 @export var master_muted: bool = false
 @export var ui_scale_preset: StringName = SCALE_NORMAL
 @export var text_scale_preset: StringName = SCALE_NORMAL
+@export var developer_debugging_enabled: bool = false
 @export var keybindings: Dictionary = {}
 
 static func load_or_create(save_path: String = DEFAULT_SAVE_FILE_PATH) -> UserSettingsState:
@@ -72,6 +73,9 @@ func reset_interface_to_defaults() -> void:
 	ui_scale_preset = SCALE_NORMAL
 	text_scale_preset = SCALE_NORMAL
 
+func reset_debugging_to_defaults() -> void:
+	developer_debugging_enabled = false
+
 func reset_keybindings_for_actions(action_names: Array[StringName]) -> void:
 	for action_name: StringName in action_names:
 		keybindings.erase(String(action_name))
@@ -80,6 +84,7 @@ func reset_all_to_defaults(include_keybindings: bool = false) -> void:
 	reset_display_to_defaults()
 	reset_audio_to_defaults()
 	reset_interface_to_defaults()
+	reset_debugging_to_defaults()
 	if include_keybindings:
 		keybindings.clear()
 

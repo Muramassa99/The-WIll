@@ -20,6 +20,9 @@ const DEFAULT_STAGE2_TOOL_AMOUNT_RATIO_STEP: float = 0.05
 const PLANE_XY: StringName = &"xy"
 const PLANE_ZX: StringName = &"zx"
 const PLANE_ZY: StringName = &"zy"
+const SPLINE_DRAG_TARGET_ANCHOR: StringName = &"anchor"
+const SPLINE_DRAG_TARGET_IN_HANDLE: StringName = &"in_handle"
+const SPLINE_DRAG_TARGET_OUT_HANDLE: StringName = &"out_handle"
 const WORKSPACE_VIEW_FREE: StringName = &"free"
 const WORKSPACE_VIEW_PLANE: StringName = &"plane"
 
@@ -71,6 +74,7 @@ const MENU_GEOMETRY_TOOL_TRIANGLE_ERASE := 246
 const MENU_GEOMETRY_SHAPE_ROTATE_LEFT := 247
 const MENU_GEOMETRY_SHAPE_ROTATE_RIGHT := 248
 const MENU_GEOMETRY_HANDLES_PANEL := 270
+const MENU_GEOMETRY_TOOL_SPLINE_LINE := 271
 const MENU_GEOMETRY_PLANE_XY := 203
 const MENU_GEOMETRY_PLANE_ZX := 204
 const MENU_GEOMETRY_PLANE_ZY := 205
@@ -88,6 +92,8 @@ const MENU_TOOL_SHAPE_PRIMARY_DOWN := 257
 const MENU_TOOL_SHAPE_PRIMARY_UP := 258
 const MENU_TOOL_SHAPE_SECONDARY_DOWN := 259
 const MENU_TOOL_SHAPE_SECONDARY_UP := 260
+const MENU_TOOL_SPLINE_END_CAP_SQUARE := 261
+const MENU_TOOL_SPLINE_END_CAP_ROUNDED := 262
 const MENU_WORKFLOW_BAKE := 300
 const MENU_WORKFLOW_RESET := 301
 const MENU_WORKFLOW_CLOSE := 302
@@ -239,6 +245,13 @@ const ForgeWorkspaceShapeToolPresenterScript = preload("res://runtime/forge/forg
 @onready var free_subviewport: SubViewport = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/FreeViewPanel/FreeVBox/FreeViewContainer/FreeSubViewport
 @onready var axis_indicator_control = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/MainViewportHost/AxisIndicatorPanel/AxisIndicatorMargin/AxisIndicatorVBox/AxisIndicatorCenter/AxisIndicatorControl
 @onready var tool_overlay_panel: PanelContainer = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel
+@onready var shape_primary_size_overlay_row: HBoxContainer = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ShapePrimarySizeOverlayRow
+@onready var shape_primary_size_up_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ShapePrimarySizeOverlayRow/ShapePrimarySizeUpButton
+@onready var shape_primary_size_down_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ShapePrimarySizeOverlayRow/ShapePrimarySizeDownButton
+@onready var shape_secondary_size_overlay_row: HBoxContainer = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ShapeSecondarySizeOverlayRow
+@onready var shape_secondary_size_up_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ShapeSecondarySizeOverlayRow/ShapeSecondarySizeUpButton
+@onready var shape_secondary_size_down_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ShapeSecondarySizeOverlayRow/ShapeSecondarySizeDownButton
+@onready var confirm_spline_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ConfirmSplineButton
 @onready var draw_tool_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/DrawToolButton
 @onready var erase_tool_button: Button = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/EraseToolButton
 @onready var tool_state_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ToolStateLabel
@@ -325,7 +338,7 @@ var structural_shape_preview_grid_positions: Array[Vector3i] = []
 var structural_shape_preview_dirty: bool = false
 var structural_shape_last_committed_layer: int = -1
 var structural_shape_last_committed_plane: StringName = StringName()
-var structural_shape_rotation_quadrant: int = 0
+var structural_shape_rotation_step: int = 0
 var selected_handle_preset_id: StringName = StringName()
 var rectangle_shape_size_a_cells: int = 1
 var rectangle_shape_size_b_cells: int = 1
@@ -334,6 +347,14 @@ var oval_shape_size_a_cells: int = 1
 var oval_shape_size_b_cells: int = 1
 var triangle_shape_size_a_cells: int = 1
 var triangle_shape_size_b_cells: int = 1
+var spline_line_width_cells: int = 1
+var spline_line_end_cap_mode: StringName = ForgeWorkspaceShapeToolPresenterScript.SPLINE_END_CAP_ROUNDED
+var spline_line_anchor_plane_positions: Array[Vector2i] = []
+var spline_line_in_handle_plane_positions: Array[Vector2i] = []
+var spline_line_out_handle_plane_positions: Array[Vector2i] = []
+var spline_line_drag_target_kind: StringName = StringName()
+var spline_line_drag_target_index: int = -1
+var spline_line_preview_active: bool = false
 var stage2_brush_radius_meters: float = 0.0
 var stage2_tool_amount_ratio: float = 1.0
 var stage2_hover_face_ids: PackedStringArray = PackedStringArray()
@@ -369,6 +390,7 @@ func _ready() -> void:
 	_configure_project_manager_popup()
 	_configure_action_menus()
 	_connect_ui_signals()
+	_configure_material_selector_focus_behavior()
 	_populate_stow_position_options()
 	_populate_grip_style_options()
 	_disable_obsolete_stage1_stance_controls()
@@ -394,6 +416,7 @@ func _process(delta: float) -> void:
 
 func _input(event: InputEvent) -> void:
 	_update_stage2_amount_modifier_state(event)
+	_release_text_focus_on_external_mouse_press(event)
 
 func _unhandled_input(event: InputEvent) -> void:
 	_update_stage2_amount_modifier_state(event)
@@ -638,6 +661,11 @@ func _connect_ui_signals() -> void:
 	start_menu_new_ranged_physical_button.pressed.connect(_on_start_menu_new_ranged_physical_pressed)
 	start_menu_new_shield_button.pressed.connect(_on_start_menu_new_shield_pressed)
 	start_menu_new_magic_button.pressed.connect(_on_start_menu_new_magic_pressed)
+	shape_primary_size_up_button.pressed.connect(_on_primary_shape_size_up_pressed)
+	shape_primary_size_down_button.pressed.connect(_on_primary_shape_size_down_pressed)
+	shape_secondary_size_up_button.pressed.connect(_on_secondary_shape_size_up_pressed)
+	shape_secondary_size_down_button.pressed.connect(_on_secondary_shape_size_down_pressed)
+	confirm_spline_button.pressed.connect(_on_confirm_spline_pressed)
 	draw_tool_button.pressed.connect(_on_primary_overlay_tool_pressed)
 	erase_tool_button.pressed.connect(_on_secondary_overlay_tool_pressed)
 	place_category_button.pressed.connect(func() -> void: _set_active_tool(TOOL_PLACE))
@@ -693,6 +721,11 @@ func _connect_ui_signals() -> void:
 	free_view_panel.gui_input.connect(_on_free_view_panel_gui_input)
 	free_view_container.gui_input.connect(_on_free_view_gui_input)
 
+func _configure_material_selector_focus_behavior() -> void:
+	if inventory_list != null:
+		inventory_list.allow_search = false
+		inventory_list.focus_mode = Control.FOCUS_NONE
+
 func _configure_action_menus() -> void:
 	if selected_handle_preset_id == StringName():
 		selected_handle_preset_id = workspace_shape_tool_presenter.get_default_handle_preset_id()
@@ -707,6 +740,9 @@ func _configure_action_menus() -> void:
 		_get_action_menu_ids()
 	)
 	_ensure_geometry_handles_popup()
+	var geometry_popup: PopupMenu = geometry_menu_button.get_popup()
+	geometry_popup.hide_on_item_selection = false
+	geometry_popup.hide_on_checkable_item_selection = false
 	var tool_popup: PopupMenu = tool_menu_button.get_popup()
 	tool_popup.hide_on_item_selection = false
 	tool_popup.hide_on_checkable_item_selection = false
@@ -787,6 +823,31 @@ func _disable_obsolete_stage1_stance_controls() -> void:
 		project_grip_style_option_button.disabled = true
 	_hide_stow_position_hint()
 	_hide_grip_style_hint()
+
+func _release_text_focus_on_external_mouse_press(event: InputEvent) -> void:
+	if not panel.visible:
+		return
+	var mouse_button: InputEventMouseButton = event as InputEventMouseButton
+	if mouse_button == null or not mouse_button.pressed:
+		return
+	var focus_owner: Control = get_viewport().gui_get_focus_owner()
+	if focus_owner == null:
+		return
+	if not _is_stage1_text_entry_control(focus_owner):
+		return
+	if _is_screen_position_inside_control(mouse_button.position, focus_owner):
+		return
+	focus_owner.release_focus()
+
+func _is_stage1_text_entry_control(control: Control) -> bool:
+	if control == null:
+		return false
+	return control == search_box or control == project_name_edit or control == project_notes_edit
+
+func _is_screen_position_inside_control(screen_position: Vector2, control: Control) -> bool:
+	if control == null or not is_instance_valid(control):
+		return false
+	return control.get_global_rect().has_point(screen_position)
 
 func _refresh_grip_style_option_availability(current_wip: CraftedItemWIP) -> void:
 	project_panel_presenter.refresh_grip_style_option_availability(project_grip_style_option_button, current_wip)
@@ -1062,6 +1123,7 @@ func _refresh_workspace_visuals(preserve_workspace_view: bool = true, force_full
 		stage2_refinement_mode_active
 	)
 	_sync_structural_shape_preview()
+	_sync_spline_line_overlay()
 	_refresh_stage2_selection_preview()
 	_refresh_axis_indicator()
 
@@ -1140,6 +1202,82 @@ func _sync_structural_shape_preview() -> void:
 			remove_mode
 		)
 
+func _is_spline_line_tool_active() -> bool:
+	return (
+		not stage2_refinement_mode_active
+		and stage1_tool_family == ForgeWorkspaceShapeToolPresenterScript.FAMILY_SPLINE_LINE
+	)
+
+func _sync_spline_line_overlay() -> void:
+	if plane_viewport == null:
+		return
+	if not _is_spline_line_tool_active():
+		plane_viewport.clear_spline_line_overlay_state()
+		return
+	plane_viewport.set_spline_line_overlay_state(
+		spline_line_anchor_plane_positions,
+		spline_line_in_handle_plane_positions,
+		spline_line_out_handle_plane_positions,
+		_get_spline_line_curve_points()
+	)
+
+func _clear_spline_line_overlay() -> void:
+	if plane_viewport != null:
+		plane_viewport.clear_spline_line_overlay_state()
+
+func _clear_spline_line_points() -> void:
+	spline_line_anchor_plane_positions.clear()
+	spline_line_in_handle_plane_positions.clear()
+	spline_line_out_handle_plane_positions.clear()
+	spline_line_drag_target_kind = StringName()
+	spline_line_drag_target_index = -1
+	spline_line_preview_active = false
+	_clear_structural_shape_preview()
+	_clear_spline_line_overlay()
+
+func _refresh_spline_line_preview() -> void:
+	if not _is_spline_line_tool_active():
+		_clear_spline_line_overlay()
+		if spline_line_preview_active:
+			spline_line_preview_active = false
+			_clear_structural_shape_preview()
+		return
+	structural_shape_drag_active = false
+	spline_line_preview_active = true
+	if forge_controller == null or spline_line_anchor_plane_positions.size() < 2:
+		structural_shape_preview_grid_positions.clear()
+		structural_shape_preview_dirty = false
+		_sync_structural_shape_preview()
+		_sync_spline_line_overlay()
+		return
+	structural_shape_preview_grid_positions = workspace_shape_tool_presenter.build_spline_line_footprint(
+		spline_line_anchor_plane_positions,
+		spline_line_in_handle_plane_positions,
+		spline_line_out_handle_plane_positions,
+		active_plane,
+		active_layer,
+		forge_controller.grid_size,
+		spline_line_width_cells,
+		spline_line_end_cap_mode
+	)
+	_mark_structural_shape_preview_dirty()
+	_sync_structural_shape_preview()
+	_sync_spline_line_overlay()
+
+func _get_spline_line_curve_points() -> PackedVector2Array:
+	return workspace_shape_tool_presenter.build_spline_line_curve_points(
+		spline_line_anchor_plane_positions,
+		spline_line_in_handle_plane_positions,
+		spline_line_out_handle_plane_positions
+	)
+
+func _can_confirm_spline_line() -> bool:
+	return (
+		_is_spline_line_tool_active()
+		and spline_line_anchor_plane_positions.size() >= 2
+		and not structural_shape_preview_grid_positions.is_empty()
+	)
+
 func _clear_structural_shape_preview() -> void:
 	structural_shape_drag_active = false
 	structural_shape_drag_anchor_grid_position = Vector3i.ZERO
@@ -1151,6 +1289,9 @@ func _clear_structural_shape_preview() -> void:
 	_sync_structural_shape_preview()
 
 func _update_structural_shape_preview() -> void:
+	if _is_spline_line_tool_active():
+		_refresh_spline_line_preview()
+		return
 	if not structural_shape_drag_active:
 		_clear_structural_shape_preview()
 		return
@@ -1165,7 +1306,7 @@ func _update_structural_shape_preview() -> void:
 			active_plane,
 			active_layer,
 			forge_controller.grid_size,
-			structural_shape_rotation_quadrant,
+			structural_shape_rotation_step,
 			shape_settings
 		)
 	else:
@@ -1276,7 +1417,7 @@ func _refresh_left_panel() -> void:
 		active_tool,
 		_get_armed_material_display_name(),
 		stage2_refinement_mode_active,
-		workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_quadrant),
+		workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_step),
 		_get_view_tuning(),
 		layer_status_label,
 		plane_status_label,
@@ -1301,7 +1442,7 @@ func _refresh_left_panel() -> void:
 		active_tool,
 		_get_armed_material_display_name(),
 		stage2_refinement_mode_active,
-		workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_quadrant)
+		workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_step)
 	)
 	_rebuild_status_menu()
 
@@ -1309,6 +1450,11 @@ func _refresh_tool_overlay() -> void:
 	var view_tuning: ForgeViewTuningDef = _get_view_tuning()
 	var draw_active: bool = tool_state_modifier == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD
 	var erase_active: bool = tool_state_modifier == ForgeWorkspaceShapeToolPresenterScript.MODIFIER_REMOVE
+	var spline_line_active: bool = _is_spline_line_tool_active()
+	var spline_line_confirm_enabled: bool = _can_confirm_spline_line()
+	confirm_spline_button.visible = spline_line_active
+	confirm_spline_button.disabled = not spline_line_confirm_enabled
+	confirm_spline_button.modulate = view_tuning.ui_button_active_color if spline_line_confirm_enabled else view_tuning.ui_button_inactive_color
 	draw_tool_button.text = "Apply" if stage2_refinement_mode_active else "Draw"
 	erase_tool_button.text = "Revert" if stage2_refinement_mode_active else "Erase"
 	draw_tool_button.set_pressed_no_signal(draw_active)
@@ -1321,11 +1467,23 @@ func _refresh_tool_overlay() -> void:
 		not stage2_refinement_mode_active
 		and workspace_shape_tool_presenter.is_shape_family(stage1_tool_family)
 	)
+	var shape_settings: Dictionary = _get_stage1_shape_settings()
+	var show_shape_rotation_status: bool = show_shape_status and bool(shape_settings.get("rotation_controls_visible", true))
+	var size_overlay_state: Dictionary = _get_stage1_geometry_size_overlay_state(shape_settings)
+	var show_primary_size_overlay: bool = bool(size_overlay_state.get("primary_visible", false))
+	var show_secondary_size_overlay: bool = bool(size_overlay_state.get("secondary_visible", false))
+	shape_primary_size_overlay_row.visible = show_primary_size_overlay
+	shape_secondary_size_overlay_row.visible = show_secondary_size_overlay
+	if show_primary_size_overlay:
+		_configure_shape_size_overlay_buttons(size_overlay_state, false)
+	if show_secondary_size_overlay:
+		_configure_shape_size_overlay_buttons(size_overlay_state, true)
 	shape_size_status_label.visible = show_shape_status
-	rotation_status_label.visible = show_shape_status
+	rotation_status_label.visible = show_shape_rotation_status
 	if show_shape_status:
-		shape_size_status_label.text = _get_stage1_shape_overlay_size_text()
-		rotation_status_label.text = "Rotation: %d°" % workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_quadrant)
+		shape_size_status_label.text = String(shape_settings.get("overlay_text", "Sizing: Drag on Workspace"))
+	if show_shape_rotation_status:
+		rotation_status_label.text = "Rotation: %d°" % workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_step)
 	var show_material_status: bool = _should_show_overlay_material_status()
 	material_status_label.visible = show_material_status
 	if show_material_status:
@@ -1340,11 +1498,88 @@ func _refresh_tool_overlay() -> void:
 		tool_amount_status_label.text = "Amount: %d%%" % int(round(stage2_tool_amount_ratio * 100.0))
 	_rebuild_tool_menu()
 
+func _get_stage1_geometry_size_overlay_state(shape_settings: Dictionary) -> Dictionary:
+	if stage2_refinement_mode_active:
+		return {}
+	if not workspace_shape_tool_presenter.is_shape_family(stage1_tool_family):
+		return {}
+	if not bool(shape_settings.get("size_controls_visible", true)):
+		return {}
+	var primary_visible: bool = false
+	var secondary_visible: bool = false
+	var primary_increase_label: String = "+"
+	var primary_decrease_label: String = "-"
+	var secondary_increase_label: String = "Height +"
+	var secondary_decrease_label: String = "Height -"
+	match stage1_tool_family:
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_CIRCLE, ForgeWorkspaceShapeToolPresenterScript.FAMILY_SPLINE_LINE:
+			primary_visible = true
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_RECTANGLE, ForgeWorkspaceShapeToolPresenterScript.FAMILY_OVAL, ForgeWorkspaceShapeToolPresenterScript.FAMILY_TRIANGLE:
+			primary_visible = true
+			secondary_visible = true
+			primary_increase_label = "Width +"
+			primary_decrease_label = "Width -"
+		_:
+			return {}
+	return {
+		"primary_visible": primary_visible,
+		"secondary_visible": secondary_visible,
+		"primary_increase_label": primary_increase_label,
+		"primary_decrease_label": primary_decrease_label,
+		"secondary_increase_label": secondary_increase_label,
+		"secondary_decrease_label": secondary_decrease_label,
+		"primary_increase_enabled": bool(shape_settings.get("primary_increase_enabled", false)),
+		"primary_decrease_enabled": bool(shape_settings.get("primary_decrease_enabled", false)),
+		"secondary_increase_enabled": bool(shape_settings.get("secondary_increase_enabled", false)),
+		"secondary_decrease_enabled": bool(shape_settings.get("secondary_decrease_enabled", false)),
+	}
+
+func _configure_shape_size_overlay_buttons(size_overlay_state: Dictionary, secondary_axis: bool) -> void:
+	var up_button: Button = shape_secondary_size_up_button if secondary_axis else shape_primary_size_up_button
+	var down_button: Button = shape_secondary_size_down_button if secondary_axis else shape_primary_size_down_button
+	var increase_key: String = "secondary_increase_enabled" if secondary_axis else "primary_increase_enabled"
+	var decrease_key: String = "secondary_decrease_enabled" if secondary_axis else "primary_decrease_enabled"
+	var increase_label_key: String = "secondary_increase_label" if secondary_axis else "primary_increase_label"
+	var decrease_label_key: String = "secondary_decrease_label" if secondary_axis else "primary_decrease_label"
+	up_button.text = String(size_overlay_state.get(increase_label_key, "+"))
+	down_button.text = String(size_overlay_state.get(decrease_label_key, "-"))
+	up_button.tooltip_text = "Increase height." if secondary_axis else ("Increase width." if String(up_button.text).begins_with("Width") else "Increase size.")
+	down_button.tooltip_text = "Decrease height." if secondary_axis else ("Decrease width." if String(down_button.text).begins_with("Width") else "Decrease size.")
+	up_button.disabled = not bool(size_overlay_state.get(increase_key, false))
+	down_button.disabled = not bool(size_overlay_state.get(decrease_key, false))
+	var view_tuning: ForgeViewTuningDef = _get_view_tuning()
+	up_button.modulate = view_tuning.ui_button_active_color if not up_button.disabled else view_tuning.ui_button_inactive_color
+	down_button.modulate = view_tuning.ui_button_active_color if not down_button.disabled else view_tuning.ui_button_inactive_color
+
 func _on_primary_overlay_tool_pressed() -> void:
 	_set_tool_state_modifier(ForgeWorkspaceShapeToolPresenterScript.MODIFIER_ADD)
 
 func _on_secondary_overlay_tool_pressed() -> void:
 	_set_tool_state_modifier(ForgeWorkspaceShapeToolPresenterScript.MODIFIER_REMOVE)
+
+func _on_primary_shape_size_up_pressed() -> void:
+	_step_stage1_shape_primary_size(1)
+
+func _on_primary_shape_size_down_pressed() -> void:
+	_step_stage1_shape_primary_size(-1)
+
+func _on_secondary_shape_size_up_pressed() -> void:
+	_step_stage1_shape_secondary_size(1)
+
+func _on_secondary_shape_size_down_pressed() -> void:
+	_step_stage1_shape_secondary_size(-1)
+
+func _on_confirm_spline_pressed() -> void:
+	if not _is_spline_line_tool_active():
+		return
+	_refresh_spline_line_preview()
+	if not _can_confirm_spline_line():
+		_refresh_tool_overlay()
+		return
+	_commit_structural_shape_preview(false)
+	_refresh_spline_line_preview()
+	_refresh_tool_overlay()
+	_refresh_status_text()
 
 func _get_overlay_tool_state_text() -> String:
 	if stage2_refinement_mode_active:
@@ -1450,10 +1685,15 @@ func _build_tool_menu_state() -> Dictionary:
 		"shape_secondary_up_text": String(shape_settings.get("secondary_up_text", "Size B +")),
 		"shape_secondary_decrease_enabled": bool(shape_settings.get("secondary_decrease_enabled", false)),
 		"shape_secondary_increase_enabled": bool(shape_settings.get("secondary_increase_enabled", false)),
+		"shape_rotation_controls_visible": bool(shape_settings.get("rotation_controls_visible", true)),
+		"spline_end_cap_visible": bool(shape_settings.get("spline_end_cap_visible", false)),
+		"spline_end_cap_text": String(shape_settings.get("spline_end_cap_text", "Line End Option: Rounded")),
+		"spline_end_cap_square_enabled": bool(shape_settings.get("spline_end_cap_square_enabled", true)),
+		"spline_end_cap_rounded_enabled": bool(shape_settings.get("spline_end_cap_rounded_enabled", true)),
 		"shape_mode_text": "Mode: %s" % ("Erase" if shape_remove_mode_active else "Draw"),
 		"shape_draw_enabled": shape_adjustments_visible and shape_remove_mode_active,
 		"shape_erase_enabled": shape_adjustments_visible and not shape_remove_mode_active,
-		"shape_rotation_text": "Rotation: %d deg" % workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_quadrant),
+		"shape_rotation_text": "Rotation: %d deg" % workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_step),
 		"stage2_radius_visible": radius_visible,
 		"stage2_radius_text": "Radius: %s m" % _format_overlay_radius_text(stage2_brush_radius_meters),
 		"stage2_radius_decrease_enabled": radius_visible and stage2_brush_radius_meters > min_radius_meters + 0.00001,
@@ -1477,7 +1717,7 @@ func _refresh_status_text() -> void:
 		_get_armed_material_display_name(),
 		_get_material_lookup(),
 		stage2_refinement_mode_active,
-		workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_quadrant),
+		workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_step),
 		status_text
 	)
 	debug_status_dirty = false
@@ -1528,6 +1768,7 @@ func _compose_effective_active_tool_from_state() -> StringName:
 
 func _apply_active_tool_change(refresh_ui: bool = true) -> void:
 	active_tool = workspace_interaction_presenter.resolve_active_tool(_compose_effective_active_tool_from_state())
+	var spline_line_active: bool = _is_spline_line_tool_active()
 	if (
 		not stage2_refinement_mode_active
 		and workspace_shape_tool_presenter.is_shape_tool(active_tool)
@@ -1536,6 +1777,13 @@ func _apply_active_tool_change(refresh_ui: bool = true) -> void:
 		main_workspace_mode = WORKSPACE_VIEW_PLANE
 		_sync_workspace_hosts()
 		_refresh_plane_and_preview()
+	if spline_line_active:
+		_refresh_spline_line_preview()
+	else:
+		_clear_spline_line_overlay()
+		if spline_line_preview_active:
+			spline_line_preview_active = false
+			_clear_structural_shape_preview()
 	if not workspace_shape_tool_presenter.is_shape_tool(active_tool):
 		_clear_structural_shape_preview()
 	stage2_hover_face_ids = PackedStringArray()
@@ -1597,8 +1845,11 @@ func _set_active_tool(tool_id: StringName, refresh_ui: bool = true) -> void:
 			_sync_stage1_tool_state_from_effective_tool(tool_id)
 	_apply_active_tool_change(refresh_ui)
 
-func _step_structural_shape_rotation(delta_quadrants: int) -> void:
-	structural_shape_rotation_quadrant = posmod(structural_shape_rotation_quadrant + delta_quadrants, 4)
+func _step_structural_shape_rotation(delta_steps: int) -> void:
+	structural_shape_rotation_step = posmod(
+		structural_shape_rotation_step + delta_steps,
+		ForgeWorkspaceShapeToolPresenterScript.SHAPE_ROTATION_STEP_COUNT
+	)
 	if structural_shape_drag_active and workspace_shape_tool_presenter.is_shape_tool(active_tool):
 		_update_structural_shape_preview()
 	_rebuild_geometry_menu()
@@ -1692,6 +1943,25 @@ func _get_stage1_shape_settings() -> Dictionary:
 				"size_a_cells": rectangle_shape_size_a_cells,
 				"size_b_cells": rectangle_shape_size_b_cells,
 			}
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_SPLINE_LINE:
+			var max_spline_width_cells: int = maxi(mini(plane_dimensions.x, plane_dimensions.y), 1)
+			spline_line_width_cells = clampi(spline_line_width_cells, 1, max_spline_width_cells)
+			var end_cap_label: String = "Square" if spline_line_end_cap_mode == ForgeWorkspaceShapeToolPresenterScript.SPLINE_END_CAP_SQUARE else "Rounded"
+			return {
+				"menu_summary_text": "Spline Width: %d cells" % spline_line_width_cells,
+				"overlay_text": "Width: %d | End: %s" % [spline_line_width_cells, end_cap_label],
+				"primary_text": "Line Width: %d cells" % spline_line_width_cells,
+				"primary_down_text": "Width -",
+				"primary_up_text": "Width +",
+				"primary_decrease_enabled": spline_line_width_cells > 1,
+				"primary_increase_enabled": spline_line_width_cells < max_spline_width_cells,
+				"secondary_visible": false,
+				"rotation_controls_visible": false,
+				"spline_end_cap_visible": true,
+				"spline_end_cap_text": "Line End Option: %s" % end_cap_label,
+				"spline_end_cap_square_enabled": spline_line_end_cap_mode != ForgeWorkspaceShapeToolPresenterScript.SPLINE_END_CAP_SQUARE,
+				"spline_end_cap_rounded_enabled": spline_line_end_cap_mode != ForgeWorkspaceShapeToolPresenterScript.SPLINE_END_CAP_ROUNDED,
+			}
 		ForgeWorkspaceShapeToolPresenterScript.FAMILY_HANDLE:
 			return {
 				"menu_summary_text": "Preset: %s" % workspace_shape_tool_presenter.get_handle_preset_label(selected_handle_preset_id),
@@ -1723,9 +1993,17 @@ func _step_stage1_shape_primary_size(step_direction: int) -> void:
 			triangle_shape_size_a_cells = clampi(triangle_shape_size_a_cells + step_direction, 1, maxi(plane_dimensions.x, 1))
 		ForgeWorkspaceShapeToolPresenterScript.FAMILY_RECTANGLE:
 			rectangle_shape_size_a_cells = clampi(rectangle_shape_size_a_cells + step_direction, 1, maxi(plane_dimensions.x, 1))
+		ForgeWorkspaceShapeToolPresenterScript.FAMILY_SPLINE_LINE:
+			spline_line_width_cells = clampi(
+				spline_line_width_cells + step_direction,
+				1,
+				maxi(mini(plane_dimensions.x, plane_dimensions.y), 1)
+			)
 		_:
 			return
-	if structural_shape_drag_active and workspace_shape_tool_presenter.is_shape_tool(active_tool):
+	if _is_spline_line_tool_active():
+		_refresh_spline_line_preview()
+	elif structural_shape_drag_active and workspace_shape_tool_presenter.is_shape_tool(active_tool):
 		_update_structural_shape_preview()
 	_refresh_tool_overlay()
 	_refresh_status_text()
@@ -1743,6 +2021,17 @@ func _step_stage1_shape_secondary_size(step_direction: int) -> void:
 			return
 	if structural_shape_drag_active and workspace_shape_tool_presenter.is_shape_tool(active_tool):
 		_update_structural_shape_preview()
+	_refresh_tool_overlay()
+	_refresh_status_text()
+
+func _set_spline_line_end_cap_mode(end_cap_mode: StringName) -> void:
+	if end_cap_mode != ForgeWorkspaceShapeToolPresenterScript.SPLINE_END_CAP_SQUARE:
+		end_cap_mode = ForgeWorkspaceShapeToolPresenterScript.SPLINE_END_CAP_ROUNDED
+	if spline_line_end_cap_mode == end_cap_mode:
+		return
+	spline_line_end_cap_mode = end_cap_mode
+	if _is_spline_line_tool_active():
+		_refresh_spline_line_preview()
 	_refresh_tool_overlay()
 	_refresh_status_text()
 
@@ -1940,7 +2229,9 @@ func _set_stage2_refinement_mode(next_active: bool, refresh_ui: bool = true) -> 
 func _set_active_plane(plane_id: StringName) -> void:
 	if stage2_refinement_mode_active:
 		return
-	if structural_shape_drag_active:
+	if _is_spline_line_tool_active() and plane_id != active_plane:
+		_clear_spline_line_points()
+	elif structural_shape_drag_active:
 		_clear_structural_shape_preview()
 	var plane_state: Dictionary = workspace_interaction_presenter.resolve_active_plane_state(
 		active_layer,
@@ -1975,6 +2266,8 @@ func _step_layer(delta: int) -> void:
 	):
 		_commit_structural_shape_preview(false)
 	active_layer = next_active_layer
+	if _is_spline_line_tool_active():
+		_refresh_spline_line_preview()
 	_refresh_plane_and_preview()
 	if active_layer != previous_active_layer:
 		if structural_shape_drag_active and workspace_shape_tool_presenter.is_shape_tool(active_tool):
@@ -2069,8 +2362,129 @@ func _on_plane_cell_pick_requested(grid_position: Vector3i) -> void:
 		return
 	_pick_material_from_grid(grid_position)
 
+func _handle_spline_line_drag_started(grid_position: Vector3i, button_index: MouseButton) -> void:
+	if button_index != MOUSE_BUTTON_LEFT:
+		return
+	var plane_position_variant: Variant = _grid_to_active_plane_position(grid_position)
+	if plane_position_variant is not Vector2i:
+		return
+	var plane_position: Vector2i = plane_position_variant
+	var target: Dictionary = _resolve_spline_line_drag_target(plane_position)
+	if target.is_empty():
+		_add_spline_line_anchor(plane_position)
+		spline_line_drag_target_kind = SPLINE_DRAG_TARGET_ANCHOR
+		spline_line_drag_target_index = spline_line_anchor_plane_positions.size() - 1
+	else:
+		spline_line_drag_target_kind = StringName(target.get("kind", StringName()))
+		spline_line_drag_target_index = int(target.get("index", -1))
+	_refresh_spline_line_preview()
+	_refresh_tool_overlay()
+
+func _handle_spline_line_drag_updated(grid_position: Vector3i, button_index: MouseButton) -> void:
+	if button_index != MOUSE_BUTTON_LEFT:
+		return
+	if spline_line_drag_target_kind == StringName() or spline_line_drag_target_index < 0:
+		return
+	var plane_position_variant: Variant = _grid_to_active_plane_position(grid_position)
+	if plane_position_variant is not Vector2i:
+		return
+	var plane_position: Vector2i = plane_position_variant
+	_move_spline_line_target(spline_line_drag_target_kind, spline_line_drag_target_index, plane_position)
+	_refresh_spline_line_preview()
+	_refresh_tool_overlay()
+
+func _finish_spline_line_drag() -> void:
+	spline_line_drag_target_kind = StringName()
+	spline_line_drag_target_index = -1
+
+func _add_spline_line_anchor(plane_position: Vector2i) -> void:
+	spline_line_anchor_plane_positions.append(plane_position)
+	spline_line_in_handle_plane_positions.append(plane_position)
+	spline_line_out_handle_plane_positions.append(plane_position)
+	var anchor_count: int = spline_line_anchor_plane_positions.size()
+	if anchor_count < 2:
+		return
+	var previous_index: int = anchor_count - 2
+	var current_index: int = anchor_count - 1
+	var previous_anchor: Vector2i = spline_line_anchor_plane_positions[previous_index]
+	var current_anchor: Vector2i = spline_line_anchor_plane_positions[current_index]
+	var handle_delta: Vector2i = _build_spline_default_handle_delta(previous_anchor, current_anchor)
+	if spline_line_out_handle_plane_positions[previous_index] == previous_anchor:
+		spline_line_out_handle_plane_positions[previous_index] = _clamp_active_plane_position(previous_anchor + handle_delta)
+	spline_line_in_handle_plane_positions[current_index] = _clamp_active_plane_position(current_anchor - handle_delta)
+
+func _resolve_spline_line_drag_target(plane_position: Vector2i) -> Dictionary:
+	for handle_index: int in range(spline_line_anchor_plane_positions.size()):
+		if handle_index > 0 and handle_index < spline_line_in_handle_plane_positions.size():
+			if spline_line_in_handle_plane_positions[handle_index] == plane_position:
+				return {
+					"kind": SPLINE_DRAG_TARGET_IN_HANDLE,
+					"index": handle_index,
+				}
+		if handle_index < spline_line_anchor_plane_positions.size() - 1 and handle_index < spline_line_out_handle_plane_positions.size():
+			if spline_line_out_handle_plane_positions[handle_index] == plane_position:
+				return {
+					"kind": SPLINE_DRAG_TARGET_OUT_HANDLE,
+					"index": handle_index,
+				}
+	for anchor_index: int in range(spline_line_anchor_plane_positions.size()):
+		if spline_line_anchor_plane_positions[anchor_index] == plane_position:
+			return {
+				"kind": SPLINE_DRAG_TARGET_ANCHOR,
+				"index": anchor_index,
+			}
+	return {}
+
+func _move_spline_line_target(target_kind: StringName, target_index: int, plane_position: Vector2i) -> void:
+	var clamped_position: Vector2i = _clamp_active_plane_position(plane_position)
+	match target_kind:
+		SPLINE_DRAG_TARGET_ANCHOR:
+			if target_index < 0 or target_index >= spline_line_anchor_plane_positions.size():
+				return
+			var previous_position: Vector2i = spline_line_anchor_plane_positions[target_index]
+			var delta: Vector2i = clamped_position - previous_position
+			spline_line_anchor_plane_positions[target_index] = clamped_position
+			if target_index < spline_line_in_handle_plane_positions.size():
+				spline_line_in_handle_plane_positions[target_index] = _clamp_active_plane_position(spline_line_in_handle_plane_positions[target_index] + delta)
+			if target_index < spline_line_out_handle_plane_positions.size():
+				spline_line_out_handle_plane_positions[target_index] = _clamp_active_plane_position(spline_line_out_handle_plane_positions[target_index] + delta)
+		SPLINE_DRAG_TARGET_IN_HANDLE:
+			if target_index >= 0 and target_index < spline_line_in_handle_plane_positions.size():
+				spline_line_in_handle_plane_positions[target_index] = clamped_position
+		SPLINE_DRAG_TARGET_OUT_HANDLE:
+			if target_index >= 0 and target_index < spline_line_out_handle_plane_positions.size():
+				spline_line_out_handle_plane_positions[target_index] = clamped_position
+
+func _build_spline_default_handle_delta(previous_anchor: Vector2i, current_anchor: Vector2i) -> Vector2i:
+	var delta: Vector2i = current_anchor - previous_anchor
+	var handle_delta: Vector2i = Vector2i(
+		int(round(float(delta.x) / 3.0)),
+		int(round(float(delta.y) / 3.0))
+	)
+	if handle_delta == Vector2i.ZERO and delta != Vector2i.ZERO:
+		handle_delta = Vector2i(
+			1 if delta.x > 0 else (-1 if delta.x < 0 else 0),
+			1 if delta.y > 0 else (-1 if delta.y < 0 else 0)
+		)
+	return handle_delta
+
+func _grid_to_active_plane_position(grid_position: Vector3i) -> Variant:
+	if plane_viewport == null:
+		return null
+	return plane_viewport.call("_grid_to_plane", grid_position)
+
+func _clamp_active_plane_position(plane_position: Vector2i) -> Vector2i:
+	var plane_dimensions: Vector2i = _get_active_plane_dimensions()
+	return Vector2i(
+		clampi(plane_position.x, 0, maxi(plane_dimensions.x - 1, 0)),
+		clampi(plane_position.y, 0, maxi(plane_dimensions.y - 1, 0))
+	)
+
 func _on_plane_drag_started(grid_position: Vector3i, button_index: MouseButton) -> void:
 	if stage2_refinement_mode_active:
+		return
+	if _is_spline_line_tool_active():
+		_handle_spline_line_drag_started(grid_position, button_index)
 		return
 	if not workspace_shape_tool_presenter.is_shape_tool(active_tool):
 		return
@@ -2081,8 +2495,11 @@ func _on_plane_drag_started(grid_position: Vector3i, button_index: MouseButton) 
 	structural_shape_drag_current_grid_position = grid_position
 	_update_structural_shape_preview()
 
-func _on_plane_drag_updated(_grid_position: Vector3i, button_index: MouseButton) -> void:
+func _on_plane_drag_updated(grid_position: Vector3i, button_index: MouseButton) -> void:
 	if stage2_refinement_mode_active:
+		return
+	if _is_spline_line_tool_active():
+		_handle_spline_line_drag_updated(grid_position, button_index)
 		return
 	if not structural_shape_drag_active:
 		return
@@ -2095,6 +2512,8 @@ func _on_plane_drag_updated(_grid_position: Vector3i, button_index: MouseButton)
 
 func _on_plane_hover_grid_position_updated(grid_position: Vector3i) -> void:
 	if stage2_refinement_mode_active:
+		return
+	if _is_spline_line_tool_active():
 		return
 	if structural_shape_drag_active:
 		return
@@ -2111,12 +2530,14 @@ func _on_plane_hover_grid_position_updated(grid_position: Vector3i) -> void:
 		active_plane,
 		active_layer,
 		forge_controller.grid_size,
-		structural_shape_rotation_quadrant,
+		structural_shape_rotation_step,
 		shape_settings
 	)
 	_sync_structural_shape_preview()
 
 func _on_plane_mouse_exited() -> void:
+	if _is_spline_line_tool_active():
+		return
 	if structural_shape_drag_active:
 		return
 	if not workspace_shape_tool_presenter.is_shape_tool(active_tool):
@@ -2124,6 +2545,10 @@ func _on_plane_mouse_exited() -> void:
 	_clear_structural_shape_preview()
 
 func _on_plane_stroke_finished() -> void:
+	if _is_spline_line_tool_active():
+		_finish_spline_line_drag()
+		_flush_pending_edit_refresh(true)
+		return
 	if structural_shape_drag_active and workspace_shape_tool_presenter.is_shape_tool(active_tool):
 		if _has_pending_structural_shape_commit_for_current_layer():
 			_commit_structural_shape_preview()
@@ -2575,6 +3000,14 @@ func _on_action_menu_id_pressed(action_id: int) -> void:
 	if action_id == int(menu_ids.get("geometry_selection_clear", -1)):
 		_clear_stage2_selection()
 		return
+	if action_id == int(menu_ids.get("geometry_shape_rotate_left", -1)):
+		_step_structural_shape_rotation(-1)
+		_refresh_geometry_menu_popup_contents()
+		return
+	if action_id == int(menu_ids.get("geometry_shape_rotate_right", -1)):
+		_step_structural_shape_rotation(1)
+		_refresh_geometry_menu_popup_contents()
+		return
 	if action_id == int(menu_ids.get("tool_radius_down", -1)):
 		_step_stage2_pointer_tool_radius(-1)
 		_refresh_tool_menu_popup_contents()
@@ -2613,6 +3046,14 @@ func _on_action_menu_id_pressed(action_id: int) -> void:
 		return
 	if action_id == int(menu_ids.get("tool_shape_secondary_up", -1)):
 		_step_stage1_shape_secondary_size(1)
+		_refresh_tool_menu_popup_contents()
+		return
+	if action_id == int(menu_ids.get("tool_spline_end_cap_square", -1)):
+		_set_spline_line_end_cap_mode(ForgeWorkspaceShapeToolPresenterScript.SPLINE_END_CAP_SQUARE)
+		_refresh_tool_menu_popup_contents()
+		return
+	if action_id == int(menu_ids.get("tool_spline_end_cap_rounded", -1)):
+		_set_spline_line_end_cap_mode(ForgeWorkspaceShapeToolPresenterScript.SPLINE_END_CAP_ROUNDED)
 		_refresh_tool_menu_popup_contents()
 		return
 	if action_id == int(menu_ids.get("tool_shape_rotate_left", -1)):
@@ -2664,6 +3105,20 @@ func _refresh_tool_menu_popup_contents_if_available() -> void:
 	_rebuild_tool_menu()
 	if popup_visible and not tool_popup.visible:
 		tool_menu_button.show_popup()
+
+func _refresh_geometry_menu_popup_contents() -> void:
+	if not is_instance_valid(geometry_menu_button):
+		return
+	call_deferred("_refresh_geometry_menu_popup_contents_if_available")
+
+func _refresh_geometry_menu_popup_contents_if_available() -> void:
+	if not is_instance_valid(geometry_menu_button):
+		return
+	var geometry_popup: PopupMenu = geometry_menu_button.get_popup()
+	var popup_visible: bool = geometry_popup.visible
+	_rebuild_geometry_menu()
+	if popup_visible and not geometry_popup.visible:
+		geometry_menu_button.show_popup()
 
 func _fit_free_workspace_preview() -> void:
 	if is_instance_valid(free_workspace_preview):
@@ -3277,6 +3732,7 @@ func _get_action_menu_ids() -> Dictionary:
 		"geometry_shape_rotate_left": MENU_GEOMETRY_SHAPE_ROTATE_LEFT,
 		"geometry_shape_rotate_right": MENU_GEOMETRY_SHAPE_ROTATE_RIGHT,
 		"geometry_handles_panel": MENU_GEOMETRY_HANDLES_PANEL,
+		"geometry_tool_spline_line": MENU_GEOMETRY_TOOL_SPLINE_LINE,
 		"geometry_selection_apply": MENU_GEOMETRY_SELECTION_APPLY,
 		"geometry_selection_clear": MENU_GEOMETRY_SELECTION_CLEAR,
 		"tool_radius_down": MENU_TOOL_RADIUS_DOWN,
@@ -3291,6 +3747,8 @@ func _get_action_menu_ids() -> Dictionary:
 		"tool_shape_primary_up": MENU_TOOL_SHAPE_PRIMARY_UP,
 		"tool_shape_secondary_down": MENU_TOOL_SHAPE_SECONDARY_DOWN,
 		"tool_shape_secondary_up": MENU_TOOL_SHAPE_SECONDARY_UP,
+		"tool_spline_end_cap_square": MENU_TOOL_SPLINE_END_CAP_SQUARE,
+		"tool_spline_end_cap_rounded": MENU_TOOL_SPLINE_END_CAP_ROUNDED,
 		"geometry_plane_xy": MENU_GEOMETRY_PLANE_XY,
 		"geometry_plane_zx": MENU_GEOMETRY_PLANE_ZX,
 		"geometry_plane_zy": MENU_GEOMETRY_PLANE_ZY,
@@ -3342,7 +3800,7 @@ func _rebuild_geometry_menu() -> void:
 		_get_action_menu_ids(),
 		stage2_refinement_mode_active,
 		active_tool,
-		workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_quadrant),
+		workspace_shape_tool_presenter.get_rotation_degrees(structural_shape_rotation_step),
 		has_stage2_selection,
 		has_stage2_selection,
 		not workspace_shape_tool_presenter.get_handle_preset_defs().is_empty()

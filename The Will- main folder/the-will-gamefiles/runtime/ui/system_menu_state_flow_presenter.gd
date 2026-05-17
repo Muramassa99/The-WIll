@@ -30,6 +30,7 @@ func refresh_from_state(
 		option_payload.get("master_volume_slider", null),
 		option_payload.get("master_volume_value_label", null),
 		option_payload.get("master_mute_check_box", null),
+		option_payload.get("debugging_check_box", null),
 		option_payload.get("ui_scale_option", null),
 		option_payload.get("text_scale_option", null),
 		option_payload.get("controls_category_option", null),
@@ -162,10 +163,11 @@ func reset_active_page_to_defaults(
 		&"settings":
 			settings_state.reset_display_to_defaults()
 			settings_state.reset_audio_to_defaults()
+			settings_state.reset_debugging_to_defaults()
 			return {
 				"handled": true,
 				"apply_and_refresh": true,
-				"status_message": "Display and audio settings restored to defaults.",
+				"status_message": "Display, audio, and debugging settings restored to defaults.",
 			}
 		&"interface":
 			settings_state.reset_interface_to_defaults()

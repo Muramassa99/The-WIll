@@ -141,7 +141,7 @@ text = "Settings"
 theme_override_font_sizes/font_size = 22
 
 [node name="PageSubtitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageHeader"]
-text = "Display and audio settings apply immediately and persist per user across boots."
+text = "Display, audio, and developer debugging settings apply immediately and persist per user across boots."
 autowrap_mode = 3
 theme_override_font_sizes/font_size = 13
 
@@ -165,6 +165,29 @@ theme_override_constants/margin_bottom = 4
 
 [node name="SettingsVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer"]
 theme_override_constants/separation = 12
+
+[node name="DebugPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox"]
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="DebugMargin" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DebugPanel"]
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="DebugVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DebugPanel/DebugMargin"]
+theme_override_constants/separation = 10
+
+[node name="DebugTitle" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DebugPanel/DebugMargin/DebugVBox"]
+text = "Developer Debugging"
+theme_override_font_sizes/font_size = 16
+
+[node name="DebuggingCheckBox" type="CheckBox" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DebugPanel/DebugMargin/DebugVBox"]
+text = "Enable Developer Debugging"
+
+[node name="DebugHelp" type="Label" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DebugPanel/DebugMargin/DebugVBox"]
+text = "Runtime debug toggles stay locked unless this switch is enabled."
+autowrap_mode = 3
 
 [node name="DisplayPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox"]
 theme_override_styles/panel = SubResource("StyleBoxFlat_section")
@@ -400,7 +423,7 @@ autowrap_mode = 3
 
 [node name="ResetPageButton" type="Button" parent="Panel/MarginContainer/RootVBox/FooterRow"]
 custom_minimum_size = Vector2(220, 42)
-text = "Reset Display / Audio"
+text = "Reset Settings"
 
 [node name="CloseButton" type="Button" parent="Panel/MarginContainer/RootVBox/FooterRow"]
 custom_minimum_size = Vector2(180, 42)

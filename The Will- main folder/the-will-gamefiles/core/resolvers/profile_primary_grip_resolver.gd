@@ -137,8 +137,8 @@ func _apply_primary_grip_occupancy_metadata(
 	profile.primary_grip_two_hand_eligible = two_hand_eligible
 	if two_hand_eligible and center_balance_valid:
 		var signed_limit: float = clampf(forge_rules.primary_grip_two_hand_max_span_usage_percent, 0.0, 1.0)
-		profile.primary_grip_two_hand_negative_limit = -signed_limit
-		profile.primary_grip_two_hand_positive_limit = signed_limit
+		profile.primary_grip_two_hand_negative_limit = -minf(clamped_ratio / 0.5, signed_limit)
+		profile.primary_grip_two_hand_positive_limit = minf((1.0 - clamped_ratio) / 0.5, signed_limit)
 
 func _resolve_primary_grip_span_projection(primary_grip: AnchorAtom, desired_position: Vector3) -> Dictionary:
 	if primary_grip == null:

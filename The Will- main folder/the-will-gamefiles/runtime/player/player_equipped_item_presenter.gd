@@ -667,6 +667,8 @@ func build_equipped_item_node(
 	var weapon_tip_local: Vector3 = (test_print.baked_profile.weapon_tip_point - dominant_grip_center_local) * cell_world_size
 	var weapon_pommel_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var weapon_pommel_local: Vector3 = (test_print.baked_profile.weapon_pommel_point - dominant_grip_center_local) * cell_world_size
+	var weapon_center_of_mass_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	var weapon_center_of_mass_local: Vector3 = (test_print.baked_profile.center_of_mass - dominant_grip_center_local) * cell_world_size
 	var primary_grip_contact_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var primary_grip_contact_local: Vector3 = (test_print.baked_profile.primary_grip_contact_position - dominant_grip_center_local) * cell_world_size
 	var primary_grip_span_start_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
@@ -700,6 +702,7 @@ func build_equipped_item_node(
 	_set_origin_tracked_vector3_meta(held_root, "hand_alignment_offset_local", "hand_alignment_offset_origin_id", hand_alignment_offset_local, hand_alignment_offset_origin_id)
 	_set_origin_tracked_vector3_meta(held_root, "weapon_tip_local", "weapon_tip_origin_id", weapon_tip_local, weapon_tip_origin_id)
 	_set_origin_tracked_vector3_meta(held_root, "weapon_pommel_local", "weapon_pommel_origin_id", weapon_pommel_local, weapon_pommel_origin_id)
+	_set_origin_tracked_vector3_meta(held_root, "weapon_center_of_mass_local", "weapon_center_of_mass_origin_id", weapon_center_of_mass_local, weapon_center_of_mass_origin_id)
 	held_root.set_meta("weapon_total_length_meters", float(test_print.baked_profile.weapon_total_length_meters))
 	_set_origin_tracked_vector3_meta(held_root, "primary_grip_contact_local", "primary_grip_contact_origin_id", primary_grip_contact_local, primary_grip_contact_origin_id)
 	held_root.set_meta("primary_grip_span_start_local", primary_grip_span_start_local)

@@ -107,6 +107,7 @@ func build_option_payload(
 	master_volume_slider: HSlider,
 	master_volume_value_label: Label,
 	master_mute_check_box: CheckBox,
+	debugging_check_box: CheckBox,
 	ui_scale_option: OptionButton,
 	text_scale_option: OptionButton,
 	controls_category_option: OptionButton
@@ -121,6 +122,7 @@ func build_option_payload(
 		"master_volume_slider": master_volume_slider,
 		"master_volume_value_label": master_volume_value_label,
 		"master_mute_check_box": master_mute_check_box,
+		"debugging_check_box": debugging_check_box,
 		"ui_scale_option": ui_scale_option,
 		"text_scale_option": text_scale_option,
 		"controls_category_option": controls_category_option,

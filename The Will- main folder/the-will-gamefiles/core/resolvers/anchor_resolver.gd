@@ -223,6 +223,7 @@ func _resolve_slice_components(slice_data: Dictionary) -> Array[Dictionary]:
 		var stack: Array[Vector2i] = [start_coord]
 		var component_positions: Array[Vector2i] = []
 		var component_cells: Array = []
+		var component_supporting_lookup: Dictionary = {}
 		var supporting_count: int = 0
 		while not stack.is_empty():
 			var current_coord: Vector2i = stack.pop_back()
@@ -235,13 +236,19 @@ func _resolve_slice_components(slice_data: Dictionary) -> Array[Dictionary]:
 				component_cells.append(cell)
 			if supporting.has(current_coord):
 				supporting_count += 1
+				component_supporting_lookup[current_coord] = true
 			for neighbor_coord: Vector2i in _get_neighbor_coords(current_coord, true):
 				if remaining.has(neighbor_coord):
 					stack.append(neighbor_coord)
-		components.append(_build_slice_component(component_cells, component_positions, supporting_count))
+		components.append(_build_slice_component(component_cells, component_positions, supporting_count, component_supporting_lookup))
 	return components
 
-func _build_slice_component(component_cells: Array, component_positions: Array[Vector2i], supporting_count: int) -> Dictionary:
+func _build_slice_component(
+	component_cells: Array,
+	component_positions: Array[Vector2i],
+	supporting_count: int,
+	component_supporting_lookup: Dictionary
+) -> Dictionary:
 	var component_lookup: Dictionary = {}
 	var min_a: int = 2147483647
 	var max_a: int = -2147483648
@@ -254,6 +261,15 @@ func _build_slice_component(component_cells: Array, component_positions: Array[V
 		min_b = mini(min_b, coord.y)
 		max_b = maxi(max_b, coord.y)
 	var count: int = component_positions.size()
+	var surface_count: int = 0
+	var surface_supporting_count: int = 0
+	for coord: Vector2i in component_positions:
+		if not _is_component_surface_coord(coord, component_lookup):
+			continue
+		surface_count += 1
+		if component_supporting_lookup.has(coord):
+			surface_supporting_count += 1
+	var surface_anchor_material_ratio: float = float(surface_supporting_count) / float(maxi(surface_count, 1))
 	return {
 		"cells": component_cells,
 		"positions": component_positions,
@@ -261,7 +277,10 @@ func _build_slice_component(component_cells: Array, component_positions: Array[V
 		"count": count,
 		"supporting_count": supporting_count,
 		"anchor_material_ratio": float(supporting_count) / float(maxi(count, 1)),
-		"slice_anchor_valid": count > 0 and supporting_count == count,
+		"surface_count": surface_count,
+		"surface_supporting_count": surface_supporting_count,
+		"surface_anchor_material_ratio": surface_anchor_material_ratio,
+		"slice_anchor_valid": surface_count > 0 and surface_anchor_material_ratio >= forge_rules.primary_grip_min_anchor_ratio,
 		"min_a": min_a if count > 0 else 0,
 		"max_a": max_a if count > 0 else -1,
 		"min_b": min_b if count > 0 else 0,
@@ -276,7 +295,7 @@ func _is_grip_eligible_slice_component(component: Dictionary, slice_data: Dictio
 		return false
 	if int(component.get("count", 0)) < 4:
 		return false
-	if float(component.get("anchor_material_ratio", 0.0)) < forge_rules.primary_grip_min_anchor_ratio:
+	if _get_grip_surface_anchor_ratio(component) < forge_rules.primary_grip_min_anchor_ratio:
 		return false
 	if not _is_grip_slice_shape_valid(component):
 		return false
@@ -334,12 +353,12 @@ func _build_grip_span_from_candidate_chain(chain: Array[Dictionary]) -> Dictiona
 		return {}
 	var first_candidate: Dictionary = chain.front()
 	var last_candidate: Dictionary = chain.back()
-	if not bool(first_candidate.get("slice_anchor_valid", false)) or not bool(last_candidate.get("slice_anchor_valid", false)):
+	if not _is_grip_span_endpoint_anchor_valid(first_candidate) or not _is_grip_span_endpoint_anchor_valid(last_candidate):
 		return {}
 	var span_anchor_ratio_total: float = 0.0
 	var span_centers: Array[Vector3] = []
 	for candidate: Dictionary in chain:
-		span_anchor_ratio_total += float(candidate.get("anchor_material_ratio", 0.0))
+		span_anchor_ratio_total += _get_grip_surface_anchor_ratio(candidate)
 		span_centers.append(candidate.get("center_position", Vector3.ZERO))
 	var span_anchor_ratio: float = span_anchor_ratio_total / float(chain.size())
 	if span_anchor_ratio < forge_rules.primary_grip_min_anchor_ratio:
@@ -353,6 +372,20 @@ func _build_grip_span_from_candidate_chain(chain: Array[Dictionary]) -> Dictiona
 		"center_position": _average_positions(span_centers),
 		"anchor_material_ratio": span_anchor_ratio,
 	}
+
+func _is_grip_span_endpoint_anchor_valid(candidate: Dictionary) -> bool:
+	if candidate.is_empty():
+		return false
+	return _get_grip_surface_anchor_ratio(candidate) >= forge_rules.primary_grip_min_anchor_ratio
+
+func _get_grip_surface_anchor_ratio(candidate: Dictionary) -> float:
+	return float(candidate.get("surface_anchor_material_ratio", candidate.get("anchor_material_ratio", 0.0)))
+
+func _is_component_surface_coord(coord: Vector2i, component_lookup: Dictionary) -> bool:
+	for neighbor_coord: Vector2i in _get_neighbor_coords(coord, false):
+		if not component_lookup.has(neighbor_coord):
+			return true
+	return false
 
 func _are_grip_slice_candidates_contiguous(previous_candidate: Dictionary, current_candidate: Dictionary) -> bool:
 	var previous_positions: Array[Vector2i] = previous_candidate.get("positions", [])

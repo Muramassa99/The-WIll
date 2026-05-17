@@ -68,6 +68,10 @@ const PREVIEW_GRIP_CONTACT_DEBUG_ROOT_NAME := "GripContactDebugRoot"
 const PREVIEW_PROXY_DEBUG_ROOT_NAME := "WeaponProxyDebugRoot"
 const PREVIEW_PROXY_DEBUG_MARKER_PREFIX := "WeaponProxyDebug_"
 const PREVIEW_GRIP_CONTACT_DEBUG_PREFIX := "GripContactDebug_"
+const PREVIEW_CENTER_OF_MASS_DEBUG_MARKER_NAME := "CenterOfMassDebugMarker"
+const PREVIEW_CENTER_OF_MASS_DEBUG_AXIS_PREFIX := "CenterOfMassDebugAxis"
+const PREVIEW_CENTER_OF_MASS_DEBUG_HALF_EXTENT_METERS := 0.18
+const PREVIEW_CENTER_OF_MASS_DEBUG_RADIUS_METERS := 0.018
 const PREVIEW_POSE_MODE_META := "preview_pose_mode"
 const PREVIEW_POSE_MODE_HAND_AUTHORED: StringName = &"hand_authored"
 const PREVIEW_POSE_MODE_NONCOMBAT_STOW: StringName = &"noncombat_stow"
@@ -1439,6 +1443,22 @@ func get_debug_state(preview_subviewport: SubViewport) -> Dictionary:
 		Vector3.ZERO,
 		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 	)
+	var center_of_mass_debug_present: bool = held_item != null and held_item.has_meta("weapon_center_of_mass_local")
+	var center_of_mass_local: Variant = null
+	var center_of_mass_origin_id: StringName = StringName()
+	if center_of_mass_debug_present:
+		center_of_mass_origin_id = _resolve_origin_meta_value(
+			held_item,
+			"weapon_center_of_mass_origin_id",
+			CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		)
+		center_of_mass_local = _get_origin_tracked_vector3_meta(
+			held_item,
+			"weapon_center_of_mass_local",
+			"weapon_center_of_mass_origin_id",
+			Vector3.ZERO,
+			CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		)
 	return {
 		"has_preview_actor": actor != null,
 		"has_preview_weapon": held_item != null and is_instance_valid(held_item),
@@ -1519,6 +1539,10 @@ func get_debug_state(preview_subviewport: SubViewport) -> Dictionary:
 		"camera_focus_point": _get_vector3_meta(preview_root, CAMERA_FOCUS_POINT_META, Vector3(0.0, 1.1, 0.0)),
 		"body_restriction_debug_mesh_count": _count_visible_body_restriction_debug_meshes(actor),
 		"weapon_bounds_debug_exists": _is_debug_mesh_visible(weapon_collision_debug_root, PREVIEW_WEAPON_BOUNDS_DEBUG_NAME),
+		"center_of_mass_debug_visible": _is_debug_mesh_visible(weapon_collision_debug_root, PREVIEW_CENTER_OF_MASS_DEBUG_MARKER_NAME),
+		"center_of_mass_debug_present": center_of_mass_debug_present,
+		"center_of_mass_debug_local": center_of_mass_local,
+		"center_of_mass_debug_origin_id": center_of_mass_origin_id,
 		"weapon_proxy_source": weapon_proxy_root.get_meta("proxy_source", StringName()) if weapon_proxy_root != null else StringName(),
 		"weapon_proxy_sample_count": int(weapon_proxy_root.get_meta("weapon_proxy_sample_count", 0)) if weapon_proxy_root != null else 0,
 		"weapon_proxy_uses_full_geometry": bool(weapon_proxy_root.get_meta("weapon_proxy_uses_full_geometry", false)) if weapon_proxy_root != null else false,
@@ -1753,7 +1777,8 @@ func _resolve_hand_proxy_authoring_segment_state(
 			"pommel_position_origin_id",
 			motion_node.pommel_position_origin_id
 		)
-		result["contact_center_local"] = (result["pommel_position_local"] as Vector3).lerp(result["tip_position_local"] as Vector3, 0.5)
+		if not _write_segment_contact_center_state(result, CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING):
+			result["authored"] = false
 		return result
 	if _motion_node_has_hand_proxy_authoring(motion_node, resolved_slot_id, playback_state):
 		result["authored"] = true
@@ -1781,7 +1806,8 @@ func _resolve_hand_proxy_authoring_segment_state(
 			resolved_slot_id,
 			false
 		)
-		result["contact_center_local"] = (result["pommel_position_local"] as Vector3).lerp(result["tip_position_local"] as Vector3, 0.5)
+		if not _write_segment_contact_center_state(result, CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING):
+			result["authored"] = false
 		return result
 	var default_state: Dictionary = _resolve_hand_proxy_default_trajectory_segment_state(
 		actor,
@@ -1792,6 +1818,27 @@ func _resolve_hand_proxy_authoring_segment_state(
 		return result
 	result.merge(default_state, true)
 	return result
+
+func _write_segment_contact_center_state(result: Dictionary, fallback_origin_id: StringName) -> bool:
+	var tip_position_origin_id: StringName = StringName(result.get("tip_position_origin_id", fallback_origin_id))
+	var pommel_position_origin_id: StringName = StringName(result.get("pommel_position_origin_id", fallback_origin_id))
+	if tip_position_origin_id == StringName():
+		tip_position_origin_id = fallback_origin_id
+	if pommel_position_origin_id == StringName():
+		pommel_position_origin_id = fallback_origin_id
+	if not result.has("tip_position_local") or not result.has("pommel_position_local"):
+		return false
+	var tip_position_value: Variant = result["tip_position_local"]
+	var pommel_position_value: Variant = result["pommel_position_local"]
+	if not (tip_position_value is Vector3) or not (pommel_position_value is Vector3):
+		return false
+	var tip_position_local: Vector3 = tip_position_value as Vector3
+	var pommel_position_local: Vector3 = pommel_position_value as Vector3
+	if tip_position_origin_id != pommel_position_origin_id:
+		return false
+	result["contact_center_origin_id"] = tip_position_origin_id
+	result["contact_center_local"] = pommel_position_local.lerp(tip_position_local, 0.5)
+	return true
 
 func _resolve_hand_proxy_default_trajectory_segment_state(
 	actor: Node3D,
@@ -3858,6 +3905,7 @@ func _refresh_collision_debug_visuals(state: Dictionary) -> void:
 			Color(1.0, 0.62, 0.18, 0.22)
 		)
 		debug_visual_count += _sync_preview_weapon_proxy_debug(held_item)
+		debug_visual_count += _sync_preview_center_of_mass_debug(held_item)
 	else:
 		_set_preview_weapon_collision_debug_visible(held_item, false)
 	preview_root.set_meta("collision_debug_visual_count", debug_visual_count)
@@ -4276,12 +4324,12 @@ func _configure_hand_authoring_proxy_node(
 		resolved_tip = _resolve_hand_authoring_local_tip(fallback_state)
 		resolved_pommel = _resolve_hand_authoring_local_pommel(fallback_state)
 		resolved_contact_center = _resolve_hand_authoring_contact_center(fallback_state)
+	var grip_axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var grip_axis_local: Vector3 = resolved_tip - resolved_pommel
 	if grip_axis_local.length_squared() <= 0.000001:
 		grip_axis_local = Vector3.RIGHT
 	else:
 		grip_axis_local = grip_axis_local.normalized()
-	var grip_axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var span_half: float = clampf(resolved_tip.distance_to(resolved_pommel) * 0.16, 0.025, 0.055)
 	var primary_grip_guide := Node3D.new()
 	primary_grip_guide.name = "PrimaryGripGuide"
@@ -7541,8 +7589,20 @@ func _create_hand_proxy_gizmo_markers(state: Dictionary, motion_node: CombatAnim
 		return 0
 	var color: Color = Color(0.25, 0.72, 1.0, 0.95) if slot_id == &"hand_left" else Color(0.3, 0.95, 0.45, 0.95)
 	var prefix: String = "LeftHandProxy" if slot_id == &"hand_left" else "RightHandProxy"
-	var tip_local: Vector3 = segment_state.get("tip_position_local", Vector3.ZERO) as Vector3
-	var pommel_local: Vector3 = segment_state.get("pommel_position_local", Vector3.ZERO) as Vector3
+	var tip_local: Vector3 = _get_origin_tracked_vector3_state(
+		segment_state,
+		"tip_position_local",
+		"tip_position_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	var pommel_local: Vector3 = _get_origin_tracked_vector3_state(
+		segment_state,
+		"pommel_position_local",
+		"pommel_position_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 	_create_control_gizmo_marker(marker_root, tip_local, color, 0.019, "%sTip" % prefix, 0.9)
 	_create_control_gizmo_marker(marker_root, pommel_local, Color(color.r, color.g, color.b, 0.72), 0.017, "%sPommel" % prefix, 0.82)
 	_create_line_gizmo_marker(marker_root, pommel_local, tip_local, Color(color.r, color.g, color.b, 0.58), "%sSegment" % prefix)
@@ -8343,6 +8403,81 @@ func _sync_preview_weapon_proxy_debug(held_item: Node3D) -> int:
 		debug_mesh.visible = true
 		visible_count += 1
 	return visible_count
+
+func _sync_preview_center_of_mass_debug(held_item: Node3D) -> int:
+	if held_item == null:
+		return 0
+	if not held_item.has_meta("weapon_center_of_mass_local"):
+		return 0
+	var center_local: Vector3 = _get_origin_tracked_vector3_meta(
+		held_item,
+		"weapon_center_of_mass_local",
+		"weapon_center_of_mass_origin_id",
+		Vector3.ZERO,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var debug_root: Node3D = _ensure_preview_weapon_collision_debug_root(held_item)
+	if debug_root == null:
+		return 0
+	var marker: MeshInstance3D = debug_root.get_node_or_null(PREVIEW_CENTER_OF_MASS_DEBUG_MARKER_NAME) as MeshInstance3D
+	if marker == null:
+		marker = MeshInstance3D.new()
+		marker.name = PREVIEW_CENTER_OF_MASS_DEBUG_MARKER_NAME
+		var sphere_mesh := SphereMesh.new()
+		sphere_mesh.radius = PREVIEW_CENTER_OF_MASS_DEBUG_RADIUS_METERS
+		sphere_mesh.height = PREVIEW_CENTER_OF_MASS_DEBUG_RADIUS_METERS * 2.0
+		marker.mesh = sphere_mesh
+		debug_root.add_child(marker)
+	marker.position = center_local
+	marker.material_override = _build_overlay_surface_material(Color(0.05, 1.0, 0.62, 0.92), 0.18)
+	marker.visible = true
+	_update_center_of_mass_axis_line(
+		debug_root,
+		"%sX" % PREVIEW_CENTER_OF_MASS_DEBUG_AXIS_PREFIX,
+		center_local - Vector3.RIGHT * PREVIEW_CENTER_OF_MASS_DEBUG_HALF_EXTENT_METERS,
+		center_local + Vector3.RIGHT * PREVIEW_CENTER_OF_MASS_DEBUG_HALF_EXTENT_METERS,
+		Color(1.0, 0.16, 0.12, 0.95)
+	)
+	_update_center_of_mass_axis_line(
+		debug_root,
+		"%sY" % PREVIEW_CENTER_OF_MASS_DEBUG_AXIS_PREFIX,
+		center_local - Vector3.UP * PREVIEW_CENTER_OF_MASS_DEBUG_HALF_EXTENT_METERS,
+		center_local + Vector3.UP * PREVIEW_CENTER_OF_MASS_DEBUG_HALF_EXTENT_METERS,
+		Color(0.1, 1.0, 0.28, 0.95)
+	)
+	_update_center_of_mass_axis_line(
+		debug_root,
+		"%sZ" % PREVIEW_CENTER_OF_MASS_DEBUG_AXIS_PREFIX,
+		center_local - Vector3.BACK * PREVIEW_CENTER_OF_MASS_DEBUG_HALF_EXTENT_METERS,
+		center_local + Vector3.BACK * PREVIEW_CENTER_OF_MASS_DEBUG_HALF_EXTENT_METERS,
+		Color(0.2, 0.5, 1.0, 0.95)
+	)
+	return 4
+
+func _update_center_of_mass_axis_line(
+	debug_root: Node3D,
+	marker_name: String,
+	start_local: Vector3,
+	end_local: Vector3,
+	color: Color
+) -> void:
+	if debug_root == null:
+		return
+	var marker: MeshInstance3D = debug_root.get_node_or_null(marker_name) as MeshInstance3D
+	if marker == null:
+		marker = MeshInstance3D.new()
+		marker.name = marker_name
+		debug_root.add_child(marker)
+	var mesh := ImmediateMesh.new()
+	mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+	mesh.surface_set_color(color)
+	mesh.surface_add_vertex(start_local)
+	mesh.surface_set_color(color)
+	mesh.surface_add_vertex(end_local)
+	mesh.surface_end()
+	marker.mesh = mesh
+	marker.material_override = _build_line_material(color)
+	marker.visible = true
 
 func _ensure_preview_weapon_collision_debug_root(held_item: Node3D) -> Node3D:
 	if held_item == null:

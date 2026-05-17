@@ -77,6 +77,7 @@ const MAX_FPS_OPTIONS := [0, 30, 60, 120, 144, 240]
 @onready var master_volume_slider: HSlider = $Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/AudioPanel/AudioMargin/AudioVBox/MasterVolumeRow/MasterVolumeSlider
 @onready var master_volume_value_label: Label = $Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/AudioPanel/AudioMargin/AudioVBox/MasterVolumeRow/MasterVolumeValueLabel
 @onready var master_mute_check_box: CheckBox = $Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/AudioPanel/AudioMargin/AudioVBox/MasterMuteCheckBox
+@onready var debugging_check_box: CheckBox = $Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/SettingsPage/MarginContainer/SettingsVBox/DebugPanel/DebugMargin/DebugVBox/DebuggingCheckBox
 @onready var ui_scale_option: OptionButton = $Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/InterfacePage/MarginContainer/InterfaceVBox/UIScaleRow/UIScaleOption
 @onready var text_scale_option: OptionButton = $Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/InterfacePage/MarginContainer/InterfaceVBox/TextScaleRow/TextScaleOption
 @onready var controls_category_option: OptionButton = $Panel/MarginContainer/RootVBox/MainHBox/ContentPanel/MarginContainer/ContentVBox/PageScroll/PageStack/ControlsPage/MarginContainer/ControlsVBox/CategoryRow/CategoryOption
@@ -133,6 +134,7 @@ func configure(player, state) -> void:
 	settings_state = session_state.get("settings_state", null)
 	return_to_title_button.disabled = true
 	_refresh_from_state()
+	_sync_active_player_debugging_gate()
 
 func is_open() -> bool:
 	return session_presenter.is_open(panel)
@@ -242,6 +244,7 @@ func _connect_signals() -> void:
 	max_fps_option.item_selected.connect(_on_max_fps_selected)
 	master_volume_slider.value_changed.connect(_on_master_volume_changed)
 	master_mute_check_box.toggled.connect(_on_master_mute_toggled)
+	debugging_check_box.toggled.connect(_on_debugging_toggled)
 	ui_scale_option.item_selected.connect(_on_ui_scale_selected)
 	text_scale_option.item_selected.connect(_on_text_scale_selected)
 	controls_category_option.item_selected.connect(_on_controls_category_selected)
@@ -318,6 +321,7 @@ func _apply_and_persist_settings(status_message: String = "") -> void:
 		footer_status_label,
 		status_message
 	)
+	_sync_active_player_debugging_gate()
 	_queue_layout_refresh()
 
 func _on_window_mode_selected(index: int) -> void:
@@ -343,6 +347,9 @@ func _on_master_volume_changed(value: float) -> void:
 
 func _on_master_mute_toggled(enabled: bool) -> void:
 	_apply_live_settings_change(settings_presenter.apply_master_mute_toggle(settings_state, enabled))
+
+func _on_debugging_toggled(enabled: bool) -> void:
+	_apply_live_settings_change(settings_presenter.apply_developer_debugging_toggle(settings_state, enabled))
 
 func _on_ui_scale_selected(index: int) -> void:
 	_apply_live_settings_change(settings_presenter.apply_ui_scale_selection(settings_state, index))
@@ -392,6 +399,7 @@ func _select_page(page_id: StringName) -> void:
 		footer_status_label,
 		FOOTER_STATUS_DEFAULT
 	)
+	_queue_layout_refresh()
 
 func _refresh_page_actions() -> void:
 	page_presenter.refresh_page_actions(current_page, surface_presenter.get_page_id_map(), selected_controls_category, reset_page_button)
@@ -466,6 +474,7 @@ func _build_surface_option_payload() -> Dictionary:
 		master_volume_slider,
 		master_volume_value_label,
 		master_mute_check_box,
+		debugging_check_box,
 		ui_scale_option,
 		text_scale_option,
 		controls_category_option
@@ -478,3 +487,9 @@ func _build_surface_controls_payload() -> Dictionary:
 		Callable(self, "_begin_rebind"),
 		selected_controls_category
 	)
+
+func _sync_active_player_debugging_gate() -> void:
+	if active_player == null or settings_state == null:
+		return
+	if active_player.has_method("set_runtime_debugging_enabled"):
+		active_player.call("set_runtime_debugging_enabled", settings_state.developer_debugging_enabled)

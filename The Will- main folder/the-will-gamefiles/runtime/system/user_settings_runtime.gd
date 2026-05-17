@@ -53,6 +53,7 @@ const ACTION_DEFINITIONS: Array[Dictionary] = [
 	{"action": "ui_settings", "display_name": "Open Settings", "category": "ui_menu", "binding": {"physical_keycode": KEY_F10, "keycode": KEY_F10, "ctrl": false, "shift": false, "alt": false, "meta": false}},
 	{"action": "toggle_hud", "display_name": "Toggle HUD", "category": "ui_menu", "binding": {"physical_keycode": KEY_F11, "keycode": KEY_F11, "ctrl": false, "shift": false, "alt": false, "meta": false}},
 	{"action": "screenshot", "display_name": "Screenshot", "category": "ui_menu", "binding": {"physical_keycode": KEY_F12, "keycode": KEY_F12, "ctrl": false, "shift": false, "alt": false, "meta": false}},
+	{"action": "runtime_debug_visuals", "display_name": "Runtime Debug Visuals", "category": "debug", "binding": {"physical_keycode": KEY_F9, "keycode": KEY_F9, "ctrl": false, "shift": false, "alt": false, "meta": false}},
 	{"action": "forge_bake", "display_name": "Bake Active WIP", "category": "forge", "binding": {"physical_keycode": KEY_ENTER, "keycode": KEY_ENTER, "ctrl": false, "shift": false, "alt": false, "meta": false}},
 	{"action": "forge_reset", "display_name": "Reset Active WIP", "category": "forge", "binding": {"physical_keycode": KEY_R, "keycode": KEY_R, "ctrl": false, "shift": false, "alt": false, "meta": false}},
 	{"action": "forge_save_wip", "display_name": "Save WIP", "category": "forge", "binding": {"physical_keycode": KEY_S, "keycode": KEY_S, "ctrl": true, "shift": false, "alt": false, "meta": false}},
@@ -78,6 +79,7 @@ const CATEGORY_DISPLAY_NAMES := {
 	"combat": "Combat",
 	"camera": "Camera",
 	"ui_menu": "UI / Menu",
+	"debug": "Debug",
 	"forge": "Forge",
 	"skill_crafter": "Skill Crafter"
 }

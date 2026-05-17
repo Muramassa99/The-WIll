@@ -62,6 +62,7 @@ func refresh_from_state(
 	master_volume_slider: HSlider,
 	master_volume_value_label: Label,
 	master_mute_check_box: CheckBox,
+	debugging_check_box: CheckBox,
 	ui_scale_option: OptionButton,
 	text_scale_option: OptionButton,
 	controls_category_option: OptionButton,
@@ -78,6 +79,7 @@ func refresh_from_state(
 	master_volume_slider.value = settings_state.master_volume_linear
 	master_mute_check_box.button_pressed = settings_state.master_muted
 	master_volume_value_label.text = "%d%%" % int(round(settings_state.master_volume_linear * 100.0))
+	debugging_check_box.button_pressed = settings_state.developer_debugging_enabled
 	ui_scale_option.select(_scale_preset_to_index(settings_state.ui_scale_preset))
 	text_scale_option.select(_scale_preset_to_index(settings_state.text_scale_preset))
 
@@ -126,6 +128,10 @@ func apply_master_volume_change(settings_state: UserSettingsState, value: float,
 func apply_master_mute_toggle(settings_state: UserSettingsState, enabled: bool) -> String:
 	settings_state.master_muted = enabled
 	return "Master mute updated."
+
+func apply_developer_debugging_toggle(settings_state: UserSettingsState, enabled: bool) -> String:
+	settings_state.developer_debugging_enabled = enabled
+	return "Developer debugging enabled." if enabled else "Developer debugging disabled."
 
 func apply_ui_scale_selection(settings_state: UserSettingsState, index: int) -> String:
 	settings_state.ui_scale_preset = _index_to_scale_preset(index)

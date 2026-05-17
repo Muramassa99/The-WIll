@@ -9,6 +9,7 @@ const FAMILY_CIRCLE: StringName = &"circle"
 const FAMILY_OVAL: StringName = &"oval"
 const FAMILY_TRIANGLE: StringName = &"triangle"
 const FAMILY_HANDLE: StringName = &"handle"
+const FAMILY_SPLINE_LINE: StringName = &"spline_line"
 
 const MODIFIER_ADD: StringName = &"add"
 const MODIFIER_REMOVE: StringName = &"remove"
@@ -24,6 +25,12 @@ const TOOL_TRIANGLE_PLACE: StringName = &"triangle_place"
 const TOOL_TRIANGLE_ERASE: StringName = &"triangle_erase"
 const TOOL_HANDLE_PLACE: StringName = &"handle_place"
 const TOOL_HANDLE_ERASE: StringName = &"handle_erase"
+const TOOL_SPLINE_LINE_PLACE: StringName = &"spline_line_place"
+const TOOL_SPLINE_LINE_ERASE: StringName = &"spline_line_erase"
+
+const SPLINE_END_CAP_ROUNDED: StringName = &"rounded"
+const SPLINE_END_CAP_SQUARE: StringName = &"square"
+const SPLINE_CURVE_BAKE_INTERVAL_CELLS: float = 0.25
 
 const HANDLE_PRESET_GRIP_2X3: StringName = PrimaryGripSliceProfileLibraryScript.PRESET_GRIP_2X3
 const HANDLE_PRESET_GRIP_2X4: StringName = PrimaryGripSliceProfileLibraryScript.PRESET_GRIP_2X4
@@ -39,6 +46,8 @@ const HANDLE_PRESET_DIAMOND_21: StringName = PrimaryGripSliceProfileLibraryScrip
 const HANDLE_PRESET_HEX_24: StringName = PrimaryGripSliceProfileLibraryScript.PRESET_HEX_24
 
 const HANDLE_PRESET_DEFS: Array[Dictionary] = PrimaryGripSliceProfileLibraryScript.PRESET_DEFS
+const SHAPE_ROTATION_STEP_DEGREES: int = 5
+const SHAPE_ROTATION_STEP_COUNT: int = 72
 
 func is_shape_tool(tool_id: StringName) -> bool:
 	return (
@@ -47,6 +56,7 @@ func is_shape_tool(tool_id: StringName) -> bool:
 		or is_oval_tool(tool_id)
 		or is_triangle_tool(tool_id)
 		or is_handle_tool(tool_id)
+		or is_spline_line_tool(tool_id)
 	)
 
 func is_rectangle_tool(tool_id: StringName) -> bool:
@@ -64,6 +74,9 @@ func is_triangle_tool(tool_id: StringName) -> bool:
 func is_handle_tool(tool_id: StringName) -> bool:
 	return tool_id == TOOL_HANDLE_PLACE or tool_id == TOOL_HANDLE_ERASE
 
+func is_spline_line_tool(tool_id: StringName) -> bool:
+	return tool_id == TOOL_SPLINE_LINE_PLACE or tool_id == TOOL_SPLINE_LINE_ERASE
+
 func is_stage1_tool_family(family_id: StringName) -> bool:
 	return (
 		family_id == FAMILY_FREEHAND
@@ -72,6 +85,7 @@ func is_stage1_tool_family(family_id: StringName) -> bool:
 		or family_id == FAMILY_OVAL
 		or family_id == FAMILY_TRIANGLE
 		or family_id == FAMILY_HANDLE
+		or family_id == FAMILY_SPLINE_LINE
 	)
 
 func is_shape_family(family_id: StringName) -> bool:
@@ -81,6 +95,7 @@ func is_shape_family(family_id: StringName) -> bool:
 		or family_id == FAMILY_OVAL
 		or family_id == FAMILY_TRIANGLE
 		or family_id == FAMILY_HANDLE
+		or family_id == FAMILY_SPLINE_LINE
 	)
 
 func is_additive_shape_tool(tool_id: StringName) -> bool:
@@ -90,6 +105,7 @@ func is_additive_shape_tool(tool_id: StringName) -> bool:
 		or tool_id == TOOL_OVAL_PLACE
 		or tool_id == TOOL_TRIANGLE_PLACE
 		or tool_id == TOOL_HANDLE_PLACE
+		or tool_id == TOOL_SPLINE_LINE_PLACE
 	)
 
 func is_subtractive_shape_tool(tool_id: StringName) -> bool:
@@ -99,6 +115,7 @@ func is_subtractive_shape_tool(tool_id: StringName) -> bool:
 		or tool_id == TOOL_OVAL_ERASE
 		or tool_id == TOOL_TRIANGLE_ERASE
 		or tool_id == TOOL_HANDLE_ERASE
+		or tool_id == TOOL_SPLINE_LINE_ERASE
 	)
 
 func resolve_stage1_tool_family(tool_id: StringName) -> StringName:
@@ -112,14 +129,16 @@ func resolve_stage1_tool_family(tool_id: StringName) -> StringName:
 		return FAMILY_TRIANGLE
 	if is_handle_tool(tool_id) or tool_id == FAMILY_HANDLE:
 		return FAMILY_HANDLE
+	if is_spline_line_tool(tool_id) or tool_id == FAMILY_SPLINE_LINE:
+		return FAMILY_SPLINE_LINE
 	return FAMILY_FREEHAND
 
 func resolve_stage1_modifier(tool_id: StringName) -> StringName:
 	if tool_id == &"pick":
 		return MODIFIER_PICK
-	if tool_id == TOOL_RECTANGLE_ERASE or tool_id == TOOL_CIRCLE_ERASE or tool_id == TOOL_OVAL_ERASE or tool_id == TOOL_TRIANGLE_ERASE or tool_id == TOOL_HANDLE_ERASE:
+	if tool_id == TOOL_RECTANGLE_ERASE or tool_id == TOOL_CIRCLE_ERASE or tool_id == TOOL_OVAL_ERASE or tool_id == TOOL_TRIANGLE_ERASE or tool_id == TOOL_HANDLE_ERASE or tool_id == TOOL_SPLINE_LINE_ERASE:
 		return MODIFIER_REMOVE
-	if tool_id == TOOL_RECTANGLE_PLACE or tool_id == TOOL_CIRCLE_PLACE or tool_id == TOOL_OVAL_PLACE or tool_id == TOOL_TRIANGLE_PLACE or tool_id == TOOL_HANDLE_PLACE:
+	if tool_id == TOOL_RECTANGLE_PLACE or tool_id == TOOL_CIRCLE_PLACE or tool_id == TOOL_OVAL_PLACE or tool_id == TOOL_TRIANGLE_PLACE or tool_id == TOOL_HANDLE_PLACE or tool_id == TOOL_SPLINE_LINE_PLACE:
 		return MODIFIER_ADD
 	if tool_id == &"erase":
 		return MODIFIER_REMOVE
@@ -139,6 +158,8 @@ func compose_stage1_tool_id(family_id: StringName, modifier_id: StringName) -> S
 			return TOOL_TRIANGLE_ERASE if modifier_id == MODIFIER_REMOVE else TOOL_TRIANGLE_PLACE
 		FAMILY_HANDLE:
 			return TOOL_HANDLE_ERASE if modifier_id == MODIFIER_REMOVE else TOOL_HANDLE_PLACE
+		FAMILY_SPLINE_LINE:
+			return TOOL_SPLINE_LINE_ERASE if modifier_id == MODIFIER_REMOVE else TOOL_SPLINE_LINE_PLACE
 		_:
 			return &"erase" if modifier_id == MODIFIER_REMOVE else &"place"
 
@@ -154,6 +175,8 @@ func get_stage1_tool_display_name(family_id: StringName) -> String:
 			return "Triangle"
 		FAMILY_HANDLE:
 			return "Handle"
+		FAMILY_SPLINE_LINE:
+			return "Spline Line"
 		_:
 			return "Freehand"
 
@@ -244,7 +267,7 @@ func build_shape_footprint(
 	active_plane: StringName,
 	active_layer: int,
 	grid_size: Vector3i,
-	rotation_quadrant: int = 0,
+	rotation_step: int = 0,
 	shape_settings: Dictionary = {}
 ) -> Array[Vector3i]:
 	var cells: Array[Vector3i] = []
@@ -274,7 +297,7 @@ func build_shape_footprint(
 			active_layer,
 			grid_size
 		)
-	return _rotate_shape_footprint(cells, active_plane, active_layer, grid_size, rotation_quadrant)
+	return _rotate_shape_footprint(cells, active_plane, active_layer, grid_size, rotation_step)
 
 func _build_fixed_shape_footprint(
 	tool_id: StringName,
@@ -369,6 +392,67 @@ func build_handle_preset_footprint(
 			visited[grid_position] = true
 			cells.append(grid_position)
 	return cells
+
+func build_spline_line_footprint(
+	anchor_plane_positions: Array[Vector2i],
+	in_handle_plane_positions: Array[Vector2i],
+	out_handle_plane_positions: Array[Vector2i],
+	active_plane: StringName,
+	active_layer: int,
+	grid_size: Vector3i,
+	width_cells: int = 1,
+	end_cap_mode: StringName = SPLINE_END_CAP_ROUNDED
+) -> Array[Vector3i]:
+	if anchor_plane_positions.size() < 2:
+		return []
+	var plane_dimensions: Vector2i = _get_plane_dimensions_from_grid_size(active_plane, grid_size)
+	if plane_dimensions.x <= 0 or plane_dimensions.y <= 0:
+		return []
+	var curve_points: PackedVector2Array = build_spline_line_curve_points(
+		anchor_plane_positions,
+		in_handle_plane_positions,
+		out_handle_plane_positions
+	)
+	if curve_points.size() < 2:
+		return []
+	var resolved_width_cells: int = clampi(width_cells, 1, maxi(maxi(plane_dimensions.x, plane_dimensions.y), 1))
+	var plane_cells: Array[Vector2i] = []
+	if resolved_width_cells == 1:
+		plane_cells = _build_spline_centerline_plane_cells(curve_points, plane_dimensions)
+	else:
+		plane_cells = _build_spline_surface_plane_cells(
+			curve_points,
+			resolved_width_cells,
+			end_cap_mode,
+			plane_dimensions
+		)
+	if plane_cells.is_empty():
+		return []
+	var cells: Array[Vector3i] = []
+	var visited: Dictionary = {}
+	for plane_position: Vector2i in plane_cells:
+		if not _is_plane_position_in_bounds(plane_position, active_plane, grid_size):
+			continue
+		var grid_position: Vector3i = _plane_to_grid_position(plane_position, active_plane, active_layer, grid_size)
+		if visited.has(grid_position):
+			continue
+		visited[grid_position] = true
+		cells.append(grid_position)
+	return cells
+
+func build_spline_line_curve_points(
+	anchor_plane_positions: Array[Vector2i],
+	in_handle_plane_positions: Array[Vector2i],
+	out_handle_plane_positions: Array[Vector2i]
+) -> PackedVector2Array:
+	var curve: Curve2D = _build_spline_line_curve(
+		anchor_plane_positions,
+		in_handle_plane_positions,
+		out_handle_plane_positions
+	)
+	if curve == null:
+		return PackedVector2Array()
+	return _deduplicate_spline_polyline(curve.get_baked_points())
 
 func _build_fixed_shape_plane_positions(
 	center_grid_position: Vector3i,
@@ -513,6 +597,8 @@ func _get_additive_shape_tool_id(tool_id: StringName) -> StringName:
 		return TOOL_OVAL_PLACE
 	if tool_id == FAMILY_TRIANGLE or is_triangle_tool(tool_id):
 		return TOOL_TRIANGLE_PLACE
+	if tool_id == FAMILY_SPLINE_LINE or is_spline_line_tool(tool_id):
+		return TOOL_SPLINE_LINE_PLACE
 	return TOOL_RECTANGLE_PLACE
 
 func _get_subtractive_shape_tool_id(tool_id: StringName) -> StringName:
@@ -522,6 +608,8 @@ func _get_subtractive_shape_tool_id(tool_id: StringName) -> StringName:
 		return TOOL_OVAL_ERASE
 	if tool_id == FAMILY_TRIANGLE or is_triangle_tool(tool_id):
 		return TOOL_TRIANGLE_ERASE
+	if tool_id == FAMILY_SPLINE_LINE or is_spline_line_tool(tool_id):
+		return TOOL_SPLINE_LINE_ERASE
 	return TOOL_RECTANGLE_ERASE
 
 func _build_plane_bounds(
@@ -557,6 +645,149 @@ func _build_ellipse_footprint(
 				continue
 			cells.append(_plane_to_grid_position(Vector2i(plane_x, plane_y), active_plane, active_layer, grid_size))
 	return cells
+
+func _build_spline_line_curve(
+	anchor_plane_positions: Array[Vector2i],
+	in_handle_plane_positions: Array[Vector2i],
+	out_handle_plane_positions: Array[Vector2i]
+) -> Curve2D:
+	if anchor_plane_positions.size() < 2:
+		return null
+	var curve: Curve2D = Curve2D.new()
+	curve.bake_interval = SPLINE_CURVE_BAKE_INTERVAL_CELLS
+	for index: int in range(anchor_plane_positions.size()):
+		var anchor_position: Vector2 = _plane_cell_center(anchor_plane_positions[index])
+		var in_position: Vector2 = Vector2(0.0, 0.0)
+		var out_position: Vector2 = Vector2(0.0, 0.0)
+		if index > 0 and index < in_handle_plane_positions.size():
+			in_position = _plane_cell_center(in_handle_plane_positions[index]) - anchor_position
+		if index < anchor_plane_positions.size() - 1 and index < out_handle_plane_positions.size():
+			out_position = _plane_cell_center(out_handle_plane_positions[index]) - anchor_position
+		curve.add_point(anchor_position, in_position, out_position)
+	return curve
+
+func _build_spline_centerline_plane_cells(
+	curve_points: PackedVector2Array,
+	plane_dimensions: Vector2i
+) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	var visited: Dictionary = {}
+	for point_index: int in range(curve_points.size() - 1):
+		var start_position: Vector2i = _curve_point_to_plane_position(curve_points[point_index], plane_dimensions)
+		var end_position: Vector2i = _curve_point_to_plane_position(curve_points[point_index + 1], plane_dimensions)
+		for line_position_variant: Variant in Geometry2D.bresenham_line(start_position, end_position):
+			var line_position: Vector2i = line_position_variant
+			if visited.has(line_position):
+				continue
+			visited[line_position] = true
+			cells.append(line_position)
+	return cells
+
+func _build_spline_surface_plane_cells(
+	curve_points: PackedVector2Array,
+	width_cells: int,
+	end_cap_mode: StringName,
+	plane_dimensions: Vector2i
+) -> Array[Vector2i]:
+	var source_polyline: PackedVector2Array = _shift_spline_polyline_for_even_width(curve_points, width_cells)
+	var end_type: int = Geometry2D.END_SQUARE if end_cap_mode == SPLINE_END_CAP_SQUARE else Geometry2D.END_ROUND
+	var polygons: Array[PackedVector2Array] = Geometry2D.offset_polyline(
+		source_polyline,
+		maxf(float(width_cells) * 0.5, 0.5),
+		Geometry2D.JOIN_ROUND,
+		end_type
+	)
+	if polygons.is_empty():
+		return _build_spline_centerline_plane_cells(curve_points, plane_dimensions)
+	var scan_bounds: Rect2i = _build_spline_polygon_scan_bounds(polygons, plane_dimensions)
+	if scan_bounds.size.x <= 0 or scan_bounds.size.y <= 0:
+		return []
+	var cells: Array[Vector2i] = []
+	for plane_y: int in range(scan_bounds.position.y, scan_bounds.position.y + scan_bounds.size.y):
+		for plane_x: int in range(scan_bounds.position.x, scan_bounds.position.x + scan_bounds.size.x):
+			var cell_center: Vector2 = Vector2(float(plane_x) + 0.5, float(plane_y) + 0.5)
+			if not _is_point_inside_any_spline_polygon(cell_center, polygons):
+				continue
+			cells.append(Vector2i(plane_x, plane_y))
+	return cells
+
+func _shift_spline_polyline_for_even_width(
+	curve_points: PackedVector2Array,
+	width_cells: int
+) -> PackedVector2Array:
+	if width_cells % 2 != 0:
+		return curve_points.duplicate()
+	var shifted_points: PackedVector2Array = PackedVector2Array()
+	for point_index: int in range(curve_points.size()):
+		var tangent: Vector2 = _resolve_spline_polyline_tangent(curve_points, point_index)
+		if tangent.length_squared() <= 0.0001:
+			shifted_points.append(curve_points[point_index])
+			continue
+		tangent = tangent.normalized()
+		var normal: Vector2 = Vector2(-tangent.y, tangent.x)
+		shifted_points.append(curve_points[point_index] + normal * 0.5)
+	return shifted_points
+
+func _resolve_spline_polyline_tangent(curve_points: PackedVector2Array, point_index: int) -> Vector2:
+	if curve_points.size() < 2:
+		return Vector2(0.0, 0.0)
+	var previous_index: int = maxi(point_index - 1, 0)
+	var next_index: int = mini(point_index + 1, curve_points.size() - 1)
+	var tangent: Vector2 = curve_points[next_index] - curve_points[previous_index]
+	if tangent.length_squared() > 0.0001:
+		return tangent
+	if point_index < curve_points.size() - 1:
+		tangent = curve_points[point_index + 1] - curve_points[point_index]
+		if tangent.length_squared() > 0.0001:
+			return tangent
+	if point_index > 0:
+		tangent = curve_points[point_index] - curve_points[point_index - 1]
+	return tangent
+
+func _build_spline_polygon_scan_bounds(
+	polygons: Array[PackedVector2Array],
+	plane_dimensions: Vector2i
+) -> Rect2i:
+	var min_x: float = INF
+	var max_x: float = -INF
+	var min_y: float = INF
+	var max_y: float = -INF
+	for polygon: PackedVector2Array in polygons:
+		for point: Vector2 in polygon:
+			min_x = minf(min_x, point.x)
+			max_x = maxf(max_x, point.x)
+			min_y = minf(min_y, point.y)
+			max_y = maxf(max_y, point.y)
+	if min_x == INF or min_y == INF:
+		return Rect2i()
+	var start_x: int = clampi(int(floor(min_x)) - 1, 0, maxi(plane_dimensions.x - 1, 0))
+	var end_x: int = clampi(int(ceil(max_x)) + 1, 0, maxi(plane_dimensions.x - 1, 0))
+	var start_y: int = clampi(int(floor(min_y)) - 1, 0, maxi(plane_dimensions.y - 1, 0))
+	var end_y: int = clampi(int(ceil(max_y)) + 1, 0, maxi(plane_dimensions.y - 1, 0))
+	return Rect2i(start_x, start_y, (end_x - start_x) + 1, (end_y - start_y) + 1)
+
+func _is_point_inside_any_spline_polygon(point: Vector2, polygons: Array[PackedVector2Array]) -> bool:
+	for polygon: PackedVector2Array in polygons:
+		if Geometry2D.is_point_in_polygon(point, polygon):
+			return true
+	return false
+
+func _deduplicate_spline_polyline(points: PackedVector2Array) -> PackedVector2Array:
+	var deduplicated_points: PackedVector2Array = PackedVector2Array()
+	for point: Vector2 in points:
+		if deduplicated_points.size() > 0 and deduplicated_points[deduplicated_points.size() - 1].distance_squared_to(point) <= 0.0001:
+			continue
+		deduplicated_points.append(point)
+	return deduplicated_points
+
+func _plane_cell_center(plane_position: Vector2i) -> Vector2:
+	return Vector2(float(plane_position.x) + 0.5, float(plane_position.y) + 0.5)
+
+func _curve_point_to_plane_position(point: Vector2, plane_dimensions: Vector2i) -> Vector2i:
+	return Vector2i(
+		clampi(int(floor(point.x)), 0, maxi(plane_dimensions.x - 1, 0)),
+		clampi(int(floor(point.y)), 0, maxi(plane_dimensions.y - 1, 0))
+	)
 
 func _get_plane_dimensions_from_grid_size(active_plane: StringName, grid_size: Vector3i) -> Vector2i:
 	match active_plane:
@@ -603,18 +834,18 @@ func _point_in_triangle(point: Vector2, a: Vector2, b: Vector2, c: Vector2) -> b
 	var gamma: float = 1.0 - alpha - beta
 	return alpha >= 0.0 and beta >= 0.0 and gamma >= 0.0
 
-func get_rotation_degrees(rotation_quadrant: int) -> int:
-	return _normalize_rotation_quadrant(rotation_quadrant) * 90
+func get_rotation_degrees(rotation_step: int) -> int:
+	return _normalize_rotation_step(rotation_step) * SHAPE_ROTATION_STEP_DEGREES
 
 func _rotate_shape_footprint(
 	cells: Array[Vector3i],
 	active_plane: StringName,
 	active_layer: int,
 	grid_size: Vector3i,
-	rotation_quadrant: int
+	rotation_step: int
 ) -> Array[Vector3i]:
-	var normalized_rotation_quadrant: int = _normalize_rotation_quadrant(rotation_quadrant)
-	if normalized_rotation_quadrant == 0 or cells.is_empty():
+	var rotation_degrees: int = get_rotation_degrees(rotation_step)
+	if rotation_degrees == 0 or cells.is_empty():
 		return cells.duplicate()
 	var plane_positions: Array[Vector2i] = []
 	var min_x: int = 2147483647
@@ -637,7 +868,7 @@ func _rotate_shape_footprint(
 			plane_position,
 			center_x,
 			center_y,
-			normalized_rotation_quadrant
+			rotation_degrees
 		)
 		if not _is_plane_position_in_bounds(rotated_plane_position, active_plane, grid_size):
 			continue
@@ -652,18 +883,17 @@ func _rotate_plane_position_around_center(
 	plane_position: Vector2i,
 	center_x: float,
 	center_y: float,
-	rotation_quadrant: int
+	rotation_degrees: int
 ) -> Vector2i:
 	var offset_x: float = (float(plane_position.x) + 0.5) - center_x
 	var offset_y: float = (float(plane_position.y) + 0.5) - center_y
-	var rotated_offset: Vector2 = Vector2(offset_x, offset_y)
-	match rotation_quadrant:
-		1:
-			rotated_offset = Vector2(-offset_y, offset_x)
-		2:
-			rotated_offset = Vector2(-offset_x, -offset_y)
-		3:
-			rotated_offset = Vector2(offset_y, -offset_x)
+	var rotation_radians: float = deg_to_rad(float(rotation_degrees))
+	var rotation_cos: float = cos(rotation_radians)
+	var rotation_sin: float = sin(rotation_radians)
+	var rotated_offset: Vector2 = Vector2(
+		(offset_x * rotation_cos) - (offset_y * rotation_sin),
+		(offset_x * rotation_sin) + (offset_y * rotation_cos)
+	)
 	var rotated_center_x: float = center_x + rotated_offset.x
 	var rotated_center_y: float = center_y + rotated_offset.y
 	return Vector2i(
@@ -725,5 +955,5 @@ func _fill_icon_cell(
 				continue
 			image.set_pixel(pixel_x, pixel_y, fill_color)
 
-func _normalize_rotation_quadrant(rotation_quadrant: int) -> int:
-	return posmod(rotation_quadrant, 4)
+func _normalize_rotation_step(rotation_step: int) -> int:
+	return posmod(rotation_step, SHAPE_ROTATION_STEP_COUNT)

@@ -299,6 +299,7 @@ var combat_authoring_modifier_processing: bool = false
 var runtime_solved_replay_modifier_processing: bool = false
 var runtime_solved_replay_pose_state: Dictionary = {}
 var runtime_solved_replay_weapon_state: Dictionary = {}
+var runtime_debug_visuals_visible: bool = false
 
 func _ready() -> void:
 	_apply_target_height_scale()
@@ -367,13 +368,20 @@ func _process(delta: float) -> void:
 	_sync_authoring_joint_range_debug()
 
 func _unhandled_input(event: InputEvent) -> void:
-	var key_event: InputEventKey = event as InputEventKey
-	if key_event == null or not key_event.pressed or key_event.echo:
+	if not _is_runtime_debug_visual_toggle_event(event):
 		return
-	if key_event.physical_keycode != KEY_F9 and key_event.keycode != KEY_F9:
+	if _has_runtime_debug_visual_controller():
 		return
-	set_runtime_bone_debug_visible(not show_runtime_bone_debug)
+	set_runtime_debug_visuals_visible(not runtime_debug_visuals_visible)
 	get_viewport().set_input_as_handled()
+
+func set_runtime_debug_visuals_visible(debug_visible: bool) -> void:
+	runtime_debug_visuals_visible = debug_visible
+	set_runtime_bone_debug_visible(debug_visible)
+	show_two_hand_grip_debug_markers = debug_visible
+	_set_body_restriction_debug_meshes_visible(debug_visible)
+	if grip_solve_root != null and is_instance_valid(grip_solve_root):
+		grip_solve_root.visible = debug_visible
 
 func set_runtime_bone_debug_visible(debug_visible: bool) -> void:
 	show_runtime_bone_debug = debug_visible
@@ -634,6 +642,7 @@ func sync_runtime_body_restriction_root_now() -> bool:
 	if body_restriction_root == null or not is_instance_valid(body_restriction_root):
 		return false
 	hand_target_constraint_solver.call("sync_body_restriction_root", body_restriction_root, skeleton)
+	_set_body_restriction_debug_meshes_visible(runtime_debug_visuals_visible)
 	return true
 
 func process_runtime_body_restriction_sync_modifier_frame(_delta: float = 1.0 / 60.0) -> void:
@@ -641,6 +650,33 @@ func process_runtime_body_restriction_sync_modifier_frame(_delta: float = 1.0 / 
 
 func get_body_restriction_root() -> Node3D:
 	return body_restriction_root
+
+func _is_runtime_debug_visual_toggle_event(event: InputEvent) -> bool:
+	if InputMap.has_action(&"runtime_debug_visuals"):
+		return event.is_action_pressed(&"runtime_debug_visuals")
+	var key_event: InputEventKey = event as InputEventKey
+	if key_event == null or not key_event.pressed or key_event.echo:
+		return false
+	return key_event.physical_keycode == KEY_F9 or key_event.keycode == KEY_F9
+
+func _has_runtime_debug_visual_controller() -> bool:
+	var current: Node = get_parent()
+	while current != null:
+		if current.has_method("_apply_runtime_debug_visual_visibility"):
+			return true
+		current = current.get_parent()
+	return false
+
+func _set_body_restriction_debug_meshes_visible(debug_visible: bool) -> void:
+	if body_restriction_root == null or not is_instance_valid(body_restriction_root):
+		return
+	for attachment_node: Node in body_restriction_root.get_children():
+		var attachment: Node3D = attachment_node as Node3D
+		if attachment == null:
+			continue
+		var debug_mesh: MeshInstance3D = attachment.get_node_or_null("RestrictionDebug") as MeshInstance3D
+		if debug_mesh != null:
+			debug_mesh.visible = debug_visible
 
 func get_body_clearance_debug_state() -> Dictionary:
 	var attachment_count: int = 0

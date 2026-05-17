@@ -215,8 +215,10 @@ var preview_drag_last_refresh_msec: int = 0
 var preview_drag_first_pending_msec: int = 0
 var preview_drag_pommel_authority_pending: bool = false
 var preview_drag_pommel_requested_local: Vector3 = Vector3.ZERO
+var preview_drag_pommel_requested_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 var preview_drag_pommel_has_solved_request: bool = false
 var preview_drag_pommel_last_solved_request_local: Vector3 = Vector3.ZERO
+var preview_drag_pommel_last_solved_request_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 var preview_drag_pommel_last_solve_legal: bool = true
 var preview_drag_pommel_last_validation_result: Dictionary = {}
 var preview_drag_chain_cache_draft: Resource = null
@@ -3367,17 +3369,26 @@ func _is_pommel_drag_authority_active() -> bool:
 		)
 	)
 
-func _queue_pommel_drag_authority_target(requested_pommel_position_local: Vector3) -> void:
+func _queue_pommel_drag_authority_target(
+	requested_pommel_position_local: Vector3,
+	requested_pommel_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+) -> void:
 	if preview_drag_override_node == null:
 		return
+	var resolved_requested_origin_id: StringName = _normalize_seed_origin_id(
+		requested_pommel_position_origin_id,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
 	var target_changed: bool = (
 		not preview_drag_pommel_authority_pending
+		or preview_drag_pommel_requested_origin_id != resolved_requested_origin_id
 		or preview_drag_pommel_requested_local.distance_to(requested_pommel_position_local) > PREVIEW_DRAG_POMMEL_TARGET_EPSILON_METERS
 	)
 	var authored_delta: float = preview_drag_override_node.pommel_position_local.distance_to(requested_pommel_position_local)
 	if not target_changed and authored_delta <= PREVIEW_DRAG_POMMEL_TARGET_EPSILON_METERS:
 		return
 	preview_drag_pommel_requested_local = requested_pommel_position_local
+	preview_drag_pommel_requested_origin_id = resolved_requested_origin_id
 	preview_drag_pommel_authority_pending = true
 	preview_drag_has_moved = true
 	_queue_preview_drag_refresh()
@@ -3396,8 +3407,10 @@ func _resolve_pending_pommel_drag_authority(force: bool = false) -> Dictionary:
 			"reason": "no_pending_target",
 		}
 	var requested_pommel_position_local: Vector3 = preview_drag_pommel_requested_local
+	var requested_pommel_position_origin_id: StringName = preview_drag_pommel_requested_origin_id
 	if (
 		preview_drag_pommel_has_solved_request
+		and preview_drag_pommel_last_solved_request_origin_id == requested_pommel_position_origin_id
 		and preview_drag_pommel_last_solved_request_local.distance_to(requested_pommel_position_local) <= PREVIEW_DRAG_POMMEL_TARGET_EPSILON_METERS
 	):
 		preview_drag_pommel_authority_pending = false
@@ -3417,7 +3430,8 @@ func _resolve_pending_pommel_drag_authority(force: bool = false) -> Dictionary:
 	var requested_segment: Dictionary = _resolve_motion_node_segment_for_pommel_target(
 		preview_drag_override_node,
 		requested_pommel_position_local,
-		false
+		false,
+		requested_pommel_position_origin_id
 	)
 	if requested_segment.is_empty():
 		return {
@@ -3433,6 +3447,7 @@ func _resolve_pending_pommel_drag_authority(force: bool = false) -> Dictionary:
 	preview_drag_pommel_authority_pending = false
 	preview_drag_pommel_has_solved_request = true
 	preview_drag_pommel_last_solved_request_local = requested_pommel_position_local
+	preview_drag_pommel_last_solved_request_origin_id = requested_pommel_position_origin_id
 	preview_drag_pommel_last_validation_result = constrained_segment.duplicate(true)
 	preview_drag_pommel_last_solve_legal = bool(constrained_segment.get("legal", true))
 	if not preview_drag_pommel_last_solve_legal:
@@ -5206,8 +5221,10 @@ func _append_perf_trace_elapsed(trace: Array, label: String, start_usec: int) ->
 func _reset_preview_drag_authority_state() -> void:
 	preview_drag_pommel_authority_pending = false
 	preview_drag_pommel_requested_local = Vector3.ZERO
+	preview_drag_pommel_requested_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 	preview_drag_pommel_has_solved_request = false
 	preview_drag_pommel_last_solved_request_local = Vector3.ZERO
+	preview_drag_pommel_last_solved_request_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 	preview_drag_pommel_last_solve_legal = true
 	preview_drag_pommel_last_validation_result = {}
 
@@ -6932,8 +6949,30 @@ func _handle_preview_drag(screen_position: Vector2) -> void:
 		var hand_state: Dictionary = _resolve_motion_node_hand_proxy_segment(editable_motion_node, hand_slot_id)
 		if hand_state.is_empty():
 			return
-		var current_tip: Vector3 = hand_state.get("tip_position_local", Vector3.ZERO) as Vector3
-		var current_pommel: Vector3 = hand_state.get("pommel_position_local", Vector3.ZERO) as Vector3
+		var current_tip_origin_id: StringName = _resolve_seed_origin_id(
+			hand_state,
+			"tip_position_origin_id",
+			CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		)
+		var current_pommel_origin_id: StringName = _resolve_seed_origin_id(
+			hand_state,
+			"pommel_position_origin_id",
+			CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		)
+		var current_tip: Vector3 = _get_origin_tracked_seed_vector3(
+			hand_state,
+			"tip_position_local",
+			"tip_position_origin_id",
+			editable_motion_node.tip_position_local,
+			current_tip_origin_id
+		)
+		var current_pommel: Vector3 = _get_origin_tracked_seed_vector3(
+			hand_state,
+			"pommel_position_local",
+			"pommel_position_origin_id",
+			editable_motion_node.pommel_position_local,
+			current_pommel_origin_id
+		)
 		var use_tip_endpoint: bool = _is_hand_proxy_tip_drag_target(drag_target)
 		var endpoint_local: Vector3 = current_tip if use_tip_endpoint else current_pommel
 		var hand_hit: Variant = motion_node_editor.raycast_local_point_on_view_drag_plane(
@@ -6955,7 +6994,15 @@ func _handle_preview_drag(screen_position: Vector2) -> void:
 				var hand_delta: Vector3 = (hand_hit as Vector3) - current_pommel
 				next_tip = current_tip + hand_delta
 				next_pommel = hand_hit as Vector3
-			if _apply_hand_proxy_segment_to_motion_node(editable_motion_node, hand_slot_id, next_tip, next_pommel):
+			if _apply_hand_proxy_segment_to_motion_node(
+				editable_motion_node,
+				hand_slot_id,
+				next_tip,
+				next_pommel,
+				true,
+				current_tip_origin_id,
+				current_pommel_origin_id
+			):
 				preview_drag_has_moved = true
 				editable_motion_node.normalize()
 				_queue_preview_drag_refresh()
@@ -7068,14 +7115,38 @@ func _resolve_hand_proxy_drag_slot(drag_target: StringName) -> StringName:
 func _seed_preview_drag_hand_proxy_segment(slot_id: StringName, segment_state: Dictionary) -> void:
 	if preview_drag_override_node == null or segment_state.is_empty():
 		return
-	var tip_position: Vector3 = segment_state.get("tip_position_local", Vector3.ZERO) as Vector3
-	var pommel_position: Vector3 = segment_state.get("pommel_position_local", Vector3.ZERO) as Vector3
+	var tip_position_origin_id: StringName = _resolve_seed_origin_id(
+		segment_state,
+		"tip_position_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	var pommel_position_origin_id: StringName = _resolve_seed_origin_id(
+		segment_state,
+		"pommel_position_origin_id",
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	var tip_position: Vector3 = _get_origin_tracked_seed_vector3(
+		segment_state,
+		"tip_position_local",
+		"tip_position_origin_id",
+		preview_drag_override_node.tip_position_local,
+		tip_position_origin_id
+	)
+	var pommel_position: Vector3 = _get_origin_tracked_seed_vector3(
+		segment_state,
+		"pommel_position_local",
+		"pommel_position_origin_id",
+		preview_drag_override_node.pommel_position_local,
+		pommel_position_origin_id
+	)
 	_apply_hand_proxy_segment_to_motion_node(
 		preview_drag_override_node,
 		slot_id,
 		tip_position,
 		pommel_position,
-		false
+		false,
+		tip_position_origin_id,
+		pommel_position_origin_id
 	)
 
 func _resolve_motion_node_hand_proxy_segment(motion_node: CombatAnimationMotionNode, slot_id: StringName) -> Dictionary:
@@ -7107,16 +7178,26 @@ func _apply_hand_proxy_segment_to_motion_node(
 	slot_id: StringName,
 	tip_position_local: Vector3,
 	pommel_position_local: Vector3,
-	mark_authored: bool = true
+	mark_authored: bool = true,
+	tip_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+	pommel_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 ) -> bool:
 	if motion_node == null:
 		return false
+	var resolved_tip_origin_id: StringName = _normalize_seed_origin_id(
+		tip_position_origin_id,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	var resolved_pommel_origin_id: StringName = _normalize_seed_origin_id(
+		pommel_position_origin_id,
+		resolved_tip_origin_id
+	)
 	if _hand_proxy_slot_uses_primary_motion_segment(slot_id):
 		return _apply_resolved_segment_to_motion_node(motion_node, {
 			"tip_position_local": tip_position_local,
-			"tip_position_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+			"tip_position_origin_id": resolved_tip_origin_id,
 			"pommel_position_local": pommel_position_local,
-			"pommel_position_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+			"pommel_position_origin_id": resolved_pommel_origin_id,
 		})
 	var changed: bool = false
 	if slot_id == HAND_SLOT_LEFT:
@@ -7126,14 +7207,14 @@ func _apply_hand_proxy_segment_to_motion_node(
 		if not motion_node.left_hand_proxy_tip_position_local.is_equal_approx(tip_position_local):
 			motion_node.left_hand_proxy_tip_position_local = tip_position_local
 			changed = true
-		if motion_node.left_hand_proxy_tip_position_origin_id != CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING:
-			motion_node.left_hand_proxy_tip_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		if motion_node.left_hand_proxy_tip_position_origin_id != resolved_tip_origin_id:
+			motion_node.left_hand_proxy_tip_position_origin_id = resolved_tip_origin_id
 			changed = true
 		if not motion_node.left_hand_proxy_pommel_position_local.is_equal_approx(pommel_position_local):
 			motion_node.left_hand_proxy_pommel_position_local = pommel_position_local
 			changed = true
-		if motion_node.left_hand_proxy_pommel_position_origin_id != CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING:
-			motion_node.left_hand_proxy_pommel_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		if motion_node.left_hand_proxy_pommel_position_origin_id != resolved_pommel_origin_id:
+			motion_node.left_hand_proxy_pommel_position_origin_id = resolved_pommel_origin_id
 			changed = true
 		return changed
 	if mark_authored and not motion_node.right_hand_proxy_authored:
@@ -7142,14 +7223,14 @@ func _apply_hand_proxy_segment_to_motion_node(
 	if not motion_node.right_hand_proxy_tip_position_local.is_equal_approx(tip_position_local):
 		motion_node.right_hand_proxy_tip_position_local = tip_position_local
 		changed = true
-	if motion_node.right_hand_proxy_tip_position_origin_id != CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING:
-		motion_node.right_hand_proxy_tip_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	if motion_node.right_hand_proxy_tip_position_origin_id != resolved_tip_origin_id:
+		motion_node.right_hand_proxy_tip_position_origin_id = resolved_tip_origin_id
 		changed = true
 	if not motion_node.right_hand_proxy_pommel_position_local.is_equal_approx(pommel_position_local):
 		motion_node.right_hand_proxy_pommel_position_local = pommel_position_local
 		changed = true
-	if motion_node.right_hand_proxy_pommel_position_origin_id != CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING:
-		motion_node.right_hand_proxy_pommel_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	if motion_node.right_hand_proxy_pommel_position_origin_id != resolved_pommel_origin_id:
+		motion_node.right_hand_proxy_pommel_position_origin_id = resolved_pommel_origin_id
 		changed = true
 	return changed
 

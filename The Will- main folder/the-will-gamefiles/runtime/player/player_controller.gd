@@ -13,6 +13,7 @@ const PlayerForgeTestPresenterScript = preload("res://runtime/player/player_forg
 const PlayerEquippedItemPresenterScript = preload("res://runtime/player/player_equipped_item_presenter.gd")
 const PlayerEquippedSkillSlotPresenterScript = preload("res://runtime/player/player_equipped_skill_slot_presenter.gd")
 const PlayerRuntimeSkillPlaybackPresenterScript = preload("res://runtime/player/player_runtime_skill_playback_presenter.gd")
+const PlayerRuntimeDebugVisualPresenterScript = preload("res://runtime/player/player_runtime_debug_visual_presenter.gd")
 const PlayerUiSurfacePresenterScript = preload("res://runtime/player/player_ui_surface_presenter.gd")
 const PlayerMotionPresenterScript = preload("res://runtime/player/player_motion_presenter.gd")
 const PlayerGameplayHudOverlayScript = preload("res://runtime/ui/player_gameplay_hud_overlay.gd")
@@ -30,10 +31,15 @@ const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://co
 @export var mouse_sensitivity: float = 0.0025
 @export var min_pitch_degrees: float = -40.0
 @export var max_pitch_degrees: float = 80.0
+@export_range(0.5, 12.0, 0.1) var camera_min_distance: float = 1.5
+@export_range(0.5, 16.0, 0.1) var camera_max_distance: float = 12.0
+@export_range(0.05, 2.0, 0.05) var camera_zoom_step: float = 0.35
+@export_range(0.5, 16.0, 0.1) var camera_default_distance: float = 4.5
 @export var aim_max_range_meters: float = 60.0
 @export var interaction_distance: float = 4.5
 @export var weapons_drawn: bool = false
 @export var combat_idle_expiry_seconds: float = 15.0
+@export var allow_runtime_debug_visual_toggle: bool = true
 
 @onready var visual_root: Node3D = $VisualRoot
 @onready var humanoid_rig: Node3D = $VisualRoot/PlayerHumanoidRig
@@ -70,8 +76,12 @@ var current_aim_context = PlayerAimContextScript.new()
 var player_skill_slot_state: PlayerSkillSlotState = null
 var last_skill_activation_result: Dictionary = {}
 var runtime_skill_playback_presenter = PlayerRuntimeSkillPlaybackPresenterScript.new()
+var runtime_debug_visual_presenter = PlayerRuntimeDebugVisualPresenterScript.new()
 var last_runtime_idle_pose_result: Dictionary = {}
 var runtime_idle_pose_dirty: bool = true
+var runtime_debugging_enabled: bool = false
+var runtime_debug_visuals_visible: bool = false
+var camera_target_distance: float = 4.5
 
 func _enter_tree() -> void:
 	_ensure_runtime_input_actions()
@@ -86,6 +96,12 @@ func _ready() -> void:
 		interaction_raycast.target_position = Vector3(0.0, 0.0, -interaction_distance)
 	if spring_arm != null:
 		spring_arm.add_excluded_object(get_rid())
+		camera_target_distance = clampf(
+			spring_arm.spring_length,
+			_get_camera_min_distance(),
+			_get_camera_max_distance()
+		)
+		spring_arm.spring_length = camera_target_distance
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	_refresh_aim_context()
 	_sync_crosshair_visibility()
@@ -94,13 +110,23 @@ func _ready() -> void:
 		gameplay_hud_overlay.configure(self)
 	runtime_skill_playback_presenter.set_combat_idle_expiry_seconds(combat_idle_expiry_seconds)
 	_sync_equipped_skill_slots()
+	set_runtime_debugging_enabled(user_settings_state.developer_debugging_enabled)
+	_apply_runtime_debug_visual_visibility(false)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not _has_runtime_input_actions():
 		_ensure_runtime_input_actions()
 		if not _has_runtime_input_actions():
 			return
+	if _is_runtime_debug_visual_toggle_event(event):
+		_toggle_runtime_debug_visuals()
+		get_viewport().set_input_as_handled()
+		return
 	if ui_mode_enabled:
+		return
+
+	if _handle_camera_zoom_input(event):
+		get_viewport().set_input_as_handled()
 		return
 
 	if event is InputEventMouseMotion and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
@@ -170,6 +196,8 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		_sync_humanoid_locomotion(0.0, false)
 		_advance_runtime_skill_playback(delta)
+		if runtime_debug_visuals_visible:
+			_sync_runtime_debug_visuals()
 		return
 
 	var input_vector: Vector2 = Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
@@ -192,6 +220,8 @@ func _physics_process(delta: float) -> void:
 	_update_visual_facing(move_direction, delta)
 	_sync_humanoid_locomotion(target_move_speed, sprinting)
 	_advance_runtime_skill_playback(delta)
+	if runtime_debug_visuals_visible:
+		_sync_runtime_debug_visuals()
 
 func _apply_vertical_motion(delta: float) -> void:
 	motion_presenter.apply_vertical_motion(self, gravity, delta)
@@ -431,6 +461,7 @@ func _sync_equipped_test_meshes() -> void:
 		DEFAULT_FORGE_VIEW_TUNING_RESOURCE,
 		equipped_item_presenter
 	)
+	_sync_runtime_debug_visuals()
 
 func _sync_equipped_skill_slots() -> void:
 	player_skill_slot_state = equipped_skill_slot_presenter.sync_from_equipment(
@@ -521,6 +552,60 @@ func _resolve_target_move_speed(input_vector: Vector2, sprinting: bool) -> float
 		sprinting
 	)
 
+func _handle_camera_zoom_input(event: InputEvent) -> bool:
+	if spring_arm == null:
+		return false
+	var mouse_button: InputEventMouseButton = event as InputEventMouseButton
+	if mouse_button != null:
+		if not mouse_button.pressed:
+			return false
+		if mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_step_camera_zoom(-1)
+			return true
+		if mouse_button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_step_camera_zoom(1)
+			return true
+	if _event_is_action_pressed(event, &"camera_zoom_in"):
+		_step_camera_zoom(-1)
+		return true
+	if _event_is_action_pressed(event, &"camera_zoom_out"):
+		_step_camera_zoom(1)
+		return true
+	if _event_is_action_pressed(event, &"camera_reset"):
+		_set_camera_distance(_get_camera_default_distance())
+		return true
+	return false
+
+func _step_camera_zoom(direction: int) -> void:
+	_set_camera_distance(camera_target_distance + float(direction) * camera_zoom_step)
+
+func _set_camera_distance(distance: float) -> void:
+	if spring_arm == null:
+		return
+	camera_target_distance = clampf(
+		distance,
+		_get_camera_min_distance(),
+		_get_camera_max_distance()
+	)
+	spring_arm.spring_length = camera_target_distance
+	_refresh_aim_context()
+
+func _get_camera_min_distance() -> float:
+	return maxf(camera_min_distance, 0.1)
+
+func _get_camera_max_distance() -> float:
+	return maxf(camera_max_distance, _get_camera_min_distance())
+
+func _get_camera_default_distance() -> float:
+	return clampf(
+		camera_default_distance,
+		_get_camera_min_distance(),
+		_get_camera_max_distance()
+	)
+
+func _event_is_action_pressed(event: InputEvent, action_name: StringName) -> bool:
+	return InputMap.has_action(action_name) and event.is_action_pressed(action_name)
+
 func _refresh_aim_context() -> void:
 	current_aim_context = motion_presenter.refresh_aim_context(
 		current_aim_context,
@@ -533,3 +618,50 @@ func _refresh_minimal_aim_context() -> void:
 
 func _sync_crosshair_visibility() -> void:
 	ui_surface_presenter.sync_crosshair_visibility(crosshair_overlay, ui_mode_enabled)
+
+func _is_runtime_debug_visual_toggle_event(event: InputEvent) -> bool:
+	if not is_runtime_debugging_enabled():
+		return false
+	if InputMap.has_action(&"runtime_debug_visuals"):
+		return event.is_action_pressed(&"runtime_debug_visuals")
+	var key_event: InputEventKey = event as InputEventKey
+	if key_event == null or not key_event.pressed or key_event.echo:
+		return false
+	return key_event.physical_keycode == KEY_F9 or key_event.keycode == KEY_F9
+
+func _toggle_runtime_debug_visuals() -> void:
+	_apply_runtime_debug_visual_visibility(not runtime_debug_visuals_visible)
+
+func set_runtime_debugging_enabled(enabled: bool) -> void:
+	runtime_debugging_enabled = enabled
+	if not is_runtime_debugging_enabled():
+		_apply_runtime_debug_visual_visibility(false)
+
+func is_runtime_debugging_enabled() -> bool:
+	return runtime_debugging_enabled and allow_runtime_debug_visual_toggle
+
+func _apply_runtime_debug_visual_visibility(enabled: bool) -> void:
+	if enabled and not is_runtime_debugging_enabled():
+		enabled = false
+	runtime_debug_visuals_visible = enabled
+	if humanoid_rig == null:
+		_sync_runtime_debug_visuals()
+		return
+	if humanoid_rig.has_method("set_runtime_debug_visuals_visible"):
+		humanoid_rig.call("set_runtime_debug_visuals_visible", runtime_debug_visuals_visible)
+	elif humanoid_rig.has_method("set_runtime_bone_debug_visible"):
+		humanoid_rig.call("set_runtime_bone_debug_visible", runtime_debug_visuals_visible)
+	_sync_runtime_debug_visuals()
+
+func _sync_runtime_debug_visuals() -> void:
+	runtime_debug_visual_presenter.sync_debug_visuals(
+		self,
+		camera,
+		interaction_raycast,
+		runtime_debug_visuals_visible,
+		get_tree()
+	)
+	runtime_debug_visual_presenter.sync_engine_collision_shape_debug_visuals(
+		get_tree(),
+		runtime_debug_visuals_visible
+	)

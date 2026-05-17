@@ -271,9 +271,19 @@ func pick_hand_proxy_drag_target(
 		return StringName()
 	var tip_target: StringName = DRAG_TARGET_LEFT_HAND_PROXY_TIP if slot_id == &"hand_left" else DRAG_TARGET_RIGHT_HAND_PROXY_TIP
 	var pommel_target: StringName = DRAG_TARGET_LEFT_HAND_PROXY_POMMEL if slot_id == &"hand_left" else DRAG_TARGET_RIGHT_HAND_PROXY_POMMEL
+	var tip_position_origin_id: StringName = StringName(hand_proxy_state.get("tip_position_origin_id", StringName()))
+	var pommel_position_origin_id: StringName = StringName(hand_proxy_state.get("pommel_position_origin_id", StringName()))
+	if tip_position_origin_id == StringName() or pommel_position_origin_id == StringName():
+		return StringName()
+	var tip_position_value: Variant = hand_proxy_state.get("tip_position_local")
+	var pommel_position_value: Variant = hand_proxy_state.get("pommel_position_local")
+	if not (tip_position_value is Vector3) or not (pommel_position_value is Vector3):
+		return StringName()
+	var tip_position_local: Vector3 = tip_position_value as Vector3
+	var pommel_position_local: Vector3 = pommel_position_value as Vector3
 	var candidates: Array = []
-	candidates.append([tip_target, hand_proxy_state.get("tip_position_local", Vector3.ZERO) as Vector3, CONTROL_SCREEN_PICK_RADIUS_PIXELS])
-	candidates.append([pommel_target, hand_proxy_state.get("pommel_position_local", Vector3.ZERO) as Vector3, CONTROL_SCREEN_PICK_RADIUS_PIXELS])
+	candidates.append([tip_target, tip_position_local, CONTROL_SCREEN_PICK_RADIUS_PIXELS])
+	candidates.append([pommel_target, pommel_position_local, CONTROL_SCREEN_PICK_RADIUS_PIXELS])
 	return _pick_best_screen_target(
 		camera,
 		trajectory_root,

@@ -302,6 +302,10 @@ func _format_tool_status_text(active_tool: StringName, shape_rotation_degrees: i
 			return "Triangle Draw (%d°)" % shape_rotation_degrees
 		&"triangle_erase":
 			return "Triangle Erase (%d°)" % shape_rotation_degrees
+		&"spline_line_place":
+			return "Spline Line Draw"
+		&"spline_line_erase":
+			return "Spline Line Erase"
 		_:
 			return String(active_tool).capitalize()
 
@@ -312,6 +316,7 @@ func _is_stage1_place_tool(tool_id: StringName) -> bool:
 		or tool_id == &"circle_place"
 		or tool_id == &"oval_place"
 		or tool_id == &"triangle_place"
+		or tool_id == &"spline_line_place"
 	)
 
 func _is_stage1_erase_tool(tool_id: StringName) -> bool:
@@ -321,6 +326,7 @@ func _is_stage1_erase_tool(tool_id: StringName) -> bool:
 		or tool_id == &"circle_erase"
 		or tool_id == &"oval_erase"
 		or tool_id == &"triangle_erase"
+		or tool_id == &"spline_line_erase"
 	)
 
 func _is_stage1_shape_tool(tool_id: StringName) -> bool:
@@ -333,4 +339,6 @@ func _is_stage1_shape_tool(tool_id: StringName) -> bool:
 		or tool_id == &"oval_erase"
 		or tool_id == &"triangle_place"
 		or tool_id == &"triangle_erase"
+		or tool_id == &"spline_line_place"
+		or tool_id == &"spline_line_erase"
 	)

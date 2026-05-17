@@ -140,7 +140,7 @@ func rebuild_geometry_menu(
 		geometry_popup.set_item_disabled(geometry_popup.get_item_count() - 1, true)
 	else:
 		geometry_popup.add_item("Freehand Tool", int(menu_ids.get("geometry_tool_place", 0)))
-		geometry_popup.add_item("Pick Material", int(menu_ids.get("geometry_tool_pick", 0)))
+		geometry_popup.add_item("Spline Line", int(menu_ids.get("geometry_tool_spline_line", 0)))
 		geometry_popup.add_separator()
 		if handle_presets_available:
 			geometry_popup.add_item("Handles", int(menu_ids.get("geometry_handles_panel", 0)))
@@ -152,8 +152,8 @@ func rebuild_geometry_menu(
 			geometry_popup.add_separator()
 			geometry_popup.add_item("Shape Rotation: %d°" % shape_rotation_degrees)
 			geometry_popup.set_item_disabled(geometry_popup.get_item_count() - 1, true)
-			geometry_popup.add_item("Rotate Shape -90°", int(menu_ids.get("geometry_shape_rotate_left", 0)))
-			geometry_popup.add_item("Rotate Shape +90°", int(menu_ids.get("geometry_shape_rotate_right", 0)))
+			geometry_popup.add_item("Rotate Shape -5°", int(menu_ids.get("geometry_shape_rotate_left", 0)))
+			geometry_popup.add_item("Rotate Shape +5°", int(menu_ids.get("geometry_shape_rotate_right", 0)))
 	if not stage2_refinement_mode_active:
 		geometry_popup.add_separator()
 		geometry_popup.add_item("Plane XY", int(menu_ids.get("geometry_plane_xy", 0)))
@@ -205,6 +205,19 @@ func rebuild_tool_menu(
 					tool_popup.get_item_count() - 1,
 					not bool(tool_state.get("shape_secondary_increase_enabled", true))
 				)
+		if bool(tool_state.get("spline_end_cap_visible", false)):
+			tool_popup.add_item(String(tool_state.get("spline_end_cap_text", "Line End Option: Rounded")))
+			tool_popup.set_item_disabled(tool_popup.get_item_count() - 1, true)
+			tool_popup.add_item("Square End", int(menu_ids.get("tool_spline_end_cap_square", 0)))
+			tool_popup.set_item_disabled(
+				tool_popup.get_item_count() - 1,
+				not bool(tool_state.get("spline_end_cap_square_enabled", true))
+			)
+			tool_popup.add_item("Rounded End", int(menu_ids.get("tool_spline_end_cap_rounded", 0)))
+			tool_popup.set_item_disabled(
+				tool_popup.get_item_count() - 1,
+				not bool(tool_state.get("spline_end_cap_rounded_enabled", true))
+			)
 		tool_popup.add_item(String(tool_state.get("shape_mode_text", "Mode: Draw")))
 		tool_popup.set_item_disabled(tool_popup.get_item_count() - 1, true)
 		tool_popup.add_item("Set Shape to Draw", int(menu_ids.get("tool_shape_mode_draw", 0)))
@@ -217,10 +230,11 @@ func rebuild_tool_menu(
 			tool_popup.get_item_count() - 1,
 			not bool(tool_state.get("shape_erase_enabled", true))
 		)
-		tool_popup.add_item(String(tool_state.get("shape_rotation_text", "Rotation: 0 deg")))
-		tool_popup.set_item_disabled(tool_popup.get_item_count() - 1, true)
-		tool_popup.add_item("Rotate Shape -90 deg", int(menu_ids.get("tool_shape_rotate_left", 0)))
-		tool_popup.add_item("Rotate Shape +90 deg", int(menu_ids.get("tool_shape_rotate_right", 0)))
+		if bool(tool_state.get("shape_rotation_controls_visible", true)):
+			tool_popup.add_item(String(tool_state.get("shape_rotation_text", "Rotation: 0 deg")))
+			tool_popup.set_item_disabled(tool_popup.get_item_count() - 1, true)
+			tool_popup.add_item("Rotate Shape -5 deg", int(menu_ids.get("tool_shape_rotate_left", 0)))
+			tool_popup.add_item("Rotate Shape +5 deg", int(menu_ids.get("tool_shape_rotate_right", 0)))
 		has_runtime_adjustments = true
 	if bool(tool_state.get("stage2_radius_visible", false)):
 		tool_popup.add_separator()
@@ -389,6 +403,8 @@ func handle_action_menu_id_pressed(
 		set_active_tool.call(&"triangle")
 	elif action_id == int(menu_ids.get("geometry_tool_triangle_erase", -1)):
 		set_active_tool.call(&"triangle_erase")
+	elif action_id == int(menu_ids.get("geometry_tool_spline_line", -1)):
+		set_active_tool.call(&"spline_line")
 	elif action_id == int(menu_ids.get("geometry_shape_rotate_left", -1)):
 		step_shape_rotation.call(-1)
 	elif action_id == int(menu_ids.get("geometry_shape_rotate_right", -1)):

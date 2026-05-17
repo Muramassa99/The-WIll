@@ -36,7 +36,7 @@ func apply_page_selection(
 		page_subtitle_label.text = "Use this overlay as a control room for active expeditions. World simulation continues while it is open."
 	else:
 		page_title_label.text = "Settings"
-		page_subtitle_label.text = "Display and audio settings apply immediately and persist per user across boots."
+		page_subtitle_label.text = "Display, audio, and developer debugging settings apply immediately and persist per user across boots."
 
 	refresh_page_actions(page_id, page_ids, selected_controls_category, reset_page_button)
 	if footer_status_label.text.is_empty() or footer_status_label.text == footer_status_default:
@@ -50,7 +50,7 @@ func refresh_page_actions(
 ) -> void:
 	if current_page == page_ids.get("settings", StringName()):
 		reset_page_button.disabled = false
-		reset_page_button.text = "Reset Display / Audio"
+		reset_page_button.text = "Reset Settings"
 	elif current_page == page_ids.get("controls", StringName()):
 		reset_page_button.disabled = selected_controls_category.is_empty()
 		reset_page_button.text = "Reset Controls"

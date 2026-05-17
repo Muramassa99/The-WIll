@@ -13,6 +13,10 @@ signal hover_cleared
 const PLANE_XY: StringName = &"xy"
 const PLANE_ZX: StringName = &"zx"
 const PLANE_ZY: StringName = &"zy"
+const SPLINE_ANCHOR_COLOR: Color = Color(1.0, 0.12, 0.08, 0.95)
+const SPLINE_HANDLE_COLOR: Color = Color(0.12, 0.42, 1.0, 0.95)
+const SPLINE_HANDLE_LINE_COLOR: Color = Color(0.12, 0.42, 1.0, 0.52)
+const SPLINE_CURVE_COLOR: Color = Color(1.0, 0.25, 0.18, 0.9)
 
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
 const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://core/defs/forge/forge_view_tuning_default.tres")
@@ -39,6 +43,10 @@ var drag_last_plane_position: Vector2i = Vector2i.ZERO
 var structural_shape_preview_cells: Array[Vector3i] = []
 var structural_shape_preview_material_id: StringName = &""
 var structural_shape_preview_remove_mode: bool = false
+var spline_line_anchor_plane_positions: Array[Vector2i] = []
+var spline_line_in_handle_plane_positions: Array[Vector2i] = []
+var spline_line_out_handle_plane_positions: Array[Vector2i] = []
+var spline_line_curve_points: PackedVector2Array = PackedVector2Array()
 
 func set_grid_size(value: Vector3i) -> void:
 	grid_size = value
@@ -168,6 +176,7 @@ func _draw() -> void:
 	for y in range(plane_dimensions.y + 1):
 		var y_pos: float = plane_rect.position.y + (float(y) * cell_size.y)
 		draw_line(Vector2(plane_rect.position.x, y_pos), Vector2(plane_rect.end.x, y_pos), tuning.plane_grid_color, 1.0)
+	_draw_spline_line_overlay(plane_rect, cell_size)
 
 func _get_plane_draw_rect() -> Rect2:
 	var margin: float = _get_view_tuning().plane_margin_pixels
@@ -397,6 +406,25 @@ func clear_structural_shape_preview_state() -> void:
 	structural_shape_preview_remove_mode = false
 	queue_redraw()
 
+func set_spline_line_overlay_state(
+	anchor_plane_positions: Array[Vector2i],
+	in_handle_plane_positions: Array[Vector2i],
+	out_handle_plane_positions: Array[Vector2i],
+	curve_points: PackedVector2Array
+) -> void:
+	spline_line_anchor_plane_positions = anchor_plane_positions.duplicate()
+	spline_line_in_handle_plane_positions = in_handle_plane_positions.duplicate()
+	spline_line_out_handle_plane_positions = out_handle_plane_positions.duplicate()
+	spline_line_curve_points = curve_points.duplicate()
+	queue_redraw()
+
+func clear_spline_line_overlay_state() -> void:
+	spline_line_anchor_plane_positions.clear()
+	spline_line_in_handle_plane_positions.clear()
+	spline_line_out_handle_plane_positions.clear()
+	spline_line_curve_points = PackedVector2Array()
+	queue_redraw()
+
 func _draw_structural_shape_preview(plane_rect: Rect2, cell_size: Vector2) -> void:
 	if structural_shape_preview_cells.is_empty():
 		return
@@ -415,6 +443,59 @@ func _draw_structural_shape_preview(plane_rect: Rect2, cell_size: Vector2) -> vo
 		)
 		draw_rect(cell_rect.grow(-tuning.plane_cell_inset_pixels), preview_color, true)
 		draw_rect(cell_rect.grow(-tuning.plane_cell_inset_pixels), preview_color.lightened(0.2), false, 1.0)
+
+func _draw_spline_line_overlay(plane_rect: Rect2, cell_size: Vector2) -> void:
+	if spline_line_anchor_plane_positions.is_empty():
+		return
+	if spline_line_curve_points.size() > 1:
+		var draw_points: PackedVector2Array = PackedVector2Array()
+		for curve_point: Vector2 in spline_line_curve_points:
+			draw_points.append(_spline_curve_point_to_screen(curve_point, plane_rect, cell_size))
+		draw_polyline(draw_points, SPLINE_CURVE_COLOR, 2.0, true)
+	for anchor_index: int in range(spline_line_anchor_plane_positions.size()):
+		var anchor_screen_position: Vector2 = _spline_plane_position_to_screen(
+			spline_line_anchor_plane_positions[anchor_index],
+			plane_rect,
+			cell_size
+		)
+		if anchor_index > 0 and anchor_index < spline_line_in_handle_plane_positions.size():
+			var in_handle_screen_position: Vector2 = _spline_plane_position_to_screen(
+				spline_line_in_handle_plane_positions[anchor_index],
+				plane_rect,
+				cell_size
+			)
+			draw_line(anchor_screen_position, in_handle_screen_position, SPLINE_HANDLE_LINE_COLOR, 1.5)
+			_draw_spline_handle_marker(in_handle_screen_position, cell_size)
+		if anchor_index < spline_line_anchor_plane_positions.size() - 1 and anchor_index < spline_line_out_handle_plane_positions.size():
+			var out_handle_screen_position: Vector2 = _spline_plane_position_to_screen(
+				spline_line_out_handle_plane_positions[anchor_index],
+				plane_rect,
+				cell_size
+			)
+			draw_line(anchor_screen_position, out_handle_screen_position, SPLINE_HANDLE_LINE_COLOR, 1.5)
+			_draw_spline_handle_marker(out_handle_screen_position, cell_size)
+		_draw_spline_anchor_marker(anchor_screen_position, cell_size)
+
+func _draw_spline_anchor_marker(center: Vector2, cell_size: Vector2) -> void:
+	var radius: float = maxf(minf(cell_size.x, cell_size.y) * 0.28, 4.0)
+	draw_circle(center, radius, Color(SPLINE_ANCHOR_COLOR.r, SPLINE_ANCHOR_COLOR.g, SPLINE_ANCHOR_COLOR.b, 0.28))
+	draw_arc(center, radius, 0.0, TAU, 24, SPLINE_ANCHOR_COLOR, 2.0)
+	draw_circle(center, maxf(radius * 0.25, 2.0), Color(1.0, 1.0, 1.0, 0.92))
+
+func _draw_spline_handle_marker(center: Vector2, cell_size: Vector2) -> void:
+	var radius: float = maxf(minf(cell_size.x, cell_size.y) * 0.22, 3.0)
+	draw_circle(center, radius, Color(SPLINE_HANDLE_COLOR.r, SPLINE_HANDLE_COLOR.g, SPLINE_HANDLE_COLOR.b, 0.25))
+	draw_arc(center, radius, 0.0, TAU, 20, SPLINE_HANDLE_COLOR, 2.0)
+	draw_circle(center, maxf(radius * 0.22, 2.0), Color(1.0, 1.0, 1.0, 0.86))
+
+func _spline_plane_position_to_screen(plane_position: Vector2i, plane_rect: Rect2, cell_size: Vector2) -> Vector2:
+	return plane_rect.position + Vector2(
+		(float(plane_position.x) + 0.5) * cell_size.x,
+		(float(plane_position.y) + 0.5) * cell_size.y
+	)
+
+func _spline_curve_point_to_screen(curve_point: Vector2, plane_rect: Rect2, cell_size: Vector2) -> Vector2:
+	return plane_rect.position + Vector2(curve_point.x * cell_size.x, curve_point.y * cell_size.y)
 
 func _clear_drag_state() -> void:
 	active_drag_button = MOUSE_BUTTON_NONE

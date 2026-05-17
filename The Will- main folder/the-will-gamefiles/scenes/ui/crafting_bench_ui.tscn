@@ -459,7 +459,7 @@ anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = -332.0
-offset_top = -170.0
+offset_top = -270.0
 offset_right = -106.0
 offset_bottom = -12.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_overlay_gizmo")
@@ -475,6 +475,58 @@ theme_override_constants/margin_bottom = 6
 mouse_filter = 2
 alignment = 1
 theme_override_constants/separation = 4
+
+[node name="ShapePrimarySizeOverlayRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox"]
+visible = false
+custom_minimum_size = Vector2(148, 26)
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="ShapePrimarySizeUpButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ShapePrimarySizeOverlayRow"]
+custom_minimum_size = Vector2(72, 26)
+mouse_filter = 1
+size_flags_horizontal = 3
+flat = true
+text = "+"
+tooltip_text = "Increase width."
+
+[node name="ShapePrimarySizeDownButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ShapePrimarySizeOverlayRow"]
+custom_minimum_size = Vector2(72, 26)
+mouse_filter = 1
+size_flags_horizontal = 3
+flat = true
+text = "-"
+tooltip_text = "Decrease width."
+
+[node name="ShapeSecondarySizeOverlayRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox"]
+visible = false
+custom_minimum_size = Vector2(148, 26)
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="ShapeSecondarySizeUpButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ShapeSecondarySizeOverlayRow"]
+custom_minimum_size = Vector2(72, 26)
+mouse_filter = 1
+size_flags_horizontal = 3
+flat = true
+text = "+"
+tooltip_text = "Increase height."
+
+[node name="ShapeSecondarySizeDownButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox/ShapeSecondarySizeOverlayRow"]
+custom_minimum_size = Vector2(72, 26)
+mouse_filter = 1
+size_flags_horizontal = 3
+flat = true
+text = "-"
+tooltip_text = "Decrease height."
+
+[node name="ConfirmSplineButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox"]
+visible = false
+custom_minimum_size = Vector2(112, 26)
+mouse_filter = 1
+flat = true
+text = "Confirm Spline"
+tooltip_text = "Apply the current spline line."
 
 [node name="DrawToolButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainHBox/CenterPanel/MarginContainer/CenterVBox/WorkspaceStage/ToolOverlayHost/ToolOverlayPanel/ToolOverlayMargin/ToolOverlayVBox"]
 custom_minimum_size = Vector2(92, 26)

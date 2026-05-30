@@ -8,6 +8,8 @@ class_name BaseMaterialDef
 @export var material_family: StringName = &"structural"
 
 # physical truth
+# Legacy name: mass for one full reference cell. V2 irregular matter scales this by
+# rough cell-equivalent volume instead of treating every authored shape as one unit.
 @export var density_per_cell: float = 0.0
 @export var hardness: float = 0.0
 @export var toughness: float = 0.0

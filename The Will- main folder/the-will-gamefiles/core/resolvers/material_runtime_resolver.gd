@@ -50,10 +50,15 @@ func resolve_base_material_for_material_id(material_id: StringName, material_loo
 	return null
 
 func resolve_density_per_cell(cell: CellAtom, material_lookup: Dictionary) -> float:
-	var material_variant: MaterialVariantDef = resolve_material_variant_for_cell(cell, material_lookup)
+	if cell == null:
+		return 0.0
+	return resolve_density_per_material_id(cell.material_variant_id, material_lookup)
+
+func resolve_density_per_material_id(material_id: StringName, material_lookup: Dictionary) -> float:
+	var material_variant: MaterialVariantDef = resolve_material_variant_for_material_id(material_id, material_lookup)
 	if material_variant != null and material_variant.resolved_density_per_cell > 0.0:
 		return material_variant.resolved_density_per_cell
-	var base_material: BaseMaterialDef = resolve_base_material_for_cell(cell, material_lookup)
+	var base_material: BaseMaterialDef = resolve_base_material_for_material_id(material_id, material_lookup)
 	if base_material == null:
 		return 0.0
 	return base_material.density_per_cell

@@ -5,6 +5,7 @@ class_name MaterialVariantDef
 @export var base_material_id: StringName = &""
 @export var tier_id: StringName = &""
 @export var variant_stats: Array[StatLine] = []
+# Legacy name: resolved mass for one full reference cell.
 @export var resolved_density_per_cell: float = 0.0
 @export var resolved_processing_output_count: int = 0
 @export var resolved_value_score: float = 0.0

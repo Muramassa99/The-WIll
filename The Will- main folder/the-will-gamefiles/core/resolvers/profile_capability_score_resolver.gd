@@ -1,8 +1,11 @@
 extends RefCounted
 class_name ProfileCapabilityScoreResolver
 
+const MaterialMassResolverScript = preload("res://core/resolvers/material_mass_resolver.gd")
+
 var shape_classifier_resolver
 var material_runtime_resolver
+var material_mass_resolver = MaterialMassResolverScript.new()
 
 func _init(resolved_shape_classifier_resolver, resolved_material_runtime_resolver) -> void:
 	shape_classifier_resolver = resolved_shape_classifier_resolver
@@ -203,4 +206,4 @@ func _supports_profile_score_type(
 			return false
 
 func _get_cell_mass(cell: CellAtom, material_lookup: Dictionary) -> float:
-	return material_runtime_resolver.resolve_density_per_cell(cell, material_lookup)
+	return material_mass_resolver.resolve_cell_mass(cell, material_lookup)

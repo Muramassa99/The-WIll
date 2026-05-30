@@ -78,6 +78,7 @@ func bake_wip(
 	)
 	profile.profile_id = _build_profile_id(wip)
 	profile.material_variant_mix = _collect_material_variant_mix(cells)
+	profile.material_volume_mix = _collect_material_volume_mix(cells)
 	profile.resolved_material_stat_lines = _collect_aggregated_material_lines(cells, material_lookup, &"material_stats")
 	profile.resolved_capability_bias_lines = _collect_aggregated_material_lines(cells, material_lookup, &"capability_bias")
 	profile.resolved_skill_family_bias_lines = _collect_aggregated_material_lines(cells, material_lookup, &"skill_family_bias")
@@ -325,3 +326,11 @@ func _collect_material_variant_mix(cells: Array[CellAtom]) -> Dictionary:
 			continue
 		material_variant_mix[cell.material_variant_id] = int(material_variant_mix.get(cell.material_variant_id, 0)) + 1
 	return material_variant_mix
+
+func _collect_material_volume_mix(cells: Array[CellAtom]) -> Dictionary:
+	var material_volume_mix: Dictionary = {}
+	for cell: CellAtom in cells:
+		if cell == null or cell.material_variant_id == StringName():
+			continue
+		material_volume_mix[cell.material_variant_id] = float(material_volume_mix.get(cell.material_variant_id, 0.0)) + 1.0
+	return material_volume_mix

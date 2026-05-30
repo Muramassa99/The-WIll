@@ -3,6 +3,7 @@ class_name BakedProfile
 
 @export var profile_id: StringName = &""
 @export var total_mass: float = 0.0
+@export var total_volume_cell_equivalents: float = 0.0
 @export var center_of_mass: Vector3 = Vector3.ZERO
 @export var reach: float = 0.0
 @export var primary_grip_offset: Vector3 = Vector3.ZERO
@@ -31,6 +32,7 @@ class_name BakedProfile
 @export var launch_score: float = 0.0
 @export var capability_scores: Dictionary[StringName, float] = {}
 @export var material_variant_mix: Dictionary = {}
+@export var material_volume_mix: Dictionary = {}
 @export var resolved_material_stat_lines: Array[StatLine] = []
 @export var resolved_capability_bias_lines: Array[StatLine] = []
 @export var resolved_skill_family_bias_lines: Array[StatLine] = []

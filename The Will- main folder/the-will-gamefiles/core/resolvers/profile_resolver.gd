@@ -3,12 +3,14 @@ class_name ProfileResolver
 
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
 const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
+const MaterialMassResolverScript = preload("res://core/resolvers/material_mass_resolver.gd")
 const ProfilePrimaryGripResolverScript = preload("res://core/resolvers/profile_primary_grip_resolver.gd")
 const ProfileCapabilityScoreResolverScript = preload("res://core/resolvers/profile_capability_score_resolver.gd")
 
 var forge_rules: ForgeRulesDef = DEFAULT_FORGE_RULES_RESOURCE
 var shape_classifier_resolver: ShapeClassifierResolver = ShapeClassifierResolver.new()
 var material_runtime_resolver = MaterialRuntimeResolverScript.new()
+var material_mass_resolver = MaterialMassResolverScript.new()
 var primary_grip_resolver
 var capability_score_resolver
 
@@ -32,6 +34,7 @@ func bake_profile(
 		equipment_context: StringName = &""
 	) -> BakedProfile:
 	var profile: BakedProfile = BakedProfile.new()
+	profile.total_volume_cell_equivalents = _calculate_total_volume_cell_equivalents(cells)
 	profile.total_mass = _calculate_total_mass(cells, material_lookup)
 	profile.center_of_mass = _calculate_center_of_mass(cells, material_lookup, profile.total_mass)
 	if not _is_connectivity_valid(cells, segments):
@@ -74,6 +77,13 @@ func _calculate_total_mass(
 		total_mass += _get_cell_mass(cell, material_lookup)
 	return total_mass
 
+func _calculate_total_volume_cell_equivalents(cells: Array[CellAtom]) -> float:
+	var total_volume: float = 0.0
+	for cell: CellAtom in cells:
+		if cell != null:
+			total_volume += 1.0
+	return total_volume
+
 func _calculate_center_of_mass(
 		cells: Array[CellAtom],
 		material_lookup: Dictionary,
@@ -93,4 +103,4 @@ func _get_cell_mass(
 		cell: CellAtom,
 		material_lookup: Dictionary
 	) -> float:
-	return material_runtime_resolver.resolve_density_per_cell(cell, material_lookup)
+	return material_mass_resolver.resolve_cell_mass(cell, material_lookup)

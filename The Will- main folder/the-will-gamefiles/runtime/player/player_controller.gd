@@ -35,6 +35,8 @@ const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://co
 @export_range(0.5, 16.0, 0.1) var camera_max_distance: float = 12.0
 @export_range(0.05, 2.0, 0.05) var camera_zoom_step: float = 0.35
 @export_range(0.5, 16.0, 0.1) var camera_default_distance: float = 4.5
+@export_range(-45.0, 45.0, 0.1) var camera_far_pitch_bias_degrees: float = 12.0
+@export_range(-2.0, 4.0, 0.05) var camera_far_height_bias_meters: float = 1.2
 @export var aim_max_range_meters: float = 60.0
 @export var interaction_distance: float = 4.5
 @export var weapons_drawn: bool = false
@@ -82,6 +84,9 @@ var runtime_idle_pose_dirty: bool = true
 var runtime_debugging_enabled: bool = false
 var runtime_debug_visuals_visible: bool = false
 var camera_target_distance: float = 4.5
+var spring_arm_base_position: Vector3
+var spring_arm_base_rotation: Vector3
+var camera_zoom_pose_baseline_ready: bool = false
 
 func _enter_tree() -> void:
 	_ensure_runtime_input_actions()
@@ -96,12 +101,14 @@ func _ready() -> void:
 		interaction_raycast.target_position = Vector3(0.0, 0.0, -interaction_distance)
 	if spring_arm != null:
 		spring_arm.add_excluded_object(get_rid())
+		_capture_camera_zoom_pose_baseline()
 		camera_target_distance = clampf(
 			spring_arm.spring_length,
 			_get_camera_min_distance(),
 			_get_camera_max_distance()
 		)
 		spring_arm.spring_length = camera_target_distance
+		_apply_camera_zoom_pose()
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	_refresh_aim_context()
 	_sync_crosshair_visibility()
@@ -588,7 +595,40 @@ func _set_camera_distance(distance: float) -> void:
 		_get_camera_max_distance()
 	)
 	spring_arm.spring_length = camera_target_distance
+	_apply_camera_zoom_pose()
 	_refresh_aim_context()
+
+func _capture_camera_zoom_pose_baseline() -> void:
+	if spring_arm == null:
+		return
+	spring_arm_base_position = spring_arm.position
+	spring_arm_base_rotation = spring_arm.rotation
+	camera_zoom_pose_baseline_ready = true
+
+func _apply_camera_zoom_pose() -> void:
+	if spring_arm == null:
+		return
+	if not camera_zoom_pose_baseline_ready:
+		_capture_camera_zoom_pose_baseline()
+	var zoom_curve_t: float = _get_far_zoom_curve_t()
+	var resolved_position: Vector3 = spring_arm_base_position
+	resolved_position.y += camera_far_height_bias_meters * zoom_curve_t
+	spring_arm.position = resolved_position
+	var resolved_rotation: Vector3 = spring_arm_base_rotation
+	resolved_rotation.x += deg_to_rad(camera_far_pitch_bias_degrees) * zoom_curve_t
+	spring_arm.rotation = resolved_rotation
+
+func _get_far_zoom_curve_t() -> float:
+	var start_distance: float = _get_camera_default_distance()
+	var max_distance: float = _get_camera_max_distance()
+	if max_distance <= start_distance + 0.001:
+		return 0.0
+	var linear_t: float = clampf(
+		(camera_target_distance - start_distance) / (max_distance - start_distance),
+		0.0,
+		1.0
+	)
+	return linear_t * linear_t * (3.0 - (2.0 * linear_t))
 
 func _get_camera_min_distance() -> float:
 	return maxf(camera_min_distance, 0.1)

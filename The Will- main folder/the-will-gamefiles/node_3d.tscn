@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" path="res://scenes/world/disassembly_bench.tscn" id="4_disassembly_bench"]
 [ext_resource type="PackedScene" path="res://scenes/world/storage_box.tscn" id="5_storage_box"]
 [ext_resource type="PackedScene" path="res://scenes/world/combat_animation_station.tscn" id="6_combat_animation_station"]
+[ext_resource type="PackedScene" path="res://scenes/world/crafting_bench_v2.tscn" id="7_crafting_bench_v2"]
 
 [sub_resource type="PhysicsMaterial" id="PhysicsMaterial_a0tk4"]
 
@@ -19,6 +20,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 6)
 
 [node name="CraftingBench" parent="." unique_id=1953969368 instance=ExtResource("3_crafting_bench")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.15511024, 0, -1.5)
+
+[node name="CraftingBenchV2" parent="." instance=ExtResource("7_crafting_bench_v2")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.05, 0, -1.5)
 
 [node name="DisassemblyBench" parent="." instance=ExtResource("4_disassembly_bench")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.85, 0, -1.45)

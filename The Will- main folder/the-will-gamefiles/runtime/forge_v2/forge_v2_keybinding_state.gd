@@ -9,11 +9,14 @@ const ACTION_VIEW_PAN := &"forge_v2_view_pan"
 const ACTION_VIEW_PAN_SECONDARY := &"forge_v2_view_pan_secondary"
 const ACTION_VIEW_ZOOM_IN := &"forge_v2_view_zoom_in"
 const ACTION_VIEW_ZOOM_OUT := &"forge_v2_view_zoom_out"
+const ACTION_SAVE_DRAFT := &"forge_v2_save_draft"
 const ACTION_VIEW_FIT := &"forge_v2_view_fit"
 const ACTION_VIEW_RESET := &"forge_v2_view_reset"
 const ACTION_TOOL_VOLUME_STROKE := &"forge_v2_tool_volume_stroke"
 const ACTION_TOOL_SPLINE_LINE := &"forge_v2_tool_spline_line"
 const ACTION_SPLINE_FINISH := &"forge_v2_spline_finish"
+const ACTION_SPLINE_CANCEL := &"forge_v2_spline_cancel"
+const ACTION_SPLINE_GENERATE_CSG_NOODLE := &"forge_v2_spline_generate_csg_noodle"
 
 const ACTION_DEFINITIONS: Array[Dictionary] = [
 	{
@@ -47,6 +50,11 @@ const ACTION_DEFINITIONS: Array[Dictionary] = [
 		"binding": {"mouse_button": MOUSE_BUTTON_WHEEL_DOWN},
 	},
 	{
+		"action": ACTION_SAVE_DRAFT,
+		"display_name": "Save Draft",
+		"binding": {"physical_keycode": KEY_S, "keycode": KEY_S, "ctrl": true},
+	},
+	{
 		"action": ACTION_VIEW_FIT,
 		"display_name": "Fit View",
 		"binding": {"physical_keycode": KEY_F, "keycode": KEY_F},
@@ -58,7 +66,7 @@ const ACTION_DEFINITIONS: Array[Dictionary] = [
 	},
 	{
 		"action": ACTION_TOOL_VOLUME_STROKE,
-		"display_name": "Select Volume Stroke Tool",
+		"display_name": "Select CSG Material Stroke Tool",
 		"binding": {"physical_keycode": KEY_B, "keycode": KEY_B},
 	},
 	{
@@ -69,6 +77,16 @@ const ACTION_DEFINITIONS: Array[Dictionary] = [
 	{
 		"action": ACTION_SPLINE_FINISH,
 		"display_name": "Finish Spline Line",
+		"binding": {},
+	},
+	{
+		"action": ACTION_SPLINE_CANCEL,
+		"display_name": "Cancel Spline Line",
+		"binding": {},
+	},
+	{
+		"action": ACTION_SPLINE_GENERATE_CSG_NOODLE,
+		"display_name": "Generate CSG Noodle",
 		"binding": {},
 	},
 ]

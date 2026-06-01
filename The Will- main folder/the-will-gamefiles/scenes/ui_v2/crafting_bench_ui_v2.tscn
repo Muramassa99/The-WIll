@@ -94,7 +94,7 @@ text = "New V2 Draft"
 
 [node name="ClearStrokesButton" type="Button" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/DraftButtonRow"]
 custom_minimum_size = Vector2(150, 34)
-text = "Clear Strokes"
+text = "Clear Pending"
 
 [node name="DraftButtonSpacer" type="Control" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/DraftButtonRow"]
 size_flags_horizontal = 3
@@ -194,28 +194,6 @@ custom_minimum_size = Vector2(42, 30)
 text = "+"
 
 [node name="RadiusSpacer" type="Control" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/RadiusRow"]
-size_flags_horizontal = 3
-
-[node name="AmountRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
-theme_override_constants/separation = 8
-
-[node name="AmountLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/AmountRow"]
-custom_minimum_size = Vector2(150, 0)
-text = "Amount"
-
-[node name="AmountDecreaseButton" type="Button" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/AmountRow"]
-custom_minimum_size = Vector2(42, 30)
-text = "-"
-
-[node name="AmountValueLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/AmountRow"]
-custom_minimum_size = Vector2(140, 0)
-text = "Amount 100%"
-
-[node name="AmountIncreaseButton" type="Button" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/AmountRow"]
-custom_minimum_size = Vector2(42, 30)
-text = "+"
-
-[node name="AmountSpacer" type="Control" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/AmountRow"]
 size_flags_horizontal = 3
 
 [node name="StrokeButtonRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]

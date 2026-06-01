@@ -27,7 +27,7 @@ func normalize() -> void:
 	if material_variant_id == StringName():
 		material_variant_id = &"iron_gray"
 	radius_meters = maxf(radius_meters, 0.001)
-	amount_ratio = clampf(amount_ratio, 0.01, 1.0)
+	amount_ratio = 1.0
 
 func get_point_count() -> int:
 	return path_points.size()

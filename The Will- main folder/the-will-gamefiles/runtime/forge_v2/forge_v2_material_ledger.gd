@@ -1,6 +1,8 @@
 extends Resource
 class_name ForgeV2MaterialLedger
 
+const ForgeV2MaterialVolumeResolverScript = preload("res://runtime/forge_v2/forge_v2_material_volume_resolver.gd")
+
 @export var material_totals: Dictionary = {}
 @export var removed_material_records: Array[Dictionary] = []
 @export var total_rough_material_centi_units: int = 0
@@ -16,10 +18,28 @@ func reset() -> void:
 
 func rebuild_from_layers(layers: Array[Resource]) -> void:
 	reset()
+	var input_shape_records: Array = []
 	for layer: Resource in layers:
 		if layer == null:
 			continue
-		apply_layer(layer)
+		if layer.has_method("normalize"):
+			layer.call("normalize")
+		var layer_input_records: Array = layer.get("input_shape_records") as Array
+		for record: Variant in layer_input_records:
+			if not (record is Dictionary):
+				continue
+			var input_record: Dictionary = (record as Dictionary).duplicate(true)
+			input_record["layer_id"] = StringName(layer.get("layer_id"))
+			input_shape_records.append(input_record)
+		var layer_removed_records: Array = layer.get("removed_material_records") as Array
+		for removed_record: Variant in layer_removed_records:
+			if removed_record is Dictionary:
+				removed_material_records.append(removed_record)
+	var resolver = ForgeV2MaterialVolumeResolverScript.new()
+	var usage_summary: Dictionary = resolver.call("build_usage_summary", input_shape_records) as Dictionary
+	material_totals = usage_summary.get("materials", {}) as Dictionary
+	total_rough_material_centi_units = int(usage_summary.get("total_rough_material_centi_units", 0))
+	total_rough_volume_cell_equivalents = float(usage_summary.get("total_rough_volume_cell_equivalents", 0.0))
 	updated_timestamp = Time.get_unix_time_from_system()
 
 func apply_layer(layer: Resource) -> void:

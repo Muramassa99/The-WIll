@@ -30,9 +30,6 @@ const ForgeV2KeybindingStateScript = preload("res://runtime/forge_v2/forge_v2_ke
 @onready var radius_value_label: Label = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/RadiusRow/RadiusValueLabel
 @onready var radius_decrease_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/RadiusRow/RadiusDecreaseButton
 @onready var radius_increase_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/RadiusRow/RadiusIncreaseButton
-@onready var amount_value_label: Label = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/AmountRow/AmountValueLabel
-@onready var amount_decrease_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/AmountRow/AmountDecreaseButton
-@onready var amount_increase_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/AmountRow/AmountIncreaseButton
 @onready var add_empty_stroke_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/StrokeButtonRow/AddEmptyStrokeButton
 @onready var commit_pending_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/StrokeButtonRow/CommitPendingButton
 @onready var undo_layer_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/StrokeButtonRow/UndoLayerButton
@@ -62,6 +59,7 @@ const UI_FIT_PADDING_PX := 2.0
 const WORKSPACE_VIEWPORT_ASPECT := 16.0 / 9.0
 const MENU_ID_BASE := 1000
 const WORKSPACE_ZOOM_STEP := 0.1
+const SPLINE_POINT_SCREEN_PICK_RADIUS_PIXELS := 26.0
 
 var active_player = null
 var active_stage_controller: Node = null
@@ -99,6 +97,10 @@ var workspace_frame_host: Control = null
 var workspace_drag_active := false
 var workspace_drag_pan_mode := false
 var workspace_brush_stroke_active := false
+var workspace_spline_point_drag_active := false
+var workspace_spline_drag_point_index := -1
+var workspace_spline_drag_plane_origin_local: Vector3 = Vector3.ZERO
+var workspace_spline_drag_plane_normal_local: Vector3 = Vector3.FORWARD
 
 func _ready() -> void:
 	visible = false
@@ -117,8 +119,6 @@ func _ready() -> void:
 	primitive_option.item_selected.connect(_on_primitive_selected)
 	radius_decrease_button.pressed.connect(_on_radius_decrease_pressed)
 	radius_increase_button.pressed.connect(_on_radius_increase_pressed)
-	amount_decrease_button.pressed.connect(_on_amount_decrease_pressed)
-	amount_increase_button.pressed.connect(_on_amount_increase_pressed)
 	add_empty_stroke_button.pressed.connect(_on_add_empty_stroke_pressed)
 	commit_pending_button.pressed.connect(_on_commit_pending_pressed)
 	undo_layer_button.pressed.connect(_on_undo_layer_pressed)
@@ -168,6 +168,7 @@ func close_ui() -> void:
 		return
 	if workspace_brush_stroke_active:
 		_finish_workspace_brush_stroke(Vector2.ZERO, false)
+	_finish_workspace_spline_point_drag()
 	_close_keybindings_popup()
 	_close_settings_popup()
 	panel.visible = false
@@ -179,6 +180,8 @@ func close_ui() -> void:
 		workspace_preview.call("clear_stage_controller")
 	workspace_drag_active = false
 	workspace_brush_stroke_active = false
+	workspace_spline_point_drag_active = false
+	workspace_spline_drag_point_index = -1
 	active_player = null
 	active_stage_controller = null
 	active_placement_space = null
@@ -792,6 +795,28 @@ func _get_v2_controller_options(method_name: StringName) -> Array:
 		return []
 	return active_stage_controller.call(method_name) as Array
 
+func _get_player_forge_wip_library_state() -> PlayerForgeWipLibraryState:
+	if active_player == null or not active_player.has_method("get_forge_wip_library_state"):
+		return null
+	return active_player.call("get_forge_wip_library_state") as PlayerForgeWipLibraryState
+
+func _collect_saved_v2_wips() -> Array[CraftedItemWIP]:
+	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
+	if wip_library == null:
+		return []
+	var saved_v2_wips: Array[CraftedItemWIP] = []
+	for saved_wip: CraftedItemWIP in wip_library.get_saved_wips():
+		if saved_wip == null or saved_wip.forge_v2_authoring_state == null:
+			continue
+		saved_v2_wips.append(saved_wip)
+	return saved_v2_wips
+
+func _format_saved_v2_wip_label(saved_wip: CraftedItemWIP) -> String:
+	if saved_wip == null:
+		return "Unnamed V2 Draft"
+	var project_name := saved_wip.forge_project_name.strip_edges()
+	return project_name if not project_name.is_empty() else String(saved_wip.wip_id)
+
 func _rebuild_v2_action_menus() -> void:
 	if draft_menu_button == null or build_menu_button == null or material_menu_button == null:
 		return
@@ -811,14 +836,35 @@ func _rebuild_v2_draft_menu(summary: Dictionary) -> void:
 	var popup: PopupMenu = draft_menu_button.get_popup()
 	popup.clear()
 	var has_draft := active_stage_controller != null
+	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
+	var saved_v2_wips: Array[CraftedItemWIP] = _collect_saved_v2_wips()
+	var source_wip_id := StringName(summary.get("source_wip_id", StringName()))
+	var saved_label := "Saved WIP: %s" % String(source_wip_id) if source_wip_id != StringName() else "Unsaved V2 draft"
+	_add_v2_disabled_line(popup, saved_label)
+	_add_v2_menu_action(popup, "Save Draft (Ctrl+S)", &"draft_save", null, not has_draft or wip_library == null)
+	popup.add_separator()
 	_add_v2_menu_action(popup, "New V2 Draft", &"draft_new", null, not has_draft)
 	_add_v2_menu_action(
 		popup,
 		"Clear Pending Work",
 		&"draft_clear",
 		null,
-		not has_draft or int(summary.get("volume_stroke_count", 0)) <= 0
+		not has_draft or int(summary.get("pending_material_body_count", 0)) <= 0
 	)
+	popup.add_separator()
+	var saved_submenu: PopupMenu = _prepare_v2_submenu(popup, "SavedV2DraftSubmenu")
+	if saved_v2_wips.is_empty():
+		_add_v2_disabled_line(saved_submenu, "No saved V2 drafts")
+	else:
+		for saved_wip: CraftedItemWIP in saved_v2_wips:
+			_add_v2_menu_action(
+				saved_submenu,
+				_format_saved_v2_wip_label(saved_wip),
+				&"draft_load_saved",
+				saved_wip.wip_id
+			)
+	popup.add_submenu_item("Saved V2 Drafts", String(saved_submenu.name))
+	popup.set_item_disabled(popup.get_item_count() - 1, saved_v2_wips.is_empty())
 	popup.add_separator()
 	_add_v2_menu_action(popup, "Close Forge", &"close")
 
@@ -890,6 +936,40 @@ func _rebuild_v2_shape_menu(summary: Dictionary) -> void:
 	)
 	popup.add_submenu_item("Tool", String(tool_submenu.name))
 	popup.add_separator()
+	_add_v2_disabled_line(popup, String(summary.get("spline_line_status_label", "Spline: no points")))
+	var spline_point_count := int(summary.get("spline_line_point_count", 0))
+	var spline_finished := bool(summary.get("spline_line_finished", false))
+	_add_v2_menu_action(
+		popup,
+		"Finish Spline Line",
+		&"spline_finish",
+		null,
+		active_stage_controller == null or spline_point_count < 2 or spline_finished
+	)
+	_add_v2_menu_action(
+		popup,
+		"Cancel Spline Line",
+		&"spline_cancel",
+		null,
+		active_stage_controller == null or spline_point_count <= 0
+	)
+	var csg_noodle_enabled := bool(summary.get("spline_line_csg_noodle_enabled", false))
+	_add_v2_disabled_line(popup, String(summary.get("spline_line_csg_noodle_status_label", "CSG noodle: needs 2 points")))
+	_add_v2_menu_action(
+		popup,
+		"Generate CSG Noodle",
+		&"spline_generate_csg_noodle",
+		null,
+		active_stage_controller == null or not bool(summary.get("can_generate_spline_line_csg_noodle", false))
+	)
+	_add_v2_menu_action(
+		popup,
+		"Clear CSG Noodle",
+		&"spline_clear_csg_noodle",
+		null,
+		active_stage_controller == null or not csg_noodle_enabled
+	)
+	popup.add_separator()
 	_add_v2_disabled_line(popup, "Primitive: %s" % String(summary.get("active_primitive_label", "None")))
 	var primitive_submenu: PopupMenu = _prepare_v2_submenu(popup, "PrimitiveSubmenu")
 	_add_v2_option_items(
@@ -903,10 +983,6 @@ func _rebuild_v2_shape_menu(summary: Dictionary) -> void:
 	_add_v2_disabled_line(popup, String(summary.get("brush_radius_label", "Radius n/a")))
 	_add_v2_menu_action(popup, "Radius -", &"radius_down", null, active_stage_controller == null)
 	_add_v2_menu_action(popup, "Radius +", &"radius_up", null, active_stage_controller == null)
-	popup.add_separator()
-	_add_v2_disabled_line(popup, String(summary.get("amount_ratio_label", "Amount n/a")))
-	_add_v2_menu_action(popup, "Amount -", &"amount_down", null, active_stage_controller == null)
-	_add_v2_menu_action(popup, "Amount +", &"amount_up", null, active_stage_controller == null)
 
 func _rebuild_v2_layers_menu(summary: Dictionary) -> void:
 	var popup: PopupMenu = layers_menu_button.get_popup()
@@ -972,7 +1048,6 @@ func _rebuild_v2_status_menu(summary: Dictionary) -> void:
 	_add_v2_disabled_line(popup, "Material: %s" % String(summary.get("active_material_label", "n/a")))
 	_add_v2_disabled_line(popup, "Primitive: %s" % String(summary.get("active_primitive_label", "n/a")))
 	_add_v2_disabled_line(popup, String(summary.get("brush_radius_label", "Radius n/a")))
-	_add_v2_disabled_line(popup, String(summary.get("amount_ratio_label", "Amount n/a")))
 	_add_v2_disabled_line(popup, "Bodies: %s user + %s seed, %s pending" % [
 		str(int(summary.get("user_material_body_count", 0))),
 		str(int(summary.get("seed_material_body_count", 0))),
@@ -1002,10 +1077,14 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 	var action_value: Variant = menu_entry.get("value", null)
 	var keep_shape_popup_open := _is_v2_shape_repeat_action(action_id)
 	match action_id:
+		&"draft_save":
+			_save_current_v2_draft()
 		&"draft_new":
 			_on_new_draft_pressed()
 		&"draft_clear":
 			_on_clear_strokes_pressed()
+		&"draft_load_saved":
+			_load_saved_v2_draft(StringName(action_value))
 		&"builder_path":
 			if active_stage_controller != null:
 				active_stage_controller.set_builder_path_id(StringName(action_value))
@@ -1027,14 +1106,18 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 		&"tool":
 			if active_stage_controller != null:
 				active_stage_controller.set_active_tool_id(StringName(action_value))
+		&"spline_finish":
+			_finish_active_spline_line()
+		&"spline_cancel":
+			_cancel_active_spline_line()
+		&"spline_generate_csg_noodle":
+			_generate_active_spline_csg_noodle()
+		&"spline_clear_csg_noodle":
+			_clear_active_spline_csg_noodle()
 		&"radius_down":
 			_on_radius_decrease_pressed()
 		&"radius_up":
 			_on_radius_increase_pressed()
-		&"amount_down":
-			_on_amount_decrease_pressed()
-		&"amount_up":
-			_on_amount_increase_pressed()
 		&"add_primitive":
 			_on_add_empty_stroke_pressed()
 		&"commit_layer":
@@ -1067,8 +1150,6 @@ func _is_v2_shape_repeat_action(action_id: StringName) -> bool:
 	return (
 		action_id == &"radius_down"
 		or action_id == &"radius_up"
-		or action_id == &"amount_down"
-		or action_id == &"amount_up"
 	)
 
 func _refresh_v2_shape_menu_popup_contents() -> void:
@@ -1099,7 +1180,88 @@ func _call_workspace_preview_action(method_name: StringName, argument: Variant =
 func _set_active_v2_tool(tool_id: StringName) -> void:
 	if active_stage_controller == null or not active_stage_controller.has_method("set_active_tool_id"):
 		return
+	if workspace_brush_stroke_active:
+		_finish_workspace_brush_stroke(Vector2.ZERO, false)
+	_finish_workspace_spline_point_drag()
 	active_stage_controller.call("set_active_tool_id", tool_id)
+
+func _finish_active_spline_line() -> void:
+	if active_stage_controller == null or not active_stage_controller.has_method("finish_spline_line"):
+		return
+	_finish_workspace_spline_point_drag()
+	active_stage_controller.call("finish_spline_line")
+
+func _cancel_active_spline_line() -> void:
+	if active_stage_controller == null or not active_stage_controller.has_method("cancel_spline_line"):
+		return
+	_finish_workspace_spline_point_drag()
+	active_stage_controller.call("cancel_spline_line")
+
+func _generate_active_spline_csg_noodle() -> void:
+	if active_stage_controller == null or not active_stage_controller.has_method("generate_spline_line_csg_noodle"):
+		return
+	_finish_workspace_spline_point_drag()
+	active_stage_controller.call("generate_spline_line_csg_noodle")
+
+func _clear_active_spline_csg_noodle() -> void:
+	if active_stage_controller == null or not active_stage_controller.has_method("clear_spline_line_csg_noodle"):
+		return
+	active_stage_controller.call("clear_spline_line_csg_noodle")
+
+func _save_current_v2_draft() -> bool:
+	if active_stage_controller == null or not active_stage_controller.has_method("save_current_wip"):
+		_set_v2_action_status_text("Save failed: no V2 draft")
+		return false
+	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
+	if wip_library == null:
+		_set_v2_action_status_text("Save failed: no WIP library")
+		return false
+	if workspace_brush_stroke_active:
+		_finish_workspace_brush_stroke(Vector2.ZERO, false)
+	_finish_workspace_spline_point_drag()
+	var saved_wip: CraftedItemWIP = active_stage_controller.call("save_current_wip", wip_library) as CraftedItemWIP
+	if saved_wip == null:
+		_set_v2_action_status_text("Save failed")
+		return false
+	_configure_options_from_controller()
+	_refresh_from_controller()
+	_set_v2_action_status_text("Saved: %s" % _format_saved_v2_wip_label(saved_wip))
+	return true
+
+func _load_saved_v2_draft(saved_wip_id: StringName) -> bool:
+	if active_stage_controller == null or not active_stage_controller.has_method("load_saved_wip"):
+		_set_v2_action_status_text("Load failed: no V2 controller")
+		return false
+	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
+	if wip_library == null or saved_wip_id == StringName():
+		_set_v2_action_status_text("Load failed: no saved draft")
+		return false
+	var saved_wip: CraftedItemWIP = wip_library.get_saved_wip_clone(saved_wip_id, false)
+	if saved_wip == null or saved_wip.forge_v2_authoring_state == null:
+		_set_v2_action_status_text("Load failed: V2 data missing")
+		return false
+	if workspace_brush_stroke_active:
+		_finish_workspace_brush_stroke(Vector2.ZERO, false)
+	_finish_workspace_spline_point_drag()
+	var loaded := bool(active_stage_controller.call("load_saved_wip", saved_wip))
+	if not loaded:
+		_set_v2_action_status_text("Load failed")
+		return false
+	wip_library.set_selected_wip_id(saved_wip_id)
+	_configure_options_from_controller()
+	_refresh_from_controller()
+	_set_v2_action_status_text("Loaded: %s" % _format_saved_v2_wip_label(saved_wip))
+	return true
+
+func _set_v2_action_status_text(status_text: String) -> void:
+	if action_status_label != null:
+		action_status_label.text = status_text
+
+func _is_v2_spline_line_tool_active() -> bool:
+	if active_stage_controller == null or not active_stage_controller.has_method("get_status_summary"):
+		return false
+	var summary: Dictionary = active_stage_controller.call("get_status_summary") as Dictionary
+	return StringName(summary.get("active_tool", StringName())) == &"tool_spline_line"
 
 func _ensure_fullscreen_workspace_layout() -> void:
 	if body_margin == null or body_scroll == null or body_vbox == null or workspace_panel == null:
@@ -1198,12 +1360,28 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if is_instance_valid(settings_popup) and settings_popup.visible:
 		return
+	if _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_SAVE_DRAFT, event):
+		_save_current_v2_draft()
+		get_viewport().set_input_as_handled()
+		return
 	if _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_VIEW_FIT, event):
 		_call_workspace_preview_action(&"fit_view")
 		get_viewport().set_input_as_handled()
 		return
 	if _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_VIEW_RESET, event):
 		_call_workspace_preview_action(&"reset_view")
+		get_viewport().set_input_as_handled()
+		return
+	if _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_SPLINE_FINISH, event):
+		_finish_active_spline_line()
+		get_viewport().set_input_as_handled()
+		return
+	if _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_SPLINE_CANCEL, event):
+		_cancel_active_spline_line()
+		get_viewport().set_input_as_handled()
+		return
+	if _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_SPLINE_GENERATE_CSG_NOODLE, event):
+		_generate_active_spline_csg_noodle()
 		get_viewport().set_input_as_handled()
 		return
 	if _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_TOOL_VOLUME_STROKE, event):
@@ -1279,25 +1457,28 @@ func _refresh_from_controller() -> void:
 		String(summary.get("operation_label", "")),
 		String(summary.get("placement_policy_label", "")),
 	]
-	workspace_status_label.text = "%s | %s | %s" % [
-		String(summary.get("active_tool_label", "")),
-		String(summary.get("brush_radius_label", "")),
-		String(summary.get("amount_ratio_label", "")),
-	]
+	var workspace_status_parts: Array[String] = [String(summary.get("active_tool_label", ""))]
+	if StringName(summary.get("active_tool", StringName())) == &"tool_spline_line":
+		workspace_status_parts.append(String(summary.get("spline_line_status_label", "Spline: no points")))
+		workspace_status_parts.append(String(summary.get("spline_line_csg_noodle_status_label", "CSG noodle: needs 2 points")))
+		workspace_status_parts.append(String(summary.get("brush_radius_label", "")))
+	else:
+		workspace_status_parts.append(String(summary.get("brush_radius_label", "")))
+	workspace_status_label.text = " | ".join(workspace_status_parts)
 	platform_contract_label.text = String(summary.get("platform_contract_summary", ""))
 	active_material_label.text = "Active: %s" % String(summary.get("active_material_label", summary.get("active_material", "")))
 	radius_value_label.text = String(summary.get("brush_radius_label", "Radius 0.0000 m"))
-	amount_value_label.text = String(summary.get("amount_ratio_label", "Amount 100%"))
 	var platform_contract: Dictionary = summary.get("platform_contract", {}) as Dictionary
-	summary_label.text = "Draft: %s\nTool: %s\nPrimitive: %s\nActive material: %s\nVolume strokes: %s\nBodies: %s user + %s seed, %s pending\nLayers: %s committed, %s redo\nSelected: %s\n%s\n%s\n%s\n%s" % [
+	summary_label.text = "Draft: %s\nTool: %s\nPrimitive: %s\nActive material: %s\nCSG bodies: %s user + %s seed, %s pending\n%s\n%s\nLayers: %s committed, %s redo\nSelected: %s\n%s\n%s\n%s\n%s" % [
 		String(summary.get("project_name", "")),
 		String(summary.get("active_tool_label", "")),
 		String(summary.get("active_primitive_label", "")),
 		String(summary.get("active_material_label", summary.get("active_material", ""))),
-		str(int(summary.get("volume_stroke_count", 0))),
 		str(int(summary.get("user_material_body_count", 0))),
 		str(int(summary.get("seed_material_body_count", 0))),
 		str(int(summary.get("pending_material_body_count", 0))),
+		String(summary.get("spline_line_status_label", "Spline: no points")),
+		String(summary.get("spline_line_csg_noodle_status_label", "CSG noodle: needs 2 points")),
 		str(int(summary.get("committed_layer_count", 0))),
 		str(int(summary.get("undone_layer_count", 0))),
 		String(selected_body_summary.get("label", "none")),
@@ -1406,7 +1587,10 @@ func _on_new_draft_pressed() -> void:
 func _on_clear_strokes_pressed() -> void:
 	if active_stage_controller == null:
 		return
-	active_stage_controller.clear_volume_strokes()
+	if active_stage_controller.has_method("clear_pending_material_bodies"):
+		active_stage_controller.call("clear_pending_material_bodies")
+	else:
+		active_stage_controller.call("clear_volume_strokes")
 
 func _on_builder_path_selected(index: int) -> void:
 	if is_refreshing_ui or active_stage_controller == null:
@@ -1447,16 +1631,6 @@ func _on_radius_increase_pressed() -> void:
 	if active_stage_controller == null:
 		return
 	active_stage_controller.adjust_brush_radius_steps(1)
-
-func _on_amount_decrease_pressed() -> void:
-	if active_stage_controller == null:
-		return
-	active_stage_controller.adjust_amount_ratio_steps(-1)
-
-func _on_amount_increase_pressed() -> void:
-	if active_stage_controller == null:
-		return
-	active_stage_controller.adjust_amount_ratio_steps(1)
 
 func _on_add_empty_stroke_pressed() -> void:
 	if active_stage_controller == null:
@@ -1550,12 +1724,22 @@ func _handle_workspace_mouse_button(mouse_button_event: InputEventMouseButton) -
 	if mouse_button_event.button_index != paint_mouse_button:
 		return
 	if mouse_button_event.pressed:
-		_begin_workspace_brush_stroke(mouse_button_event.position)
+		if _is_v2_spline_line_tool_active():
+			_begin_workspace_spline_input(mouse_button_event.position)
+		else:
+			_begin_workspace_brush_stroke(mouse_button_event.position)
 	else:
-		_finish_workspace_brush_stroke(mouse_button_event.position)
+		if workspace_spline_point_drag_active:
+			_finish_workspace_spline_point_drag()
+		else:
+			_finish_workspace_brush_stroke(mouse_button_event.position)
 	workspace_view_container.accept_event()
 
 func _handle_workspace_mouse_motion(motion_event: InputEventMouseMotion) -> void:
+	if workspace_spline_point_drag_active:
+		_update_workspace_spline_point_drag(motion_event.position)
+		workspace_view_container.accept_event()
+		return
 	if workspace_brush_stroke_active:
 		_extend_workspace_brush_stroke(motion_event.position)
 		workspace_view_container.accept_event()
@@ -1571,10 +1755,85 @@ func _handle_workspace_mouse_motion(motion_event: InputEventMouseMotion) -> void
 
 func _on_workspace_view_mouse_exited() -> void:
 	workspace_drag_active = false
+	_finish_workspace_spline_point_drag()
 	if workspace_brush_stroke_active:
 		_finish_workspace_brush_stroke(Vector2.ZERO, false)
 	if active_stage_controller != null and active_stage_controller.has_method("clear_placement_cursor"):
 		active_stage_controller.call("clear_placement_cursor")
+
+func _begin_workspace_spline_input(screen_position: Vector2) -> void:
+	var nearest_point_index := _find_nearest_spline_point_at_screen(screen_position)
+	if nearest_point_index >= 0:
+		_begin_workspace_spline_point_drag(nearest_point_index, Vector3.ZERO)
+		_update_workspace_spline_point_drag(screen_position)
+		return
+	var placement_result: Dictionary = _resolve_workspace_local_position(screen_position)
+	if not bool(placement_result.get("valid", false)):
+		return
+	var local_position: Vector3 = placement_result.get("local_position", Vector3.ZERO) as Vector3
+	if active_stage_controller != null and active_stage_controller.has_method("append_spline_line_point"):
+		active_stage_controller.call("append_spline_line_point", local_position)
+
+func _begin_workspace_spline_point_drag(point_index: int, fallback_local_position: Vector3) -> void:
+	if workspace_preview == null or not workspace_preview.has_method("build_camera_facing_drag_plane"):
+		return
+	var point_origin: Vector3 = _get_spline_point_local_position(point_index, fallback_local_position)
+	var drag_plane: Dictionary = workspace_preview.call("build_camera_facing_drag_plane", point_origin) as Dictionary
+	if not bool(drag_plane.get("valid", false)):
+		return
+	workspace_spline_point_drag_active = true
+	workspace_spline_drag_point_index = point_index
+	workspace_spline_drag_plane_origin_local = drag_plane.get("origin_local", point_origin) as Vector3
+	workspace_spline_drag_plane_normal_local = drag_plane.get("normal_local", Vector3.FORWARD) as Vector3
+	if active_stage_controller != null and active_stage_controller.has_method("select_spline_line_point"):
+		active_stage_controller.call("select_spline_line_point", point_index)
+
+func _update_workspace_spline_point_drag(screen_position: Vector2) -> void:
+	if not workspace_spline_point_drag_active:
+		return
+	if workspace_preview == null or not workspace_preview.has_method("screen_to_workspace_local_on_drag_plane"):
+		return
+	var drag_result: Dictionary = workspace_preview.call(
+		"screen_to_workspace_local_on_drag_plane",
+		screen_position,
+		workspace_spline_drag_plane_origin_local,
+		workspace_spline_drag_plane_normal_local
+	) as Dictionary
+	if not bool(drag_result.get("valid", false)):
+		return
+	var local_position: Vector3 = drag_result.get("local_position", Vector3.ZERO) as Vector3
+	if active_stage_controller != null and active_stage_controller.has_method("set_spline_line_point"):
+		active_stage_controller.call("set_spline_line_point", workspace_spline_drag_point_index, local_position)
+
+func _finish_workspace_spline_point_drag() -> void:
+	workspace_spline_point_drag_active = false
+	workspace_spline_drag_point_index = -1
+	workspace_spline_drag_plane_origin_local = Vector3.ZERO
+	workspace_spline_drag_plane_normal_local = Vector3.FORWARD
+
+func _find_nearest_spline_point_at_screen(screen_position: Vector2) -> int:
+	if workspace_preview == null or not workspace_preview.has_method("find_nearest_local_point_by_screen"):
+		return -1
+	var spline_points: PackedVector3Array = _get_spline_points()
+	return int(workspace_preview.call(
+		"find_nearest_local_point_by_screen",
+		spline_points,
+		screen_position,
+		SPLINE_POINT_SCREEN_PICK_RADIUS_PIXELS
+	))
+
+func _get_spline_point_local_position(point_index: int, fallback_local_position: Vector3) -> Vector3:
+	var spline_points: PackedVector3Array = _get_spline_points()
+	if point_index < 0 or point_index >= spline_points.size():
+		return fallback_local_position
+	return spline_points[point_index]
+
+func _get_spline_points() -> PackedVector3Array:
+	if active_stage_controller == null or not active_stage_controller.has_method("get_status_summary"):
+		return PackedVector3Array()
+	var summary: Dictionary = active_stage_controller.call("get_status_summary") as Dictionary
+	var spline_summary: Dictionary = summary.get("spline_line", {}) as Dictionary
+	return spline_summary.get("points", PackedVector3Array())
 
 func _begin_workspace_brush_stroke(screen_position: Vector2) -> void:
 	var placement_result: Dictionary = _resolve_workspace_local_position(screen_position)
@@ -1582,10 +1841,12 @@ func _begin_workspace_brush_stroke(screen_position: Vector2) -> void:
 		return
 	var local_position: Vector3 = placement_result.get("local_position", Vector3.ZERO) as Vector3
 	workspace_brush_stroke_active = true
-	if active_stage_controller.has_method("begin_placement_stroke"):
+	if active_stage_controller.has_method("begin_material_body_path"):
+		active_stage_controller.call("begin_material_body_path", local_position)
+	elif active_stage_controller.has_method("begin_placement_stroke"):
 		active_stage_controller.call("begin_placement_stroke", local_position)
 	else:
-		active_stage_controller.call("append_point_volume_stroke", local_position)
+		active_stage_controller.call("append_point_material_body", local_position)
 
 func _extend_workspace_brush_stroke(screen_position: Vector2, force_endpoint: bool = false) -> void:
 	if not workspace_brush_stroke_active:
@@ -1596,16 +1857,24 @@ func _extend_workspace_brush_stroke(screen_position: Vector2, force_endpoint: bo
 			active_stage_controller.call("clear_placement_cursor")
 		return
 	var local_position: Vector3 = placement_result.get("local_position", Vector3.ZERO) as Vector3
-	if active_stage_controller.has_method("extend_placement_stroke"):
+	if active_stage_controller.has_method("extend_material_body_path"):
+		active_stage_controller.call("extend_material_body_path", local_position, force_endpoint)
+	elif active_stage_controller.has_method("extend_placement_stroke"):
 		active_stage_controller.call("extend_placement_stroke", local_position, force_endpoint)
 	elif force_endpoint:
-		active_stage_controller.call("append_point_volume_stroke", local_position)
+		active_stage_controller.call("append_point_material_body", local_position)
 
 func _finish_workspace_brush_stroke(screen_position: Vector2, use_screen_position: bool = true) -> void:
 	if not workspace_brush_stroke_active:
 		return
-	if active_stage_controller.has_method("finish_placement_stroke"):
-		var placement_result: Dictionary = _resolve_workspace_local_position(screen_position) if use_screen_position else {"valid": false}
+	var placement_result: Dictionary = _resolve_workspace_local_position(screen_position) if use_screen_position else {"valid": false}
+	if active_stage_controller.has_method("finish_material_body_path"):
+		active_stage_controller.call(
+			"finish_material_body_path",
+			placement_result.get("local_position", Vector3.ZERO) as Vector3,
+			bool(placement_result.get("valid", false))
+		)
+	elif active_stage_controller.has_method("finish_placement_stroke"):
 		active_stage_controller.call(
 			"finish_placement_stroke",
 			placement_result.get("local_position", Vector3.ZERO) as Vector3,

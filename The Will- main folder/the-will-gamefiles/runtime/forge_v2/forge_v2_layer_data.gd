@@ -1,6 +1,8 @@
 extends Resource
 class_name ForgeV2LayerData
 
+const ForgeV2MaterialVolumeResolverScript = preload("res://runtime/forge_v2/forge_v2_material_volume_resolver.gd")
+
 const OPERATION_ADD_MATERIAL := &"layer_operation_add_material"
 const OPERATION_SUBTRACT_VOID := &"layer_operation_subtract_void"
 const OPERATION_MIXED_VOLUME := &"layer_operation_mixed_volume"
@@ -38,7 +40,11 @@ const SOURCE_OPERATION_REMOVE_MATERIAL := &"operation_remove_material"
 @export var created_timestamp: float = 0.0
 @export var undoable: bool = true
 
-func configure_from_material_bodies(next_order_index: int, material_bodies: Array[Resource]) -> void:
+func configure_from_material_bodies(
+	next_order_index: int,
+	material_bodies: Array[Resource],
+	existing_material_bodies: Array[Resource] = []
+) -> void:
 	order_index = maxi(next_order_index, 1)
 	layer_id = StringName("v2_layer_%04d_%s" % [order_index, str(Time.get_ticks_usec())])
 	created_timestamp = Time.get_unix_time_from_system()
@@ -54,6 +60,7 @@ func configure_from_material_bodies(next_order_index: int, material_bodies: Arra
 	var add_body_count := 0
 	var remove_body_count := 0
 	var add_material_ids: Array[StringName] = []
+	var add_bodies: Array[Resource] = []
 	for body: Resource in material_bodies:
 		if body == null:
 			continue
@@ -69,7 +76,8 @@ func configure_from_material_bodies(next_order_index: int, material_bodies: Arra
 		var material_variant_id: StringName = StringName(body.get("material_variant_id"))
 		if not add_material_ids.has(material_variant_id):
 			add_material_ids.append(material_variant_id)
-		_append_add_material_delta(body)
+		add_bodies.append(body)
+	_append_resolved_material_policy_deltas(existing_material_bodies, material_bodies)
 	_resolve_operation_metadata(add_body_count, remove_body_count, add_material_ids)
 
 func normalize() -> void:
@@ -137,6 +145,67 @@ func _append_add_material_delta(body: Resource) -> void:
 	ledger_delta[material_variant_id] = entry
 	rough_volume_cell_equivalents_delta += volume_cell_equivalents
 	rough_material_centi_units_delta += material_centi_units
+
+func _append_resolved_add_material_deltas(add_bodies: Array[Resource]) -> void:
+	if add_bodies.is_empty():
+		return
+	var resolver = ForgeV2MaterialVolumeResolverScript.new()
+	var resolved_delta: Dictionary = resolver.call("build_add_material_delta", add_bodies, layer_id) as Dictionary
+	var resolved_ledger_delta: Dictionary = resolved_delta.get("ledger_delta", {}) as Dictionary
+	for material_variant_id: StringName in resolved_ledger_delta.keys():
+		ledger_delta[material_variant_id] = resolved_ledger_delta[material_variant_id]
+	rough_volume_cell_equivalents_delta += float(resolved_delta.get("rough_volume_cell_equivalents_delta", 0.0))
+	rough_material_centi_units_delta += int(resolved_delta.get("rough_material_centi_units_delta", 0))
+
+func _append_resolved_material_policy_deltas(
+	existing_material_bodies: Array[Resource],
+	layer_material_bodies: Array[Resource]
+) -> void:
+	if layer_material_bodies.is_empty():
+		return
+	var resolver = ForgeV2MaterialVolumeResolverScript.new()
+	var before_summary: Dictionary = resolver.call("build_usage_summary", existing_material_bodies) as Dictionary
+	var combined_bodies: Array = []
+	combined_bodies.append_array(existing_material_bodies)
+	combined_bodies.append_array(layer_material_bodies)
+	var after_summary: Dictionary = resolver.call("build_usage_summary", combined_bodies) as Dictionary
+	_append_material_summary_delta(before_summary, after_summary)
+
+func _append_material_summary_delta(before_summary: Dictionary, after_summary: Dictionary) -> void:
+	var before_materials: Dictionary = before_summary.get("materials", {}) as Dictionary
+	var after_materials: Dictionary = after_summary.get("materials", {}) as Dictionary
+	var material_ids: Array[StringName] = []
+	for material_variant_id: StringName in before_materials.keys():
+		if not material_ids.has(material_variant_id):
+			material_ids.append(material_variant_id)
+	for material_variant_id: StringName in after_materials.keys():
+		if not material_ids.has(material_variant_id):
+			material_ids.append(material_variant_id)
+	for material_variant_id: StringName in material_ids:
+		var before_entry: Dictionary = before_materials.get(material_variant_id, {}) as Dictionary
+		var after_entry: Dictionary = after_materials.get(material_variant_id, {}) as Dictionary
+		var volume_delta: float = (
+			float(after_entry.get("rough_volume_cell_equivalents", 0.0))
+			- float(before_entry.get("rough_volume_cell_equivalents", 0.0))
+		)
+		var centi_units_delta: int = (
+			int(after_entry.get("rough_material_centi_units", 0))
+			- int(before_entry.get("rough_material_centi_units", 0))
+		)
+		if is_zero_approx(volume_delta) and centi_units_delta == 0:
+			continue
+		var layer_ids: Array[StringName] = []
+		if layer_id != StringName():
+			layer_ids.append(layer_id)
+		ledger_delta[material_variant_id] = {
+			"material_variant_id": material_variant_id,
+			"rough_volume_cell_equivalents": volume_delta,
+			"rough_material_centi_units": centi_units_delta,
+			"rough_material_units": float(centi_units_delta) / 100.0,
+			"layer_ids": layer_ids,
+		}
+		rough_volume_cell_equivalents_delta += volume_delta
+		rough_material_centi_units_delta += centi_units_delta
 
 func _append_removed_material_record(body: Resource) -> void:
 	var material_centi_units: int = int(body.get("rough_material_centi_units"))

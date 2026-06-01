@@ -60,10 +60,10 @@ static func build_option_entries() -> Array[Dictionary]:
 static func build_stroke_specs(
 	primitive_id: StringName,
 	radius_meters: float,
-	amount_ratio: float
+	_amount_ratio: float
 ) -> Array[Dictionary]:
 	var radius: float = maxf(radius_meters, 0.001)
-	var amount: float = clampf(amount_ratio, 0.01, 1.0)
+	var amount: float = 1.0
 	match normalize_primitive_id(primitive_id):
 		PRIMITIVE_ROD:
 			return [_build_spec(

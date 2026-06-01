@@ -35,6 +35,7 @@ const EQUIPMENT_CONTEXT_UNARMED := &"ctx_unarmed"
 @export var builder_marker_positions: Dictionary = {}
 @export var stage2_item_state: Resource
 @export var combat_animation_station_state: Resource
+@export var forge_v2_authoring_state: Resource
 @export var forge_intent: StringName = &""
 @export var equipment_context: StringName = &""
 @export var stow_position_mode: StringName = STOW_SHOULDER_HANGING

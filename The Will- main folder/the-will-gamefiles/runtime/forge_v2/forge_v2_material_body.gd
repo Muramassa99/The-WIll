@@ -7,6 +7,7 @@ const ForgeV2VolumeStrokeScript = preload("res://runtime/forge_v2/forge_v2_volum
 const BODY_KIND_VOLUME_STROKE := &"body_kind_volume_stroke"
 const BODY_KIND_PLATFORM_SEED := &"body_kind_platform_seed"
 const SHAPE_KIND_CAPSULE_PATH := &"shape_kind_capsule_path"
+const SHAPE_KIND_SPLINE_CAPSULE_PATH := &"shape_kind_spline_capsule_path"
 
 const SEED_ROLE_NONE := &"seed_role_none"
 const SEED_ROLE_SHIELD_FIXED_HANDLE := &"seed_role_shield_fixed_handle"
@@ -63,9 +64,10 @@ func normalize() -> void:
 		placement_policy = ForgeV2VolumeStrokeScript.PLACEMENT_REPLACE_EXISTING
 	if body_kind == BODY_KIND_PLATFORM_SEED:
 		placement_policy = ForgeV2VolumeStrokeScript.PLACEMENT_EMPTY_ONLY
-	shape_kind = SHAPE_KIND_CAPSULE_PATH
+	if shape_kind != SHAPE_KIND_SPLINE_CAPSULE_PATH:
+		shape_kind = SHAPE_KIND_CAPSULE_PATH
 	radius_meters = maxf(radius_meters, 0.001)
-	amount_ratio = clampf(amount_ratio, 0.01, 1.0)
+	amount_ratio = 1.0
 	_recalculate_rough_volume()
 
 func is_platform_seed() -> bool:
@@ -87,7 +89,7 @@ func get_signed_rough_material_units() -> float:
 	return float(get_signed_rough_material_centi_units()) / float(MATERIAL_UNIT_SCALE)
 
 func _recalculate_rough_volume() -> void:
-	var volume_meters_cubed: float = _calculate_capsule_path_volume_meters_cubed() * amount_ratio
+	var volume_meters_cubed: float = _calculate_capsule_path_volume_meters_cubed()
 	var cell_volume_meters_cubed: float = pow(REFERENCE_CELL_WORLD_SIZE_METERS, 3.0)
 	rough_volume_cell_equivalents = maxf(volume_meters_cubed / cell_volume_meters_cubed, 0.0)
 	var raw_material_units: float = rough_volume_cell_equivalents / CELL_EQUIVALENTS_PER_MATERIAL_UNIT

@@ -10,14 +10,14 @@ const FREEHAND_SMOOTHING_MAX := 10
 @export var contract_id: StringName = CONTRACT_ID
 @export var authoring_space_id: StringName = AUTHORING_SPACE_DIEGETIC_BOX
 @export var placement_mode: StringName = PLACEMENT_MODE_PLANE
-@export var local_min: Vector3 = Vector3(-1.55, -1.0, -0.9)
-@export var local_max: Vector3 = Vector3(1.55, 1.0, 0.9)
+@export var local_min: Vector3 = Vector3(-3.0, -1.0, -0.5)
+@export var local_max: Vector3 = Vector3(3.0, 1.0, 0.5)
 @export var placement_plane_z: float = 0.0
 @export var plane_visual_z_offset: float = -0.002
 @export var grid_visual_z_offset: float = 0.001
 @export var axes_visual_z_offset: float = 0.004
 @export var grid_step_meters: float = 0.125
-@export var fit_size_meters: float = 3.1
+@export var fit_size_meters: float = 6.0
 @export var stroke_sample_spacing_radius_ratio: float = 0.55
 @export var stroke_sample_spacing_min_meters: float = 0.00625
 @export_range(0, 10, 1) var freehand_smoothing_steps: int = 0
@@ -41,8 +41,8 @@ func normalize() -> void:
 		local_min.z = local_max.z
 		local_max.z = swap_z
 	if local_min.is_equal_approx(local_max):
-		local_min = Vector3(-1.55, -1.0, -0.9)
-		local_max = Vector3(1.55, 1.0, 0.9)
+		local_min = Vector3(-3.0, -1.0, -0.5)
+		local_max = Vector3(3.0, 1.0, 0.5)
 	placement_plane_z = clampf(placement_plane_z, local_min.z, local_max.z)
 	grid_step_meters = maxf(grid_step_meters, 0.001)
 	fit_size_meters = maxf(fit_size_meters, maxf(get_local_size().x, get_local_size().y))
@@ -70,6 +70,16 @@ func clamp_local_position(local_position: Vector3) -> Vector3:
 		clampf(local_position.x, local_min.x, local_max.x),
 		clampf(local_position.y, local_min.y, local_max.y),
 		clampf(local_position.z, local_min.z, local_max.z)
+	)
+
+func contains_local_position(local_position: Vector3, epsilon: float = 0.0001) -> bool:
+	return (
+		local_position.x >= local_min.x - epsilon
+		and local_position.x <= local_max.x + epsilon
+		and local_position.y >= local_min.y - epsilon
+		and local_position.y <= local_max.y + epsilon
+		and local_position.z >= local_min.z - epsilon
+		and local_position.z <= local_max.z + epsilon
 	)
 
 func resolve_stroke_sample_spacing(radius_meters: float) -> float:

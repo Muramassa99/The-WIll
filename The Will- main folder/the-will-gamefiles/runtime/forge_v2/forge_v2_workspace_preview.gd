@@ -108,6 +108,61 @@ func resolve_placement_target(screen_position: Vector2) -> Dictionary:
 func screen_to_workspace_local(screen_position: Vector2) -> Dictionary:
 	return resolve_placement_target(screen_position)
 
+func build_camera_facing_drag_plane(local_origin: Vector3) -> Dictionary:
+	if camera == null:
+		return {"valid": false}
+	var world_normal: Vector3 = camera.global_transform.basis.z.normalized()
+	if world_normal.length_squared() <= 0.000001:
+		return {"valid": false}
+	return {
+		"valid": true,
+		"origin_local": local_origin,
+		"normal_local": (global_transform.basis.inverse() * world_normal).normalized(),
+	}
+
+func screen_to_workspace_local_on_drag_plane(
+	screen_position: Vector2,
+	plane_origin_local: Vector3,
+	plane_normal_local: Vector3
+) -> Dictionary:
+	if camera == null or plane_normal_local.length_squared() <= 0.000001:
+		return {"valid": false}
+	var world_normal: Vector3 = (global_transform.basis * plane_normal_local).normalized()
+	var world_origin: Vector3 = global_transform * plane_origin_local
+	var hit_plane := Plane(world_normal, world_origin)
+	var ray_origin: Vector3 = camera.project_ray_origin(screen_position)
+	var ray_direction: Vector3 = camera.project_ray_normal(screen_position)
+	var intersection: Variant = hit_plane.intersects_ray(ray_origin, ray_direction)
+	if intersection == null:
+		return {"valid": false}
+	var raw_local_position: Vector3 = global_transform.affine_inverse() * (intersection as Vector3)
+	var local_position: Vector3 = _get_workspace_contract().clamp_local_position(raw_local_position)
+	return {
+		"valid": true,
+		"local_position": local_position,
+		"raw_local_position": raw_local_position,
+		"target_kind": &"camera_facing_drag_plane",
+	}
+
+func find_nearest_local_point_by_screen(
+	local_points: PackedVector3Array,
+	screen_position: Vector2,
+	max_distance_pixels: float
+) -> int:
+	if camera == null or local_points.is_empty() or max_distance_pixels <= 0.0:
+		return -1
+	var nearest_index := -1
+	var nearest_distance := max_distance_pixels
+	for point_index in range(local_points.size()):
+		var world_position: Vector3 = global_transform * local_points[point_index]
+		var projected_position: Vector2 = camera.unproject_position(world_position)
+		var distance := projected_position.distance_to(screen_position)
+		if distance > nearest_distance:
+			continue
+		nearest_distance = distance
+		nearest_index = point_index
+	return nearest_index
+
 func _build_scene() -> void:
 	if camera_pivot != null:
 		return

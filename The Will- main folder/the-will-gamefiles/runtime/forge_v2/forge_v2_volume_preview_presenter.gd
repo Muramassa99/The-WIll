@@ -27,7 +27,14 @@ var spline_preview_mesh_instance: MeshInstance3D = null
 var spline_csg_path: Path3D = null
 var spline_csg_polygon: CSGPolygon3D = null
 var csg_material_body_root: Node3D = null
+var csg_static_body_root: Node3D = null
+var csg_active_body_root: Node3D = null
 var placement_cursor_mesh_instance: MeshInstance3D = null
+var csg_static_zone_nodes: Dictionary = {}
+var csg_static_zone_signatures: Dictionary = {}
+var csg_static_zone_body_ids_by_key: Dictionary = {}
+var csg_static_body_zone_key_by_id: Dictionary = {}
+var csg_static_zones_initialized := false
 
 func _ready() -> void:
 	_ensure_preview_mesh_instance()
@@ -110,6 +117,10 @@ func _sync_preview_mesh(authoring_state: Resource) -> void:
 		preview_mesh_instance.visible = false
 		preview_mesh_instance.mesh = null
 		return
+	if _has_csg_material_body_records(authoring_state):
+		preview_mesh_instance.visible = false
+		preview_mesh_instance.mesh = null
+		return
 	var active_preview_records: Array = _collect_active_placement_preview_records(authoring_state)
 	if not active_preview_records.is_empty():
 		var active_preview_mesh: ArrayMesh = _build_preview_mesh(active_preview_records)
@@ -118,10 +129,6 @@ func _sync_preview_mesh(authoring_state: Resource) -> void:
 			preview_mesh_instance.material_override = _build_preview_material()
 			preview_mesh_instance.visible = true
 			return
-	if _has_csg_material_body_records(authoring_state):
-		preview_mesh_instance.visible = false
-		preview_mesh_instance.mesh = null
-		return
 	var volume_records: Array = authoring_state.get("material_bodies")
 	var preview_mesh: ArrayMesh = _build_preview_mesh(volume_records)
 	if preview_mesh == null or preview_mesh.get_surface_count() <= 0:
@@ -185,48 +192,154 @@ func _sync_csg_material_body_preview(authoring_state: Resource) -> void:
 	_ensure_csg_material_body_root()
 	if csg_material_body_root == null:
 		return
-	_clear_csg_material_body_root()
 	if authoring_state == null:
+		_clear_csg_material_body_root()
 		csg_material_body_root.visible = false
 		return
-	var material_groups: Dictionary = _collect_csg_material_body_groups(authoring_state)
-	if material_groups.is_empty():
-		csg_material_body_root.visible = false
+	var material_bodies: Array = _collect_active_csg_material_bodies(authoring_state)
+	var active_body_id := _get_active_placement_body_id()
+	var active_body_index := _find_body_index_by_id(material_bodies, active_body_id)
+	var static_bodies := _filter_body_list_excluding_id(material_bodies, active_body_id)
+	if active_body_index >= 0:
+		if not csg_static_zones_initialized:
+			_sync_static_csg_zones(static_bodies)
+		_apply_static_zone_visibility({})
+		_sync_active_csg_preview_body(material_bodies, active_body_index)
+	else:
+		_sync_static_csg_zones(static_bodies)
+		_apply_static_zone_visibility({})
+		_clear_node_children(csg_active_body_root)
+		if csg_active_body_root != null:
+			csg_active_body_root.visible = false
+	csg_material_body_root.visible = (
+		(csg_static_body_root != null and csg_static_body_root.visible)
+		or (csg_active_body_root != null and csg_active_body_root.visible)
+	)
+
+func _sync_static_csg_zones(static_bodies: Array) -> void:
+	if csg_static_body_root == null:
 		return
-	csg_material_body_root.visible = true
-	var group_index := 0
-	for material_variant_key: Variant in material_groups.keys():
-		var material_variant_id := StringName(material_variant_key)
-		var group_record: Dictionary = material_groups.get(material_variant_id, {}) as Dictionary
-		var combiner := CSGCombiner3D.new()
-		combiner.name = "MaterialUnion_%02d_%s" % [group_index, String(material_variant_id)]
-		combiner.operation = CSGShape3D.OPERATION_UNION
-		csg_material_body_root.add_child(combiner)
-		var body_shape_index := 0
-		var additive_body_shape_count := 0
-		var body_records: Array = group_record.get("body_records", []) as Array
-		for body_record_variant: Variant in body_records:
-			if not (body_record_variant is Dictionary):
-				continue
-			var body_record: Dictionary = body_record_variant as Dictionary
-			var body: Resource = body_record.get("body", null) as Resource
-			var clip_bodies: Array = body_record.get("clip_bodies", []) as Array
-			if _append_csg_clipped_body_shape(
-				combiner,
-				body,
-				clip_bodies,
-				material_variant_id,
-				body_shape_index
-			):
-				body_shape_index += 1
-				additive_body_shape_count += 1
-		combiner.visible = body_shape_index > 0
-		_configure_material_surface_collision(
+	csg_static_zones_initialized = true
+	var zones: Array = _build_csg_body_zones(static_bodies)
+	var next_zone_keys: Dictionary = {}
+	csg_static_zone_body_ids_by_key = {}
+	csg_static_body_zone_key_by_id = {}
+	for zone_variant: Variant in zones:
+		if not (zone_variant is Dictionary):
+			continue
+		var zone: Dictionary = zone_variant as Dictionary
+		var zone_key: String = String(zone.get("zone_key", ""))
+		if zone_key.is_empty():
+			continue
+		next_zone_keys[zone_key] = true
+		var primary_body_ids: Array = zone.get("primary_body_ids", []) as Array
+		csg_static_zone_body_ids_by_key[zone_key] = primary_body_ids
+		for body_id_variant: Variant in primary_body_ids:
+			csg_static_body_zone_key_by_id[StringName(body_id_variant)] = zone_key
+		var zone_signature: String = String(zone.get("signature", ""))
+		var zone_node: Node = csg_static_zone_nodes.get(zone_key, null) as Node
+		if (
+			zone_node == null
+			or not is_instance_valid(zone_node)
+			or String(csg_static_zone_signatures.get(zone_key, "")) != zone_signature
+		):
+			if zone_node != null and is_instance_valid(zone_node):
+				csg_static_body_root.remove_child(zone_node)
+				zone_node.free()
+			zone_node = _build_csg_zone_node(zone, true, "StaticZone")
+			csg_static_body_root.add_child(zone_node)
+			csg_static_zone_nodes[zone_key] = zone_node
+			csg_static_zone_signatures[zone_key] = zone_signature
+	var stale_zone_keys: Array = csg_static_zone_nodes.keys()
+	for stale_key_variant: Variant in stale_zone_keys:
+		var stale_key := String(stale_key_variant)
+		if next_zone_keys.has(stale_key):
+			continue
+		var stale_node: Node = csg_static_zone_nodes.get(stale_key, null) as Node
+		if stale_node != null and is_instance_valid(stale_node):
+			csg_static_body_root.remove_child(stale_node)
+			stale_node.free()
+		csg_static_zone_nodes.erase(stale_key)
+		csg_static_zone_signatures.erase(stale_key)
+	csg_static_body_root.visible = not zones.is_empty()
+
+func _sync_active_csg_preview_body(material_bodies: Array, active_body_index: int) -> void:
+	if csg_active_body_root == null:
+		return
+	_clear_node_children(csg_active_body_root)
+	if active_body_index < 0 or active_body_index >= material_bodies.size():
+		csg_active_body_root.visible = false
+		return
+	var active_body: Resource = material_bodies[active_body_index] as Resource
+	if active_body == null:
+		csg_active_body_root.visible = false
+		return
+	var material_variant_id := StringName(active_body.get("material_variant_id"))
+	var combiner := CSGCombiner3D.new()
+	combiner.name = "ActivePreview_%s" % String(material_variant_id)
+	combiner.operation = CSGShape3D.OPERATION_UNION
+	csg_active_body_root.add_child(combiner)
+	var appended := false
+	if not _is_remove_material_body(active_body):
+		appended = _append_csg_clipped_body_shape(
 			combiner,
+			active_body,
+			[],
 			material_variant_id,
-			additive_body_shape_count > 0 and body_shape_index > 0
+			0,
+			false
 		)
-		group_index += 1
+	else:
+		appended = _append_csg_body_shape(
+			combiner,
+			active_body,
+			material_variant_id,
+			false,
+			0
+		)
+	_configure_material_surface_collision(combiner, material_variant_id, false)
+	combiner.visible = appended
+	if not appended:
+		csg_active_body_root.visible = false
+		return
+	csg_active_body_root.visible = true
+
+func _build_csg_zone_node(
+	zone: Dictionary,
+	enable_collision: bool,
+	name_prefix: String
+) -> CSGCombiner3D:
+	var material_variant_id: StringName = StringName(zone.get("material_variant_id", StringName()))
+	var primary_body_ids: Array = zone.get("primary_body_ids", []) as Array
+	var combiner := CSGCombiner3D.new()
+	combiner.name = "%s_%s" % [name_prefix, String(zone.get("zone_key", String(material_variant_id)))]
+	combiner.operation = CSGShape3D.OPERATION_UNION
+	var body_shape_index := 0
+	var body_records: Array = zone.get("body_records", []) as Array
+	for body_record_variant: Variant in body_records:
+		if not (body_record_variant is Dictionary):
+			continue
+		var body_record: Dictionary = body_record_variant as Dictionary
+		var body: Resource = body_record.get("body", null) as Resource
+		var clip_bodies: Array = body_record.get("clip_bodies", []) as Array
+		var is_active_body := bool(body_record.get("is_active_body", false))
+		if _append_csg_clipped_body_shape(
+			combiner,
+			body,
+			clip_bodies,
+			material_variant_id,
+				body_shape_index,
+				false
+			):
+			body_shape_index += 1
+	combiner.visible = body_shape_index > 0
+	_configure_material_surface_collision(
+		combiner,
+		material_variant_id,
+		enable_collision and body_shape_index > 0,
+		_resolve_zone_collision_body_id(primary_body_ids)
+	)
+	return combiner
 
 func _ensure_preview_mesh_instance() -> void:
 	if preview_mesh_instance != null and is_instance_valid(preview_mesh_instance):
@@ -265,12 +378,30 @@ func _ensure_spline_csg_nodes() -> void:
 
 func _ensure_csg_material_body_root() -> void:
 	if csg_material_body_root != null and is_instance_valid(csg_material_body_root):
+		_ensure_csg_material_body_branch_roots()
 		return
 	csg_material_body_root = get_node_or_null("MaterialBodyCsgRoot") as Node3D
 	if csg_material_body_root == null:
 		csg_material_body_root = Node3D.new()
 		csg_material_body_root.name = "MaterialBodyCsgRoot"
 		add_child(csg_material_body_root)
+	_ensure_csg_material_body_branch_roots()
+
+func _ensure_csg_material_body_branch_roots() -> void:
+	if csg_material_body_root == null:
+		return
+	if csg_static_body_root == null or not is_instance_valid(csg_static_body_root):
+		csg_static_body_root = csg_material_body_root.get_node_or_null("StaticMaterialBodyCsgRoot") as Node3D
+		if csg_static_body_root == null:
+			csg_static_body_root = Node3D.new()
+			csg_static_body_root.name = "StaticMaterialBodyCsgRoot"
+			csg_material_body_root.add_child(csg_static_body_root)
+	if csg_active_body_root == null or not is_instance_valid(csg_active_body_root):
+		csg_active_body_root = csg_material_body_root.get_node_or_null("ActiveMaterialBodyCsgRoot") as Node3D
+		if csg_active_body_root == null:
+			csg_active_body_root = Node3D.new()
+			csg_active_body_root.name = "ActiveMaterialBodyCsgRoot"
+			csg_material_body_root.add_child(csg_active_body_root)
 
 func _clear_csg_material_body_root() -> void:
 	if csg_material_body_root == null:
@@ -278,11 +409,27 @@ func _clear_csg_material_body_root() -> void:
 	for child: Node in csg_material_body_root.get_children():
 		csg_material_body_root.remove_child(child)
 		child.free()
+	csg_static_body_root = null
+	csg_active_body_root = null
+	csg_static_zone_nodes = {}
+	csg_static_zone_signatures = {}
+	csg_static_zone_body_ids_by_key = {}
+	csg_static_body_zone_key_by_id = {}
+	csg_static_zones_initialized = false
+	_ensure_csg_material_body_branch_roots()
+
+func _clear_node_children(parent: Node) -> void:
+	if parent == null:
+		return
+	for child: Node in parent.get_children():
+		parent.remove_child(child)
+		child.free()
 
 func _configure_material_surface_collision(
 	shape: CSGShape3D,
 	material_variant_id: StringName,
-	enabled: bool
+	enabled: bool,
+	body_id: StringName = StringName()
 ) -> void:
 	if shape == null:
 		return
@@ -291,7 +438,7 @@ func _configure_material_surface_collision(
 	shape.collision_mask = 0
 	shape.set_meta("forge_v2_material_surface", enabled)
 	shape.set_meta("forge_v2_material_variant_id", material_variant_id)
-	shape.set_meta("forge_v2_body_id", StringName())
+	shape.set_meta("forge_v2_body_id", body_id)
 
 func _get_active_placement_body_id() -> StringName:
 	if active_stage_controller == null or not active_stage_controller.has_method("get_active_placement_body_id"):
@@ -322,13 +469,10 @@ func _has_csg_material_body_records(authoring_state: Resource) -> bool:
 	if authoring_state == null:
 		return false
 	var material_bodies: Array = authoring_state.get("material_bodies")
-	var active_body_id := _get_active_placement_body_id()
 	for body_variant: Variant in material_bodies:
 		if not (body_variant is Resource):
 			continue
 		var body: Resource = body_variant as Resource
-		if active_body_id != StringName() and StringName(body.get("body_id")) == active_body_id:
-			continue
 		if body.has_method("normalize"):
 			body.call("normalize")
 		if body.get("layer_active") is bool and not bool(body.get("layer_active")):
@@ -339,10 +483,14 @@ func _has_csg_material_body_records(authoring_state: Resource) -> bool:
 	return false
 
 func _collect_csg_material_body_groups(authoring_state: Resource) -> Dictionary:
-	var material_groups: Dictionary = {}
 	if authoring_state == null:
-		return material_groups
+		return {}
 	var material_bodies: Array = _collect_active_csg_material_bodies(authoring_state)
+	return _collect_csg_material_body_groups_from_bodies(material_bodies)
+
+func _collect_csg_material_body_groups_from_bodies(material_bodies: Array) -> Dictionary:
+	var material_groups: Dictionary = {}
+	var active_body_id := _get_active_placement_body_id()
 	for body_index in range(material_bodies.size()):
 		var body: Resource = material_bodies[body_index] as Resource
 		if _is_remove_material_body(body):
@@ -355,23 +503,308 @@ func _collect_csg_material_body_groups(authoring_state: Resource) -> Dictionary:
 		body_records.append({
 			"body": body,
 			"clip_bodies": _collect_csg_clip_bodies_for_add_body(material_bodies, body_index),
+			"is_active_body": active_body_id != StringName() and StringName(body.get("body_id")) == active_body_id,
 		})
 		group_record["body_records"] = body_records
 		material_groups[material_variant_id] = group_record
 	return material_groups
+
+func _find_body_index_by_id(material_bodies: Array, body_id: StringName) -> int:
+	if body_id == StringName():
+		return -1
+	for body_index in range(material_bodies.size()):
+		var body: Resource = material_bodies[body_index] as Resource
+		if body != null and StringName(body.get("body_id")) == body_id:
+			return body_index
+	return -1
+
+func _filter_body_list_excluding_id(material_bodies: Array, excluded_body_id: StringName) -> Array:
+	var filtered_bodies: Array = []
+	for body_variant: Variant in material_bodies:
+		if not (body_variant is Resource):
+			continue
+		var body: Resource = body_variant as Resource
+		if excluded_body_id != StringName() and StringName(body.get("body_id")) == excluded_body_id:
+			continue
+		filtered_bodies.append(body)
+	return filtered_bodies
+
+func _collect_direct_dirty_primary_body_ids(material_bodies: Array, active_body_index: int) -> Array[StringName]:
+	var dirty_body_ids: Array[StringName] = []
+	if active_body_index < 0 or active_body_index >= material_bodies.size():
+		return dirty_body_ids
+	var active_body: Resource = material_bodies[active_body_index] as Resource
+	var active_bounds: AABB = _build_csg_body_bounds(active_body)
+	for body_index in range(material_bodies.size()):
+		if body_index == active_body_index:
+			continue
+		var body: Resource = material_bodies[body_index] as Resource
+		if body == null or _is_remove_material_body(body):
+			continue
+		if _csg_body_bounds_intersect(active_bounds, _build_csg_body_bounds(body)):
+			dirty_body_ids.append(StringName(body.get("body_id")))
+	return dirty_body_ids
+
+func _resolve_static_zone_keys_for_body_ids(body_ids: Array[StringName]) -> Dictionary:
+	var zone_keys: Dictionary = {}
+	for body_id: StringName in body_ids:
+		var zone_key := String(csg_static_body_zone_key_by_id.get(body_id, ""))
+		if not zone_key.is_empty():
+			zone_keys[zone_key] = true
+	return zone_keys
+
+func _resolve_static_primary_body_ids_for_zone_keys(zone_keys: Dictionary) -> Array[StringName]:
+	var body_ids: Array[StringName] = []
+	for zone_key_variant: Variant in zone_keys.keys():
+		var zone_key := String(zone_key_variant)
+		var zone_body_ids: Array = csg_static_zone_body_ids_by_key.get(zone_key, []) as Array
+		for body_id_variant: Variant in zone_body_ids:
+			var body_id := StringName(body_id_variant)
+			if not body_ids.has(body_id):
+				body_ids.append(body_id)
+	return body_ids
+
+func _apply_static_zone_visibility(hidden_zone_keys: Dictionary) -> void:
+	if csg_static_body_root == null:
+		return
+	var has_visible_zone := false
+	for zone_key_variant: Variant in csg_static_zone_nodes.keys():
+		var zone_key := String(zone_key_variant)
+		var zone_node: Node = csg_static_zone_nodes.get(zone_key, null) as Node
+		if zone_node == null or not is_instance_valid(zone_node):
+			continue
+		var is_visible := not hidden_zone_keys.has(zone_key)
+		zone_node.visible = is_visible
+		has_visible_zone = has_visible_zone or is_visible
+	csg_static_body_root.visible = has_visible_zone
+
+func _collect_active_dirty_zone_bodies(
+	material_bodies: Array,
+	active_body_index: int,
+	dirty_primary_body_ids: Array[StringName]
+) -> Array:
+	var dirty_bodies: Array = []
+	if active_body_index < 0 or active_body_index >= material_bodies.size():
+		return dirty_bodies
+	var dirty_bounds: Array[AABB] = []
+	var active_body: Resource = material_bodies[active_body_index] as Resource
+	if active_body == null:
+		return dirty_bodies
+	dirty_bodies.append(active_body)
+	dirty_bounds.append(_build_csg_body_bounds(active_body))
+	for body_variant: Variant in material_bodies:
+		if not (body_variant is Resource):
+			continue
+		var body: Resource = body_variant as Resource
+		var body_id := StringName(body.get("body_id"))
+		if body_id == StringName(active_body.get("body_id")):
+			continue
+		if dirty_primary_body_ids.has(body_id):
+			dirty_bodies.append(body)
+			dirty_bounds.append(_build_csg_body_bounds(body))
+	for body_variant: Variant in material_bodies:
+		if not (body_variant is Resource):
+			continue
+		var body: Resource = body_variant as Resource
+		if dirty_bodies.has(body):
+			continue
+		if _csg_body_intersects_any_bounds(body, dirty_bounds):
+			dirty_bodies.append(body)
+	return dirty_bodies
+
+func _build_csg_body_zones(material_bodies: Array) -> Array:
+	var records: Array = []
+	var active_body_id := _get_active_placement_body_id()
+	for body_index in range(material_bodies.size()):
+		var body: Resource = material_bodies[body_index] as Resource
+		if body == null or _is_remove_material_body(body):
+			continue
+		records.append({
+			"body": body,
+			"body_index": body_index,
+			"material_variant_id": StringName(body.get("material_variant_id")),
+			"bounds": _build_csg_body_bounds(body),
+			"clip_bodies": _collect_csg_clip_bodies_for_add_body(material_bodies, body_index),
+			"is_active_body": active_body_id != StringName() and StringName(body.get("body_id")) == active_body_id,
+		})
+	if records.is_empty():
+		return []
+	var parents: Array[int] = []
+	for record_index in range(records.size()):
+		parents.append(record_index)
+	for first_index in range(records.size()):
+		var first_record: Dictionary = records[first_index] as Dictionary
+		for second_index in range(first_index + 1, records.size()):
+			var second_record: Dictionary = records[second_index] as Dictionary
+			if StringName(first_record.get("material_variant_id")) != StringName(second_record.get("material_variant_id")):
+				continue
+			if _csg_bounds_intersect(
+				first_record.get("bounds", AABB()) as AABB,
+				second_record.get("bounds", AABB()) as AABB
+			):
+				_union_zone_parent(parents, first_index, second_index)
+	var grouped_records: Dictionary = {}
+	for record_index in range(records.size()):
+		var root_index := _find_zone_parent(parents, record_index)
+		var group_records: Array = grouped_records.get(root_index, []) as Array
+		group_records.append(records[record_index])
+		grouped_records[root_index] = group_records
+	var zones: Array = []
+	for root_key: Variant in grouped_records.keys():
+		var group_records: Array = grouped_records[root_key] as Array
+		zones.append(_build_csg_zone_from_records(group_records))
+	return zones
+
+func _build_csg_zone_from_records(records: Array) -> Dictionary:
+	var primary_body_ids: Array[StringName] = []
+	var body_records: Array = []
+	var material_variant_id := StringName()
+	for record_variant: Variant in records:
+		if not (record_variant is Dictionary):
+			continue
+		var record: Dictionary = record_variant as Dictionary
+		var body: Resource = record.get("body", null) as Resource
+		if body == null:
+			continue
+		material_variant_id = StringName(record.get("material_variant_id", material_variant_id))
+		var body_id := StringName(body.get("body_id"))
+		if not primary_body_ids.has(body_id):
+			primary_body_ids.append(body_id)
+		body_records.append({
+			"body": body,
+			"clip_bodies": record.get("clip_bodies", []) as Array,
+			"is_active_body": bool(record.get("is_active_body", false)),
+		})
+	primary_body_ids.sort()
+	var id_parts: PackedStringArray = []
+	for body_id: StringName in primary_body_ids:
+		id_parts.append(String(body_id))
+	var zone_key := "%s:%s" % [String(material_variant_id), ",".join(id_parts)]
+	return {
+		"zone_key": zone_key,
+		"material_variant_id": material_variant_id,
+		"primary_body_ids": primary_body_ids,
+		"body_records": body_records,
+		"signature": _build_csg_zone_signature(body_records),
+	}
+
+func _build_csg_zone_signature(body_records: Array) -> String:
+	var parts: PackedStringArray = []
+	for body_record_variant: Variant in body_records:
+		if not (body_record_variant is Dictionary):
+			continue
+		var body_record: Dictionary = body_record_variant as Dictionary
+		var body: Resource = body_record.get("body", null) as Resource
+		var clip_bodies: Array = body_record.get("clip_bodies", []) as Array
+		var clip_parts: PackedStringArray = []
+		for clip_body_variant: Variant in clip_bodies:
+			if clip_body_variant is Resource:
+				clip_parts.append(_build_csg_body_signature(clip_body_variant as Resource))
+		parts.append("%s clips[%s]" % [_build_csg_body_signature(body), " / ".join(clip_parts)])
+	return "\n".join(parts)
+
+func _resolve_zone_collision_body_id(primary_body_ids: Array) -> StringName:
+	if primary_body_ids.size() == 1:
+		return StringName(primary_body_ids[0])
+	return StringName()
+
+func _find_zone_parent(parents: Array[int], index: int) -> int:
+	var current := index
+	while parents[current] != current:
+		current = parents[current]
+	var root := current
+	current = index
+	while parents[current] != current:
+		var next := parents[current]
+		parents[current] = root
+		current = next
+	return root
+
+func _union_zone_parent(parents: Array[int], first_index: int, second_index: int) -> void:
+	var first_root := _find_zone_parent(parents, first_index)
+	var second_root := _find_zone_parent(parents, second_index)
+	if first_root != second_root:
+		parents[second_root] = first_root
+
+func _build_csg_body_bounds(body: Resource) -> AABB:
+	if body == null:
+		return AABB()
+	var path_points: PackedVector3Array = body.get("path_points")
+	if path_points.is_empty():
+		return AABB()
+	var min_point: Vector3 = path_points[0]
+	var max_point: Vector3 = path_points[0]
+	for point: Vector3 in path_points:
+		min_point.x = minf(min_point.x, point.x)
+		min_point.y = minf(min_point.y, point.y)
+		min_point.z = minf(min_point.z, point.z)
+		max_point.x = maxf(max_point.x, point.x)
+		max_point.y = maxf(max_point.y, point.y)
+		max_point.z = maxf(max_point.z, point.z)
+	var radius := maxf(float(body.get("radius_meters")), 0.001)
+	var margin := Vector3.ONE * radius
+	return AABB(min_point - margin, (max_point - min_point) + (margin * 2.0))
+
+func _csg_body_intersects_any_bounds(body: Resource, bounds_list: Array[AABB]) -> bool:
+	var body_bounds := _build_csg_body_bounds(body)
+	for bounds: AABB in bounds_list:
+		if _csg_bounds_intersect(body_bounds, bounds):
+			return true
+	return false
+
+func _csg_body_bounds_intersect(first_bounds: AABB, second_bounds: AABB) -> bool:
+	return _csg_bounds_intersect(first_bounds, second_bounds)
+
+func _csg_bounds_intersect(first_bounds: AABB, second_bounds: AABB) -> bool:
+	var margin := 0.0001
+	var grown_first := AABB(
+		first_bounds.position - (Vector3.ONE * margin),
+		first_bounds.size + (Vector3.ONE * margin * 2.0)
+	)
+	var grown_second := AABB(
+		second_bounds.position - (Vector3.ONE * margin),
+		second_bounds.size + (Vector3.ONE * margin * 2.0)
+	)
+	return grown_first.intersects(grown_second)
+
+func _build_csg_body_list_signature(material_bodies: Array) -> String:
+	if material_bodies.is_empty():
+		return ""
+	var parts: PackedStringArray = []
+	for body_variant: Variant in material_bodies:
+		if body_variant is Resource:
+			parts.append(_build_csg_body_signature(body_variant as Resource))
+	return "\n".join(parts)
+
+func _build_csg_body_signature(body: Resource) -> String:
+	if body == null:
+		return ""
+	var path_points: PackedVector3Array = body.get("path_points")
+	var point_parts: PackedStringArray = []
+	for point: Vector3 in path_points:
+		point_parts.append("%.5f,%.5f,%.5f" % [point.x, point.y, point.z])
+	return "|".join([
+		String(body.get("body_id")),
+		String(body.get("material_variant_id")),
+		String(body.get("operation_mode")),
+		String(body.get("placement_policy")),
+		String(body.get("shape_kind")),
+		str(float(body.get("radius_meters"))),
+		str(StringName(body.get("committed_layer_id"))),
+		str(bool(body.get("layer_active"))),
+		str(float(body.get("updated_timestamp"))),
+		";".join(point_parts),
+	])
 
 func _collect_active_csg_material_bodies(authoring_state: Resource) -> Array:
 	var active_bodies: Array = []
 	if authoring_state == null:
 		return active_bodies
 	var material_bodies: Array = authoring_state.get("material_bodies")
-	var active_body_id := _get_active_placement_body_id()
 	for body_variant: Variant in material_bodies:
 		if not (body_variant is Resource):
 			continue
 		var body: Resource = body_variant as Resource
-		if active_body_id != StringName() and StringName(body.get("body_id")) == active_body_id:
-			continue
 		if body.has_method("normalize"):
 			body.call("normalize")
 		if body.get("layer_active") is bool and not bool(body.get("layer_active")):
@@ -387,15 +820,22 @@ func _collect_csg_clip_bodies_for_add_body(material_bodies: Array, body_index: i
 	if body_index < 0 or body_index >= material_bodies.size():
 		return clip_bodies
 	var body: Resource = material_bodies[body_index] as Resource
+	var body_bounds := _build_csg_body_bounds(body)
 	var material_variant_id: StringName = StringName(body.get("material_variant_id"))
 	if StringName(body.get("placement_policy")) == ForgeV2VolumeStrokeScript.PLACEMENT_EMPTY_ONLY:
 		for previous_index in range(body_index):
 			var previous_body: Resource = material_bodies[previous_index] as Resource
-			if previous_body != null and not _is_remove_material_body(previous_body):
+			if (
+				previous_body != null
+				and not _is_remove_material_body(previous_body)
+				and _csg_body_bounds_intersect(body_bounds, _build_csg_body_bounds(previous_body))
+			):
 				clip_bodies.append(previous_body)
 	for next_index in range(body_index + 1, material_bodies.size()):
 		var next_body: Resource = material_bodies[next_index] as Resource
 		if next_body == null:
+			continue
+		if not _csg_body_bounds_intersect(body_bounds, _build_csg_body_bounds(next_body)):
 			continue
 		if _is_remove_material_body(next_body):
 			clip_bodies.append(next_body)
@@ -417,7 +857,8 @@ func _append_csg_clipped_body_shape(
 	body: Resource,
 	clip_bodies: Array,
 	material_variant_id: StringName,
-	body_shape_index: int
+	body_shape_index: int,
+	enable_collision: bool
 ) -> bool:
 	if parent == null or body == null:
 		return false
@@ -438,6 +879,12 @@ func _append_csg_clipped_body_shape(
 		if _append_csg_body_shape(body_combiner, clip_body, material_variant_id, true, child_shape_index):
 			child_shape_index += 1
 	body_combiner.visible = true
+	_configure_material_surface_collision(
+		body_combiner,
+		material_variant_id,
+		enable_collision,
+		StringName(body.get("body_id"))
+	)
 	return true
 
 func _append_csg_body_shape(
@@ -838,12 +1285,12 @@ func _build_spline_preview_material() -> StandardMaterial3D:
 func _build_csg_body_material(material_variant_id: StringName, is_subtraction: bool) -> StandardMaterial3D:
 	var base_color := Color(0.95, 0.22, 0.18, 0.78) if is_subtraction else _resolve_material_color(material_variant_id)
 	if not is_subtraction:
-		base_color.a = 0.88
+		base_color.a = 1.0
 	var material := StandardMaterial3D.new()
 	material.albedo_color = base_color
 	material.emission_enabled = true
 	material.emission = base_color.darkened(0.35)
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA if is_subtraction else BaseMaterial3D.TRANSPARENCY_DISABLED
 	material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	material.roughness = 0.54
 	material.metallic = 0.12 if not is_subtraction else 0.0

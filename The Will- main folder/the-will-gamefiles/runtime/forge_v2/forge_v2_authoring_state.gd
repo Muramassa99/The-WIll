@@ -104,6 +104,7 @@ func normalize() -> void:
 	schema_id = SCHEMA_ID
 	if draft_id == StringName():
 		draft_id = StringName("v2_draft_%s" % str(Time.get_unix_time_from_system()))
+	var had_valid_material_ledger := material_ledger != null and material_ledger.has_method("rebuild_from_layers")
 	if project_name.strip_edges().is_empty():
 		project_name = "Stage 1 V2 Draft"
 	if created_timestamp <= 0.0:
@@ -134,7 +135,8 @@ func normalize() -> void:
 	_normalize_spline_line()
 	_normalize_forge_layers()
 	_ensure_material_ledger()
-	_rebuild_material_ledger()
+	if not had_valid_material_ledger and not forge_layers.is_empty():
+		_rebuild_material_ledger()
 	_normalize_selected_material_body_id()
 
 func set_builder_path(next_builder_path_id: StringName, next_builder_component_id: StringName = StringName()) -> void:
@@ -429,6 +431,15 @@ func get_spline_line_summary() -> Dictionary:
 
 func commit_pending_material_bodies_as_layer() -> Resource:
 	var pending_bodies: Array[Resource] = _collect_pending_user_material_bodies()
+	return _commit_material_bodies_as_layer(pending_bodies)
+
+func commit_material_body_as_layer(body_id: StringName) -> Resource:
+	var body: Resource = _find_editable_material_body(body_id)
+	if body == null:
+		return null
+	return _commit_material_bodies_as_layer([body])
+
+func _commit_material_bodies_as_layer(pending_bodies: Array[Resource]) -> Resource:
 	if pending_bodies.is_empty():
 		return null
 	var committed_bodies: Array[Resource] = _collect_committed_active_user_material_bodies()

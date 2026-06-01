@@ -259,9 +259,12 @@ func finish_placement_stroke(local_position: Vector3 = Vector3.ZERO, has_final_p
 
 func finish_material_body_path(local_position: Vector3 = Vector3.ZERO, has_final_position: bool = false) -> bool:
 	var had_active_body := active_placement_body_id != StringName()
+	var completed_body_id := active_placement_body_id
 	var changed := false
+	var committed := false
+	var state: Resource = null
 	if had_active_body and has_final_position:
-		var state: Resource = ensure_authoring_state(default_project_name)
+		state = ensure_authoring_state(default_project_name)
 		var sample_spacing: float = ensure_workspace_contract().resolve_stroke_sample_spacing(_get_active_brush_radius_meters())
 		changed = bool(state.call(
 			"append_point_to_material_body",
@@ -273,10 +276,15 @@ func finish_material_body_path(local_position: Vector3 = Vector3.ZERO, has_final
 		placement_cursor_local_position = local_position
 		placement_cursor_valid = true
 	active_placement_body_id = StringName()
-	if changed or had_active_body:
+	if had_active_body:
+		if state == null:
+			state = ensure_authoring_state(default_project_name)
+		if state.has_method("commit_material_body_as_layer"):
+			committed = state.call("commit_material_body_as_layer", completed_body_id) != null
+	if changed or had_active_body or committed:
 		_emit_state_changed()
 	_emit_placement_cursor_changed()
-	return changed or had_active_body
+	return changed or had_active_body or committed
 
 func get_active_placement_body_id() -> StringName:
 	return active_placement_body_id

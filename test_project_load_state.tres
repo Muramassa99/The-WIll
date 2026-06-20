@@ -1,0 +1,650 @@
+[gd_resource type="Resource" script_class="PlayerForgeWipLibraryState" format=3]
+
+[ext_resource type="Script" path="res://core/models/crafted_item_wip.gd" id="1_qeahx"]
+[ext_resource type="Script" path="res://core/models/player_forge_wip_library_state.gd" id="2_eaoly"]
+[ext_resource type="Script" path="res://core/models/combat_animation_motion_node.gd" id="2_kfgjv"]
+[ext_resource type="Script" path="res://core/models/combat_animation_draft.gd" id="3_34ovy"]
+[ext_resource type="Script" path="res://core/models/combat_animation_station_state.gd" id="4_8h4bm"]
+[ext_resource type="Script" path="res://core/atoms/layer_atom.gd" id="5_2rtpn"]
+
+[sub_resource type="Resource" id="Resource_kfgjv"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+
+[sub_resource type="Resource" id="Resource_34ovy"]
+script = ExtResource("3_34ovy")
+draft_id = &"idle_combat_draft"
+display_name = "Combat Idle"
+draft_kind = &"draft_idle"
+context_id = &"idle_combat"
+motion_node_chain = Array[Resource]([SubResource("Resource_kfgjv")])
+preview_loop_enabled = true
+
+[sub_resource type="Resource" id="Resource_8h4bm"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_position_origin_id = &"StowAnchorOrigin"
+pommel_position_origin_id = &"StowAnchorOrigin"
+
+[sub_resource type="Resource" id="Resource_2rtpn"]
+script = ExtResource("3_34ovy")
+draft_id = &"idle_noncombat_draft"
+display_name = "Noncombat Idle"
+draft_kind = &"draft_idle"
+context_id = &"idle_noncombat"
+motion_node_chain = Array[Resource]([SubResource("Resource_8h4bm")])
+preview_loop_enabled = true
+
+[sub_resource type="Resource" id="Resource_50ue3"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_3035e"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_jqaad"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_block_draft"
+display_name = "Block"
+owning_skill_id = &"skill_block"
+legal_slot_id = &"skill_block"
+motion_node_chain = Array[Resource]([SubResource("Resource_50ue3"), SubResource("Resource_3035e")])
+
+[sub_resource type="Resource" id="Resource_udar5"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_0gi21"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_oi3s1"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_1_draft"
+display_name = "Skill Slot 1"
+owning_skill_id = &"skill_slot_1"
+legal_slot_id = &"skill_slot_1"
+motion_node_chain = Array[Resource]([SubResource("Resource_udar5"), SubResource("Resource_0gi21")])
+
+[sub_resource type="Resource" id="Resource_uikkf"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_j1l10"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_0vva5"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_10_draft"
+display_name = "Skill Slot 10"
+owning_skill_id = &"skill_slot_10"
+legal_slot_id = &"skill_slot_10"
+motion_node_chain = Array[Resource]([SubResource("Resource_uikkf"), SubResource("Resource_j1l10")])
+
+[sub_resource type="Resource" id="Resource_2jj6l"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_7g4jg"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_b8l3h"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_11_draft"
+display_name = "Skill Slot 11"
+owning_skill_id = &"skill_slot_11"
+legal_slot_id = &"skill_slot_11"
+motion_node_chain = Array[Resource]([SubResource("Resource_2jj6l"), SubResource("Resource_7g4jg")])
+
+[sub_resource type="Resource" id="Resource_bulao"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_3h01u"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_jjdvm"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_12_draft"
+display_name = "Skill Slot 12"
+owning_skill_id = &"skill_slot_12"
+legal_slot_id = &"skill_slot_12"
+motion_node_chain = Array[Resource]([SubResource("Resource_bulao"), SubResource("Resource_3h01u")])
+
+[sub_resource type="Resource" id="Resource_djdt7"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_o8x55"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_dxt6i"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_2_draft"
+display_name = "Skill Slot 2"
+owning_skill_id = &"skill_slot_2"
+legal_slot_id = &"skill_slot_2"
+motion_node_chain = Array[Resource]([SubResource("Resource_djdt7"), SubResource("Resource_o8x55")])
+
+[sub_resource type="Resource" id="Resource_8mlhb"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_oivh4"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_s2141"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_3_draft"
+display_name = "Skill Slot 3"
+owning_skill_id = &"skill_slot_3"
+legal_slot_id = &"skill_slot_3"
+motion_node_chain = Array[Resource]([SubResource("Resource_8mlhb"), SubResource("Resource_oivh4")])
+
+[sub_resource type="Resource" id="Resource_cmgr0"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_88nkh"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_dgupb"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_4_draft"
+display_name = "Skill Slot 4"
+owning_skill_id = &"skill_slot_4"
+legal_slot_id = &"skill_slot_4"
+motion_node_chain = Array[Resource]([SubResource("Resource_cmgr0"), SubResource("Resource_88nkh")])
+
+[sub_resource type="Resource" id="Resource_d64g7"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_ivdru"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_e0ysi"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_5_draft"
+display_name = "Skill Slot 5"
+owning_skill_id = &"skill_slot_5"
+legal_slot_id = &"skill_slot_5"
+motion_node_chain = Array[Resource]([SubResource("Resource_d64g7"), SubResource("Resource_ivdru")])
+
+[sub_resource type="Resource" id="Resource_f40tu"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_yd18b"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_7ts3f"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_6_draft"
+display_name = "Skill Slot 6"
+owning_skill_id = &"skill_slot_6"
+legal_slot_id = &"skill_slot_6"
+motion_node_chain = Array[Resource]([SubResource("Resource_f40tu"), SubResource("Resource_yd18b")])
+
+[sub_resource type="Resource" id="Resource_lpqim"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_agutt"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_ryuql"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_7_draft"
+display_name = "Skill Slot 7"
+owning_skill_id = &"skill_slot_7"
+legal_slot_id = &"skill_slot_7"
+motion_node_chain = Array[Resource]([SubResource("Resource_lpqim"), SubResource("Resource_agutt")])
+
+[sub_resource type="Resource" id="Resource_fs33x"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_a0pie"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_tmerh"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_8_draft"
+display_name = "Skill Slot 8"
+owning_skill_id = &"skill_slot_8"
+legal_slot_id = &"skill_slot_8"
+motion_node_chain = Array[Resource]([SubResource("Resource_fs33x"), SubResource("Resource_a0pie")])
+
+[sub_resource type="Resource" id="Resource_1c2jn"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_bof6v"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_e46yw"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_9_draft"
+display_name = "Skill Slot 9"
+owning_skill_id = &"skill_slot_9"
+legal_slot_id = &"skill_slot_9"
+motion_node_chain = Array[Resource]([SubResource("Resource_1c2jn"), SubResource("Resource_bof6v")])
+
+[sub_resource type="Resource" id="Resource_lxvqd"]
+script = ExtResource("4_8h4bm")
+selected_skill_id = &"skill_slot_1"
+idle_drafts = Array[Resource]([SubResource("Resource_34ovy"), SubResource("Resource_2rtpn")])
+skill_drafts = Array[Resource]([SubResource("Resource_jqaad"), SubResource("Resource_oi3s1"), SubResource("Resource_0vva5"), SubResource("Resource_b8l3h"), SubResource("Resource_jjdvm"), SubResource("Resource_dxt6i"), SubResource("Resource_s2141"), SubResource("Resource_dgupb"), SubResource("Resource_e0ysi"), SubResource("Resource_7ts3f"), SubResource("Resource_ryuql"), SubResource("Resource_tmerh"), SubResource("Resource_e46yw")])
+default_skill_package_initialized = true
+
+[sub_resource type="Resource" id="Resource_mlt6p"]
+script = ExtResource("1_qeahx")
+wip_id = &"player_wip_1778352567.704_1"
+forge_project_name = "Alpha Sword"
+forge_project_notes = "alpha notes"
+creator_id = &"project_load_verifier"
+combat_animation_station_state = SubResource("Resource_lxvqd")
+forge_intent = &"intent_melee"
+equipment_context = &"ctx_weapon"
+
+[sub_resource type="Resource" id="Resource_u7smd"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+
+[sub_resource type="Resource" id="Resource_ep1ir"]
+script = ExtResource("3_34ovy")
+draft_id = &"idle_combat_draft"
+display_name = "Combat Idle"
+draft_kind = &"draft_idle"
+context_id = &"idle_combat"
+motion_node_chain = Array[Resource]([SubResource("Resource_u7smd")])
+preview_loop_enabled = true
+
+[sub_resource type="Resource" id="Resource_xjgl0"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_position_origin_id = &"StowAnchorOrigin"
+pommel_position_origin_id = &"StowAnchorOrigin"
+
+[sub_resource type="Resource" id="Resource_do1jy"]
+script = ExtResource("3_34ovy")
+draft_id = &"idle_noncombat_draft"
+display_name = "Noncombat Idle"
+draft_kind = &"draft_idle"
+context_id = &"idle_noncombat"
+motion_node_chain = Array[Resource]([SubResource("Resource_xjgl0")])
+preview_loop_enabled = true
+
+[sub_resource type="Resource" id="Resource_du3by"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_fl4wh"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_6rxsb"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_block_draft"
+display_name = "Block"
+owning_skill_id = &"skill_block"
+legal_slot_id = &"skill_block"
+motion_node_chain = Array[Resource]([SubResource("Resource_du3by"), SubResource("Resource_fl4wh")])
+
+[sub_resource type="Resource" id="Resource_u450a"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_on1qs"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_mijms"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_1_draft"
+display_name = "Skill Slot 1"
+owning_skill_id = &"skill_slot_1"
+legal_slot_id = &"skill_slot_1"
+motion_node_chain = Array[Resource]([SubResource("Resource_u450a"), SubResource("Resource_on1qs")])
+
+[sub_resource type="Resource" id="Resource_jqc6l"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_ssakf"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_d6umw"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_10_draft"
+display_name = "Skill Slot 10"
+owning_skill_id = &"skill_slot_10"
+legal_slot_id = &"skill_slot_10"
+motion_node_chain = Array[Resource]([SubResource("Resource_jqc6l"), SubResource("Resource_ssakf")])
+
+[sub_resource type="Resource" id="Resource_6w4od"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_mohrd"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_hag3m"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_11_draft"
+display_name = "Skill Slot 11"
+owning_skill_id = &"skill_slot_11"
+legal_slot_id = &"skill_slot_11"
+motion_node_chain = Array[Resource]([SubResource("Resource_6w4od"), SubResource("Resource_mohrd")])
+
+[sub_resource type="Resource" id="Resource_7wmdv"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_mijh8"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_pwsrx"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_12_draft"
+display_name = "Skill Slot 12"
+owning_skill_id = &"skill_slot_12"
+legal_slot_id = &"skill_slot_12"
+motion_node_chain = Array[Resource]([SubResource("Resource_7wmdv"), SubResource("Resource_mijh8")])
+
+[sub_resource type="Resource" id="Resource_q3ebr"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_d0c4u"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_ryhyr"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_2_draft"
+display_name = "Skill Slot 2"
+owning_skill_id = &"skill_slot_2"
+legal_slot_id = &"skill_slot_2"
+motion_node_chain = Array[Resource]([SubResource("Resource_q3ebr"), SubResource("Resource_d0c4u")])
+
+[sub_resource type="Resource" id="Resource_43x5o"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_eu18n"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_vgyjm"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_3_draft"
+display_name = "Skill Slot 3"
+owning_skill_id = &"skill_slot_3"
+legal_slot_id = &"skill_slot_3"
+motion_node_chain = Array[Resource]([SubResource("Resource_43x5o"), SubResource("Resource_eu18n")])
+
+[sub_resource type="Resource" id="Resource_3ldlr"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_45qnt"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_h7fdc"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_4_draft"
+display_name = "Skill Slot 4"
+owning_skill_id = &"skill_slot_4"
+legal_slot_id = &"skill_slot_4"
+motion_node_chain = Array[Resource]([SubResource("Resource_3ldlr"), SubResource("Resource_45qnt")])
+
+[sub_resource type="Resource" id="Resource_qk5y4"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_v6ppb"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_ls14o"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_5_draft"
+display_name = "Skill Slot 5"
+owning_skill_id = &"skill_slot_5"
+legal_slot_id = &"skill_slot_5"
+motion_node_chain = Array[Resource]([SubResource("Resource_qk5y4"), SubResource("Resource_v6ppb")])
+
+[sub_resource type="Resource" id="Resource_qqk6b"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_smbrd"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_bxg2s"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_6_draft"
+display_name = "Skill Slot 6"
+owning_skill_id = &"skill_slot_6"
+legal_slot_id = &"skill_slot_6"
+motion_node_chain = Array[Resource]([SubResource("Resource_qqk6b"), SubResource("Resource_smbrd")])
+
+[sub_resource type="Resource" id="Resource_ewgie"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_ojxip"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_if5qx"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_7_draft"
+display_name = "Skill Slot 7"
+owning_skill_id = &"skill_slot_7"
+legal_slot_id = &"skill_slot_7"
+motion_node_chain = Array[Resource]([SubResource("Resource_ewgie"), SubResource("Resource_ojxip")])
+
+[sub_resource type="Resource" id="Resource_2e4uf"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_ktmsj"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_5o3o3"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_8_draft"
+display_name = "Skill Slot 8"
+owning_skill_id = &"skill_slot_8"
+legal_slot_id = &"skill_slot_8"
+motion_node_chain = Array[Resource]([SubResource("Resource_2e4uf"), SubResource("Resource_ktmsj")])
+
+[sub_resource type="Resource" id="Resource_fkipx"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_00"
+tip_curve_out_handle = Vector3(0, 0, -0.04)
+
+[sub_resource type="Resource" id="Resource_fmwje"]
+script = ExtResource("2_kfgjv")
+node_id = &"motion_node_01"
+node_index = 1
+tip_position_local = Vector3(0, 0, -0.12)
+tip_curve_in_handle = Vector3(0, 0, 0.04)
+pommel_position_local = Vector3(0, 0, -0.12)
+
+[sub_resource type="Resource" id="Resource_xvj8t"]
+script = ExtResource("3_34ovy")
+draft_id = &"skill_slot_9_draft"
+display_name = "Skill Slot 9"
+owning_skill_id = &"skill_slot_9"
+legal_slot_id = &"skill_slot_9"
+motion_node_chain = Array[Resource]([SubResource("Resource_fkipx"), SubResource("Resource_fmwje")])
+
+[sub_resource type="Resource" id="Resource_y7u0u"]
+script = ExtResource("4_8h4bm")
+selected_skill_id = &"skill_slot_1"
+idle_drafts = Array[Resource]([SubResource("Resource_ep1ir"), SubResource("Resource_do1jy")])
+skill_drafts = Array[Resource]([SubResource("Resource_6rxsb"), SubResource("Resource_mijms"), SubResource("Resource_d6umw"), SubResource("Resource_hag3m"), SubResource("Resource_pwsrx"), SubResource("Resource_ryhyr"), SubResource("Resource_vgyjm"), SubResource("Resource_h7fdc"), SubResource("Resource_ls14o"), SubResource("Resource_bxg2s"), SubResource("Resource_if5qx"), SubResource("Resource_5o3o3"), SubResource("Resource_xvj8t")])
+default_skill_package_initialized = true
+
+[sub_resource type="Resource" id="Resource_3wgej"]
+script = ExtResource("1_qeahx")
+wip_id = &"player_wip_1778352567.708_2"
+forge_project_name = "Beta Spear"
+forge_project_notes = "beta notes"
+creator_id = &"project_load_verifier"
+combat_animation_station_state = SubResource("Resource_y7u0u")
+forge_intent = &"intent_melee"
+equipment_context = &"ctx_weapon"
+
+[resource]
+script = ExtResource("2_eaoly")
+saved_wips = Array[ExtResource("1_qeahx")]([SubResource("Resource_mlt6p"), SubResource("Resource_3wgej")])
+selected_wip_id = &"player_wip_1778352567.704_1"
+save_file_path = "c:/WORKSPACE/test_project_load_state.tres"

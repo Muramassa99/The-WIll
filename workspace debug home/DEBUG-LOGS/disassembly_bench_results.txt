@@ -1,0 +1,16 @@
+ui_loaded=true
+layout_inside_1280x720=true
+panel_rect_1280x720=[P: (12.0, 12.0), S: (1256.0, 696.0)]
+viewport_rect_1280x720=[P: (0.0, 0.0), S: (1280.0, 720.0)]
+inventory_item_count_before=5
+preview_count_before=1
+selected_count_after_pick=1
+preview_count_after_pick=1
+disassemble_disabled_before=true
+disassemble_disabled_after_pick=true
+disassemble_disabled_after_check=false
+body_remaining_after_commit=4
+forge_wood_quantity_after_commit=24
+layout_inside_1024x576=true
+panel_rect_1024x576=[P: (12.0, 12.0), S: (1000.0, 552.0)]
+viewport_rect_1024x576=[P: (0.0, 0.0), S: (1024.0, 576.0)]

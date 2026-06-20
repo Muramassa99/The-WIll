@@ -1,0 +1,100 @@
+[gd_resource type="Resource" script_class="BaseMaterialDef" format=3 uid="uid://dqssmwbs0ybkk"]
+
+[ext_resource type="Script" uid="uid://7m86a3xt1dlg" path="res://core/defs/base_material_def.gd" id="1_base_material"]
+[ext_resource type="Script" uid="uid://cl8i2kjpv5mh3" path="res://core/atoms/stat_line.gd" id="2_stat_line"]
+
+[sub_resource type="Resource" id="Stat_aspd"]
+script = ExtResource("2_stat_line")
+stat_id = &"aspd_pct_add"
+value = 0.06
+value_kind = 1
+
+[sub_resource type="Resource" id="Stat_move"]
+script = ExtResource("2_stat_line")
+stat_id = &"move_speed_pct_add"
+value = 0.04
+value_kind = 1
+
+[sub_resource type="Resource" id="Stat_draw_speed"]
+script = ExtResource("2_stat_line")
+stat_id = &"draw_speed_pct_add"
+value = 0.08
+value_kind = 1
+
+[sub_resource type="Resource" id="Stat_reload_speed"]
+script = ExtResource("2_stat_line")
+stat_id = &"reload_speed_pct_add"
+value = 0.06
+value_kind = 1
+
+[sub_resource type="Resource" id="Cap_flex"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_flex"
+value = 0.9
+
+[sub_resource type="Resource" id="Cap_launch"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_launch"
+value = 0.7
+
+[sub_resource type="Resource" id="Cap_control"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_control"
+value = 0.4
+
+[sub_resource type="Resource" id="Elem_life"]
+script = ExtResource("2_stat_line")
+stat_id = &"elem_life"
+value = 0.2
+
+[sub_resource type="Resource" id="Ctx_weapon"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_weapon"
+value = 0.5
+
+[sub_resource type="Resource" id="Ctx_ranged"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_ranged_support"
+value = 0.8
+
+[sub_resource type="Resource" id="Ctx_accessory"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_accessory"
+value = 0.5
+
+[sub_resource type="Resource" id="Fam_mobility"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_mobility"
+value = 0.7
+
+[sub_resource type="Resource" id="Fam_support"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_support"
+value = 0.5
+
+[resource]
+script = ExtResource("1_base_material")
+base_material_id = &"mat_tendon_base"
+display_name = "Tendon"
+material_family = &"organic"
+density_per_cell = 0.3
+hardness = 0.15
+toughness = 0.85
+elasticity = 0.95
+brittleness = 0.05
+thermal_stability = 0.3
+corrosion_resistance = 0.45
+salvage_priority = 1
+color_group = &"tan"
+albedo_color = Color(0.760784, 0.658824, 0.556863, 1)
+gloss_grade = 0.15
+base_stat_lines = Array[ExtResource("2_stat_line")]([SubResource("Stat_aspd"), SubResource("Stat_move"), SubResource("Stat_draw_speed"), SubResource("Stat_reload_speed")])
+capability_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Cap_flex"), SubResource("Cap_launch"), SubResource("Cap_control")])
+skill_family_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Fam_mobility"), SubResource("Fam_support")])
+elemental_affinity_lines = Array[ExtResource("2_stat_line")]([SubResource("Elem_life")])
+equipment_context_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Ctx_weapon"), SubResource("Ctx_ranged"), SubResource("Ctx_accessory")])
+can_be_anchor_material = true
+can_be_grip_profile = true
+can_be_joint_membrane = true
+can_be_bow_string = true
+can_be_bow_grip = true

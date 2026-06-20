@@ -1,0 +1,47 @@
+extends Resource
+class_name BakedProfile
+
+@export var profile_id: StringName = &""
+@export var total_mass: float = 0.0
+@export var total_volume_cell_equivalents: float = 0.0
+@export var center_of_mass: Vector3 = Vector3.ZERO
+@export var reach: float = 0.0
+@export var primary_grip_offset: Vector3 = Vector3.ZERO
+@export var primary_grip_contact_position: Vector3 = Vector3.ZERO
+@export var primary_grip_axis_ratio_from_span_start: float = 0.0
+@export var primary_grip_contact_percent: float = 0.0
+@export var primary_grip_com_side_position: Vector3 = Vector3.ZERO
+@export var primary_grip_far_side_position: Vector3 = Vector3.ZERO
+@export var primary_grip_span_start: Vector3 = Vector3.ZERO
+@export var primary_grip_span_end: Vector3 = Vector3.ZERO
+@export var primary_grip_span_length_voxels: int = 0
+@export var primary_grip_slide_axis: Vector3 = Vector3.ZERO
+@export var primary_grip_center_balance_valid: bool = false
+@export var primary_grip_center_balance_origin: Vector3 = Vector3.ZERO
+@export var primary_grip_center_balance_offset_percent: float = 0.0
+@export var primary_grip_two_hand_eligible: bool = false
+@export var primary_grip_two_hand_negative_limit: float = 0.0
+@export var primary_grip_two_hand_positive_limit: float = 0.0
+@export var front_heavy_score: float = 0.0
+@export var balance_score: float = 0.0
+@export var edge_score: float = 0.0
+@export var blunt_score: float = 0.0
+@export var pierce_score: float = 0.0
+@export var guard_score: float = 0.0
+@export var flex_score: float = 0.0
+@export var launch_score: float = 0.0
+@export var capability_scores: Dictionary[StringName, float] = {}
+@export var material_variant_mix: Dictionary = {}
+@export var material_volume_mix: Dictionary = {}
+@export var resolved_material_stat_lines: Array[StatLine] = []
+@export var resolved_capability_bias_lines: Array[StatLine] = []
+@export var resolved_skill_family_bias_lines: Array[StatLine] = []
+@export var resolved_elemental_affinity_lines: Array[StatLine] = []
+@export var resolved_equipment_context_bias_lines: Array[StatLine] = []
+@export var weapon_total_length_meters: float = 0.0
+@export var weapon_tip_point: Vector3 = Vector3.ZERO
+@export var weapon_pommel_point: Vector3 = Vector3.ZERO
+@export var weapon_tip_distance_meters: float = 0.0
+@export var weapon_pommel_distance_meters: float = 0.0
+@export var primary_grip_valid: bool = false
+@export var validation_error: String = ""

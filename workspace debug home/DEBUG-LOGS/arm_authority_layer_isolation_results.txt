@@ -1,0 +1,206 @@
+audit_scope=arm_authority_layer_isolation
+target_project_name=Test sword for animations
+source_library_loaded=true
+source_wip_found=true
+diagnostic_save_path=C:/WORKSPACE/test_artifacts/diagnose_arm_authority_layer_isolation_library.tres
+diagnostic_wip_id=player_wip_1776595437.824_5_authority_layer_isolation
+
+[baseline_all_authoring_layers]
+baseline_all_authoring_layers_open_ok=true
+baseline_all_authoring_layers_select_skill_slot_1_ok=true
+baseline_all_authoring_layers_reset_ok=true
+baseline_all_authoring_layers_actor_exists=true
+baseline_all_authoring_layers_enable_upper_body_authoring_pose=true
+baseline_all_authoring_layers_enable_contact_wrist_basis=true
+baseline_all_authoring_layers_enable_limb_twist_distribution=true
+baseline_all_authoring_layers_enable_support_arm_ik=true
+baseline_all_authoring_layers_enable_finger_grip_ik=true
+baseline_all_authoring_layers_dominant_grip_error_m=0.000000
+baseline_all_authoring_layers_collision_pose_legal=true
+baseline_all_authoring_layers_body_self_collision_legal=true
+baseline_all_authoring_layers_right_twist_requested_deg=-35.235616
+baseline_all_authoring_layers_right_forearm_twist_applied_deg=-27.483780
+baseline_all_authoring_layers_right_upperarm_twist_applied_deg=-7.751835
+baseline_all_authoring_layers_right_twist_bone_applied_count=4
+baseline_all_authoring_layers_CC_Base_R_Upperarm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=69.5454
+baseline_all_authoring_layers_CC_Base_R_UpperarmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=4.4509
+baseline_all_authoring_layers_CC_Base_R_UpperarmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=3.3004
+baseline_all_authoring_layers_CC_Base_R_Forearm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=18.9666
+baseline_all_authoring_layers_CC_Base_R_ForearmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=13.0613
+baseline_all_authoring_layers_CC_Base_R_ForearmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=15.2827
+baseline_all_authoring_layers_CC_Base_R_Hand_current_best=+Z current_dots={ "+X": 0.0898, "-X": -0.0898, "+Y": 0.6899, "-Y": -0.6899, "+Z": 0.7184, "-Z": -0.7184 } local_pose_delta_deg=44.7927
+
+[no_limb_twist_distribution]
+no_limb_twist_distribution_open_ok=true
+no_limb_twist_distribution_select_skill_slot_1_ok=true
+no_limb_twist_distribution_reset_ok=true
+no_limb_twist_distribution_actor_exists=true
+no_limb_twist_distribution_enable_upper_body_authoring_pose=true
+no_limb_twist_distribution_enable_contact_wrist_basis=true
+no_limb_twist_distribution_enable_limb_twist_distribution=false
+no_limb_twist_distribution_enable_support_arm_ik=true
+no_limb_twist_distribution_enable_finger_grip_ik=true
+no_limb_twist_distribution_dominant_grip_error_m=0.000000
+no_limb_twist_distribution_collision_pose_legal=true
+no_limb_twist_distribution_body_self_collision_legal=true
+no_limb_twist_distribution_right_twist_requested_deg=0.000000
+no_limb_twist_distribution_right_forearm_twist_applied_deg=0.000000
+no_limb_twist_distribution_right_upperarm_twist_applied_deg=0.000000
+no_limb_twist_distribution_right_twist_bone_applied_count=0
+no_limb_twist_distribution_CC_Base_R_Upperarm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=70.8191
+no_limb_twist_distribution_CC_Base_R_UpperarmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=0.5747
+no_limb_twist_distribution_CC_Base_R_UpperarmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=0.5747
+no_limb_twist_distribution_CC_Base_R_Forearm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=18.8448
+no_limb_twist_distribution_CC_Base_R_ForearmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=0.6807
+no_limb_twist_distribution_CC_Base_R_ForearmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=1.5410
+no_limb_twist_distribution_CC_Base_R_Hand_current_best=+Z current_dots={ "+X": 0.0792, "-X": -0.0792, "+Y": 0.6238, "-Y": -0.6238, "+Z": 0.7776, "-Z": -0.7776 } local_pose_delta_deg=47.8711
+
+[no_contact_wrist_basis]
+no_contact_wrist_basis_open_ok=true
+no_contact_wrist_basis_select_skill_slot_1_ok=true
+no_contact_wrist_basis_reset_ok=true
+no_contact_wrist_basis_actor_exists=true
+no_contact_wrist_basis_enable_upper_body_authoring_pose=true
+no_contact_wrist_basis_enable_contact_wrist_basis=false
+no_contact_wrist_basis_enable_limb_twist_distribution=true
+no_contact_wrist_basis_enable_support_arm_ik=true
+no_contact_wrist_basis_enable_finger_grip_ik=true
+no_contact_wrist_basis_dominant_grip_error_m=0.000000
+no_contact_wrist_basis_collision_pose_legal=false
+no_contact_wrist_basis_body_self_collision_legal=true
+no_contact_wrist_basis_right_twist_requested_deg=0.000000
+no_contact_wrist_basis_right_forearm_twist_applied_deg=0.000000
+no_contact_wrist_basis_right_upperarm_twist_applied_deg=0.000000
+no_contact_wrist_basis_right_twist_bone_applied_count=0
+no_contact_wrist_basis_CC_Base_R_Upperarm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=77.9543
+no_contact_wrist_basis_CC_Base_R_UpperarmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=0.5747
+no_contact_wrist_basis_CC_Base_R_UpperarmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=0.5747
+no_contact_wrist_basis_CC_Base_R_Forearm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=21.2850
+no_contact_wrist_basis_CC_Base_R_ForearmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=0.6807
+no_contact_wrist_basis_CC_Base_R_ForearmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=1.5410
+no_contact_wrist_basis_CC_Base_R_Hand_current_best=+Y current_dots={ "+X": 0.1228, "-X": -0.1228, "+Y": 0.9622, "-Y": -0.9622, "+Z": 0.2431, "-Z": -0.2431 } local_pose_delta_deg=21.3122
+
+[no_upper_body_pose]
+no_upper_body_pose_open_ok=true
+no_upper_body_pose_select_skill_slot_1_ok=true
+no_upper_body_pose_reset_ok=true
+no_upper_body_pose_actor_exists=true
+no_upper_body_pose_enable_upper_body_authoring_pose=false
+no_upper_body_pose_enable_contact_wrist_basis=true
+no_upper_body_pose_enable_limb_twist_distribution=true
+no_upper_body_pose_enable_support_arm_ik=true
+no_upper_body_pose_enable_finger_grip_ik=true
+no_upper_body_pose_dominant_grip_error_m=0.000000
+no_upper_body_pose_collision_pose_legal=true
+no_upper_body_pose_body_self_collision_legal=false
+no_upper_body_pose_right_twist_requested_deg=22.482268
+no_upper_body_pose_right_forearm_twist_applied_deg=17.536169
+no_upper_body_pose_right_upperarm_twist_applied_deg=4.946099
+no_upper_body_pose_right_twist_bone_applied_count=4
+no_upper_body_pose_CC_Base_R_Upperarm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=28.5346
+no_upper_body_pose_CC_Base_R_UpperarmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=1.8975
+no_upper_body_pose_CC_Base_R_UpperarmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=3.0484
+no_upper_body_pose_CC_Base_R_Forearm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=17.1611
+no_upper_body_pose_CC_Base_R_ForearmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=9.4488
+no_upper_body_pose_CC_Base_R_ForearmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=7.2271
+no_upper_body_pose_CC_Base_R_Hand_current_best=+Y current_dots={ "+X": -0.0842, "-X": 0.0842, "+Y": 0.9267, "-Y": -0.9267, "+Z": 0.3662, "-Z": -0.3662 } local_pose_delta_deg=22.9226
+
+[no_finger_ik]
+no_finger_ik_open_ok=true
+no_finger_ik_select_skill_slot_1_ok=true
+no_finger_ik_reset_ok=true
+no_finger_ik_actor_exists=true
+no_finger_ik_enable_upper_body_authoring_pose=true
+no_finger_ik_enable_contact_wrist_basis=true
+no_finger_ik_enable_limb_twist_distribution=true
+no_finger_ik_enable_support_arm_ik=true
+no_finger_ik_enable_finger_grip_ik=false
+no_finger_ik_dominant_grip_error_m=0.008914
+no_finger_ik_collision_pose_legal=true
+no_finger_ik_body_self_collision_legal=true
+no_finger_ik_right_twist_requested_deg=-4.662600
+no_finger_ik_right_forearm_twist_applied_deg=-3.636828
+no_finger_ik_right_upperarm_twist_applied_deg=-1.025772
+no_finger_ik_right_twist_bone_applied_count=4
+no_finger_ik_CC_Base_R_Upperarm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=70.7326
+no_finger_ik_CC_Base_R_UpperarmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=1.0879
+no_finger_ik_CC_Base_R_UpperarmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=0.0396
+no_finger_ik_CC_Base_R_Forearm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=22.1504
+no_finger_ik_CC_Base_R_ForearmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=1.1371
+no_finger_ik_CC_Base_R_ForearmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=3.3589
+no_finger_ik_CC_Base_R_Hand_current_best=+Z current_dots={ "+X": 0.0113, "-X": -0.0113, "+Y": 0.6068, "-Y": -0.6068, "+Z": 0.7948, "-Z": -0.7948 } local_pose_delta_deg=39.1733
+
+[no_support_ik_target_solver]
+no_support_ik_target_solver_open_ok=true
+no_support_ik_target_solver_select_skill_slot_1_ok=true
+no_support_ik_target_solver_reset_ok=true
+no_support_ik_target_solver_actor_exists=true
+no_support_ik_target_solver_enable_upper_body_authoring_pose=true
+no_support_ik_target_solver_enable_contact_wrist_basis=true
+no_support_ik_target_solver_enable_limb_twist_distribution=true
+no_support_ik_target_solver_enable_support_arm_ik=false
+no_support_ik_target_solver_enable_finger_grip_ik=true
+no_support_ik_target_solver_dominant_grip_error_m=0.001107
+no_support_ik_target_solver_collision_pose_legal=true
+no_support_ik_target_solver_body_self_collision_legal=false
+no_support_ik_target_solver_right_twist_requested_deg=43.777831
+no_support_ik_target_solver_right_forearm_twist_applied_deg=34.146708
+no_support_ik_target_solver_right_upperarm_twist_applied_deg=9.631123
+no_support_ik_target_solver_right_twist_bone_applied_count=4
+no_support_ik_target_solver_CC_Base_R_Upperarm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=54.4924
+no_support_ik_target_solver_CC_Base_R_UpperarmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=4.2401
+no_support_ik_target_solver_CC_Base_R_UpperarmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=5.3909
+no_support_ik_target_solver_CC_Base_R_Forearm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=60.3217
+no_support_ik_target_solver_CC_Base_R_ForearmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=17.7539
+no_support_ik_target_solver_CC_Base_R_ForearmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=15.5325
+no_support_ik_target_solver_CC_Base_R_Hand_current_best=+Y current_dots={ "+X": -0.1295, "-X": 0.1295, "+Y": 0.7766, "-Y": -0.7766, "+Z": 0.6166, "-Z": -0.6166 } local_pose_delta_deg=46.7798
+
+[no_contact_basis_no_limb_twist]
+no_contact_basis_no_limb_twist_open_ok=true
+no_contact_basis_no_limb_twist_select_skill_slot_1_ok=true
+no_contact_basis_no_limb_twist_reset_ok=true
+no_contact_basis_no_limb_twist_actor_exists=true
+no_contact_basis_no_limb_twist_enable_upper_body_authoring_pose=true
+no_contact_basis_no_limb_twist_enable_contact_wrist_basis=false
+no_contact_basis_no_limb_twist_enable_limb_twist_distribution=false
+no_contact_basis_no_limb_twist_enable_support_arm_ik=true
+no_contact_basis_no_limb_twist_enable_finger_grip_ik=true
+no_contact_basis_no_limb_twist_dominant_grip_error_m=0.033342
+no_contact_basis_no_limb_twist_collision_pose_legal=true
+no_contact_basis_no_limb_twist_body_self_collision_legal=true
+no_contact_basis_no_limb_twist_right_twist_requested_deg=0.000000
+no_contact_basis_no_limb_twist_right_forearm_twist_applied_deg=0.000000
+no_contact_basis_no_limb_twist_right_upperarm_twist_applied_deg=0.000000
+no_contact_basis_no_limb_twist_right_twist_bone_applied_count=0
+no_contact_basis_no_limb_twist_CC_Base_R_Upperarm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=82.9237
+no_contact_basis_no_limb_twist_CC_Base_R_UpperarmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=0.5747
+no_contact_basis_no_limb_twist_CC_Base_R_UpperarmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=0.5747
+no_contact_basis_no_limb_twist_CC_Base_R_Forearm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=27.4804
+no_contact_basis_no_limb_twist_CC_Base_R_ForearmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=0.6807
+no_contact_basis_no_limb_twist_CC_Base_R_ForearmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=1.5410
+no_contact_basis_no_limb_twist_CC_Base_R_Hand_current_best=+Y current_dots={ "+X": 0.1228, "-X": -0.1228, "+Y": 0.9622, "-Y": -0.9622, "+Z": 0.2431, "-Z": -0.2431 } local_pose_delta_deg=21.3122
+
+[no_upper_body_no_limb_twist]
+no_upper_body_no_limb_twist_open_ok=true
+no_upper_body_no_limb_twist_select_skill_slot_1_ok=true
+no_upper_body_no_limb_twist_reset_ok=true
+no_upper_body_no_limb_twist_actor_exists=true
+no_upper_body_no_limb_twist_enable_upper_body_authoring_pose=false
+no_upper_body_no_limb_twist_enable_contact_wrist_basis=true
+no_upper_body_no_limb_twist_enable_limb_twist_distribution=false
+no_upper_body_no_limb_twist_enable_support_arm_ik=true
+no_upper_body_no_limb_twist_enable_finger_grip_ik=true
+no_upper_body_no_limb_twist_dominant_grip_error_m=0.000000
+no_upper_body_no_limb_twist_collision_pose_legal=true
+no_upper_body_no_limb_twist_body_self_collision_legal=false
+no_upper_body_no_limb_twist_right_twist_requested_deg=0.000000
+no_upper_body_no_limb_twist_right_forearm_twist_applied_deg=0.000000
+no_upper_body_no_limb_twist_right_upperarm_twist_applied_deg=0.000000
+no_upper_body_no_limb_twist_right_twist_bone_applied_count=0
+no_upper_body_no_limb_twist_CC_Base_R_Upperarm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=28.6003
+no_upper_body_no_limb_twist_CC_Base_R_UpperarmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=0.5747
+no_upper_body_no_limb_twist_CC_Base_R_UpperarmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 } local_pose_delta_deg=0.5747
+no_upper_body_no_limb_twist_CC_Base_R_Forearm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=17.1971
+no_upper_body_no_limb_twist_CC_Base_R_ForearmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=0.6807
+no_upper_body_no_limb_twist_CC_Base_R_ForearmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 } local_pose_delta_deg=1.5410
+no_upper_body_no_limb_twist_CC_Base_R_Hand_current_best=+Y current_dots={ "+X": -0.0848, "-X": 0.0848, "+Y": 0.9046, "-Y": -0.9046, "+Z": 0.4177, "-Z": -0.4177 } local_pose_delta_deg=24.7093

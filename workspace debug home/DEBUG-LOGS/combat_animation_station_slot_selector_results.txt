@@ -1,0 +1,11 @@
+slot_grid_exists=true
+slot_grid_count=13
+first_slot_tooltip=Skill Slot 1 [1]
+select_skill_slot_ok=true
+active_identifier_after_skill_slot=skill_slot_4
+active_slot_after_skill_slot=skill_slot_4
+select_block_slot_ok=true
+active_identifier_after_block=skill_block
+active_slot_after_block=skill_block
+legacy_custom_removed=true
+reloaded_skill_draft_count=13

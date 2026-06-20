@@ -1,0 +1,95 @@
+[gd_resource type="Resource" script_class="BaseMaterialDef" format=3 uid="uid://b8hqq424p2wl0"]
+
+[ext_resource type="Script" uid="uid://7m86a3xt1dlg" path="res://core/defs/base_material_def.gd" id="1_base_material"]
+[ext_resource type="Script" uid="uid://cl8i2kjpv5mh3" path="res://core/atoms/stat_line.gd" id="2_stat_line"]
+
+[sub_resource type="Resource" id="Stat_heal"]
+script = ExtResource("2_stat_line")
+stat_id = &"heal_power_flat"
+value = 1.0
+
+[sub_resource type="Resource" id="Stat_heal_pct"]
+script = ExtResource("2_stat_line")
+stat_id = &"heal_power_pct_add"
+value = 0.08
+value_kind = 1
+
+[sub_resource type="Resource" id="Stat_recv"]
+script = ExtResource("2_stat_line")
+stat_id = &"received_heal_pct_add"
+value = 0.05
+value_kind = 1
+
+[sub_resource type="Resource" id="Stat_buff"]
+script = ExtResource("2_stat_line")
+stat_id = &"buff_duration_pct_add"
+value = 0.08
+value_kind = 1
+
+[sub_resource type="Resource" id="Cap_heal"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_heal"
+value = 1.0
+
+[sub_resource type="Resource" id="Cap_support"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_support"
+value = 0.6
+
+[sub_resource type="Resource" id="Cap_barrier"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_barrier"
+value = 0.4
+
+[sub_resource type="Resource" id="Cap_magic"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_magic"
+value = 0.4
+
+[sub_resource type="Resource" id="Elem_healing"]
+script = ExtResource("2_stat_line")
+stat_id = &"elem_healing"
+value = 0.9
+
+[sub_resource type="Resource" id="Elem_life"]
+script = ExtResource("2_stat_line")
+stat_id = &"elem_life"
+value = 0.4
+
+[sub_resource type="Resource" id="Ctx_weapon"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_weapon"
+value = 0.4
+
+[sub_resource type="Resource" id="Ctx_focus"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_focus"
+value = 0.8
+
+[sub_resource type="Resource" id="Ctx_trinket"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_trinket"
+value = 0.7
+
+[sub_resource type="Resource" id="Fam_support"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_support"
+value = 0.8
+
+[resource]
+script = ExtResource("1_base_material")
+base_material_id = &"mat_healing_base"
+display_name = "Healing"
+material_family = &"elemental"
+density_per_cell = 0.35
+hardness = 0.1
+toughness = 0.25
+elasticity = 0.4
+color_group = &"mint"
+albedo_color = Color(0.639216, 0.984314, 0.760784, 1)
+gloss_grade = 0.2
+base_stat_lines = Array[ExtResource("2_stat_line")]([SubResource("Stat_heal"), SubResource("Stat_heal_pct"), SubResource("Stat_recv"), SubResource("Stat_buff")])
+capability_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Cap_heal"), SubResource("Cap_support"), SubResource("Cap_barrier"), SubResource("Cap_magic")])
+skill_family_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Fam_support")])
+elemental_affinity_lines = Array[ExtResource("2_stat_line")]([SubResource("Elem_healing"), SubResource("Elem_life")])
+equipment_context_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Ctx_weapon"), SubResource("Ctx_focus"), SubResource("Ctx_trinket")])

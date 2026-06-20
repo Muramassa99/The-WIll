@@ -1,0 +1,15 @@
+character_two_hand_span_meters=1.445
+centered_valid=true
+centered_two_hand_weapon_eligible=true
+centered_two_hand_character_eligible=true
+centered_effective_two_hand_span_meters=1.445
+centered_dominant_signed_ratio=1.0
+centered_support_signed_ratio=-1.0
+centered_span_clamped_to_character=true
+front_heavy_valid=true
+front_heavy_center_balance_valid=false
+front_heavy_two_hand_weapon_eligible=true
+front_heavy_two_hand_character_eligible=true
+front_heavy_dominant_contact_percent=1.0
+front_heavy_support_contact_percent=0.02
+front_heavy_support_extends_farther_than_dominant=true

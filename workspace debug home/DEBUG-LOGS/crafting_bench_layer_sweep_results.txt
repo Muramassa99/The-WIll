@@ -1,0 +1,13 @@
+initial_material_variant_id=mat_wood_gray
+start_layer=15
+place_end_layer=18
+placed_layers=[15, 16, 17, 18]
+placed_layer_count=4
+layer_sweep_place_success=true
+total_cells_after_place=4
+place_one_per_new_layer=true
+cleared_layers=[15, 16, 17, 18]
+cleared_layer_count=4
+layer_sweep_erase_success=true
+total_cells_after_erase=0
+erase_returned_to_empty=true

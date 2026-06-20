@@ -1,0 +1,16 @@
+insert_ok=true
+delete_ok=true
+timestamps_before_delete=[0.0, 0.18, 0.85]
+timestamps_after_delete=[0.0, 0.67]
+selected_index_after_delete=1
+continuity_index_after_delete=1
+remaining_motion_node_count=2
+remaining_node_transition=0.67
+grip_swap_insert_ok=true
+generated_selected_index=2
+generated_bridge_locked=true
+generated_bridge_kind=grip_style_swap
+generated_bridge_grip=grip_reverse
+generated_edit_rejected=true
+generated_edit_preserved_tip=true
+generated_delete_ok=true

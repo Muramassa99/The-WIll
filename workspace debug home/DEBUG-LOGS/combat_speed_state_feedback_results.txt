@@ -1,0 +1,16 @@
+open_ok=true
+select_slot_ok=true
+append_visible_node_ok=true
+acceleration_set_ok=true
+deceleration_set_ok=true
+active_draft_acceleration_percent=15.0
+active_draft_deceleration_percent=25.0
+saved_draft_acceleration_percent=15.0
+saved_draft_deceleration_percent=25.0
+speed_state_sample_count=13
+speed_state_armed_sample_count=8
+speed_state_reset_sample_count=5
+speed_state_has_armed=true
+speed_state_has_reset=true
+speed_state_debug_acceleration_percent=15.0
+speed_state_debug_deceleration_percent=25.0

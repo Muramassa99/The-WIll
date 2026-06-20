@@ -1,0 +1,38 @@
+[ready]
+ready_animation=Idle
+ready_right_clavicle_world=(-0.060891, 1.445096, -0.010351)
+ready_right_upperarm_world=(-0.148754, 1.404751, 0.009307)
+ready_right_forearm_world=(-0.203872, 1.094713, 0.003486)
+ready_right_hand_world=(-0.215352, 0.840935, 0.039358)
+ready_right_hand_from_clavicle=(-0.154461, -0.604161, 0.049709)
+ready_right_anchor_world=(-0.209554, 0.765736, 0.042349)
+ready_left_clavicle_world=(0.055852, 1.450026, -0.003699)
+ready_left_hand_world=(0.211188, 0.854577, 0.048621)
+ready_left_hand_from_clavicle=(0.155335, -0.59545, 0.052319)
+ready_left_anchor_world=(0.207398, 0.779328, 0.053181)
+
+[idle_reset]
+idle_reset_animation=Idle
+idle_reset_right_clavicle_world=(-0.060891, 1.445096, -0.010351)
+idle_reset_right_upperarm_world=(-0.148754, 1.404751, 0.009307)
+idle_reset_right_forearm_world=(-0.203872, 1.094713, 0.003486)
+idle_reset_right_hand_world=(-0.215352, 0.840935, 0.039358)
+idle_reset_right_hand_from_clavicle=(-0.154461, -0.604161, 0.049709)
+idle_reset_right_anchor_world=(-0.209554, 0.765736, 0.042349)
+idle_reset_left_clavicle_world=(0.055852, 1.450026, -0.003699)
+idle_reset_left_hand_world=(0.211188, 0.854576, 0.048621)
+idle_reset_left_hand_from_clavicle=(0.155336, -0.59545, 0.052319)
+idle_reset_left_anchor_world=(0.207398, 0.779328, 0.053181)
+
+[two_hand_idle_reset]
+two_hand_idle_reset_animation=2 Hand Idle
+two_hand_idle_reset_right_clavicle_world=(-0.060891, 1.445096, -0.010351)
+two_hand_idle_reset_right_upperarm_world=(-0.148754, 1.404751, 0.009307)
+two_hand_idle_reset_right_forearm_world=(-0.203872, 1.094713, 0.003486)
+two_hand_idle_reset_right_hand_world=(-0.215352, 0.840935, 0.039358)
+two_hand_idle_reset_right_hand_from_clavicle=(-0.154461, -0.604161, 0.049709)
+two_hand_idle_reset_right_anchor_world=(-0.209554, 0.765736, 0.042349)
+two_hand_idle_reset_left_clavicle_world=(0.055852, 1.450026, -0.003699)
+two_hand_idle_reset_left_hand_world=(0.211188, 0.854576, 0.048621)
+two_hand_idle_reset_left_hand_from_clavicle=(0.155336, -0.59545, 0.052319)
+two_hand_idle_reset_left_anchor_world=(0.207398, 0.779328, 0.053181)

@@ -1,0 +1,93 @@
+[gd_resource type="Resource" script_class="BaseMaterialDef" format=3 uid="uid://x2vkt3ikproo"]
+
+[ext_resource type="Script" uid="uid://7m86a3xt1dlg" path="res://core/defs/base_material_def.gd" id="1_base_material"]
+[ext_resource type="Script" uid="uid://cl8i2kjpv5mh3" path="res://core/atoms/stat_line.gd" id="2_stat_line"]
+
+[sub_resource type="Resource" id="Stat_def"]
+script = ExtResource("2_stat_line")
+stat_id = &"def_mod_flat"
+value = 0.6
+
+[sub_resource type="Resource" id="Stat_move"]
+script = ExtResource("2_stat_line")
+stat_id = &"move_speed_pct_add"
+value = 0.05
+value_kind = 1
+
+[sub_resource type="Resource" id="Stat_aspd"]
+script = ExtResource("2_stat_line")
+stat_id = &"aspd_pct_add"
+value = 0.03
+value_kind = 1
+
+[sub_resource type="Resource" id="Stat_heal_recv"]
+script = ExtResource("2_stat_line")
+stat_id = &"received_heal_pct_add"
+value = 0.05
+value_kind = 1
+
+[sub_resource type="Resource" id="Cap_flex"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_flex"
+value = 0.7
+
+[sub_resource type="Resource" id="Cap_guard"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_guard"
+value = 0.4
+
+[sub_resource type="Resource" id="Cap_mobility"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_mobility"
+value = 0.6
+
+[sub_resource type="Resource" id="Elem_life"]
+script = ExtResource("2_stat_line")
+stat_id = &"elem_life"
+value = 0.2
+
+[sub_resource type="Resource" id="Ctx_weapon"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_weapon"
+value = 0.5
+
+[sub_resource type="Resource" id="Ctx_armor"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_armor"
+value = 0.8
+
+[sub_resource type="Resource" id="Ctx_accessory"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_accessory"
+value = 0.6
+
+[sub_resource type="Resource" id="Fam_defense"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_defense"
+value = 0.6
+
+[sub_resource type="Resource" id="Fam_mobility"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_mobility"
+value = 0.5
+
+[resource]
+script = ExtResource("1_base_material")
+base_material_id = &"mat_hide_base"
+display_name = "Hide"
+material_family = &"organic"
+density_per_cell = 0.4
+hardness = 0.25
+toughness = 0.7
+elasticity = 0.8
+color_group = &"tan"
+albedo_color = Color(0.639216, 0.490196, 0.333333, 1)
+base_stat_lines = Array[ExtResource("2_stat_line")]([SubResource("Stat_def"), SubResource("Stat_move"), SubResource("Stat_aspd"), SubResource("Stat_heal_recv")])
+capability_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Cap_flex"), SubResource("Cap_guard"), SubResource("Cap_mobility")])
+skill_family_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Fam_defense"), SubResource("Fam_mobility")])
+elemental_affinity_lines = Array[ExtResource("2_stat_line")]([SubResource("Elem_life")])
+equipment_context_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Ctx_weapon"), SubResource("Ctx_armor"), SubResource("Ctx_accessory")])
+can_be_anchor_material = true
+can_be_grip_profile = true
+can_be_joint_membrane = true
+can_be_bow_grip = true

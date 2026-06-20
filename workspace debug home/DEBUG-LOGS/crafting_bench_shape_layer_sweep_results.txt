@@ -1,0 +1,12 @@
+rectangle_place_layer_count=4
+rectangle_place_expected_total_ok=true
+rectangle_place_expected_cells_ok=true
+rectangle_place_one_per_layer_ok=true
+rectangle_erase_layer_count=4
+rectangle_erase_success=true
+oval_place_layer_count=4
+oval_place_expected_total_ok=true
+oval_place_expected_cells_ok=true
+oval_place_one_per_layer_ok=true
+oval_erase_layer_count=4
+oval_erase_success=true

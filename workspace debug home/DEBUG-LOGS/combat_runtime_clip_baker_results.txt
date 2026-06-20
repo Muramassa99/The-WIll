@@ -1,0 +1,12 @@
+clip_exists=true
+clip_playable=true
+clip_kind=skill_playback
+clip_motion_node_count=3
+clip_frame_count=16
+clip_duration_seconds=0.50
+clip_has_multiple_frames=true
+clip_first_tip_matches=true
+clip_final_tip_matches=true
+clip_grip_state_samples_match=true
+clip_player_runtime_length_locked=true
+clip_player_trajectory_source=baked_runtime_clip

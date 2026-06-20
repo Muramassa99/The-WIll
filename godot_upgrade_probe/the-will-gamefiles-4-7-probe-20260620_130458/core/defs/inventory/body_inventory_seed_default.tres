@@ -1,0 +1,38 @@
+[gd_resource type="Resource" script_class="BodyInventorySeedDef" format=3 uid="uid://cknombjh43mwy"]
+
+[ext_resource type="Script" uid="uid://blbk67d7jt38i" path="res://core/defs/inventory/body_inventory_seed_def.gd" id="1_body_inventory_seed_def"]
+[ext_resource type="Script" uid="uid://2drrxo2d4nyt" path="res://core/defs/inventory/body_inventory_seed_entry_def.gd" id="2_body_inventory_seed_entry_def"]
+
+[sub_resource type="Resource" id="SeedEntry_wood"]
+script = ExtResource("2_body_inventory_seed_entry_def")
+display_name = "Wood Raw (Gray)"
+raw_drop_id = &"drop_wood_raw_gray"
+stack_count = 4
+
+[sub_resource type="Resource" id="SeedEntry_iron"]
+script = ExtResource("2_body_inventory_seed_entry_def")
+display_name = "Iron Raw (Gray)"
+raw_drop_id = &"drop_iron_raw_gray"
+stack_count = 3
+
+[sub_resource type="Resource" id="SeedEntry_bone"]
+script = ExtResource("2_body_inventory_seed_entry_def")
+display_name = "Bone Raw (Gray)"
+raw_drop_id = &"drop_bone_raw_gray"
+stack_count = 3
+
+[sub_resource type="Resource" id="SeedEntry_crystal"]
+script = ExtResource("2_body_inventory_seed_entry_def")
+display_name = "Crystal Raw (Gray)"
+raw_drop_id = &"drop_crystal_raw_gray"
+stack_count = 2
+
+[sub_resource type="Resource" id="SeedEntry_hide"]
+script = ExtResource("2_body_inventory_seed_entry_def")
+display_name = "Hide Raw (Gray)"
+raw_drop_id = &"drop_hide_raw_gray"
+stack_count = 2
+
+[resource]
+script = ExtResource("1_body_inventory_seed_def")
+entries = Array[Resource]([SubResource("SeedEntry_wood"), SubResource("SeedEntry_iron"), SubResource("SeedEntry_bone"), SubResource("SeedEntry_crystal"), SubResource("SeedEntry_hide")])

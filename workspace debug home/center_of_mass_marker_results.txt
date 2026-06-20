@@ -1,0 +1,7 @@
+selected_wip_id=player_wip_1778691813.301_3
+debugger_view_enabled=true
+preview_weapon_exists=true
+center_of_mass_debug_visible=true
+center_of_mass_debug_local=(-0.480519, 0.001781, -0.00028)
+center_of_mass_debug_origin_id=WeaponRootOrigin
+collision_debug_visual_count=183

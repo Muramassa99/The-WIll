@@ -1,0 +1,6 @@
+player_loaded=true
+movement_facing_matches_move=true
+skill_facing_matches_crosshair=true
+crosshair_priority_active=true
+rear_camera_fallback_active=true
+backpedal_camera_override_active=true

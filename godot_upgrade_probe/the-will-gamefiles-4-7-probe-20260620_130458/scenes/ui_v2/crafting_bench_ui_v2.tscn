@@ -1,0 +1,291 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://runtime/forge_v2/crafting_bench_ui_v2.gd" id="1_crafting_bench_ui_v2"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
+bg_color = Color(0.0705882, 0.0823529, 0.0941176, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.32549, 0.67451, 0.623529, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_section"]
+bg_color = Color(0.105882, 0.12549, 0.145098, 0.94)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.431373, 0.52549, 0.568627, 0.9)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[node name="CraftingBenchUIV2" type="CanvasLayer"]
+script = ExtResource("1_crafting_bench_ui_v2")
+
+[node name="Panel" type="PanelContainer" parent="."]
+visible = false
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 0.0
+offset_bottom = 0.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel"]
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="RootVBox" type="VBoxContainer" parent="Panel/MarginContainer"]
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="HeaderVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox"]
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/HeaderVBox"]
+text = "Crafting Bench V2"
+theme_override_font_sizes/font_size = 20
+
+[node name="SubtitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/HeaderVBox"]
+text = "Stage 1 V2 authoring surface"
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 11
+
+[node name="BodyPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox"]
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="BodyMargin" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel"]
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 14
+
+[node name="BodyScroll" type="ScrollContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="BodyVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="StatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
+text = "V2 bench shell"
+autowrap_mode = 3
+
+[node name="DraftButtonRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
+theme_override_constants/separation = 8
+
+[node name="NewDraftButton" type="Button" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/DraftButtonRow"]
+custom_minimum_size = Vector2(150, 34)
+text = "New V2 Draft"
+
+[node name="ClearStrokesButton" type="Button" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/DraftButtonRow"]
+custom_minimum_size = Vector2(150, 34)
+text = "Clear Pending"
+
+[node name="DraftButtonSpacer" type="Control" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/DraftButtonRow"]
+size_flags_horizontal = 3
+
+[node name="BuilderPathRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
+theme_override_constants/separation = 8
+
+[node name="BuilderPathLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/BuilderPathRow"]
+custom_minimum_size = Vector2(150, 0)
+text = "Builder Path"
+
+[node name="BuilderPathOption" type="OptionButton" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/BuilderPathRow"]
+size_flags_horizontal = 3
+
+[node name="BuilderComponentRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
+visible = false
+theme_override_constants/separation = 8
+
+[node name="BuilderComponentLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/BuilderComponentRow"]
+custom_minimum_size = Vector2(150, 0)
+text = "Component"
+
+[node name="BuilderComponentOption" type="OptionButton" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/BuilderComponentRow"]
+size_flags_horizontal = 3
+
+[node name="OperationRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
+theme_override_constants/separation = 8
+
+[node name="OperationLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/OperationRow"]
+custom_minimum_size = Vector2(150, 0)
+text = "Operation"
+
+[node name="OperationOption" type="OptionButton" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/OperationRow"]
+size_flags_horizontal = 3
+
+[node name="PlacementPolicyRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
+theme_override_constants/separation = 8
+
+[node name="PlacementPolicyLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/PlacementPolicyRow"]
+custom_minimum_size = Vector2(150, 0)
+text = "Placement"
+
+[node name="PlacementPolicyOption" type="OptionButton" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/PlacementPolicyRow"]
+size_flags_horizontal = 3
+
+[node name="MaterialPaletteRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
+theme_override_constants/separation = 8
+
+[node name="MaterialPaletteLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/MaterialPaletteRow"]
+custom_minimum_size = Vector2(150, 0)
+text = "Material"
+
+[node name="MaterialPaletteVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/MaterialPaletteRow"]
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
+
+[node name="ActiveMaterialLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/MaterialPaletteRow/MaterialPaletteVBox"]
+text = "Iron"
+
+[node name="MaterialPaletteScroll" type="ScrollContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/MaterialPaletteRow/MaterialPaletteVBox"]
+custom_minimum_size = Vector2(0, 118)
+size_flags_horizontal = 3
+
+[node name="MaterialPaletteGrid" type="GridContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/MaterialPaletteRow/MaterialPaletteVBox/MaterialPaletteScroll"]
+size_flags_horizontal = 3
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
+columns = 8
+
+[node name="PrimitiveRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
+theme_override_constants/separation = 8
+
+[node name="PrimitiveLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/PrimitiveRow"]
+custom_minimum_size = Vector2(150, 0)
+text = "Primitive"
+
+[node name="PrimitiveOption" type="OptionButton" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/PrimitiveRow"]
+size_flags_horizontal = 3
+
+[node name="RadiusRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
+theme_override_constants/separation = 8
+
+[node name="RadiusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/RadiusRow"]
+custom_minimum_size = Vector2(150, 0)
+text = "Radius"
+
+[node name="RadiusDecreaseButton" type="Button" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/RadiusRow"]
+custom_minimum_size = Vector2(42, 30)
+text = "-"
+
+[node name="RadiusValueLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/RadiusRow"]
+custom_minimum_size = Vector2(140, 0)
+text = "Radius 0.0250 m"
+
+[node name="RadiusIncreaseButton" type="Button" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/RadiusRow"]
+custom_minimum_size = Vector2(42, 30)
+text = "+"
+
+[node name="RadiusSpacer" type="Control" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/RadiusRow"]
+size_flags_horizontal = 3
+
+[node name="StrokeButtonRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
+theme_override_constants/separation = 8
+
+[node name="AddEmptyStrokeButton" type="Button" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/StrokeButtonRow"]
+custom_minimum_size = Vector2(180, 34)
+text = "Add Primitive"
+
+[node name="CommitPendingButton" type="Button" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/StrokeButtonRow"]
+custom_minimum_size = Vector2(150, 34)
+text = "Commit Layer"
+
+[node name="UndoLayerButton" type="Button" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/StrokeButtonRow"]
+custom_minimum_size = Vector2(90, 34)
+text = "Undo"
+
+[node name="RedoLayerButton" type="Button" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/StrokeButtonRow"]
+custom_minimum_size = Vector2(90, 34)
+text = "Redo"
+
+[node name="StrokeButtonSpacer" type="Control" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/StrokeButtonRow"]
+size_flags_horizontal = 3
+
+[node name="BodyStackRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
+theme_override_constants/separation = 8
+
+[node name="BodyStackLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/BodyStackRow"]
+custom_minimum_size = Vector2(150, 0)
+text = "Body Stack"
+
+[node name="BodyStackOption" type="OptionButton" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/BodyStackRow"]
+size_flags_horizontal = 3
+
+[node name="DeleteSelectedBodyButton" type="Button" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/BodyStackRow"]
+custom_minimum_size = Vector2(120, 30)
+text = "Delete"
+
+[node name="PlatformContractLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
+text = "Platform contract"
+autowrap_mode = 3
+
+[node name="SummaryLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
+text = "Draft summary"
+autowrap_mode = 3
+
+[node name="WorkspacePanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox"]
+custom_minimum_size = Vector2(0, 500)
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="WorkspaceMargin" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/WorkspacePanel"]
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="WorkspaceVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/WorkspacePanel/WorkspaceMargin"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 6
+
+[node name="WorkspaceTitle" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/WorkspacePanel/WorkspaceMargin/WorkspaceVBox"]
+text = "3D Refinement Workspace"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 16
+
+[node name="WorkspaceViewportContainer" type="SubViewportContainer" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/WorkspacePanel/WorkspaceMargin/WorkspaceVBox"]
+custom_minimum_size = Vector2(0, 420)
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="WorkspaceSubViewport" type="SubViewport" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/WorkspacePanel/WorkspaceMargin/WorkspaceVBox/WorkspaceViewportContainer"]
+size = Vector2i(900, 420)
+own_world_3d = true
+transparent_bg = false
+handle_input_locally = false
+render_target_update_mode = 4
+
+[node name="WorkspaceStatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/WorkspacePanel/WorkspaceMargin/WorkspaceVBox"]
+text = "Workspace ready"
+horizontal_alignment = 1
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 12
+
+[node name="FooterRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox"]
+theme_override_constants/separation = 8
+
+[node name="FooterSpacer" type="Control" parent="Panel/MarginContainer/RootVBox/FooterRow"]
+size_flags_horizontal = 3
+
+[node name="CloseButton" type="Button" parent="Panel/MarginContainer/RootVBox/FooterRow"]
+custom_minimum_size = Vector2(140, 38)
+text = "Close"

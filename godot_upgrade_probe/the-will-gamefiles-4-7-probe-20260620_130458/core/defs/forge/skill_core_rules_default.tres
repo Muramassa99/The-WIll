@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="SkillCoreRulesDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/defs/skill_core_rules_def.gd" id="1_skill_core_rules_def"]
+
+[resource]
+script = ExtResource("1_skill_core_rules_def")
+rule_id = &"skill_core_rules_default"
+skill_cores_are_nonmodifiable_in_skill_station = true
+salvage_priority_bonus = 1.0
+count_toward_special_recovery_logic = true

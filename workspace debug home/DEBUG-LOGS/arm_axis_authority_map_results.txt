@@ -1,0 +1,242 @@
+audit_scope=arm_axis_authority_map
+official_godot_coordinate_rule=Skeleton3D bone global pose is skeleton-space; world transform requires skeleton.global_transform multiplication.
+target_project_name=Test sword for animations
+
+[player_ready]
+player_ready_rig_exists=true
+player_ready_authoring_preview_mode_enabled=false
+player_ready_upper_body_auto_apply=true
+player_ready_enable_upper_body_authoring_pose=true
+player_ready_enable_support_arm_ik=true
+player_ready_enable_finger_grip_ik=true
+player_ready_enable_contact_wrist_basis=true
+player_ready_enable_limb_twist_distribution=true
+player_ready_usable_arm_motion_range_ratio=0.9800
+player_ready_upper_body_state={  }
+player_ready_grip_contact_debug={ "right_arm_ik_active": false, "left_arm_ik_active": false, "right_arm_ik_influence": 0.0, "left_arm_ik_influence": 0.0, "right_arm_guidance_active": false, "left_arm_guidance_active": false, "right_authoring_contact_basis_active": false, "left_authoring_contact_basis_active": false, "authoring_limb_twist_distribution_enabled": true, "right_forearm_twist_bone_count": 2, "left_forearm_twist_bone_count": 2, "right_upperarm_twist_bone_count": 2, "left_upperarm_twist_bone_count": 2, "right_authoring_twist_distribution_active": false, "left_authoring_twist_distribution_active": false, "right_authoring_twist_requested_degrees": 0.0, "left_authoring_twist_requested_degrees": 0.0, "right_authoring_forearm_twist_applied_degrees": 0.0, "left_authoring_forearm_twist_applied_degrees": 0.0, "right_authoring_upperarm_twist_applied_degrees": 0.0, "left_authoring_upperarm_twist_applied_degrees": 0.0, "right_authoring_twist_bone_applied_count": 0, "left_authoring_twist_bone_applied_count": 0, "right_hand_world": (-0.217477, 0.841367, 0.039367), "left_hand_world": (0.211719, 0.854715, 0.048617), "usable_arm_motion_range_ratio": 0.98, "right_max_arm_chain_reach_meters": 0.74563391506672, "left_max_arm_chain_reach_meters": 0.7456344589591, "right_usable_arm_chain_reach_meters": 0.73072123676538, "left_usable_arm_chain_reach_meters": 0.73072176977992, "right_hand_ik_clavicle_distance_meters": 0.62554264068604, "left_hand_ik_clavicle_distance_meters": 0.61750364303589, "right_hand_ik_target_world": (-0.215352, 0.840935, 0.039358), "left_hand_ik_target_world": (0.211188, 0.854577, 0.048621), "last_two_hand_solve_result": { "dominant_slot_id": &"hand_right", "hand_right": { "active": false, "desired_target": (0.0, 0.0, 0.0), "corrected_target": (0.0, 0.0, 0.0), "pole_target": (0.0, 0.0, 0.0), "path_illegal": false, "point_illegal": false, "front_bias_failed": false, "used_orbit": false, "alternate_target_correction_disabled": false, "weapon_body_illegal": false, "arm_reach_clamped": false, "arm_reach_limit_meters": 0.0, "arm_reach_before_meters": 0.0, "arm_reach_after_meters": 0.0 }, "hand_left": { "active": false, "desired_target": (0.0, 0.0, 0.0), "corrected_target": (0.0, 0.0, 0.0), "pole_target": (0.0, 0.0, 0.0), "path_illegal": false, "point_illegal": false, "front_bias_failed": false, "used_orbit": false, "alternate_target_correction_disabled": false, "weapon_body_illegal": false, "arm_reach_clamped": false, "arm_reach_limit_meters": 0.0, "arm_reach_before_meters": 0.0, "arm_reach_after_meters": 0.0 } }, "right_hand_ik_target_distance_meters": 0.00216848333366, "left_hand_ik_target_distance_meters": 0.00054871483007 }
+player_ready_skeleton_exists=true
+player_ready_skeleton_global_transform=[X: (0.764165, 0.0, 0.0), Y: (0.0, 0.764165, 0.0), Z: (0.0, 0.0, 0.764165), O: (0.0, 0.0, 0.0)]
+player_ready_modifier_callback_mode_process=1
+player_ready_modifier=RightArmIK class=TwoBoneIK3D active=false influence=0.0000 process_mode=0
+player_ready_modifier=LeftArmIK class=TwoBoneIK3D active=false influence=0.0000 process_mode=0
+player_ready_modifier=RightThumbGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+player_ready_modifier=RightIndexGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+player_ready_modifier=RightMiddleGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+player_ready_modifier=RightRingGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+player_ready_modifier=RightPinkyGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+player_ready_modifier=LeftThumbGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+player_ready_modifier=LeftIndexGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+player_ready_modifier=LeftMiddleGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+player_ready_modifier=LeftRingGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+player_ready_modifier=LeftPinkyGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+player_ready_axis_CC_Base_R_Clavicle_exists=true parent=CC_Base_Spine02 reference=CC_Base_R_Clavicle_to_CC_Base_R_Upperarm
+player_ready_axis_CC_Base_R_Clavicle_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_R_Clavicle_current_best=+Y current_dots={ "+X": 0.0012, "-X": -0.0012, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_R_Clavicle_rest_origin=(-0.076574, 1.979441, -0.027936) current_origin=(-0.07964, 1.891098, -0.012709) local_pose_delta_deg=21.2505
+player_ready_axis_CC_Base_R_Upperarm_exists=true parent=CC_Base_R_Clavicle reference=CC_Base_R_Upperarm_to_CC_Base_R_Forearm
+player_ready_axis_CC_Base_R_Upperarm_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_R_Upperarm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 }
+player_ready_axis_CC_Base_R_Upperarm_rest_origin=(-0.204864, 1.965292, -0.024926) current_origin=(-0.194827, 1.83856, 0.012615) local_pose_delta_deg=68.3370
+player_ready_axis_CC_Base_R_UpperarmTwist01_exists=true parent=CC_Base_R_Upperarm reference=CC_Base_R_Upperarm_to_CC_Base_R_Forearm
+player_ready_axis_CC_Base_R_UpperarmTwist01_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_R_UpperarmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 }
+player_ready_axis_CC_Base_R_UpperarmTwist01_rest_origin=(-0.204864, 1.965291, -0.024926) current_origin=(-0.194816, 1.838565, 0.012608) local_pose_delta_deg=0.5747
+player_ready_axis_CC_Base_R_UpperarmTwist02_exists=true parent=CC_Base_R_UpperarmTwist01 reference=CC_Base_R_Upperarm_to_CC_Base_R_Forearm
+player_ready_axis_CC_Base_R_UpperarmTwist02_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_R_UpperarmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 }
+player_ready_axis_CC_Base_R_UpperarmTwist02_rest_origin=(-0.410645, 1.960171, -0.034636) current_origin=(-0.23158, 1.63583, 0.008672) local_pose_delta_deg=0.5747
+player_ready_axis_CC_Base_R_Forearm_exists=true parent=CC_Base_R_Upperarm reference=CC_Base_R_Forearm_to_CC_Base_R_Hand
+player_ready_axis_CC_Base_R_Forearm_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_R_Forearm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_R_Forearm_rest_origin=(-0.616427, 1.955055, -0.044347) current_origin=(-0.268333, 1.433091, 0.004739) local_pose_delta_deg=6.6880
+player_ready_axis_CC_Base_R_ForearmTwist01_exists=true parent=CC_Base_R_Forearm reference=CC_Base_R_Forearm_to_CC_Base_R_Hand
+player_ready_axis_CC_Base_R_ForearmTwist01_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_R_ForearmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_R_ForearmTwist01_rest_origin=(-0.616427, 1.955055, -0.044347) current_origin=(-0.268366, 1.433095, 0.004765) local_pose_delta_deg=0.6807
+player_ready_axis_CC_Base_R_ForearmTwist02_exists=true parent=CC_Base_R_ForearmTwist01 reference=CC_Base_R_Forearm_to_CC_Base_R_Hand
+player_ready_axis_CC_Base_R_ForearmTwist02_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_R_ForearmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_R_ForearmTwist02_rest_origin=(-0.784133, 1.952983, -0.037438) current_origin=(-0.27646, 1.267074, 0.028163) local_pose_delta_deg=1.5410
+player_ready_axis_CC_Base_R_Hand_exists=true parent=CC_Base_R_Forearm reference=CC_Base_R_Forearm_to_CC_Base_R_Hand
+player_ready_axis_CC_Base_R_Hand_rest_best=+Y rest_dots={ "+X": 0.0185, "-X": -0.0185, "+Y": 0.9715, "-Y": -0.9715, "+Z": 0.2362, "-Z": -0.2362 }
+player_ready_axis_CC_Base_R_Hand_current_best=+Y current_dots={ "+X": 0.1229, "-X": -0.1229, "+Y": 0.9621, "-Y": -0.9621, "+Z": 0.2432, "-Z": -0.2432 }
+player_ready_axis_CC_Base_R_Hand_rest_origin=(-0.951839, 1.950911, -0.030531) current_origin=(-0.284595, 1.101028, 0.051516) local_pose_delta_deg=21.2218
+player_ready_axis_CC_Base_R_Index1_exists=true parent=CC_Base_R_Hand reference=CC_Base_R_Pinky1_to_CC_Base_R_Index1
+player_ready_axis_CC_Base_R_Index1_rest_best=+Z rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 0.1883, "-Y": -0.1883, "+Z": 0.9821, "-Z": -0.9821 }
+player_ready_axis_CC_Base_R_Index1_current_best=+Z current_dots={ "+X": 0.0309, "-X": -0.0309, "+Y": 0.2004, "-Y": -0.2004, "+Z": 0.9792, "-Z": -0.9792 }
+player_ready_axis_CC_Base_R_Index1_rest_origin=(-1.082807, 1.950913, 0.015308) current_origin=(-0.263901, 0.973354, 0.101799) local_pose_delta_deg=6.9398
+player_ready_axis_CC_Base_R_Pinky1_exists=true parent=CC_Base_R_Hand reference=CC_Base_R_Pinky1_to_CC_Base_R_Index1
+player_ready_axis_CC_Base_R_Pinky1_rest_best=+Z rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 0.1254, "-Y": -0.1254, "+Z": 0.9921, "-Z": -0.9921 }
+player_ready_axis_CC_Base_R_Pinky1_current_best=+Z current_dots={ "+X": 0.0661, "-X": -0.0661, "+Y": -0.006, "-Y": 0.006, "+Z": 0.9978, "-Z": -0.9978 }
+player_ready_axis_CC_Base_R_Pinky1_rest_origin=(-1.059211, 1.945498, -0.08489) current_origin=(-0.298998, 0.990252, 0.006354) local_pose_delta_deg=26.8916
+player_ready_axis_CC_Base_L_Clavicle_exists=true parent=CC_Base_Spine02 reference=CC_Base_L_Clavicle_to_CC_Base_L_Upperarm
+player_ready_axis_CC_Base_L_Clavicle_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_L_Clavicle_current_best=+Y current_dots={ "+X": -0.0006, "-X": 0.0006, "+Y": 1.0, "-Y": -1.0, "+Z": -0.0001, "-Z": 0.0001 }
+player_ready_axis_CC_Base_L_Clavicle_rest_origin=(0.076574, 1.979442, -0.027936) current_origin=(0.073111, 1.897516, -0.003613) local_pose_delta_deg=21.3673
+player_ready_axis_CC_Base_L_Upperarm_exists=true parent=CC_Base_L_Clavicle reference=CC_Base_L_Upperarm_to_CC_Base_L_Forearm
+player_ready_axis_CC_Base_L_Upperarm_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_L_Upperarm_current_best=+Y current_dots={ "+X": -0.0001, "-X": 0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": -0.0001, "-Z": 0.0001 }
+player_ready_axis_CC_Base_L_Upperarm_rest_origin=(0.204865, 1.965293, -0.024926) current_origin=(0.188302, 1.859523, 0.040597) local_pose_delta_deg=73.0745
+player_ready_axis_CC_Base_L_UpperarmTwist01_exists=true parent=CC_Base_L_Upperarm reference=CC_Base_L_Upperarm_to_CC_Base_L_Forearm
+player_ready_axis_CC_Base_L_UpperarmTwist01_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_L_UpperarmTwist01_current_best=+Y current_dots={ "+X": -0.0001, "-X": 0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": -0.0001, "-Z": 0.0001 }
+player_ready_axis_CC_Base_L_UpperarmTwist01_rest_origin=(0.204865, 1.965292, -0.024926) current_origin=(0.188325, 1.859526, 0.040618) local_pose_delta_deg=0.5761
+player_ready_axis_CC_Base_L_UpperarmTwist02_exists=true parent=CC_Base_L_UpperarmTwist01 reference=CC_Base_L_Upperarm_to_CC_Base_L_Forearm
+player_ready_axis_CC_Base_L_UpperarmTwist02_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_L_UpperarmTwist02_current_best=+Y current_dots={ "+X": -0.0001, "-X": 0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": -0.0001, "-Z": 0.0001 }
+player_ready_axis_CC_Base_L_UpperarmTwist02_rest_origin=(0.410646, 1.960173, -0.034639) current_origin=(0.218858, 1.655731, 0.038301) local_pose_delta_deg=0.5761
+player_ready_axis_CC_Base_L_Forearm_exists=true parent=CC_Base_L_Upperarm reference=CC_Base_L_Forearm_to_CC_Base_L_Hand
+player_ready_axis_CC_Base_L_Forearm_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_L_Forearm_current_best=+Y current_dots={ "+X": -0.0004, "-X": 0.0004, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_L_Forearm_rest_origin=(0.616427, 1.955056, -0.044347) current_origin=(0.249337, 1.451934, 0.035924) local_pose_delta_deg=1.4628
+player_ready_axis_CC_Base_L_ForearmTwist01_exists=true parent=CC_Base_L_Forearm reference=CC_Base_L_Forearm_to_CC_Base_L_Hand
+player_ready_axis_CC_Base_L_ForearmTwist01_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_L_ForearmTwist01_current_best=+Y current_dots={ "+X": -0.0004, "-X": 0.0004, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_L_ForearmTwist01_rest_origin=(0.616427, 1.955054, -0.044347) current_origin=(0.249417, 1.451947, 0.03599) local_pose_delta_deg=0.6795
+player_ready_axis_CC_Base_L_ForearmTwist02_exists=true parent=CC_Base_L_ForearmTwist01 reference=CC_Base_L_Forearm_to_CC_Base_L_Hand
+player_ready_axis_CC_Base_L_ForearmTwist02_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_L_ForearmTwist02_current_best=+Y current_dots={ "+X": -0.0004, "-X": 0.0004, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+player_ready_axis_CC_Base_L_ForearmTwist02_rest_origin=(0.784133, 1.952982, -0.037438) current_origin=(0.26322, 1.285225, 0.049779) local_pose_delta_deg=1.5400
+player_ready_axis_CC_Base_L_Hand_exists=true parent=CC_Base_L_Forearm reference=CC_Base_L_Forearm_to_CC_Base_L_Hand
+player_ready_axis_CC_Base_L_Hand_rest_best=+Y rest_dots={ "+X": -0.0185, "-X": 0.0185, "+Y": 0.9715, "-Y": -0.9715, "+Z": 0.2362, "-Z": -0.2362 }
+player_ready_axis_CC_Base_L_Hand_current_best=+Y current_dots={ "+X": -0.1077, "-X": 0.1077, "+Y": 0.9727, "-Y": -0.9727, "+Z": 0.2056, "-Z": -0.2056 }
+player_ready_axis_CC_Base_L_Hand_rest_origin=(0.95184, 1.950911, -0.030531) current_origin=(0.277059, 1.118496, 0.063621) local_pose_delta_deg=33.6753
+player_ready_axis_CC_Base_L_Index1_exists=true parent=CC_Base_L_Hand reference=CC_Base_L_Index1_to_CC_Base_L_Pinky1
+player_ready_axis_CC_Base_L_Index1_rest_best=+Z rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": -0.1883, "-Y": 0.1883, "+Z": -0.9821, "-Z": 0.9821 }
+player_ready_axis_CC_Base_L_Index1_current_best=+Z current_dots={ "+X": 0.0327, "-X": -0.0327, "+Y": -0.1945, "-Y": 0.1945, "+Z": -0.9804, "-Z": 0.9804 }
+player_ready_axis_CC_Base_L_Index1_rest_origin=(1.082808, 1.950912, 0.015309) current_origin=(0.271383, 0.990754, 0.117503) local_pose_delta_deg=7.6550
+player_ready_axis_CC_Base_L_Pinky1_exists=true parent=CC_Base_L_Hand reference=CC_Base_L_Index1_to_CC_Base_L_Pinky1
+player_ready_axis_CC_Base_L_Pinky1_rest_best=+Z rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": -0.1254, "-Y": 0.1254, "+Z": -0.9921, "-Z": 0.9921 }
+player_ready_axis_CC_Base_L_Pinky1_current_best=+Z current_dots={ "+X": 0.0642, "-X": -0.0642, "+Y": 0.0188, "-Y": -0.0188, "+Z": -0.9978, "-Z": 0.9978 }
+player_ready_axis_CC_Base_L_Pinky1_rest_origin=(1.059211, 1.945497, -0.08489) current_origin=(0.28095, 1.007791, 0.016276) local_pose_delta_deg=27.6519
+
+[station_setup]
+source_library_loaded=true
+source_wip_found=true
+diagnostic_save_path=C:/WORKSPACE/test_artifacts/diagnose_arm_axis_authority_map_library.tres
+source_wip_id=player_wip_1776595437.824_5
+diagnostic_wip_id=player_wip_1776595437.824_5_axis_authority_map
+open_ok=true
+select_skill_slot_1_ok=true
+reset_ok=true
+station_after_reset_active_draft_identifier=skill_slot_1
+station_after_reset_selected_motion_node_index=1
+station_after_reset_actor_exists=true
+station_after_reset_held_item_exists=true
+station_after_reset_node_tip_local=(-0.203941, -2.512073, 0.424775)
+station_after_reset_node_pommel_local=(-0.290934, 0.324, 0.888179)
+station_after_reset_node_grip=grip_normal
+station_after_reset_node_two_hand=two_hand_one_hand
+station_after_reset_dominant_grip_error_m=0.000000
+station_after_reset_collision_pose_legal=true
+station_after_reset_collision_pose_region=
+station_after_reset_body_self_collision_legal=true
+station_after_reset_body_self_illegal_pair_count=0
+
+[station_after_reset]
+station_after_reset_rig_exists=true
+station_after_reset_authoring_preview_mode_enabled=true
+station_after_reset_upper_body_auto_apply=false
+station_after_reset_enable_upper_body_authoring_pose=true
+station_after_reset_enable_support_arm_ik=true
+station_after_reset_enable_finger_grip_ik=true
+station_after_reset_enable_contact_wrist_basis=true
+station_after_reset_enable_limb_twist_distribution=true
+station_after_reset_usable_arm_motion_range_ratio=0.9800
+station_after_reset_upper_body_state={ "active": true, "blend": 0.4, "two_hand": false, "dominant_slot_id": &"hand_right", "primary_target_world": (-0.164365, 0.800535, 0.305667), "secondary_target_world": (-0.362718, 0.875083, -0.105435), "tip_world": (0.835443, 0.424775, 2.377843), "pommel_world": (-0.397564, 0.888179, -0.177656) }
+station_after_reset_grip_contact_debug={ "right_arm_ik_active": false, "left_arm_ik_active": false, "right_arm_ik_influence": 0.0, "left_arm_ik_influence": 0.0, "right_arm_guidance_active": true, "left_arm_guidance_active": false, "right_authoring_contact_basis_active": true, "left_authoring_contact_basis_active": false, "authoring_limb_twist_distribution_enabled": true, "right_forearm_twist_bone_count": 2, "left_forearm_twist_bone_count": 2, "right_upperarm_twist_bone_count": 2, "left_upperarm_twist_bone_count": 2, "right_authoring_twist_distribution_active": true, "left_authoring_twist_distribution_active": false, "right_authoring_twist_requested_degrees": -31.8760386289618, "left_authoring_twist_requested_degrees": 0.0, "right_authoring_forearm_twist_applied_degrees": -24.8633101305902, "left_authoring_forearm_twist_applied_degrees": 0.0, "right_authoring_upperarm_twist_applied_degrees": -7.0127284983716, "left_authoring_upperarm_twist_applied_degrees": 0.0, "right_authoring_twist_bone_applied_count": 4, "left_authoring_twist_bone_applied_count": 0, "right_hand_world": (-0.115606, 0.890458, 0.319546), "left_hand_world": (0.216319, 0.849488, 0.03479), "usable_arm_motion_range_ratio": 0.98, "right_max_arm_chain_reach_meters": 0.74563387781382, "left_max_arm_chain_reach_meters": 0.74563439190388, "right_usable_arm_chain_reach_meters": 0.73072120025754, "left_usable_arm_chain_reach_meters": 0.7307217040658, "right_hand_ik_clavicle_distance_meters": 0.64657855033875, "left_hand_ik_clavicle_distance_meters": 0.62049275636673, "right_hand_ik_target_world": (-0.119851, 0.878076, 0.323446), "left_hand_ik_target_world": (0.212706, 0.854576, -0.04148), "last_two_hand_solve_result": { "dominant_slot_id": &"hand_right", "hand_right": { "active": true, "desired_target": (-0.119851, 0.878076, 0.323446), "corrected_target": (-0.119851, 0.878076, 0.323446), "pole_target": (0.012562, 1.002959, -0.054966), "path_illegal": false, "point_illegal": false, "front_bias_failed": false, "used_orbit": false, "alternate_target_correction_disabled": false, "weapon_body_illegal": false, "arm_reach_clamped": false, "arm_reach_limit_meters": 0.73072120025754, "arm_reach_before_meters": 0.64657860994339, "arm_reach_after_meters": 0.64657860994339 }, "hand_left": { "active": false, "desired_target": (0.0, 0.0, 0.0), "corrected_target": (0.0, 0.0, 0.0), "pole_target": (0.0, 0.0, 0.0), "path_illegal": false, "point_illegal": false, "front_bias_failed": false, "used_orbit": false, "alternate_target_correction_disabled": false, "weapon_body_illegal": false, "arm_reach_clamped": false, "arm_reach_limit_meters": 0.0, "arm_reach_before_meters": 0.0, "arm_reach_after_meters": 0.0 } }, "right_hand_ik_target_distance_meters": 0.01365790888667, "left_hand_ik_target_distance_meters": 0.07652509212494 }
+station_after_reset_skeleton_exists=true
+station_after_reset_skeleton_global_transform=[X: (0.698099, 0.0, -0.310814), Y: (0.0, 0.764165, 0.0), Z: (0.310814, 0.0, 0.698099), O: (0.0, 0.0, 0.0)]
+station_after_reset_modifier_callback_mode_process=2
+station_after_reset_modifier=RightArmIK class=TwoBoneIK3D active=false influence=0.0000 process_mode=0
+station_after_reset_modifier=LeftArmIK class=TwoBoneIK3D active=false influence=0.0000 process_mode=0
+station_after_reset_modifier=RightThumbGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+station_after_reset_modifier=RightIndexGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+station_after_reset_modifier=RightMiddleGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+station_after_reset_modifier=RightRingGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+station_after_reset_modifier=RightPinkyGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+station_after_reset_modifier=LeftThumbGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+station_after_reset_modifier=LeftIndexGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+station_after_reset_modifier=LeftMiddleGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+station_after_reset_modifier=LeftRingGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+station_after_reset_modifier=LeftPinkyGripIK class=CCDIK3D active=false influence=0.0000 process_mode=0
+station_after_reset_axis_CC_Base_R_Clavicle_exists=true parent=CC_Base_Spine02 reference=CC_Base_R_Clavicle_to_CC_Base_R_Upperarm
+station_after_reset_axis_CC_Base_R_Clavicle_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_R_Clavicle_current_best=+Y current_dots={ "+X": 0.0012, "-X": -0.0012, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_R_Clavicle_rest_origin=(-0.076574, 1.979441, -0.027936) current_origin=(-0.065232, 1.896764, 0.015845) local_pose_delta_deg=45.3185
+station_after_reset_axis_CC_Base_R_Upperarm_exists=true parent=CC_Base_R_Clavicle reference=CC_Base_R_Upperarm_to_CC_Base_R_Forearm
+station_after_reset_axis_CC_Base_R_Upperarm_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_R_Upperarm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 }
+station_after_reset_axis_CC_Base_R_Upperarm_rest_origin=(-0.204864, 1.965292, -0.024926) current_origin=(-0.133492, 1.796676, -0.028791) local_pose_delta_deg=64.0669
+station_after_reset_axis_CC_Base_R_UpperarmTwist01_exists=true parent=CC_Base_R_Upperarm reference=CC_Base_R_Upperarm_to_CC_Base_R_Forearm
+station_after_reset_axis_CC_Base_R_UpperarmTwist01_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_R_UpperarmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 }
+station_after_reset_axis_CC_Base_R_UpperarmTwist01_rest_origin=(-0.204864, 1.965291, -0.024926) current_origin=(-0.13348, 1.796682, -0.02879) local_pose_delta_deg=4.0813
+station_after_reset_axis_CC_Base_R_UpperarmTwist02_exists=true parent=CC_Base_R_UpperarmTwist01 reference=CC_Base_R_Upperarm_to_CC_Base_R_Forearm
+station_after_reset_axis_CC_Base_R_UpperarmTwist02_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_R_UpperarmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0001, "-Z": -0.0001 }
+station_after_reset_axis_CC_Base_R_UpperarmTwist02_rest_origin=(-0.410645, 1.960171, -0.034636) current_origin=(-0.170696, 1.629479, 0.085782) local_pose_delta_deg=2.9311
+station_after_reset_axis_CC_Base_R_Forearm_exists=true parent=CC_Base_R_Upperarm reference=CC_Base_R_Forearm_to_CC_Base_R_Hand
+station_after_reset_axis_CC_Base_R_Forearm_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_R_Forearm_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_R_Forearm_rest_origin=(-0.616427, 1.955055, -0.044347) current_origin=(-0.207908, 1.462279, 0.200362) local_pose_delta_deg=18.0449
+station_after_reset_axis_CC_Base_R_ForearmTwist01_exists=true parent=CC_Base_R_Forearm reference=CC_Base_R_Forearm_to_CC_Base_R_Hand
+station_after_reset_axis_CC_Base_R_ForearmTwist01_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_R_ForearmTwist01_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_R_ForearmTwist01_rest_origin=(-0.616427, 1.955055, -0.044347) current_origin=(-0.207947, 1.462283, 0.200345) local_pose_delta_deg=11.7510
+station_after_reset_axis_CC_Base_R_ForearmTwist02_exists=true parent=CC_Base_R_ForearmTwist01 reference=CC_Base_R_Forearm_to_CC_Base_R_Hand
+station_after_reset_axis_CC_Base_R_ForearmTwist02_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_R_ForearmTwist02_current_best=+Y current_dots={ "+X": 0.0001, "-X": -0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_R_ForearmTwist02_rest_origin=(-0.784133, 1.952983, -0.037438) current_origin=(-0.258117, 1.313798, 0.260436) local_pose_delta_deg=13.9724
+station_after_reset_axis_CC_Base_R_Hand_exists=true parent=CC_Base_R_Forearm reference=CC_Base_R_Forearm_to_CC_Base_R_Hand
+station_after_reset_axis_CC_Base_R_Hand_rest_best=+Y rest_dots={ "+X": 0.0185, "-X": -0.0185, "+Y": 0.9715, "-Y": -0.9715, "+Z": 0.2362, "-Z": -0.2362 }
+station_after_reset_axis_CC_Base_R_Hand_current_best=+Y current_dots={ "+X": 0.1069, "-X": -0.1069, "+Y": 0.8827, "-Y": -0.8827, "+Z": 0.4576, "-Z": -0.4576 }
+station_after_reset_axis_CC_Base_R_Hand_rest_origin=(-0.951839, 1.950911, -0.030531) current_origin=(-0.308287, 1.165269, 0.320479) local_pose_delta_deg=32.5702
+station_after_reset_axis_CC_Base_R_Index1_exists=true parent=CC_Base_R_Hand reference=CC_Base_R_Pinky1_to_CC_Base_R_Index1
+station_after_reset_axis_CC_Base_R_Index1_rest_best=+Z rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 0.1883, "-Y": -0.1883, "+Z": 0.9821, "-Z": -0.9821 }
+station_after_reset_axis_CC_Base_R_Index1_current_best=+Z current_dots={ "+X": 0.2004, "-X": -0.2004, "+Y": -0.0309, "-Y": 0.0309, "+Z": 0.9792, "-Z": -0.9792 }
+station_after_reset_axis_CC_Base_R_Index1_rest_origin=(-1.082807, 1.950913, 0.015308) current_origin=(-0.335873, 1.041418, 0.376665) local_pose_delta_deg=96.8803
+station_after_reset_axis_CC_Base_R_Pinky1_exists=true parent=CC_Base_R_Hand reference=CC_Base_R_Pinky1_to_CC_Base_R_Index1
+station_after_reset_axis_CC_Base_R_Pinky1_rest_best=+Z rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 0.1254, "-Y": -0.1254, "+Z": 0.9921, "-Z": -0.9921 }
+station_after_reset_axis_CC_Base_R_Pinky1_current_best=+Z current_dots={ "+X": 0.0323, "-X": -0.0323, "+Y": -0.058, "-Y": 0.058, "+Z": 0.9978, "-Z": -0.9978 }
+station_after_reset_axis_CC_Base_R_Pinky1_rest_origin=(-1.059211, 1.945498, -0.08489) current_origin=(-0.338981, 1.058007, 0.274969) local_pose_delta_deg=81.9669
+station_after_reset_axis_CC_Base_L_Clavicle_exists=true parent=CC_Base_Spine02 reference=CC_Base_L_Clavicle_to_CC_Base_L_Upperarm
+station_after_reset_axis_CC_Base_L_Clavicle_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_L_Clavicle_current_best=+Y current_dots={ "+X": -0.0006, "-X": 0.0006, "+Y": 1.0, "-Y": -1.0, "+Z": -0.0001, "-Z": 0.0001 }
+station_after_reset_axis_CC_Base_L_Clavicle_rest_origin=(0.076574, 1.979442, -0.027936) current_origin=(0.049253, 1.896025, 0.117578) local_pose_delta_deg=29.7671
+station_after_reset_axis_CC_Base_L_Upperarm_exists=true parent=CC_Base_L_Clavicle reference=CC_Base_L_Upperarm_to_CC_Base_L_Forearm
+station_after_reset_axis_CC_Base_L_Upperarm_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_L_Upperarm_current_best=+Y current_dots={ "+X": -0.0001, "-X": 0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": -0.0001, "-Z": 0.0001 }
+station_after_reset_axis_CC_Base_L_Upperarm_rest_origin=(0.204865, 1.965293, -0.024926) current_origin=(0.10019, 1.842092, 0.223236) local_pose_delta_deg=72.9699
+station_after_reset_axis_CC_Base_L_UpperarmTwist01_exists=true parent=CC_Base_L_Upperarm reference=CC_Base_L_Upperarm_to_CC_Base_L_Forearm
+station_after_reset_axis_CC_Base_L_UpperarmTwist01_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_L_UpperarmTwist01_current_best=+Y current_dots={ "+X": -0.0001, "-X": 0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": -0.0001, "-Z": 0.0001 }
+station_after_reset_axis_CC_Base_L_UpperarmTwist01_rest_origin=(0.204865, 1.965292, -0.024926) current_origin=(0.10019, 1.842089, 0.223267) local_pose_delta_deg=0.5761
+station_after_reset_axis_CC_Base_L_UpperarmTwist02_exists=true parent=CC_Base_L_UpperarmTwist01 reference=CC_Base_L_Upperarm_to_CC_Base_L_Forearm
+station_after_reset_axis_CC_Base_L_UpperarmTwist02_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_L_UpperarmTwist02_current_best=+Y current_dots={ "+X": -0.0001, "-X": 0.0001, "+Y": 1.0, "-Y": -1.0, "+Z": -0.0001, "-Z": 0.0001 }
+station_after_reset_axis_CC_Base_L_UpperarmTwist02_rest_origin=(0.410646, 1.960173, -0.034639) current_origin=(0.149066, 1.642831, 0.203824) local_pose_delta_deg=0.5761
+station_after_reset_axis_CC_Base_L_Forearm_exists=true parent=CC_Base_L_Upperarm reference=CC_Base_L_Forearm_to_CC_Base_L_Hand
+station_after_reset_axis_CC_Base_L_Forearm_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_L_Forearm_current_best=+Y current_dots={ "+X": -0.0004, "-X": 0.0004, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_L_Forearm_rest_origin=(0.616427, 1.955056, -0.044347) current_origin=(0.197949, 1.44359, 0.184302) local_pose_delta_deg=1.4591
+station_after_reset_axis_CC_Base_L_ForearmTwist01_exists=true parent=CC_Base_L_Forearm reference=CC_Base_L_Forearm_to_CC_Base_L_Hand
+station_after_reset_axis_CC_Base_L_ForearmTwist01_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_L_ForearmTwist01_current_best=+Y current_dots={ "+X": -0.0004, "-X": 0.0004, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_L_ForearmTwist01_rest_origin=(0.616427, 1.955054, -0.044347) current_origin=(0.197953, 1.443583, 0.184405) local_pose_delta_deg=0.6795
+station_after_reset_axis_CC_Base_L_ForearmTwist02_exists=true parent=CC_Base_L_ForearmTwist01 reference=CC_Base_L_Forearm_to_CC_Base_L_Hand
+station_after_reset_axis_CC_Base_L_ForearmTwist02_rest_best=+Y rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_L_ForearmTwist02_current_best=+Y current_dots={ "+X": -0.0004, "-X": 0.0004, "+Y": 1.0, "-Y": -1.0, "+Z": 0.0, "-Z": 0.0 }
+station_after_reset_axis_CC_Base_L_ForearmTwist02_rest_origin=(0.784133, 1.952982, -0.037438) current_origin=(0.219027, 1.27763, 0.170538) local_pose_delta_deg=1.5400
+station_after_reset_axis_CC_Base_L_Hand_exists=true parent=CC_Base_L_Forearm reference=CC_Base_L_Forearm_to_CC_Base_L_Hand
+station_after_reset_axis_CC_Base_L_Hand_rest_best=+Y rest_dots={ "+X": -0.0185, "-X": 0.0185, "+Y": 0.9715, "-Y": -0.9715, "+Z": 0.2362, "-Z": -0.2362 }
+station_after_reset_axis_CC_Base_L_Hand_current_best=+Y current_dots={ "+X": -0.1083, "-X": 0.1083, "+Y": 0.9729, "-Y": -0.9729, "+Z": 0.2042, "-Z": -0.2042 }
+station_after_reset_axis_CC_Base_L_Hand_rest_origin=(0.95184, 1.950911, -0.030531) current_origin=(0.240088, 1.111655, 0.156729) local_pose_delta_deg=33.7398
+station_after_reset_axis_CC_Base_L_Index1_exists=true parent=CC_Base_L_Hand reference=CC_Base_L_Index1_to_CC_Base_L_Pinky1
+station_after_reset_axis_CC_Base_L_Index1_rest_best=+Z rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": -0.1883, "-Y": 0.1883, "+Z": -0.9821, "-Z": 0.9821 }
+station_after_reset_axis_CC_Base_L_Index1_current_best=+Z current_dots={ "+X": 0.0327, "-X": -0.0327, "+Y": -0.1945, "-Y": 0.1945, "+Z": -0.9804, "-Z": 0.9804 }
+station_after_reset_axis_CC_Base_L_Index1_rest_origin=(1.082808, 1.950912, 0.015309) current_origin=(0.213706, 0.975552, 0.162535) local_pose_delta_deg=7.6550
+station_after_reset_axis_CC_Base_L_Pinky1_exists=true parent=CC_Base_L_Hand reference=CC_Base_L_Index1_to_CC_Base_L_Pinky1
+station_after_reset_axis_CC_Base_L_Pinky1_rest_best=+Z rest_dots={ "+X": 0.0, "-X": 0.0, "+Y": -0.1254, "-Y": 0.1254, "+Z": -0.9921, "-Z": 0.9921 }
+station_after_reset_axis_CC_Base_L_Pinky1_current_best=+Z current_dots={ "+X": 0.0642, "-X": -0.0642, "+Y": 0.0188, "-Y": -0.0188, "+Z": -0.9978, "-Z": 0.9978 }
+station_after_reset_axis_CC_Base_L_Pinky1_rest_origin=(1.059211, 1.945497, -0.08489) current_origin=(0.291159, 1.014628, 0.106832) local_pose_delta_deg=27.6519

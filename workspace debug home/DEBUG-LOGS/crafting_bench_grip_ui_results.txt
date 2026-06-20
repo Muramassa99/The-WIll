@@ -1,0 +1,10 @@
+option_count=2
+default_mode=grip_normal
+melee_reverse_disabled=false
+saved_mode_after_reverse_select=grip_reverse
+tooltip_popup_visible=true
+tooltip_text=Reverse grip shortens the weapon's effective reach significantly and disables two-handed weapon techniques, but grants +25% attack speed.
+normal_label=Normal Grip
+reverse_label=Reverse Grip
+bow_reverse_disabled=true
+bow_mode_after_forced_reverse_select=grip_normal

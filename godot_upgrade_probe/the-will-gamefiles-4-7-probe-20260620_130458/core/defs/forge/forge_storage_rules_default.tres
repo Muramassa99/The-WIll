@@ -1,0 +1,6 @@
+[gd_resource type="Resource" script_class="ForgeStorageRulesDef" format=3]
+
+[ext_resource type="Script" path="res://core/defs/forge_storage_rules_def.gd" id="1_storage_rules_def"]
+
+[resource]
+script = ExtResource("1_storage_rules_def")

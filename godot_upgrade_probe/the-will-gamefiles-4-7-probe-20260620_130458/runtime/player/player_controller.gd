@@ -1,0 +1,707 @@
+extends CharacterBody3D
+class_name PlayerController3D
+
+const UserSettingsStateScript = preload("res://core/models/user_settings_state.gd")
+const UserSettingsRuntimeScript = preload("res://runtime/system/user_settings_runtime.gd")
+const PlayerAimContextScript = preload("res://core/models/player_aim_context.gd")
+const MaterialPipelineServiceScript = preload("res://services/material_pipeline_service.gd")
+const ForgeServiceScript = preload("res://services/forge_service.gd")
+const TestPrintMeshBuilderScript = preload("res://runtime/forge/test_print_mesh_builder.gd")
+const PlayerInteractionPresenterScript = preload("res://runtime/player/player_interaction_presenter.gd")
+const PlayerRuntimeStatePresenterScript = preload("res://runtime/player/player_runtime_state_presenter.gd")
+const PlayerForgeTestPresenterScript = preload("res://runtime/player/player_forge_test_presenter.gd")
+const PlayerEquippedItemPresenterScript = preload("res://runtime/player/player_equipped_item_presenter.gd")
+const PlayerEquippedSkillSlotPresenterScript = preload("res://runtime/player/player_equipped_skill_slot_presenter.gd")
+const PlayerRuntimeSkillPlaybackPresenterScript = preload("res://runtime/player/player_runtime_skill_playback_presenter.gd")
+const PlayerRuntimeDebugVisualPresenterScript = preload("res://runtime/player/player_runtime_debug_visual_presenter.gd")
+const PlayerUiSurfacePresenterScript = preload("res://runtime/player/player_ui_surface_presenter.gd")
+const PlayerMotionPresenterScript = preload("res://runtime/player/player_motion_presenter.gd")
+const PlayerGameplayHudOverlayScript = preload("res://runtime/ui/player_gameplay_hud_overlay.gd")
+const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_state.gd")
+const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
+const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://core/defs/forge/forge_view_tuning_default.tres")
+
+@export var move_speed: float = 5.5
+@export var sprint_speed: float = 8.0
+@export_range(0.1, 1.0, 0.01) var backpedal_speed_multiplier: float = 0.9
+@export var acceleration: float = 18.0
+@export var air_control: float = 8.0
+@export var jump_velocity: float = 6.0
+@export var turn_speed: float = 10.0
+@export var mouse_sensitivity: float = 0.0025
+@export var min_pitch_degrees: float = -40.0
+@export var max_pitch_degrees: float = 80.0
+@export_range(0.5, 12.0, 0.1) var camera_min_distance: float = 1.5
+@export_range(0.5, 16.0, 0.1) var camera_max_distance: float = 12.0
+@export_range(0.05, 2.0, 0.05) var camera_zoom_step: float = 0.35
+@export_range(0.5, 16.0, 0.1) var camera_default_distance: float = 4.5
+@export_range(-45.0, 45.0, 0.1) var camera_far_pitch_bias_degrees: float = 12.0
+@export_range(-2.0, 4.0, 0.05) var camera_far_height_bias_meters: float = 1.2
+@export var aim_max_range_meters: float = 60.0
+@export var interaction_distance: float = 4.5
+@export var weapons_drawn: bool = false
+@export var combat_idle_expiry_seconds: float = 15.0
+@export var allow_runtime_debug_visual_toggle: bool = true
+
+@onready var visual_root: Node3D = $VisualRoot
+@onready var humanoid_rig: Node3D = $VisualRoot/PlayerHumanoidRig
+@onready var camera_pivot: Node3D = $CameraPivot
+@onready var spring_arm: SpringArm3D = $CameraPivot/SpringArm3D
+@onready var camera: Camera3D = $CameraPivot/SpringArm3D/Camera3D
+@onready var interaction_raycast: RayCast3D = $CameraPivot/SpringArm3D/Camera3D/InteractionRayCast3D
+@onready var system_menu_overlay: CanvasLayer = $SystemMenuOverlay
+@onready var player_inventory_overlay: CanvasLayer = $PlayerInventoryOverlay
+@onready var crosshair_overlay: Control = $PlayerCrosshairOverlay/Crosshair
+@onready var gameplay_hud_overlay: CanvasLayer = $PlayerGameplayHudOverlay
+
+var gravity: float = float(ProjectSettings.get_setting("physics/3d/default_gravity"))
+var ui_mode_enabled: bool = false
+var user_settings_state: UserSettingsState = UserSettingsStateScript.load_or_create()
+var body_inventory_state = null
+var personal_storage_state = null
+var equipment_state = null
+var forge_inventory_state: PlayerForgeInventoryState = null
+var forge_wip_library_state: PlayerForgeWipLibraryState = null
+var material_pipeline_service = MaterialPipelineServiceScript.new()
+var forge_service: ForgeService = ForgeServiceScript.new(DEFAULT_FORGE_RULES_RESOURCE)
+var held_item_mesh_builder: TestPrintMeshBuilder = TestPrintMeshBuilderScript.new()
+var interaction_presenter = PlayerInteractionPresenterScript.new()
+var state_presenter = PlayerRuntimeStatePresenterScript.new()
+var forge_test_presenter = PlayerForgeTestPresenterScript.new()
+var equipped_item_presenter = PlayerEquippedItemPresenterScript.new()
+var equipped_skill_slot_presenter = PlayerEquippedSkillSlotPresenterScript.new()
+var ui_surface_presenter = PlayerUiSurfacePresenterScript.new()
+var motion_presenter = PlayerMotionPresenterScript.new()
+var cached_material_lookup: Dictionary = {}
+var held_item_nodes: Dictionary = {}
+var current_aim_context = PlayerAimContextScript.new()
+var player_skill_slot_state: PlayerSkillSlotState = null
+var last_skill_activation_result: Dictionary = {}
+var runtime_skill_playback_presenter = PlayerRuntimeSkillPlaybackPresenterScript.new()
+var runtime_debug_visual_presenter = PlayerRuntimeDebugVisualPresenterScript.new()
+var last_runtime_idle_pose_result: Dictionary = {}
+var runtime_idle_pose_dirty: bool = true
+var runtime_debugging_enabled: bool = false
+var runtime_debug_visuals_visible: bool = false
+var camera_target_distance: float = 4.5
+var spring_arm_base_position: Vector3
+var spring_arm_base_rotation: Vector3
+var camera_zoom_pose_baseline_ready: bool = false
+
+func _enter_tree() -> void:
+	_ensure_runtime_input_actions()
+
+func _ready() -> void:
+	_ensure_runtime_input_actions()
+	UserSettingsRuntimeScript.apply_settings(user_settings_state, get_tree().root)
+	cached_material_lookup = material_pipeline_service.build_base_material_lookup()
+	if system_menu_overlay != null and system_menu_overlay.has_method("configure"):
+		system_menu_overlay.configure(self, user_settings_state)
+	if interaction_raycast != null:
+		interaction_raycast.target_position = Vector3(0.0, 0.0, -interaction_distance)
+	if spring_arm != null:
+		spring_arm.add_excluded_object(get_rid())
+		_capture_camera_zoom_pose_baseline()
+		camera_target_distance = clampf(
+			spring_arm.spring_length,
+			_get_camera_min_distance(),
+			_get_camera_max_distance()
+		)
+		spring_arm.spring_length = camera_target_distance
+		_apply_camera_zoom_pose()
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	_refresh_aim_context()
+	_sync_crosshair_visibility()
+	_sync_equipped_test_meshes()
+	if gameplay_hud_overlay != null and gameplay_hud_overlay.has_method("configure"):
+		gameplay_hud_overlay.configure(self)
+	runtime_skill_playback_presenter.set_combat_idle_expiry_seconds(combat_idle_expiry_seconds)
+	_sync_equipped_skill_slots()
+	set_runtime_debugging_enabled(user_settings_state.developer_debugging_enabled)
+	_apply_runtime_debug_visual_visibility(false)
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not _has_runtime_input_actions():
+		_ensure_runtime_input_actions()
+		if not _has_runtime_input_actions():
+			return
+	if _is_runtime_debug_visual_toggle_event(event):
+		_toggle_runtime_debug_visuals()
+		get_viewport().set_input_as_handled()
+		return
+	if ui_mode_enabled:
+		return
+
+	if _handle_camera_zoom_input(event):
+		get_viewport().set_input_as_handled()
+		return
+
+	if event is InputEventMouseMotion and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
+		var motion_event: InputEventMouseMotion = event
+		motion_presenter.apply_mouse_look(
+			camera_pivot,
+			motion_event,
+			mouse_sensitivity,
+			min_pitch_degrees,
+			max_pitch_degrees
+		)
+		_refresh_aim_context()
+		return
+
+	if event.is_action_pressed(&"ui_settings"):
+		_open_system_menu_page(&"settings")
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed(&"ui_social"):
+		_open_system_menu_page(&"social")
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed(&"ui_inventory"):
+		_toggle_player_inventory_page(&"inventory", "Player Inventory")
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed(&"ui_character"):
+		_toggle_player_inventory_page(&"equipment", "Character Equipment")
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed(&"menu_toggle"):
+		_toggle_system_menu()
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed(&"interact"):
+		_try_interact()
+		return
+
+	if event.is_action_pressed(&"skill_block"):
+		_activate_skill_slot(&"skill_block")
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed(&"skill_evade"):
+		_activate_skill_slot(&"skill_evade")
+		get_viewport().set_input_as_handled()
+		return
+
+	for slot_id: StringName in PlayerSkillSlotStateScript.SKILL_SLOT_IDS:
+		if event.is_action_pressed(slot_id):
+			_activate_skill_slot(slot_id)
+			get_viewport().set_input_as_handled()
+			return
+
+func _physics_process(delta: float) -> void:
+	if not _has_runtime_input_actions():
+		_ensure_runtime_input_actions()
+	if ui_mode_enabled:
+		velocity.x = 0.0
+		velocity.z = 0.0
+		_apply_vertical_motion(delta)
+		move_and_slide()
+		_sync_humanoid_locomotion(0.0, false)
+		_advance_runtime_skill_playback(delta)
+		if runtime_debug_visuals_visible:
+			_sync_runtime_debug_visuals()
+		return
+
+	var input_vector: Vector2 = Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
+	var move_direction: Vector3 = _get_move_direction(input_vector)
+	var sprinting: bool = Input.is_action_pressed(&"sprint") and not input_vector.is_zero_approx()
+	var target_move_speed: float = _resolve_target_move_speed(input_vector, sprinting)
+	var desired_velocity: Vector3 = move_direction * target_move_speed
+	var horizontal_velocity: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
+	var blend_rate: float = acceleration if is_on_floor() else air_control
+	horizontal_velocity = horizontal_velocity.move_toward(desired_velocity, blend_rate * delta)
+	velocity.x = horizontal_velocity.x
+	velocity.z = horizontal_velocity.z
+
+	if is_on_floor() and Input.is_action_just_pressed(&"jump"):
+		velocity.y = jump_velocity
+
+	_apply_vertical_motion(delta)
+	move_and_slide()
+	_refresh_aim_context()
+	_update_visual_facing(move_direction, delta)
+	_sync_humanoid_locomotion(target_move_speed, sprinting)
+	_advance_runtime_skill_playback(delta)
+	if runtime_debug_visuals_visible:
+		_sync_runtime_debug_visuals()
+
+func _apply_vertical_motion(delta: float) -> void:
+	motion_presenter.apply_vertical_motion(self, gravity, delta)
+
+func _get_move_direction(input_vector: Vector2) -> Vector3:
+	return motion_presenter.get_move_direction(camera_pivot, input_vector)
+
+func _update_visual_facing(move_direction: Vector3, delta: float) -> void:
+	motion_presenter.update_visual_facing(visual_root, move_direction, turn_speed, delta)
+
+func _try_interact() -> void:
+	interaction_presenter.try_interact(
+		interaction_raycast,
+		camera,
+		global_position,
+		interaction_distance,
+		get_tree(),
+		self
+	)
+
+func _activate_skill_slot(slot_id: StringName) -> void:
+	last_skill_activation_result = preview_runtime_skill_slot_activation(slot_id)
+	if bool(last_skill_activation_result.get("success", false)):
+		runtime_skill_playback_presenter.set_combat_idle_expiry_seconds(combat_idle_expiry_seconds)
+		if not weapons_drawn:
+			runtime_skill_playback_presenter.begin_draw_bridge(
+				last_skill_activation_result.get("source_equipment_slot_id", StringName()) as StringName
+			)
+			set_weapons_drawn(true)
+		var playback_result: Dictionary = runtime_skill_playback_presenter.start_playback(
+			last_skill_activation_result,
+			humanoid_rig,
+			held_item_nodes,
+			equipped_item_presenter,
+			get_equipment_state(),
+			weapons_drawn
+		)
+		last_skill_activation_result["runtime_playback_started"] = bool(playback_result.get("started", false))
+		last_skill_activation_result["runtime_playback_message"] = String(playback_result.get("message", ""))
+		last_skill_activation_result["source_equipment_slot_id"] = playback_result.get(
+			"dominant_slot_id",
+			last_skill_activation_result.get("source_equipment_slot_id", StringName())
+		)
+	if gameplay_hud_overlay != null:
+		gameplay_hud_overlay.activate_skill_slot(slot_id)
+
+func preview_runtime_skill_slot_activation(slot_id: StringName) -> Dictionary:
+	if slot_id == StringName():
+		last_skill_activation_result = {
+			"success": false,
+			"slot_id": slot_id,
+			"message": "No skill slot id was provided.",
+		}
+		return last_skill_activation_result
+	if player_skill_slot_state == null:
+		player_skill_slot_state = equipped_skill_slot_presenter.sync_from_equipment(
+			get_equipment_state(),
+			get_forge_wip_library_state(),
+			player_skill_slot_state
+		)
+	last_skill_activation_result = equipped_skill_slot_presenter.resolve_runtime_skill_slot(
+		slot_id,
+		get_equipment_state(),
+		get_forge_wip_library_state(),
+		player_skill_slot_state
+	)
+	return last_skill_activation_result
+
+func get_last_skill_activation_result() -> Dictionary:
+	return last_skill_activation_result.duplicate(true)
+
+func is_runtime_skill_playback_active() -> bool:
+	return runtime_skill_playback_presenter.is_playing()
+
+func get_runtime_skill_playback_debug_state() -> Dictionary:
+	return runtime_skill_playback_presenter.get_debug_state()
+
+func get_runtime_idle_pose_debug_state() -> Dictionary:
+	return runtime_skill_playback_presenter.get_idle_debug_state()
+
+func get_last_runtime_idle_pose_result() -> Dictionary:
+	return last_runtime_idle_pose_result.duplicate(true)
+
+func _toggle_system_menu() -> void:
+	ui_surface_presenter.toggle_system_menu(system_menu_overlay)
+
+func _open_system_menu_page(page_id: StringName) -> void:
+	ui_surface_presenter.open_system_menu_page(system_menu_overlay, page_id)
+
+func _toggle_player_inventory_page(page_id: StringName, source_label: String = "Player Inventory") -> void:
+	ui_surface_presenter.toggle_player_inventory_page(player_inventory_overlay, self, page_id, source_label)
+
+func open_player_inventory_page(page_id: StringName, source_label: String = "Player Inventory") -> void:
+	ui_surface_presenter.open_player_inventory_page(player_inventory_overlay, self, page_id, source_label)
+
+func set_ui_mode_enabled(enabled: bool) -> void:
+	ui_mode_enabled = enabled
+	if enabled:
+		velocity.x = 0.0
+		velocity.z = 0.0
+	ui_surface_presenter.set_mouse_mode_for_ui(enabled)
+	_refresh_aim_context()
+	_sync_crosshair_visibility()
+	if gameplay_hud_overlay != null and gameplay_hud_overlay.has_method("set_hud_visible"):
+		gameplay_hud_overlay.set_hud_visible(not enabled)
+
+func get_humanoid_standing_height_meters() -> float:
+	if humanoid_rig != null:
+		return humanoid_rig.get_standing_height_meters()
+	return 0.0
+
+func get_body_inventory_state():
+	body_inventory_state = state_presenter.get_body_inventory_state(body_inventory_state)
+	return body_inventory_state
+
+func get_personal_storage_state():
+	personal_storage_state = state_presenter.get_personal_storage_state(personal_storage_state)
+	return personal_storage_state
+
+func get_equipment_state():
+	equipment_state = state_presenter.get_equipment_state(equipment_state)
+	return equipment_state
+
+func get_forge_inventory_state() -> PlayerForgeInventoryState:
+	forge_inventory_state = state_presenter.get_forge_inventory_state(forge_inventory_state)
+	return forge_inventory_state
+
+func get_forge_wip_library_state() -> PlayerForgeWipLibraryState:
+	forge_wip_library_state = state_presenter.get_forge_wip_library_state(forge_wip_library_state)
+	return forge_wip_library_state
+
+func ensure_body_inventory_seeded(seed_def: Resource = null) -> void:
+	state_presenter.ensure_body_inventory_seeded(get_body_inventory_state(), seed_def)
+
+func ensure_forge_inventory_seeded(
+		material_lookup: Dictionary,
+		inventory_seed_def: Resource = null,
+		fallback_quantity: int = 0,
+		debug_bonus_quantity: int = 0
+	) -> void:
+	if material_lookup.is_empty():
+		return
+	state_presenter.ensure_forge_inventory_seeded(
+		get_forge_inventory_state(),
+		material_lookup,
+		inventory_seed_def,
+		fallback_quantity,
+		debug_bonus_quantity
+	)
+
+func set_selected_forge_wip_id(saved_wip_id: StringName) -> void:
+	state_presenter.set_selected_forge_wip_id(get_forge_wip_library_state(), saved_wip_id)
+
+func preview_saved_wip_test_status(saved_wip_id: StringName) -> Dictionary:
+	return forge_test_presenter.preview_saved_wip_test_status(
+		saved_wip_id,
+		get_forge_wip_library_state(),
+		forge_service,
+		_get_material_lookup()
+	)
+
+func preview_saved_wip_grip_hold_layout(saved_wip_id: StringName, dominant_slot_id: StringName) -> Dictionary:
+	return forge_test_presenter.preview_saved_wip_grip_hold_layout(
+		saved_wip_id,
+		dominant_slot_id,
+		get_forge_wip_library_state(),
+		forge_service,
+		_get_material_lookup(),
+		humanoid_rig,
+		DEFAULT_FORGE_RULES_RESOURCE.cell_world_size_meters
+	)
+
+func equip_saved_wip_to_hand(saved_wip_id: StringName, slot_id: StringName) -> Dictionary:
+	var result: Dictionary = forge_test_presenter.equip_saved_wip_to_hand(
+		saved_wip_id,
+		slot_id,
+		get_forge_wip_library_state(),
+		forge_service,
+		_get_material_lookup(),
+		get_equipment_state(),
+		Callable(self, "_sync_equipped_test_meshes"),
+		equipped_item_presenter
+	)
+	if bool(result.get("success", false)):
+		runtime_idle_pose_dirty = true
+		_sync_equipped_skill_slots()
+	return result
+
+func clear_equipment_slot(slot_id: StringName) -> void:
+	forge_test_presenter.clear_equipment_slot(
+		slot_id,
+		get_equipment_state(),
+		Callable(self, "_sync_equipped_test_meshes")
+	)
+	runtime_idle_pose_dirty = true
+	_sync_equipped_skill_slots()
+
+func set_weapons_drawn(draw_weapons: bool) -> void:
+	if weapons_drawn == draw_weapons:
+		return
+	weapons_drawn = draw_weapons
+	runtime_idle_pose_dirty = true
+	if equipped_item_presenter.reanchor_equipped_item_nodes(
+		humanoid_rig,
+		held_item_nodes,
+		get_equipment_state(),
+		weapons_drawn
+	):
+		return
+	_sync_equipped_test_meshes()
+
+func get_current_aim_context():
+	return current_aim_context
+
+func get_current_aim_point() -> Vector3:
+	return current_aim_context.aim_point if current_aim_context != null else global_position
+
+func _sync_equipped_test_meshes() -> void:
+	runtime_idle_pose_dirty = true
+	runtime_skill_playback_presenter.stop_playback(
+		humanoid_rig,
+		held_item_nodes,
+		equipped_item_presenter,
+		get_equipment_state(),
+		weapons_drawn
+	)
+	forge_test_presenter.sync_equipped_test_meshes(
+		humanoid_rig,
+		held_item_nodes,
+		get_equipment_state(),
+		get_forge_wip_library_state(),
+		weapons_drawn,
+		forge_service,
+		_get_material_lookup(),
+		held_item_mesh_builder,
+		DEFAULT_FORGE_RULES_RESOURCE,
+		DEFAULT_FORGE_VIEW_TUNING_RESOURCE,
+		equipped_item_presenter
+	)
+	_sync_runtime_debug_visuals()
+
+func _sync_equipped_skill_slots() -> void:
+	player_skill_slot_state = equipped_skill_slot_presenter.sync_from_equipment(
+		get_equipment_state(),
+		get_forge_wip_library_state(),
+		player_skill_slot_state
+	)
+	if gameplay_hud_overlay != null and gameplay_hud_overlay.has_method("refresh_all_slots"):
+		gameplay_hud_overlay.refresh_all_slots()
+
+func _get_hand_anchor(slot_id: StringName) -> Node3D:
+	return forge_test_presenter.get_hand_anchor(humanoid_rig, slot_id, equipped_item_presenter)
+
+func _get_material_lookup() -> Dictionary:
+	cached_material_lookup = state_presenter.get_material_lookup(material_pipeline_service, cached_material_lookup)
+	return cached_material_lookup
+
+func _ensure_runtime_input_actions() -> void:
+	motion_presenter.ensure_runtime_input_actions(user_settings_state)
+
+func _has_runtime_input_actions() -> bool:
+	return motion_presenter.has_runtime_input_actions()
+
+func _advance_runtime_skill_playback(delta: float) -> void:
+	var playback_result: Dictionary = runtime_skill_playback_presenter.advance_playback(
+		delta,
+		humanoid_rig,
+		held_item_nodes
+	)
+	if bool(playback_result.get("finished", false)):
+		runtime_skill_playback_presenter.stop_playback(
+			humanoid_rig,
+			held_item_nodes,
+			equipped_item_presenter,
+			get_equipment_state(),
+			weapons_drawn,
+			false,
+			true
+		)
+		if not last_skill_activation_result.is_empty():
+			last_skill_activation_result["runtime_playback_finished"] = true
+	if not runtime_skill_playback_presenter.is_playing():
+		_apply_runtime_idle_pose(delta)
+
+func _apply_runtime_idle_pose(delta: float) -> void:
+	if runtime_idle_pose_dirty or last_runtime_idle_pose_result.is_empty():
+		last_runtime_idle_pose_result = equipped_skill_slot_presenter.resolve_runtime_idle_pose(
+			get_equipment_state(),
+			get_forge_wip_library_state(),
+			weapons_drawn
+		)
+		runtime_idle_pose_dirty = false
+	var idle_apply_result: Dictionary = runtime_skill_playback_presenter.apply_idle_pose(
+		delta,
+		last_runtime_idle_pose_result,
+		humanoid_rig,
+		held_item_nodes,
+		equipped_item_presenter,
+		get_equipment_state(),
+		weapons_drawn
+	)
+	if not idle_apply_result.is_empty():
+		last_runtime_idle_pose_result["runtime_idle_applied"] = bool(idle_apply_result.get("applied", false))
+		last_runtime_idle_pose_result["runtime_idle_message"] = String(idle_apply_result.get("message", ""))
+		last_runtime_idle_pose_result["runtime_idle_dominant_slot_id"] = idle_apply_result.get("dominant_slot_id", StringName())
+		last_runtime_idle_pose_result["hidden_bridge_state"] = idle_apply_result.get("hidden_bridge_state", {})
+		last_runtime_idle_pose_result["combat_idle_elapsed_seconds"] = float(idle_apply_result.get("combat_idle_elapsed_seconds", 0.0))
+		last_runtime_idle_pose_result["combat_idle_expired_pending"] = bool(idle_apply_result.get("combat_idle_expired_pending", false))
+		if bool(idle_apply_result.get("requested_weapons_drawn", weapons_drawn)) != weapons_drawn:
+			set_weapons_drawn(bool(idle_apply_result.get("requested_weapons_drawn", weapons_drawn)))
+
+func _sync_humanoid_locomotion(target_move_speed: float, sprinting: bool) -> void:
+	motion_presenter.sync_humanoid_locomotion(
+		humanoid_rig,
+		velocity,
+		target_move_speed,
+		is_on_floor(),
+		velocity.y,
+		sprinting
+	)
+
+func _resolve_target_move_speed(input_vector: Vector2, sprinting: bool) -> float:
+	return motion_presenter.resolve_target_move_speed(
+		move_speed,
+		sprint_speed,
+		backpedal_speed_multiplier,
+		input_vector,
+		sprinting
+	)
+
+func _handle_camera_zoom_input(event: InputEvent) -> bool:
+	if spring_arm == null:
+		return false
+	var mouse_button: InputEventMouseButton = event as InputEventMouseButton
+	if mouse_button != null:
+		if not mouse_button.pressed:
+			return false
+		if mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_step_camera_zoom(-1)
+			return true
+		if mouse_button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_step_camera_zoom(1)
+			return true
+	if _event_is_action_pressed(event, &"camera_zoom_in"):
+		_step_camera_zoom(-1)
+		return true
+	if _event_is_action_pressed(event, &"camera_zoom_out"):
+		_step_camera_zoom(1)
+		return true
+	if _event_is_action_pressed(event, &"camera_reset"):
+		_set_camera_distance(_get_camera_default_distance())
+		return true
+	return false
+
+func _step_camera_zoom(direction: int) -> void:
+	_set_camera_distance(camera_target_distance + float(direction) * camera_zoom_step)
+
+func _set_camera_distance(distance: float) -> void:
+	if spring_arm == null:
+		return
+	camera_target_distance = clampf(
+		distance,
+		_get_camera_min_distance(),
+		_get_camera_max_distance()
+	)
+	spring_arm.spring_length = camera_target_distance
+	_apply_camera_zoom_pose()
+	_refresh_aim_context()
+
+func _capture_camera_zoom_pose_baseline() -> void:
+	if spring_arm == null:
+		return
+	spring_arm_base_position = spring_arm.position
+	spring_arm_base_rotation = spring_arm.rotation
+	camera_zoom_pose_baseline_ready = true
+
+func _apply_camera_zoom_pose() -> void:
+	if spring_arm == null:
+		return
+	if not camera_zoom_pose_baseline_ready:
+		_capture_camera_zoom_pose_baseline()
+	var zoom_curve_t: float = _get_far_zoom_curve_t()
+	var resolved_position: Vector3 = spring_arm_base_position
+	resolved_position.y += camera_far_height_bias_meters * zoom_curve_t
+	spring_arm.position = resolved_position
+	var resolved_rotation: Vector3 = spring_arm_base_rotation
+	resolved_rotation.x += deg_to_rad(camera_far_pitch_bias_degrees) * zoom_curve_t
+	spring_arm.rotation = resolved_rotation
+
+func _get_far_zoom_curve_t() -> float:
+	var start_distance: float = _get_camera_default_distance()
+	var max_distance: float = _get_camera_max_distance()
+	if max_distance <= start_distance + 0.001:
+		return 0.0
+	var linear_t: float = clampf(
+		(camera_target_distance - start_distance) / (max_distance - start_distance),
+		0.0,
+		1.0
+	)
+	return linear_t * linear_t * (3.0 - (2.0 * linear_t))
+
+func _get_camera_min_distance() -> float:
+	return maxf(camera_min_distance, 0.1)
+
+func _get_camera_max_distance() -> float:
+	return maxf(camera_max_distance, _get_camera_min_distance())
+
+func _get_camera_default_distance() -> float:
+	return clampf(
+		camera_default_distance,
+		_get_camera_min_distance(),
+		_get_camera_max_distance()
+	)
+
+func _event_is_action_pressed(event: InputEvent, action_name: StringName) -> bool:
+	return InputMap.has_action(action_name) and event.is_action_pressed(action_name)
+
+func _refresh_aim_context() -> void:
+	current_aim_context = motion_presenter.refresh_aim_context(
+		current_aim_context,
+		camera,
+		aim_max_range_meters
+	)
+
+func _refresh_minimal_aim_context() -> void:
+	_refresh_aim_context()
+
+func _sync_crosshair_visibility() -> void:
+	ui_surface_presenter.sync_crosshair_visibility(crosshair_overlay, ui_mode_enabled)
+
+func _is_runtime_debug_visual_toggle_event(event: InputEvent) -> bool:
+	if not is_runtime_debugging_enabled():
+		return false
+	if InputMap.has_action(&"runtime_debug_visuals"):
+		return event.is_action_pressed(&"runtime_debug_visuals")
+	var key_event: InputEventKey = event as InputEventKey
+	if key_event == null or not key_event.pressed or key_event.echo:
+		return false
+	return key_event.physical_keycode == KEY_F9 or key_event.keycode == KEY_F9
+
+func _toggle_runtime_debug_visuals() -> void:
+	_apply_runtime_debug_visual_visibility(not runtime_debug_visuals_visible)
+
+func set_runtime_debugging_enabled(enabled: bool) -> void:
+	runtime_debugging_enabled = enabled
+	if not is_runtime_debugging_enabled():
+		_apply_runtime_debug_visual_visibility(false)
+
+func is_runtime_debugging_enabled() -> bool:
+	return runtime_debugging_enabled and allow_runtime_debug_visual_toggle
+
+func _apply_runtime_debug_visual_visibility(enabled: bool) -> void:
+	if enabled and not is_runtime_debugging_enabled():
+		enabled = false
+	runtime_debug_visuals_visible = enabled
+	if humanoid_rig == null:
+		_sync_runtime_debug_visuals()
+		return
+	if humanoid_rig.has_method("set_runtime_debug_visuals_visible"):
+		humanoid_rig.call("set_runtime_debug_visuals_visible", runtime_debug_visuals_visible)
+	elif humanoid_rig.has_method("set_runtime_bone_debug_visible"):
+		humanoid_rig.call("set_runtime_bone_debug_visible", runtime_debug_visuals_visible)
+	_sync_runtime_debug_visuals()
+
+func _sync_runtime_debug_visuals() -> void:
+	runtime_debug_visual_presenter.sync_debug_visuals(
+		self,
+		camera,
+		interaction_raycast,
+		runtime_debug_visuals_visible,
+		get_tree()
+	)
+	runtime_debug_visual_presenter.sync_engine_collision_shape_debug_visuals(
+		get_tree(),
+		runtime_debug_visuals_visible
+	)

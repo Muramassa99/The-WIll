@@ -1,0 +1,33 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://runtime/storage/storage_box.gd" id="1_storage_box"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_storage_collider"]
+size = Vector3(1.4, 1.1, 1.2)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_storage_box"]
+albedo_color = Color(0.372549, 0.282353, 0.192157, 1)
+metallic = 0.04
+roughness = 0.72
+
+[sub_resource type="BoxMesh" id="BoxMesh_storage_box"]
+size = Vector3(1.3, 1.0, 1.1)
+
+[node name="StorageBox" type="StaticBody3D"]
+script = ExtResource("1_storage_box")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.5, 0)
+shape = SubResource("BoxShape3D_storage_collider")
+
+[node name="PlaceholderCube" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.5, 0)
+mesh = SubResource("BoxMesh_storage_box")
+surface_material_override/0 = SubResource("StandardMaterial3D_storage_box")
+
+[node name="PromptLabel3D" type="Label3D" parent="."]
+position = Vector3(0, 1.45, 0)
+billboard = 1
+text = "F - Use Personal Storage"
+font_size = 38
+outline_size = 12

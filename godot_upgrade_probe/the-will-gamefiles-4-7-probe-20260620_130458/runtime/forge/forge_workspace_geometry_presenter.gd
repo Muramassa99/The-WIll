@@ -1,0 +1,246 @@
+extends RefCounted
+class_name ForgeWorkspaceGeometryPresenter
+
+const PLANE_XY: StringName = &"xy"
+const PLANE_ZX: StringName = &"zx"
+const PLANE_ZY: StringName = &"zy"
+
+const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
+const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://core/defs/forge/forge_view_tuning_default.tres")
+const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
+
+var grid_size: Vector3i = DEFAULT_FORGE_RULES_RESOURCE.grid_size
+var cell_world_size: float = DEFAULT_FORGE_RULES_RESOURCE.cell_world_size_meters
+var active_plane: StringName = PLANE_XY
+var active_layer: int = DEFAULT_FORGE_RULES_RESOURCE.grid_size.z >> 1
+var material_lookup: Dictionary = {}
+var forge_view_tuning: ForgeViewTuningDef = DEFAULT_FORGE_VIEW_TUNING_RESOURCE
+var material_runtime_resolver = MaterialRuntimeResolverScript.new()
+var occupied_cells_multimesh: MultiMesh
+var occupied_cell_mesh: BoxMesh
+
+func configure(new_grid_size: Vector3i, new_cell_world_size: float) -> bool:
+	var geometry_changed: bool = grid_size != new_grid_size or not is_equal_approx(cell_world_size, new_cell_world_size)
+	grid_size = new_grid_size
+	cell_world_size = new_cell_world_size
+	if geometry_changed:
+		_refresh_occupied_cell_mesh()
+	return geometry_changed
+
+func set_active_slice(plane_id: StringName, layer_index: int) -> void:
+	active_plane = plane_id
+	active_layer = layer_index
+
+func set_material_lookup(value: Dictionary) -> void:
+	material_lookup = value
+
+func set_view_tuning(value: ForgeViewTuningDef) -> void:
+	forge_view_tuning = value if value != null else DEFAULT_FORGE_VIEW_TUNING_RESOURCE
+	_refresh_occupied_cell_mesh()
+
+func build_voxel_material() -> StandardMaterial3D:
+	var material: StandardMaterial3D = StandardMaterial3D.new()
+	material.vertex_color_use_as_albedo = true
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	material.roughness = _get_view_tuning().workspace_voxel_roughness
+	material.metallic = _get_view_tuning().workspace_voxel_metallic
+	return material
+
+func refresh_visuals(
+	occupied_cells_instance: MultiMeshInstance3D,
+	active_plane_instance: MeshInstance3D,
+	grid_bounds_instance: MeshInstance3D
+) -> void:
+	if occupied_cells_instance != null:
+		occupied_cells_instance.material_override = build_voxel_material()
+	_update_plane_mesh(active_plane_instance)
+	_update_grid_bounds_mesh(grid_bounds_instance)
+	_apply_grid_materials(active_plane_instance, grid_bounds_instance)
+
+func sync_from_wip(wip: CraftedItemWIP, occupied_cells_instance: MultiMeshInstance3D) -> void:
+	if occupied_cells_instance == null:
+		return
+	var cells: Array[CellAtom] = []
+	if wip != null:
+		for layer_atom: LayerAtom in wip.layers:
+			if layer_atom == null:
+				continue
+			for cell: CellAtom in layer_atom.cells:
+				if cell != null:
+					cells.append(cell)
+
+	_ensure_occupied_multimesh()
+	occupied_cells_multimesh.instance_count = cells.size()
+	for index in range(cells.size()):
+		var cell: CellAtom = cells[index]
+		var cell_transform: Transform3D = Transform3D(Basis.IDENTITY, _grid_to_local(cell.grid_position))
+		occupied_cells_multimesh.set_instance_transform(index, cell_transform)
+		occupied_cells_multimesh.set_instance_color(index, _resolve_material_color(cell.material_variant_id))
+	occupied_cells_instance.multimesh = occupied_cells_multimesh
+
+func screen_to_grid(camera: Camera3D, screen_position: Vector2) -> Variant:
+	if camera == null:
+		return null
+	var ray_origin: Vector3 = camera.project_ray_origin(screen_position)
+	var ray_direction: Vector3 = camera.project_ray_normal(screen_position)
+	var plane_normal: Vector3 = _get_plane_normal()
+	var plane_point: Vector3 = _get_plane_point()
+	var denominator: float = ray_direction.dot(plane_normal)
+	if absf(denominator) <= _get_view_tuning().workspace_ray_plane_epsilon:
+		return null
+	var distance: float = (plane_point - ray_origin).dot(plane_normal) / denominator
+	if distance < 0.0:
+		return null
+	var hit_position: Vector3 = ray_origin + (ray_direction * distance)
+	if not _is_local_position_within_grid_bounds(hit_position):
+		return null
+	return _local_to_grid(hit_position)
+
+func _build_cell_mesh() -> BoxMesh:
+	var cell_mesh: BoxMesh = BoxMesh.new()
+	var inset: float = cell_world_size * _get_view_tuning().workspace_voxel_inset_factor
+	cell_mesh.size = Vector3.ONE * inset
+	return cell_mesh
+
+func _refresh_occupied_cell_mesh() -> void:
+	occupied_cell_mesh = _build_cell_mesh()
+	if occupied_cells_multimesh != null:
+		occupied_cells_multimesh.mesh = occupied_cell_mesh
+
+func _ensure_occupied_multimesh() -> void:
+	if occupied_cells_multimesh != null:
+		if occupied_cells_multimesh.mesh == null:
+			occupied_cells_multimesh.mesh = occupied_cell_mesh if occupied_cell_mesh != null else _build_cell_mesh()
+		return
+	occupied_cells_multimesh = MultiMesh.new()
+	occupied_cells_multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	occupied_cells_multimesh.use_colors = true
+	if occupied_cell_mesh == null:
+		occupied_cell_mesh = _build_cell_mesh()
+	occupied_cells_multimesh.mesh = occupied_cell_mesh
+
+func _build_grid_material(color: Color) -> StandardMaterial3D:
+	var material: StandardMaterial3D = StandardMaterial3D.new()
+	material.albedo_color = color
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return material
+
+func _apply_grid_materials(active_plane_instance: MeshInstance3D, grid_bounds_instance: MeshInstance3D) -> void:
+	var tuning: ForgeViewTuningDef = _get_view_tuning()
+	if grid_bounds_instance != null:
+		grid_bounds_instance.material_override = _build_grid_material(tuning.workspace_grid_bounds_color)
+	if active_plane_instance != null:
+		active_plane_instance.material_override = _build_grid_material(tuning.workspace_active_plane_color)
+
+func _update_grid_bounds_mesh(grid_bounds_instance: MeshInstance3D) -> void:
+	if grid_bounds_instance == null:
+		return
+	var box_mesh: BoxMesh = BoxMesh.new()
+	box_mesh.size = Vector3(
+		float(grid_size.x) * cell_world_size,
+		float(grid_size.y) * cell_world_size,
+		float(grid_size.z) * cell_world_size
+	)
+	grid_bounds_instance.mesh = box_mesh
+	grid_bounds_instance.position = Vector3.ZERO
+
+func _update_plane_mesh(active_plane_instance: MeshInstance3D) -> void:
+	if active_plane_instance == null:
+		return
+	var plane_mesh: BoxMesh = BoxMesh.new()
+	var thickness: float = cell_world_size * _get_view_tuning().workspace_plane_thickness_factor
+	var plane_position: Vector3 = _get_plane_point()
+	match active_plane:
+		PLANE_ZX:
+			plane_mesh.size = Vector3(float(grid_size.z) * cell_world_size, thickness, float(grid_size.x) * cell_world_size)
+			active_plane_instance.rotation_degrees = Vector3(0.0, 90.0, 0.0)
+		PLANE_ZY:
+			plane_mesh.size = Vector3(thickness, float(grid_size.y) * cell_world_size, float(grid_size.z) * cell_world_size)
+			active_plane_instance.rotation_degrees = Vector3(0.0, 0.0, 0.0)
+		_:
+			plane_mesh.size = Vector3(float(grid_size.x) * cell_world_size, float(grid_size.y) * cell_world_size, thickness)
+			active_plane_instance.rotation_degrees = Vector3(0.0, 0.0, 0.0)
+	active_plane_instance.mesh = plane_mesh
+	active_plane_instance.position = plane_position
+
+func _get_plane_normal() -> Vector3:
+	match active_plane:
+		PLANE_ZX:
+			return Vector3.UP
+		PLANE_ZY:
+			return Vector3.RIGHT
+		_:
+			return Vector3.BACK
+
+func _get_plane_point() -> Vector3:
+	match active_plane:
+		PLANE_ZX:
+			return Vector3(0.0, _get_layer_axis_local_coordinate(grid_size.y, active_layer), 0.0)
+		PLANE_ZY:
+			return Vector3(_get_layer_axis_local_coordinate(grid_size.x, active_layer), 0.0, 0.0)
+		_:
+			return Vector3(0.0, 0.0, _get_layer_axis_local_coordinate(grid_size.z, active_layer))
+
+func _get_layer_axis_local_coordinate(axis_size: int, layer_index: int) -> float:
+	if axis_size <= 0:
+		return 0.0
+	var clamped_layer_index: int = clampi(layer_index, 0, axis_size - 1)
+	var axis_offset: float = (float(axis_size - 1) * cell_world_size) * 0.5
+	return float(clamped_layer_index) * cell_world_size - axis_offset
+
+func _grid_to_local(grid_position: Vector3i) -> Vector3:
+	var offset: Vector3 = Vector3(
+		(float(grid_size.x - 1) * cell_world_size) * 0.5,
+		(float(grid_size.y - 1) * cell_world_size) * 0.5,
+		(float(grid_size.z - 1) * cell_world_size) * 0.5
+	)
+	return Vector3(grid_position) * cell_world_size - offset
+
+func _local_to_grid(local_position: Vector3) -> Variant:
+	if not _is_local_position_within_grid_bounds(local_position):
+		return null
+	var offset: Vector3 = Vector3(
+		(float(grid_size.x - 1) * cell_world_size) * 0.5,
+		(float(grid_size.y - 1) * cell_world_size) * 0.5,
+		(float(grid_size.z - 1) * cell_world_size) * 0.5
+	)
+	var grid_position: Vector3 = (local_position + offset) / cell_world_size
+	var result: Vector3i = Vector3i(
+		clampi(int(round(grid_position.x)), 0, grid_size.x - 1),
+		clampi(int(round(grid_position.y)), 0, grid_size.y - 1),
+		clampi(int(round(grid_position.z)), 0, grid_size.z - 1)
+	)
+	match active_plane:
+		PLANE_ZX:
+			result.y = clampi(active_layer, 0, grid_size.y - 1)
+		PLANE_ZY:
+			result.x = clampi(active_layer, 0, grid_size.x - 1)
+		_:
+			result.z = clampi(active_layer, 0, grid_size.z - 1)
+	return result
+
+func _is_local_position_within_grid_bounds(local_position: Vector3) -> bool:
+	var half_extents: Vector3 = Vector3(
+		(float(grid_size.x) * cell_world_size) * 0.5,
+		(float(grid_size.y) * cell_world_size) * 0.5,
+		(float(grid_size.z) * cell_world_size) * 0.5
+	)
+	var tolerance: float = 0.0001
+	return local_position.x >= -half_extents.x - tolerance \
+		and local_position.x <= half_extents.x + tolerance \
+		and local_position.y >= -half_extents.y - tolerance \
+		and local_position.y <= half_extents.y + tolerance \
+		and local_position.z >= -half_extents.z - tolerance \
+		and local_position.z <= half_extents.z + tolerance
+
+func _resolve_material_color(material_id: StringName) -> Color:
+	return material_runtime_resolver.resolve_material_color(
+		material_id,
+		material_lookup,
+		_get_view_tuning().unknown_material_color
+	)
+
+func _get_view_tuning() -> ForgeViewTuningDef:
+	return forge_view_tuning if forge_view_tuning != null else DEFAULT_FORGE_VIEW_TUNING_RESOURCE

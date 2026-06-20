@@ -1,0 +1,13 @@
+short_preset_resolved=true
+long_preset_resolved=true
+short_node_count=3
+long_node_count=3
+node_count_ok=true
+all_short_lengths_ok=true
+all_long_lengths_ok=true
+pivots_stable_ok=true
+all_nodes_have_retarget_ok=true
+timing_ok=true
+speed_tuning_ok=true
+validation_ok=true
+all_checks_passed=true

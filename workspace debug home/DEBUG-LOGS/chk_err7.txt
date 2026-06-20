@@ -1,0 +1,12 @@
+ERROR: res://scenes/ui/combat_animation_station_ui.tscn:1 - Parse Error: Expected '['.
+   at: _printerr (scene/resources/resource_format_text.cpp:40)
+ERROR: Failed loading resource: res://scenes/ui/combat_animation_station_ui.tscn.
+   at: _load (core/io/resource_loader.cpp:343)
+ERROR: res://scenes/world/combat_animation_station.tscn:36 - Parse Error: [ext_resource] referenced non-existent resource at: res://scenes/ui/combat_animation_station_ui.tscn.
+   at: _printerr (scene/resources/resource_format_text.cpp:40)
+WARNING: Node './CombatAnimationStationUI' was modified from inside an instance, but it has vanished.
+   at: instantiate (scene/resources/packed_scene.cpp:310)
+ERROR: Node not found: "CombatAnimationStationUI" (relative to "/root/TraversalSandbox/CombatAnimationStation").
+   at: get_node (scene/main/node.cpp:1963)
+   GDScript backtrace (most recent call first):
+       [0] @implicit_ready (res://runtime/combat/combat_animation_station.gd:5)

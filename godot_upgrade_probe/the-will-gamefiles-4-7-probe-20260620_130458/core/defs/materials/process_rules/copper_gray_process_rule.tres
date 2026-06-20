@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="ProcessRuleDef" format=3]
+
+[ext_resource type="Script" path="res://core/defs/process_rule_def.gd" id="1_process_rule_def"]
+
+[resource]
+script = ExtResource("1_process_rule_def")
+rule_id = &"rule_process_copper_gray"
+input_drop_id = &"drop_copper_raw_gray"
+output_material_variant_id = &"mat_copper_gray"
+output_count_per_input = 6

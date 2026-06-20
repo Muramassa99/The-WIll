@@ -1,0 +1,97 @@
+[gd_resource type="Resource" script_class="BaseMaterialDef" format=3 uid="uid://bj8n7crfoi71r"]
+
+[ext_resource type="Script" uid="uid://7m86a3xt1dlg" path="res://core/defs/base_material_def.gd" id="1_base_material"]
+[ext_resource type="Script" uid="uid://cl8i2kjpv5mh3" path="res://core/atoms/stat_line.gd" id="2_stat_line"]
+
+[sub_resource type="Resource" id="Stat_def"]
+script = ExtResource("2_stat_line")
+stat_id = &"def_mod_flat"
+value = 0.8
+
+[sub_resource type="Resource" id="Stat_endurance"]
+script = ExtResource("2_stat_line")
+stat_id = &"endurance_flat"
+value = 0.4
+
+[sub_resource type="Resource" id="Stat_stagger"]
+script = ExtResource("2_stat_line")
+stat_id = &"stagger_resist_flat"
+value = 0.35
+
+[sub_resource type="Resource" id="Stat_move"]
+script = ExtResource("2_stat_line")
+stat_id = &"move_speed_pct_add"
+value = -0.04
+value_kind = 1
+
+[sub_resource type="Resource" id="Cap_guard"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_guard"
+value = 0.8
+
+[sub_resource type="Resource" id="Cap_blunt"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_blunt"
+value = 0.6
+
+[sub_resource type="Resource" id="Cap_stability"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_stability"
+value = 0.7
+
+[sub_resource type="Resource" id="Elem_terre"]
+script = ExtResource("2_stat_line")
+stat_id = &"elem_terre"
+value = 0.2
+
+[sub_resource type="Resource" id="Ctx_armor"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_armor"
+value = 0.9
+
+[sub_resource type="Resource" id="Ctx_shield"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_shield"
+value = 0.8
+
+[sub_resource type="Resource" id="Ctx_weapon"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_weapon"
+value = 0.45
+
+[sub_resource type="Resource" id="Fam_defense"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_defense"
+value = 0.8
+
+[sub_resource type="Resource" id="Fam_melee"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_melee"
+value = 0.4
+
+[resource]
+script = ExtResource("1_base_material")
+base_material_id = &"mat_carapace_base"
+display_name = "Carapace"
+material_family = &"organic"
+density_per_cell = 0.95
+hardness = 0.7
+toughness = 0.65
+elasticity = 0.15
+brittleness = 0.3
+edge_retention = 0.3
+thermal_stability = 0.55
+corrosion_resistance = 0.5
+salvage_priority = 3
+color_group = &"amber"
+albedo_color = Color(0.545098, 0.392157, 0.219608, 1)
+gloss_grade = 0.2
+base_stat_lines = Array[ExtResource("2_stat_line")]([SubResource("Stat_def"), SubResource("Stat_endurance"), SubResource("Stat_stagger"), SubResource("Stat_move")])
+capability_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Cap_guard"), SubResource("Cap_blunt"), SubResource("Cap_stability")])
+skill_family_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Fam_defense"), SubResource("Fam_melee")])
+elemental_affinity_lines = Array[ExtResource("2_stat_line")]([SubResource("Elem_terre")])
+equipment_context_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Ctx_armor"), SubResource("Ctx_shield"), SubResource("Ctx_weapon")])
+can_be_anchor_material = true
+can_be_blunt_surface = true
+can_be_guard_surface = true
+can_be_plate_surface = true

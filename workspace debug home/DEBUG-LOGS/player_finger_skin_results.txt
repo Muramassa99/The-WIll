@@ -1,0 +1,38 @@
+player_loaded=true
+rig_loaded=true
+skeleton_loaded=true
+mesh_loaded=true
+skin_loaded=true
+surface_count=2
+skin_bind_count=77
+weighted_finger_bone_count=30
+CC_Base_R_Index1_slot_hits=160 vertex_hits=160
+CC_Base_R_Index2_slot_hits=37 vertex_hits=37
+CC_Base_R_Index3_slot_hits=69 vertex_hits=69
+CC_Base_R_Mid1_slot_hits=183 vertex_hits=183
+CC_Base_R_Mid2_slot_hits=88 vertex_hits=88
+CC_Base_R_Mid3_slot_hits=90 vertex_hits=90
+CC_Base_R_Ring1_slot_hits=306 vertex_hits=306
+CC_Base_R_Ring2_slot_hits=91 vertex_hits=91
+CC_Base_R_Ring3_slot_hits=62 vertex_hits=62
+CC_Base_R_Pinky1_slot_hits=154 vertex_hits=154
+CC_Base_R_Pinky2_slot_hits=61 vertex_hits=61
+CC_Base_R_Pinky3_slot_hits=62 vertex_hits=62
+CC_Base_R_Thumb1_slot_hits=125 vertex_hits=125
+CC_Base_R_Thumb2_slot_hits=141 vertex_hits=141
+CC_Base_R_Thumb3_slot_hits=62 vertex_hits=62
+CC_Base_L_Index1_slot_hits=165 vertex_hits=165
+CC_Base_L_Index2_slot_hits=37 vertex_hits=37
+CC_Base_L_Index3_slot_hits=67 vertex_hits=67
+CC_Base_L_Mid1_slot_hits=173 vertex_hits=173
+CC_Base_L_Mid2_slot_hits=59 vertex_hits=59
+CC_Base_L_Mid3_slot_hits=87 vertex_hits=87
+CC_Base_L_Ring1_slot_hits=300 vertex_hits=300
+CC_Base_L_Ring2_slot_hits=94 vertex_hits=94
+CC_Base_L_Ring3_slot_hits=65 vertex_hits=65
+CC_Base_L_Pinky1_slot_hits=157 vertex_hits=157
+CC_Base_L_Pinky2_slot_hits=57 vertex_hits=57
+CC_Base_L_Pinky3_slot_hits=64 vertex_hits=64
+CC_Base_L_Thumb1_slot_hits=117 vertex_hits=117
+CC_Base_L_Thumb2_slot_hits=133 vertex_hits=133
+CC_Base_L_Thumb3_slot_hits=63 vertex_hits=63

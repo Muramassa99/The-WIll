@@ -1,0 +1,12 @@
+max_clamped=true
+max_distance_after=1.0000
+max_segment_length_preserved=true
+max_pivot_on_shell_ok=true
+min_clamped=true
+min_distance_after=0.5000
+min_segment_length_preserved=true
+min_pivot_on_shell_ok=true
+chain_volume_clamped=true
+chain_pivot_distance=1.0000
+chain_segment_length_preserved=true
+chain_pivot_on_shell_ok=true

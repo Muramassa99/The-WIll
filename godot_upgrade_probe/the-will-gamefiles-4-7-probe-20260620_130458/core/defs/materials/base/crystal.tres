@@ -1,0 +1,97 @@
+[gd_resource type="Resource" script_class="BaseMaterialDef" format=3 uid="uid://dcepgr2rst6ds"]
+
+[ext_resource type="Script" uid="uid://7m86a3xt1dlg" path="res://core/defs/base_material_def.gd" id="1_base_material"]
+[ext_resource type="Script" uid="uid://cl8i2kjpv5mh3" path="res://core/atoms/stat_line.gd" id="2_stat_line"]
+
+[sub_resource type="Resource" id="Stat_magic"]
+script = ExtResource("2_stat_line")
+stat_id = &"magic_power_flat"
+value = 0.8
+
+[sub_resource type="Resource" id="Stat_crit"]
+script = ExtResource("2_stat_line")
+stat_id = &"crit_damage_bonus_add"
+value = 0.15
+value_kind = 1
+
+[sub_resource type="Resource" id="Stat_channel"]
+script = ExtResource("2_stat_line")
+stat_id = &"channel_stability_flat"
+value = 0.35
+
+[sub_resource type="Resource" id="Stat_amp"]
+script = ExtResource("2_stat_line")
+stat_id = &"elemental_amplify_pct"
+value = 0.08
+value_kind = 1
+
+[sub_resource type="Resource" id="Cap_magic"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_magic"
+value = 0.9
+
+[sub_resource type="Resource" id="Cap_channel"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_channel"
+value = 0.8
+
+[sub_resource type="Resource" id="Cap_precision"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_precision"
+value = 0.4
+
+[sub_resource type="Resource" id="Cap_edge"]
+script = ExtResource("2_stat_line")
+stat_id = &"cap_edge"
+value = 0.4
+
+[sub_resource type="Resource" id="Elem_crystal"]
+script = ExtResource("2_stat_line")
+stat_id = &"elem_crystal"
+value = 0.9
+
+[sub_resource type="Resource" id="Elem_light"]
+script = ExtResource("2_stat_line")
+stat_id = &"elem_light"
+value = 0.2
+
+[sub_resource type="Resource" id="Ctx_weapon"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_weapon"
+value = 0.5
+
+[sub_resource type="Resource" id="Ctx_focus"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_focus"
+value = 0.9
+
+[sub_resource type="Resource" id="Ctx_trinket"]
+script = ExtResource("2_stat_line")
+stat_id = &"ctx_trinket"
+value = 0.7
+
+[sub_resource type="Resource" id="Fam_magic"]
+script = ExtResource("2_stat_line")
+stat_id = &"fam_magic"
+value = 0.8
+
+[resource]
+script = ExtResource("1_base_material")
+base_material_id = &"mat_crystal_base"
+display_name = "Crystal"
+material_family = &"catalyst"
+density_per_cell = 0.95
+hardness = 0.75
+toughness = 0.3
+elasticity = 0.1
+brittleness = 0.7
+edge_retention = 0.55
+color_group = &"violet"
+albedo_color = Color(0.603922, 0.756863, 0.933333, 1)
+transparency_grade = 0.35
+base_stat_lines = Array[ExtResource("2_stat_line")]([SubResource("Stat_magic"), SubResource("Stat_crit"), SubResource("Stat_channel"), SubResource("Stat_amp")])
+capability_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Cap_magic"), SubResource("Cap_channel"), SubResource("Cap_precision"), SubResource("Cap_edge")])
+skill_family_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Fam_magic")])
+elemental_affinity_lines = Array[ExtResource("2_stat_line")]([SubResource("Elem_crystal"), SubResource("Elem_light")])
+equipment_context_bias_lines = Array[ExtResource("2_stat_line")]([SubResource("Ctx_weapon"), SubResource("Ctx_focus"), SubResource("Ctx_trinket")])
+can_be_beveled_edge = true

@@ -1,0 +1,38 @@
+diagnostic=glave_grip_candidate_reasons
+target_project_name=Long Glave  Animation  Test
+library_loaded=true
+target_found=true
+target_wip_id=player_wip_1778007837.679_9
+selected_wip_id=player_wip_1778007837.679_9
+cell_count=6379
+segment_count=1
+anchor_count=1
+profile_validation_error=
+profile_center_of_mass=(305.305, 108.488, 41.464)
+primary_grip_valid=true
+
+[segment_0]
+segment_id=segment_0
+member_cell_count=6379
+bounds_min=(70, 105, 28)
+bounds_max=(419, 112, 65)
+major_axis=RIGHT/X
+minor_axis_a=UP/Y
+minor_axis_b=BACK/Z
+length_voxels=350
+cross_width_voxels=8
+cross_thickness_voxels=32
+anchor_material_ratio=0.5272
+material_mix=mat_iron_gray:3016, mat_wood_gray:3363
+resolved_primary_grip_span_count=1
+span_0=76..355 length=280 ratio=1.0000 start=(76.000, 108.500, 39.500) end=(355.000, 108.500, 39.500)
+slice_count=350
+valid_grip_candidate_slice_count=281
+valid_grip_candidate_slice_ranges=76..356
+full_anchor_valid_candidate_slice_count=281
+full_anchor_valid_candidate_slice_ranges=76..356
+candidate_examples=slice=76 count=12 surface_ratio=1.0000 total_ratio=0.6667 surface_valid=true width=4 thickness=4 mats=mat_iron_gray:4, mat_wood_gray:8 | slice=77 count=12 surface_ratio=1.0000 total_ratio=0.6667 surface_valid=true width=4 thickness=4 mats=mat_iron_gray:4, mat_wood_gray:8 | slice=78 count=12 surface_ratio=1.0000 total_ratio=0.9167 surface_valid=true width=4 thickness=4 mats=mat_iron_gray:1, mat_wood_gray:11 | slice=79 count=12 surface_ratio=1.0000 total_ratio=1.0000 surface_valid=true width=4 thickness=4 mats=mat_wood_gray:12 | slice=80 count=12 surface_ratio=1.0000 total_ratio=1.0000 surface_valid=true width=4 thickness=4 mats=mat_wood_gray:12 | slice=81 count=12 surface_ratio=1.0000 total_ratio=1.0000 surface_valid=true width=4 thickness=4 mats=mat_wood_gray:12 | slice=82 count=12 surface_ratio=1.0000 total_ratio=1.0000 surface_valid=true width=4 thickness=4 mats=mat_wood_gray:12 | slice=83 count=12 surface_ratio=1.0000 total_ratio=1.0000 surface_valid=true width=4 thickness=4 mats=mat_wood_gray:12 | slice=84 count=12 surface_ratio=1.0000 total_ratio=1.0000 surface_valid=true width=4 thickness=4 mats=mat_wood_gray:12 | slice=85 count=12 surface_ratio=1.0000 total_ratio=1.0000 surface_valid=true width=4 thickness=4 mats=mat_wood_gray:12 | slice=86 count=12 surface_ratio=1.0000 total_ratio=1.0000 surface_valid=true width=4 thickness=4 mats=mat_wood_gray:12 | slice=87 count=12 surface_ratio=1.0000 total_ratio=1.0000 surface_valid=true width=4 thickness=4 mats=mat_wood_gray:12
+component_reason_counts=eligible:281, count_lt_4:0, anchor_ratio_low:93, invalid_shape:0, clearance_blocked:0
+top_invalid_shape_patterns=
+anchor_ratio_low_examples=slice=70 count=4 surface_ratio=0.0000 total_ratio=0.0000 width=2 thickness=2 mats=mat_iron_gray:4 | slice=71 count=16 surface_ratio=0.0000 total_ratio=0.0000 width=4 thickness=4 mats=mat_iron_gray:16 | slice=72 count=32 surface_ratio=0.0000 total_ratio=0.0000 width=6 thickness=6 mats=mat_iron_gray:32 | slice=73 count=52 surface_ratio=0.0000 total_ratio=0.0000 width=8 thickness=8 mats=mat_iron_gray:52 | slice=74 count=32 surface_ratio=0.0000 total_ratio=0.0000 width=6 thickness=6 mats=mat_iron_gray:32 | slice=75 count=16 surface_ratio=0.0000 total_ratio=0.0000 width=4 thickness=4 mats=mat_iron_gray:16 | slice=357 count=34 surface_ratio=0.0000 total_ratio=0.0000 width=7 thickness=7 mats=mat_iron_gray:34 | slice=358 count=42 surface_ratio=0.0000 total_ratio=0.0000 width=7 thickness=8 mats=mat_iron_gray:42
+clearance_blocked_examples=

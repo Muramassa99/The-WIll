@@ -1,0 +1,12 @@
+compiled_ok=true
+duplicated_ok=true
+original_unchanged_ok=true
+degradation_ok=true
+allowed_preserves_two_hand_ok=true
+hand_swap_bridge_ok=true
+retarget_ok=true
+blocked_degraded_node_count=1
+blocked_hand_swap_bridge_count=1
+blocked_retarget_seeded_count=2
+blocked_retargeted_count=2
+all_checks_passed=true

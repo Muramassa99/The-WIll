@@ -1,0 +1,13 @@
+body_restriction_root_exists=true
+neutral_body_self_legal=true
+neutral_checked_pair_count=190
+neutral_overlap_pair_count=44
+neutral_allowed_overlap_pair_count=44
+neutral_illegal_pair_count=0
+neutral_illegal_pairs=[]
+forced_body_self_legal=false
+forced_illegal_pair_count=6
+forced_first_illegal_first_region=torso_chest
+forced_first_illegal_second_region=right_forearm
+forced_first_illegal_clearance_meters=-0.0434
+anatomical_self_collision_ok=true

@@ -1,0 +1,295 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://runtime/disassembly/disassembly_bench_ui.gd" id="1_disassembly_bench_ui"]
+
+[node name="DisassemblyBenchUI" type="CanvasLayer"]
+layer = 20
+script = ExtResource("1_disassembly_bench_ui")
+
+[node name="Backdrop" type="ColorRect" parent="."]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.58)
+
+[node name="Panel" type="PanelContainer" parent="."]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 14
+
+[node name="RootVBox" type="VBoxContainer" parent="Panel/MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 12
+
+[node name="HeaderBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox"]
+theme_override_constants/separation = 4
+
+[node name="TitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/HeaderBox"]
+text = "Disassembly Bench"
+horizontal_alignment = 1
+
+[node name="SubtitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/HeaderBox"]
+text = "Prepare suitable body-inventory items for one-way disassembly into forge materials."
+autowrap_mode = 2
+horizontal_alignment = 1
+
+[node name="MainScroll" type="ScrollContainer" parent="Panel/MarginContainer/RootVBox"]
+size_flags_vertical = 3
+
+[node name="MainHBox" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainScroll"]
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="InventoryPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/InventoryPanel"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="InventoryVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/InventoryPanel/MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="InventoryHeaderLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/InventoryPanel/MarginContainer/InventoryVBox"]
+text = "1. Body Inventory"
+
+[node name="InventorySubLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/InventoryPanel/MarginContainer/InventoryVBox"]
+text = "Only suitable disassembly items are shown here. Clicking a row moves it into the disassembly queue."
+autowrap_mode = 2
+
+[node name="InventoryList" type="ItemList" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/InventoryPanel/MarginContainer/InventoryVBox"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+allow_reselect = true
+
+[node name="OutputPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="OutputVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel/MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="OutputHeaderLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel/MarginContainer/OutputVBox"]
+text = "2. Output Preview"
+
+[node name="OutputSubLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel/MarginContainer/OutputVBox"]
+text = "These projected forge materials do not exist yet. They only route into forge storage if disassembly is confirmed."
+autowrap_mode = 2
+
+[node name="OutputPreviewList" type="ItemList" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel/MarginContainer/OutputVBox"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="OutputStatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel/MarginContainer/OutputVBox"]
+text = "Select items from the left list to preview processed output."
+autowrap_mode = 2
+
+[node name="WarningPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel/MarginContainer/OutputVBox"]
+size_flags_horizontal = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel/MarginContainer/OutputVBox/WarningPanel"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="WarningVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel/MarginContainer/OutputVBox/WarningPanel/MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="WarningTitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel/MarginContainer/OutputVBox/WarningPanel/MarginContainer/WarningVBox"]
+text = "5. Irreversible Warning"
+
+[node name="WarningTextLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel/MarginContainer/OutputVBox/WarningPanel/MarginContainer/WarningVBox"]
+text = "Disassembly converts selected items into forge building materials."
+autowrap_mode = 2
+
+[node name="IrreversibleCheckBox" type="CheckBox" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel/MarginContainer/OutputVBox/WarningPanel/MarginContainer/WarningVBox"]
+text = "By checking this box I understand that this process is irreversible."
+
+[node name="ActionRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel/MarginContainer/OutputVBox"]
+theme_override_constants/separation = 8
+
+[node name="DisassembleButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel/MarginContainer/OutputVBox/ActionRow"]
+size_flags_horizontal = 3
+text = "4. Disassemble"
+
+[node name="ClearSelectionButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/OutputPanel/MarginContainer/OutputVBox/ActionRow"]
+size_flags_horizontal = 3
+text = "Clear Selection"
+
+[node name="SelectedPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="SelectedVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="SelectedHeaderLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox"]
+text = "3. Selected For Disassembly"
+
+[node name="SelectedSubLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox"]
+text = "Items queued here remain in body inventory until disassembly is confirmed. Clicking a row returns it to the inventory list."
+autowrap_mode = 2
+
+[node name="SelectedList" type="ItemList" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+allow_reselect = true
+
+[node name="SummaryPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox"]
+size_flags_horizontal = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox/SummaryPanel"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="SummaryVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox/SummaryPanel/MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 6
+
+[node name="SummaryTitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox/SummaryPanel/MarginContainer/SummaryVBox"]
+text = "Selection Summary"
+
+[node name="SummaryLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox/SummaryPanel/MarginContainer/SummaryVBox"]
+text = "Selected item rows: 0"
+autowrap_mode = 2
+
+[node name="OptionalPanel" type="PanelContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox"]
+size_flags_horizontal = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox/OptionalPanel"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="OptionalVBox" type="VBoxContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox/OptionalPanel/MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="OptionalTitleLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox/OptionalPanel/MarginContainer/OptionalVBox"]
+text = "6 / 7. Optional Actions"
+
+[node name="OptionalStatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox/OptionalPanel/MarginContainer/OptionalVBox"]
+text = "No blueprint or chase-skill extraction options are available for the current selection."
+autowrap_mode = 2
+
+[node name="OptionalActionRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox/OptionalPanel/MarginContainer/OptionalVBox"]
+theme_override_constants/separation = 8
+
+[node name="ExtractBlueprintButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox/OptionalPanel/MarginContainer/OptionalVBox/OptionalActionRow"]
+visible = false
+size_flags_horizontal = 3
+text = "Extract Blueprint"
+
+[node name="SelectSkillButton" type="Button" parent="Panel/MarginContainer/RootVBox/MainScroll/MainHBox/SelectedPanel/MarginContainer/SelectedVBox/OptionalPanel/MarginContainer/OptionalVBox/OptionalActionRow"]
+visible = false
+size_flags_horizontal = 3
+text = "Select Skill"
+
+[node name="FooterRow" type="HBoxContainer" parent="Panel/MarginContainer/RootVBox"]
+theme_override_constants/separation = 10
+
+[node name="FooterStatusLabel" type="Label" parent="Panel/MarginContainer/RootVBox/FooterRow"]
+size_flags_horizontal = 3
+text = "Select suitable inventory items to prepare them for disassembly."
+autowrap_mode = 2
+
+[node name="CloseButton" type="Button" parent="Panel/MarginContainer/RootVBox/FooterRow"]
+text = "Close"

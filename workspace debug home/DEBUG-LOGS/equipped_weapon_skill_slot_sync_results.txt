@@ -1,0 +1,17 @@
+player_scene_instanced=true
+hud_scene_instanced=true
+right_slot_6_publishable=false
+right_slot_6_matches_legacy=true
+right_slot_6_display_name=Skill Slot 6
+right_slot_6_skill_name=
+right_slot_6_motion_node_count=2
+slot_1_assigned=true
+slot_1_display_name=Right Slash
+slot_1_source_weapon=player_wip_1777249148.821_1
+slot_6_assigned=true
+slot_6_display_name=Left Guard
+slot_6_source_weapon=player_wip_1777249148.824_2
+untouched_slot_2_assigned=false
+slot_1_after_clear_display_name=Left Slash
+slot_1_after_clear_source_weapon=player_wip_1777249148.824_2
+reloaded_slot_6_display_name=Left Guard

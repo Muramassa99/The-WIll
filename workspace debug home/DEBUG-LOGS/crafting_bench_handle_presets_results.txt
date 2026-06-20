@@ -1,0 +1,13 @@
+geometry_menu_has_handles_entry=true
+handle_popup_visible=true
+handle_popup_has_four_columns=true
+handle_popup_button_count=12
+handle_popup_has_icons=true
+handle_tool_selected=true
+selected_handle_is_diamond_13=true
+tool_menu_has_handle_label=true
+tool_menu_has_handle_preset_line=true
+tool_menu_hides_size_controls_for_handle=true
+hover_preview_count_matches=true
+handle_stamp_expected_cells_ok=true
+handle_erase_success=true

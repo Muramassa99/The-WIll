@@ -1,0 +1,15 @@
+rig_loaded=true
+skeleton_loaded=true
+usable_arm_motion_range_ratio=0.98
+right_max_arm_chain_reach_meters=0.7456
+left_max_arm_chain_reach_meters=0.7456
+right_usable_arm_chain_reach_meters=0.7307
+left_usable_arm_chain_reach_meters=0.7307
+right_requested_distance_meters=0.9865
+left_requested_distance_meters=0.9865
+right_clamped_distance_meters=0.7308
+left_clamped_distance_meters=0.7309
+right_requested_exceeded_limit=true
+left_requested_exceeded_limit=true
+right_limit_respected=true
+left_limit_respected=true

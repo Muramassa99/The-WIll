@@ -1,0 +1,11 @@
+assigned_success=true
+assigned_display_name=Forward Arc
+assigned_weapon_name=Runtime Skill Test
+assigned_motion_node_count=2
+assigned_slot_id=skill_slot_3
+assigned_legal_slot_id=skill_slot_3
+assigned_skill_name=Forward Arc
+assigned_preferred_grip_style=grip_normal
+unassigned_success=false
+unassigned_message=No authored skill is assigned to this slot.
+last_result_matches_assigned=true

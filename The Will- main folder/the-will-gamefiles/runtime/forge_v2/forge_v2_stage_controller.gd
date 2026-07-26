@@ -166,6 +166,167 @@ func set_active_tool_id(tool_id: StringName) -> void:
 	state.set_active_tool_id(tool_id)
 	_emit_state_changed()
 
+func set_active_profile_id(profile_id: StringName) -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.set_active_profile_id(profile_id)
+	_emit_state_changed()
+
+func set_active_profile_display_name(display_name: String) -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.call("set_active_profile_display_name", display_name)
+	_emit_state_changed()
+
+func reset_active_handle_profile_builder() -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.call("reset_active_handle_profile_builder")
+	_emit_state_changed()
+
+func reset_active_basic_profile_builder() -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.call("reset_active_basic_profile_builder")
+	_emit_state_changed()
+
+func set_active_profile_width_meters(width_meters: float) -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.set_active_profile_width_meters(width_meters)
+	_emit_state_changed()
+
+func set_active_profile_height_meters(height_meters: float) -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.set_active_profile_height_meters(height_meters)
+	_emit_state_changed()
+
+func set_active_profile_anchor_x_meters(anchor_x_meters: float) -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.set_active_profile_anchor_x_meters(anchor_x_meters)
+	_emit_state_changed()
+
+func set_active_profile_anchor_y_meters(anchor_y_meters: float) -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.set_active_profile_anchor_y_meters(anchor_y_meters)
+	_emit_state_changed()
+
+func set_active_profile_anchor_2d_meters(anchor_position_meters: Vector2) -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.call("set_active_profile_anchor_2d_meters", anchor_position_meters)
+	_emit_state_changed()
+
+func reset_active_profile_anchor_to_center() -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.call("reset_active_profile_anchor_to_center")
+	_emit_state_changed()
+
+func set_active_profile_rotation_degrees(rotation_degrees: float) -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.set_active_profile_rotation_degrees(rotation_degrees)
+	_emit_state_changed()
+
+func set_active_handle_face_count(face_count: int) -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.set_active_handle_face_count(face_count)
+	_emit_state_changed()
+
+func set_active_handle_rounding_enabled(is_enabled: bool) -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.set_active_handle_rounding_enabled(is_enabled)
+	_emit_state_changed()
+
+func set_active_handle_corner_radius_meters(corner_radius_meters: float) -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.set_active_handle_corner_radius_meters(corner_radius_meters)
+	_emit_state_changed()
+
+func set_active_handle_control_point_2d_meters(point_index: int, point_position_meters: Vector2) -> bool:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var changed := bool(state.call("set_active_handle_control_point_2d_meters", point_index, point_position_meters))
+	if changed:
+		_emit_state_changed()
+	return changed
+
+func set_active_handle_grid_snapping_enabled(is_enabled: bool) -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.call("set_active_handle_grid_snapping_enabled", is_enabled)
+	_emit_state_changed()
+
+func set_active_basic_control_point_2d_meters(point_index: int, point_position_meters: Vector2) -> bool:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var changed := bool(state.call("set_active_basic_control_point_2d_meters", point_index, point_position_meters))
+	if changed:
+		_emit_state_changed()
+	return changed
+
+func insert_active_basic_control_point_on_segment(
+	segment_start_corner_id: StringName,
+	preview_position_meters: Vector2
+) -> StringName:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var new_corner_id := StringName(state.call(
+		"insert_active_basic_control_point_on_segment",
+		segment_start_corner_id,
+		preview_position_meters
+	))
+	if new_corner_id != StringName():
+		_emit_state_changed()
+	return new_corner_id
+
+func remove_active_basic_control_point(corner_id: StringName) -> bool:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var changed := bool(state.call("remove_active_basic_control_point", corner_id))
+	if changed:
+		_emit_state_changed()
+	return changed
+
+func add_active_basic_corner_fillet(corner_id: StringName) -> bool:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var changed := bool(state.call("add_active_basic_corner_fillet", corner_id))
+	if changed:
+		_emit_state_changed()
+	return changed
+
+func set_active_basic_corner_fillet_radius(
+	corner_id: StringName,
+	radius_meters: float
+) -> bool:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var changed := bool(state.call(
+		"set_active_basic_corner_fillet_radius",
+		corner_id,
+		radius_meters
+	))
+	if changed:
+		_emit_state_changed()
+	return changed
+
+func remove_active_basic_corner_fillet(corner_id: StringName) -> bool:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var changed := bool(state.call("remove_active_basic_corner_fillet", corner_id))
+	if changed:
+		_emit_state_changed()
+	return changed
+
+func get_active_basic_corner_fillet_settings(corner_id: StringName) -> Dictionary:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	return state.call(
+		"get_active_basic_corner_fillet_settings",
+		corner_id
+	) as Dictionary
+
+func set_active_basic_grid_snapping_enabled(is_enabled: bool) -> void:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	state.call("set_active_basic_grid_snapping_enabled", is_enabled)
+	_emit_state_changed()
+
+func apply_tool_profile_preset(profile_data: Dictionary) -> bool:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var changed := bool(state.call("apply_tool_profile_preset", profile_data))
+	if changed:
+		_emit_state_changed()
+	return changed
+
+func build_active_tool_profile_preset_data(requested_name: String = "") -> Dictionary:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	return state.call("build_active_tool_profile_preset_data", requested_name) as Dictionary
+
 func set_active_material_variant_id(material_variant_id: StringName) -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.set_active_material_variant_id(material_variant_id)
@@ -349,6 +510,13 @@ func generate_spline_line_csg_noodle() -> bool:
 		_emit_state_changed()
 	return changed
 
+func generate_profile_extrusion_from_spline() -> bool:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var changed: bool = bool(state.call("generate_profile_extrusion_from_spline"))
+	if changed:
+		_emit_state_changed()
+	return changed
+
 func clear_spline_line_csg_noodle() -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var changed: bool = bool(state.call("clear_spline_line_csg_noodle"))
@@ -454,6 +622,10 @@ func get_primitive_options() -> Array[Dictionary]:
 func get_tool_options() -> Array[Dictionary]:
 	var state: Resource = ensure_authoring_state(default_project_name)
 	return state.get_tool_options()
+
+func get_profile_options() -> Array[Dictionary]:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	return state.get_profile_options()
 
 func get_material_palette_options() -> Array[Dictionary]:
 	var state: Resource = ensure_authoring_state(default_project_name)

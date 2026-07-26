@@ -8,6 +8,7 @@ const MaterialPipelineServiceScript = preload("res://services/material_pipeline_
 const DisassemblyBenchLayoutPresenterScript = preload("res://runtime/disassembly/disassembly_bench_layout_presenter.gd")
 const DisassemblyBenchTextPresenterScript = preload("res://runtime/disassembly/disassembly_bench_text_presenter.gd")
 const DisassemblyBenchWorkflowPresenterScript = preload("res://runtime/disassembly/disassembly_bench_workflow_presenter.gd")
+const UiWindowLayerPolicyScript = preload("res://runtime/ui/ui_window_layer_policy.gd")
 const DEFAULT_BODY_INVENTORY_SEED_RESOURCE: Resource = preload("res://core/defs/inventory/body_inventory_seed_default.tres")
 
 @export_category("Responsive Layout")
@@ -71,6 +72,8 @@ func _ready() -> void:
 	visible = false
 	backdrop.visible = false
 	panel.visible = false
+	UiWindowLayerPolicyScript.configure_visual_input_surface(backdrop)
+	UiWindowLayerPolicyScript.configure_visual_input_surface(panel)
 	inventory_list.item_clicked.connect(_on_inventory_item_clicked)
 	selected_list.item_clicked.connect(_on_selected_item_clicked)
 	irreversible_check_box.toggled.connect(_on_irreversible_toggled)

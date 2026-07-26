@@ -4,6 +4,7 @@ class_name ForgeV2VolumePreviewPresenter
 const ForgeV2VolumeStrokeScript = preload("res://runtime/forge_v2/forge_v2_volume_stroke.gd")
 const ForgeV2MaterialBodyScript = preload("res://runtime/forge_v2/forge_v2_material_body.gd")
 const ForgeV2MaterialPaletteScript = preload("res://runtime/forge_v2/forge_v2_material_palette.gd")
+const ForgeV2ProfileShapeLibraryScript = preload("res://runtime/forge_v2/forge_v2_profile_shape_library.gd")
 
 const PREVIEW_TUBE_SIDES := 12
 const PREVIEW_SPHERE_RINGS := 6
@@ -783,17 +784,31 @@ func _build_csg_body_signature(body: Resource) -> String:
 	var point_parts: PackedStringArray = []
 	for point: Vector3 in path_points:
 		point_parts.append("%.5f,%.5f,%.5f" % [point.x, point.y, point.z])
+	var profile_polygon: PackedVector2Array = body.get("profile_polygon_2d_meters")
+	var profile_point_parts: PackedStringArray = []
+	for profile_point: Vector2 in profile_polygon:
+		profile_point_parts.append("%.5f,%.5f" % [profile_point.x, profile_point.y])
+	var profile_anchor_value: Variant = body.get("profile_anchor_2d_meters")
+	var profile_anchor := Vector2.ZERO
+	if profile_anchor_value is Vector2:
+		profile_anchor = profile_anchor_value as Vector2
 	return "|".join([
 		String(body.get("body_id")),
+		String(body.get("body_kind")),
 		String(body.get("material_variant_id")),
 		String(body.get("operation_mode")),
 		String(body.get("placement_policy")),
 		String(body.get("shape_kind")),
 		str(float(body.get("radius_meters"))),
+		String(body.get("profile_id")),
+		String(body.get("profile_role")),
+		"%.5f,%.5f" % [profile_anchor.x, profile_anchor.y],
+		str(float(body.get("profile_twist_degrees_per_meter"))),
 		str(StringName(body.get("committed_layer_id"))),
 		str(bool(body.get("layer_active"))),
 		str(float(body.get("updated_timestamp"))),
 		";".join(point_parts),
+		";".join(profile_point_parts),
 	])
 
 func _collect_active_csg_material_bodies(authoring_state: Resource) -> Array:
@@ -901,6 +916,9 @@ func _append_csg_body_shape(
 		return false
 	var radius_meters: float = maxf(float(body.get("radius_meters")), 0.001)
 	var operation := CSGShape3D.OPERATION_SUBTRACTION if is_subtraction else CSGShape3D.OPERATION_UNION
+	var shape_kind: StringName = StringName(body.get("shape_kind"))
+	if _is_profile_shape_kind(shape_kind) and path_points.size() < 2:
+		return false
 	if path_points.size() == 1:
 		var sphere := CSGSphere3D.new()
 		sphere.name = "BodySphere_%03d" % body_shape_index
@@ -911,7 +929,24 @@ func _append_csg_body_shape(
 		parent.add_child(sphere)
 		return true
 	var path_interval_meters := _resolve_spline_csg_path_interval(radius_meters)
-	var shape_kind: StringName = StringName(body.get("shape_kind"))
+	if _is_profile_shape_kind(shape_kind):
+		var profile_polygon := _resolve_body_profile_polygon(body)
+		var curve: Curve3D = (
+			_build_spline_csg_curve(path_points, path_interval_meters)
+			if shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
+			else _build_linear_csg_curve(path_points, path_interval_meters)
+		)
+		return _append_csg_body_path_shape(
+			parent,
+			curve,
+			radius_meters,
+			material_variant_id,
+			is_subtraction,
+			operation,
+			body_shape_index,
+			0,
+			profile_polygon
+		)
 	if shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH:
 		return _append_csg_body_path_shape(
 			parent,
@@ -942,7 +977,8 @@ func _append_csg_body_path_shape(
 	is_subtraction: bool,
 	operation: int,
 	body_shape_index: int,
-	span_index: int
+	span_index: int,
+	profile_polygon_2d_meters: PackedVector2Array = PackedVector2Array()
 ) -> bool:
 	if parent == null or curve == null or curve.point_count < 2:
 		return false
@@ -963,7 +999,10 @@ func _append_csg_body_path_shape(
 	polygon.path_continuous_u = true
 	polygon.path_u_distance = 0.0
 	polygon.smooth_faces = true
-	polygon.polygon = _build_circle_profile_polygon(radius_meters, SPLINE_CSG_CIRCLE_SIDES)
+	if profile_polygon_2d_meters.size() >= 3:
+		polygon.polygon = profile_polygon_2d_meters
+	else:
+		polygon.polygon = _build_circle_profile_polygon(radius_meters, SPLINE_CSG_CIRCLE_SIDES)
 	polygon.material = _build_csg_body_material(material_variant_id, is_subtraction)
 	return true
 
@@ -1131,6 +1170,24 @@ func _build_circle_profile_polygon(radius_meters: float, side_count: int) -> Pac
 		var angle := TAU * float(side_index) / float(resolved_side_count)
 		polygon.append(Vector2(cos(angle), sin(angle)) * resolved_radius)
 	return polygon
+
+func _is_profile_shape_kind(shape_kind: StringName) -> bool:
+	return (
+		shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
+		or shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
+	)
+
+func _resolve_body_profile_polygon(body: Resource) -> PackedVector2Array:
+	if body == null:
+		return PackedVector2Array()
+	var profile_polygon: PackedVector2Array = body.get("profile_polygon_2d_meters")
+	if profile_polygon.size() >= 3:
+		return profile_polygon
+	var radius_meters: float = maxf(float(body.get("radius_meters")), 0.001)
+	var profile_id: StringName = StringName(body.get("profile_id"))
+	if profile_id != StringName():
+		return ForgeV2ProfileShapeLibraryScript.resolve_profile_polygon(profile_id, radius_meters)
+	return ForgeV2ProfileShapeLibraryScript.build_circle_polygon(radius_meters)
 
 func _deduplicate_spline_points(points: PackedVector3Array) -> PackedVector3Array:
 	var deduplicated := PackedVector3Array()

@@ -2,6 +2,7 @@ extends RefCounted
 class_name ForgeV2MaterialVolumeResolver
 
 const ForgeV2MaterialBodyScript = preload("res://runtime/forge_v2/forge_v2_material_body.gd")
+const ForgeV2ProfileShapeLibraryScript = preload("res://runtime/forge_v2/forge_v2_profile_shape_library.gd")
 const ForgeV2VolumeStrokeScript = preload("res://runtime/forge_v2/forge_v2_volume_stroke.gd")
 
 const REFERENCE_CELL_WORLD_SIZE_METERS := ForgeV2MaterialBodyScript.REFERENCE_CELL_WORLD_SIZE_METERS
@@ -154,6 +155,9 @@ func estimate_same_material_union_volume_cell_equivalents(add_bodies: Array) -> 
 			continue
 		_normalize_body_entry(body)
 		var amount_ratio: float = 1.0
+		if _is_profile_body_shape(body):
+			_mark_profile_path_cells(occupied_cells, body, amount_ratio, sample_cell_size_meters)
+			continue
 		var radius_meters: float = maxf(_read_body_float(body, "radius_meters", 0.001), 0.001)
 		var body_points: PackedVector3Array = _resolve_body_sample_points(body, sample_cell_size_meters)
 		if body_points.is_empty():
@@ -191,6 +195,9 @@ func _resolve_group_sample_cell_size(add_bodies: Array) -> float:
 
 func _collect_body_occupied_cells(body: Variant, sample_cell_size_meters: float) -> Dictionary:
 	var occupied_cells: Dictionary = {}
+	if _is_profile_body_shape(body):
+		_mark_profile_path_cells(occupied_cells, body, 1.0, sample_cell_size_meters)
+		return occupied_cells
 	var radius_meters: float = maxf(_read_body_float(body, "radius_meters", 0.001), 0.001)
 	var body_points: PackedVector3Array = _resolve_body_sample_points(body, sample_cell_size_meters)
 	if body_points.is_empty():
@@ -216,12 +223,140 @@ func _resolve_body_sample_points(body: Variant, sample_cell_size_meters: float) 
 	if path_points.size() < 2:
 		return _deduplicate_points(path_points)
 	var shape_kind: StringName = _read_body_string_name(body, "shape_kind")
-	if shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH:
+	if (
+		shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH
+		or shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
+	):
 		var curve: Curve3D = _build_spline_curve(path_points, _resolve_body_bake_interval(path_points, sample_cell_size_meters))
 		var baked_points: PackedVector3Array = curve.get_baked_points()
 		if baked_points.size() >= 2:
 			return _deduplicate_points(baked_points)
 	return _deduplicate_points(path_points)
+
+func _is_profile_body_shape(body: Variant) -> bool:
+	var shape_kind: StringName = _read_body_string_name(body, "shape_kind")
+	return (
+		shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
+		or shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
+	)
+
+func _mark_profile_path_cells(
+	occupied_cells: Dictionary,
+	body: Variant,
+	amount_ratio: float,
+	sample_cell_size_meters: float
+) -> void:
+	var body_points: PackedVector3Array = _resolve_body_sample_points(body, sample_cell_size_meters)
+	if body_points.size() < 2:
+		return
+	var profile_polygon: PackedVector2Array = _resolve_body_profile_polygon(body)
+	if profile_polygon.size() < 3:
+		return
+	for point_index in range(body_points.size() - 1):
+		_mark_profile_segment_cells(
+			occupied_cells,
+			body_points[point_index],
+			body_points[point_index + 1],
+			profile_polygon,
+			amount_ratio,
+			sample_cell_size_meters
+		)
+
+func _mark_profile_segment_cells(
+	occupied_cells: Dictionary,
+	from_point: Vector3,
+	to_point: Vector3,
+	profile_polygon: PackedVector2Array,
+	amount_ratio: float,
+	sample_cell_size_meters: float
+) -> void:
+	var segment: Vector3 = to_point - from_point
+	var segment_length: float = segment.length()
+	if segment_length <= 0.000001:
+		return
+	var tangent: Vector3 = segment / segment_length
+	var normal: Vector3 = _resolve_perpendicular_normal(tangent)
+	var binormal: Vector3 = tangent.cross(normal).normalized()
+	var profile_radius: float = maxf(
+		ForgeV2ProfileShapeLibraryScript.calculate_polygon_max_radius_meters(profile_polygon),
+		0.001
+	)
+	var min_point: Vector3 = Vector3(
+		minf(from_point.x, to_point.x) - profile_radius,
+		minf(from_point.y, to_point.y) - profile_radius,
+		minf(from_point.z, to_point.z) - profile_radius
+	)
+	var max_point: Vector3 = Vector3(
+		maxf(from_point.x, to_point.x) + profile_radius,
+		maxf(from_point.y, to_point.y) + profile_radius,
+		maxf(from_point.z, to_point.z) + profile_radius
+	)
+	var min_index: Vector3i = _sample_index_floor(min_point, sample_cell_size_meters)
+	var max_index: Vector3i = _sample_index_floor(max_point, sample_cell_size_meters)
+	for x_index in range(min_index.x, max_index.x + 1):
+		for y_index in range(min_index.y, max_index.y + 1):
+			for z_index in range(min_index.z, max_index.z + 1):
+				var sample_position := _sample_center_from_index(x_index, y_index, z_index, sample_cell_size_meters)
+				var relative_position: Vector3 = sample_position - from_point
+				var distance_along_path: float = relative_position.dot(tangent)
+				if distance_along_path < 0.0 or distance_along_path > segment_length:
+					continue
+				var profile_center: Vector3 = from_point + tangent * distance_along_path
+				var lateral_position: Vector3 = sample_position - profile_center
+				var profile_point := Vector2(lateral_position.dot(normal), lateral_position.dot(binormal))
+				if not _profile_polygon_contains_point(profile_polygon, profile_point):
+					continue
+				_mark_cell(occupied_cells, x_index, y_index, z_index, amount_ratio)
+
+func _resolve_body_profile_polygon(body: Variant) -> PackedVector2Array:
+	var profile_polygon: PackedVector2Array = _read_body_vector2_array(body, "profile_polygon_2d_meters")
+	if profile_polygon.size() >= 3:
+		return profile_polygon
+	var radius_meters: float = maxf(_read_body_float(body, "radius_meters", 0.001), 0.001)
+	var profile_id: StringName = _read_body_string_name(body, "profile_id")
+	if profile_id != StringName():
+		return ForgeV2ProfileShapeLibraryScript.resolve_profile_polygon(profile_id, radius_meters)
+	return ForgeV2ProfileShapeLibraryScript.build_circle_polygon(radius_meters)
+
+func _resolve_perpendicular_normal(tangent: Vector3) -> Vector3:
+	var reference_axis := Vector3.UP
+	if absf(tangent.normalized().dot(reference_axis)) > 0.95:
+		reference_axis = Vector3.RIGHT
+	var normal := reference_axis.cross(tangent).normalized()
+	if normal.length_squared() <= 0.000001:
+		return Vector3.FORWARD
+	return normal
+
+func _profile_polygon_contains_point(polygon: PackedVector2Array, point: Vector2) -> bool:
+	var inside := false
+	var previous_index := polygon.size() - 1
+	for point_index in range(polygon.size()):
+		var current_point: Vector2 = polygon[point_index]
+		var previous_point: Vector2 = polygon[previous_index]
+		if _distance_squared_to_2d_segment(point, current_point, previous_point) <= 0.00000001:
+			return true
+		var crosses_y := (current_point.y > point.y) != (previous_point.y > point.y)
+		if crosses_y:
+			var denominator := previous_point.y - current_point.y
+			if absf(denominator) > 0.000001:
+				var intersect_x := (
+					(previous_point.x - current_point.x)
+					* (point.y - current_point.y)
+					/ denominator
+					+ current_point.x
+				)
+				if point.x < intersect_x:
+					inside = not inside
+		previous_index = point_index
+	return inside
+
+func _distance_squared_to_2d_segment(point: Vector2, from_point: Vector2, to_point: Vector2) -> float:
+	var segment: Vector2 = to_point - from_point
+	var segment_length_squared: float = segment.length_squared()
+	if segment_length_squared <= 0.000001:
+		return point.distance_squared_to(from_point)
+	var segment_ratio: float = clampf((point - from_point).dot(segment) / segment_length_squared, 0.0, 1.0)
+	return point.distance_squared_to(from_point + segment * segment_ratio)
 
 func _resolve_body_bake_interval(path_points: PackedVector3Array, sample_cell_size_meters: float) -> float:
 	var path_length: float = _calculate_polyline_length(path_points)
@@ -391,6 +526,12 @@ func _read_body_path_points(body: Variant) -> PackedVector3Array:
 	if value is PackedVector3Array:
 		return value as PackedVector3Array
 	return PackedVector3Array()
+
+func _read_body_vector2_array(body: Variant, field_name: String) -> PackedVector2Array:
+	var value: Variant = _read_body_variant(body, field_name, PackedVector2Array())
+	if value is PackedVector2Array:
+		return value as PackedVector2Array
+	return PackedVector2Array()
 
 func _material_centi_units_from_volume_cell_equivalents(volume_cell_equivalents: float) -> int:
 	var raw_material_units: float = maxf(volume_cell_equivalents, 0.0) / CELL_EQUIVALENTS_PER_MATERIAL_UNIT

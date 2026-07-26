@@ -15,6 +15,7 @@ const PlayerInventorySelectionPresenterScript = preload("res://runtime/ui/player
 const PlayerInventorySessionPresenterScript = preload("res://runtime/ui/player_inventory_session_presenter.gd")
 const PlayerInventorySurfacePresenterScript = preload("res://runtime/ui/player_inventory_surface_presenter.gd")
 const PlayerInventoryTextPresenterScript = preload("res://runtime/ui/player_inventory_text_presenter.gd")
+const UiWindowLayerPolicyScript = preload("res://runtime/ui/ui_window_layer_policy.gd")
 const DEFAULT_EQUIPMENT_SLOT_REGISTRY_RESOURCE: Resource = preload("res://core/defs/equipment/equipment_slot_registry_default.tres")
 
 const PAGE_EQUIPMENT := &"equipment"
@@ -99,6 +100,8 @@ func _ready() -> void:
 	visible = false
 	backdrop.visible = false
 	panel.visible = false
+	UiWindowLayerPolicyScript.configure_visual_input_surface(backdrop)
+	UiWindowLayerPolicyScript.configure_visual_input_surface(panel)
 	_refresh_material_lookup()
 	equipment_page_button.pressed.connect(func() -> void: _set_active_page(PAGE_EQUIPMENT))
 	inventory_page_button.pressed.connect(func() -> void: _set_active_page(PAGE_BODY_INVENTORY))

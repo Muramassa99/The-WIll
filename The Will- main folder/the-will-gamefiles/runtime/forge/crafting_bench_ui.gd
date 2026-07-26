@@ -128,6 +128,7 @@ const ForgeBenchStartMenuPresenterScript = preload("res://runtime/forge/forge_be
 const ForgeStage2BrushPresenterScript = preload("res://runtime/forge/forge_stage2_brush_presenter.gd")
 const ForgeStage2SelectionPresenterScript = preload("res://runtime/forge/forge_stage2_selection_presenter.gd")
 const ForgeWorkspaceShapeToolPresenterScript = preload("res://runtime/forge/forge_workspace_shape_tool_presenter.gd")
+const UiWindowLayerPolicyScript = preload("res://runtime/ui/ui_window_layer_policy.gd")
 
 @export_category("Responsive Layout")
 @export var compact_width_breakpoint: int = 1360
@@ -386,6 +387,7 @@ func _ready() -> void:
 	stow_hint_popup.hide()
 	grip_hint_popup.hide()
 	project_manager_popup.hide()
+	_configure_window_layer_policy()
 	free_subviewport.own_world_3d = true
 	_configure_project_manager_popup()
 	_configure_action_menus()
@@ -405,6 +407,41 @@ func _ready() -> void:
 		panel.resized.connect(_queue_layout_refresh)
 	_queue_layout_refresh()
 
+func _configure_window_layer_policy() -> void:
+	UiWindowLayerPolicyScript.configure_major_workspace(debug_popup)
+	UiWindowLayerPolicyScript.configure_major_workspace(
+		project_manager_popup
+	)
+	UiWindowLayerPolicyScript.attach_owned_popup(
+		project_manager_popup,
+		stow_hint_popup
+	)
+	UiWindowLayerPolicyScript.attach_owned_popup(
+		project_manager_popup,
+		grip_hint_popup
+	)
+	if not project_manager_popup.popup_hide.is_connected(
+		_on_project_manager_popup_hidden
+	):
+		project_manager_popup.popup_hide.connect(
+			_on_project_manager_popup_hidden
+		)
+	var visual_surfaces: Array[Control] = [
+		panel,
+		debug_popup.get_node_or_null("DebugMargin") as Control,
+		project_manager_popup.get_node_or_null(
+			"ProjectManagerMargin"
+		) as Control,
+		stow_hint_popup.get_node_or_null("StowHintMargin") as Control,
+		grip_hint_popup.get_node_or_null("GripHintMargin") as Control,
+	]
+	for surface: Control in visual_surfaces:
+		UiWindowLayerPolicyScript.configure_visual_input_surface(surface)
+
+func _on_project_manager_popup_hidden() -> void:
+	_hide_stow_position_hint()
+	_hide_grip_style_hint()
+
 func _process(delta: float) -> void:
 	if not panel.visible:
 		return
@@ -415,10 +452,18 @@ func _process(delta: float) -> void:
 	_refresh_axis_indicator()
 
 func _input(event: InputEvent) -> void:
+	if _has_focused_custom_window_layer():
+		return
 	_update_stage2_amount_modifier_state(event)
 	_release_text_focus_on_external_mouse_press(event)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if panel.visible and _has_focused_custom_window_layer():
+		if event.is_action_pressed(&"ui_cancel"):
+			if not _close_focused_temporary_window_layer():
+				_close_focused_major_workspace()
+			get_viewport().set_input_as_handled()
+		return
 	_update_stage2_amount_modifier_state(event)
 	if workspace_edit_flow.is_free_view_drag_active():
 		if event is InputEventMouseMotion:
@@ -450,6 +495,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not panel.visible:
 		return
 	if event.is_action_pressed(&"ui_cancel"):
+		var root_window := get_window()
+		if not is_instance_valid(root_window) or not root_window.has_focus():
+			get_viewport().set_input_as_handled()
+			return
 		close_ui()
 		get_viewport().set_input_as_handled()
 		return
@@ -490,6 +539,87 @@ func _unhandled_input(event: InputEvent) -> void:
 	if workspace_interaction_presenter.is_action_pressed_if_available(event, &"forge_plane_zy"):
 		_set_active_plane(PLANE_ZY)
 		get_viewport().set_input_as_handled()
+
+func _close_focused_temporary_window_layer() -> bool:
+	var temporary_layers: Array[PopupPanel] = [
+		stow_hint_popup,
+		grip_hint_popup,
+		geometry_handles_popup,
+	]
+	var target_layer: PopupPanel = null
+	for candidate: PopupPanel in temporary_layers:
+		if (
+			is_instance_valid(candidate)
+			and candidate.visible
+			and candidate.has_focus()
+		):
+			target_layer = candidate
+			break
+	if target_layer == null:
+		var focused_major: PopupPanel = null
+		if (
+			is_instance_valid(debug_popup)
+			and debug_popup.visible
+			and debug_popup.has_focus()
+		):
+			focused_major = debug_popup
+		elif (
+			is_instance_valid(project_manager_popup)
+			and project_manager_popup.visible
+			and project_manager_popup.has_focus()
+		):
+			focused_major = project_manager_popup
+		if focused_major != null:
+			for candidate: PopupPanel in temporary_layers:
+				if (
+					is_instance_valid(candidate)
+					and candidate.visible
+					and focused_major.is_ancestor_of(candidate)
+				):
+					target_layer = candidate
+					break
+	if target_layer == null:
+		return false
+	if target_layer == stow_hint_popup:
+		_hide_stow_position_hint()
+	elif target_layer == grip_hint_popup:
+		_hide_grip_style_hint()
+	elif target_layer == geometry_handles_popup:
+		_close_geometry_handles_popup()
+	return true
+
+func _has_focused_custom_window_layer() -> bool:
+	for candidate: PopupPanel in [
+		stow_hint_popup,
+		grip_hint_popup,
+		geometry_handles_popup,
+		debug_popup,
+		project_manager_popup,
+	]:
+		if (
+			is_instance_valid(candidate)
+			and candidate.visible
+			and candidate.has_focus()
+		):
+			return true
+	return false
+
+func _close_focused_major_workspace() -> bool:
+	if (
+		is_instance_valid(debug_popup)
+		and debug_popup.visible
+		and debug_popup.has_focus()
+	):
+		debug_popup.hide()
+		return true
+	if (
+		is_instance_valid(project_manager_popup)
+		and project_manager_popup.visible
+		and project_manager_popup.has_focus()
+	):
+		project_manager_popup.hide()
+		return true
+	return false
 
 func _update_stage2_amount_modifier_state(event: InputEvent) -> void:
 	if event is not InputEventKey:
@@ -554,6 +684,7 @@ func close_ui() -> void:
 	stage2_amount_modifier_active = false
 	_set_stage2_refinement_mode(false, false)
 	_autosave_current_wip_if_needed()
+	_close_geometry_handles_popup()
 	project_manager_popup.hide()
 	var close_state: Dictionary = bench_session_presenter.close_session(
 		active_player,
@@ -642,6 +773,30 @@ func _get_current_builder_component_id() -> StringName:
 func _configure_project_manager_popup() -> void:
 	left_panel.visible = false
 	left_panel.custom_minimum_size = Vector2.ZERO
+	var header_row := project_manager_host.get_node_or_null(
+		"ProjectManagerHeaderRow"
+	) as HBoxContainer
+	if header_row == null:
+		header_row = HBoxContainer.new()
+		header_row.name = "ProjectManagerHeaderRow"
+		header_row.add_theme_constant_override("separation", 8)
+		project_manager_host.add_child(header_row)
+		project_manager_host.move_child(header_row, 0)
+		var title := Label.new()
+		title.name = "ProjectManagerTitle"
+		title.text = "Projects"
+		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		title.add_theme_font_size_override("font_size", 16)
+		header_row.add_child(title)
+		var close_button_local := Button.new()
+		close_button_local.name = "ProjectManagerCloseButton"
+		close_button_local.text = "X"
+		close_button_local.custom_minimum_size = Vector2(34.0, 28.0)
+		close_button_local.focus_mode = Control.FOCUS_NONE
+		close_button_local.pressed.connect(
+			func() -> void: project_manager_popup.hide()
+		)
+		header_row.add_child(close_button_local)
 	var project_button_rows: Array[NodePath] = [
 		NodePath("ProjectMargin/ProjectVBox/ProjectButtonRow"),
 		NodePath("ProjectMargin/ProjectVBox/ProjectButtonRowSecondary"),
@@ -758,6 +913,9 @@ func _ensure_geometry_handles_popup() -> void:
 	geometry_handles_popup.name = "GeometryHandlesPopup"
 	geometry_handles_popup.visible = false
 	geometry_handles_popup.unresizable = true
+	UiWindowLayerPolicyScript.configure_owned_popup(
+		geometry_handles_popup
+	)
 	add_child(geometry_handles_popup)
 
 	var panel_margin: MarginContainer = MarginContainer.new()
@@ -766,6 +924,9 @@ func _ensure_geometry_handles_popup() -> void:
 	panel_margin.add_theme_constant_override("margin_top", 8)
 	panel_margin.add_theme_constant_override("margin_right", 8)
 	panel_margin.add_theme_constant_override("margin_bottom", 8)
+	UiWindowLayerPolicyScript.configure_visual_input_surface(
+		panel_margin
+	)
 	geometry_handles_popup.add_child(panel_margin)
 
 	var grid: GridContainer = GridContainer.new()

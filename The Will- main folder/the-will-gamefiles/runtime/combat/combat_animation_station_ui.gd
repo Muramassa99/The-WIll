@@ -20,6 +20,7 @@ const CombatOriginRecordScript = preload("res://core/models/combat_origin_record
 const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_state.gd")
 const UserSettingsStateScript = preload("res://core/models/user_settings_state.gd")
 const UserSettingsRuntimeScript = preload("res://runtime/system/user_settings_runtime.gd")
+const UiWindowLayerPolicyScript = preload("res://runtime/ui/ui_window_layer_policy.gd")
 
 const AUTHORING_MODE_LABELS := {
 	CombatAnimationStationStateScript.AUTHORING_MODE_IDLE: "Idle Drafts",
@@ -344,16 +345,36 @@ func _process(delta: float) -> void:
 		footer_status_label.text = "Preview finished."
 
 func _input(event: InputEvent) -> void:
+	if _has_visible_weapon_open_popup():
+		return
 	_capture_editor_cycle_focus_event(event)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not panel.visible:
+		return
+	if _has_visible_weapon_open_popup():
+		if event.is_action_pressed(&"ui_cancel"):
+			if (
+				is_instance_valid(weapon_open_variant_popup)
+				and weapon_open_variant_popup.visible
+			):
+				weapon_open_variant_popup.hide()
+			elif (
+				is_instance_valid(weapon_open_primary_popup)
+				and weapon_open_primary_popup.visible
+			):
+				weapon_open_primary_popup.hide()
+			get_viewport().set_input_as_handled()
 		return
 	if event is InputEventMouseButton:
 		var mouse_button_event: InputEventMouseButton = event as InputEventMouseButton
 		if mouse_button_event.button_index == MOUSE_BUTTON_RIGHT and not mouse_button_event.pressed:
 			preview_camera_orbiting = false
 	if event.is_action_pressed(&"ui_cancel"):
+		var root_window := get_window()
+		if not is_instance_valid(root_window) or not root_window.has_focus():
+			get_viewport().set_input_as_handled()
+			return
 		_navigate_back()
 		get_viewport().set_input_as_handled()
 		return
@@ -1650,6 +1671,7 @@ func _build_ui() -> void:
 	backdrop.visible = false
 	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	backdrop.color = COLOR_BACKDROP
+	UiWindowLayerPolicyScript.configure_visual_input_surface(backdrop)
 	add_child(backdrop)
 	panel = PanelContainer.new()
 	panel.name = "Panel"
@@ -1666,6 +1688,7 @@ func _build_ui() -> void:
 	root_style.set_corner_radius_all(4)
 	panel.add_theme_stylebox_override("panel", root_style)
 	panel.clip_contents = true
+	UiWindowLayerPolicyScript.configure_visual_input_surface(panel)
 	add_child(panel)
 	var root_margin := MarginContainer.new()
 	root_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1703,13 +1726,19 @@ func _ensure_weapon_open_popups() -> void:
 	weapon_open_primary_popup.hide_on_item_selection = false
 	weapon_open_primary_popup.hide_on_checkable_item_selection = false
 	weapon_open_primary_popup.add_theme_font_size_override("font_size", FONT_BODY)
+	UiWindowLayerPolicyScript.configure_owned_popup(
+		weapon_open_primary_popup
+	)
 	add_child(weapon_open_primary_popup)
 	weapon_open_variant_popup = PopupMenu.new()
 	weapon_open_variant_popup.name = "WeaponOpenVariantPopup"
 	weapon_open_variant_popup.hide_on_item_selection = true
 	weapon_open_variant_popup.hide_on_checkable_item_selection = true
 	weapon_open_variant_popup.add_theme_font_size_override("font_size", FONT_BODY)
-	add_child(weapon_open_variant_popup)
+	UiWindowLayerPolicyScript.attach_owned_popup(
+		weapon_open_primary_popup,
+		weapon_open_variant_popup
+	)
 
 func _build_header(parent: VBoxContainer) -> void:
 	var row := HBoxContainer.new()
@@ -4159,6 +4188,15 @@ func _hide_weapon_open_popups() -> void:
 		weapon_open_primary_popup.hide()
 	pending_weapon_open_wip_id = StringName()
 	pending_weapon_open_primary_slot_id = HAND_SLOT_RIGHT
+
+func _has_visible_weapon_open_popup() -> bool:
+	return (
+		is_instance_valid(weapon_open_variant_popup)
+		and weapon_open_variant_popup.visible
+	) or (
+		is_instance_valid(weapon_open_primary_popup)
+		and weapon_open_primary_popup.visible
+	)
 
 func _show_weapon_open_primary_popup_for_index(index: int) -> void:
 	if active_wip_library == null or index < 0 or index >= project_list.get_item_count():

@@ -2,16 +2,23 @@ extends Resource
 class_name ForgeV2MaterialBody
 
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
+const ForgeV2ProfileShapeLibraryScript = preload("res://runtime/forge_v2/forge_v2_profile_shape_library.gd")
 const ForgeV2VolumeStrokeScript = preload("res://runtime/forge_v2/forge_v2_volume_stroke.gd")
 
 const BODY_KIND_VOLUME_STROKE := &"body_kind_volume_stroke"
 const BODY_KIND_PLATFORM_SEED := &"body_kind_platform_seed"
+const BODY_KIND_PROFILE_EXTRUSION := &"body_kind_profile_extrusion"
+const BODY_KIND_HANDLE_PROFILE := &"body_kind_handle_profile"
 const SHAPE_KIND_CAPSULE_PATH := &"shape_kind_capsule_path"
 const SHAPE_KIND_SPLINE_CAPSULE_PATH := &"shape_kind_spline_capsule_path"
+const SHAPE_KIND_PROFILE_PATH := &"shape_kind_profile_path"
+const SHAPE_KIND_SPLINE_PROFILE_PATH := &"shape_kind_spline_profile_path"
 
 const SEED_ROLE_NONE := &"seed_role_none"
 const SEED_ROLE_SHIELD_FIXED_HANDLE := &"seed_role_shield_fixed_handle"
 const SEED_ROLE_RANGED_BOW_HANDLE_ANCHOR := &"seed_role_ranged_bow_handle_anchor"
+const PROFILE_ROLE_NONE := ForgeV2ProfileShapeLibraryScript.PROFILE_ROLE_NONE
+const PROFILE_ROLE_HANDLE := ForgeV2ProfileShapeLibraryScript.PROFILE_ROLE_HANDLE
 
 const REFERENCE_CELL_WORLD_SIZE_METERS := 0.0125
 const CELL_EQUIVALENTS_PER_MATERIAL_UNIT := 200.0
@@ -31,6 +38,11 @@ const MATERIAL_UNIT_SCALE := 100
 @export var shape_kind: StringName = SHAPE_KIND_CAPSULE_PATH
 @export var path_points: PackedVector3Array = PackedVector3Array()
 @export var radius_meters: float = 0.02
+@export var profile_id: StringName = StringName()
+@export var profile_role: StringName = PROFILE_ROLE_NONE
+@export var profile_polygon_2d_meters: PackedVector2Array = PackedVector2Array()
+@export var profile_anchor_2d_meters: Vector2 = Vector2.ZERO
+@export var profile_twist_degrees_per_meter: float = 0.0
 @export var amount_ratio: float = 1.0
 @export var rough_volume_cell_equivalents: float = 0.0
 @export var rough_material_units: float = 0.0
@@ -47,9 +59,11 @@ func normalize() -> void:
 		created_timestamp = Time.get_unix_time_from_system()
 	if updated_timestamp <= 0.0:
 		updated_timestamp = created_timestamp
-	body_kind = BODY_KIND_PLATFORM_SEED if body_kind == BODY_KIND_PLATFORM_SEED else BODY_KIND_VOLUME_STROKE
+	body_kind = _normalize_body_kind(body_kind)
 	if body_kind != BODY_KIND_PLATFORM_SEED:
 		seed_role = SEED_ROLE_NONE
+	if body_kind == BODY_KIND_HANDLE_PROFILE:
+		profile_role = PROFILE_ROLE_HANDLE
 	builder_path_id = CraftedItemWIPScript.normalize_builder_path_id(builder_path_id)
 	builder_component_id = CraftedItemWIPScript.normalize_builder_component_id(builder_path_id, builder_component_id)
 	if forge_intent == StringName():
@@ -64,9 +78,12 @@ func normalize() -> void:
 		placement_policy = ForgeV2VolumeStrokeScript.PLACEMENT_REPLACE_EXISTING
 	if body_kind == BODY_KIND_PLATFORM_SEED:
 		placement_policy = ForgeV2VolumeStrokeScript.PLACEMENT_EMPTY_ONLY
-	if shape_kind != SHAPE_KIND_SPLINE_CAPSULE_PATH:
-		shape_kind = SHAPE_KIND_CAPSULE_PATH
+	shape_kind = _normalize_shape_kind(shape_kind)
+	if _is_profile_shape_kind():
+		_ensure_profile_data()
 	radius_meters = maxf(radius_meters, 0.001)
+	if _is_profile_shape_kind():
+		radius_meters = maxf(radius_meters, ForgeV2ProfileShapeLibraryScript.calculate_polygon_max_radius_meters(profile_polygon_2d_meters))
 	amount_ratio = 1.0
 	_recalculate_rough_volume()
 
@@ -101,6 +118,8 @@ func _recalculate_rough_volume() -> void:
 func _calculate_capsule_path_volume_meters_cubed() -> float:
 	if path_points.is_empty():
 		return 0.0
+	if _is_profile_shape_kind():
+		return _calculate_profile_path_volume_meters_cubed()
 	var radius: float = maxf(radius_meters, 0.001)
 	if path_points.size() == 1:
 		return _sphere_volume(radius)
@@ -114,6 +133,52 @@ func _calculate_capsule_path_volume_meters_cubed() -> float:
 func _sphere_volume(radius: float) -> float:
 	return (4.0 / 3.0) * PI * radius * radius * radius
 
+func _calculate_profile_path_volume_meters_cubed() -> float:
+	var profile_area: float = ForgeV2ProfileShapeLibraryScript.calculate_polygon_area_meters_squared(profile_polygon_2d_meters)
+	if profile_area <= 0.0 or path_points.size() < 2:
+		return 0.0
+	var path_length := 0.0
+	for point_index in range(path_points.size() - 1):
+		path_length += path_points[point_index].distance_to(path_points[point_index + 1])
+	return profile_area * path_length
+
+func _normalize_body_kind(next_body_kind: StringName) -> StringName:
+	match next_body_kind:
+		BODY_KIND_PLATFORM_SEED, BODY_KIND_PROFILE_EXTRUSION, BODY_KIND_HANDLE_PROFILE:
+			return next_body_kind
+		_:
+			return BODY_KIND_VOLUME_STROKE
+
+func _normalize_shape_kind(next_shape_kind: StringName) -> StringName:
+	match next_shape_kind:
+		SHAPE_KIND_SPLINE_CAPSULE_PATH, SHAPE_KIND_PROFILE_PATH, SHAPE_KIND_SPLINE_PROFILE_PATH:
+			return next_shape_kind
+		_:
+			return SHAPE_KIND_CAPSULE_PATH
+
+func _is_profile_shape_kind() -> bool:
+	return shape_kind == SHAPE_KIND_PROFILE_PATH or shape_kind == SHAPE_KIND_SPLINE_PROFILE_PATH
+
+func _ensure_profile_data() -> void:
+	var required_family := (
+		ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_HANDLE
+		if profile_role == PROFILE_ROLE_HANDLE or body_kind == BODY_KIND_HANDLE_PROFILE
+		else StringName()
+	)
+	profile_id = ForgeV2ProfileShapeLibraryScript.normalize_profile_id(profile_id, required_family)
+	var record: Dictionary = ForgeV2ProfileShapeLibraryScript.get_profile_record(profile_id, radius_meters)
+	if profile_role == StringName():
+		profile_role = PROFILE_ROLE_NONE
+	if not record.is_empty():
+		if profile_role == PROFILE_ROLE_NONE:
+			profile_role = StringName(record.get("role", PROFILE_ROLE_NONE))
+		if profile_polygon_2d_meters.size() < 3:
+			profile_polygon_2d_meters = record.get("polygon", PackedVector2Array())
+		if profile_anchor_2d_meters == Vector2.ZERO:
+			profile_anchor_2d_meters = record.get("anchor_2d_meters", Vector2.ZERO) as Vector2
+	if profile_polygon_2d_meters.size() < 3:
+		profile_polygon_2d_meters = ForgeV2ProfileShapeLibraryScript.build_circle_polygon(radius_meters)
+
 func _build_body_id() -> StringName:
 	if body_kind == BODY_KIND_PLATFORM_SEED and seed_role != SEED_ROLE_NONE:
 		return StringName("v2_seed_%s_%s_%s" % [
@@ -121,4 +186,8 @@ func _build_body_id() -> StringName:
 			String(builder_component_id),
 			String(seed_role),
 		])
+	if body_kind == BODY_KIND_HANDLE_PROFILE:
+		return StringName("v2_handle_%s" % str(Time.get_ticks_usec()))
+	if body_kind == BODY_KIND_PROFILE_EXTRUSION:
+		return StringName("v2_profile_%s" % str(Time.get_ticks_usec()))
 	return StringName("v2_body_%s" % str(Time.get_ticks_usec()))

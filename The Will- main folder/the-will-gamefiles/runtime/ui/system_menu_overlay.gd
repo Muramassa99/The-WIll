@@ -10,6 +10,7 @@ const SystemMenuSessionPresenterScript = preload("res://runtime/ui/system_menu_s
 const SystemMenuStateFlowPresenterScript = preload("res://runtime/ui/system_menu_state_flow_presenter.gd")
 const SystemMenuSurfacePresenterScript = preload("res://runtime/ui/system_menu_surface_presenter.gd")
 const SystemMenuSettingsPresenterScript = preload("res://runtime/ui/system_menu_settings_presenter.gd")
+const UiWindowLayerPolicyScript = preload("res://runtime/ui/ui_window_layer_policy.gd")
 
 const PAGE_SETTINGS := &"settings"
 const PAGE_CONTROLS := &"controls"
@@ -117,6 +118,8 @@ func _ready() -> void:
 	visible = false
 	backdrop.visible = false
 	panel.visible = false
+	UiWindowLayerPolicyScript.configure_visual_input_surface(backdrop)
+	UiWindowLayerPolicyScript.configure_visual_input_surface(panel)
 	_configure_static_options()
 	_connect_signals()
 	_select_page(PAGE_SETTINGS)
@@ -206,7 +209,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			input_result.get("key_event", null)
 		)
 	elif bool(input_result.get("close_menu", false)):
-		close_menu()
+		var root_window := get_window()
+		if is_instance_valid(root_window) and root_window.has_focus():
+			close_menu()
 	else:
 		var page_id: StringName = input_result.get("open_page", StringName())
 		if page_id != StringName():

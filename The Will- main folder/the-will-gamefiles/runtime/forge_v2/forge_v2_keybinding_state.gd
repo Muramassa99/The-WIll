@@ -14,6 +14,7 @@ const ACTION_VIEW_FIT := &"forge_v2_view_fit"
 const ACTION_VIEW_RESET := &"forge_v2_view_reset"
 const ACTION_TOOL_VOLUME_STROKE := &"forge_v2_tool_volume_stroke"
 const ACTION_TOOL_SPLINE_LINE := &"forge_v2_tool_spline_line"
+const ACTION_TOOL_HANDLES := &"forge_v2_tool_handles"
 const ACTION_SPLINE_FINISH := &"forge_v2_spline_finish"
 const ACTION_SPLINE_CANCEL := &"forge_v2_spline_cancel"
 const ACTION_SPLINE_GENERATE_CSG_NOODLE := &"forge_v2_spline_generate_csg_noodle"
@@ -73,6 +74,11 @@ const ACTION_DEFINITIONS: Array[Dictionary] = [
 		"action": ACTION_TOOL_SPLINE_LINE,
 		"display_name": "Select Spline Line Tool",
 		"binding": {"physical_keycode": KEY_L, "keycode": KEY_L},
+	},
+	{
+		"action": ACTION_TOOL_HANDLES,
+		"display_name": "Select Handles Tool",
+		"binding": {"physical_keycode": KEY_H, "keycode": KEY_H},
 	},
 	{
 		"action": ACTION_SPLINE_FINISH,

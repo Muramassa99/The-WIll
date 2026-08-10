@@ -252,14 +252,52 @@ func _mark_profile_path_cells(
 	var profile_polygon: PackedVector2Array = _resolve_body_profile_polygon(body)
 	if profile_polygon.size() < 3:
 		return
+	var source_points: PackedVector3Array = _read_body_path_points(body)
+	var source_surface_normals: PackedVector3Array = _read_body_vector3_array(
+		body,
+		"path_surface_normals"
+	)
+	var contact_direction := _read_body_vector2(
+		body,
+		"profile_contact_direction_2d",
+		ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_LOCAL_SIX
+	)
+	var rotation_bias_degrees := _read_body_float(
+		body,
+		"profile_rotation_bias_degrees",
+		0.0
+	)
+	var use_compiled_orientation := (
+		int(_read_body_variant(
+			body,
+			"profile_runtime_schema_version",
+			0
+		)) > 0
+	)
 	for point_index in range(body_points.size() - 1):
+		var surface_normal := Vector3.FORWARD
+		if use_compiled_orientation:
+			surface_normal = (
+				ForgeV2ProfileShapeLibraryScript.resolve_path_surface_normal(
+				(
+					body_points[point_index]
+					+ body_points[point_index + 1]
+				) * 0.5,
+				source_points,
+				source_surface_normals
+				)
+			)
 		_mark_profile_segment_cells(
 			occupied_cells,
 			body_points[point_index],
 			body_points[point_index + 1],
 			profile_polygon,
 			amount_ratio,
-			sample_cell_size_meters
+			sample_cell_size_meters,
+			surface_normal,
+			contact_direction,
+			rotation_bias_degrees,
+			use_compiled_orientation
 		)
 
 func _mark_profile_segment_cells(
@@ -268,7 +306,13 @@ func _mark_profile_segment_cells(
 	to_point: Vector3,
 	profile_polygon: PackedVector2Array,
 	amount_ratio: float,
-	sample_cell_size_meters: float
+	sample_cell_size_meters: float,
+	surface_normal: Vector3 = Vector3.FORWARD,
+	contact_direction_2d: Vector2 = (
+		ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_LOCAL_SIX
+	),
+	rotation_bias_degrees: float = 0.0,
+	use_compiled_orientation: bool = false
 ) -> void:
 	var segment: Vector3 = to_point - from_point
 	var segment_length: float = segment.length()
@@ -277,6 +321,15 @@ func _mark_profile_segment_cells(
 	var tangent: Vector3 = segment / segment_length
 	var normal: Vector3 = _resolve_perpendicular_normal(tangent)
 	var binormal: Vector3 = tangent.cross(normal).normalized()
+	if use_compiled_orientation:
+		var frame := ForgeV2ProfileShapeLibraryScript.resolve_profile_path_frame(
+			tangent,
+			surface_normal,
+			contact_direction_2d,
+			rotation_bias_degrees
+		)
+		normal = frame.get("axis_x", normal) as Vector3
+		binormal = frame.get("axis_y", binormal) as Vector3
 	var profile_radius: float = maxf(
 		ForgeV2ProfileShapeLibraryScript.calculate_polygon_max_radius_meters(profile_polygon),
 		0.001
@@ -532,6 +585,27 @@ func _read_body_vector2_array(body: Variant, field_name: String) -> PackedVector
 	if value is PackedVector2Array:
 		return value as PackedVector2Array
 	return PackedVector2Array()
+
+func _read_body_vector3_array(
+	body: Variant,
+	field_name: String
+) -> PackedVector3Array:
+	var value: Variant = _read_body_variant(
+		body,
+		field_name,
+		PackedVector3Array()
+	)
+	if value is PackedVector3Array:
+		return value as PackedVector3Array
+	return PackedVector3Array()
+
+func _read_body_vector2(
+	body: Variant,
+	field_name: String,
+	default_value: Vector2 = Vector2.ZERO
+) -> Vector2:
+	var value: Variant = _read_body_variant(body, field_name, default_value)
+	return value as Vector2 if value is Vector2 else default_value
 
 func _material_centi_units_from_volume_cell_equivalents(volume_cell_equivalents: float) -> int:
 	var raw_material_units: float = maxf(volume_cell_equivalents, 0.0) / CELL_EQUIVALENTS_PER_MATERIAL_UNIT

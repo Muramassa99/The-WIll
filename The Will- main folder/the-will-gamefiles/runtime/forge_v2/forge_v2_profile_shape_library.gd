@@ -29,6 +29,13 @@ const BASIC_FILLET_GEOMETRY_EPSILON := 0.000001
 const BASIC_FILLET_CROSS_EPSILON := 0.0000000001
 const BASIC_FILLET_AREA_EPSILON := 0.000000000001
 const BASIC_FILLET_ANGLE_EPSILON := 0.0001
+const BASIC_PROFILE_RECORD_SCHEMA_VERSION := 1
+const BASIC_PROFILE_RUNTIME_SCHEMA_VERSION := 1
+const BASIC_PROFILE_CONTACT_RULE_ID := &"closest_boundary_clock_6_left_v1"
+const BASIC_PROFILE_COORDINATE_SPACE := &"profile_local_cartesian_y_up"
+const BASIC_PROFILE_ANCHOR_CLEARANCE_METERS := 0.0005
+const BASIC_PROFILE_CONTACT_DISTANCE_EPSILON := 0.0000001
+const BASIC_PROFILE_LOCAL_SIX := Vector2(0.0, -1.0)
 const HANDLE_FACE_COUNT_RECTANGLE := 4
 const HANDLE_FACE_COUNT_OCTAGON := 8
 const HANDLE_DEFAULT_WIDTH_METERS := DEFAULT_CELL_WORLD_SIZE_METERS * 2.0
@@ -129,6 +136,521 @@ static func calculate_polygon_bounds(polygon: PackedVector2Array) -> Rect2:
 static func calculate_polygon_size_meters(polygon: PackedVector2Array) -> Vector2:
 	var bounds := calculate_polygon_bounds(polygon)
 	return Vector2(maxf(bounds.size.x, 0.0), maxf(bounds.size.y, 0.0))
+
+static func compile_basic_profile_runtime_data(profile_data: Dictionary) -> Dictionary:
+	var compiled_profile := profile_data.duplicate(true)
+	if StringName(compiled_profile.get("family", StringName())) != PROFILE_FAMILY_BASIC:
+		return compiled_profile
+	var rotation_degrees := float(compiled_profile.get("rotation_degrees", 0.0))
+	var preview_polygon: PackedVector2Array = compiled_profile.get(
+		"polygon_2d_meters",
+		PackedVector2Array()
+	)
+	var base_polygon: PackedVector2Array = compiled_profile.get(
+		"base_polygon_2d_meters",
+		PackedVector2Array()
+	)
+	if base_polygon.size() < 3 and preview_polygon.size() >= 3:
+		base_polygon = _rotate_polygon(preview_polygon, -rotation_degrees)
+	if base_polygon.size() < 3:
+		var control_points: PackedVector2Array = compiled_profile.get(
+			"control_points_2d_meters",
+			PackedVector2Array()
+		)
+		if control_points.size() >= 3:
+			base_polygon = build_basic_builder_polygon(
+				control_points,
+				compiled_profile.get("basic_corner_metadata", []) as Array
+			)
+	if preview_polygon.size() < 3 and base_polygon.size() >= 3:
+		preview_polygon = _rotate_polygon(base_polygon, rotation_degrees)
+	compiled_profile["record_schema_version"] = BASIC_PROFILE_RECORD_SCHEMA_VERSION
+	compiled_profile["base_polygon_2d_meters"] = base_polygon
+	compiled_profile["polygon_2d_meters"] = preview_polygon
+	var runtime_data := {
+		"schema_version": BASIC_PROFILE_RUNTIME_SCHEMA_VERSION,
+		"rule_id": BASIC_PROFILE_CONTACT_RULE_ID,
+		"coordinate_space": BASIC_PROFILE_COORDINATE_SPACE,
+		"valid": false,
+		"error": &"invalid_polygon",
+		"anchor_clearance_meters": BASIC_PROFILE_ANCHOR_CLEARANCE_METERS,
+		"anchor_2d_meters": Vector2.ZERO,
+		"contact_point_2d_meters": Vector2.ZERO,
+		"contact_point_relative_2d_meters": Vector2.ZERO,
+		"contact_direction_2d": BASIC_PROFILE_LOCAL_SIX,
+		"contact_distance_meters": 0.0,
+		"deposition_polygon_2d_meters": PackedVector2Array(),
+	}
+	if (
+		not _basic_fillet_polygon_is_valid(base_polygon)
+	):
+		compiled_profile["compiled_profile"] = runtime_data
+		return compiled_profile
+	var base_anchor := Vector2.ZERO
+	var stored_base_anchor: Variant = compiled_profile.get(
+		"base_anchor_2d_meters",
+		null
+	)
+	if stored_base_anchor is Vector2:
+		base_anchor = stored_base_anchor as Vector2
+	else:
+		base_anchor = Vector2(
+			float(compiled_profile.get("anchor_x_meters", 0.0)),
+			float(compiled_profile.get("anchor_y_meters", 0.0))
+		)
+	var clearance_result := constrain_point_inside_polygon_with_clearance(
+		base_anchor,
+		base_polygon,
+		BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+	)
+	if not bool(clearance_result.get("valid", false)):
+		runtime_data["error"] = StringName(clearance_result.get(
+			"error",
+			&"anchor_clearance_unavailable"
+		))
+		compiled_profile["compiled_profile"] = runtime_data
+		return compiled_profile
+	base_anchor = clearance_result.get("point", base_anchor) as Vector2
+	var contact_result := resolve_profile_anchor_contact(base_polygon, base_anchor)
+	if not bool(contact_result.get("valid", false)):
+		runtime_data["error"] = &"contact_unavailable"
+		compiled_profile["compiled_profile"] = runtime_data
+		return compiled_profile
+	var contact_distance := float(contact_result.get("distance_meters", 0.0))
+	if (
+		contact_distance
+		+ BASIC_PROFILE_CONTACT_DISTANCE_EPSILON
+		< BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+	):
+		runtime_data["error"] = &"anchor_inset_numerical_failure"
+		compiled_profile["compiled_profile"] = runtime_data
+		return compiled_profile
+	var contact_point := contact_result.get("point", base_anchor) as Vector2
+	var contact_direction := contact_result.get(
+		"direction",
+		BASIC_PROFILE_LOCAL_SIX
+	) as Vector2
+	var deposition_polygon := PackedVector2Array()
+	for point: Vector2 in base_polygon:
+		deposition_polygon.append(point - base_anchor)
+	compiled_profile["anchor_x_meters"] = base_anchor.x
+	compiled_profile["anchor_y_meters"] = base_anchor.y
+	compiled_profile["base_anchor_2d_meters"] = base_anchor
+	compiled_profile["anchor_2d_meters"] = base_anchor.rotated(
+		deg_to_rad(rotation_degrees)
+	)
+	runtime_data["valid"] = true
+	runtime_data["error"] = StringName()
+	runtime_data["anchor_2d_meters"] = base_anchor
+	runtime_data["contact_point_2d_meters"] = contact_point
+	runtime_data["contact_point_relative_2d_meters"] = contact_point - base_anchor
+	runtime_data["contact_direction_2d"] = contact_direction
+	runtime_data["contact_distance_meters"] = contact_distance
+	runtime_data["deposition_polygon_2d_meters"] = deposition_polygon
+	compiled_profile["compiled_profile"] = runtime_data
+	return compiled_profile
+
+static func is_compiled_basic_profile_runtime_valid(profile_data: Dictionary) -> bool:
+	if StringName(profile_data.get("family", StringName())) != PROFILE_FAMILY_BASIC:
+		return false
+	if (
+		int(profile_data.get("record_schema_version", 0))
+		!= BASIC_PROFILE_RECORD_SCHEMA_VERSION
+	):
+		return false
+	var runtime_data: Dictionary = profile_data.get("compiled_profile", {}) as Dictionary
+	if (
+		int(runtime_data.get("schema_version", 0))
+		!= BASIC_PROFILE_RUNTIME_SCHEMA_VERSION
+		or StringName(runtime_data.get("rule_id", StringName()))
+		!= BASIC_PROFILE_CONTACT_RULE_ID
+		or StringName(runtime_data.get("coordinate_space", StringName()))
+		!= BASIC_PROFILE_COORDINATE_SPACE
+		or not bool(runtime_data.get("valid", false))
+	):
+		return false
+	var clearance_meters := float(runtime_data.get(
+		"anchor_clearance_meters",
+		0.0
+	))
+	if (
+		not is_finite(clearance_meters)
+		or clearance_meters
+		+ BASIC_PROFILE_CONTACT_DISTANCE_EPSILON
+		< BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+	):
+		return false
+	var base_polygon: PackedVector2Array = profile_data.get(
+		"base_polygon_2d_meters",
+		PackedVector2Array()
+	)
+	var deposition_polygon: PackedVector2Array = runtime_data.get(
+		"deposition_polygon_2d_meters",
+		PackedVector2Array()
+	)
+	if (
+		not _basic_fillet_polygon_is_valid(base_polygon)
+		or not _basic_fillet_polygon_is_valid(deposition_polygon)
+		or deposition_polygon.size() != base_polygon.size()
+	):
+		return false
+	var anchor_variant: Variant = runtime_data.get("anchor_2d_meters", null)
+	var contact_point_variant: Variant = runtime_data.get(
+		"contact_point_2d_meters",
+		null
+	)
+	var contact_relative_variant: Variant = runtime_data.get(
+		"contact_point_relative_2d_meters",
+		null
+	)
+	var contact_direction_variant: Variant = runtime_data.get(
+		"contact_direction_2d",
+		null
+	)
+	if (
+		not anchor_variant is Vector2
+		or not contact_point_variant is Vector2
+		or not contact_relative_variant is Vector2
+		or not contact_direction_variant is Vector2
+	):
+		return false
+	var anchor := anchor_variant as Vector2
+	var contact_point := contact_point_variant as Vector2
+	var contact_relative := contact_relative_variant as Vector2
+	var contact_direction := contact_direction_variant as Vector2
+	var contact_distance := float(runtime_data.get(
+		"contact_distance_meters",
+		0.0
+	))
+	if (
+		not is_finite(contact_distance)
+		or contact_distance
+		+ BASIC_PROFILE_CONTACT_DISTANCE_EPSILON
+		< clearance_meters
+		or absf(contact_direction.length() - 1.0) > 0.00001
+	):
+		return false
+	var validation_tolerance := maxf(
+		BASIC_PROFILE_CONTACT_DISTANCE_EPSILON * 10.0,
+		BASIC_FILLET_GEOMETRY_EPSILON
+	)
+	var clearance_result := constrain_point_inside_polygon_with_clearance(
+		anchor,
+		base_polygon,
+		clearance_meters
+	)
+	if (
+		not bool(clearance_result.get("valid", false))
+		or (clearance_result.get("point", anchor) as Vector2).distance_to(anchor)
+		> validation_tolerance
+	):
+		return false
+	var expected_contact := resolve_profile_anchor_contact(base_polygon, anchor)
+	if not bool(expected_contact.get("valid", false)):
+		return false
+	if (
+		(expected_contact.get("point", anchor) as Vector2).distance_to(
+			contact_point
+		) > validation_tolerance
+		or (expected_contact.get(
+			"direction",
+			BASIC_PROFILE_LOCAL_SIX
+		) as Vector2).distance_to(contact_direction) > validation_tolerance
+		or absf(float(expected_contact.get(
+			"distance_meters",
+			0.0
+		)) - contact_distance) > validation_tolerance
+		or contact_point.distance_to(anchor + contact_relative)
+		> validation_tolerance
+	):
+		return false
+	for point_index in range(base_polygon.size()):
+		if (
+			deposition_polygon[point_index].distance_to(
+				base_polygon[point_index] - anchor
+			) > validation_tolerance
+		):
+			return false
+	return true
+
+static func constrain_point_inside_polygon_with_clearance(
+	point: Vector2,
+	polygon: PackedVector2Array,
+	clearance_meters: float = BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+) -> Dictionary:
+	if polygon.size() < 3:
+		return {
+			"valid": false,
+			"error": &"invalid_polygon",
+			"point": point,
+		}
+	var clearance := maxf(clearance_meters, 0.0)
+	if clearance <= 0.0:
+		return {
+			"valid": true,
+			"error": StringName(),
+			"point": clamp_point_to_polygon(point, polygon),
+		}
+	var inset_polygons: Array[PackedVector2Array] = Geometry2D.offset_polygon(
+		polygon,
+		-clearance,
+		Geometry2D.JOIN_MITER
+	)
+	var usable_insets: Array[PackedVector2Array] = []
+	for inset_polygon: PackedVector2Array in inset_polygons:
+		if (
+			inset_polygon.size() >= 3
+			and absf(_calculate_signed_polygon_area(inset_polygon))
+			> BASIC_FILLET_AREA_EPSILON
+		):
+			usable_insets.append(inset_polygon)
+	if usable_insets.is_empty():
+		return {
+			"valid": false,
+			"error": &"anchor_clearance_unavailable",
+			"point": point,
+		}
+	for inset_polygon: PackedVector2Array in usable_insets:
+		if _is_point_inside_or_on_polygon(
+			point,
+			inset_polygon,
+			BASIC_PROFILE_CONTACT_DISTANCE_EPSILON
+		):
+			return {
+				"valid": true,
+				"error": StringName(),
+				"point": point,
+			}
+	var nearest_point := point
+	var nearest_distance_squared := INF
+	for inset_polygon: PackedVector2Array in usable_insets:
+		var candidate := clamp_point_to_polygon(
+			point,
+			inset_polygon,
+			BASIC_PROFILE_CONTACT_DISTANCE_EPSILON
+		)
+		var distance_squared := point.distance_squared_to(candidate)
+		if distance_squared >= nearest_distance_squared:
+			continue
+		nearest_distance_squared = distance_squared
+		nearest_point = candidate
+	return {
+		"valid": nearest_distance_squared < INF,
+		"error": StringName() if nearest_distance_squared < INF else &"anchor_clearance_unavailable",
+		"point": nearest_point,
+	}
+
+static func resolve_profile_anchor_contact(
+	polygon: PackedVector2Array,
+	anchor_2d_meters: Vector2
+) -> Dictionary:
+	if polygon.size() < 3:
+		return {"valid": false}
+	var nearest_point := polygon[0]
+	var nearest_direction := BASIC_PROFILE_LOCAL_SIX
+	var nearest_distance := INF
+	for point_index in range(polygon.size()):
+		var segment_a: Vector2 = polygon[point_index]
+		var segment_b: Vector2 = polygon[(point_index + 1) % polygon.size()]
+		var candidate := _closest_point_on_segment(
+			anchor_2d_meters,
+			segment_a,
+			segment_b
+		)
+		var candidate_delta := candidate - anchor_2d_meters
+		var distance_meters := candidate_delta.length()
+		var is_nearer := (
+			distance_meters
+			< nearest_distance
+			- BASIC_PROFILE_CONTACT_DISTANCE_EPSILON
+		)
+		var is_tied := (
+			absf(distance_meters - nearest_distance)
+			<= BASIC_PROFILE_CONTACT_DISTANCE_EPSILON
+		)
+		var candidate_direction := (
+			candidate_delta.normalized()
+			if distance_meters > BASIC_FILLET_GEOMETRY_EPSILON
+			else BASIC_PROFILE_LOCAL_SIX
+		)
+		if (
+			not is_nearer
+			and (
+				not is_tied
+				or not _contact_direction_has_priority(
+					candidate_direction,
+					nearest_direction
+				)
+			)
+		):
+			continue
+		nearest_point = candidate
+		nearest_direction = candidate_direction
+		nearest_distance = distance_meters
+	if nearest_distance == INF:
+		return {"valid": false}
+	return {
+		"valid": true,
+		"point": nearest_point,
+		"direction": nearest_direction,
+		"distance_meters": nearest_distance,
+	}
+
+static func resolve_profile_path_frame(
+	path_tangent: Vector3,
+	surface_normal: Vector3,
+	contact_direction_2d: Vector2,
+	rotation_bias_degrees: float = 0.0
+) -> Dictionary:
+	var tangent := path_tangent.normalized()
+	if tangent.length_squared() <= BASIC_FILLET_GEOMETRY_EPSILON:
+		tangent = Vector3.RIGHT
+	var reference_axis := Vector3.UP
+	if absf(tangent.dot(reference_axis)) > 0.95:
+		reference_axis = Vector3.RIGHT
+	var axis_x := reference_axis.cross(tangent).normalized()
+	if axis_x.length_squared() <= BASIC_FILLET_GEOMETRY_EPSILON:
+		axis_x = Vector3.FORWARD
+	var axis_y := tangent.cross(axis_x).normalized()
+	var contact_direction := contact_direction_2d.normalized()
+	if contact_direction.length_squared() <= BASIC_FILLET_GEOMETRY_EPSILON:
+		contact_direction = BASIC_PROFILE_LOCAL_SIX
+	var reference_contact := (
+		axis_x * contact_direction.x
+		+ axis_y * contact_direction.y
+	).normalized()
+	var inward := -surface_normal.normalized()
+	if inward.length_squared() <= BASIC_FILLET_GEOMETRY_EPSILON:
+		inward = reference_contact
+	inward -= tangent * inward.dot(tangent)
+	if inward.length_squared() <= BASIC_FILLET_GEOMETRY_EPSILON:
+		inward = reference_contact
+	else:
+		inward = inward.normalized()
+	var contact_perpendicular := tangent.cross(inward).normalized()
+	var resolved_axis_x := (
+		inward * contact_direction.x
+		- contact_perpendicular * contact_direction.y
+	).normalized()
+	var resolved_axis_y := (
+		inward * contact_direction.y
+		+ contact_perpendicular * contact_direction.x
+	).normalized()
+	var rotation_bias_radians := deg_to_rad(rotation_bias_degrees)
+	if not is_zero_approx(rotation_bias_radians):
+		var rotation_bias_basis := Basis(tangent, rotation_bias_radians)
+		resolved_axis_x = (rotation_bias_basis * resolved_axis_x).normalized()
+		resolved_axis_y = (rotation_bias_basis * resolved_axis_y).normalized()
+	var resolved_contact := (
+		resolved_axis_x * contact_direction.x
+		+ resolved_axis_y * contact_direction.y
+	).normalized()
+	var tilt_radians := reference_contact.signed_angle_to(
+		resolved_contact,
+		tangent
+	)
+	return {
+		"tangent": tangent,
+		"axis_x": resolved_axis_x,
+		"axis_y": resolved_axis_y,
+		"inward": inward,
+		"resolved_contact": resolved_contact,
+		"tilt_radians": tilt_radians,
+	}
+
+static func resolve_path_surface_normal(
+	sample_position: Vector3,
+	source_points: PackedVector3Array,
+	source_surface_normals: PackedVector3Array
+) -> Vector3:
+	if source_points.is_empty() or source_surface_normals.is_empty():
+		return Vector3.FORWARD
+	var nearest_distance_squared := INF
+	var nearest_segment_ratio := 0.0
+	var nearest_segment_index := -1
+	for segment_index in range(source_points.size() - 1):
+		var segment_start: Vector3 = source_points[segment_index]
+		var segment_end: Vector3 = source_points[segment_index + 1]
+		var segment := segment_end - segment_start
+		var segment_length_squared := segment.length_squared()
+		if segment_length_squared <= BASIC_FILLET_GEOMETRY_EPSILON:
+			continue
+		var segment_ratio := clampf(
+			(sample_position - segment_start).dot(segment)
+			/ segment_length_squared,
+			0.0,
+			1.0
+		)
+		var candidate := segment_start + segment * segment_ratio
+		var distance_squared := sample_position.distance_squared_to(candidate)
+		if distance_squared >= nearest_distance_squared:
+			continue
+		nearest_distance_squared = distance_squared
+		nearest_segment_ratio = segment_ratio
+		nearest_segment_index = segment_index
+	if nearest_segment_index >= 0:
+		var from_normal_index := mini(
+			nearest_segment_index,
+			source_surface_normals.size() - 1
+		)
+		var to_normal_index := mini(
+			nearest_segment_index + 1,
+			source_surface_normals.size() - 1
+		)
+		var interpolated_normal: Vector3 = source_surface_normals[
+			from_normal_index
+		].lerp(
+			source_surface_normals[to_normal_index],
+			nearest_segment_ratio
+		)
+		if interpolated_normal.length_squared() > BASIC_FILLET_GEOMETRY_EPSILON:
+			return interpolated_normal.normalized()
+	var nearest_point_index := 0
+	nearest_distance_squared = INF
+	for point_index in range(source_points.size()):
+		var distance_squared := sample_position.distance_squared_to(
+			source_points[point_index]
+		)
+		if distance_squared >= nearest_distance_squared:
+			continue
+		nearest_distance_squared = distance_squared
+		nearest_point_index = point_index
+	nearest_point_index = mini(
+		nearest_point_index,
+		source_surface_normals.size() - 1
+	)
+	var surface_normal: Vector3 = source_surface_normals[nearest_point_index]
+	return (
+		surface_normal.normalized()
+		if surface_normal.length_squared() > BASIC_FILLET_GEOMETRY_EPSILON
+		else Vector3.FORWARD
+	)
+
+static func _contact_direction_has_priority(
+	candidate_direction: Vector2,
+	current_direction: Vector2
+) -> bool:
+	var candidate_down := candidate_direction.dot(BASIC_PROFILE_LOCAL_SIX)
+	var current_down := current_direction.dot(BASIC_PROFILE_LOCAL_SIX)
+	if not is_equal_approx(candidate_down, current_down):
+		return candidate_down > current_down
+	var candidate_left := candidate_direction.dot(Vector2.LEFT)
+	var current_left := current_direction.dot(Vector2.LEFT)
+	if not is_equal_approx(candidate_left, current_left):
+		return candidate_left > current_left
+	return false
+
+static func _rotate_polygon(
+	polygon: PackedVector2Array,
+	rotation_degrees: float
+) -> PackedVector2Array:
+	if polygon.is_empty() or is_zero_approx(rotation_degrees):
+		return polygon
+	var rotated := PackedVector2Array()
+	var rotation_radians := deg_to_rad(rotation_degrees)
+	for point: Vector2 in polygon:
+		rotated.append(point.rotated(rotation_radians))
+	return rotated
 
 static func transform_profile_polygon(
 	polygon: PackedVector2Array,
@@ -932,10 +1454,14 @@ static func _fit_centered_points_inside_limit(points: PackedVector2Array, limit_
 		return _scale_points_from_origin(centered_points, 0.0)
 	return fitted_points
 
-static func clamp_point_to_polygon(point: Vector2, polygon: PackedVector2Array) -> Vector2:
+static func clamp_point_to_polygon(
+	point: Vector2,
+	polygon: PackedVector2Array,
+	tolerance_meters: float = 0.00001
+) -> Vector2:
 	if polygon.size() < 3:
 		return point
-	if _is_point_inside_or_on_polygon(point, polygon):
+	if _is_point_inside_or_on_polygon(point, polygon, tolerance_meters):
 		return point
 	var nearest_point: Vector2 = polygon[0]
 	var nearest_distance := INF

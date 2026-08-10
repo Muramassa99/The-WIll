@@ -3,6 +3,7 @@ class_name PlayerToolProfileLibraryState
 
 const DEFAULT_SAVE_FILE_PATH := "user://forge/tool_presets/player_tool_profile_library_state.tres"
 const PersistentResourceStateIOScript = preload("res://core/models/persistent_resource_state_io.gd")
+const ForgeV2ProfileShapeLibraryScript = preload("res://runtime/forge_v2/forge_v2_profile_shape_library.gd")
 
 const PROFILE_NAME_MAX_LENGTH := 36
 const PROFILE_FAMILY_HANDLE := &"profile_family_handle"
@@ -13,7 +14,18 @@ const PROFILE_FAMILY_BASIC := &"profile_family_basic"
 @export var save_file_path: String = DEFAULT_SAVE_FILE_PATH
 
 static func load_or_create(save_path: String = DEFAULT_SAVE_FILE_PATH):
-	return PersistentResourceStateIOScript.load_or_create(save_path, "res://core/models/player_tool_profile_library_state.gd")
+	var profile_library = PersistentResourceStateIOScript.load_or_create(
+		save_path,
+		"res://core/models/player_tool_profile_library_state.gd"
+	)
+	if (
+		profile_library != null
+		and profile_library.has_method("upgrade_saved_profiles_once")
+		and bool(profile_library.call("upgrade_saved_profiles_once"))
+		and profile_library.has_method("persist")
+	):
+		profile_library.call("persist")
+	return profile_library
 
 func get_saved_profiles(profile_family: StringName = StringName()) -> Array[Dictionary]:
 	var profiles: Array[Dictionary] = []
@@ -43,6 +55,14 @@ func save_profile(profile_data: Dictionary, requested_name: String = "") -> Dict
 	saved_profile["id"] = profile_id
 	saved_profile["family"] = profile_family
 	saved_profile["label"] = _resolve_available_profile_name(requested_name, profile_family, profile_id)
+	if profile_family == PROFILE_FAMILY_BASIC:
+		saved_profile = ForgeV2ProfileShapeLibraryScript.compile_basic_profile_runtime_data(
+			saved_profile
+		)
+		if not ForgeV2ProfileShapeLibraryScript.is_compiled_basic_profile_runtime_valid(
+			saved_profile
+		):
+			return {}
 	saved_profile["updated_timestamp"] = Time.get_unix_time_from_system()
 	if not saved_profile.has("created_timestamp") or float(saved_profile.get("created_timestamp", 0.0)) <= 0.0:
 		saved_profile["created_timestamp"] = saved_profile["updated_timestamp"]
@@ -54,6 +74,27 @@ func save_profile(profile_data: Dictionary, requested_name: String = "") -> Dict
 	selected_profile_id = profile_id
 	persist()
 	return saved_profile.duplicate(true)
+
+func upgrade_saved_profiles_once() -> bool:
+	var changed := false
+	for profile_index in range(saved_profiles.size()):
+		var profile: Dictionary = saved_profiles[profile_index]
+		if (
+			profile.is_empty()
+			or StringName(profile.get("family", StringName()))
+			!= PROFILE_FAMILY_BASIC
+		):
+			continue
+		var upgraded_profile: Dictionary = (
+			ForgeV2ProfileShapeLibraryScript.compile_basic_profile_runtime_data(
+				profile
+			)
+		)
+		if upgraded_profile == profile:
+			continue
+		saved_profiles[profile_index] = upgraded_profile
+		changed = true
+	return changed
 
 func remove_profile(profile_id: StringName) -> bool:
 	var profile_index := _find_saved_profile_index(profile_id)

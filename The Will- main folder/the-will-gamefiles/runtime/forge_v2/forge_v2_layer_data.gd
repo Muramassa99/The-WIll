@@ -11,6 +11,7 @@ const CSG_OPERATION_UNION := &"csg_operation_union"
 const CSG_OPERATION_SUBTRACTION := &"csg_operation_subtraction"
 const CSG_OPERATION_MIXED := &"csg_operation_mixed"
 
+const INPUT_SHAPE_MATERIAL_BODY_BUNDLE := &"input_shape_material_body_bundle"
 const INPUT_SHAPE_CAPSULE_PATH_BUNDLE := &"input_shape_capsule_path_bundle"
 const COMMIT_BACKEND_LEDGER_ONLY := &"commit_backend_ledger_only"
 const MATERIAL_VOID := &"mat_void"
@@ -25,7 +26,7 @@ const SOURCE_OPERATION_REMOVE_MATERIAL := &"operation_remove_material"
 @export var operation_material_id: StringName = StringName()
 @export var csg_operation: StringName = CSG_OPERATION_UNION
 @export var commit_backend_id: StringName = COMMIT_BACKEND_LEDGER_ONLY
-@export var input_shape_type: StringName = INPUT_SHAPE_CAPSULE_PATH_BUNDLE
+@export var input_shape_type: StringName = INPUT_SHAPE_MATERIAL_BODY_BUNDLE
 @export var body_ids: Array[StringName] = []
 @export var source_record_ids: Array[StringName] = []
 @export var input_shape_records: Array[Dictionary] = []
@@ -95,7 +96,7 @@ func normalize() -> void:
 	if commit_backend_id == StringName():
 		commit_backend_id = COMMIT_BACKEND_LEDGER_ONLY
 	if input_shape_type == StringName():
-		input_shape_type = INPUT_SHAPE_CAPSULE_PATH_BUNDLE
+		input_shape_type = INPUT_SHAPE_MATERIAL_BODY_BUNDLE
 
 func get_material_delta_units(material_variant_id: StringName) -> float:
 	var delta_entry: Dictionary = ledger_delta.get(material_variant_id, {}) as Dictionary
@@ -120,11 +121,28 @@ func _append_body_record(body: Resource) -> void:
 		"placement_policy": StringName(body.get("placement_policy")),
 		"shape_kind": StringName(body.get("shape_kind")),
 		"path_points": body.get("path_points"),
+		"path_surface_normals": body.get("path_surface_normals"),
 		"radius_meters": float(body.get("radius_meters")),
 		"profile_id": StringName(body.get("profile_id")),
+		"profile_display_name": String(body.get("profile_display_name")),
 		"profile_role": StringName(body.get("profile_role")),
 		"profile_polygon_2d_meters": body.get("profile_polygon_2d_meters"),
 		"profile_anchor_2d_meters": body.get("profile_anchor_2d_meters"),
+		"profile_contact_point_relative_2d_meters": body.get(
+			"profile_contact_point_relative_2d_meters"
+		),
+		"profile_contact_direction_2d": body.get(
+			"profile_contact_direction_2d"
+		),
+		"profile_contact_distance_meters": float(body.get(
+			"profile_contact_distance_meters"
+		)),
+		"profile_runtime_schema_version": int(body.get(
+			"profile_runtime_schema_version"
+		)),
+		"profile_rotation_bias_degrees": float(body.get(
+			"profile_rotation_bias_degrees"
+		)),
 		"profile_twist_degrees_per_meter": float(body.get("profile_twist_degrees_per_meter")),
 		"amount_ratio": float(body.get("amount_ratio")),
 		"rough_volume_cell_equivalents": float(body.get("rough_volume_cell_equivalents")),

@@ -37,11 +37,20 @@ const MATERIAL_UNIT_SCALE := 100
 @export var placement_policy: StringName = ForgeV2VolumeStrokeScript.PLACEMENT_REPLACE_EXISTING
 @export var shape_kind: StringName = SHAPE_KIND_CAPSULE_PATH
 @export var path_points: PackedVector3Array = PackedVector3Array()
+@export var path_surface_normals: PackedVector3Array = PackedVector3Array()
 @export var radius_meters: float = 0.02
 @export var profile_id: StringName = StringName()
+@export var profile_display_name: String = ""
 @export var profile_role: StringName = PROFILE_ROLE_NONE
 @export var profile_polygon_2d_meters: PackedVector2Array = PackedVector2Array()
 @export var profile_anchor_2d_meters: Vector2 = Vector2.ZERO
+@export var profile_contact_point_relative_2d_meters: Vector2 = Vector2.ZERO
+@export var profile_contact_direction_2d: Vector2 = (
+	ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_LOCAL_SIX
+)
+@export var profile_contact_distance_meters: float = 0.0
+@export var profile_runtime_schema_version: int = 0
+@export var profile_rotation_bias_degrees: float = 0.0
 @export var profile_twist_degrees_per_meter: float = 0.0
 @export var amount_ratio: float = 1.0
 @export var rough_volume_cell_equivalents: float = 0.0
@@ -79,6 +88,7 @@ func normalize() -> void:
 	if body_kind == BODY_KIND_PLATFORM_SEED:
 		placement_policy = ForgeV2VolumeStrokeScript.PLACEMENT_EMPTY_ONLY
 	shape_kind = _normalize_shape_kind(shape_kind)
+	_normalize_path_surface_normals()
 	if _is_profile_shape_kind():
 		_ensure_profile_data()
 	radius_meters = maxf(radius_meters, 0.001)
@@ -165,8 +175,16 @@ func _ensure_profile_data() -> void:
 		if profile_role == PROFILE_ROLE_HANDLE or body_kind == BODY_KIND_HANDLE_PROFILE
 		else StringName()
 	)
-	profile_id = ForgeV2ProfileShapeLibraryScript.normalize_profile_id(profile_id, required_family)
-	var record: Dictionary = ForgeV2ProfileShapeLibraryScript.get_profile_record(profile_id, radius_meters)
+	var record: Dictionary = {}
+	if profile_polygon_2d_meters.size() < 3:
+		profile_id = ForgeV2ProfileShapeLibraryScript.normalize_profile_id(
+			profile_id,
+			required_family
+		)
+		record = ForgeV2ProfileShapeLibraryScript.get_profile_record(
+			profile_id,
+			radius_meters
+		)
 	if profile_role == StringName():
 		profile_role = PROFILE_ROLE_NONE
 	if not record.is_empty():
@@ -178,6 +196,32 @@ func _ensure_profile_data() -> void:
 			profile_anchor_2d_meters = record.get("anchor_2d_meters", Vector2.ZERO) as Vector2
 	if profile_polygon_2d_meters.size() < 3:
 		profile_polygon_2d_meters = ForgeV2ProfileShapeLibraryScript.build_circle_polygon(radius_meters)
+	if profile_contact_direction_2d.length_squared() <= 0.0000000001:
+		profile_contact_direction_2d = (
+			ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_LOCAL_SIX
+		)
+	else:
+		profile_contact_direction_2d = profile_contact_direction_2d.normalized()
+	profile_contact_distance_meters = maxf(
+		profile_contact_distance_meters,
+		0.0
+	)
+	profile_rotation_bias_degrees = wrapf(
+		profile_rotation_bias_degrees,
+		-180.0,
+		180.0
+	)
+
+func _normalize_path_surface_normals() -> void:
+	var normalized_normals := PackedVector3Array()
+	for point_index in range(path_points.size()):
+		var normal := Vector3.FORWARD
+		if point_index < path_surface_normals.size():
+			normal = path_surface_normals[point_index]
+		if normal.length_squared() <= 0.000001:
+			normal = Vector3.FORWARD
+		normalized_normals.append(normal.normalized())
+	path_surface_normals = normalized_normals
 
 func _build_body_id() -> StringName:
 	if body_kind == BODY_KIND_PLATFORM_SEED and seed_role != SEED_ROLE_NONE:

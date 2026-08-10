@@ -159,12 +159,25 @@ func set_active_primitive_id(primitive_id: StringName) -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.set_active_primitive_id(primitive_id)
 	_emit_state_changed()
+	_emit_placement_cursor_changed()
+
+func select_active_saved_basic_profile(profile_data: Dictionary) -> bool:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var changed := bool(state.call(
+		"select_active_saved_basic_profile",
+		profile_data
+	))
+	if changed:
+		_emit_state_changed()
+		_emit_placement_cursor_changed()
+	return changed
 
 func set_active_tool_id(tool_id: StringName) -> void:
 	active_placement_body_id = StringName()
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.set_active_tool_id(tool_id)
 	_emit_state_changed()
+	_emit_placement_cursor_changed()
 
 func set_active_profile_id(profile_id: StringName) -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
@@ -321,6 +334,7 @@ func apply_tool_profile_preset(profile_data: Dictionary) -> bool:
 	var changed := bool(state.call("apply_tool_profile_preset", profile_data))
 	if changed:
 		_emit_state_changed()
+		_emit_placement_cursor_changed()
 	return changed
 
 func build_active_tool_profile_preset_data(requested_name: String = "") -> Dictionary:
@@ -367,24 +381,46 @@ func append_active_primitive_deposit() -> Array[Resource]:
 	_emit_state_changed()
 	return bodies
 
-func append_point_volume_stroke(local_position: Vector3) -> Resource:
-	return append_point_material_body(local_position)
+func append_point_volume_stroke(
+	local_position: Vector3,
+	local_surface_normal: Vector3 = Vector3.FORWARD
+) -> Resource:
+	return append_point_material_body(local_position, local_surface_normal)
 
-func append_point_material_body(local_position: Vector3) -> Resource:
+func append_point_material_body(
+	local_position: Vector3,
+	local_surface_normal: Vector3 = Vector3.FORWARD
+) -> Resource:
 	var state: Resource = ensure_authoring_state(default_project_name)
-	var body: Resource = state.append_point_material_body(local_position)
+	var body: Resource = state.append_point_material_body(
+		local_position,
+		-1.0,
+		-1.0,
+		local_surface_normal
+	)
 	placement_cursor_local_position = local_position
 	placement_cursor_valid = true
 	_emit_state_changed()
 	_emit_placement_cursor_changed()
 	return body
 
-func begin_placement_stroke(local_position: Vector3) -> StringName:
-	return begin_material_body_path(local_position)
+func begin_placement_stroke(
+	local_position: Vector3,
+	local_surface_normal: Vector3 = Vector3.FORWARD
+) -> StringName:
+	return begin_material_body_path(local_position, local_surface_normal)
 
-func begin_material_body_path(local_position: Vector3) -> StringName:
+func begin_material_body_path(
+	local_position: Vector3,
+	local_surface_normal: Vector3 = Vector3.FORWARD
+) -> StringName:
 	var state: Resource = ensure_authoring_state(default_project_name)
-	var body: Resource = state.append_point_material_body(local_position)
+	var body: Resource = state.append_point_material_body(
+		local_position,
+		-1.0,
+		-1.0,
+		local_surface_normal
+	)
 	active_placement_body_id = StringName(body.get("body_id")) if body != null else StringName()
 	placement_cursor_local_position = local_position
 	placement_cursor_valid = true
@@ -392,21 +428,36 @@ func begin_material_body_path(local_position: Vector3) -> StringName:
 	_emit_placement_cursor_changed()
 	return active_placement_body_id
 
-func extend_placement_stroke(local_position: Vector3, force_endpoint: bool = false) -> bool:
-	return extend_material_body_path(local_position, force_endpoint)
+func extend_placement_stroke(
+	local_position: Vector3,
+	force_endpoint: bool = false,
+	local_surface_normal: Vector3 = Vector3.FORWARD
+) -> bool:
+	return extend_material_body_path(
+		local_position,
+		force_endpoint,
+		local_surface_normal
+	)
 
-func extend_material_body_path(local_position: Vector3, force_endpoint: bool = false) -> bool:
+func extend_material_body_path(
+	local_position: Vector3,
+	force_endpoint: bool = false,
+	local_surface_normal: Vector3 = Vector3.FORWARD
+) -> bool:
 	if active_placement_body_id == StringName():
-		begin_material_body_path(local_position)
+		begin_material_body_path(local_position, local_surface_normal)
 		return true
 	var state: Resource = ensure_authoring_state(default_project_name)
-	var sample_spacing: float = ensure_workspace_contract().resolve_stroke_sample_spacing(_get_active_brush_radius_meters())
+	var sample_spacing: float = ensure_workspace_contract().resolve_stroke_sample_spacing(
+		_get_active_deposition_sample_radius_meters()
+	)
 	var changed: bool = bool(state.call(
 		"append_point_to_material_body",
 		active_placement_body_id,
 		local_position,
 		sample_spacing,
-		force_endpoint
+		force_endpoint,
+		local_surface_normal
 	))
 	placement_cursor_local_position = local_position
 	placement_cursor_valid = true
@@ -415,10 +466,22 @@ func extend_material_body_path(local_position: Vector3, force_endpoint: bool = f
 	_emit_placement_cursor_changed()
 	return changed
 
-func finish_placement_stroke(local_position: Vector3 = Vector3.ZERO, has_final_position: bool = false) -> bool:
-	return finish_material_body_path(local_position, has_final_position)
+func finish_placement_stroke(
+	local_position: Vector3 = Vector3.ZERO,
+	has_final_position: bool = false,
+	local_surface_normal: Vector3 = Vector3.FORWARD
+) -> bool:
+	return finish_material_body_path(
+		local_position,
+		has_final_position,
+		local_surface_normal
+	)
 
-func finish_material_body_path(local_position: Vector3 = Vector3.ZERO, has_final_position: bool = false) -> bool:
+func finish_material_body_path(
+	local_position: Vector3 = Vector3.ZERO,
+	has_final_position: bool = false,
+	local_surface_normal: Vector3 = Vector3.FORWARD
+) -> bool:
 	var had_active_body := active_placement_body_id != StringName()
 	var completed_body_id := active_placement_body_id
 	var changed := false
@@ -426,13 +489,16 @@ func finish_material_body_path(local_position: Vector3 = Vector3.ZERO, has_final
 	var state: Resource = null
 	if had_active_body and has_final_position:
 		state = ensure_authoring_state(default_project_name)
-		var sample_spacing: float = ensure_workspace_contract().resolve_stroke_sample_spacing(_get_active_brush_radius_meters())
+		var sample_spacing: float = ensure_workspace_contract().resolve_stroke_sample_spacing(
+			_get_active_deposition_sample_radius_meters()
+		)
 		changed = bool(state.call(
 			"append_point_to_material_body",
 			active_placement_body_id,
 			local_position,
 			sample_spacing,
-			true
+			true,
+			local_surface_normal
 		))
 		placement_cursor_local_position = local_position
 		placement_cursor_valid = true
@@ -440,8 +506,25 @@ func finish_material_body_path(local_position: Vector3 = Vector3.ZERO, has_final
 	if had_active_body:
 		if state == null:
 			state = ensure_authoring_state(default_project_name)
-		if state.has_method("commit_material_body_as_layer"):
+		var commit_ready := true
+		if state.has_method("is_material_body_commit_ready"):
+			commit_ready = bool(state.call(
+				"is_material_body_commit_ready",
+				completed_body_id
+			))
+		if (
+			commit_ready
+			and state.has_method("commit_material_body_as_layer")
+		):
 			committed = state.call("commit_material_body_as_layer", completed_body_id) != null
+		elif (
+			not commit_ready
+			and state.has_method("remove_material_body")
+		):
+			changed = bool(state.call(
+				"remove_material_body",
+				completed_body_id
+			)) or changed
 	if changed or had_active_body or committed:
 		_emit_state_changed()
 	_emit_placement_cursor_changed()
@@ -453,10 +536,17 @@ func get_active_placement_body_id() -> StringName:
 func is_material_body_path_active() -> bool:
 	return active_placement_body_id != StringName()
 
-func append_spline_line_point(local_position: Vector3) -> int:
+func append_spline_line_point(
+	local_position: Vector3,
+	local_surface_normal: Vector3 = Vector3.FORWARD
+) -> int:
 	active_placement_body_id = StringName()
 	var state: Resource = ensure_authoring_state(default_project_name)
-	var point_index: int = int(state.call("append_spline_line_point", local_position))
+	var point_index: int = int(state.call(
+		"append_spline_line_point",
+		local_position,
+		local_surface_normal
+	))
 	placement_cursor_local_position = local_position
 	placement_cursor_valid = true
 	if point_index >= 0:
@@ -588,7 +678,7 @@ func get_placement_cursor_state() -> Dictionary:
 	return {
 		"local_position": placement_cursor_local_position,
 		"is_valid": placement_cursor_valid,
-		"radius_meters": _get_active_brush_radius_meters(),
+		"radius_meters": _get_active_deposition_envelope_radius_meters(),
 	}
 
 func get_status_summary() -> Dictionary:
@@ -692,12 +782,32 @@ func _emit_placement_cursor_changed() -> void:
 	placement_cursor_changed.emit(
 		placement_cursor_local_position,
 		placement_cursor_valid,
-		_get_active_brush_radius_meters()
+		_get_active_deposition_envelope_radius_meters()
 	)
 
 func _get_active_brush_radius_meters() -> float:
 	var state: Resource = ensure_authoring_state(default_project_name)
 	return float(state.get("active_brush_radius_meters"))
 
+func _get_active_deposition_envelope_radius_meters() -> float:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	if state.has_method("get_active_deposition_envelope_radius_meters"):
+		return float(state.call(
+			"get_active_deposition_envelope_radius_meters"
+		))
+	return _get_active_brush_radius_meters()
+
+func _get_active_deposition_sample_radius_meters() -> float:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	if state.has_method("get_active_deposition_sample_radius_meters"):
+		return maxf(float(state.call(
+			"get_active_deposition_sample_radius_meters"
+		)), 0.001)
+	return maxf(_get_active_deposition_envelope_radius_meters(), 0.001)
+
 func _get_spline_selection_radius_meters() -> float:
-	return clampf(_get_active_brush_radius_meters() * 1.35, 0.035, 0.16)
+	return clampf(
+		_get_active_deposition_envelope_radius_meters() * 1.35,
+		0.035,
+		0.16
+	)

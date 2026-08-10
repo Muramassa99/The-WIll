@@ -926,7 +926,7 @@ var profile_name_pending_profile_id: StringName = StringName()
 var profile_name_restore_profile_builder: bool = false
 var profile_name_restore_saved_profiles: bool = false
 var tool_profile_library_state: Resource = null
-var active_saved_profile_id: StringName = StringName()
+var editor_loaded_saved_profile_id: StringName = StringName()
 var profile_saved_profiles_context_profile_id: StringName = StringName()
 var profile_saved_profile_ids_by_index: Array[StringName] = []
 var keybindings_popup: PopupPanel = null
@@ -1998,7 +1998,7 @@ func _refresh_profile_saved_profiles_popup() -> void:
 		var item_index := profile_saved_profiles_item_list.add_item(label)
 		profile_saved_profiles_item_list.set_item_metadata(item_index, profile_id)
 		profile_saved_profile_ids_by_index.append(profile_id)
-		if profile_id == active_saved_profile_id:
+		if profile_id == editor_loaded_saved_profile_id:
 			profile_saved_profiles_item_list.select(item_index)
 
 func _on_profile_saved_profile_item_clicked(index: int, _at_position: Vector2, mouse_button_index: int) -> void:
@@ -2014,7 +2014,7 @@ func _on_profile_saved_profile_item_clicked(index: int, _at_position: Vector2, m
 	profile_saved_profiles_item_list.select(index)
 	if mouse_button_index == MOUSE_BUTTON_LEFT:
 		_hide_saved_profile_context_menu()
-		_load_saved_tool_profile(profile_id)
+		_load_saved_tool_profile_into_editor(profile_id)
 		if is_instance_valid(profile_saved_profiles_popup) and profile_saved_profiles_popup.visible:
 			_refresh_profile_saved_profiles_popup()
 
@@ -2537,6 +2537,7 @@ func _build_profile_fillet_popup(
 func _request_profile_fillet_size_apply() -> void:
 	if profile_fillet_spin_box != null:
 		profile_fillet_spin_box.apply()
+		call_deferred("_apply_profile_fillet_size_popup")
 
 func _on_profile_fillet_size_text_submitted(
 	_submitted_text: String
@@ -2655,10 +2656,44 @@ func _open_save_profile_name_popup() -> void:
 		profile_name_line_edit.grab_focus()
 
 func _on_profile_save_button_pressed() -> void:
-	if active_saved_profile_id != StringName():
-		_save_active_profile_over_existing(active_saved_profile_id)
+	if (
+		active_stage_controller != null
+		and active_stage_controller.has_method(
+			"build_active_tool_profile_preset_data"
+		)
+	):
+		var validation_data: Dictionary = active_stage_controller.call(
+			"build_active_tool_profile_preset_data",
+			""
+		) as Dictionary
+		if not _profile_data_is_valid_for_save(validation_data):
+			return
+	if editor_loaded_saved_profile_id != StringName():
+		_save_active_profile_over_existing(editor_loaded_saved_profile_id)
 	else:
 		_open_save_profile_name_popup()
+
+func _profile_data_is_valid_for_save(profile_data: Dictionary) -> bool:
+	if profile_data.is_empty():
+		return false
+	if (
+		StringName(profile_data.get("family", StringName()))
+		!= ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_BASIC
+	):
+		return true
+	if ForgeV2ProfileShapeLibraryScript.is_compiled_basic_profile_runtime_valid(
+		profile_data
+	):
+		return true
+	var runtime_data := profile_data.get("compiled_profile", {}) as Dictionary
+	var runtime_error := String(
+		runtime_data.get("error", &"anchor_clearance_unavailable")
+	)
+	_set_v2_action_status_text(
+		"Profile not saved: the resolved shape needs a valid 0.5 mm "
+		+ "anchor-clearance region (%s)." % runtime_error
+	)
+	return false
 
 func _save_active_profile_over_existing(profile_id: StringName) -> void:
 	if profile_id == StringName():
@@ -2671,22 +2706,28 @@ func _save_active_profile_over_existing(profile_id: StringName) -> void:
 		return
 	var existing_profile: Dictionary = profile_library.call("get_saved_profile", profile_id) as Dictionary
 	if existing_profile.is_empty():
-		active_saved_profile_id = StringName()
+		editor_loaded_saved_profile_id = StringName()
 		_open_save_profile_name_popup()
 		return
 	if StringName(existing_profile.get("family", StringName())) != _resolve_active_profile_builder_family():
-		active_saved_profile_id = StringName()
+		editor_loaded_saved_profile_id = StringName()
 		_open_save_profile_name_popup()
 		return
 	var profile_label := String(existing_profile.get("label", "Profile"))
 	var profile_data: Dictionary = active_stage_controller.call("build_active_tool_profile_preset_data", profile_label) as Dictionary
-	if profile_data.is_empty():
+	if (
+		profile_data.is_empty()
+		or not _profile_data_is_valid_for_save(profile_data)
+	):
 		return
 	profile_data["profile_id"] = profile_id
 	profile_data["id"] = profile_id
 	profile_data["created_timestamp"] = existing_profile.get("created_timestamp", 0.0)
 	var saved_profile: Dictionary = profile_library.call("save_profile", profile_data, profile_label) as Dictionary
-	active_saved_profile_id = StringName(saved_profile.get("profile_id", profile_id))
+	if saved_profile.is_empty():
+		_set_v2_action_status_text("Profile not saved: invalid profile data.")
+		return
+	editor_loaded_saved_profile_id = StringName(saved_profile.get("profile_id", profile_id))
 	if active_stage_controller.has_method("set_active_profile_display_name"):
 		active_stage_controller.call("set_active_profile_display_name", String(saved_profile.get("label", profile_label)))
 	_set_v2_action_status_text("Saved profile: %s" % String(saved_profile.get("label", profile_label)))
@@ -2732,8 +2773,8 @@ func _delete_saved_profile(profile_id: StringName) -> void:
 		return
 	var removed := bool(profile_library.call("remove_profile", profile_id))
 	if removed:
-		if active_saved_profile_id == profile_id:
-			active_saved_profile_id = StringName()
+		if editor_loaded_saved_profile_id == profile_id:
+			editor_loaded_saved_profile_id = StringName()
 			if active_stage_controller != null and active_stage_controller.has_method("set_active_profile_display_name"):
 				active_stage_controller.call("set_active_profile_display_name", "")
 		_set_v2_action_status_text("Deleted profile")
@@ -2791,11 +2832,21 @@ func _confirm_profile_name_popup() -> void:
 				_close_profile_name_popup()
 				return
 			var profile_data: Dictionary = active_stage_controller.call("build_active_tool_profile_preset_data", submitted_name) as Dictionary
-			if profile_data.is_empty() or not profile_library.has_method("save_profile"):
+			if (
+				profile_data.is_empty()
+				or not _profile_data_is_valid_for_save(profile_data)
+				or not profile_library.has_method("save_profile")
+			):
 				_close_profile_name_popup()
 				return
 			var saved_profile: Dictionary = profile_library.call("save_profile", profile_data, submitted_name) as Dictionary
-			active_saved_profile_id = StringName(saved_profile.get("profile_id", StringName()))
+			if saved_profile.is_empty():
+				_set_v2_action_status_text(
+					"Profile not saved: invalid profile data."
+				)
+				_close_profile_name_popup()
+				return
+			editor_loaded_saved_profile_id = StringName(saved_profile.get("profile_id", StringName()))
 			if active_stage_controller.has_method("apply_tool_profile_preset"):
 				active_stage_controller.call("apply_tool_profile_preset", saved_profile)
 			_set_v2_action_status_text("Saved profile: %s" % String(saved_profile.get("label", "Profile")))
@@ -2804,7 +2855,7 @@ func _confirm_profile_name_popup() -> void:
 				_close_profile_name_popup()
 				return
 			var renamed_profile: Dictionary = profile_library.call("rename_profile", profile_name_pending_profile_id, submitted_name) as Dictionary
-			if profile_name_pending_profile_id == active_saved_profile_id and active_stage_controller != null:
+			if profile_name_pending_profile_id == editor_loaded_saved_profile_id and active_stage_controller != null:
 				if active_stage_controller.has_method("set_active_profile_display_name"):
 					active_stage_controller.call("set_active_profile_display_name", String(renamed_profile.get("label", "Profile")))
 			_set_v2_action_status_text("Renamed profile: %s" % String(renamed_profile.get("label", "Profile")))
@@ -2912,7 +2963,37 @@ func _refresh_profile_builder_popup() -> void:
 		profile_handle_corner_radius_slider.modulate = Color(1.0, 1.0, 1.0, 1.0) if corner_radius_editable else Color(0.55, 0.57, 0.58, 0.75)
 		profile_handle_corner_radius_slider.set_value_no_signal(clampf(corner_radius_value, 0.0, maxf(corner_radius_max, 0.0)))
 	if profile_save_button != null:
-		profile_save_button.disabled = not profile_builder_active
+		var basic_clearance_valid := bool(
+			profile_builder_settings.get("anchor_clearance_valid", true)
+		)
+		var basic_clearance_required := (
+			StringName(profile_builder_settings.get(
+				"family",
+				StringName()
+			))
+			== ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_BASIC
+		)
+		var profile_can_save := (
+			profile_builder_active
+			and (
+				not basic_clearance_required
+				or basic_clearance_valid
+			)
+		)
+		profile_save_button.disabled = not profile_can_save
+		profile_save_button.text = (
+			"Save Profile"
+			if profile_can_save or not basic_clearance_required
+			else "Fix 0.5 mm Anchor Clearance"
+		)
+		profile_save_button.tooltip_text = (
+			""
+			if profile_can_save or not basic_clearance_required
+			else (
+				"The resolved shape has no valid region for the required "
+				+ "0.5 mm anchor clearance."
+			)
+		)
 	if profile_grid_snap_check_box != null:
 		profile_grid_snap_check_box.disabled = not profile_builder_active
 		profile_grid_snap_check_box.set_pressed_no_signal(bool(profile_builder_settings.get("grid_snapping_enabled", false)))
@@ -3034,7 +3115,7 @@ func _on_profile_handles_button_pressed() -> void:
 func _select_profile_builder_basic_builder() -> void:
 	if active_stage_controller == null:
 		return
-	active_saved_profile_id = StringName()
+	editor_loaded_saved_profile_id = StringName()
 	if active_stage_controller.has_method("reset_active_basic_profile_builder"):
 		active_stage_controller.call("reset_active_basic_profile_builder")
 	else:
@@ -3089,7 +3170,7 @@ func _on_profile_anchor_point_reset_requested() -> void:
 func _select_profile_builder_handle_builder() -> void:
 	if active_stage_controller == null:
 		return
-	active_saved_profile_id = StringName()
+	editor_loaded_saved_profile_id = StringName()
 	if active_stage_controller.has_method("reset_active_handle_profile_builder"):
 		active_stage_controller.call("reset_active_handle_profile_builder")
 	else:
@@ -3100,7 +3181,7 @@ func _select_profile_builder_handle_builder() -> void:
 	_refresh_from_controller()
 	_refresh_profile_builder_popup()
 
-func _load_saved_tool_profile(profile_id: StringName) -> bool:
+func _load_saved_tool_profile_into_editor(profile_id: StringName) -> bool:
 	if profile_id == StringName():
 		return false
 	if active_stage_controller == null or not active_stage_controller.has_method("apply_tool_profile_preset"):
@@ -3114,10 +3195,56 @@ func _load_saved_tool_profile(profile_id: StringName) -> bool:
 	var loaded := bool(active_stage_controller.call("apply_tool_profile_preset", saved_profile))
 	if not loaded:
 		return false
-	active_saved_profile_id = profile_id
+	editor_loaded_saved_profile_id = profile_id
 	_set_v2_action_status_text("Loaded profile: %s" % String(saved_profile.get("label", "Profile")))
 	_refresh_from_controller()
 	_refresh_profile_builder_popup()
+	return true
+
+func _select_saved_basic_profile_for_shape(profile_id: StringName) -> bool:
+	if profile_id == StringName() or active_stage_controller == null:
+		return false
+	if not active_stage_controller.has_method(
+		"select_active_saved_basic_profile"
+	):
+		return false
+	var profile_library: Resource = _ensure_tool_profile_library_state()
+	if profile_library == null or not profile_library.has_method(
+		"get_saved_profile"
+	):
+		return false
+	var saved_profile: Dictionary = profile_library.call(
+		"get_saved_profile",
+		profile_id
+	) as Dictionary
+	if (
+		saved_profile.is_empty()
+		or StringName(saved_profile.get("family", StringName()))
+		!= ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_BASIC
+	):
+		return false
+	var selected := bool(active_stage_controller.call(
+		"select_active_saved_basic_profile",
+		saved_profile
+	))
+	if not selected:
+		var runtime_data: Dictionary = saved_profile.get(
+			"compiled_profile",
+			{}
+		) as Dictionary
+		_set_v2_action_status_text(
+			"Shape unavailable: %s" % String(runtime_data.get(
+				"error",
+				"invalid profile"
+			))
+		)
+		return false
+	_set_v2_action_status_text(
+		"Shape selected: %s (fixed metric size)" % String(
+			saved_profile.get("label", "Profile")
+		)
+	)
+	_refresh_from_controller()
 	return true
 
 func _clamp_profile_anchor_position(anchor_position_meters: Vector2) -> Vector2:
@@ -3352,8 +3479,21 @@ func _add_v2_saved_profile_items(
 			continue
 		var profile_id := StringName(profile.get("profile_id", StringName()))
 		var label := String(profile.get("label", String(profile_id)))
+		var profile_is_usable := true
+		if action_id == &"basic_saved_profile":
+			profile_is_usable = (
+				ForgeV2ProfileShapeLibraryScript.is_compiled_basic_profile_runtime_valid(
+					profile
+				)
+			)
+			if not profile_is_usable:
+				label = "%s (needs valid 0.5 mm anchor clearance)" % label
 		popup.add_radio_check_item(label, _register_v2_menu_action(action_id, profile_id))
 		popup.set_item_checked(popup.get_item_count() - 1, profile_id == active_profile_id)
+		popup.set_item_disabled(
+			popup.get_item_count() - 1,
+			not profile_is_usable
+		)
 
 func _register_profile_builder_action(action_id: StringName, action_value: Variant = null) -> int:
 	var menu_id := profile_builder_next_id
@@ -3539,7 +3679,7 @@ func _rebuild_v2_shape_menu(summary: Dictionary) -> void:
 			saved_profiles_submenu,
 			_get_saved_handle_profiles(),
 			&"handle_saved_profile",
-			active_saved_profile_id
+			editor_loaded_saved_profile_id
 		)
 		handle_profiles_submenu.add_submenu_item("Saved Profiles", String(saved_profiles_submenu.name))
 		var preset_profiles_submenu: PopupMenu = _prepare_v2_submenu(handle_profiles_submenu, "HandlePresetProfilesSubmenu")
@@ -3556,24 +3696,29 @@ func _rebuild_v2_shape_menu(summary: Dictionary) -> void:
 		)
 		popup.add_separator()
 	elif active_tool_id == &"tool_volume_stroke" or active_tool_id == &"tool_spline_line":
-		_add_v2_disabled_line(popup, "Profile: %s" % String(summary.get("active_profile_label", "None")))
+		_add_v2_disabled_line(
+			popup,
+			"Shape: %s" % String(summary.get(
+				"active_basic_shape_label",
+				"Primitive / circular brush"
+			))
+		)
 		var tool_profiles_submenu: PopupMenu = _prepare_v2_submenu(popup, "Tool2DProfilesSubmenu")
 		var saved_profiles_submenu: PopupMenu = _prepare_v2_submenu(tool_profiles_submenu, "Tool2DSavedProfilesSubmenu")
 		_add_v2_saved_profile_items(
 			saved_profiles_submenu,
 			_get_saved_basic_profiles(),
 			&"basic_saved_profile",
-			active_saved_profile_id
+			StringName(summary.get(
+				"active_saved_basic_profile_id",
+				StringName()
+			))
 		)
 		tool_profiles_submenu.add_submenu_item("Saved Profiles", String(saved_profiles_submenu.name))
-		var preset_profiles_submenu: PopupMenu = _prepare_v2_submenu(tool_profiles_submenu, "Tool2DPresetProfilesSubmenu")
-		_add_v2_option_items(
-			preset_profiles_submenu,
-			_get_v2_controller_options(&"get_profile_options"),
-			&"profile",
-			summary.get("active_profile", StringName())
+		_add_v2_disabled_line(
+			tool_profiles_submenu,
+			"Shape templates are edited under Profiles"
 		)
-		tool_profiles_submenu.add_submenu_item("Presets", String(preset_profiles_submenu.name))
 		popup.add_submenu_item("2D Profiles", String(tool_profiles_submenu.name))
 		popup.add_separator()
 	_add_v2_disabled_line(popup, String(summary.get("spline_line_status_label", "Spline: no points")))
@@ -3613,17 +3758,48 @@ func _rebuild_v2_shape_menu(summary: Dictionary) -> void:
 	popup.add_separator()
 	_add_v2_disabled_line(popup, "Primitive: %s" % String(summary.get("active_primitive_label", "None")))
 	var primitive_submenu: PopupMenu = _prepare_v2_submenu(popup, "PrimitiveSubmenu")
+	var active_primitive_menu_value: Variant = summary.get(
+		"active_primitive",
+		StringName()
+	)
+	if (
+		StringName(summary.get("active_basic_shape_source", StringName()))
+		== &"basic_shape_source_saved_profile"
+	):
+		active_primitive_menu_value = StringName()
 	_add_v2_option_items(
 		primitive_submenu,
 		_get_v2_controller_options(&"get_primitive_options"),
 		&"primitive",
-		summary.get("active_primitive", StringName())
+		active_primitive_menu_value
 	)
 	popup.add_submenu_item("Primitive", String(primitive_submenu.name))
 	popup.add_separator()
-	_add_v2_disabled_line(popup, String(summary.get("brush_radius_label", "Radius n/a")))
-	_add_v2_menu_action(popup, "Radius -", &"radius_down", null, active_stage_controller == null)
-	_add_v2_menu_action(popup, "Radius +", &"radius_up", null, active_stage_controller == null)
+	var primitive_size_controls_enabled := bool(summary.get(
+		"primitive_size_controls_enabled",
+		true
+	))
+	_add_v2_disabled_line(
+		popup,
+		String(summary.get(
+			"active_basic_shape_size_label",
+			summary.get("brush_radius_label", "Radius n/a")
+		))
+	)
+	_add_v2_menu_action(
+		popup,
+		"Radius -",
+		&"radius_down",
+		null,
+		active_stage_controller == null or not primitive_size_controls_enabled
+	)
+	_add_v2_menu_action(
+		popup,
+		"Radius +",
+		&"radius_up",
+		null,
+		active_stage_controller == null or not primitive_size_controls_enabled
+	)
 
 func _rebuild_v2_layers_menu(summary: Dictionary) -> void:
 	var popup: PopupMenu = layers_menu_button.get_popup()
@@ -3689,7 +3865,7 @@ func _rebuild_v2_status_menu(summary: Dictionary) -> void:
 	_add_v2_disabled_line(popup, "Material: %s" % String(summary.get("active_material_label", "n/a")))
 	_add_v2_disabled_line(popup, "Primitive: %s" % String(summary.get("active_primitive_label", "n/a")))
 	_add_v2_disabled_line(popup, "Profile: %s" % String(summary.get("active_profile_label", "n/a")))
-	_add_v2_disabled_line(popup, String(summary.get("brush_radius_label", "Radius n/a")))
+	_add_v2_disabled_line(popup, _resolve_v2_shape_size_label(summary))
 	_add_v2_disabled_line(popup, "Bodies: %s user + %s seed, %s pending" % [
 		str(int(summary.get("user_material_body_count", 0))),
 		str(int(summary.get("seed_material_body_count", 0))),
@@ -3701,6 +3877,14 @@ func _rebuild_v2_status_menu(summary: Dictionary) -> void:
 	])
 	_add_v2_disabled_line(popup, String(summary.get("material_ledger_label", "Ledger n/a")))
 
+func _resolve_v2_shape_size_label(summary: Dictionary) -> String:
+	if StringName(summary.get("active_tool", StringName())) == &"tool_handles":
+		return String(summary.get("brush_radius_label", "Radius n/a"))
+	return String(summary.get(
+		"active_basic_shape_size_label",
+		summary.get("brush_radius_label", "Radius n/a")
+	))
+
 func _sync_v2_action_status(summary: Dictionary) -> void:
 	if action_status_label == null:
 		return
@@ -3708,7 +3892,7 @@ func _sync_v2_action_status(summary: Dictionary) -> void:
 		String(summary.get("builder_scope", "No draft")),
 		String(summary.get("active_tool_label", "No tool")),
 		String(summary.get("active_material_label", "No material")),
-		String(summary.get("brush_radius_label", "Radius n/a")),
+		_resolve_v2_shape_size_label(summary),
 	]
 
 func _on_v2_menu_id_pressed(menu_id: int) -> void:
@@ -3750,16 +3934,12 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 			if next_tool_id == &"tool_handles":
 				_select_profile_builder_handle_builder()
 			elif active_stage_controller != null:
-				active_saved_profile_id = StringName()
+				editor_loaded_saved_profile_id = StringName()
 				active_stage_controller.set_active_tool_id(next_tool_id)
-		&"profile":
-			if active_stage_controller != null and active_stage_controller.has_method("set_active_profile_id"):
-				active_saved_profile_id = StringName()
-				active_stage_controller.call("set_active_profile_id", StringName(action_value))
 		&"basic_saved_profile":
-			_load_saved_tool_profile(StringName(action_value))
+			_select_saved_basic_profile_for_shape(StringName(action_value))
 		&"handle_saved_profile":
-			_load_saved_tool_profile(StringName(action_value))
+			_load_saved_tool_profile_into_editor(StringName(action_value))
 		&"spline_finish":
 			_finish_active_spline_line()
 		&"spline_cancel":
@@ -3815,7 +3995,7 @@ func _on_profile_builder_menu_id_pressed(menu_id: int) -> void:
 			if StringName(action_value) == ForgeV2ProfileShapeLibraryScript.PROFILE_2D_BUILDER:
 				_select_profile_builder_basic_builder()
 			else:
-				active_saved_profile_id = StringName()
+				editor_loaded_saved_profile_id = StringName()
 				if active_stage_controller.has_method("set_active_tool_id"):
 					active_stage_controller.call("set_active_tool_id", &"tool_volume_stroke")
 				if active_stage_controller.has_method("set_active_profile_id"):
@@ -3823,7 +4003,7 @@ func _on_profile_builder_menu_id_pressed(menu_id: int) -> void:
 		&"profile_handle":
 			_select_profile_builder_handle_builder()
 		&"profile_saved_load":
-			_load_saved_tool_profile(StringName(action_value))
+			_load_saved_tool_profile_into_editor(StringName(action_value))
 		&"profile_saved_rename":
 			_hide_saved_profile_context_menu()
 			_open_rename_profile_name_popup(StringName(action_value))
@@ -3874,7 +4054,7 @@ func _set_active_v2_tool(tool_id: StringName) -> void:
 	if tool_id == &"tool_handles":
 		_select_profile_builder_handle_builder()
 	else:
-		active_saved_profile_id = StringName()
+		editor_loaded_saved_profile_id = StringName()
 		active_stage_controller.call("set_active_tool_id", tool_id)
 
 func _finish_active_spline_line() -> void:
@@ -3945,6 +4125,7 @@ func _load_saved_v2_draft(saved_wip_id: StringName) -> bool:
 	if not loaded:
 		_set_v2_action_status_text("Load failed")
 		return false
+	editor_loaded_saved_profile_id = StringName()
 	wip_library.set_selected_wip_id(saved_wip_id)
 	_configure_options_from_controller()
 	_refresh_from_controller()
@@ -4407,27 +4588,62 @@ func _refresh_from_controller() -> void:
 		String(summary.get("placement_policy_label", "")),
 	]
 	var active_tool_id := StringName(summary.get("active_tool", StringName()))
+	var primitive_size_controls_enabled := bool(summary.get(
+		"primitive_size_controls_enabled",
+		true
+	))
+	radius_decrease_button.disabled = not primitive_size_controls_enabled
+	radius_increase_button.disabled = not primitive_size_controls_enabled
 	var workspace_status_parts: Array[String] = [String(summary.get("active_tool_label", ""))]
 	if active_tool_id == &"tool_spline_line":
 		workspace_status_parts.append(String(summary.get("spline_line_status_label", "Spline: no points")))
 		workspace_status_parts.append(String(summary.get("spline_line_csg_noodle_status_label", "CSG noodle: needs 2 points")))
-		workspace_status_parts.append(String(summary.get("brush_radius_label", "")))
+		workspace_status_parts.append(String(summary.get(
+			"active_basic_shape_size_label",
+			summary.get("brush_radius_label", "")
+		)))
 	elif active_tool_id == &"tool_handles":
 		workspace_status_parts.append(String(summary.get("active_profile_label", "No profile")))
 		workspace_status_parts.append(String(summary.get("spline_line_status_label", "Spline: no points")))
 		workspace_status_parts.append(String(summary.get("profile_extrusion_status_label", "Handle: needs 3 points")))
 	else:
-		workspace_status_parts.append(String(summary.get("brush_radius_label", "")))
+		workspace_status_parts.append(String(summary.get(
+			"active_basic_shape_label",
+			"Primitive / circular brush"
+		)))
+		workspace_status_parts.append(String(summary.get(
+			"active_basic_shape_size_label",
+			summary.get("brush_radius_label", "")
+		)))
 	workspace_status_label.text = " | ".join(workspace_status_parts)
 	platform_contract_label.text = String(summary.get("platform_contract_summary", ""))
 	active_material_label.text = "Active: %s" % String(summary.get("active_material_label", summary.get("active_material", "")))
-	radius_value_label.text = String(summary.get("brush_radius_label", "Radius 0.0000 m"))
+	radius_value_label.text = String(summary.get(
+		"active_basic_shape_size_label",
+		summary.get("brush_radius_label", "Radius 0.0000 m")
+	))
 	var platform_contract: Dictionary = summary.get("platform_contract", {}) as Dictionary
-	summary_label.text = "Draft: %s\nTool: %s\nPrimitive: %s\nProfile: %s\nActive material: %s\nCSG bodies: %s user + %s seed, %s pending\n%s\n%s\n%s\nLayers: %s committed, %s redo\nSelected: %s\n%s\n%s\n%s\n%s" % [
+	var displayed_shape_label := (
+		String(summary.get("active_profile_label", "No profile"))
+		if active_tool_id == &"tool_handles"
+		else String(summary.get(
+			"active_basic_shape_label",
+			"Primitive / circular brush"
+		))
+	)
+	var displayed_shape_size_label := (
+		String(summary.get("brush_radius_label", ""))
+		if active_tool_id == &"tool_handles"
+		else String(summary.get(
+			"active_basic_shape_size_label",
+			summary.get("brush_radius_label", "")
+		))
+	)
+	summary_label.text = "Draft: %s\nTool: %s\nPrimitive: %s\nShape: %s\nActive material: %s\nCSG bodies: %s user + %s seed, %s pending\n%s\n%s\n%s\nLayers: %s committed, %s redo\nSelected: %s\n%s\n%s\n%s\n%s" % [
 		String(summary.get("project_name", "")),
 		String(summary.get("active_tool_label", "")),
 		String(summary.get("active_primitive_label", "")),
-		String(summary.get("active_profile_label", "")),
+		displayed_shape_label,
 		String(summary.get("active_material_label", summary.get("active_material", ""))),
 		str(int(summary.get("user_material_body_count", 0))),
 		str(int(summary.get("seed_material_body_count", 0))),
@@ -4438,7 +4654,7 @@ func _refresh_from_controller() -> void:
 		str(int(summary.get("committed_layer_count", 0))),
 		str(int(summary.get("undone_layer_count", 0))),
 		String(selected_body_summary.get("label", "none")),
-		String(summary.get("brush_radius_label", "")),
+		displayed_shape_size_label,
 		String(summary.get("material_ledger_label", "")),
 		String(summary.get("material_usage_label", "")),
 		String(platform_contract.get("validation_note", "")),
@@ -4540,7 +4756,7 @@ func _on_authoring_state_changed(_state) -> void:
 func _on_new_draft_pressed() -> void:
 	if active_stage_controller == null:
 		return
-	active_saved_profile_id = StringName()
+	editor_loaded_saved_profile_id = StringName()
 	active_stage_controller.start_new_draft("%s V2 Draft" % current_bench_name)
 
 func _on_clear_strokes_pressed() -> void:
@@ -4730,8 +4946,16 @@ func _begin_workspace_spline_input(screen_position: Vector2) -> void:
 	if not bool(placement_result.get("valid", false)):
 		return
 	var local_position: Vector3 = placement_result.get("local_position", Vector3.ZERO) as Vector3
+	var local_surface_normal: Vector3 = placement_result.get(
+		"local_normal",
+		Vector3.FORWARD
+	) as Vector3
 	if active_stage_controller != null and active_stage_controller.has_method("append_spline_line_point"):
-		active_stage_controller.call("append_spline_line_point", local_position)
+		active_stage_controller.call(
+			"append_spline_line_point",
+			local_position,
+			local_surface_normal
+		)
 
 func _begin_workspace_spline_point_drag(point_index: int, fallback_local_position: Vector3) -> void:
 	if workspace_preview == null or not workspace_preview.has_method("build_camera_facing_drag_plane"):
@@ -4799,13 +5023,29 @@ func _begin_workspace_brush_stroke(screen_position: Vector2) -> void:
 	if not bool(placement_result.get("valid", false)):
 		return
 	var local_position: Vector3 = placement_result.get("local_position", Vector3.ZERO) as Vector3
+	var local_surface_normal: Vector3 = placement_result.get(
+		"local_normal",
+		Vector3.FORWARD
+	) as Vector3
 	workspace_brush_stroke_active = true
 	if active_stage_controller.has_method("begin_material_body_path"):
-		active_stage_controller.call("begin_material_body_path", local_position)
+		active_stage_controller.call(
+			"begin_material_body_path",
+			local_position,
+			local_surface_normal
+		)
 	elif active_stage_controller.has_method("begin_placement_stroke"):
-		active_stage_controller.call("begin_placement_stroke", local_position)
+		active_stage_controller.call(
+			"begin_placement_stroke",
+			local_position,
+			local_surface_normal
+		)
 	else:
-		active_stage_controller.call("append_point_material_body", local_position)
+		active_stage_controller.call(
+			"append_point_material_body",
+			local_position,
+			local_surface_normal
+		)
 
 func _extend_workspace_brush_stroke(screen_position: Vector2, force_endpoint: bool = false) -> void:
 	if not workspace_brush_stroke_active:
@@ -4816,12 +5056,30 @@ func _extend_workspace_brush_stroke(screen_position: Vector2, force_endpoint: bo
 			active_stage_controller.call("clear_placement_cursor")
 		return
 	var local_position: Vector3 = placement_result.get("local_position", Vector3.ZERO) as Vector3
+	var local_surface_normal: Vector3 = placement_result.get(
+		"local_normal",
+		Vector3.FORWARD
+	) as Vector3
 	if active_stage_controller.has_method("extend_material_body_path"):
-		active_stage_controller.call("extend_material_body_path", local_position, force_endpoint)
+		active_stage_controller.call(
+			"extend_material_body_path",
+			local_position,
+			force_endpoint,
+			local_surface_normal
+		)
 	elif active_stage_controller.has_method("extend_placement_stroke"):
-		active_stage_controller.call("extend_placement_stroke", local_position, force_endpoint)
+		active_stage_controller.call(
+			"extend_placement_stroke",
+			local_position,
+			force_endpoint,
+			local_surface_normal
+		)
 	elif force_endpoint:
-		active_stage_controller.call("append_point_material_body", local_position)
+		active_stage_controller.call(
+			"append_point_material_body",
+			local_position,
+			local_surface_normal
+		)
 
 func _finish_workspace_brush_stroke(screen_position: Vector2, use_screen_position: bool = true) -> void:
 	if not workspace_brush_stroke_active:
@@ -4831,13 +5089,21 @@ func _finish_workspace_brush_stroke(screen_position: Vector2, use_screen_positio
 		active_stage_controller.call(
 			"finish_material_body_path",
 			placement_result.get("local_position", Vector3.ZERO) as Vector3,
-			bool(placement_result.get("valid", false))
+			bool(placement_result.get("valid", false)),
+			placement_result.get(
+				"local_normal",
+				Vector3.FORWARD
+			) as Vector3
 		)
 	elif active_stage_controller.has_method("finish_placement_stroke"):
 		active_stage_controller.call(
 			"finish_placement_stroke",
 			placement_result.get("local_position", Vector3.ZERO) as Vector3,
-			bool(placement_result.get("valid", false))
+			bool(placement_result.get("valid", false)),
+			placement_result.get(
+				"local_normal",
+				Vector3.FORWARD
+			) as Vector3
 		)
 	workspace_brush_stroke_active = false
 

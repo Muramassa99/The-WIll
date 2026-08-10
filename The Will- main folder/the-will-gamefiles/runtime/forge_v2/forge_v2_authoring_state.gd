@@ -13,13 +13,15 @@ const ForgeV2PlatformContractScript = preload("res://runtime/forge_v2/forge_v2_p
 const ForgeV2PrimitiveCatalogScript = preload("res://runtime/forge_v2/forge_v2_primitive_catalog.gd")
 const ForgeV2VolumeStrokeScript = preload("res://runtime/forge_v2/forge_v2_volume_stroke.gd")
 
-const SCHEMA_VERSION := 1
+const SCHEMA_VERSION := 2
 const SCHEMA_ID := &"forge_stage1_v2"
 
 const AUTHORING_SPACE_WORLD_3D := &"authoring_space_world_3d"
 const TOOL_VOLUME_STROKE := &"tool_volume_stroke"
 const TOOL_SPLINE_LINE := &"tool_spline_line"
 const TOOL_HANDLES := &"tool_handles"
+const BASIC_SHAPE_SOURCE_PRIMITIVE := &"basic_shape_source_primitive"
+const BASIC_SHAPE_SOURCE_SAVED_PROFILE := &"basic_shape_source_saved_profile"
 const DEFAULT_ACTIVE_PRIMITIVE_ID := ForgeV2PrimitiveCatalogScript.PRIMITIVE_BLOB
 const OPERATION_ADD_MATERIAL := ForgeV2VolumeStrokeScript.OPERATION_ADD_MATERIAL
 const OPERATION_REMOVE_MATERIAL := ForgeV2VolumeStrokeScript.OPERATION_REMOVE_MATERIAL
@@ -53,6 +55,9 @@ const PROFILE_ROTATION_MAX_DEGREES := 360.0
 @export var authoring_space_id: StringName = AUTHORING_SPACE_WORLD_3D
 @export var active_tool_id: StringName = TOOL_VOLUME_STROKE
 @export var active_primitive_id: StringName = DEFAULT_ACTIVE_PRIMITIVE_ID
+@export var active_basic_shape_source_id: StringName = BASIC_SHAPE_SOURCE_PRIMITIVE
+@export var active_saved_basic_profile_id: StringName = StringName()
+@export var active_saved_basic_profile_data: Dictionary = {}
 @export var active_profile_id: StringName = StringName()
 @export var active_profile_width_meters: float = 0.0
 @export var active_profile_height_meters: float = 0.0
@@ -78,6 +83,7 @@ const PROFILE_ROTATION_MAX_DEGREES := 360.0
 @export var material_bodies: Array[Resource] = []
 @export var volume_strokes: Array[Resource] = []
 @export var spline_line_points: PackedVector3Array = PackedVector3Array()
+@export var spline_line_surface_normals: PackedVector3Array = PackedVector3Array()
 @export var spline_line_finished: bool = false
 @export var selected_spline_point_index: int = -1
 @export var spline_line_csg_noodle_enabled: bool = false
@@ -105,6 +111,9 @@ func reset_new_draft(next_project_name: String = "Stage 1 V2 Draft") -> void:
 	authoring_space_id = AUTHORING_SPACE_WORLD_3D
 	active_tool_id = TOOL_VOLUME_STROKE
 	active_primitive_id = DEFAULT_ACTIVE_PRIMITIVE_ID
+	active_basic_shape_source_id = BASIC_SHAPE_SOURCE_PRIMITIVE
+	active_saved_basic_profile_id = StringName()
+	active_saved_basic_profile_data = {}
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.get_default_profile_id()
 	active_profile_width_meters = 0.0
 	active_profile_height_meters = 0.0
@@ -130,6 +139,7 @@ func reset_new_draft(next_project_name: String = "Stage 1 V2 Draft") -> void:
 	material_bodies = []
 	volume_strokes = []
 	spline_line_points = PackedVector3Array()
+	spline_line_surface_normals = PackedVector3Array()
 	spline_line_finished = false
 	selected_spline_point_index = -1
 	spline_line_csg_noodle_enabled = false
@@ -162,6 +172,7 @@ func normalize() -> void:
 	if not _is_valid_tool_id(active_tool_id):
 		active_tool_id = TOOL_VOLUME_STROKE
 	active_primitive_id = ForgeV2PrimitiveCatalogScript.normalize_primitive_id(active_primitive_id)
+	_normalize_active_basic_shape_authority()
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.normalize_profile_id(active_profile_id, _get_active_profile_family())
 	_normalize_active_profile_settings()
 	if active_operation_mode != OPERATION_REMOVE_MATERIAL:
@@ -212,7 +223,39 @@ func set_placement_policy(next_placement_policy: StringName) -> void:
 
 func set_active_primitive_id(next_primitive_id: StringName) -> void:
 	active_primitive_id = ForgeV2PrimitiveCatalogScript.normalize_primitive_id(next_primitive_id)
+	active_basic_shape_source_id = BASIC_SHAPE_SOURCE_PRIMITIVE
+	active_saved_basic_profile_id = StringName()
+	active_saved_basic_profile_data = {}
 	mark_updated()
+
+func select_active_saved_basic_profile(profile_data: Dictionary) -> bool:
+	if (
+		profile_data.is_empty()
+		or StringName(profile_data.get("family", StringName()))
+		!= ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_BASIC
+	):
+		return false
+	var compiled_profile := (
+		ForgeV2ProfileShapeLibraryScript.compile_basic_profile_runtime_data(
+			profile_data
+		)
+	)
+	var profile_id := StringName(compiled_profile.get(
+		"profile_id",
+		compiled_profile.get("id", StringName())
+	))
+	if (
+		profile_id == StringName()
+		or not ForgeV2ProfileShapeLibraryScript.is_compiled_basic_profile_runtime_valid(
+			compiled_profile
+		)
+	):
+		return false
+	active_basic_shape_source_id = BASIC_SHAPE_SOURCE_SAVED_PROFILE
+	active_saved_basic_profile_id = profile_id
+	active_saved_basic_profile_data = compiled_profile.duplicate(true)
+	mark_updated()
+	return true
 
 func set_active_tool_id(next_tool_id: StringName) -> void:
 	var previous_profile_id := active_profile_id
@@ -503,6 +546,7 @@ func add_active_basic_corner_fillet(corner_id: StringName) -> bool:
 	)
 	active_basic_corner_metadata[point_index] = metadata
 	_normalize_active_basic_corner_metadata()
+	_constrain_active_basic_anchor()
 	mark_updated()
 	return true
 
@@ -526,6 +570,7 @@ func set_active_basic_corner_fillet_radius(
 	)
 	active_basic_corner_metadata[point_index] = metadata
 	_normalize_active_basic_corner_metadata()
+	_constrain_active_basic_anchor()
 	mark_updated()
 	return true
 
@@ -541,6 +586,7 @@ func remove_active_basic_corner_fillet(corner_id: StringName) -> bool:
 		return false
 	metadata.erase("radius_meters")
 	active_basic_corner_metadata[point_index] = metadata
+	_constrain_active_basic_anchor()
 	mark_updated()
 	return true
 
@@ -655,7 +701,12 @@ func build_active_tool_profile_preset_data(requested_name: String = "") -> Dicti
 		preset_name = "handle profile" if profile_family == ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_HANDLE else "tool profile"
 	var control_points := active_handle_control_points_2d_meters if profile_family == ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_HANDLE else active_basic_control_points_2d_meters
 	var grid_snapping_enabled := active_handle_grid_snapping_enabled if profile_family == ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_HANDLE else active_basic_grid_snapping_enabled
-	return {
+	var base_polygon := (
+		_resolve_active_handle_builder_base_polygon()
+		if profile_family == ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_HANDLE
+		else _resolve_active_basic_builder_base_polygon()
+	)
+	var profile_data := {
 		"profile_id": StringName(),
 		"id": StringName(),
 		"label": preset_name,
@@ -677,8 +728,18 @@ func build_active_tool_profile_preset_data(requested_name: String = "") -> Dicti
 		),
 		"basic_next_corner_serial": active_basic_next_corner_serial,
 		"grid_snapping_enabled": grid_snapping_enabled,
+		"base_polygon_2d_meters": base_polygon,
+		"base_anchor_2d_meters": Vector2(
+			active_profile_anchor_x_meters,
+			active_profile_anchor_y_meters
+		),
 		"polygon_2d_meters": _resolve_active_profile_polygon(),
 	}
+	if profile_family == ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_BASIC:
+		return ForgeV2ProfileShapeLibraryScript.compile_basic_profile_runtime_data(
+			profile_data
+		)
+	return profile_data
 
 func set_active_material_variant_id(next_material_variant_id: StringName) -> void:
 	if next_material_variant_id == StringName():
@@ -687,6 +748,11 @@ func set_active_material_variant_id(next_material_variant_id: StringName) -> voi
 	mark_updated()
 
 func set_brush_radius_meters(next_radius_meters: float) -> void:
+	if (
+		active_tool_id != TOOL_HANDLES
+		and is_saved_basic_profile_shape_active()
+	):
+		return
 	active_brush_radius_meters = _normalize_brush_radius(next_radius_meters)
 	mark_updated()
 
@@ -743,19 +809,48 @@ func append_active_primitive_deposit() -> Array[Resource]:
 func append_point_volume_stroke(
 	local_position: Vector3,
 	radius_meters: float = -1.0,
-	amount_ratio: float = -1.0
+	amount_ratio: float = -1.0,
+	local_surface_normal: Vector3 = Vector3.FORWARD
 ) -> Resource:
-	return append_point_material_body(local_position, radius_meters, amount_ratio)
+	return append_point_material_body(
+		local_position,
+		radius_meters,
+		amount_ratio,
+		local_surface_normal
+	)
 
 func append_point_material_body(
 	local_position: Vector3,
 	radius_meters: float = -1.0,
-	amount_ratio: float = -1.0
+	amount_ratio: float = -1.0,
+	local_surface_normal: Vector3 = Vector3.FORWARD
 ) -> Resource:
+	if active_tool_id != TOOL_HANDLES and is_saved_basic_profile_shape_active():
+		var profile_body := _append_active_saved_basic_profile_material_body(
+			PackedVector3Array([local_position]),
+			PackedVector3Array([
+				_normalize_path_surface_normal(local_surface_normal),
+			]),
+			ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH,
+			"v2_saved_profile_stroke"
+		)
+		mark_updated()
+		return profile_body
 	var body: Resource = _append_material_body_record(
 		PackedVector3Array([local_position]),
 		active_brush_radius_meters if radius_meters <= 0.0 else _normalize_brush_radius(radius_meters),
-		DEFAULT_AMOUNT_RATIO
+		DEFAULT_AMOUNT_RATIO,
+		ForgeV2MaterialBodyScript.SHAPE_KIND_CAPSULE_PATH,
+		"v2_csg_body",
+		ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE,
+		StringName(),
+		ForgeV2ProfileShapeLibraryScript.PROFILE_ROLE_NONE,
+		PackedVector2Array(),
+		Vector2.ZERO,
+		0.0,
+		PackedVector3Array([
+			_normalize_path_surface_normal(local_surface_normal),
+		])
 	)
 	mark_updated()
 	return body
@@ -764,23 +859,38 @@ func append_point_to_volume_stroke(
 	stroke_id: StringName,
 	local_position: Vector3,
 	min_spacing_meters: float = 0.0,
-	force_endpoint: bool = false
+	force_endpoint: bool = false,
+	local_surface_normal: Vector3 = Vector3.FORWARD
 ) -> bool:
-	return append_point_to_material_body(stroke_id, local_position, min_spacing_meters, force_endpoint)
+	return append_point_to_material_body(
+		stroke_id,
+		local_position,
+		min_spacing_meters,
+		force_endpoint,
+		local_surface_normal
+	)
 
 func append_point_to_material_body(
 	body_id: StringName,
 	local_position: Vector3,
 	min_spacing_meters: float = 0.0,
-	force_endpoint: bool = false
+	force_endpoint: bool = false,
+	local_surface_normal: Vector3 = Vector3.FORWARD
 ) -> bool:
 	var body: Resource = _find_editable_material_body(body_id)
 	if body == null:
 		return false
 	var path_points: PackedVector3Array = body.get("path_points")
+	var path_surface_normals: PackedVector3Array = body.get(
+		"path_surface_normals"
+	)
+	var normalized_surface_normal := _normalize_path_surface_normal(
+		local_surface_normal
+	)
 	var changed := false
 	if path_points.is_empty():
 		path_points.append(local_position)
+		path_surface_normals.append(normalized_surface_normal)
 		changed = true
 	else:
 		var last_point: Vector3 = path_points[path_points.size() - 1]
@@ -788,13 +898,27 @@ func append_point_to_material_body(
 		var is_far_enough := spacing <= 0.0 or last_point.distance_squared_to(local_position) >= spacing * spacing
 		if is_far_enough:
 			path_points.append(local_position)
+			path_surface_normals.append(normalized_surface_normal)
 			changed = true
 		elif force_endpoint and not last_point.is_equal_approx(local_position):
 			path_points[path_points.size() - 1] = local_position
+			while path_surface_normals.size() < path_points.size():
+				path_surface_normals.append(normalized_surface_normal)
+			path_surface_normals[path_points.size() - 1] = normalized_surface_normal
 			changed = true
+		elif force_endpoint:
+			while path_surface_normals.size() < path_points.size():
+				path_surface_normals.append(normalized_surface_normal)
+			var last_normal_index := path_points.size() - 1
+			if not path_surface_normals[last_normal_index].is_equal_approx(
+				normalized_surface_normal
+			):
+				path_surface_normals[last_normal_index] = normalized_surface_normal
+				changed = true
 	if not changed:
 		return false
 	body.set("path_points", path_points)
+	body.set("path_surface_normals", path_surface_normals)
 	body.set("updated_timestamp", Time.get_unix_time_from_system())
 	if body.has_method("normalize"):
 		body.call("normalize")
@@ -813,7 +937,10 @@ func clear_pending_material_bodies() -> void:
 	_mark_material_usage_summary_dirty()
 	mark_updated()
 
-func append_spline_line_point(local_position: Vector3) -> int:
+func append_spline_line_point(
+	local_position: Vector3,
+	local_surface_normal: Vector3 = Vector3.FORWARD
+) -> int:
 	_normalize_spline_line()
 	if spline_line_finished:
 		return -1
@@ -822,6 +949,11 @@ func append_spline_line_point(local_position: Vector3) -> int:
 	var next_points: PackedVector3Array = spline_line_points
 	next_points.append(local_position)
 	spline_line_points = next_points
+	var next_surface_normals: PackedVector3Array = spline_line_surface_normals
+	next_surface_normals.append(
+		_normalize_path_surface_normal(local_surface_normal)
+	)
+	spline_line_surface_normals = next_surface_normals
 	selected_spline_point_index = spline_line_points.size() - 1
 	mark_updated()
 	return selected_spline_point_index
@@ -873,6 +1005,7 @@ func cancel_spline_line() -> bool:
 	if spline_line_points.is_empty() and not spline_line_finished and selected_spline_point_index < 0:
 		return false
 	spline_line_points = PackedVector3Array()
+	spline_line_surface_normals = PackedVector3Array()
 	spline_line_finished = false
 	selected_spline_point_index = -1
 	spline_line_csg_noodle_enabled = false
@@ -881,7 +1014,10 @@ func cancel_spline_line() -> bool:
 
 func can_generate_spline_line_csg_noodle() -> bool:
 	_normalize_spline_line()
-	return spline_line_points.size() >= 2
+	return (
+		spline_line_points.size() >= 2
+		and _calculate_spline_line_path_length() > 0.000001
+	)
 
 func can_generate_profile_extrusion_from_spline() -> bool:
 	_normalize_spline_line()
@@ -899,6 +1035,7 @@ func generate_spline_line_csg_noodle() -> bool:
 	if body == null:
 		return false
 	spline_line_points = PackedVector3Array()
+	spline_line_surface_normals = PackedVector3Array()
 	spline_line_finished = false
 	selected_spline_point_index = -1
 	spline_line_csg_noodle_enabled = false
@@ -914,6 +1051,7 @@ func generate_profile_extrusion_from_spline() -> bool:
 	if body == null:
 		return false
 	spline_line_points = PackedVector3Array()
+	spline_line_surface_normals = PackedVector3Array()
 	spline_line_finished = false
 	selected_spline_point_index = -1
 	spline_line_csg_noodle_enabled = false
@@ -941,8 +1079,18 @@ func get_spline_line_status_label() -> String:
 func get_spline_line_csg_noodle_status_label() -> String:
 	if spline_line_points.size() < 2:
 		return "CSG noodle: needs 2 points"
-	var radius_label := "radius %.4f m" % active_brush_radius_meters
-	return "CSG noodle: active, %s" % radius_label if spline_line_csg_noodle_enabled else "CSG noodle: ready, %s" % radius_label
+	if _calculate_spline_line_path_length() <= 0.000001:
+		return "CSG noodle: needs nonzero path length"
+	var shape_label := (
+		get_active_basic_shape_size_label()
+		if active_tool_id != TOOL_HANDLES
+		else "radius %.4f m" % active_brush_radius_meters
+	)
+	return (
+		"CSG noodle: active, %s" % shape_label
+		if spline_line_csg_noodle_enabled
+		else "CSG noodle: ready, %s" % shape_label
+	)
 
 func get_profile_extrusion_status_label() -> String:
 	if active_tool_id != TOOL_HANDLES:
@@ -961,6 +1109,7 @@ func get_spline_line_summary() -> Dictionary:
 	_normalize_spline_line()
 	return {
 		"points": spline_line_points,
+		"surface_normals": spline_line_surface_normals,
 		"point_count": spline_line_points.size(),
 		"finished": spline_line_finished,
 		"selected_point_index": selected_spline_point_index,
@@ -968,7 +1117,7 @@ func get_spline_line_summary() -> Dictionary:
 		"csg_noodle_enabled": spline_line_csg_noodle_enabled,
 		"can_generate_csg_noodle": can_generate_spline_line_csg_noodle(),
 		"csg_noodle_status_label": get_spline_line_csg_noodle_status_label(),
-		"csg_noodle_radius_meters": active_brush_radius_meters,
+		"csg_noodle_radius_meters": get_active_deposition_envelope_radius_meters(),
 		"can_generate_profile_extrusion": can_generate_profile_extrusion_from_spline(),
 		"profile_extrusion_status_label": get_profile_extrusion_status_label(),
 	}
@@ -979,17 +1128,31 @@ func commit_pending_material_bodies_as_layer() -> Resource:
 
 func commit_material_body_as_layer(body_id: StringName) -> Resource:
 	var body: Resource = _find_editable_material_body(body_id)
-	if body == null:
+	if body == null or not _is_material_body_commit_ready(body):
 		return null
 	return _commit_material_bodies_as_layer([body])
 
+func is_material_body_commit_ready(body_id: StringName) -> bool:
+	return _is_material_body_commit_ready(
+		_find_editable_material_body(body_id)
+	)
+
 func _commit_material_bodies_as_layer(pending_bodies: Array[Resource]) -> Resource:
-	if pending_bodies.is_empty():
+	var commit_ready_bodies: Array[Resource] = []
+	for body: Resource in pending_bodies:
+		if _is_material_body_commit_ready(body):
+			commit_ready_bodies.append(body)
+	if commit_ready_bodies.is_empty():
 		return null
 	var committed_bodies: Array[Resource] = _collect_committed_active_user_material_bodies()
 	var layer: Resource = ForgeV2LayerDataScript.new()
-	layer.call("configure_from_material_bodies", forge_layers.size() + 1, pending_bodies, committed_bodies)
-	for body: Resource in pending_bodies:
+	layer.call(
+		"configure_from_material_bodies",
+		forge_layers.size() + 1,
+		commit_ready_bodies,
+		committed_bodies
+	)
+	for body: Resource in commit_ready_bodies:
 		if body == null:
 			continue
 		body.set("committed_layer_id", StringName(layer.get("layer_id")))
@@ -1047,6 +1210,72 @@ func get_active_primitive_label() -> String:
 
 func get_active_primitive_summary() -> String:
 	return ForgeV2PrimitiveCatalogScript.get_primitive_summary(active_primitive_id)
+
+func is_saved_basic_profile_shape_active() -> bool:
+	return (
+		active_basic_shape_source_id == BASIC_SHAPE_SOURCE_SAVED_PROFILE
+		and ForgeV2ProfileShapeLibraryScript.is_compiled_basic_profile_runtime_valid(
+			active_saved_basic_profile_data
+		)
+	)
+
+func get_active_basic_shape_label() -> String:
+	if is_saved_basic_profile_shape_active():
+		var saved_label := String(active_saved_basic_profile_data.get(
+			"label",
+			String(active_saved_basic_profile_id)
+		)).strip_edges()
+		return saved_label if not saved_label.is_empty() else "Saved 2D Profile"
+	return "Primitive / circular brush"
+
+func get_active_basic_shape_size_label() -> String:
+	if (
+		active_tool_id == TOOL_HANDLES
+		or not is_saved_basic_profile_shape_active()
+	):
+		return get_brush_radius_label()
+	var runtime_data := _get_active_saved_basic_profile_runtime_data()
+	var polygon: PackedVector2Array = runtime_data.get(
+		"deposition_polygon_2d_meters",
+		PackedVector2Array()
+	)
+	var size := ForgeV2ProfileShapeLibraryScript.calculate_polygon_size_meters(
+		polygon
+	)
+	return "Fixed %.4f x %.4f m" % [size.x, size.y]
+
+func get_active_deposition_envelope_radius_meters() -> float:
+	if (
+		active_tool_id == TOOL_HANDLES
+		or not is_saved_basic_profile_shape_active()
+	):
+		return active_brush_radius_meters
+	var runtime_data := _get_active_saved_basic_profile_runtime_data()
+	var polygon: PackedVector2Array = runtime_data.get(
+		"deposition_polygon_2d_meters",
+		PackedVector2Array()
+	)
+	return maxf(
+		ForgeV2ProfileShapeLibraryScript.calculate_polygon_max_radius_meters(
+			polygon
+		),
+		0.001
+	)
+
+func get_active_deposition_sample_radius_meters() -> float:
+	if (
+		active_tool_id == TOOL_HANDLES
+		or not is_saved_basic_profile_shape_active()
+	):
+		return active_brush_radius_meters
+	var runtime_data := _get_active_saved_basic_profile_runtime_data()
+	return maxf(
+		float(runtime_data.get(
+			"contact_distance_meters",
+			ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+		)),
+		ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+	)
 
 func get_active_tool_label() -> String:
 	match active_tool_id:
@@ -1382,6 +1611,14 @@ func get_status_summary(include_material_usage: bool = true) -> Dictionary:
 		"active_primitive": active_primitive_id,
 		"active_primitive_label": get_active_primitive_label(),
 		"active_primitive_summary": get_active_primitive_summary(),
+		"active_basic_shape_source": active_basic_shape_source_id,
+		"active_saved_basic_profile_id": active_saved_basic_profile_id,
+		"active_basic_shape_label": get_active_basic_shape_label(),
+		"active_basic_shape_size_label": get_active_basic_shape_size_label(),
+		"primitive_size_controls_enabled": (
+			active_tool_id == TOOL_HANDLES
+			or not is_saved_basic_profile_shape_active()
+		),
 		"active_profile": active_profile_id,
 		"active_profile_label": get_active_profile_label(),
 		"active_profile_settings": get_active_profile_settings_summary(),
@@ -1455,6 +1692,12 @@ func build_authoring_export_snapshot() -> Dictionary:
 		"equipment_context": equipment_context,
 		"authoring_space_id": authoring_space_id,
 		"active_tool_id": active_tool_id,
+		"active_primitive_id": active_primitive_id,
+		"active_basic_shape_source_id": active_basic_shape_source_id,
+		"active_saved_basic_profile_id": active_saved_basic_profile_id,
+		"active_saved_basic_profile_data": active_saved_basic_profile_data.duplicate(
+			true
+		),
 		"active_profile_id": active_profile_id,
 		"active_profile_width_meters": active_profile_width_meters,
 		"active_profile_height_meters": active_profile_height_meters,
@@ -1504,7 +1747,15 @@ func _append_material_body_record(
 	profile_role: StringName = ForgeV2ProfileShapeLibraryScript.PROFILE_ROLE_NONE,
 	profile_polygon_2d_meters: PackedVector2Array = PackedVector2Array(),
 	profile_anchor_2d_meters: Vector2 = Vector2.ZERO,
-	profile_twist_degrees_per_meter: float = 0.0
+	profile_twist_degrees_per_meter: float = 0.0,
+	path_surface_normals: PackedVector3Array = PackedVector3Array(),
+	profile_contact_point_relative_2d_meters: Vector2 = Vector2.ZERO,
+	profile_contact_direction_2d: Vector2 = (
+		ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_LOCAL_SIX
+	),
+	profile_contact_distance_meters: float = 0.0,
+	profile_runtime_schema_version: int = 0,
+	profile_rotation_bias_degrees: float = 0.0
 ) -> Resource:
 	var body: Resource = ForgeV2MaterialBodyScript.new()
 	body.set("source_record_id", StringName("%s_%s" % [source_prefix, str(Time.get_ticks_usec())]))
@@ -1515,12 +1766,33 @@ func _append_material_body_record(
 	body.set("radius_meters", maxf(radius_meters, 0.001))
 	body.set("amount_ratio", DEFAULT_AMOUNT_RATIO)
 	body.set("path_points", path_points)
+	body.set("path_surface_normals", path_surface_normals)
 	body.set("body_kind", body_kind)
 	body.set("seed_role", ForgeV2MaterialBodyScript.SEED_ROLE_NONE)
 	body.set("profile_id", profile_id)
 	body.set("profile_role", profile_role)
 	body.set("profile_polygon_2d_meters", profile_polygon_2d_meters)
 	body.set("profile_anchor_2d_meters", profile_anchor_2d_meters)
+	body.set(
+		"profile_contact_point_relative_2d_meters",
+		profile_contact_point_relative_2d_meters
+	)
+	body.set(
+		"profile_contact_direction_2d",
+		profile_contact_direction_2d
+	)
+	body.set(
+		"profile_contact_distance_meters",
+		profile_contact_distance_meters
+	)
+	body.set(
+		"profile_runtime_schema_version",
+		profile_runtime_schema_version
+	)
+	body.set(
+		"profile_rotation_bias_degrees",
+		profile_rotation_bias_degrees
+	)
 	body.set("profile_twist_degrees_per_meter", profile_twist_degrees_per_meter)
 	body.set("builder_path_id", builder_path_id)
 	body.set("builder_component_id", builder_component_id)
@@ -1532,6 +1804,70 @@ func _append_material_body_record(
 	material_bodies.append(body)
 	selected_material_body_id = StringName(body.get("body_id"))
 	_mark_material_usage_summary_dirty()
+	return body
+
+func _append_active_saved_basic_profile_material_body(
+	path_points: PackedVector3Array,
+	path_surface_normals: PackedVector3Array,
+	shape_kind: StringName,
+	source_prefix: String
+) -> Resource:
+	if not is_saved_basic_profile_shape_active():
+		return null
+	var runtime_data := _get_active_saved_basic_profile_runtime_data()
+	var profile_polygon: PackedVector2Array = runtime_data.get(
+		"deposition_polygon_2d_meters",
+		PackedVector2Array()
+	)
+	if profile_polygon.size() < 3:
+		return null
+	var profile_anchor := runtime_data.get(
+		"anchor_2d_meters",
+		Vector2.ZERO
+	) as Vector2
+	var contact_point := runtime_data.get(
+		"contact_point_relative_2d_meters",
+		Vector2.ZERO
+	) as Vector2
+	var contact_direction := runtime_data.get(
+		"contact_direction_2d",
+		ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_LOCAL_SIX
+	) as Vector2
+	var body := _append_material_body_record(
+		path_points,
+		maxf(
+			ForgeV2ProfileShapeLibraryScript.calculate_polygon_max_radius_meters(
+				profile_polygon
+			),
+			0.001
+		),
+		DEFAULT_AMOUNT_RATIO,
+		shape_kind,
+		source_prefix,
+		ForgeV2MaterialBodyScript.BODY_KIND_PROFILE_EXTRUSION,
+		active_saved_basic_profile_id,
+		ForgeV2ProfileShapeLibraryScript.PROFILE_ROLE_NONE,
+		profile_polygon,
+		profile_anchor,
+		0.0,
+		path_surface_normals,
+		contact_point,
+		contact_direction,
+		float(runtime_data.get("contact_distance_meters", 0.0)),
+		int(runtime_data.get("schema_version", 0)),
+		float(active_saved_basic_profile_data.get(
+			"rotation_degrees",
+			0.0
+		))
+	)
+	if body != null:
+		body.set(
+			"profile_display_name",
+			String(active_saved_basic_profile_data.get(
+				"label",
+				String(active_saved_basic_profile_id)
+			))
+		)
 	return body
 
 func _build_material_body_from_stroke(stroke: Resource) -> Resource:
@@ -1558,12 +1894,26 @@ func _build_material_body_from_stroke(stroke: Resource) -> Resource:
 	return body
 
 func _append_spline_line_material_body() -> Resource:
+	if active_tool_id != TOOL_HANDLES and is_saved_basic_profile_shape_active():
+		return _append_active_saved_basic_profile_material_body(
+			spline_line_points,
+			spline_line_surface_normals,
+			ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH,
+			"v2_saved_profile_spline"
+		)
 	return _append_material_body_record(
 		spline_line_points,
 		active_brush_radius_meters,
 		DEFAULT_AMOUNT_RATIO,
 		ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH,
-		"v2_spline_noodle"
+		"v2_spline_noodle",
+		ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE,
+		StringName(),
+		ForgeV2ProfileShapeLibraryScript.PROFILE_ROLE_NONE,
+		PackedVector2Array(),
+		Vector2.ZERO,
+		0.0,
+		spline_line_surface_normals
 	)
 
 func _append_profile_extrusion_material_body(is_handle_profile: bool) -> Resource:
@@ -1723,7 +2073,13 @@ func _build_material_body_stack_entry(body: Resource, body_index: int) -> Dictio
 		"seed_role": StringName(body.get("seed_role")),
 		"profile_id": StringName(body.get("profile_id")),
 		"profile_role": StringName(body.get("profile_role")),
-		"profile_label": ForgeV2ProfileShapeLibraryScript.get_profile_label(StringName(body.get("profile_id"))),
+		"profile_label": (
+			String(body.get("profile_display_name"))
+			if not String(body.get("profile_display_name")).strip_edges().is_empty()
+			else ForgeV2ProfileShapeLibraryScript.get_profile_label(
+				StringName(body.get("profile_id"))
+			)
+		),
 	}
 
 func _build_selected_material_body_summary() -> Dictionary:
@@ -1747,11 +2103,28 @@ func _build_material_body_export_snapshot(body: Resource) -> Dictionary:
 		"placement_policy": StringName(body.get("placement_policy")),
 		"shape_kind": StringName(body.get("shape_kind")),
 		"path_points": body.get("path_points"),
+		"path_surface_normals": body.get("path_surface_normals"),
 		"radius_meters": float(body.get("radius_meters")),
 		"profile_id": StringName(body.get("profile_id")),
+		"profile_display_name": String(body.get("profile_display_name")),
 		"profile_role": StringName(body.get("profile_role")),
 		"profile_polygon_2d_meters": body.get("profile_polygon_2d_meters"),
 		"profile_anchor_2d_meters": body.get("profile_anchor_2d_meters"),
+		"profile_contact_point_relative_2d_meters": body.get(
+			"profile_contact_point_relative_2d_meters"
+		),
+		"profile_contact_direction_2d": body.get(
+			"profile_contact_direction_2d"
+		),
+		"profile_contact_distance_meters": float(body.get(
+			"profile_contact_distance_meters"
+		)),
+		"profile_runtime_schema_version": int(body.get(
+			"profile_runtime_schema_version"
+		)),
+		"profile_rotation_bias_degrees": float(body.get(
+			"profile_rotation_bias_degrees"
+		)),
 		"profile_twist_degrees_per_meter": float(body.get("profile_twist_degrees_per_meter")),
 		"amount_ratio": float(body.get("amount_ratio")),
 		"rough_volume_cell_equivalents": float(body.get("rough_volume_cell_equivalents")),
@@ -1789,6 +2162,26 @@ func _is_material_body_active(body: Resource) -> bool:
 		return false
 	var layer_active_value: Variant = body.get("layer_active")
 	return not (layer_active_value is bool) or bool(layer_active_value)
+
+func _is_material_body_commit_ready(body: Resource) -> bool:
+	if body == null:
+		return false
+	var shape_kind := StringName(body.get("shape_kind"))
+	if (
+		shape_kind != ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
+		and shape_kind
+		!= ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
+	):
+		return true
+	var path_points: PackedVector3Array = body.get("path_points")
+	if path_points.size() < 2:
+		return false
+	var path_length := 0.0
+	for point_index in range(path_points.size() - 1):
+		path_length += path_points[point_index].distance_to(
+			path_points[point_index + 1]
+		)
+	return path_length > 0.000001
 
 func _is_material_body_committed(body: Resource) -> bool:
 	return body != null and StringName(body.get("committed_layer_id")) != StringName()
@@ -2028,6 +2421,41 @@ func _resolve_active_profile_polygon(profile_id: StringName = StringName()) -> P
 
 func _is_valid_tool_id(tool_id: StringName) -> bool:
 	return tool_id == TOOL_VOLUME_STROKE or tool_id == TOOL_SPLINE_LINE or tool_id == TOOL_HANDLES
+
+func _normalize_active_basic_shape_authority() -> void:
+	if active_basic_shape_source_id != BASIC_SHAPE_SOURCE_SAVED_PROFILE:
+		active_basic_shape_source_id = BASIC_SHAPE_SOURCE_PRIMITIVE
+		active_saved_basic_profile_id = StringName()
+		active_saved_basic_profile_data = {}
+		return
+	var compiled_profile := (
+		ForgeV2ProfileShapeLibraryScript.compile_basic_profile_runtime_data(
+			active_saved_basic_profile_data
+		)
+	)
+	var profile_id := StringName(compiled_profile.get(
+		"profile_id",
+		compiled_profile.get("id", active_saved_basic_profile_id)
+	))
+	if (
+		profile_id == StringName()
+		or not ForgeV2ProfileShapeLibraryScript.is_compiled_basic_profile_runtime_valid(
+			compiled_profile
+		)
+	):
+		active_basic_shape_source_id = BASIC_SHAPE_SOURCE_PRIMITIVE
+		active_saved_basic_profile_id = StringName()
+		active_saved_basic_profile_data = {}
+		return
+	active_saved_basic_profile_id = profile_id
+	active_saved_basic_profile_data = compiled_profile.duplicate(true)
+
+func _get_active_saved_basic_profile_runtime_data() -> Dictionary:
+	if not is_saved_basic_profile_shape_active():
+		return {}
+	return (
+		active_saved_basic_profile_data.get("compiled_profile", {}) as Dictionary
+	).duplicate(true)
 
 func _get_active_profile_family() -> StringName:
 	return (
@@ -2381,13 +2809,29 @@ func _constrain_active_basic_anchor(use_grid_snapping: bool = false) -> void:
 		active_profile_anchor_y_meters = _normalize_profile_anchor_meters(active_profile_anchor_y_meters)
 		return
 	var anchor := Vector2(active_profile_anchor_x_meters, active_profile_anchor_y_meters)
-	anchor = ForgeV2ProfileShapeLibraryScript.clamp_point_to_polygon(anchor, base_polygon)
+	var clearance_result := (
+		ForgeV2ProfileShapeLibraryScript.constrain_point_inside_polygon_with_clearance(
+			anchor,
+			base_polygon,
+			ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+		)
+	)
+	if bool(clearance_result.get("valid", false)):
+		anchor = clearance_result.get("point", anchor) as Vector2
 	if use_grid_snapping:
 		var profile_polygon := _resolve_active_basic_builder_preview_polygon()
 		var preview_anchor := _rotate_profile_point(anchor, active_profile_rotation_degrees)
 		preview_anchor = _snap_anchor_to_grid_inside_profile(preview_anchor, profile_polygon)
 		anchor = _rotate_profile_point(preview_anchor, -active_profile_rotation_degrees)
-		anchor = ForgeV2ProfileShapeLibraryScript.clamp_point_to_polygon(anchor, base_polygon)
+		clearance_result = (
+			ForgeV2ProfileShapeLibraryScript.constrain_point_inside_polygon_with_clearance(
+				anchor,
+				base_polygon,
+				ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+			)
+		)
+		if bool(clearance_result.get("valid", false)):
+			anchor = clearance_result.get("point", anchor) as Vector2
 	active_profile_anchor_x_meters = anchor.x
 	active_profile_anchor_y_meters = anchor.y
 
@@ -2478,6 +2922,17 @@ func _rotate_profile_point(point: Vector2, rotation_degrees: float) -> Vector2:
 
 func _build_active_profile_builder_settings_summary() -> Dictionary:
 	if _is_active_basic_builder_profile():
+		var base_polygon := _resolve_active_basic_builder_base_polygon()
+		var anchor_clearance_result := (
+			ForgeV2ProfileShapeLibraryScript.constrain_point_inside_polygon_with_clearance(
+				Vector2(
+					active_profile_anchor_x_meters,
+					active_profile_anchor_y_meters
+				),
+				base_polygon,
+				ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+			)
+		)
 		return {
 			"is_active": true,
 			"family": ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_BASIC,
@@ -2497,6 +2952,17 @@ func _build_active_profile_builder_settings_summary() -> Dictionary:
 			"guide_grid_snap_points_2d_meters": _resolve_active_basic_builder_preview_grid_snap_points(),
 			"guide_grid_step_meters": ForgeV2ProfileShapeLibraryScript.BASIC_BUILDER_GRID_STEP_METERS,
 			"temporary_guide_profile_id": StringName(),
+			"anchor_clearance_valid": bool(anchor_clearance_result.get(
+				"valid",
+				false
+			)),
+			"anchor_clearance_error": StringName(anchor_clearance_result.get(
+				"error",
+				&"anchor_clearance_unavailable"
+			)),
+			"anchor_clearance_meters": (
+				ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+			),
 		}
 	if _is_active_handle_builder_profile():
 		return {
@@ -2670,15 +3136,37 @@ func _normalize_volume_strokes() -> void:
 func _normalize_spline_line() -> void:
 	if active_tool_id == TOOL_HANDLES and spline_line_points.size() > HANDLE_REQUIRED_POINT_COUNT:
 		var capped_points := PackedVector3Array()
+		var capped_normals := PackedVector3Array()
 		for point_index in range(HANDLE_REQUIRED_POINT_COUNT):
 			capped_points.append(spline_line_points[point_index])
+			var point_normal := Vector3.FORWARD
+			if point_index < spline_line_surface_normals.size():
+				point_normal = spline_line_surface_normals[point_index]
+			capped_normals.append(
+				_normalize_path_surface_normal(point_normal)
+			)
 		spline_line_points = capped_points
+		spline_line_surface_normals = capped_normals
+	var normalized_surface_normals := PackedVector3Array()
+	for point_index in range(spline_line_points.size()):
+		var point_normal := Vector3.FORWARD
+		if point_index < spline_line_surface_normals.size():
+			point_normal = spline_line_surface_normals[point_index]
+		normalized_surface_normals.append(
+			_normalize_path_surface_normal(point_normal)
+		)
+	spline_line_surface_normals = normalized_surface_normals
 	if selected_spline_point_index >= spline_line_points.size():
 		selected_spline_point_index = -1
 	if selected_spline_point_index < -1:
 		selected_spline_point_index = -1
 	if spline_line_points.size() < 2:
 		spline_line_finished = false
+
+func _normalize_path_surface_normal(surface_normal: Vector3) -> Vector3:
+	if surface_normal.length_squared() <= 0.000001:
+		return Vector3.FORWARD
+	return surface_normal.normalized()
 
 func _calculate_spline_line_path_length() -> float:
 	_normalize_spline_line()

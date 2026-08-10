@@ -792,6 +792,19 @@ func _build_csg_body_signature(body: Resource) -> String:
 	var profile_anchor := Vector2.ZERO
 	if profile_anchor_value is Vector2:
 		profile_anchor = profile_anchor_value as Vector2
+	var path_surface_normals: PackedVector3Array = body.get(
+		"path_surface_normals"
+	)
+	var normal_parts: PackedStringArray = []
+	for surface_normal: Vector3 in path_surface_normals:
+		normal_parts.append("%.5f,%.5f,%.5f" % [
+			surface_normal.x,
+			surface_normal.y,
+			surface_normal.z,
+		])
+	var profile_contact_direction: Vector2 = body.get(
+		"profile_contact_direction_2d"
+	)
 	return "|".join([
 		String(body.get("body_id")),
 		String(body.get("body_kind")),
@@ -803,11 +816,18 @@ func _build_csg_body_signature(body: Resource) -> String:
 		String(body.get("profile_id")),
 		String(body.get("profile_role")),
 		"%.5f,%.5f" % [profile_anchor.x, profile_anchor.y],
+		"%.5f,%.5f" % [
+			profile_contact_direction.x,
+			profile_contact_direction.y,
+		],
+		str(int(body.get("profile_runtime_schema_version"))),
+		str(float(body.get("profile_rotation_bias_degrees"))),
 		str(float(body.get("profile_twist_degrees_per_meter"))),
 		str(StringName(body.get("committed_layer_id"))),
 		str(bool(body.get("layer_active"))),
 		str(float(body.get("updated_timestamp"))),
 		";".join(point_parts),
+		";".join(normal_parts),
 		";".join(profile_point_parts),
 	])
 
@@ -928,7 +948,15 @@ func _append_csg_body_shape(
 		sphere.material = _build_csg_body_material(material_variant_id, is_subtraction)
 		parent.add_child(sphere)
 		return true
-	var path_interval_meters := _resolve_spline_csg_path_interval(radius_meters)
+	var path_sampling_radius_meters := radius_meters
+	if int(body.get("profile_runtime_schema_version")) > 0:
+		path_sampling_radius_meters = maxf(
+			float(body.get("profile_contact_distance_meters")),
+			ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+		)
+	var path_interval_meters := _resolve_spline_csg_path_interval(
+		path_sampling_radius_meters
+	)
 	if _is_profile_shape_kind(shape_kind):
 		var profile_polygon := _resolve_body_profile_polygon(body)
 		var curve: Curve3D = (
@@ -936,6 +964,14 @@ func _append_csg_body_shape(
 			if shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
 			else _build_linear_csg_curve(path_points, path_interval_meters)
 		)
+		if int(body.get("profile_runtime_schema_version")) > 0:
+			_apply_profile_curve_orientation(
+				curve,
+				path_points,
+				body.get("path_surface_normals") as PackedVector3Array,
+				body.get("profile_contact_direction_2d") as Vector2,
+				float(body.get("profile_rotation_bias_degrees"))
+			)
 		return _append_csg_body_path_shape(
 			parent,
 			curve,
@@ -1103,6 +1139,59 @@ func _build_linear_csg_curve(path_points: PackedVector3Array, path_interval_mete
 	for point: Vector3 in control_points:
 		curve.add_point(point)
 	return curve
+
+func _apply_profile_curve_orientation(
+	curve: Curve3D,
+	source_points: PackedVector3Array,
+	source_surface_normals: PackedVector3Array,
+	contact_direction_2d: Vector2,
+	rotation_bias_degrees: float
+) -> void:
+	if curve == null or curve.point_count < 2:
+		return
+	var previous_tilt := 0.0
+	var has_previous_tilt := false
+	for point_index in range(curve.point_count):
+		var tangent := _resolve_curve_point_tangent(curve, point_index)
+		var point_position := curve.get_point_position(point_index)
+		var surface_normal := (
+			ForgeV2ProfileShapeLibraryScript.resolve_path_surface_normal(
+			point_position,
+			source_points,
+			source_surface_normals
+			)
+		)
+		var frame := ForgeV2ProfileShapeLibraryScript.resolve_profile_path_frame(
+			tangent,
+			surface_normal,
+			contact_direction_2d,
+			rotation_bias_degrees
+		)
+		var tilt := float(frame.get("tilt_radians", 0.0))
+		if has_previous_tilt:
+			while tilt - previous_tilt > PI:
+				tilt -= TAU
+			while tilt - previous_tilt < -PI:
+				tilt += TAU
+		curve.set_point_tilt(point_index, tilt)
+		previous_tilt = tilt
+		has_previous_tilt = true
+
+func _resolve_curve_point_tangent(
+	curve: Curve3D,
+	point_index: int
+) -> Vector3:
+	if curve == null or curve.point_count < 2:
+		return Vector3.RIGHT
+	var current_position := curve.get_point_position(point_index)
+	var tangent := Vector3.ZERO
+	if point_index > 0:
+		tangent += current_position - curve.get_point_position(point_index - 1)
+	if point_index < curve.point_count - 1:
+		tangent += curve.get_point_position(point_index + 1) - current_position
+	if tangent.length_squared() <= 0.000001:
+		return Vector3.RIGHT
+	return tangent.normalized()
 
 func _resolve_spline_csg_path_interval(radius_meters: float) -> float:
 	if active_stage_controller != null and active_stage_controller.has_method("get_workspace_contract"):

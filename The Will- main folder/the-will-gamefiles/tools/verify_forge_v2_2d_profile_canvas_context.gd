@@ -6,8 +6,14 @@ const CraftingBenchUIV2Script = preload(
 const ForgeV2ProfileShapeLibraryScript = preload(
 	"res://runtime/forge_v2/forge_v2_profile_shape_library.gd"
 )
+const ForgeV2KeybindingStateScript = preload(
+	"res://runtime/forge_v2/forge_v2_keybinding_state.gd"
+)
 const ForgeV2StageControllerScript = preload(
 	"res://runtime/forge_v2/forge_v2_stage_controller.gd"
+)
+const PlayerToolProfileLibraryStateScript = preload(
+	"res://core/models/player_tool_profile_library_state.gd"
 )
 const CraftingBenchUIV2Scene = preload(
 	"res://scenes/ui_v2/crafting_bench_ui_v2.tscn"
@@ -19,6 +25,14 @@ const UiWindowLayerPolicyScript = preload(
 const RESULT_PATH := (
 	"C:/WORKSPACE/godot_runs/"
 	+ "verify_forge_v2_2d_profile_canvas_context_2026-07-26.txt"
+)
+const PROFILE_LIBRARY_STATE_PATH := (
+	"C:/WORKSPACE/godot_runs/"
+	+ "verify_forge_v2_2d_profile_canvas_context_library_state.tres"
+)
+const KEYBINDING_STATE_PATH := (
+	"C:/WORKSPACE/godot_runs/"
+	+ "verify_forge_v2_2d_profile_canvas_context_keybindings.json"
 )
 const EPSILON := 0.00001
 
@@ -38,6 +52,15 @@ func _run() -> void:
 	controller.call("reset_active_basic_profile_builder")
 
 	var ui: CanvasLayer = CraftingBenchUIV2Scene.instantiate() as CanvasLayer
+	var isolated_profile_library: Resource = (
+		PlayerToolProfileLibraryStateScript.new()
+	)
+	isolated_profile_library.set("save_file_path", PROFILE_LIBRARY_STATE_PATH)
+	ui.set("tool_profile_library_state", isolated_profile_library)
+	var isolated_keybindings: Resource = ForgeV2KeybindingStateScript.new()
+	isolated_keybindings.set("save_file_path", KEYBINDING_STATE_PATH)
+	isolated_keybindings.call("normalize")
+	ui.set("keybinding_state", isolated_keybindings)
 	get_root().add_child(ui)
 	await process_frame
 	ui.call("open_for", null, controller, "Canvas Context Verify", null)

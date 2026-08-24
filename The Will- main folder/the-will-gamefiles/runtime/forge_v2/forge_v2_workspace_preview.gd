@@ -6,6 +6,11 @@ const ForgeV2PlacementTargetResolverScript = preload("res://runtime/forge_v2/for
 const ForgeV2WorkspaceContractScript = preload("res://runtime/forge_v2/forge_v2_workspace_contract.gd")
 const ForgeV2VolumePreviewPresenterScript = preload("res://runtime/forge_v2/forge_v2_volume_preview_presenter.gd")
 
+const REJECT_SURFACE_TARGET_KIND_MISMATCH := &"reject_surface_target_kind_mismatch"
+const REJECT_SURFACE_TARGET_ID_MISMATCH := &"reject_surface_target_id_mismatch"
+const REJECT_SURFACE_PROJECTION_NO_CAMERA := &"reject_surface_projection_no_camera"
+const REJECT_SURFACE_PROJECTION_BEHIND_CAMERA := &"reject_surface_projection_behind_camera"
+
 var forge_view_tuning: ForgeViewTuningDef = DEFAULT_FORGE_VIEW_TUNING_RESOURCE
 var placement_target_resolver = ForgeV2PlacementTargetResolverScript.new()
 var workspace_contract = ForgeV2WorkspaceContractScript.new()
@@ -33,10 +38,12 @@ func bind_stage_controller(stage_controller: Node) -> void:
 	if volume_preview_presenter != null and volume_preview_presenter.has_method("bind_stage_controller"):
 		volume_preview_presenter.call("bind_stage_controller", active_stage_controller)
 
-func clear_stage_controller() -> void:
-	active_stage_controller = null
+func clear_stage_controller() -> bool:
 	if volume_preview_presenter != null and volume_preview_presenter.has_method("clear_stage_controller"):
-		volume_preview_presenter.call("clear_stage_controller")
+		if not bool(volume_preview_presenter.call("clear_stage_controller")):
+			return false
+	active_stage_controller = null
+	return true
 
 func orbit_by(delta: Vector2) -> void:
 	if camera_pivot == null or camera_pitch == null:
@@ -105,8 +112,105 @@ func resolve_placement_target(screen_position: Vector2) -> Dictionary:
 		_get_view_tuning().workspace_ray_plane_epsilon
 	)
 
+func resolve_material_surface_target(screen_position: Vector2) -> Dictionary:
+	return _get_placement_target_resolver().resolve_material_surface_from_camera(
+		camera,
+		screen_position,
+		self,
+		_get_workspace_contract()
+	)
+
+func resolve_placement_plane_target(screen_position: Vector2) -> Dictionary:
+	return _get_placement_target_resolver().resolve_placement_plane_from_camera(
+		camera,
+		screen_position,
+		self,
+		_get_workspace_contract(),
+		_get_view_tuning().workspace_ray_plane_epsilon
+	)
+
+func resolve_strict_surface_target(
+	screen_position: Vector2,
+	required_target_kind: StringName = StringName(),
+	required_surface_target_id: StringName = StringName()
+) -> Dictionary:
+	var result: Dictionary
+	match required_target_kind:
+		ForgeV2PlacementTargetResolverScript.TARGET_KIND_MATERIAL_SURFACE:
+			result = resolve_material_surface_target(screen_position)
+		ForgeV2PlacementTargetResolverScript.TARGET_KIND_PLACEMENT_PLANE:
+			result = resolve_placement_plane_target(screen_position)
+		_:
+			result = resolve_placement_target(screen_position)
+	if not bool(result.get("valid", false)):
+		return result
+	var actual_target_kind := StringName(result.get(
+		"target_kind",
+		ForgeV2PlacementTargetResolverScript.TARGET_KIND_NONE
+	))
+	var actual_surface_target_id := StringName(result.get(
+		"surface_target_id",
+		StringName()
+	))
+	if (
+		required_target_kind != StringName()
+		and actual_target_kind != required_target_kind
+	):
+		return _build_strict_surface_rejection(
+			result,
+			REJECT_SURFACE_TARGET_KIND_MISMATCH,
+			required_target_kind,
+			required_surface_target_id
+		)
+	if (
+		required_surface_target_id != StringName()
+		and actual_surface_target_id != required_surface_target_id
+	):
+		return _build_strict_surface_rejection(
+			result,
+			REJECT_SURFACE_TARGET_ID_MISMATCH,
+			required_target_kind,
+			required_surface_target_id
+		)
+	return result
+
+func project_workspace_local_to_screen(local_position: Vector3) -> Dictionary:
+	if camera == null:
+		return {
+			"valid": false,
+			"reject_reason": REJECT_SURFACE_PROJECTION_NO_CAMERA,
+			"local_position": local_position,
+		}
+	var world_position: Vector3 = to_global(local_position)
+	if camera.is_position_behind(world_position):
+		return {
+			"valid": false,
+			"reject_reason": REJECT_SURFACE_PROJECTION_BEHIND_CAMERA,
+			"local_position": local_position,
+			"world_position": world_position,
+		}
+	return {
+		"valid": true,
+		"local_position": local_position,
+		"world_position": world_position,
+		"screen_position": camera.unproject_position(world_position),
+	}
+
 func screen_to_workspace_local(screen_position: Vector2) -> Dictionary:
 	return resolve_placement_target(screen_position)
+
+func _build_strict_surface_rejection(
+	resolved_result: Dictionary,
+	reject_reason: StringName,
+	required_target_kind: StringName,
+	required_surface_target_id: StringName
+) -> Dictionary:
+	var rejected_result := resolved_result.duplicate(true)
+	rejected_result["valid"] = false
+	rejected_result["reject_reason"] = reject_reason
+	rejected_result["required_target_kind"] = required_target_kind
+	rejected_result["required_surface_target_id"] = required_surface_target_id
+	return rejected_result
 
 func build_camera_facing_drag_plane(local_origin: Vector3) -> Dictionary:
 	if camera == null:

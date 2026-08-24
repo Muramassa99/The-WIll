@@ -6,8 +6,11 @@ const ForgeV2KeybindingStateScript = preload("res://runtime/forge_v2/forge_v2_ke
 const ForgeV2StageControllerScript = preload("res://runtime/forge_v2/forge_v2_stage_controller.gd")
 const MetricScaleRulerControlScript = preload("res://runtime/ui/metric_scale_ruler_control.gd")
 const CraftingBenchUIV2Scene = preload("res://scenes/ui_v2/crafting_bench_ui_v2.tscn")
+const PlayerToolProfileLibraryStateScript = preload("res://core/models/player_tool_profile_library_state.gd")
 
 const RESULT_PATH := "C:/WORKSPACE/godot_runs/verify_forge_v2_2d_profile_view_scale_2026-07-25.txt"
+const PROFILE_LIBRARY_STATE_PATH := "C:/WORKSPACE/godot_runs/verify_forge_v2_2d_profile_view_scale_library_state.tres"
+const KEYBINDING_STATE_PATH := "C:/WORKSPACE/godot_runs/verify_forge_v2_2d_profile_view_scale_keybindings.json"
 const EPSILON := 0.00001
 const PIXEL_EPSILON := 0.01
 
@@ -512,6 +515,7 @@ func _run() -> void:
 		return
 
 	var keybinding_state: Resource = ForgeV2KeybindingStateScript.new()
+	keybinding_state.set("save_file_path", KEYBINDING_STATE_PATH)
 	keybinding_state.call("normalize")
 	var zoom_in_event := InputEventMouseButton.new()
 	zoom_in_event.button_index = MOUSE_BUTTON_WHEEL_UP
@@ -617,9 +621,14 @@ func _run() -> void:
 	var integrated_controller: Node = ForgeV2StageControllerScript.new()
 	get_root().add_child(integrated_controller)
 	var integrated_ui: CanvasLayer = CraftingBenchUIV2Scene.instantiate() as CanvasLayer
+	var isolated_profile_library: Resource = (
+		PlayerToolProfileLibraryStateScript.new()
+	)
+	isolated_profile_library.set("save_file_path", PROFILE_LIBRARY_STATE_PATH)
+	integrated_ui.set("tool_profile_library_state", isolated_profile_library)
+	integrated_ui.set("keybinding_state", keybinding_state)
 	get_root().add_child(integrated_ui)
 	await process_frame
-	integrated_ui.set("keybinding_state", keybinding_state)
 	var integrated_state: Resource = integrated_controller.call("get_active_authoring_state") as Resource
 	integrated_state.call("reset_active_basic_profile_builder")
 	integrated_ui.call("open_for", null, integrated_controller, "Profile Scale Verify", null)

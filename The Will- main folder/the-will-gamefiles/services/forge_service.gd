@@ -6,6 +6,9 @@ const CraftedItemCanonicalSolidResolverScript = preload("res://core/resolvers/cr
 const CraftedItemCanonicalGeometryResolverScript = preload("res://core/resolvers/crafted_item_canonical_geometry_resolver.gd")
 const ForgeStage2ServiceScript = preload("res://services/forge_stage2_service.gd")
 const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
+const ForgeV2WipCompatibilityAdapterScript = preload(
+	"res://runtime/forge_v2/forge_v2_wip_compatibility_adapter.gd"
+)
 
 var forge_rules: ForgeRulesDef = DEFAULT_FORGE_RULES_RESOURCE
 var tier_resolver: TierResolver
@@ -50,6 +53,8 @@ func bake_wip(
 	) -> BakedProfile:
 	if wip == null:
 		return null
+	if _wip_uses_forge_v2_runtime_contract(wip):
+		return _bake_forge_v2_wip(wip, material_lookup)
 
 	var authored_cells: Array[CellAtom] = _collect_authored_wip_cells(wip)
 	var cells: Array[CellAtom] = _collect_wip_cells(wip)
@@ -85,6 +90,7 @@ func bake_wip(
 	profile.resolved_elemental_affinity_lines = _collect_aggregated_material_lines(cells, material_lookup, &"elemental_affinity")
 	profile.resolved_equipment_context_bias_lines = _collect_aggregated_material_lines(cells, material_lookup, &"equipment_context_bias")
 	profile.capability_scores = derive_capability_scores(profile, profile.resolved_capability_bias_lines)
+	profile.material_runtime_data_resolved = true
 	wip.latest_baked_profile_snapshot = profile.duplicate(true) as BakedProfile
 	return profile
 
@@ -117,7 +123,7 @@ func build_test_print_from_wip(
 		else null
 	)
 	if (
-		stage2_item_state == null or not stage2_item_state.has_current_shell()
+		not _stage2_item_state_has_runtime_geometry(stage2_item_state)
 	) and stage2_service != null:
 		stage2_item_state = stage2_service.build_stage2_item_state_from_stage1(
 			wip,
@@ -129,7 +135,7 @@ func build_test_print_from_wip(
 		if wip != null and stage2_item_state != null:
 			wip.stage2_item_state = stage2_item_state.duplicate(true)
 	var stage2_canonical_geometry = null
-	if stage2_item_state != null and stage2_item_state.has_current_shell():
+	if _stage2_item_state_has_runtime_geometry(stage2_item_state):
 		stage2_canonical_geometry = stage2_item_state.build_current_canonical_geometry(test_print.canonical_solid)
 	test_print.stage2_item_state = stage2_item_state
 	test_print.canonical_geometry = (
@@ -247,6 +253,227 @@ func _collect_wip_cells(wip: CraftedItemWIP) -> Array[CellAtom]:
 
 func _collect_authored_wip_cells(wip: CraftedItemWIP) -> Array[CellAtom]:
 	return CraftedItemWIP.collect_cells(wip, true)
+
+func _bake_forge_v2_wip(
+	wip: CraftedItemWIP,
+	material_lookup: Dictionary
+) -> BakedProfile:
+	var runtime_mesh_packet := _build_forge_v2_runtime_mesh_packet(wip)
+	var runtime_cell_size_meters := maxf(
+		forge_rules.cell_world_size_meters if forge_rules != null else 0.0125,
+		0.0001
+	)
+	if wip.stage2_item_state != null:
+		var saved_cell_size_meters := float(
+			wip.stage2_item_state.get("cell_world_size_meters")
+		)
+		if saved_cell_size_meters > 0.0:
+			runtime_cell_size_meters = saved_cell_size_meters
+	var runtime_contract: Dictionary = (
+		ForgeV2WipCompatibilityAdapterScript.build_runtime_contract(
+			wip,
+			runtime_mesh_packet,
+			runtime_cell_size_meters
+		)
+	)
+	var profile := runtime_contract.get("baked_profile", null) as BakedProfile
+	if profile == null:
+		profile = BakedProfile.new()
+		profile.validation_error = String(runtime_contract.get(
+			"error",
+			"forge_v2_runtime_contract_failed"
+		))
+	var rebuilt_stage2_state := runtime_contract.get(
+		"stage2_item_state",
+		null
+	) as Resource
+	if rebuilt_stage2_state != null:
+		wip.stage2_item_state = rebuilt_stage2_state.duplicate(true) as Resource
+	profile.profile_id = _build_profile_id(wip)
+	_enrich_forge_v2_profile_material_data(profile, material_lookup)
+	wip.latest_baked_profile_snapshot = profile.duplicate(true) as BakedProfile
+	return profile
+
+func _build_forge_v2_runtime_mesh_packet(wip: CraftedItemWIP) -> Dictionary:
+	if wip == null or not _stage2_item_state_has_authoritative_editable_mesh(
+		wip.stage2_item_state
+	):
+		return {
+			"ok": false,
+			"error_code": "FORGE_V2_RUNTIME_EDITABLE_MESH_UNAVAILABLE",
+		}
+	var stage2_item_state := wip.stage2_item_state
+	var editable_mesh_state := stage2_item_state.get(
+		"current_editable_mesh_state"
+	) as Resource
+	var surface_arrays: Array = editable_mesh_state.get("surface_arrays") as Array
+	if (
+		surface_arrays.size() <= Mesh.ARRAY_VERTEX
+		or not surface_arrays[Mesh.ARRAY_VERTEX] is PackedVector3Array
+	):
+		return {
+			"ok": false,
+			"error_code": "FORGE_V2_RUNTIME_VERTEX_ARRAY_INVALID",
+		}
+	var vertices_cell_units := surface_arrays[
+		Mesh.ARRAY_VERTEX
+	] as PackedVector3Array
+	var indices := PackedInt32Array()
+	if (
+		surface_arrays.size() > Mesh.ARRAY_INDEX
+		and surface_arrays[Mesh.ARRAY_INDEX] is PackedInt32Array
+	):
+		indices = PackedInt32Array(surface_arrays[Mesh.ARRAY_INDEX])
+	if vertices_cell_units.is_empty() or indices.is_empty() or indices.size() % 3 != 0:
+		return {
+			"ok": false,
+			"error_code": "FORGE_V2_RUNTIME_MESH_INVALID",
+		}
+	var cell_size_meters := maxf(
+		float(stage2_item_state.get("cell_world_size_meters")),
+		0.0001
+	)
+	var vertices_meters := PackedVector3Array()
+	vertices_meters.resize(vertices_cell_units.size())
+	for vertex_index: int in range(vertices_cell_units.size()):
+		vertices_meters[vertex_index] = (
+			vertices_cell_units[vertex_index] * cell_size_meters
+		)
+	return {
+		"ok": true,
+		"vertices": vertices_meters,
+		"indices": indices,
+		"watertight": true,
+		"source": &"stage2_authoritative_editable_mesh",
+	}
+
+func _enrich_forge_v2_profile_material_data(
+	profile: BakedProfile,
+	material_lookup: Dictionary
+) -> void:
+	if profile == null:
+		return
+	var volume_mix: Dictionary = profile.material_volume_mix
+	var total_mass := 0.0
+	var runtime_material_data_resolved := not volume_mix.is_empty()
+	for material_key: Variant in volume_mix.keys():
+		var material_variant_id := StringName(material_key)
+		if material_runtime_resolver.resolve_base_material_for_material_id(
+			material_variant_id,
+			material_lookup
+		) == null:
+			runtime_material_data_resolved = false
+		var volume_cell_equivalents := maxf(
+			float(volume_mix.get(material_key, 0.0)),
+			0.0
+		)
+		total_mass += (
+			material_runtime_resolver.resolve_density_per_material_id(
+				material_variant_id,
+				material_lookup
+			)
+			* volume_cell_equivalents
+		)
+	if total_mass > 0.0 or profile.total_mass <= 0.0:
+		profile.total_mass = total_mass
+	profile.resolved_material_stat_lines = (
+		_collect_aggregated_material_lines_from_volume_mix(
+			volume_mix,
+			material_lookup,
+			&"material_stats"
+		)
+	)
+	profile.resolved_capability_bias_lines = (
+		_collect_aggregated_material_lines_from_volume_mix(
+			volume_mix,
+			material_lookup,
+			&"capability_bias"
+		)
+	)
+	profile.resolved_skill_family_bias_lines = (
+		_collect_aggregated_material_lines_from_volume_mix(
+			volume_mix,
+			material_lookup,
+			&"skill_family_bias"
+		)
+	)
+	profile.resolved_elemental_affinity_lines = (
+		_collect_aggregated_material_lines_from_volume_mix(
+			volume_mix,
+			material_lookup,
+			&"elemental_affinity"
+		)
+	)
+	profile.resolved_equipment_context_bias_lines = (
+		_collect_aggregated_material_lines_from_volume_mix(
+			volume_mix,
+			material_lookup,
+			&"equipment_context_bias"
+		)
+	)
+	profile.capability_scores = derive_capability_scores(
+		profile,
+		profile.resolved_capability_bias_lines
+	)
+	profile.material_runtime_data_resolved = runtime_material_data_resolved
+
+func _collect_aggregated_material_lines_from_volume_mix(
+	volume_mix: Dictionary,
+	material_lookup: Dictionary,
+	line_kind: StringName
+) -> Array[StatLine]:
+	var line_lookup: Dictionary = {}
+	for material_key: Variant in volume_mix.keys():
+		var volume_cell_equivalents := maxf(
+			float(volume_mix.get(material_key, 0.0)),
+			0.0
+		)
+		if volume_cell_equivalents <= 0.0:
+			continue
+		var representative_cell := CellAtom.new()
+		representative_cell.material_variant_id = StringName(material_key)
+		var material_lines: Array[StatLine] = _resolve_material_lines_for_cell(
+			representative_cell,
+			material_lookup,
+			line_kind
+		)
+		for material_line: StatLine in material_lines:
+			if material_line == null or not material_line.is_valid():
+				continue
+			var scale := volume_cell_equivalents if material_line.is_numeric() else 1.0
+			_merge_stat_lines(line_lookup, [material_line.copy_scaled(scale)])
+	return _build_sorted_stat_line_array(line_lookup)
+
+func _stage2_item_state_has_runtime_geometry(stage2_item_state: Resource) -> bool:
+	return (
+		stage2_item_state != null
+		and (
+			(
+				stage2_item_state.has_method("has_current_shell")
+				and bool(stage2_item_state.call("has_current_shell"))
+			)
+			or _stage2_item_state_has_authoritative_editable_mesh(
+				stage2_item_state
+			)
+		)
+	)
+
+func _stage2_item_state_has_authoritative_editable_mesh(
+	stage2_item_state: Resource
+) -> bool:
+	return (
+		stage2_item_state != null
+		and bool(stage2_item_state.get("editable_mesh_visual_authority"))
+		and stage2_item_state.has_method("has_current_editable_mesh")
+		and bool(stage2_item_state.call("has_current_editable_mesh"))
+	)
+
+func _wip_uses_forge_v2_runtime_contract(wip: CraftedItemWIP) -> bool:
+	return (
+		wip != null
+		and wip.forge_v2_authoring_state != null
+		and wip.layers.is_empty()
+	)
 
 func _build_test_print_id(wip: CraftedItemWIP) -> StringName:
 	if wip == null or wip.wip_id == StringName():

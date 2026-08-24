@@ -64,6 +64,16 @@ Open followups:
 - Keep raw input available long enough to debug the difference between player motion, sampled centerline, and final noodle mesh.
 - Use the smoothed centerline as the foundation for true closed noodle volume: wall surface, flat/rounded end caps, material add/replace policy, and later same-material merge behavior.
 
+Freehand stabilizer implementation added and integrated 2026-08-10:
+- `runtime/forge_v2/forge_v2_freehand_input_stabilizer.gd` now provides a reusable screen-space input stabilizer with no scene, camera, surface, or material ownership.
+- Smoothness `0` is direct input. Values `1-10` use deterministic 60 Hz timestamp resampling plus a delayed centered triangular-weighted window whose lookahead is the selected step count.
+- Release stops raw input, pads and drains the delayed window, and ends at the exact final valid screen sample without retaining stroke history.
+- Internal smoothing history is bounded to at most 21 uniform samples. Catch-up output is also bounded per call so a long frame stall cannot create an unbounded raycast burst.
+- Focused verifier: `tools/verify_forge_v2_freehand_input_stabilizer.gd`.
+- `crafting_bench_ui_v2.gd` now owns stabilizer lifetime during a Volume Stroke, raycasts stabilized screen samples in order, applies them through the batched stroke API, drains the tail on release, and restores accumulated-input ownership on every finish/focus-loss path.
+- Live drawing uses a collisionless swept `ArrayMesh` instead of rebuilding active CSG for each accepted sample. The final committed CSG/collision result remains authoritative and can still have a measurable release-time cost.
+- Honest boundary: stabilizing the cursor path does not by itself guarantee exact wrapping over rapidly changing 3D surfaces. Target sampling and final committed CSG orientation remain separate responsibilities that require interactive evidence.
+
 ## Forge V2 Local Keybindings V1
 
 Current code foundation:
@@ -118,6 +128,77 @@ Open followups:
 - Convert spline authoring output into a `Curve3D`/`Path3D` style centerline.
 - Test `CSGPolygon3D` path extrusion as the professional noodle operand.
 - Decide how spline endpoints become flat caps, rounded caps, or separate cap primitives.
+
+## Benched Spline Line And Handle Select Solid Orientation Reference
+
+Deferred design intent:
+- Add an optional `Select Solid` magnetic orientation reference for future
+  Spline Line and Handle authoring.
+- Spline Line and Handle centerlines remain unrestricted 3D paths. Selecting a
+  connected solid does not pull the path onto its surface and does not inherit
+  the surface-conforming path law used by CSG Material Stroke and Detailing
+  Brush.
+- The selected connected solid supplies only the roll/B-C orientation bias
+  toward the reference while the path position and tangent remain authored in
+  free 3D space.
+- At each path sample, project the direction toward the selected-solid
+  reference into the plane perpendicular to path tangent `T`. Use that
+  projected direction as the magnetic orientation reference rather than
+  changing `T` or the centerline.
+- If the reference direction is parallel or near-parallel to `T`, or otherwise
+  degenerates, preserve the last valid projected direction when available and
+  use a deterministic least-parallel canonical-axis fallback when it is not.
+  The fallback must not introduce nondeterministic roll flips.
+- Preview geometry, generated/final geometry, saved authoring data, and WIP
+  reload must resolve the same reference, frame, and fallback result.
+- While placing or moving Spline Line control dots, show a live shadow/profile
+  sweep preview of the prospective authored profile geometry and its resolved
+  orientation. This should provide the same kind of immediate decision feedback
+  as the Skill Crafter blade/pose preview, so the user can choose point position
+  and orientation visually instead of guessing and pressing Generate to inspect
+  the result.
+
+Prerequisite and boundary:
+- This feature requires a stable connected-solid identity that survives the
+  relevant authoring and persistence lifecycle; transient body ids or mutable
+  render-zone membership are not sufficient authority.
+- This feature is explicitly benched. It is outside the current CSG Material
+  Stroke/Detailing Brush surface-frame and connected-surface work and must not
+  broaden that implementation pass into Spline Line or Handle path changes.
+  The shadow/profile sweep preview is deferred with the same future Spline Line
+  and Handle orientation infrastructure.
+
+## Deferred QoL: Reopen And Edit A Committed Handle
+
+Requested behavior:
+- Add an explicit `Edit Handle` action for the distinct semantic Handle
+  component. This is deferred QoL work and is not part of the current Handle
+  minimum-span feedback pass.
+- Reopen the selected committed Handle in its original three-dot/connection-line
+  authoring form, including its authored profile, point positions, surface-frame
+  data, and other settings required to reproduce the same component.
+- Allow the three points, length, curve, and profile settings to be adjusted with
+  the same controls and validity feedback used while creating a new Handle.
+- Regenerating the edited Handle must replace the old Handle component rather
+  than adding a second Handle authority. The replacement should be atomic: keep
+  the old committed Handle recoverable until the edited replacement is valid and
+  committed, and make Cancel leave the original unchanged.
+- The under-minimum start-to-end span must use the same red-guide feedback and
+  generation gate as new Handle creation. Point 2 remains excluded from the
+  minimum endpoint-span calculation.
+- Preserve editability through WIP save/reload so a Handle can be adjusted after
+  testing the WIP in Inventory, equip, or the Skill Crafter.
+
+Acceptance boundary for the later implementation:
+- At most one active committed semantic Handle exists before and after editing.
+- A successful edit removes/retires the old Handle body and installs the new one
+  without leaving duplicate geometry, material-ledger entries, history entries,
+  collision, or runtime grip authority.
+- Undo/redo, bounded history, final save-time composition, and the existing V2
+  runtime compatibility adapter must observe the replacement as one coherent
+  operation.
+- Do not reconstruct the editable path from the final fused mesh when the saved
+  semantic Handle authoring data is available.
 
 ## Placement Target Resolver V1
 

@@ -479,10 +479,18 @@ func build_equipped_item_node(
 		return null
 	var canonical_solid = test_print.canonical_solid if test_print.canonical_solid != null else held_item_mesh_builder.build_canonical_solid(test_print.display_cells)
 	var canonical_geometry = test_print.canonical_geometry if test_print.canonical_geometry != null else held_item_mesh_builder.build_canonical_geometry(canonical_solid)
+	var use_authoritative_editable_mesh := (
+		saved_wip.forge_v2_authoring_state != null
+		and saved_wip.layers.is_empty()
+		and test_print.visual_mesh_source == &"editable_mesh"
+	)
 	var mesh: ArrayMesh = (
-		held_item_mesh_builder.build_mesh_from_canonical_geometry(canonical_geometry, material_lookup)
-		if prefer_cached_profile
-		else held_item_mesh_builder.build_mesh_from_test_print(test_print, material_lookup)
+		held_item_mesh_builder.build_mesh_from_test_print(test_print, material_lookup)
+		if use_authoritative_editable_mesh or not prefer_cached_profile
+		else held_item_mesh_builder.build_mesh_from_canonical_geometry(
+			canonical_geometry,
+			material_lookup
+		)
 	)
 	if mesh == null or mesh.get_surface_count() == 0:
 		return null
@@ -495,7 +503,12 @@ func build_equipped_item_node(
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.mesh = mesh
 	mesh_instance.material_override = build_held_item_material(forge_view_tuning)
-	mesh_instance.set_meta("visual_mesh_source", &"canonical_geometry_fast_preview" if prefer_cached_profile else test_print.visual_mesh_source)
+	mesh_instance.set_meta(
+		"visual_mesh_source",
+		test_print.visual_mesh_source
+		if use_authoritative_editable_mesh
+		else (&"canonical_geometry_fast_preview" if prefer_cached_profile else test_print.visual_mesh_source)
+	)
 	var cell_world_size: float = forge_rules.cell_world_size_meters
 	var grip_hold_layout: Dictionary = {}
 	if humanoid_rig != null and humanoid_rig.has_method("resolve_grip_hold_layout"):
@@ -951,6 +964,13 @@ func _build_grip_contact_shell_data(
 	baked_profile: BakedProfile,
 	contact_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 ) -> Dictionary:
+	var authored_shell_data := _build_authored_grip_contact_shell_data(
+		contact_position_local,
+		baked_profile,
+		contact_position_origin_id
+	)
+	if not authored_shell_data.is_empty():
+		return authored_shell_data
 	var contact_position_state := {
 		"contact_position_local": contact_position_local,
 		"contact_position_origin_id": contact_position_origin_id,
@@ -1066,6 +1086,51 @@ func _build_grip_contact_shell_data(
 		"profile_offsets_minor": profile_offsets_minor,
 	}
 
+func _build_authored_grip_contact_shell_data(
+	contact_position_local: Vector3,
+	baked_profile: BakedProfile,
+	contact_position_origin_id: StringName
+) -> Dictionary:
+	if (
+		baked_profile == null
+		or baked_profile.primary_grip_authority_source == StringName()
+		or baked_profile.primary_grip_profile_offsets_minor_meters.is_empty()
+	):
+		return {}
+	var major_axis := baked_profile.primary_grip_slide_axis.normalized()
+	var minor_axis_a := baked_profile.primary_grip_minor_axis_a.normalized()
+	var minor_axis_b := baked_profile.primary_grip_minor_axis_b.normalized()
+	if (
+		major_axis.length_squared() <= 0.000001
+		or minor_axis_a.length_squared() <= 0.000001
+		or minor_axis_b.length_squared() <= 0.000001
+	):
+		return {}
+	minor_axis_a = (
+		minor_axis_a - major_axis * minor_axis_a.dot(major_axis)
+	).normalized()
+	if minor_axis_a.length_squared() <= 0.000001:
+		return {}
+	var resolved_minor_axis_b := major_axis.cross(minor_axis_a).normalized()
+	if resolved_minor_axis_b.dot(minor_axis_b) < 0.0:
+		resolved_minor_axis_b = -resolved_minor_axis_b
+	var profile_offsets_minor: Array = []
+	for offset: Vector2 in baked_profile.primary_grip_profile_offsets_minor_meters:
+		profile_offsets_minor.append(offset)
+	return {
+		"guide_center_offset_local": Vector3.ZERO,
+		"guide_center_offset_origin_id": contact_position_origin_id,
+		"slice_center_local": contact_position_local,
+		"slice_center_origin_id": contact_position_origin_id,
+		"major_axis_local": major_axis,
+		"major_axis_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		"minor_axis_a_local": minor_axis_a,
+		"minor_axis_a_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		"minor_axis_b_local": resolved_minor_axis_b,
+		"minor_axis_b_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		"profile_offsets_minor": profile_offsets_minor,
+	}
+
 func _attach_grip_contact_area(grip_center: Node3D, grip_shell_data: Dictionary, cell_world_size: float) -> void:
 	if grip_center == null:
 		return
@@ -1092,8 +1157,6 @@ func _attach_grip_contact_area(grip_center: Node3D, grip_shell_data: Dictionary,
 		Vector3.ZERO,
 		major_axis_origin_id
 	))
-	if major_axis_index < 0:
-		return
 	var profile_offsets: Array = grip_shell_data.get("profile_offsets_minor", [])
 	var minor_axis_a_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
 		grip_shell_data,
@@ -1121,7 +1184,8 @@ func _attach_grip_contact_area(grip_center: Node3D, grip_shell_data: Dictionary,
 	)
 	var shape_size_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var local_shape_size: Vector3 = Vector3.ONE * cell_world_size
-	local_shape_size = _set_axis_component(local_shape_size, major_axis_index, cell_world_size)
+	if major_axis_index >= 0:
+		local_shape_size = _set_axis_component(local_shape_size, major_axis_index, cell_world_size)
 	for profile_index: int in range(profile_offsets.size()):
 		var offset_minor: Vector2 = profile_offsets[profile_index] as Vector2
 		var collision_shape := CollisionShape3D.new()

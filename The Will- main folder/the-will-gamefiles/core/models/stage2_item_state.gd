@@ -1315,7 +1315,10 @@ func _should_build_canonical_geometry_from_editable_mesh() -> bool:
 		editable_mesh_visual_authority
 		and has_current_editable_mesh()
 		and current_editable_mesh_state != null
-		and bool(current_editable_mesh_state.get("dirty"))
+		and (
+			bool(current_editable_mesh_state.get("dirty"))
+			or not has_current_shell()
+		)
 	)
 
 func _build_current_canonical_geometry_from_editable_mesh(source_solid = null):

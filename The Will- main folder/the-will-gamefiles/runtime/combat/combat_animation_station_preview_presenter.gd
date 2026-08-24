@@ -2355,9 +2355,23 @@ func ensure_baked_profile_snapshot(active_wip: CraftedItemWIP) -> BakedProfile:
 		return null
 	if CraftedItemWIP.is_unarmed_authoring_wip(active_wip):
 		return null
-	if active_wip.latest_baked_profile_snapshot != null:
+	if (
+		active_wip.latest_baked_profile_snapshot != null
+		and not _forge_v2_cached_profile_requires_runtime_bake(active_wip)
+	):
 		return active_wip.latest_baked_profile_snapshot
 	return forge_service.bake_wip(active_wip, _get_material_lookup())
+
+func _forge_v2_cached_profile_requires_runtime_bake(
+	active_wip: CraftedItemWIP
+) -> bool:
+	return (
+		active_wip != null
+		and active_wip.forge_v2_authoring_state != null
+		and active_wip.layers.is_empty()
+		and active_wip.latest_baked_profile_snapshot != null
+		and not active_wip.latest_baked_profile_snapshot.material_runtime_data_resolved
+	)
 
 func _ensure_preview_nodes(preview_container: SubViewportContainer, preview_subviewport: SubViewport) -> Dictionary:
 	if preview_subviewport == null:
@@ -4265,6 +4279,8 @@ func _build_weapon_preview_node(preview_root: Node3D, actor: Node3D, active_wip:
 		return null
 	if CraftedItemWIP.is_unarmed_authoring_wip(active_wip):
 		return _build_unarmed_preview_node(preview_root, actor, active_wip)
+	if ensure_baked_profile_snapshot(active_wip) == null:
+		return null
 	var held_item: Node3D = equipped_item_presenter.build_equipped_item_node(
 		active_wip,
 		_resolve_preview_dominant_slot_id(),

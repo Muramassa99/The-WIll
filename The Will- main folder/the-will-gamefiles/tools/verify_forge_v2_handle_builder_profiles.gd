@@ -217,6 +217,23 @@ func _init() -> void:
 	var generated_anchor_local := Vector2(0.004, 0.0)
 	profile_state.call("set_active_profile_anchor_2d_meters", generated_anchor_local)
 	profile_state.call("set_active_profile_rotation_degrees", 90.0)
+	var generated_profile_data: Dictionary = profile_state.call(
+		"build_active_tool_profile_preset_data",
+		"Generated Handle Anchor Authority"
+	) as Dictionary
+	var generated_base_polygon: PackedVector2Array = generated_profile_data.get(
+		"base_polygon_2d_meters",
+		PackedVector2Array()
+	)
+	var expected_body_polygon := PackedVector2Array()
+	for profile_point: Vector2 in generated_base_polygon:
+		expected_body_polygon.append(profile_point - generated_anchor_local)
+	var expected_contact: Dictionary = (
+		ForgeV2ProfileShapeLibraryScript.resolve_profile_anchor_contact(
+			generated_base_polygon,
+			generated_anchor_local
+		)
+	)
 	profile_state.call("append_spline_line_point", Vector3(0.0, 0.0, 0.0))
 	profile_state.call("append_spline_line_point", Vector3(0.15, 0.0, 0.025))
 	profile_state.call("append_spline_line_point", Vector3(0.32, 0.0, 0.0))
@@ -234,9 +251,34 @@ func _init() -> void:
 	if body_polygon.size() <= control_points.size():
 		_fail("generated handle builder body did not retain rounded polygon")
 		return
+	if not _packed_points_match(body_polygon, expected_body_polygon):
+		_fail("generated Handle profile was not offset so its red dot follows the authored path")
+		return
 	var body_anchor: Vector2 = body.get("profile_anchor_2d_meters")
-	if body_anchor.distance_to(generated_anchor_local.rotated(deg_to_rad(90.0))) > EPSILON:
-		_fail("generated handle builder body did not keep the rotated red anchor")
+	if body_anchor.distance_to(generated_anchor_local) > EPSILON:
+		_fail("generated Handle body did not keep the red dot in canonical profile space")
+		return
+	if (
+		int(body.get("profile_runtime_schema_version"))
+		!= ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_RUNTIME_SCHEMA_VERSION
+		or absf(float(body.get("profile_rotation_bias_degrees")) - 90.0)
+		> EPSILON
+		or (
+			body.get("profile_contact_point_relative_2d_meters") as Vector2
+		).distance_to(
+			(
+				expected_contact.get("point", generated_anchor_local)
+				as Vector2
+			) - generated_anchor_local
+		) > EPSILON
+		or (body.get("profile_contact_direction_2d") as Vector2).distance_to(
+			expected_contact.get(
+				"direction",
+				ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_LOCAL_SIX
+			) as Vector2
+		) > EPSILON
+	):
+		_fail("generated Handle body did not inherit red-dot contact orientation authority")
 		return
 	result_lines.append("ok=true")
 	result_lines.append("default_polygon_points=%d" % default_polygon.size())
@@ -257,6 +299,7 @@ func _init() -> void:
 	result_lines.append("library_path=%s" % library_path)
 	result_lines.append("body_polygon_points=%d" % body_polygon.size())
 	result_lines.append("body_anchor=%.5f,%.5f" % [body_anchor.x, body_anchor.y])
+	result_lines.append("red_dot_drives_generated_handle=true")
 	_write_results()
 	quit(0)
 

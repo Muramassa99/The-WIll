@@ -9,6 +9,7 @@ const BODY_KIND_VOLUME_STROKE := &"body_kind_volume_stroke"
 const BODY_KIND_PLATFORM_SEED := &"body_kind_platform_seed"
 const BODY_KIND_PROFILE_EXTRUSION := &"body_kind_profile_extrusion"
 const BODY_KIND_HANDLE_PROFILE := &"body_kind_handle_profile"
+const BODY_KIND_DETAILING_BRUSH := &"body_kind_detailing_brush"
 const SHAPE_KIND_CAPSULE_PATH := &"shape_kind_capsule_path"
 const SHAPE_KIND_SPLINE_CAPSULE_PATH := &"shape_kind_spline_capsule_path"
 const SHAPE_KIND_PROFILE_PATH := &"shape_kind_profile_path"
@@ -38,6 +39,9 @@ const MATERIAL_UNIT_SCALE := 100
 @export var shape_kind: StringName = SHAPE_KIND_CAPSULE_PATH
 @export var path_points: PackedVector3Array = PackedVector3Array()
 @export var path_surface_normals: PackedVector3Array = PackedVector3Array()
+@export var path_contact_directions: PackedVector3Array = PackedVector3Array()
+@export var surface_target_kind: StringName = StringName()
+@export var surface_target_id: StringName = StringName()
 @export var radius_meters: float = 0.02
 @export var profile_id: StringName = StringName()
 @export var profile_display_name: String = ""
@@ -71,6 +75,17 @@ func normalize() -> void:
 	body_kind = _normalize_body_kind(body_kind)
 	if body_kind != BODY_KIND_PLATFORM_SEED:
 		seed_role = SEED_ROLE_NONE
+	if body_kind == BODY_KIND_DETAILING_BRUSH:
+		if surface_target_kind == StringName() or surface_target_id == StringName():
+			surface_target_kind = StringName()
+			surface_target_id = StringName()
+		if shape_kind == SHAPE_KIND_SPLINE_PROFILE_PATH:
+			shape_kind = SHAPE_KIND_PROFILE_PATH
+		elif shape_kind == SHAPE_KIND_SPLINE_CAPSULE_PATH:
+			shape_kind = SHAPE_KIND_CAPSULE_PATH
+	else:
+		surface_target_kind = StringName()
+		surface_target_id = StringName()
 	if body_kind == BODY_KIND_HANDLE_PROFILE:
 		profile_role = PROFILE_ROLE_HANDLE
 	builder_path_id = CraftedItemWIPScript.normalize_builder_path_id(builder_path_id)
@@ -81,14 +96,19 @@ func normalize() -> void:
 		equipment_context = CraftedItemWIPScript.get_default_equipment_context_for_builder_path(builder_path_id)
 	if material_variant_id == StringName() or material_variant_id == &"iron_gray":
 		material_variant_id = &"mat_iron_gray"
-	if operation_mode != ForgeV2VolumeStrokeScript.OPERATION_REMOVE_MATERIAL:
+	if body_kind == BODY_KIND_HANDLE_PROFILE:
 		operation_mode = ForgeV2VolumeStrokeScript.OPERATION_ADD_MATERIAL
-	if placement_policy != ForgeV2VolumeStrokeScript.PLACEMENT_EMPTY_ONLY:
 		placement_policy = ForgeV2VolumeStrokeScript.PLACEMENT_REPLACE_EXISTING
+	else:
+		if operation_mode != ForgeV2VolumeStrokeScript.OPERATION_REMOVE_MATERIAL:
+			operation_mode = ForgeV2VolumeStrokeScript.OPERATION_ADD_MATERIAL
+		if placement_policy != ForgeV2VolumeStrokeScript.PLACEMENT_EMPTY_ONLY:
+			placement_policy = ForgeV2VolumeStrokeScript.PLACEMENT_REPLACE_EXISTING
 	if body_kind == BODY_KIND_PLATFORM_SEED:
 		placement_policy = ForgeV2VolumeStrokeScript.PLACEMENT_EMPTY_ONLY
 	shape_kind = _normalize_shape_kind(shape_kind)
 	_normalize_path_surface_normals()
+	_normalize_path_contact_directions()
 	if _is_profile_shape_kind():
 		_ensure_profile_data()
 	radius_meters = maxf(radius_meters, 0.001)
@@ -99,6 +119,19 @@ func normalize() -> void:
 
 func is_platform_seed() -> bool:
 	return body_kind == BODY_KIND_PLATFORM_SEED
+
+func is_detailing_brush() -> bool:
+	return body_kind == BODY_KIND_DETAILING_BRUSH
+
+func uses_explicit_surface_contact_authority() -> bool:
+	return (
+		shape_kind == SHAPE_KIND_PROFILE_PATH
+		and profile_runtime_schema_version > 0
+		and (
+			body_kind == BODY_KIND_VOLUME_STROKE
+			or body_kind == BODY_KIND_DETAILING_BRUSH
+		)
+	)
 
 func is_committed_to_layer() -> bool:
 	return committed_layer_id != StringName()
@@ -154,7 +187,7 @@ func _calculate_profile_path_volume_meters_cubed() -> float:
 
 func _normalize_body_kind(next_body_kind: StringName) -> StringName:
 	match next_body_kind:
-		BODY_KIND_PLATFORM_SEED, BODY_KIND_PROFILE_EXTRUSION, BODY_KIND_HANDLE_PROFILE:
+		BODY_KIND_PLATFORM_SEED, BODY_KIND_PROFILE_EXTRUSION, BODY_KIND_HANDLE_PROFILE, BODY_KIND_DETAILING_BRUSH:
 			return next_body_kind
 		_:
 			return BODY_KIND_VOLUME_STROKE
@@ -223,6 +256,27 @@ func _normalize_path_surface_normals() -> void:
 		normalized_normals.append(normal.normalized())
 	path_surface_normals = normalized_normals
 
+func _normalize_path_contact_directions() -> void:
+	if not uses_explicit_surface_contact_authority():
+		return
+	if path_contact_directions.is_empty():
+		return
+	if path_contact_directions.size() != path_points.size():
+		path_contact_directions = PackedVector3Array()
+		return
+	var normalized_directions := PackedVector3Array()
+	for contact_direction: Vector3 in path_contact_directions:
+		if (
+			not is_finite(contact_direction.x)
+			or not is_finite(contact_direction.y)
+			or not is_finite(contact_direction.z)
+			or contact_direction.length_squared() <= 0.000001
+		):
+			path_contact_directions = PackedVector3Array()
+			return
+		normalized_directions.append(contact_direction.normalized())
+	path_contact_directions = normalized_directions
+
 func _build_body_id() -> StringName:
 	if body_kind == BODY_KIND_PLATFORM_SEED and seed_role != SEED_ROLE_NONE:
 		return StringName("v2_seed_%s_%s_%s" % [
@@ -234,4 +288,6 @@ func _build_body_id() -> StringName:
 		return StringName("v2_handle_%s" % str(Time.get_ticks_usec()))
 	if body_kind == BODY_KIND_PROFILE_EXTRUSION:
 		return StringName("v2_profile_%s" % str(Time.get_ticks_usec()))
+	if body_kind == BODY_KIND_DETAILING_BRUSH:
+		return StringName("v2_detail_%s" % str(Time.get_ticks_usec()))
 	return StringName("v2_body_%s" % str(Time.get_ticks_usec()))

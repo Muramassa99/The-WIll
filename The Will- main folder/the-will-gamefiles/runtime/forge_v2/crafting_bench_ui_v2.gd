@@ -6,6 +6,10 @@ signal closed
 const ForgeV2WorkspacePreviewScript = preload("res://runtime/forge_v2/forge_v2_workspace_preview.gd")
 const ForgeV2KeybindingStateScript = preload("res://runtime/forge_v2/forge_v2_keybinding_state.gd")
 const ForgeV2ProfileShapeLibraryScript = preload("res://runtime/forge_v2/forge_v2_profile_shape_library.gd")
+const ForgeV2FreehandInputStabilizerScript = preload("res://runtime/forge_v2/forge_v2_freehand_input_stabilizer.gd")
+const ForgeV2SurfaceSplineResolverScript = preload(
+	"res://runtime/forge_v2/forge_v2_surface_spline_resolver.gd"
+)
 const PlayerToolProfileLibraryStateScript = preload("res://core/models/player_tool_profile_library_state.gd")
 const MetricScaleRulerControlScript = preload("res://runtime/ui/metric_scale_ruler_control.gd")
 const UiWindowLayerPolicyScript = preload("res://runtime/ui/ui_window_layer_policy.gd")
@@ -856,6 +860,10 @@ const MENU_ID_BASE := 1000
 const PROFILE_BUILDER_MENU_ID_BASE := 50000
 const WORKSPACE_ZOOM_STEP := 0.1
 const SPLINE_POINT_SCREEN_PICK_RADIUS_PIXELS := 26.0
+const DETAILING_SURFACE_FLATNESS_TOLERANCE_METERS := 0.0002
+const DETAILING_SURFACE_MAX_SUBDIVISION_DEPTH := 10
+const DETAILING_SURFACE_MAX_SAMPLES_PER_SPAN := 257
+const DETAILING_SOLUTION_REASON_NOT_READY := &"not_ready"
 const PROFILE_BUILDER_POPUP_SIZE := Vector2i(960, 560)
 const PROFILE_BUILDER_PREVIEW_SIZE := Vector2(420, 420)
 const PROFILE_CANVAS_CONTEXT_POPUP_WIDTH := 148
@@ -939,6 +947,11 @@ var is_refreshing_settings_ui: bool = false
 var is_refreshing_profile_builder_ui: bool = false
 var menu_action_lookup: Dictionary = {}
 var menu_next_id: int = MENU_ID_BASE
+var last_refreshed_active_tool_id: StringName = StringName()
+var v2_top_menu_switch_pending := false
+var material_palette_semantic_cache: Array = []
+var material_palette_semantic_cache_valid := false
+var body_stack_cached_ids: Array[StringName] = []
 var profile_builder_action_lookup: Dictionary = {}
 var profile_builder_next_id: int = PROFILE_BUILDER_MENU_ID_BASE
 var last_ui_fit_scale := 1.0
@@ -946,6 +959,13 @@ var workspace_frame_host: Control = null
 var workspace_drag_active := false
 var workspace_drag_pan_mode := false
 var workspace_brush_stroke_active := false
+var workspace_brush_input_stabilizer: RefCounted = null
+var workspace_brush_last_raw_screen_position := Vector2.ZERO
+var workspace_brush_last_valid_stabilized_screen_position := Vector2.ZERO
+var workspace_brush_has_last_valid_stabilized_screen_position := false
+var workspace_brush_locked_target_kind := StringName()
+var workspace_brush_previous_accumulated_input := true
+var workspace_brush_owns_accumulated_input := false
 var workspace_spline_point_drag_active := false
 var workspace_spline_drag_point_index := -1
 var workspace_spline_drag_plane_origin_local: Vector3 = Vector3.ZERO
@@ -1014,6 +1034,36 @@ func open_for(player, stage_controller: Node, bench_name: String, placement_spac
 	if active_player != null and active_player.has_method("set_ui_mode_enabled"):
 		active_player.call("set_ui_mode_enabled", true)
 
+func _process(_delta: float) -> void:
+	if (
+		not workspace_brush_stroke_active
+		or workspace_brush_input_stabilizer == null
+		or not workspace_brush_input_stabilizer.has_method("advance")
+	):
+		return
+	var catch_up_samples: PackedVector2Array = (
+		workspace_brush_input_stabilizer.call(
+			"advance",
+			int(Time.get_ticks_usec())
+		) as PackedVector2Array
+	)
+	_append_stabilized_workspace_brush_samples(catch_up_samples)
+
+func _notification(what: int) -> void:
+	if (
+		what == NOTIFICATION_APPLICATION_FOCUS_OUT
+		and (
+			workspace_brush_stroke_active
+			or workspace_spline_point_drag_active
+		)
+	):
+		call_deferred("_finish_workspace_input_after_focus_loss")
+
+func _finish_workspace_input_after_focus_loss() -> void:
+	if workspace_brush_stroke_active:
+		_finish_workspace_brush_stroke(Vector2.ZERO, false)
+	_finish_workspace_spline_point_drag()
+
 func close_ui() -> void:
 	if not is_open():
 		return
@@ -1027,20 +1077,23 @@ func close_ui() -> void:
 	_close_profile_builder_popup()
 	_close_profile_saved_profiles_popup()
 	_close_profile_name_popup(false)
+	if workspace_preview != null and workspace_preview.has_method("clear_stage_controller"):
+		if not bool(workspace_preview.call("clear_stage_controller")):
+			return
 	panel.visible = false
 	visible = false
 	if active_player != null and active_player.has_method("set_ui_mode_enabled"):
 		active_player.call("set_ui_mode_enabled", false)
 	_disconnect_stage_controller()
-	if workspace_preview != null and workspace_preview.has_method("clear_stage_controller"):
-		workspace_preview.call("clear_stage_controller")
 	workspace_drag_active = false
 	workspace_brush_stroke_active = false
+	_reset_workspace_brush_input_stabilizer()
 	workspace_spline_point_drag_active = false
 	workspace_spline_drag_point_index = -1
 	active_player = null
 	active_stage_controller = null
 	active_placement_space = null
+	last_refreshed_active_tool_id = StringName()
 	current_bench_name = ""
 	closed.emit()
 
@@ -1063,11 +1116,19 @@ func _ensure_top_action_bar() -> void:
 	build_menu_button = _ensure_action_menu_button("BuildMenuButton", "Build")
 	material_menu_button = _ensure_action_menu_button("MaterialMenuButton", "Material")
 	shape_menu_button = _ensure_action_menu_button("ShapeMenuButton", "Shape")
-	profiles_button = _ensure_action_button("ProfilesButton", "Profiles", Callable(self, "_open_profile_builder_popup"))
+	profiles_button = _ensure_action_button(
+		"ProfilesButton",
+		"Profiles",
+		Callable(self, "_on_profiles_top_level_pressed")
+	)
 	layers_menu_button = _ensure_action_menu_button("LayersMenuButton", "Layers")
 	view_menu_button = _ensure_action_menu_button("ViewMenuButton", "View")
 	status_menu_button = _ensure_action_menu_button("StatusMenuButton", "Status")
-	settings_button = _ensure_action_button("SettingsButton", "Settings", Callable(self, "_open_settings_popup"))
+	settings_button = _ensure_action_button(
+		"SettingsButton",
+		"Settings",
+		Callable(self, "_on_settings_top_level_pressed")
+	)
 	_configure_v2_increment_popup(shape_menu_button.get_popup())
 	action_status_label = action_host_row.get_node_or_null("ActionStatusLabel") as Label
 	if action_status_label == null:
@@ -1085,7 +1146,6 @@ func _ensure_top_action_bar() -> void:
 		close_button.custom_minimum_size = Vector2(92.0, 30.0)
 	if footer_row != null:
 		footer_row.visible = false
-	_rebuild_v2_action_menus()
 
 func _ensure_action_button(button_name: String, button_text: String, pressed_callback: Callable) -> Button:
 	var button := action_host_row.get_node_or_null(button_name) as Button
@@ -1111,7 +1171,139 @@ func _ensure_action_menu_button(button_name: String, button_text: String) -> Men
 	button.switch_on_hover = true
 	button.focus_mode = Control.FOCUS_NONE
 	_connect_v2_popup(button.get_popup())
+	var about_to_popup_callback := Callable(
+		self,
+		"_on_v2_top_menu_about_to_popup"
+	).bind(button)
+	if not button.about_to_popup.is_connected(about_to_popup_callback):
+		button.about_to_popup.connect(about_to_popup_callback)
 	return button
+
+func _on_profiles_top_level_pressed() -> void:
+	_close_v2_top_menu_popup_trees()
+	if is_instance_valid(settings_popup) and settings_popup.visible:
+		_close_settings_popup()
+	_open_profile_builder_popup()
+
+func _on_settings_top_level_pressed() -> void:
+	_close_v2_top_menu_popup_trees()
+	if is_instance_valid(profile_builder_popup) and profile_builder_popup.visible:
+		_close_profile_builder_popup()
+	_open_settings_popup()
+
+func _on_v2_top_menu_about_to_popup(requested_button: MenuButton) -> void:
+	_close_v2_top_menu_popup_trees(requested_button)
+	if is_instance_valid(profile_builder_popup) and profile_builder_popup.visible:
+		_close_profile_builder_popup()
+	if is_instance_valid(settings_popup) and settings_popup.visible:
+		_close_settings_popup()
+	_rebuild_v2_action_menus()
+
+func _close_v2_top_menu_popup_trees(
+	except_button: MenuButton = null
+) -> void:
+	for menu_button: MenuButton in _get_v2_top_menu_buttons():
+		if menu_button == except_button:
+			continue
+		_hide_v2_popup_tree(menu_button.get_popup())
+
+func _get_v2_top_menu_buttons() -> Array[MenuButton]:
+	var candidates: Array[MenuButton] = [
+		draft_menu_button,
+		build_menu_button,
+		material_menu_button,
+		shape_menu_button,
+		layers_menu_button,
+		view_menu_button,
+		status_menu_button,
+	]
+	var buttons: Array[MenuButton] = []
+	for menu_button: MenuButton in candidates:
+		if not is_instance_valid(menu_button):
+			continue
+		buttons.append(menu_button)
+	return buttons
+
+func _on_v2_top_popup_window_input(
+	event: InputEvent,
+	source_popup: PopupMenu
+) -> void:
+	if (
+		v2_top_menu_switch_pending
+		or not event is InputEventMouseButton
+	):
+		return
+	var mouse_event := event as InputEventMouseButton
+	if (
+		not mouse_event.pressed
+		or mouse_event.button_index != MOUSE_BUTTON_LEFT
+	):
+		return
+	var source_button := _find_v2_top_menu_button_for_popup(source_popup)
+	var target_control := _find_v2_top_level_control_at_position(
+		mouse_event.global_position
+	)
+	if (
+		not is_instance_valid(target_control)
+		or target_control == source_button
+	):
+		return
+	v2_top_menu_switch_pending = true
+	_close_v2_top_menu_popup_trees()
+	if is_instance_valid(source_popup):
+		source_popup.set_input_as_handled()
+	call_deferred("_activate_v2_top_level_control", target_control)
+
+func _find_v2_top_menu_button_for_popup(
+	popup: PopupMenu
+) -> MenuButton:
+	if not is_instance_valid(popup):
+		return null
+	for menu_button: MenuButton in _get_v2_top_menu_buttons():
+		var root_popup := menu_button.get_popup()
+		if popup == root_popup or root_popup.is_ancestor_of(popup):
+			return menu_button
+	return null
+
+func _find_v2_top_level_control_at_position(
+	viewport_position: Vector2
+) -> Control:
+	var controls: Array[Control] = []
+	for menu_button: MenuButton in _get_v2_top_menu_buttons():
+		controls.append(menu_button)
+	if is_instance_valid(profiles_button):
+		controls.append(profiles_button)
+	if is_instance_valid(settings_button):
+		controls.append(settings_button)
+	for control: Control in controls:
+		if control.visible and control.get_global_rect().has_point(
+			viewport_position
+		):
+			return control
+	return null
+
+func _activate_v2_top_level_control(target_control: Control) -> void:
+	v2_top_menu_switch_pending = false
+	if not is_instance_valid(target_control) or not is_open():
+		return
+	if target_control is MenuButton:
+		var target_menu_button := target_control as MenuButton
+		if not target_menu_button.get_popup().visible:
+			target_menu_button.show_popup()
+		return
+	if target_control == profiles_button:
+		_on_profiles_top_level_pressed()
+	elif target_control == settings_button:
+		_on_settings_top_level_pressed()
+
+func _hide_v2_popup_tree(popup: PopupMenu) -> void:
+	if not is_instance_valid(popup):
+		return
+	for child: Node in popup.get_children():
+		if child is PopupMenu:
+			_hide_v2_popup_tree(child as PopupMenu)
+	if popup.visible:
+		popup.hide()
 
 func _apply_margin(container: MarginContainer, margin_px: int) -> void:
 	if container == null:
@@ -1272,6 +1464,12 @@ func _connect_v2_popup(popup: PopupMenu) -> void:
 	_apply_v2_popup_theme(popup)
 	if not popup.id_pressed.is_connected(_on_v2_menu_id_pressed):
 		popup.id_pressed.connect(_on_v2_menu_id_pressed)
+	var window_input_callback := Callable(
+		self,
+		"_on_v2_top_popup_window_input"
+	).bind(popup)
+	if not popup.window_input.is_connected(window_input_callback):
+		popup.window_input.connect(window_input_callback)
 
 func _connect_profile_builder_popup_menu(popup: PopupMenu) -> void:
 	if popup == null:
@@ -2963,32 +3161,35 @@ func _refresh_profile_builder_popup() -> void:
 		profile_handle_corner_radius_slider.modulate = Color(1.0, 1.0, 1.0, 1.0) if corner_radius_editable else Color(0.55, 0.57, 0.58, 0.75)
 		profile_handle_corner_radius_slider.set_value_no_signal(clampf(corner_radius_value, 0.0, maxf(corner_radius_max, 0.0)))
 	if profile_save_button != null:
-		var basic_clearance_valid := bool(
+		var anchor_clearance_valid := bool(
 			profile_builder_settings.get("anchor_clearance_valid", true)
 		)
-		var basic_clearance_required := (
+		var anchor_clearance_required := (
 			StringName(profile_builder_settings.get(
 				"family",
 				StringName()
 			))
-			== ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_BASIC
+			in [
+				ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_BASIC,
+				ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_HANDLE,
+			]
 		)
 		var profile_can_save := (
 			profile_builder_active
 			and (
-				not basic_clearance_required
-				or basic_clearance_valid
+				not anchor_clearance_required
+				or anchor_clearance_valid
 			)
 		)
 		profile_save_button.disabled = not profile_can_save
 		profile_save_button.text = (
 			"Save Profile"
-			if profile_can_save or not basic_clearance_required
+			if profile_can_save or not anchor_clearance_required
 			else "Fix 0.5 mm Anchor Clearance"
 		)
 		profile_save_button.tooltip_text = (
 			""
-			if profile_can_save or not basic_clearance_required
+			if profile_can_save or not anchor_clearance_required
 			else (
 				"The resolved shape has no valid region for the required "
 				+ "0.5 mm anchor clearance."
@@ -3647,7 +3848,7 @@ func _rebuild_v2_material_menu(summary: Dictionary) -> void:
 	var material_submenu: PopupMenu = _prepare_v2_submenu(popup, "MaterialVariantSubmenu")
 	_add_v2_option_items(
 		material_submenu,
-		_get_v2_controller_options(&"get_material_palette_options"),
+		summary.get("material_palette_entries", []) as Array,
 		&"material",
 		summary.get("active_material", StringName())
 	)
@@ -3695,7 +3896,11 @@ func _rebuild_v2_shape_menu(summary: Dictionary) -> void:
 			active_stage_controller == null or not bool(summary.get("can_generate_profile_extrusion", false))
 		)
 		popup.add_separator()
-	elif active_tool_id == &"tool_volume_stroke" or active_tool_id == &"tool_spline_line":
+	elif (
+		active_tool_id == &"tool_volume_stroke"
+		or active_tool_id == &"tool_spline_line"
+		or active_tool_id == &"tool_detailing_brush"
+	):
 		_add_v2_disabled_line(
 			popup,
 			"Shape: %s" % String(summary.get(
@@ -3721,40 +3926,93 @@ func _rebuild_v2_shape_menu(summary: Dictionary) -> void:
 		)
 		popup.add_submenu_item("2D Profiles", String(tool_profiles_submenu.name))
 		popup.add_separator()
-	_add_v2_disabled_line(popup, String(summary.get("spline_line_status_label", "Spline: no points")))
+	var detailing_summary: Dictionary = summary.get(
+		"detailing_brush",
+		{}
+	) as Dictionary
+	var detailing_brush_active := active_tool_id == &"tool_detailing_brush"
+	var spline_status_label := String(summary.get(
+		"spline_line_status_label",
+		"Spline: no points"
+	))
 	var spline_point_count := int(summary.get("spline_line_point_count", 0))
 	var spline_finished := bool(summary.get("spline_line_finished", false))
-	var finish_spline_label := "Finish Handle Path" if active_tool_id == &"tool_handles" else "Finish Spline Line"
+	if detailing_brush_active:
+		spline_status_label = String(detailing_summary.get(
+			"status_label",
+			"Detailing Brush: select a surface"
+		))
+		var detail_controls: PackedVector3Array = detailing_summary.get(
+			"control_points",
+			PackedVector3Array()
+		) as PackedVector3Array
+		spline_point_count = detail_controls.size()
+		spline_finished = bool(detailing_summary.get("finished", false))
+	_add_v2_disabled_line(popup, spline_status_label)
+	var finish_spline_label := "Finish Spline Line"
+	if active_tool_id == &"tool_handles":
+		finish_spline_label = "Finish Handle Path"
+	elif detailing_brush_active:
+		finish_spline_label = "Finish Detailing Brush Path"
+	var finish_spline_disabled := (
+		active_stage_controller == null
+		or spline_point_count < 2
+		or spline_finished
+	)
+	if detailing_brush_active:
+		finish_spline_disabled = (
+			finish_spline_disabled
+			or not bool(detailing_summary.get("can_generate", false))
+		)
 	_add_v2_menu_action(
 		popup,
 		finish_spline_label,
 		&"spline_finish",
 		null,
-		active_stage_controller == null or spline_point_count < 2 or spline_finished
+		finish_spline_disabled
 	)
 	_add_v2_menu_action(
 		popup,
-		"Cancel Spline Line",
+		(
+			"Cancel Detailing Brush"
+			if detailing_brush_active
+			else "Cancel Spline Line"
+		),
 		&"spline_cancel",
 		null,
 		active_stage_controller == null or spline_point_count <= 0
 	)
-	var csg_noodle_enabled := bool(summary.get("spline_line_csg_noodle_enabled", false))
-	_add_v2_disabled_line(popup, String(summary.get("spline_line_csg_noodle_status_label", "CSG noodle: needs 2 points")))
-	_add_v2_menu_action(
-		popup,
-		"Generate CSG Noodle",
-		&"spline_generate_csg_noodle",
-		null,
-		active_stage_controller == null or not bool(summary.get("can_generate_spline_line_csg_noodle", false))
-	)
-	_add_v2_menu_action(
-		popup,
-		"Clear CSG Noodle",
-		&"spline_clear_csg_noodle",
-		null,
-		active_stage_controller == null or not csg_noodle_enabled
-	)
+	if detailing_brush_active:
+		_add_v2_menu_action(
+			popup,
+			"Generate Detailing Brush",
+			&"detailing_generate",
+			null,
+			(
+				active_stage_controller == null
+				or not bool(detailing_summary.get("can_generate", false))
+			)
+		)
+	else:
+		var csg_noodle_enabled := bool(summary.get("spline_line_csg_noodle_enabled", false))
+		_add_v2_disabled_line(popup, String(summary.get(
+			"spline_line_csg_noodle_status_label",
+			"CSG noodle: needs 2 points"
+		)))
+		_add_v2_menu_action(
+			popup,
+			"Generate CSG Noodle",
+			&"spline_generate_csg_noodle",
+			null,
+			active_stage_controller == null or not bool(summary.get("can_generate_spline_line_csg_noodle", false))
+		)
+		_add_v2_menu_action(
+			popup,
+			"Clear CSG Noodle",
+			&"spline_clear_csg_noodle",
+			null,
+			active_stage_controller == null or not csg_noodle_enabled
+		)
 	popup.add_separator()
 	_add_v2_disabled_line(popup, "Primitive: %s" % String(summary.get("active_primitive_label", "None")))
 	var primitive_submenu: PopupMenu = _prepare_v2_submenu(popup, "PrimitiveSubmenu")
@@ -3831,7 +4089,7 @@ func _rebuild_v2_layers_menu(summary: Dictionary) -> void:
 	var body_submenu: PopupMenu = _prepare_v2_submenu(popup, "BodyStackSubmenu")
 	_add_v2_option_items(
 		body_submenu,
-		_get_v2_controller_options(&"get_material_body_stack_options"),
+		summary.get("material_body_stack_entries", []) as Array,
 		&"select_body",
 		summary.get("selected_material_body_id", StringName())
 	)
@@ -3937,7 +4195,9 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 				editor_loaded_saved_profile_id = StringName()
 				active_stage_controller.set_active_tool_id(next_tool_id)
 		&"basic_saved_profile":
-			_select_saved_basic_profile_for_shape(StringName(action_value))
+			if _select_saved_basic_profile_for_shape(StringName(action_value)):
+				_hide_v2_popup_tree(shape_menu_button.get_popup())
+				call_deferred("_restore_v2_workspace_input_after_top_menu")
 		&"handle_saved_profile":
 			_load_saved_tool_profile_into_editor(StringName(action_value))
 		&"spline_finish":
@@ -3946,6 +4206,8 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 			_cancel_active_spline_line()
 		&"spline_generate_csg_noodle":
 			_generate_active_spline_csg_noodle()
+		&"detailing_generate":
+			_generate_active_detailing_brush()
 		&"profile_generate_extrusion":
 			_generate_active_profile_extrusion()
 		&"spline_clear_csg_noodle":
@@ -3979,8 +4241,6 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 			close_ui()
 	if keep_shape_popup_open:
 		_refresh_v2_shape_menu_popup_contents()
-	else:
-		_rebuild_v2_action_menus()
 
 func _on_profile_builder_menu_id_pressed(menu_id: int) -> void:
 	var menu_entry: Dictionary = profile_builder_action_lookup.get(menu_id, {}) as Dictionary
@@ -4020,6 +4280,13 @@ func _is_v2_shape_repeat_action(action_id: StringName) -> bool:
 		or action_id == &"radius_up"
 	)
 
+func _restore_v2_workspace_input_after_top_menu() -> void:
+	if not is_open() or not is_instance_valid(workspace_view_container):
+		return
+	var root_window := get_window()
+	if is_instance_valid(root_window):
+		root_window.grab_focus()
+
 func _refresh_v2_shape_menu_popup_contents() -> void:
 	if not is_instance_valid(shape_menu_button):
 		return
@@ -4031,6 +4298,8 @@ func _refresh_v2_shape_menu_popup_contents_if_available() -> void:
 	var popup: PopupMenu = shape_menu_button.get_popup()
 	var popup_visible: bool = popup.visible
 	var summary: Dictionary = active_stage_controller.get_status_summary() if active_stage_controller != null else {}
+	menu_action_lookup.clear()
+	menu_next_id = MENU_ID_BASE
 	_rebuild_v2_shape_menu(summary)
 	_sync_v2_action_status(summary)
 	if popup_visible and not popup.visible:
@@ -4070,16 +4339,37 @@ func _cancel_active_spline_line() -> void:
 	active_stage_controller.call("cancel_spline_line")
 
 func _generate_active_spline_csg_noodle() -> void:
+	if _is_v2_detailing_brush_active():
+		_generate_active_detailing_brush()
+		return
 	if active_stage_controller == null or not active_stage_controller.has_method("generate_spline_line_csg_noodle"):
 		return
 	_finish_workspace_spline_point_drag()
-	active_stage_controller.call("generate_spline_line_csg_noodle")
+	if bool(active_stage_controller.call("generate_spline_line_csg_noodle")):
+		_set_v2_action_status_text(
+			"Noodle generated and kept pending; use Commit Layer when ready."
+		)
+
+func _generate_active_detailing_brush() -> void:
+	if (
+		active_stage_controller == null
+		or not active_stage_controller.has_method("generate_detailing_brush")
+	):
+		return
+	_finish_workspace_spline_point_drag()
+	if bool(active_stage_controller.call("generate_detailing_brush")):
+		_set_v2_action_status_text(
+			"Detailing stroke generated and kept pending; use Commit Layer when ready."
+		)
 
 func _generate_active_profile_extrusion() -> void:
 	if active_stage_controller == null or not active_stage_controller.has_method("generate_profile_extrusion_from_spline"):
 		return
 	_finish_workspace_spline_point_drag()
-	active_stage_controller.call("generate_profile_extrusion_from_spline")
+	if bool(active_stage_controller.call("generate_profile_extrusion_from_spline")):
+		_set_v2_action_status_text(
+			"Handle generated and kept pending; use Commit Layer when ready."
+		)
 
 func _clear_active_spline_csg_noodle() -> void:
 	if active_stage_controller == null or not active_stage_controller.has_method("clear_spline_line_csg_noodle"):
@@ -4137,11 +4427,26 @@ func _set_v2_action_status_text(status_text: String) -> void:
 		action_status_label.text = status_text
 
 func _is_v2_path_point_tool_active() -> bool:
-	if active_stage_controller == null or not active_stage_controller.has_method("get_status_summary"):
-		return false
-	var summary: Dictionary = active_stage_controller.call("get_status_summary") as Dictionary
-	var active_tool_id := StringName(summary.get("active_tool", StringName()))
-	return active_tool_id == &"tool_spline_line" or active_tool_id == &"tool_handles"
+	var active_tool_id := _get_active_v2_tool_id()
+	return (
+		active_tool_id == &"tool_spline_line"
+		or active_tool_id == &"tool_handles"
+		or active_tool_id == &"tool_detailing_brush"
+	)
+
+func _is_v2_detailing_brush_active() -> bool:
+	return _get_active_v2_tool_id() == &"tool_detailing_brush"
+
+func _get_active_v2_tool_id() -> StringName:
+	if (
+		active_stage_controller == null
+		or not active_stage_controller.has_method("get_status_summary")
+	):
+		return StringName()
+	var summary: Dictionary = active_stage_controller.call(
+		"get_status_summary"
+	) as Dictionary
+	return StringName(summary.get("active_tool", StringName()))
 
 func _ensure_fullscreen_workspace_layout() -> void:
 	if body_margin == null or body_scroll == null or body_vbox == null or workspace_panel == null:
@@ -4550,9 +4855,10 @@ func _configure_option_button(option_button: OptionButton, options: Array[Dictio
 
 func _refresh_from_controller() -> void:
 	if active_stage_controller == null:
+		last_refreshed_active_tool_id = StringName()
 		status_label.text = "No V2 stage controller is attached."
 		summary_label.text = ""
-		_rebuild_v2_action_menus()
+		_sync_v2_action_status({})
 		if is_instance_valid(settings_popup) and settings_popup.visible:
 			_refresh_settings_popup()
 		if is_instance_valid(profile_builder_popup) and profile_builder_popup.visible:
@@ -4560,12 +4866,23 @@ func _refresh_from_controller() -> void:
 		return
 	is_refreshing_ui = true
 	var summary: Dictionary = active_stage_controller.get_status_summary()
+	var active_tool_id := StringName(summary.get(
+		"active_tool",
+		StringName()
+	))
+	var active_tool_changed := (
+		last_refreshed_active_tool_id != StringName()
+		and last_refreshed_active_tool_id != active_tool_id
+	)
+	last_refreshed_active_tool_id = active_tool_id
 	_configure_option_button(builder_component_option, active_stage_controller.get_builder_component_options())
 	_rebuild_material_palette(
-		active_stage_controller.get_material_palette_options(),
+		summary.get("material_palette_entries", []) as Array,
 		StringName(summary.get("active_material", StringName()))
 	)
-	_configure_body_stack_options(active_stage_controller.get_material_body_stack_options())
+	_configure_body_stack_options(
+		summary.get("material_body_stack_entries", []) as Array
+	)
 	_select_option_by_metadata(builder_path_option, _resolve_builder_path_from_state())
 	_select_option_by_metadata(builder_component_option, summary.get("builder_component", StringName()))
 	_select_option_by_metadata(operation_option, summary.get("operation", StringName()))
@@ -4587,7 +4904,6 @@ func _refresh_from_controller() -> void:
 		String(summary.get("operation_label", "")),
 		String(summary.get("placement_policy_label", "")),
 	]
-	var active_tool_id := StringName(summary.get("active_tool", StringName()))
 	var primitive_size_controls_enabled := bool(summary.get(
 		"primitive_size_controls_enabled",
 		true
@@ -4597,7 +4913,23 @@ func _refresh_from_controller() -> void:
 	var workspace_status_parts: Array[String] = [String(summary.get("active_tool_label", ""))]
 	if active_tool_id == &"tool_spline_line":
 		workspace_status_parts.append(String(summary.get("spline_line_status_label", "Spline: no points")))
-		workspace_status_parts.append(String(summary.get("spline_line_csg_noodle_status_label", "CSG noodle: needs 2 points")))
+		workspace_status_parts.append(String(summary.get(
+			"spline_line_csg_noodle_status_label",
+			"CSG noodle: needs 2 points"
+		)))
+		workspace_status_parts.append(String(summary.get(
+			"active_basic_shape_size_label",
+			summary.get("brush_radius_label", "")
+		)))
+	elif active_tool_id == &"tool_detailing_brush":
+		var detailing_summary: Dictionary = summary.get(
+			"detailing_brush",
+			{}
+		) as Dictionary
+		workspace_status_parts.append(String(detailing_summary.get(
+			"status_label",
+			"Detailing Brush: select a surface"
+		)))
 		workspace_status_parts.append(String(summary.get(
 			"active_basic_shape_size_label",
 			summary.get("brush_radius_label", "")
@@ -4649,7 +4981,10 @@ func _refresh_from_controller() -> void:
 		str(int(summary.get("seed_material_body_count", 0))),
 		str(int(summary.get("pending_material_body_count", 0))),
 		String(summary.get("spline_line_status_label", "Spline: no points")),
-		String(summary.get("spline_line_csg_noodle_status_label", "CSG noodle: needs 2 points")),
+		String(summary.get(
+			"spline_line_csg_noodle_status_label",
+			"CSG noodle: needs 2 points"
+		)),
 		String(summary.get("profile_extrusion_status_label", "Handle: needs 3 points")),
 		str(int(summary.get("committed_layer_count", 0))),
 		str(int(summary.get("undone_layer_count", 0))),
@@ -4660,29 +4995,73 @@ func _refresh_from_controller() -> void:
 		String(platform_contract.get("validation_note", "")),
 	]
 	is_refreshing_ui = false
-	_rebuild_v2_action_menus()
+	_sync_v2_action_status(summary)
 	if is_instance_valid(settings_popup) and settings_popup.visible:
 		_refresh_settings_popup()
 	if is_instance_valid(profile_builder_popup) and profile_builder_popup.visible:
 		_refresh_profile_builder_popup()
+	if (
+		active_tool_changed
+		and is_instance_valid(shape_menu_button)
+		and shape_menu_button.get_popup().visible
+	):
+		_refresh_v2_shape_menu_popup_contents()
 
-func _configure_body_stack_options(options: Array[Dictionary]) -> void:
-	body_stack_option.clear()
+func _configure_body_stack_options(options: Array) -> void:
 	if options.is_empty():
-		body_stack_option.add_item("No material bodies")
-		body_stack_option.set_item_metadata(0, StringName())
+		if (
+			body_stack_option.get_item_count() != 1
+			or body_stack_option.get_item_metadata(0) != StringName()
+		):
+			body_stack_option.clear()
+			body_stack_option.add_item("No material bodies")
+			body_stack_option.set_item_metadata(0, StringName())
+		elif body_stack_option.get_item_text(0) != "No material bodies":
+			body_stack_option.set_item_text(0, "No material bodies")
+		body_stack_cached_ids.clear()
 		body_stack_option.disabled = true
 		return
 	body_stack_option.disabled = false
-	for option: Dictionary in options:
-		var item_index: int = body_stack_option.get_item_count()
+	var next_ids: Array[StringName] = []
+	for option_value: Variant in options:
+		var option: Dictionary = option_value as Dictionary
+		next_ids.append(StringName(option.get("id", StringName())))
+	var shared_prefix_count := 0
+	var comparable_count := mini(body_stack_cached_ids.size(), next_ids.size())
+	while (
+		shared_prefix_count < comparable_count
+		and body_stack_cached_ids[shared_prefix_count] == next_ids[shared_prefix_count]
+	):
+		shared_prefix_count += 1
+	while body_stack_option.get_item_count() > shared_prefix_count:
+		body_stack_option.remove_item(body_stack_option.get_item_count() - 1)
+	for item_index in range(shared_prefix_count):
+		var option: Dictionary = options[item_index] as Dictionary
+		var next_label := String(option.get("label", ""))
+		if body_stack_option.get_item_text(item_index) != next_label:
+			body_stack_option.set_item_text(item_index, next_label)
+	for item_index in range(shared_prefix_count, options.size()):
+		var option: Dictionary = options[item_index] as Dictionary
 		body_stack_option.add_item(String(option.get("label", "")))
-		body_stack_option.set_item_metadata(item_index, option.get("id", StringName()))
+		body_stack_option.set_item_metadata(item_index, next_ids[item_index])
+	body_stack_cached_ids = next_ids
 
-func _rebuild_material_palette(options: Array[Dictionary], active_material_id: StringName) -> void:
+func _rebuild_material_palette(options: Array, active_material_id: StringName) -> void:
+	var next_semantic_cache := _build_material_palette_semantic_cache(
+		options,
+		active_material_id
+	)
+	if (
+		material_palette_semantic_cache_valid
+		and material_palette_semantic_cache == next_semantic_cache
+	):
+		return
+	material_palette_semantic_cache = next_semantic_cache
+	material_palette_semantic_cache_valid = true
 	for child: Node in material_palette_grid.get_children():
 		child.queue_free()
-	for option: Dictionary in options:
+	for option_value: Variant in options:
+		var option: Dictionary = option_value as Dictionary
 		var material_id: StringName = StringName(option.get("id", StringName()))
 		if material_id == StringName():
 			continue
@@ -4704,6 +5083,23 @@ func _rebuild_material_palette(options: Array[Dictionary], active_material_id: S
 		_apply_material_button_theme(material_button, material_color, is_active)
 		material_button.pressed.connect(_on_material_palette_pressed.bind(material_id))
 		material_palette_grid.add_child(material_button)
+
+func _build_material_palette_semantic_cache(
+	options: Array,
+	active_material_id: StringName
+) -> Array:
+	var semantic_cache: Array = [active_material_id]
+	for option_value: Variant in options:
+		var option: Dictionary = option_value as Dictionary
+		var material_id := StringName(option.get("id", StringName()))
+		if material_id == StringName():
+			continue
+		semantic_cache.append([
+			material_id,
+			String(option.get("label", String(material_id))),
+			option.get("albedo_color", Color(0.8, 0.82, 0.84, 1.0)) as Color,
+		])
+	return semantic_cache
 
 func _apply_material_button_theme(button: Button, material_color: Color, is_active: bool) -> void:
 	var icon_color: Color = material_color.lightened(0.22 if is_active else 0.04)
@@ -4815,7 +5211,14 @@ func _on_add_empty_stroke_pressed() -> void:
 func _on_commit_pending_pressed() -> void:
 	if active_stage_controller == null:
 		return
-	active_stage_controller.commit_pending_material_bodies_as_layer()
+	var committed_layer: Resource = (
+		active_stage_controller.commit_pending_material_bodies_as_layer()
+		as Resource
+	)
+	if committed_layer != null:
+		_set_v2_action_status_text("Committed pending material.")
+		return
+	_show_last_material_body_finish_feedback()
 
 func _on_undo_layer_pressed() -> void:
 	if active_stage_controller == null:
@@ -4905,6 +5308,10 @@ func _handle_workspace_mouse_button(mouse_button_event: InputEventMouseButton) -
 			_begin_workspace_brush_stroke(mouse_button_event.position)
 	else:
 		if workspace_spline_point_drag_active:
+			if _is_v2_detailing_brush_active():
+				_update_workspace_spline_point_drag(
+					mouse_button_event.position
+				)
 			_finish_workspace_spline_point_drag()
 		else:
 			_finish_workspace_brush_stroke(mouse_button_event.position)
@@ -4937,6 +5344,9 @@ func _on_workspace_view_mouse_exited() -> void:
 		active_stage_controller.call("clear_placement_cursor")
 
 func _begin_workspace_spline_input(screen_position: Vector2) -> void:
+	if _is_v2_detailing_brush_active():
+		_begin_workspace_detailing_brush_input(screen_position)
+		return
 	var nearest_point_index := _find_nearest_spline_point_at_screen(screen_position)
 	if nearest_point_index >= 0:
 		_begin_workspace_spline_point_drag(nearest_point_index, Vector3.ZERO)
@@ -4957,7 +5367,29 @@ func _begin_workspace_spline_input(screen_position: Vector2) -> void:
 			local_surface_normal
 		)
 
+func _begin_workspace_detailing_brush_input(
+	screen_position: Vector2
+) -> void:
+	var nearest_point_index := _find_nearest_spline_point_at_screen(
+		screen_position
+	)
+	if nearest_point_index >= 0:
+		_begin_workspace_spline_point_drag(
+			nearest_point_index,
+			Vector3.ZERO
+		)
+		_update_workspace_spline_point_drag(screen_position)
+		return
+	var detailing_summary := _get_detailing_brush_summary()
+	if bool(detailing_summary.get("finished", false)):
+		return
+	_apply_detailing_brush_control_candidate(screen_position, -1)
+
 func _begin_workspace_spline_point_drag(point_index: int, fallback_local_position: Vector3) -> void:
+	if _is_v2_detailing_brush_active():
+		workspace_spline_point_drag_active = true
+		workspace_spline_drag_point_index = point_index
+		return
 	if workspace_preview == null or not workspace_preview.has_method("build_camera_facing_drag_plane"):
 		return
 	var point_origin: Vector3 = _get_spline_point_local_position(point_index, fallback_local_position)
@@ -4973,6 +5405,12 @@ func _begin_workspace_spline_point_drag(point_index: int, fallback_local_positio
 
 func _update_workspace_spline_point_drag(screen_position: Vector2) -> void:
 	if not workspace_spline_point_drag_active:
+		return
+	if _is_v2_detailing_brush_active():
+		_apply_detailing_brush_control_candidate(
+			screen_position,
+			workspace_spline_drag_point_index
+		)
 		return
 	if workspace_preview == null or not workspace_preview.has_method("screen_to_workspace_local_on_drag_plane"):
 		return
@@ -5015,8 +5453,248 @@ func _get_spline_points() -> PackedVector3Array:
 	if active_stage_controller == null or not active_stage_controller.has_method("get_status_summary"):
 		return PackedVector3Array()
 	var summary: Dictionary = active_stage_controller.call("get_status_summary") as Dictionary
+	if StringName(summary.get("active_tool", StringName())) == &"tool_detailing_brush":
+		var detailing_summary: Dictionary = summary.get(
+			"detailing_brush",
+			{}
+		) as Dictionary
+		return detailing_summary.get(
+			"control_points",
+			PackedVector3Array()
+		) as PackedVector3Array
 	var spline_summary: Dictionary = summary.get("spline_line", {}) as Dictionary
 	return spline_summary.get("points", PackedVector3Array())
+
+func _get_detailing_brush_summary() -> Dictionary:
+	if (
+		active_stage_controller == null
+		or not active_stage_controller.has_method("get_status_summary")
+	):
+		return {}
+	var summary: Dictionary = active_stage_controller.call(
+		"get_status_summary"
+	) as Dictionary
+	return summary.get("detailing_brush", {}) as Dictionary
+
+func _apply_detailing_brush_control_candidate(
+	screen_position: Vector2,
+	point_index: int
+) -> bool:
+	if (
+		active_stage_controller == null
+		or not active_stage_controller.has_method(
+			"replace_detailing_brush_path_solution"
+		)
+	):
+		return false
+	_ensure_workspace_preview()
+	if (
+		workspace_preview == null
+		or not workspace_preview.has_method("resolve_strict_surface_target")
+	):
+		return false
+	var detailing_summary := _get_detailing_brush_summary()
+	var control_points: PackedVector3Array = detailing_summary.get(
+		"control_points",
+		PackedVector3Array()
+	) as PackedVector3Array
+	var control_normals: PackedVector3Array = detailing_summary.get(
+		"control_surface_normals",
+		PackedVector3Array()
+	) as PackedVector3Array
+	var control_contact_directions: PackedVector3Array = detailing_summary.get(
+		"control_contact_directions",
+		PackedVector3Array()
+	) as PackedVector3Array
+	if control_normals.size() != control_points.size():
+		return false
+	if control_contact_directions.size() != control_points.size():
+		return false
+	if point_index >= control_points.size():
+		return false
+	var locked_target_kind := StringName(detailing_summary.get(
+		"locked_target_kind",
+		StringName()
+	))
+	var locked_target_id := StringName(detailing_summary.get(
+		"locked_target_id",
+		StringName()
+	))
+	if not control_points.is_empty() and (
+		locked_target_kind == StringName()
+		or locked_target_id == StringName()
+	):
+		return false
+	var hit: Dictionary = workspace_preview.call(
+		"resolve_strict_surface_target",
+		screen_position,
+		locked_target_kind,
+		locked_target_id
+	) as Dictionary
+	if not bool(hit.get("valid", false)):
+		return false
+	var hit_target_kind := StringName(hit.get(
+		"target_kind",
+		StringName()
+	))
+	var hit_target_id := StringName(hit.get(
+		"surface_target_id",
+		StringName()
+	))
+	if hit_target_kind == StringName() or hit_target_id == StringName():
+		return false
+	if control_points.is_empty():
+		locked_target_kind = hit_target_kind
+		locked_target_id = hit_target_id
+	elif (
+		hit_target_kind != locked_target_kind
+		or hit_target_id != locked_target_id
+	):
+		return false
+	var hit_position_variant: Variant = hit.get("local_position", null)
+	var hit_normal_variant: Variant = hit.get("local_normal", null)
+	var hit_contact_direction_variant: Variant = hit.get(
+		"local_contact_direction",
+		null
+	)
+	if (
+		not hit_position_variant is Vector3
+		or not hit_normal_variant is Vector3
+		or not hit_contact_direction_variant is Vector3
+	):
+		return false
+	var hit_position := hit_position_variant as Vector3
+	var hit_normal := hit_normal_variant as Vector3
+	var hit_contact_direction := hit_contact_direction_variant as Vector3
+	if hit_normal.length_squared() <= 0.000000000001:
+		return false
+	if hit_contact_direction.length_squared() <= 0.000000000001:
+		return false
+	hit_normal = hit_normal.normalized()
+	hit_contact_direction = hit_contact_direction.normalized()
+	var next_control_points := control_points.duplicate()
+	var next_control_normals := control_normals.duplicate()
+	var next_control_contact_directions := control_contact_directions.duplicate()
+	var selected_point_index := point_index
+	if point_index < 0:
+		next_control_points.append(hit_position)
+		next_control_normals.append(hit_normal)
+		next_control_contact_directions.append(hit_contact_direction)
+		selected_point_index = next_control_points.size() - 1
+	else:
+		next_control_points[point_index] = hit_position
+		next_control_normals[point_index] = hit_normal
+		next_control_contact_directions[point_index] = hit_contact_direction
+	return _solve_and_store_detailing_brush_candidate(
+		next_control_points,
+		next_control_normals,
+		next_control_contact_directions,
+		locked_target_kind,
+		locked_target_id,
+		selected_point_index
+	)
+
+func _solve_and_store_detailing_brush_candidate(
+	control_points: PackedVector3Array,
+	control_normals: PackedVector3Array,
+	control_contact_directions: PackedVector3Array,
+	locked_target_kind: StringName,
+	locked_target_id: StringName,
+	selected_point_index: int
+) -> bool:
+	if (
+		active_stage_controller == null
+		or workspace_preview == null
+		or not active_stage_controller.has_method(
+			"replace_detailing_brush_path_solution"
+		)
+		or not workspace_preview.has_method(
+			"project_workspace_local_to_screen"
+		)
+		or not workspace_preview.has_method("resolve_strict_surface_target")
+	):
+		return false
+	var solution: Dictionary = ForgeV2SurfaceSplineResolverScript.solve(
+		control_points,
+		control_normals,
+		locked_target_kind,
+		locked_target_id,
+		Callable(workspace_preview, "project_workspace_local_to_screen"),
+		Callable(workspace_preview, "resolve_strict_surface_target"),
+		_get_detailing_brush_sample_spacing_meters(),
+		DETAILING_SURFACE_FLATNESS_TOLERANCE_METERS,
+		DETAILING_SURFACE_MAX_SUBDIVISION_DEPTH,
+		DETAILING_SURFACE_MAX_SAMPLES_PER_SPAN,
+		control_contact_directions
+	)
+	var solution_valid := (
+		control_points.size() >= 2
+		and bool(solution.get("valid", false))
+	)
+	var solution_reason := StringName(solution.get(
+		"reason",
+		DETAILING_SOLUTION_REASON_NOT_READY
+	))
+	if control_points.size() < 2:
+		solution_reason = DETAILING_SOLUTION_REASON_NOT_READY
+	return bool(active_stage_controller.call(
+		"replace_detailing_brush_path_solution",
+		control_points,
+		control_normals,
+		locked_target_kind,
+		locked_target_id,
+		solution.get("points", PackedVector3Array()) as PackedVector3Array,
+		solution.get(
+			"surface_normals",
+			PackedVector3Array()
+		) as PackedVector3Array,
+		solution.get("span_offsets", PackedInt32Array()) as PackedInt32Array,
+		solution.get("span_validity", []) as Array,
+		solution.get("span_reasons", []) as Array,
+		solution_valid,
+		solution_reason,
+		selected_point_index,
+		control_contact_directions,
+		solution.get(
+			"contact_directions",
+			PackedVector3Array()
+		) as PackedVector3Array
+	))
+
+func _get_detailing_brush_sample_spacing_meters() -> float:
+	var fallback_spacing := float(
+		ForgeV2SurfaceSplineResolverScript.DEFAULT_MAX_SPACING_METERS
+	)
+	if active_stage_controller == null:
+		return fallback_spacing
+	var sample_radius := fallback_spacing
+	if active_stage_controller.has_method(
+		"get_active_deposition_sample_radius_meters"
+	):
+		sample_radius = maxf(float(active_stage_controller.call(
+			"get_active_deposition_sample_radius_meters"
+		)), 0.001)
+	var workspace_contract: Variant = null
+	if active_stage_controller.has_method("get_workspace_contract"):
+		workspace_contract = active_stage_controller.call(
+			"get_workspace_contract"
+		)
+	elif active_stage_controller.has_method("ensure_workspace_contract"):
+		workspace_contract = active_stage_controller.call(
+			"ensure_workspace_contract"
+		)
+	if (
+		workspace_contract is Object
+		and is_instance_valid(workspace_contract as Object)
+		and (workspace_contract as Object).has_method(
+			"resolve_stroke_sample_spacing"
+		)
+	):
+		return maxf(float((workspace_contract as Object).call(
+			"resolve_stroke_sample_spacing",
+			sample_radius
+		)), 0.001)
+	return fallback_spacing
 
 func _begin_workspace_brush_stroke(screen_position: Vector2) -> void:
 	var placement_result: Dictionary = _resolve_workspace_local_position(screen_position)
@@ -5027,90 +5705,245 @@ func _begin_workspace_brush_stroke(screen_position: Vector2) -> void:
 		"local_normal",
 		Vector3.FORWARD
 	) as Vector3
+	var local_contact_direction: Vector3 = placement_result.get(
+		"local_contact_direction",
+		Vector3.ZERO
+	) as Vector3
+	_reset_workspace_brush_input_stabilizer()
+	workspace_brush_locked_target_kind = StringName(placement_result.get(
+		"target_kind",
+		StringName()
+	))
+	workspace_brush_input_stabilizer = ForgeV2FreehandInputStabilizerScript.new()
+	workspace_brush_last_raw_screen_position = screen_position
+	workspace_brush_last_valid_stabilized_screen_position = screen_position
+	workspace_brush_has_last_valid_stabilized_screen_position = true
+	var smoothing_steps := _get_workspace_freehand_smoothing_steps()
+	workspace_brush_input_stabilizer.call(
+		"begin",
+		screen_position,
+		int(Time.get_ticks_usec()),
+		smoothing_steps
+	)
+	if smoothing_steps > 0:
+		_begin_workspace_freehand_input_capture()
 	workspace_brush_stroke_active = true
 	if active_stage_controller.has_method("begin_material_body_path"):
 		active_stage_controller.call(
 			"begin_material_body_path",
 			local_position,
-			local_surface_normal
+			local_surface_normal,
+			local_contact_direction
 		)
 	elif active_stage_controller.has_method("begin_placement_stroke"):
 		active_stage_controller.call(
 			"begin_placement_stroke",
 			local_position,
-			local_surface_normal
+			local_surface_normal,
+			local_contact_direction
 		)
 	else:
 		active_stage_controller.call(
 			"append_point_material_body",
 			local_position,
-			local_surface_normal
+			-1.0,
+			-1.0,
+			local_surface_normal,
+			local_contact_direction
 		)
 
 func _extend_workspace_brush_stroke(screen_position: Vector2, force_endpoint: bool = false) -> void:
 	if not workspace_brush_stroke_active:
 		return
-	var placement_result: Dictionary = _resolve_workspace_local_position(screen_position)
-	if not bool(placement_result.get("valid", false)):
-		if active_stage_controller.has_method("clear_placement_cursor"):
-			active_stage_controller.call("clear_placement_cursor")
+	workspace_brush_last_raw_screen_position = screen_position
+	if workspace_brush_input_stabilizer == null:
 		return
-	var local_position: Vector3 = placement_result.get("local_position", Vector3.ZERO) as Vector3
-	var local_surface_normal: Vector3 = placement_result.get(
-		"local_normal",
-		Vector3.FORWARD
-	) as Vector3
-	if active_stage_controller.has_method("extend_material_body_path"):
-		active_stage_controller.call(
-			"extend_material_body_path",
-			local_position,
-			force_endpoint,
-			local_surface_normal
-		)
-	elif active_stage_controller.has_method("extend_placement_stroke"):
-		active_stage_controller.call(
-			"extend_placement_stroke",
-			local_position,
-			force_endpoint,
-			local_surface_normal
-		)
-	elif force_endpoint:
-		active_stage_controller.call(
-			"append_point_material_body",
-			local_position,
-			local_surface_normal
-		)
+	var stabilized_screen_positions: PackedVector2Array = workspace_brush_input_stabilizer.call(
+		"push",
+		screen_position,
+		int(Time.get_ticks_usec())
+	) as PackedVector2Array
+	_append_stabilized_workspace_brush_samples(
+		stabilized_screen_positions,
+		force_endpoint
+	)
 
 func _finish_workspace_brush_stroke(screen_position: Vector2, use_screen_position: bool = true) -> void:
 	if not workspace_brush_stroke_active:
 		return
-	var placement_result: Dictionary = _resolve_workspace_local_position(screen_position) if use_screen_position else {"valid": false}
+	var release_screen_position := (
+		screen_position
+		if use_screen_position
+		else workspace_brush_last_raw_screen_position
+	)
+	var release_result: Dictionary = _resolve_workspace_brush_target(
+		release_screen_position
+	)
+	var release_screen_position_valid := bool(release_result.get("valid", false))
+	if (
+		not release_screen_position_valid
+		and workspace_brush_has_last_valid_stabilized_screen_position
+	):
+		release_screen_position = workspace_brush_last_valid_stabilized_screen_position
+		release_screen_position_valid = true
+	if workspace_brush_input_stabilizer != null:
+		var release_samples: PackedVector2Array = workspace_brush_input_stabilizer.call(
+			"release",
+			release_screen_position,
+			int(Time.get_ticks_usec()),
+			release_screen_position_valid
+		) as PackedVector2Array
+		_append_stabilized_workspace_brush_samples(release_samples, true)
 	if active_stage_controller.has_method("finish_material_body_path"):
 		active_stage_controller.call(
 			"finish_material_body_path",
-			placement_result.get("local_position", Vector3.ZERO) as Vector3,
-			bool(placement_result.get("valid", false)),
-			placement_result.get(
-				"local_normal",
-				Vector3.FORWARD
-			) as Vector3
+			Vector3.ZERO,
+			false,
+			Vector3.FORWARD
 		)
 	elif active_stage_controller.has_method("finish_placement_stroke"):
 		active_stage_controller.call(
 			"finish_placement_stroke",
-			placement_result.get("local_position", Vector3.ZERO) as Vector3,
-			bool(placement_result.get("valid", false)),
+			Vector3.ZERO,
+			false,
+			Vector3.FORWARD
+		)
+	_show_last_material_body_finish_feedback()
+	workspace_brush_stroke_active = false
+	_reset_workspace_brush_input_stabilizer()
+
+func _show_last_material_body_finish_feedback() -> void:
+	if (
+		active_stage_controller == null
+		or not active_stage_controller.has_method(
+			"get_last_material_body_finish_result"
+		)
+	):
+		return
+	var result: Dictionary = active_stage_controller.call(
+		"get_last_material_body_finish_result"
+	) as Dictionary
+	match StringName(result.get("status", StringName())):
+		&"commit_deferred":
+			_set_v2_action_status_text(
+				"Stroke retained; its commit is queued behind the current material update."
+			)
+		&"commit_blocked_retry_required":
+			_set_v2_action_status_text(
+				"Commit is briefly busy finishing the prior material update; the pending material remains visible. Try Commit Layer again."
+			)
+		&"commit_rejected":
+			_set_v2_action_status_text(
+				"Commit blocked: the material remains visible and pending because it is incompatible with the current optimized history."
+			)
+		&"discarded_not_ready":
+			_set_v2_action_status_text(
+				"Stroke discarded because it was too short to create material."
+			)
+		&"no_pending_bodies":
+			_set_v2_action_status_text("Nothing is pending to commit.")
+
+func _append_stabilized_workspace_brush_samples(
+	stabilized_screen_positions: PackedVector2Array,
+	force_final_endpoint: bool = false
+) -> int:
+	if stabilized_screen_positions.is_empty() or active_stage_controller == null:
+		return 0
+	var local_positions := PackedVector3Array()
+	var local_surface_normals := PackedVector3Array()
+	var local_contact_directions := PackedVector3Array()
+	for stabilized_screen_position: Vector2 in stabilized_screen_positions:
+		var placement_result: Dictionary = _resolve_workspace_brush_target(
+			stabilized_screen_position
+		)
+		if not bool(placement_result.get("valid", false)):
+			continue
+		local_positions.append(
+			placement_result.get("local_position", Vector3.ZERO) as Vector3
+		)
+		local_surface_normals.append(
+			placement_result.get("local_normal", Vector3.FORWARD) as Vector3
+		)
+		local_contact_directions.append(
 			placement_result.get(
-				"local_normal",
-				Vector3.FORWARD
+				"local_contact_direction",
+				Vector3.ZERO
 			) as Vector3
 		)
-	workspace_brush_stroke_active = false
+		workspace_brush_last_valid_stabilized_screen_position = (
+			stabilized_screen_position
+		)
+		workspace_brush_has_last_valid_stabilized_screen_position = true
+	if local_positions.is_empty():
+		if active_stage_controller.has_method("clear_placement_cursor"):
+			active_stage_controller.call("clear_placement_cursor")
+		return 0
+	if active_stage_controller.has_method("extend_material_body_path_samples"):
+		return int(active_stage_controller.call(
+			"extend_material_body_path_samples",
+			local_positions,
+			local_surface_normals,
+			force_final_endpoint,
+			local_contact_directions
+		))
+	var changed_sample_count := 0
+	for sample_index in range(local_positions.size()):
+		var force_endpoint := (
+			force_final_endpoint
+			and sample_index == local_positions.size() - 1
+		)
+		if active_stage_controller.has_method("extend_material_body_path"):
+			if bool(active_stage_controller.call(
+				"extend_material_body_path",
+				local_positions[sample_index],
+				force_endpoint,
+				local_surface_normals[sample_index],
+				local_contact_directions[sample_index]
+			)):
+				changed_sample_count += 1
+	return changed_sample_count
+
+func _get_workspace_freehand_smoothing_steps() -> int:
+	if (
+		active_stage_controller != null
+		and active_stage_controller.has_method("get_freehand_smoothing_steps")
+	):
+		return clampi(
+			int(active_stage_controller.call("get_freehand_smoothing_steps")),
+			0,
+			10
+		)
+	return 0
+
+func _begin_workspace_freehand_input_capture() -> void:
+	if workspace_brush_owns_accumulated_input:
+		return
+	workspace_brush_previous_accumulated_input = Input.use_accumulated_input
+	Input.use_accumulated_input = false
+	workspace_brush_owns_accumulated_input = true
+
+func _reset_workspace_brush_input_stabilizer() -> void:
+	if workspace_brush_input_stabilizer != null:
+		workspace_brush_input_stabilizer.call("reset")
+	workspace_brush_input_stabilizer = null
+	workspace_brush_last_raw_screen_position = Vector2.ZERO
+	workspace_brush_last_valid_stabilized_screen_position = Vector2.ZERO
+	workspace_brush_has_last_valid_stabilized_screen_position = false
+	workspace_brush_locked_target_kind = StringName()
+	if workspace_brush_owns_accumulated_input:
+		Input.use_accumulated_input = workspace_brush_previous_accumulated_input
+	workspace_brush_owns_accumulated_input = false
 
 func _update_placement_cursor_from_workspace_position(screen_position: Vector2) -> void:
 	if active_stage_controller == null or not active_stage_controller.has_method("set_placement_cursor_local_position"):
 		return
-	var placement_result: Dictionary = _resolve_workspace_local_position(screen_position)
+	var placement_result: Dictionary
+	if _is_v2_detailing_brush_active():
+		placement_result = _resolve_detailing_brush_cursor_target(
+			screen_position
+		)
+	else:
+		placement_result = _resolve_workspace_local_position(screen_position)
 	if not bool(placement_result.get("valid", false)):
 		active_stage_controller.call("clear_placement_cursor")
 		return
@@ -5120,8 +5953,74 @@ func _update_placement_cursor_from_workspace_position(screen_position: Vector2) 
 		true
 	)
 
+func _resolve_detailing_brush_cursor_target(
+	screen_position: Vector2
+) -> Dictionary:
+	_ensure_workspace_preview()
+	if (
+		workspace_preview == null
+		or not workspace_preview.has_method("resolve_strict_surface_target")
+	):
+		return {"valid": false}
+	var detailing_summary := _get_detailing_brush_summary()
+	var control_points: PackedVector3Array = detailing_summary.get(
+		"control_points",
+		PackedVector3Array()
+	) as PackedVector3Array
+	var locked_target_kind := StringName()
+	var locked_target_id := StringName()
+	if not control_points.is_empty():
+		locked_target_kind = StringName(detailing_summary.get(
+			"locked_target_kind",
+			StringName()
+		))
+		locked_target_id = StringName(detailing_summary.get(
+			"locked_target_id",
+			StringName()
+		))
+		if (
+			locked_target_kind == StringName()
+			or locked_target_id == StringName()
+		):
+			return {"valid": false}
+	var target: Dictionary = workspace_preview.call(
+		"resolve_strict_surface_target",
+		screen_position,
+		locked_target_kind,
+		locked_target_id
+	) as Dictionary
+	if (
+		not bool(target.get("valid", false))
+		or StringName(target.get("target_kind", StringName()))
+		== StringName()
+		or StringName(target.get("surface_target_id", StringName()))
+		== StringName()
+	):
+		return {"valid": false}
+	return target
+
 func _resolve_workspace_local_position(screen_position: Vector2) -> Dictionary:
 	_ensure_workspace_preview()
 	if workspace_preview == null or not workspace_preview.has_method("screen_to_workspace_local"):
 		return {"valid": false}
 	return workspace_preview.call("screen_to_workspace_local", screen_position) as Dictionary
+
+
+func _resolve_workspace_brush_target(screen_position: Vector2) -> Dictionary:
+	_ensure_workspace_preview()
+	if (
+		workspace_brush_locked_target_kind != StringName()
+		and workspace_preview != null
+		and workspace_preview.has_method("resolve_strict_surface_target")
+	):
+		# Lock only the surface kind. The fused material target ID changes when a
+		# newer exact revision publishes, even though it is still the same logical
+		# workpiece. This prevents a miss from falling through to the sheet without
+		# making rapid strokes depend on a stale revision ID.
+		return workspace_preview.call(
+			"resolve_strict_surface_target",
+			screen_position,
+			workspace_brush_locked_target_kind,
+			StringName()
+		) as Dictionary
+	return _resolve_workspace_local_position(screen_position)

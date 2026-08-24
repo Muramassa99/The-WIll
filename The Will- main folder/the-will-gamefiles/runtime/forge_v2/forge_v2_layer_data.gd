@@ -2,6 +2,9 @@ extends Resource
 class_name ForgeV2LayerData
 
 const ForgeV2MaterialVolumeResolverScript = preload("res://runtime/forge_v2/forge_v2_material_volume_resolver.gd")
+const ForgeV2MaterialBodyScript = preload(
+	"res://runtime/forge_v2/forge_v2_material_body.gd"
+)
 
 const OPERATION_ADD_MATERIAL := &"layer_operation_add_material"
 const OPERATION_SUBTRACT_VOID := &"layer_operation_subtract_void"
@@ -19,6 +22,8 @@ const MATERIAL_MIXED := &"mat_mixed"
 const MATERIAL_UNKNOWN_REMOVED := &"mat_unknown_removed"
 
 const SOURCE_OPERATION_REMOVE_MATERIAL := &"operation_remove_material"
+const SOURCE_OPERATION_ADD_MATERIAL := &"operation_add_material"
+const SOURCE_PLACEMENT_REPLACE_EXISTING := &"placement_replace_existing"
 
 @export var layer_id: StringName = StringName()
 @export var order_index: int = 0
@@ -44,8 +49,10 @@ const SOURCE_OPERATION_REMOVE_MATERIAL := &"operation_remove_material"
 func configure_from_material_bodies(
 	next_order_index: int,
 	material_bodies: Array[Resource],
-	existing_material_bodies: Array[Resource] = []
-) -> void:
+	existing_material_bodies: Array[Resource] = [],
+	existing_usage_summary: Dictionary = {},
+	authoritative_usage_after: Dictionary = {}
+) -> Dictionary:
 	order_index = maxi(next_order_index, 1)
 	layer_id = StringName("v2_layer_%04d_%s" % [order_index, str(Time.get_ticks_usec())])
 	created_timestamp = Time.get_unix_time_from_system()
@@ -78,8 +85,14 @@ func configure_from_material_bodies(
 		if not add_material_ids.has(material_variant_id):
 			add_material_ids.append(material_variant_id)
 		add_bodies.append(body)
-	_append_resolved_material_policy_deltas(existing_material_bodies, material_bodies)
+	var resolved_usage_after := _append_resolved_material_policy_deltas(
+		existing_material_bodies,
+		material_bodies,
+		existing_usage_summary,
+		authoritative_usage_after
+	)
 	_resolve_operation_metadata(add_body_count, remove_body_count, add_material_ids)
+	return resolved_usage_after
 
 func normalize() -> void:
 	if layer_id == StringName():
@@ -104,6 +117,115 @@ func get_material_delta_units(material_variant_id: StringName) -> float:
 		return 0.0
 	return float(delta_entry.get("rough_material_units", 0.0))
 
+
+func is_bounded_add_history_eligible(
+	expected_material_variant_id: StringName = StringName()
+) -> bool:
+	if (
+		operation_type != OPERATION_ADD_MATERIAL
+		or csg_operation != CSG_OPERATION_UNION
+		or not undoable
+		or layer_id == StringName()
+		or operation_material_id == StringName()
+		or operation_material_id == MATERIAL_MIXED
+		or (
+			expected_material_variant_id != StringName()
+			and operation_material_id != expected_material_variant_id
+		)
+		or input_shape_records.size() != 1
+		or body_ids.size() != 1
+		or not removed_material_records.is_empty()
+		or rough_void_material_centi_units != 0
+		or not is_zero_approx(rough_void_volume_cell_equivalents)
+	):
+		return false
+	var record_variant: Variant = input_shape_records[0]
+	if not record_variant is Dictionary:
+		return false
+	var record := record_variant as Dictionary
+	if (
+		StringName(record.get("body_id", StringName())) != body_ids[0]
+		or StringName(record.get(
+			"material_variant_id",
+			StringName()
+		)) != operation_material_id
+	):
+		return false
+	for ledger_material_key: Variant in ledger_delta.keys():
+		if StringName(ledger_material_key) != operation_material_id:
+			return false
+	var path_points: PackedVector3Array = record.get(
+		"path_points",
+		PackedVector3Array()
+	)
+	var path_normals: PackedVector3Array = record.get(
+		"path_surface_normals",
+		PackedVector3Array()
+	)
+	var path_contacts: PackedVector3Array = record.get(
+		"path_contact_directions",
+		PackedVector3Array()
+	)
+	var shape_kind := StringName(record.get("shape_kind", StringName()))
+	if shape_kind in [
+		ForgeV2MaterialBodyScript.SHAPE_KIND_CAPSULE_PATH,
+		ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH,
+	]:
+		var minimum_path_point_count := (
+			2
+			if shape_kind
+			== ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH
+			else 1
+		)
+		var radius_meters := float(record.get("radius_meters", 0.0))
+		if (
+			StringName(record.get("body_kind", StringName()))
+			not in [
+				ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE,
+				ForgeV2MaterialBodyScript.BODY_KIND_DETAILING_BRUSH,
+			]
+			or StringName(record.get("operation_mode", StringName()))
+			!= SOURCE_OPERATION_ADD_MATERIAL
+			or StringName(record.get("placement_policy", StringName()))
+			!= SOURCE_PLACEMENT_REPLACE_EXISTING
+			or int(record.get("profile_runtime_schema_version", 0)) != 0
+			or path_points.size() < minimum_path_point_count
+			or path_normals.size() != path_points.size()
+			or not path_contacts.is_empty()
+			or not is_finite(radius_meters)
+			or radius_meters <= 0.0
+		):
+			return false
+		for path_point: Vector3 in path_points:
+			if not path_point.is_finite():
+				return false
+		for path_normal: Vector3 in path_normals:
+			if (
+				not is_finite(path_normal.x)
+				or not is_finite(path_normal.y)
+				or not is_finite(path_normal.z)
+				or path_normal.length_squared() <= 0.000001
+			):
+				return false
+		return true
+	return (
+		StringName(record.get("body_kind", StringName()))
+		in [
+			ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE,
+			ForgeV2MaterialBodyScript.BODY_KIND_DETAILING_BRUSH,
+		]
+		and StringName(record.get("operation_mode", StringName()))
+		== SOURCE_OPERATION_ADD_MATERIAL
+		and StringName(record.get("placement_policy", StringName()))
+		== SOURCE_PLACEMENT_REPLACE_EXISTING
+		and StringName(record.get("shape_kind", StringName()))
+		== ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
+		and int(record.get("profile_runtime_schema_version", 0)) > 0
+		and path_points.size() >= 2
+		and path_normals.size() == path_points.size()
+		and path_contacts.size() == path_points.size()
+	)
+
 func _append_body_record(body: Resource) -> void:
 	var body_id: StringName = StringName(body.get("body_id"))
 	if body_id != StringName():
@@ -122,6 +244,9 @@ func _append_body_record(body: Resource) -> void:
 		"shape_kind": StringName(body.get("shape_kind")),
 		"path_points": body.get("path_points"),
 		"path_surface_normals": body.get("path_surface_normals"),
+		"path_contact_directions": body.get("path_contact_directions"),
+		"surface_target_kind": StringName(body.get("surface_target_kind")),
+		"surface_target_id": StringName(body.get("surface_target_id")),
 		"radius_meters": float(body.get("radius_meters")),
 		"profile_id": StringName(body.get("profile_id")),
 		"profile_display_name": String(body.get("profile_display_name")),
@@ -184,17 +309,30 @@ func _append_resolved_add_material_deltas(add_bodies: Array[Resource]) -> void:
 
 func _append_resolved_material_policy_deltas(
 	existing_material_bodies: Array[Resource],
-	layer_material_bodies: Array[Resource]
-) -> void:
+	layer_material_bodies: Array[Resource],
+	existing_usage_summary: Dictionary = {},
+	authoritative_usage_after: Dictionary = {}
+) -> Dictionary:
 	if layer_material_bodies.is_empty():
-		return
+		return {}
 	var resolver = ForgeV2MaterialVolumeResolverScript.new()
-	var before_summary: Dictionary = resolver.call("build_usage_summary", existing_material_bodies) as Dictionary
-	var combined_bodies: Array = []
-	combined_bodies.append_array(existing_material_bodies)
-	combined_bodies.append_array(layer_material_bodies)
-	var after_summary: Dictionary = resolver.call("build_usage_summary", combined_bodies) as Dictionary
+	var before_summary: Dictionary = existing_usage_summary.duplicate(true)
+	if not before_summary.has("materials"):
+		before_summary = resolver.call(
+			"build_usage_summary",
+			existing_material_bodies
+		) as Dictionary
+	var after_summary := authoritative_usage_after.duplicate(true)
+	if not after_summary.has("materials"):
+		var combined_bodies: Array = []
+		combined_bodies.append_array(existing_material_bodies)
+		combined_bodies.append_array(layer_material_bodies)
+		after_summary = resolver.call(
+			"build_usage_summary",
+			combined_bodies
+		) as Dictionary
 	_append_material_summary_delta(before_summary, after_summary)
+	return after_summary
 
 func _append_material_summary_delta(before_summary: Dictionary, after_summary: Dictionary) -> void:
 	var before_materials: Dictionary = before_summary.get("materials", {}) as Dictionary

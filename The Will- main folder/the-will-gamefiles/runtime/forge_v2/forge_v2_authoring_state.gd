@@ -3,7 +3,13 @@ class_name ForgeV2AuthoringState
 
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
 const ForgeV2LayerDataScript = preload("res://runtime/forge_v2/forge_v2_layer_data.gd")
+const ForgeV2HistoryCheckpointScript = preload(
+	"res://runtime/forge_v2/forge_v2_history_checkpoint.gd"
+)
 const ForgeV2MaterialBodyScript = preload("res://runtime/forge_v2/forge_v2_material_body.gd")
+const ForgeV2MaterialCompositionPolicyScript = preload(
+	"res://runtime/forge_v2/forge_v2_material_composition_policy.gd"
+)
 const ForgeV2MaterialLedgerScript = preload("res://runtime/forge_v2/forge_v2_material_ledger.gd")
 const ForgeV2MaterialPaletteScript = preload("res://runtime/forge_v2/forge_v2_material_palette.gd")
 const ForgeV2ProfileShapeLibraryScript = preload("res://runtime/forge_v2/forge_v2_profile_shape_library.gd")
@@ -13,13 +19,17 @@ const ForgeV2PlatformContractScript = preload("res://runtime/forge_v2/forge_v2_p
 const ForgeV2PrimitiveCatalogScript = preload("res://runtime/forge_v2/forge_v2_primitive_catalog.gd")
 const ForgeV2VolumeStrokeScript = preload("res://runtime/forge_v2/forge_v2_volume_stroke.gd")
 
-const SCHEMA_VERSION := 2
+const SCHEMA_VERSION := 6
 const SCHEMA_ID := &"forge_stage1_v2"
 
 const AUTHORING_SPACE_WORLD_3D := &"authoring_space_world_3d"
 const TOOL_VOLUME_STROKE := &"tool_volume_stroke"
 const TOOL_SPLINE_LINE := &"tool_spline_line"
 const TOOL_HANDLES := &"tool_handles"
+const TOOL_DETAILING_BRUSH := &"tool_detailing_brush"
+const DETAIL_SOLUTION_REASON_NONE := &"none"
+const DETAIL_SOLUTION_REASON_NOT_READY := &"not_ready"
+const DETAIL_SOLUTION_REASON_INVALID_PERSISTED := &"invalid_persisted_solution"
 const BASIC_SHAPE_SOURCE_PRIMITIVE := &"basic_shape_source_primitive"
 const BASIC_SHAPE_SOURCE_SAVED_PROFILE := &"basic_shape_source_saved_profile"
 const DEFAULT_ACTIVE_PRIMITIVE_ID := ForgeV2PrimitiveCatalogScript.PRIMITIVE_BLOB
@@ -33,11 +43,24 @@ const BRUSH_RADIUS_STEP_METERS := 0.0125
 const DEFAULT_POINT_PLACEMENT_RADIUS_METERS := 0.025
 const DEFAULT_AMOUNT_RATIO := 1.0
 const HANDLE_REQUIRED_POINT_COUNT := 3
-const HANDLE_MIN_LENGTH_METERS := ForgeV2ProfileShapeLibraryScript.DEFAULT_CELL_WORLD_SIZE_METERS * 20.0
+const HANDLE_MIN_AXIAL_SPAN_METERS := (
+	ForgeV2ProfileShapeLibraryScript.DEFAULT_CELL_WORLD_SIZE_METERS * 20.0
+)
 const PROFILE_SIZE_MIN_METERS := ForgeV2ProfileShapeLibraryScript.DEFAULT_CELL_WORLD_SIZE_METERS
 const PROFILE_SIZE_MAX_METERS := 4.0
 const PROFILE_ROTATION_MIN_DEGREES := -360.0
 const PROFILE_ROTATION_MAX_DEGREES := 360.0
+const BOUNDED_HISTORY_TAIL_CAPACITY := 5
+const BOUNDED_HISTORY_TRANSITION_NONE := &"none"
+const BOUNDED_HISTORY_TRANSITION_RESET := &"reset"
+const BOUNDED_HISTORY_TRANSITION_APPEND := &"append"
+const BOUNDED_HISTORY_TRANSITION_PROMOTION_APPEND := &"promotion_append"
+const BOUNDED_HISTORY_TRANSITION_UNDO := &"undo"
+const BOUNDED_HISTORY_TRANSITION_REDO := &"redo"
+const BOUNDED_HISTORY_TRANSITION_RESTORE := &"restore"
+const BOUNDED_HISTORY_TRANSITION_FALLBACK := &"fallback_full_refresh"
+const BOUNDED_HISTORY_TRANSITION_PROTECTED_CHANGED := &"protected_changed"
+const BOUNDED_HISTORY_SUSPENDED_NONE := &"none"
 
 @export var schema_version: int = SCHEMA_VERSION
 @export var schema_id: StringName = SCHEMA_ID
@@ -87,14 +110,42 @@ const PROFILE_ROTATION_MAX_DEGREES := 360.0
 @export var spline_line_finished: bool = false
 @export var selected_spline_point_index: int = -1
 @export var spline_line_csg_noodle_enabled: bool = false
+@export var detailing_surface_target_kind: StringName = StringName()
+@export var detailing_surface_target_id: StringName = StringName()
+@export var detailing_control_contact_directions: PackedVector3Array = PackedVector3Array()
+@export var detailing_resolved_path_points: PackedVector3Array = PackedVector3Array()
+@export var detailing_resolved_surface_normals: PackedVector3Array = PackedVector3Array()
+@export var detailing_resolved_contact_directions: PackedVector3Array = PackedVector3Array()
+@export var detailing_span_offsets: PackedInt32Array = PackedInt32Array()
+@export var detailing_span_validity: Array[bool] = []
+@export var detailing_span_reasons: Array[StringName] = []
+@export var detailing_solution_valid: bool = false
+@export var detailing_solution_reason: StringName = DETAIL_SOLUTION_REASON_NOT_READY
 @export var forge_layers: Array[Resource] = []
 @export var undone_forge_layers: Array[Resource] = []
+@export var protected_forge_layers: Array[Resource] = []
 @export var material_ledger: Resource = null
+@export var bounded_history_enabled: bool = true
+@export var bounded_history_suspended_reason: StringName = (
+	BOUNDED_HISTORY_SUSPENDED_NONE
+)
+@export var bounded_history_recovery_blocked_reason: StringName = StringName()
+@export var bounded_history_checkpoint: Resource = null
+@export var bounded_history_lifetime_operation_count: int = 0
+@export var bounded_history_transition_revision: int = 0
 
 var material_usage_summary_cache: Dictionary = {}
 var material_usage_summary_cache_dirty: bool = true
+var committed_volume_resolver: RefCounted = null
+var committed_volume_cache_diagnostics: Dictionary = {}
+var _bounded_history_transition: Dictionary = {}
+var _bounded_history_pending_promotion: Dictionary = {}
+var _bounded_history_checkpoint_export_provider: Callable = Callable()
+var _runtime_contract_mesh_export_provider: Callable = Callable()
+var _bounded_history_normalized_once: bool = false
 
 func reset_new_draft(next_project_name: String = "Stage 1 V2 Draft") -> void:
+	_reset_committed_volume_cache(&"new_draft")
 	schema_version = SCHEMA_VERSION
 	schema_id = SCHEMA_ID
 	draft_id = StringName("v2_draft_%s" % str(Time.get_unix_time_from_system()))
@@ -143,13 +194,26 @@ func reset_new_draft(next_project_name: String = "Stage 1 V2 Draft") -> void:
 	spline_line_finished = false
 	selected_spline_point_index = -1
 	spline_line_csg_noodle_enabled = false
+	_clear_detailing_brush_solution()
 	forge_layers = []
 	undone_forge_layers = []
+	protected_forge_layers = []
 	material_ledger = ForgeV2MaterialLedgerScript.new()
+	bounded_history_enabled = true
+	bounded_history_suspended_reason = BOUNDED_HISTORY_SUSPENDED_NONE
+	bounded_history_recovery_blocked_reason = StringName()
+	bounded_history_checkpoint = ForgeV2HistoryCheckpointScript.new()
+	bounded_history_lifetime_operation_count = 0
+	bounded_history_transition_revision = 0
+	_bounded_history_transition = {}
+	_bounded_history_pending_promotion = {}
+	_bounded_history_normalized_once = false
 	_mark_material_usage_summary_dirty()
 	normalize()
 
 func normalize() -> void:
+	_reset_committed_volume_cache(&"state_normalized")
+	var loaded_schema_version := schema_version
 	schema_version = SCHEMA_VERSION
 	schema_id = SCHEMA_ID
 	if draft_id == StringName():
@@ -182,13 +246,25 @@ func normalize() -> void:
 	active_material_variant_id = ForgeV2MaterialPaletteScript.normalize_material_variant_id(active_material_variant_id)
 	active_brush_radius_meters = _normalize_brush_radius(active_brush_radius_meters)
 	active_amount_ratio = _normalize_amount_ratio(active_amount_ratio)
+	_migrate_legacy_surface_contact_authority(loaded_schema_version)
 	_normalize_material_bodies()
 	_ensure_platform_seed_bodies()
 	_normalize_volume_strokes()
 	_normalize_spline_line()
 	_normalize_forge_layers()
+	_normalize_bounded_history(loaded_schema_version)
 	_ensure_material_ledger()
-	if not had_valid_material_ledger and not forge_layers.is_empty():
+	if (
+		(
+			not forge_layers.is_empty()
+			or not protected_forge_layers.is_empty()
+			or _has_bounded_history_checkpoint()
+		)
+		and (
+			not had_valid_material_ledger
+			or loaded_schema_version < SCHEMA_VERSION
+		)
+	):
 		_rebuild_material_ledger()
 	_normalize_selected_material_body_id()
 
@@ -259,7 +335,7 @@ func select_active_saved_basic_profile(profile_data: Dictionary) -> bool:
 
 func set_active_tool_id(next_tool_id: StringName) -> void:
 	var previous_profile_id := active_profile_id
-	active_tool_id = next_tool_id if _is_valid_tool_id(next_tool_id) else TOOL_VOLUME_STROKE
+	_assign_active_tool_id(next_tool_id)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.normalize_profile_id(active_profile_id, _get_active_profile_family())
 	if active_profile_id != previous_profile_id:
 		active_profile_display_name = ""
@@ -280,7 +356,7 @@ func set_active_profile_display_name(next_display_name: String) -> void:
 	mark_updated()
 
 func reset_active_handle_profile_builder() -> void:
-	active_tool_id = TOOL_HANDLES
+	_assign_active_tool_id(TOOL_HANDLES)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_HANDLE_BUILDER
 	active_profile_display_name = ""
 	active_profile_width_meters = ForgeV2ProfileShapeLibraryScript.HANDLE_DEFAULT_WIDTH_METERS
@@ -300,7 +376,7 @@ func reset_active_handle_profile_builder() -> void:
 	mark_updated()
 
 func reset_active_basic_profile_builder() -> void:
-	active_tool_id = TOOL_VOLUME_STROKE
+	_assign_active_tool_id(TOOL_VOLUME_STROKE)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_2D_BUILDER
 	active_profile_display_name = ""
 	active_profile_width_meters = ForgeV2ProfileShapeLibraryScript.BASIC_BUILDER_DEFAULT_WIDTH_METERS
@@ -399,7 +475,7 @@ func set_active_profile_rotation_degrees(next_rotation_degrees: float) -> void:
 	mark_updated()
 
 func set_active_handle_face_count(next_face_count: int) -> void:
-	active_tool_id = TOOL_HANDLES
+	_assign_active_tool_id(TOOL_HANDLES)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_HANDLE_BUILDER
 	active_profile_display_name = ""
 	active_handle_face_count = ForgeV2ProfileShapeLibraryScript.normalize_handle_face_count(next_face_count)
@@ -408,21 +484,21 @@ func set_active_handle_face_count(next_face_count: int) -> void:
 	mark_updated()
 
 func set_active_handle_rounding_enabled(is_enabled: bool) -> void:
-	active_tool_id = TOOL_HANDLES
+	_assign_active_tool_id(TOOL_HANDLES)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_HANDLE_BUILDER
 	active_handle_rounding_enabled = is_enabled
 	_normalize_active_profile_settings()
 	mark_updated()
 
 func set_active_handle_corner_radius_meters(next_corner_radius_meters: float) -> void:
-	active_tool_id = TOOL_HANDLES
+	_assign_active_tool_id(TOOL_HANDLES)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_HANDLE_BUILDER
 	active_handle_corner_radius_meters = next_corner_radius_meters
 	_normalize_active_profile_settings()
 	mark_updated()
 
 func set_active_handle_control_point_2d_meters(point_index: int, point_position_meters: Vector2) -> bool:
-	active_tool_id = TOOL_HANDLES
+	_assign_active_tool_id(TOOL_HANDLES)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_HANDLE_BUILDER
 	_normalize_active_profile_settings()
 	if point_index < 0 or point_index >= active_handle_control_points_2d_meters.size():
@@ -440,14 +516,14 @@ func set_active_handle_control_point_2d_meters(point_index: int, point_position_
 	return true
 
 func set_active_handle_grid_snapping_enabled(is_enabled: bool) -> void:
-	active_tool_id = TOOL_HANDLES
+	_assign_active_tool_id(TOOL_HANDLES)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_HANDLE_BUILDER
 	active_handle_grid_snapping_enabled = is_enabled
 	_normalize_active_profile_settings()
 	mark_updated()
 
 func set_active_basic_control_point_2d_meters(point_index: int, point_position_meters: Vector2) -> bool:
-	active_tool_id = TOOL_VOLUME_STROKE
+	_assign_active_tool_id(TOOL_VOLUME_STROKE)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_2D_BUILDER
 	_normalize_active_profile_settings()
 	if point_index < 0 or point_index >= active_basic_control_points_2d_meters.size():
@@ -633,7 +709,7 @@ func get_active_basic_corner_fillet_settings(corner_id: StringName) -> Dictionar
 	}
 
 func set_active_basic_grid_snapping_enabled(is_enabled: bool) -> void:
-	active_tool_id = TOOL_VOLUME_STROKE
+	_assign_active_tool_id(TOOL_VOLUME_STROKE)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_2D_BUILDER
 	active_basic_grid_snapping_enabled = is_enabled
 	_normalize_active_profile_settings()
@@ -645,7 +721,7 @@ func apply_tool_profile_preset(profile_data: Dictionary) -> bool:
 	var profile_family: StringName = StringName(profile_data.get("family", ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_HANDLE))
 	match profile_family:
 		ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_HANDLE:
-			active_tool_id = TOOL_HANDLES
+			_assign_active_tool_id(TOOL_HANDLES)
 			active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_HANDLE_BUILDER
 			active_profile_display_name = String(profile_data.get("label", ""))
 			active_handle_face_count = ForgeV2ProfileShapeLibraryScript.normalize_handle_face_count(int(profile_data.get("face_count", active_handle_face_count)))
@@ -662,7 +738,7 @@ func apply_tool_profile_preset(profile_data: Dictionary) -> bool:
 			_sync_active_profile_size_from_handle_control_points()
 		ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_BASIC:
 			if active_tool_id == TOOL_HANDLES:
-				active_tool_id = TOOL_VOLUME_STROKE
+				_assign_active_tool_id(TOOL_VOLUME_STROKE)
 			active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_2D_BUILDER
 			active_profile_display_name = String(profile_data.get("label", ""))
 			var basic_preset_points: PackedVector2Array = profile_data.get("control_points_2d_meters", PackedVector2Array())
@@ -739,7 +815,9 @@ func build_active_tool_profile_preset_data(requested_name: String = "") -> Dicti
 		return ForgeV2ProfileShapeLibraryScript.compile_basic_profile_runtime_data(
 			profile_data
 		)
-	return profile_data
+	return ForgeV2ProfileShapeLibraryScript.compile_handle_profile_runtime_data(
+		profile_data
+	)
 
 func set_active_material_variant_id(next_material_variant_id: StringName) -> void:
 	if next_material_variant_id == StringName():
@@ -810,29 +888,41 @@ func append_point_volume_stroke(
 	local_position: Vector3,
 	radius_meters: float = -1.0,
 	amount_ratio: float = -1.0,
-	local_surface_normal: Vector3 = Vector3.FORWARD
+	local_surface_normal: Vector3 = Vector3.FORWARD,
+	local_contact_direction: Vector3 = Vector3.ZERO
 ) -> Resource:
 	return append_point_material_body(
 		local_position,
 		radius_meters,
 		amount_ratio,
-		local_surface_normal
+		local_surface_normal,
+		local_contact_direction
 	)
 
 func append_point_material_body(
 	local_position: Vector3,
 	radius_meters: float = -1.0,
 	amount_ratio: float = -1.0,
-	local_surface_normal: Vector3 = Vector3.FORWARD
+	local_surface_normal: Vector3 = Vector3.FORWARD,
+	local_contact_direction: Vector3 = Vector3.ZERO
 ) -> Resource:
 	if active_tool_id != TOOL_HANDLES and is_saved_basic_profile_shape_active():
+		var normalized_contact_direction := _normalize_path_contact_direction(
+			local_contact_direction
+		)
+		if normalized_contact_direction == Vector3.ZERO:
+			return null
 		var profile_body := _append_active_saved_basic_profile_material_body(
 			PackedVector3Array([local_position]),
 			PackedVector3Array([
 				_normalize_path_surface_normal(local_surface_normal),
 			]),
 			ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH,
-			"v2_saved_profile_stroke"
+			"v2_saved_profile_stroke",
+			ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE,
+			StringName(),
+			StringName(),
+			PackedVector3Array([normalized_contact_direction])
 		)
 		mark_updated()
 		return profile_body
@@ -860,14 +950,16 @@ func append_point_to_volume_stroke(
 	local_position: Vector3,
 	min_spacing_meters: float = 0.0,
 	force_endpoint: bool = false,
-	local_surface_normal: Vector3 = Vector3.FORWARD
+	local_surface_normal: Vector3 = Vector3.FORWARD,
+	local_contact_direction: Vector3 = Vector3.ZERO
 ) -> bool:
 	return append_point_to_material_body(
 		stroke_id,
 		local_position,
 		min_spacing_meters,
 		force_endpoint,
-		local_surface_normal
+		local_surface_normal,
+		local_contact_direction
 	)
 
 func append_point_to_material_body(
@@ -875,56 +967,130 @@ func append_point_to_material_body(
 	local_position: Vector3,
 	min_spacing_meters: float = 0.0,
 	force_endpoint: bool = false,
-	local_surface_normal: Vector3 = Vector3.FORWARD
+	local_surface_normal: Vector3 = Vector3.FORWARD,
+	local_contact_direction: Vector3 = Vector3.ZERO
 ) -> bool:
+	return append_points_to_material_body(
+		body_id,
+		PackedVector3Array([local_position]),
+		PackedVector3Array([local_surface_normal]),
+		min_spacing_meters,
+		force_endpoint,
+		PackedVector3Array([local_contact_direction])
+	) > 0
+
+func append_points_to_material_body(
+	body_id: StringName,
+	local_positions: PackedVector3Array,
+	local_surface_normals: PackedVector3Array = PackedVector3Array(),
+	min_spacing_meters: float = 0.0,
+	force_final_endpoint: bool = false,
+	local_contact_directions: PackedVector3Array = PackedVector3Array()
+) -> int:
+	if local_positions.is_empty():
+		return 0
 	var body: Resource = _find_editable_material_body(body_id)
 	if body == null:
-		return false
+		return 0
 	var path_points: PackedVector3Array = body.get("path_points")
 	var path_surface_normals: PackedVector3Array = body.get(
 		"path_surface_normals"
 	)
-	var normalized_surface_normal := _normalize_path_surface_normal(
-		local_surface_normal
+	var uses_explicit_contact_authority := (
+		body.has_method("uses_explicit_surface_contact_authority")
+		and bool(body.call("uses_explicit_surface_contact_authority"))
 	)
-	var changed := false
-	if path_points.is_empty():
-		path_points.append(local_position)
-		path_surface_normals.append(normalized_surface_normal)
-		changed = true
-	else:
+	if (
+		uses_explicit_contact_authority
+		and local_contact_directions.size() != local_positions.size()
+	):
+		return 0
+	var path_contact_directions: PackedVector3Array = body.get(
+		"path_contact_directions"
+	)
+	if (
+		uses_explicit_contact_authority
+		and path_contact_directions.size() != path_points.size()
+	):
+		return 0
+	var changed_sample_count := 0
+	var spacing: float = maxf(min_spacing_meters, 0.0)
+	for sample_index in range(local_positions.size()):
+		var local_position: Vector3 = local_positions[sample_index]
+		var local_surface_normal := Vector3.FORWARD
+		if sample_index < local_surface_normals.size():
+			local_surface_normal = local_surface_normals[sample_index]
+		var normalized_surface_normal := _normalize_path_surface_normal(
+			local_surface_normal
+		)
+		var normalized_contact_direction := Vector3.ZERO
+		if uses_explicit_contact_authority:
+			normalized_contact_direction = _normalize_path_contact_direction(
+				local_contact_directions[sample_index]
+			)
+			if normalized_contact_direction == Vector3.ZERO:
+				return 0
+		var force_endpoint := (
+			force_final_endpoint
+			and sample_index == local_positions.size() - 1
+		)
+		if path_points.is_empty():
+			path_points.append(local_position)
+			path_surface_normals.append(normalized_surface_normal)
+			if uses_explicit_contact_authority:
+				path_contact_directions.append(normalized_contact_direction)
+			changed_sample_count += 1
+			continue
 		var last_point: Vector3 = path_points[path_points.size() - 1]
-		var spacing: float = maxf(min_spacing_meters, 0.0)
 		var is_far_enough := spacing <= 0.0 or last_point.distance_squared_to(local_position) >= spacing * spacing
 		if is_far_enough:
 			path_points.append(local_position)
 			path_surface_normals.append(normalized_surface_normal)
-			changed = true
+			if uses_explicit_contact_authority:
+				path_contact_directions.append(normalized_contact_direction)
+			changed_sample_count += 1
 		elif force_endpoint and not last_point.is_equal_approx(local_position):
 			path_points[path_points.size() - 1] = local_position
 			while path_surface_normals.size() < path_points.size():
 				path_surface_normals.append(normalized_surface_normal)
 			path_surface_normals[path_points.size() - 1] = normalized_surface_normal
-			changed = true
+			if uses_explicit_contact_authority:
+				path_contact_directions[path_points.size() - 1] = (
+					normalized_contact_direction
+				)
+			changed_sample_count += 1
 		elif force_endpoint:
 			while path_surface_normals.size() < path_points.size():
 				path_surface_normals.append(normalized_surface_normal)
 			var last_normal_index := path_points.size() - 1
+			var endpoint_metadata_changed := false
 			if not path_surface_normals[last_normal_index].is_equal_approx(
 				normalized_surface_normal
 			):
 				path_surface_normals[last_normal_index] = normalized_surface_normal
-				changed = true
-	if not changed:
-		return false
+				endpoint_metadata_changed = true
+			if (
+				uses_explicit_contact_authority
+				and not path_contact_directions[last_normal_index].is_equal_approx(
+					normalized_contact_direction
+				)
+			):
+				path_contact_directions[last_normal_index] = normalized_contact_direction
+				endpoint_metadata_changed = true
+			if endpoint_metadata_changed:
+				changed_sample_count += 1
+	if changed_sample_count <= 0:
+		return 0
 	body.set("path_points", path_points)
 	body.set("path_surface_normals", path_surface_normals)
+	if uses_explicit_contact_authority:
+		body.set("path_contact_directions", path_contact_directions)
 	body.set("updated_timestamp", Time.get_unix_time_from_system())
 	if body.has_method("normalize"):
 		body.call("normalize")
 	_mark_material_usage_summary_dirty()
 	mark_updated()
-	return true
+	return changed_sample_count
 
 func clear_volume_strokes() -> void:
 	clear_pending_material_bodies()
@@ -937,10 +1103,99 @@ func clear_pending_material_bodies() -> void:
 	_mark_material_usage_summary_dirty()
 	mark_updated()
 
+func replace_detailing_brush_path_solution(
+	control_points: PackedVector3Array,
+	control_surface_normals: PackedVector3Array,
+	locked_target_kind: StringName,
+	locked_target_id: StringName,
+	resolved_path_points: PackedVector3Array,
+	resolved_surface_normals: PackedVector3Array,
+	span_offsets: PackedInt32Array,
+	span_validity: Array,
+	span_reasons: Array,
+	solution_valid: bool,
+	solution_reason: StringName,
+	selected_point_index: int = -2,
+	control_contact_directions: PackedVector3Array = PackedVector3Array(),
+	resolved_contact_directions: PackedVector3Array = PackedVector3Array()
+) -> bool:
+	if active_tool_id != TOOL_DETAILING_BRUSH:
+		return false
+	var validated := _build_validated_detailing_brush_solution(
+		control_points,
+		control_surface_normals,
+		control_contact_directions,
+		locked_target_kind,
+		locked_target_id,
+		resolved_path_points,
+		resolved_surface_normals,
+		resolved_contact_directions,
+		span_offsets,
+		span_validity,
+		span_reasons,
+		solution_valid,
+		solution_reason
+	)
+	if not bool(validated.get("accepted", false)):
+		return false
+	var resolved_selected_point_index := selected_point_index
+	if resolved_selected_point_index == -2:
+		resolved_selected_point_index = control_points.size() - 1
+	if (
+		resolved_selected_point_index < -1
+		or resolved_selected_point_index >= control_points.size()
+	):
+		return false
+	spline_line_points = validated.get(
+		"control_points",
+		PackedVector3Array()
+	) as PackedVector3Array
+	spline_line_surface_normals = validated.get(
+		"control_surface_normals",
+		PackedVector3Array()
+	) as PackedVector3Array
+	detailing_control_contact_directions = validated.get(
+		"control_contact_directions",
+		PackedVector3Array()
+	) as PackedVector3Array
+	detailing_surface_target_kind = locked_target_kind
+	detailing_surface_target_id = locked_target_id
+	detailing_resolved_path_points = validated.get(
+		"resolved_path_points",
+		PackedVector3Array()
+	) as PackedVector3Array
+	detailing_resolved_surface_normals = validated.get(
+		"resolved_surface_normals",
+		PackedVector3Array()
+	) as PackedVector3Array
+	detailing_resolved_contact_directions = validated.get(
+		"resolved_contact_directions",
+		PackedVector3Array()
+	) as PackedVector3Array
+	detailing_span_offsets = span_offsets.duplicate()
+	detailing_span_validity = validated.get("span_validity", []) as Array[bool]
+	detailing_span_reasons = validated.get("span_reasons", []) as Array[StringName]
+	detailing_solution_valid = solution_valid
+	detailing_solution_reason = (
+		DETAIL_SOLUTION_REASON_NONE
+		if solution_valid
+		else StringName(validated.get(
+			"solution_reason",
+			DETAIL_SOLUTION_REASON_NOT_READY
+		))
+	)
+	spline_line_finished = false
+	selected_spline_point_index = resolved_selected_point_index
+	spline_line_csg_noodle_enabled = false
+	mark_updated()
+	return true
+
 func append_spline_line_point(
 	local_position: Vector3,
 	local_surface_normal: Vector3 = Vector3.FORWARD
 ) -> int:
+	if active_tool_id == TOOL_DETAILING_BRUSH:
+		return -1
 	_normalize_spline_line()
 	if spline_line_finished:
 		return -1
@@ -959,6 +1214,8 @@ func append_spline_line_point(
 	return selected_spline_point_index
 
 func set_spline_line_point(point_index: int, local_position: Vector3) -> bool:
+	if active_tool_id == TOOL_DETAILING_BRUSH:
+		return false
 	_normalize_spline_line()
 	if point_index < 0 or point_index >= spline_line_points.size():
 		return false
@@ -993,6 +1250,8 @@ func find_nearest_spline_line_point(local_position: Vector3, max_distance_meters
 
 func finish_spline_line() -> bool:
 	_normalize_spline_line()
+	if active_tool_id == TOOL_DETAILING_BRUSH and not can_generate_detailing_brush():
+		return false
 	if spline_line_points.size() < 2 or spline_line_finished:
 		return false
 	spline_line_finished = true
@@ -1002,18 +1261,16 @@ func finish_spline_line() -> bool:
 
 func cancel_spline_line() -> bool:
 	_normalize_spline_line()
-	if spline_line_points.is_empty() and not spline_line_finished and selected_spline_point_index < 0:
+	if not _has_spline_transient_state():
 		return false
-	spline_line_points = PackedVector3Array()
-	spline_line_surface_normals = PackedVector3Array()
-	spline_line_finished = false
-	selected_spline_point_index = -1
-	spline_line_csg_noodle_enabled = false
+	_clear_spline_transient_state()
 	mark_updated()
 	return true
 
 func can_generate_spline_line_csg_noodle() -> bool:
 	_normalize_spline_line()
+	if active_tool_id == TOOL_DETAILING_BRUSH:
+		return can_generate_detailing_brush()
 	return (
 		spline_line_points.size() >= 2
 		and _calculate_spline_line_path_length() > 0.000001
@@ -1025,10 +1282,21 @@ func can_generate_profile_extrusion_from_spline() -> bool:
 		return false
 	if spline_line_points.size() != HANDLE_REQUIRED_POINT_COUNT:
 		return false
-	return _calculate_spline_line_path_length() >= HANDLE_MIN_LENGTH_METERS
+	if not _handle_endpoint_span_meets_minimum(spline_line_points):
+		return false
+	var compiled_handle_profile: Dictionary = (
+		build_active_tool_profile_preset_data("Handle Runtime")
+	)
+	var handle_runtime: Dictionary = compiled_handle_profile.get(
+		"compiled_profile",
+		{}
+	) as Dictionary
+	return bool(handle_runtime.get("valid", false))
 
 func generate_spline_line_csg_noodle() -> bool:
 	_normalize_spline_line()
+	if active_tool_id == TOOL_DETAILING_BRUSH:
+		return generate_detailing_brush()
 	if spline_line_points.size() < 2:
 		return false
 	var body: Resource = _append_spline_line_material_body()
@@ -1039,6 +1307,78 @@ func generate_spline_line_csg_noodle() -> bool:
 	spline_line_finished = false
 	selected_spline_point_index = -1
 	spline_line_csg_noodle_enabled = false
+	selected_material_body_id = StringName(body.get("body_id"))
+	mark_updated()
+	return true
+
+func can_generate_detailing_brush() -> bool:
+	if active_tool_id != TOOL_DETAILING_BRUSH:
+		return false
+	if not detailing_solution_valid:
+		return false
+	var validation := _build_validated_detailing_brush_solution(
+		spline_line_points,
+		spline_line_surface_normals,
+		detailing_control_contact_directions,
+		detailing_surface_target_kind,
+		detailing_surface_target_id,
+		detailing_resolved_path_points,
+		detailing_resolved_surface_normals,
+		detailing_resolved_contact_directions,
+		detailing_span_offsets,
+		detailing_span_validity,
+		detailing_span_reasons,
+		true,
+		detailing_solution_reason
+	)
+	return (
+		bool(validation.get("accepted", false))
+		and spline_line_points.size() >= 2
+		and _calculate_polyline_path_length(
+			detailing_resolved_path_points
+		) > 0.000001
+	)
+
+func generate_detailing_brush() -> bool:
+	if not can_generate_detailing_brush():
+		return false
+	var body: Resource = null
+	if is_saved_basic_profile_shape_active():
+		body = _append_active_saved_basic_profile_material_body(
+			detailing_resolved_path_points,
+			detailing_resolved_surface_normals,
+			ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH,
+			"v2_detail_profile",
+			ForgeV2MaterialBodyScript.BODY_KIND_DETAILING_BRUSH,
+			detailing_surface_target_kind,
+			detailing_surface_target_id,
+			detailing_resolved_contact_directions
+		)
+	else:
+		body = _append_material_body_record(
+			detailing_resolved_path_points,
+			active_brush_radius_meters,
+			DEFAULT_AMOUNT_RATIO,
+			ForgeV2MaterialBodyScript.SHAPE_KIND_CAPSULE_PATH,
+			"v2_detail_capsule",
+			ForgeV2MaterialBodyScript.BODY_KIND_DETAILING_BRUSH,
+			StringName(),
+			ForgeV2ProfileShapeLibraryScript.PROFILE_ROLE_NONE,
+			PackedVector2Array(),
+			Vector2.ZERO,
+			0.0,
+			detailing_resolved_surface_normals,
+			Vector2.ZERO,
+			ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_LOCAL_SIX,
+			0.0,
+			0,
+			0.0,
+			detailing_surface_target_kind,
+			detailing_surface_target_id
+		)
+	if body == null:
+		return false
+	_clear_spline_transient_state()
 	selected_material_body_id = StringName(body.get("body_id"))
 	mark_updated()
 	return true
@@ -1070,6 +1410,8 @@ func get_spline_line_point_count() -> int:
 	return spline_line_points.size()
 
 func get_spline_line_status_label() -> String:
+	if active_tool_id == TOOL_DETAILING_BRUSH:
+		return get_detailing_brush_status_label()
 	var point_count := get_spline_line_point_count()
 	if point_count <= 0:
 		return "Spline: no points"
@@ -1077,6 +1419,8 @@ func get_spline_line_status_label() -> String:
 	return "Spline: %s points, %s" % [str(point_count), state_label]
 
 func get_spline_line_csg_noodle_status_label() -> String:
+	if active_tool_id == TOOL_DETAILING_BRUSH:
+		return get_detailing_brush_status_label()
 	if spline_line_points.size() < 2:
 		return "CSG noodle: needs 2 points"
 	if _calculate_spline_line_path_length() <= 0.000001:
@@ -1100,10 +1444,87 @@ func get_profile_extrusion_status_label() -> String:
 		return "Handle: needs %d points" % HANDLE_REQUIRED_POINT_COUNT
 	if point_count > HANDLE_REQUIRED_POINT_COUNT:
 		return "Handle: too many points"
-	var path_length := _calculate_spline_line_path_length()
-	if path_length < HANDLE_MIN_LENGTH_METERS:
-		return "Handle: needs %.3f m length" % HANDLE_MIN_LENGTH_METERS
-	return "Handle: ready, %.3f m" % path_length
+	var endpoint_span := _calculate_handle_endpoint_span(spline_line_points)
+	if not _handle_endpoint_span_meets_minimum(spline_line_points):
+		return "Handle: needs %.3f m axial span (currently %.3f m)" % [
+			HANDLE_MIN_AXIAL_SPAN_METERS,
+			endpoint_span,
+		]
+	var compiled_handle_profile: Dictionary = (
+		build_active_tool_profile_preset_data("Handle Runtime")
+	)
+	var handle_runtime: Dictionary = compiled_handle_profile.get(
+		"compiled_profile",
+		{}
+	) as Dictionary
+	if not bool(handle_runtime.get("valid", false)):
+		return "Handle: red anchor needs a valid 0.5 mm profile inset"
+	return "Handle: ready, %.3f m axial span" % endpoint_span
+
+func get_detailing_brush_status_label() -> String:
+	if active_tool_id != TOOL_DETAILING_BRUSH:
+		return "Detailing Brush: select tool"
+	if (
+		detailing_surface_target_kind == StringName()
+		or detailing_surface_target_id == StringName()
+	):
+		return "Detailing Brush: select a surface"
+	if spline_line_points.size() < 2:
+		return "Detailing Brush: needs 2 control points"
+	if not detailing_solution_valid:
+		var reason_label := String(detailing_solution_reason).replace("_", " ")
+		if reason_label.is_empty() or detailing_solution_reason == DETAIL_SOLUTION_REASON_NONE:
+			reason_label = "surface path invalid"
+		return "Detailing Brush: invalid - %s" % reason_label
+	if not can_generate_detailing_brush():
+		return "Detailing Brush: resolved path is not generation-ready"
+	return "Detailing Brush: ready, %d controls / %d surface samples" % [
+		spline_line_points.size(),
+		detailing_resolved_path_points.size(),
+	]
+
+func get_detailing_brush_summary() -> Dictionary:
+	if active_tool_id != TOOL_DETAILING_BRUSH:
+		return {
+			"active": false,
+			"control_points": PackedVector3Array(),
+			"control_surface_normals": PackedVector3Array(),
+			"control_contact_directions": PackedVector3Array(),
+			"locked_target_kind": StringName(),
+			"locked_target_id": StringName(),
+			"resolved_path_points": PackedVector3Array(),
+			"resolved_surface_normals": PackedVector3Array(),
+			"resolved_contact_directions": PackedVector3Array(),
+			"span_offsets": PackedInt32Array(),
+			"span_validity": [],
+			"span_reasons": [],
+			"valid": false,
+			"reason": DETAIL_SOLUTION_REASON_NOT_READY,
+			"can_generate": false,
+			"finished": false,
+			"selected_point_index": -1,
+			"status_label": get_detailing_brush_status_label(),
+		}
+	return {
+		"active": true,
+		"control_points": spline_line_points,
+		"control_surface_normals": spline_line_surface_normals,
+		"control_contact_directions": detailing_control_contact_directions,
+		"locked_target_kind": detailing_surface_target_kind,
+		"locked_target_id": detailing_surface_target_id,
+		"resolved_path_points": detailing_resolved_path_points,
+		"resolved_surface_normals": detailing_resolved_surface_normals,
+		"resolved_contact_directions": detailing_resolved_contact_directions,
+		"span_offsets": detailing_span_offsets,
+		"span_validity": detailing_span_validity.duplicate(),
+		"span_reasons": detailing_span_reasons.duplicate(),
+		"valid": detailing_solution_valid,
+		"reason": detailing_solution_reason,
+		"can_generate": can_generate_detailing_brush(),
+		"finished": spline_line_finished,
+		"selected_point_index": selected_spline_point_index,
+		"status_label": get_detailing_brush_status_label(),
+	}
 
 func get_spline_line_summary() -> Dictionary:
 	_normalize_spline_line()
@@ -1120,6 +1541,7 @@ func get_spline_line_summary() -> Dictionary:
 		"csg_noodle_radius_meters": get_active_deposition_envelope_radius_meters(),
 		"can_generate_profile_extrusion": can_generate_profile_extrusion_from_spline(),
 		"profile_extrusion_status_label": get_profile_extrusion_status_label(),
+		"detailing_brush": get_detailing_brush_summary(),
 	}
 
 func commit_pending_material_bodies_as_layer() -> Resource:
@@ -1138,34 +1560,147 @@ func is_material_body_commit_ready(body_id: StringName) -> bool:
 	)
 
 func _commit_material_bodies_as_layer(pending_bodies: Array[Resource]) -> Resource:
+	if has_pending_bounded_history_promotion():
+		return null
 	var commit_ready_bodies: Array[Resource] = []
 	for body: Resource in pending_bodies:
 		if _is_material_body_commit_ready(body):
 			commit_ready_bodies.append(body)
 	if commit_ready_bodies.is_empty():
 		return null
-	var committed_bodies: Array[Resource] = _collect_committed_active_user_material_bodies()
-	var layer: Resource = ForgeV2LayerDataScript.new()
-	layer.call(
-		"configure_from_material_bodies",
-		forge_layers.size() + 1,
-		commit_ready_bodies,
-		committed_bodies
+	if _must_reject_unsupported_bounded_commit(commit_ready_bodies):
+		return null
+	var stages_bounded_promotion := _will_stage_bounded_history_promotion(
+		commit_ready_bodies
 	)
+	var committed_bodies: Array[Resource] = _collect_committed_active_user_material_bodies()
+	_ensure_material_ledger()
+	var promotion_rollback: Dictionary = {}
+	if stages_bounded_promotion:
+		promotion_rollback = _build_bounded_promotion_rollback_snapshot(
+			commit_ready_bodies
+		)
+	var committed_usage_before: Dictionary = {}
+	if material_ledger != null and material_ledger.has_method("get_summary"):
+		committed_usage_before = material_ledger.call("get_summary") as Dictionary
+	var committed_resolver := _ensure_committed_volume_resolver()
+	_ensure_bounded_resolver_cache(committed_bodies)
+	var incremental_resolution: Dictionary = committed_resolver.call(
+		"build_incremental_committed_usage_summary",
+		committed_bodies,
+		commit_ready_bodies,
+		_get_bounded_history_checkpoint_token(),
+		stages_bounded_promotion
+	) as Dictionary
+	var authoritative_usage_after := incremental_resolution.get(
+		"summary",
+		{}
+	) as Dictionary
+	if (
+		stages_bounded_promotion
+		and not authoritative_usage_after.has("materials")
+	):
+		_abort_bounded_promotion_cache_candidate(
+			committed_resolver,
+			promotion_rollback
+		)
+		return null
+	committed_volume_cache_diagnostics = incremental_resolution.get(
+		"diagnostics",
+		{}
+	) as Dictionary
+	var layer: Resource = ForgeV2LayerDataScript.new()
+	var resolved_usage_after: Dictionary = layer.call(
+		"configure_from_material_bodies",
+		bounded_history_lifetime_operation_count + 1,
+		commit_ready_bodies,
+		committed_bodies,
+		committed_usage_before,
+		authoritative_usage_after
+	) as Dictionary
+	if (
+		stages_bounded_promotion
+		and not _can_commit_layer_to_bounded_add_history(
+			layer,
+			commit_ready_bodies
+		)
+	):
+		_abort_bounded_promotion_cache_candidate(
+			committed_resolver,
+			promotion_rollback
+		)
+		return null
 	for body: Resource in commit_ready_bodies:
 		if body == null:
 			continue
 		body.set("committed_layer_id", StringName(layer.get("layer_id")))
 		body.set("layer_active", true)
-	forge_layers.append(layer)
-	undone_forge_layers.clear()
-	_rebuild_material_ledger()
-	_mark_material_usage_summary_dirty()
+	_discard_abandoned_redo_layers()
+	var is_protected_commit := _is_protected_commit_group(commit_ready_bodies)
+	if is_protected_commit:
+		protected_forge_layers.append(layer)
+	else:
+		forge_layers.append(layer)
+	bounded_history_lifetime_operation_count += 1
+	if stages_bounded_promotion:
+		var promotion_ledger_candidate: Resource = (
+			ForgeV2MaterialLedgerScript.new()
+		)
+		promotion_ledger_candidate.call(
+			"replace_with_summary",
+			material_ledger.call("get_summary") as Dictionary
+		)
+		promotion_ledger_candidate.call("apply_layer", layer)
+		material_ledger = promotion_ledger_candidate
+	elif material_ledger != null and material_ledger.has_method("apply_layer"):
+		material_ledger.call("apply_layer", layer)
+	else:
+		_rebuild_material_ledger()
+	if not authoritative_usage_after.is_empty() and _can_reuse_committed_usage_summary(
+		resolved_usage_after,
+		committed_bodies,
+		commit_ready_bodies
+	):
+		material_usage_summary_cache = resolved_usage_after.duplicate(true)
+		material_usage_summary_cache_dirty = false
+	else:
+		_mark_material_usage_summary_dirty()
+	if is_protected_commit:
+		_publish_bounded_history_transition(
+			BOUNDED_HISTORY_TRANSITION_PROTECTED_CHANGED,
+			layer,
+			commit_ready_bodies
+		)
+	elif _can_commit_layer_to_bounded_add_history(layer, commit_ready_bodies):
+		if forge_layers.size() > BOUNDED_HISTORY_TAIL_CAPACITY:
+			_stage_bounded_history_promotion(
+				layer,
+				commit_ready_bodies,
+				promotion_rollback
+			)
+		else:
+			_publish_bounded_history_transition(
+				(
+					BOUNDED_HISTORY_TRANSITION_RESET
+					if forge_layers.size() == 1
+					and not _has_bounded_history_checkpoint()
+					else BOUNDED_HISTORY_TRANSITION_APPEND
+				),
+				layer,
+				commit_ready_bodies
+			)
+	else:
+		_suspend_bounded_history(&"unsupported_committed_layer")
+		_publish_bounded_history_transition(
+			BOUNDED_HISTORY_TRANSITION_FALLBACK,
+			layer,
+			commit_ready_bodies
+		)
 	mark_updated()
 	return layer
 
 func undo_latest_layer() -> bool:
-	if forge_layers.is_empty():
+	if forge_layers.is_empty() or has_pending_bounded_history_promotion():
 		return false
 	var layer: Resource = forge_layers.pop_back()
 	if layer == null:
@@ -1174,11 +1709,16 @@ func undo_latest_layer() -> bool:
 	_set_layer_bodies_active(layer, false)
 	_rebuild_material_ledger()
 	_mark_material_usage_summary_dirty()
+	_publish_bounded_history_transition(
+		BOUNDED_HISTORY_TRANSITION_UNDO,
+		layer,
+		_get_layer_material_bodies(layer)
+	)
 	mark_updated()
 	return true
 
 func redo_latest_layer() -> bool:
-	if undone_forge_layers.is_empty():
+	if undone_forge_layers.is_empty() or has_pending_bounded_history_promotion():
 		return false
 	var layer: Resource = undone_forge_layers.pop_back()
 	if layer == null:
@@ -1187,8 +1727,463 @@ func redo_latest_layer() -> bool:
 	_set_layer_bodies_active(layer, true)
 	_rebuild_material_ledger()
 	_mark_material_usage_summary_dirty()
+	_publish_bounded_history_transition(
+		BOUNDED_HISTORY_TRANSITION_REDO,
+		layer,
+		_get_layer_material_bodies(layer)
+	)
 	mark_updated()
 	return true
+
+func get_bounded_history_transition() -> Dictionary:
+	if _bounded_history_transition.is_empty():
+		return {
+			"kind": BOUNDED_HISTORY_TRANSITION_NONE,
+			"revision": bounded_history_transition_revision,
+			"requires_native_ack": false,
+			"bounded_history_enabled": _is_bounded_history_active(),
+		}
+	return _bounded_history_transition.duplicate()
+
+func get_bounded_presentation_descriptor() -> Dictionary:
+	var active_tail_layers := _nonnull_layers(forge_layers)
+	var redo_stack_layers := _nonnull_layers(undone_forge_layers)
+	var redo_timeline_layers := redo_stack_layers.duplicate()
+	redo_timeline_layers.reverse()
+	var active_tail_bodies := _collect_layer_bodies(active_tail_layers)
+	var redo_stack_bodies := _collect_layer_bodies(redo_stack_layers)
+	var redo_timeline_bodies := _collect_layer_bodies(redo_timeline_layers)
+	var protected_bodies := _collect_protected_material_bodies()
+	var checkpoint_packet := _get_bounded_history_checkpoint_token()
+	var checkpoint_identity := _get_bounded_history_checkpoint_identity()
+	return {
+		"schema_version": 1,
+		"bounded_history_enabled": _is_bounded_history_active(),
+		"bounded_history_configured_enabled": bounded_history_enabled,
+		"suspended_reason": bounded_history_suspended_reason,
+		"recovery_blocked": (
+			bounded_history_recovery_blocked_reason != StringName()
+		),
+		"recovery_blocked_reason": bounded_history_recovery_blocked_reason,
+		"transition_revision": bounded_history_transition_revision,
+		"tail_capacity": BOUNDED_HISTORY_TAIL_CAPACITY,
+		"lifetime_operation_count": bounded_history_lifetime_operation_count,
+		"checkpoint": bounded_history_checkpoint,
+		"checkpoint_packet": checkpoint_packet,
+		"checkpoint_identity": checkpoint_identity,
+		"checkpoint_operation_count": get_bounded_history_checkpoint_operation_count(),
+		"checkpoint_mesh_dirty": bool(checkpoint_packet.get(
+			"checkpoint_mesh_dirty",
+			false
+		)),
+		"materialized_mesh_operation_count": int(checkpoint_packet.get(
+			"materialized_mesh_operation_count",
+			0
+		)),
+		"checkpoint_restore_ready": bool(checkpoint_packet.get(
+			"checkpoint_restore_ready",
+			false
+		)),
+		"active_tail_layers": active_tail_layers,
+		"active_tail_layer_ids": _layer_ids(active_tail_layers),
+		"active_tail_bodies": active_tail_bodies,
+		"active_tail_body_ids": _body_ids(active_tail_bodies),
+		"redo_tail_layers": redo_stack_layers,
+		"redo_tail_layer_ids": _layer_ids(redo_stack_layers),
+		"redo_tail_bodies": redo_stack_bodies,
+		"redo_tail_body_ids": _body_ids(redo_stack_bodies),
+		"redo_timeline_layers": redo_timeline_layers,
+		"redo_timeline_layer_ids": _layer_ids(redo_timeline_layers),
+		"redo_timeline_bodies": redo_timeline_bodies,
+		"redo_timeline_body_ids": _body_ids(redo_timeline_bodies),
+		"protected_layers": _nonnull_layers(protected_forge_layers),
+		"protected_layer_count": _nonnull_layers(
+			protected_forge_layers
+		).size(),
+		"protected_bodies": protected_bodies,
+		"protected_body_ids": _body_ids(protected_bodies),
+		"protected_body_count": protected_bodies.size(),
+		"logical_body_count": (
+			(1 if _has_bounded_history_checkpoint() else 0)
+			+ active_tail_bodies.size()
+			+ protected_bodies.size()
+		),
+		"pending_native_ack": has_pending_bounded_history_promotion(),
+	}
+
+func has_pending_bounded_history_promotion() -> bool:
+	return not _bounded_history_pending_promotion.is_empty()
+
+func acknowledge_bounded_history_transition(
+	revision: int,
+	native_history_result: Dictionary = {}
+) -> bool:
+	if (
+		not has_pending_bounded_history_promotion()
+		or revision != bounded_history_transition_revision
+		or revision != int(_bounded_history_pending_promotion.get(
+			"revision",
+			-1
+		))
+	):
+		return false
+	var expected_checkpoint_operation_count := int(
+		_bounded_history_pending_promotion.get(
+			"expected_checkpoint_operation_count",
+			-1
+		)
+	)
+	if (
+		not bool(native_history_result.get("ok", false))
+		or not bool(native_history_result.get("history_window_enabled", false))
+		or String(native_history_result.get("last_mode", ""))
+		!= String(BOUNDED_HISTORY_TRANSITION_PROMOTION_APPEND)
+		or int(native_history_result.get("checkpoint_operation_count", -1))
+		!= expected_checkpoint_operation_count
+		or int(native_history_result.get("promotion_boolean_delta", -1)) != 0
+		or int(native_history_result.get("promotion_export_delta", -1)) != 0
+	):
+		return false
+	var promoted_layer := _bounded_history_pending_promotion.get(
+		"promoted_layer",
+		null
+	) as Resource
+	var promoted_bodies := _bounded_history_pending_promotion.get(
+		"promoted_bodies",
+		[]
+	) as Array
+	if promoted_layer == null or promoted_bodies.is_empty():
+		return false
+	var resolver := _ensure_committed_volume_resolver()
+	var sample_cell_size_meters := float(
+		resolver.call("get_incremental_sample_cell_size_meters")
+	)
+	if sample_cell_size_meters <= 0.0 and _has_bounded_history_checkpoint():
+		sample_cell_size_meters = float(bounded_history_checkpoint.get(
+			"resolver_sample_cell_size_meters"
+		))
+	if sample_cell_size_meters <= 0.0:
+		return false
+	var checkpoint_summary: Dictionary = {}
+	if _has_bounded_history_checkpoint():
+		checkpoint_summary = bounded_history_checkpoint.call(
+			"get_material_ledger_summary"
+		) as Dictionary
+	_ensure_material_ledger()
+	var next_checkpoint_summary := material_ledger.call(
+		"build_checkpoint_summary_after_layer",
+		checkpoint_summary,
+		promoted_layer
+	) as Dictionary
+	var live_ledger_summary_before := material_ledger.call(
+		"get_summary"
+	) as Dictionary
+	var bounded_ledger_candidate: Resource = ForgeV2MaterialLedgerScript.new()
+	bounded_ledger_candidate.call(
+		"rebuild_from_checkpoint_and_layers",
+		next_checkpoint_summary,
+		protected_forge_layers,
+		forge_layers
+	)
+	var bounded_ledger_summary := bounded_ledger_candidate.call(
+		"get_summary"
+	) as Dictionary
+	if not _material_ledger_summaries_match(
+		live_ledger_summary_before,
+		bounded_ledger_summary
+	):
+		return false
+	if not _bounded_ledger_retains_only_live_layer_ids(
+		bounded_ledger_candidate
+	):
+		return false
+	var previous_checkpoint_token := _bounded_history_pending_promotion.get(
+		"previous_checkpoint_token",
+		{}
+	) as Dictionary
+	var occupancy_result := resolver.call(
+		"build_checkpoint_occupancy_delta",
+		previous_checkpoint_token,
+		promoted_bodies,
+		sample_cell_size_meters
+	) as Dictionary
+	if not bool(occupancy_result.get("ok", false)):
+		return false
+	_ensure_bounded_history_checkpoint()
+	var next_checkpoint_identity := bounded_history_checkpoint.call(
+		"build_next_identity_descriptor",
+		expected_checkpoint_operation_count
+	) as Dictionary
+	if next_checkpoint_identity.is_empty():
+		return false
+	var next_checkpoint_token := next_checkpoint_identity.duplicate()
+	next_checkpoint_token["checkpoint_initialized"] = true
+	next_checkpoint_token["checkpoint_restore_ready"] = false
+	next_checkpoint_token["material_variant_id"] = StringName(
+		promoted_layer.get("operation_material_id")
+	)
+	next_checkpoint_token["resolver_sample_cell_size_meters"] = (
+		sample_cell_size_meters
+	)
+	var active_rebased_bodies := _collect_committed_active_user_material_bodies()
+	var pre_rebase_body_tokens := _bounded_history_pending_promotion.get(
+		"pre_rebase_body_tokens",
+		[]
+	) as Array
+	var rebase_plan := resolver.call(
+		"build_incremental_committed_cache_rebase_plan",
+		next_checkpoint_token,
+		active_rebased_bodies,
+		pre_rebase_body_tokens,
+		previous_checkpoint_token
+	) as Dictionary
+	if (
+		not bool(rebase_plan.get("ok", false))
+		or not bool(resolver.call(
+			"has_pending_incremental_committed_cache_candidate"
+		))
+		or not bool(resolver.call(
+			"validate_incremental_committed_cache_rebase_plan",
+			rebase_plan
+		))
+		or not bool(bounded_history_checkpoint.call(
+			"can_advance_logical_checkpoint_with_occupancy_delta",
+			expected_checkpoint_operation_count,
+			next_checkpoint_identity,
+			StringName(promoted_layer.get("operation_material_id")),
+			sample_cell_size_meters,
+			occupancy_result
+		))
+	):
+		return false
+	var rebase_result := resolver.call(
+		"commit_incremental_committed_cache_rebase",
+		rebase_plan
+	) as Dictionary
+	if not bool(rebase_result.get("ok", false)):
+		return false
+	var checkpoint_advanced := bool(bounded_history_checkpoint.call(
+		"advance_logical_checkpoint_with_occupancy_delta",
+		expected_checkpoint_operation_count,
+		next_checkpoint_identity,
+		StringName(promoted_layer.get("operation_material_id")),
+		next_checkpoint_summary,
+		bounded_history_lifetime_operation_count,
+		sample_cell_size_meters,
+		occupancy_result
+	))
+	if not checkpoint_advanced:
+		resolver.call(
+			"rollback_incremental_committed_cache_rebase",
+			rebase_plan
+		)
+		return false
+	# Swap in the candidate only after every pre-ACK validation succeeds.
+	# Its prefix has no historical source IDs and its suffix contains at most
+	# the protected layer(s) plus the five active tail layer IDs.
+	material_ledger = bounded_ledger_candidate
+	material_usage_summary_cache = bounded_ledger_summary.duplicate(true)
+	material_usage_summary_cache_dirty = false
+	resolver.call("commit_incremental_committed_cache_candidate")
+	committed_volume_cache_diagnostics = rebase_result.duplicate(true)
+	var promoted_source_ids: Array = promoted_layer.get(
+		"source_record_ids"
+	) as Array
+	var normalized_source_ids: Array[StringName] = []
+	for source_id_variant: Variant in promoted_source_ids:
+		normalized_source_ids.append(StringName(source_id_variant))
+	_remove_volume_strokes_by_id(normalized_source_ids)
+	_bounded_history_pending_promotion = {}
+	_bounded_history_transition["requires_native_ack"] = false
+	_bounded_history_transition["pending_native_ack"] = false
+	_bounded_history_transition["acknowledged"] = true
+	_bounded_history_transition["checkpoint"] = bounded_history_checkpoint
+	_bounded_history_transition["checkpoint_packet"] = (
+		_get_bounded_history_checkpoint_token()
+	)
+	_bounded_history_transition["checkpoint_identity"] = (
+		_get_bounded_history_checkpoint_identity()
+	)
+	_bounded_history_transition["checkpoint_operation_count"] = (
+		expected_checkpoint_operation_count
+	)
+	_bounded_history_transition["checkpoint_mesh_dirty"] = true
+	_bounded_history_transition["logical_body_count"] = (
+		1
+		+ int((_bounded_history_transition.get(
+			"active_tail_bodies",
+			[]
+		) as Array).size())
+		+ int((_bounded_history_transition.get(
+			"protected_bodies",
+			[]
+		) as Array).size())
+	)
+	mark_updated()
+	return true
+
+func reject_bounded_history_transition(
+	revision: int,
+	reason: StringName = &"native_promotion_rejected"
+) -> bool:
+	if (
+		not has_pending_bounded_history_promotion()
+		or revision != int(_bounded_history_pending_promotion.get(
+			"revision",
+			-1
+		))
+	):
+		return false
+	var rollback_snapshot := _bounded_history_pending_promotion.get(
+		"rollback_snapshot",
+		{}
+	) as Dictionary
+	# A later stroke may have been completed while this native promotion was
+	# awaiting its asynchronous operand.  It is not part of the older rollback
+	# snapshot and must remain pending rather than being silently discarded.
+	var retained_pending_bodies := _collect_pending_user_material_bodies()
+	var retained_source_ids: Dictionary = {}
+	for pending_body: Resource in retained_pending_bodies:
+		if pending_body == null:
+			continue
+		var source_id := StringName(pending_body.get("source_record_id"))
+		if source_id != StringName():
+			retained_source_ids[source_id] = true
+	var retained_pending_strokes: Array[Resource] = []
+	for stroke: Resource in volume_strokes:
+		if (
+			stroke != null
+			and retained_source_ids.has(StringName(stroke.get("stroke_id")))
+		):
+			retained_pending_strokes.append(stroke)
+	var retained_selected_body_id := selected_material_body_id
+	_abort_bounded_promotion_cache_candidate(
+		_ensure_committed_volume_resolver(),
+		rollback_snapshot
+	)
+	_restore_bounded_promotion_rollback_snapshot(rollback_snapshot)
+	for pending_body: Resource in retained_pending_bodies:
+		if pending_body == null:
+			continue
+		var pending_body_id := StringName(pending_body.get("body_id"))
+		if _find_material_body_by_id(pending_body_id) == null:
+			material_bodies.append(pending_body)
+	for pending_stroke: Resource in retained_pending_strokes:
+		if pending_stroke == null:
+			continue
+		var pending_stroke_id := StringName(pending_stroke.get("stroke_id"))
+		if _find_volume_stroke_by_id(pending_stroke_id) == null:
+			volume_strokes.append(pending_stroke)
+	if _find_material_body_by_id(retained_selected_body_id) != null:
+		selected_material_body_id = retained_selected_body_id
+	_normalize_selected_material_body_id()
+	_bounded_history_pending_promotion = {}
+	_suspend_bounded_history(
+		reason if reason != StringName() else &"native_promotion_rejected"
+	)
+	_publish_bounded_history_transition(
+		BOUNDED_HISTORY_TRANSITION_FALLBACK,
+		null,
+		[]
+	)
+	mark_updated()
+	return true
+
+func set_bounded_history_checkpoint_export_provider(
+	provider: Callable
+) -> void:
+	_bounded_history_checkpoint_export_provider = provider
+
+func clear_bounded_history_checkpoint_export_provider(
+	provider: Callable = Callable()
+) -> void:
+	if (
+		provider.is_valid()
+		and provider != _bounded_history_checkpoint_export_provider
+	):
+		return
+	_bounded_history_checkpoint_export_provider = Callable()
+
+func set_runtime_contract_mesh_export_provider(provider: Callable) -> void:
+	_runtime_contract_mesh_export_provider = provider
+
+func clear_runtime_contract_mesh_export_provider(
+	provider: Callable = Callable()
+) -> void:
+	if provider.is_valid() and provider != _runtime_contract_mesh_export_provider:
+		return
+	_runtime_contract_mesh_export_provider = Callable()
+
+func request_runtime_contract_mesh_export() -> Dictionary:
+	if not _runtime_contract_mesh_export_provider.is_valid():
+		return {
+			"ok": false,
+			"error_code": "RUNTIME_CONTRACT_MESH_PROVIDER_UNAVAILABLE",
+		}
+	var packet_variant: Variant = _runtime_contract_mesh_export_provider.call()
+	if not packet_variant is Dictionary:
+		return {
+			"ok": false,
+			"error_code": "RUNTIME_CONTRACT_MESH_PACKET_INVALID",
+		}
+	return packet_variant as Dictionary
+
+func mark_bounded_history_recovery_blocked(reason: StringName) -> void:
+	bounded_history_recovery_blocked_reason = (
+		reason if reason != StringName() else &"checkpoint_recovery_blocked"
+	)
+
+func clear_bounded_history_recovery_blocked() -> void:
+	bounded_history_recovery_blocked_reason = StringName()
+
+func materialize_bounded_history_checkpoint(
+	native_checkpoint_packet: Dictionary
+) -> bool:
+	if not _has_bounded_history_checkpoint():
+		return true
+	var expected_count := get_bounded_history_checkpoint_operation_count()
+	var materialized := bool(bounded_history_checkpoint.call(
+		"materialize_from_native_packet",
+		native_checkpoint_packet,
+		expected_count
+	))
+	if not materialized:
+		return false
+	clear_bounded_history_recovery_blocked()
+	var resolver := _ensure_committed_volume_resolver()
+	if resolver.has_method("rebase_incremental_committed_cache"):
+		resolver.call(
+			"rebase_incremental_committed_cache",
+			_get_bounded_history_checkpoint_token(),
+			_collect_committed_active_user_material_bodies()
+		)
+	if not _bounded_history_transition.is_empty():
+		_bounded_history_transition["checkpoint"] = bounded_history_checkpoint
+		_bounded_history_transition["checkpoint_packet"] = (
+			_get_bounded_history_checkpoint_token()
+		)
+		_bounded_history_transition["checkpoint_identity"] = (
+			_get_bounded_history_checkpoint_identity()
+		)
+		_bounded_history_transition["checkpoint_mesh_dirty"] = false
+		_bounded_history_transition["materialized_mesh_operation_count"] = (
+			expected_count
+		)
+	return true
+
+func materialize_bounded_history_checkpoint_for_persistence() -> bool:
+	if not _has_bounded_history_checkpoint():
+		return true
+	if bool(bounded_history_checkpoint.call("is_restore_ready")):
+		return true
+	if not _bounded_history_checkpoint_export_provider.is_valid():
+		return false
+	var packet_variant: Variant = _bounded_history_checkpoint_export_provider.call(
+		get_bounded_history_checkpoint_operation_count()
+	)
+	if not packet_variant is Dictionary:
+		return false
+	return materialize_bounded_history_checkpoint(packet_variant as Dictionary)
 
 func get_builder_scope_label() -> String:
 	return CraftedItemWIPScript.get_builder_scope_label(builder_path_id, builder_component_id)
@@ -1283,6 +2278,8 @@ func get_active_tool_label() -> String:
 			return "Spline Line"
 		TOOL_HANDLES:
 			return "Handles"
+		TOOL_DETAILING_BRUSH:
+			return "Detailing Brush"
 		_:
 			return "CSG Material Stroke"
 
@@ -1299,6 +2296,10 @@ func get_tool_options() -> Array[Dictionary]:
 		{
 			"id": TOOL_HANDLES,
 			"label": "Handles",
+		},
+		{
+			"id": TOOL_DETAILING_BRUSH,
+			"label": "Detailing Brush",
 		},
 	]
 
@@ -1407,11 +2408,33 @@ func get_pending_material_body_count() -> int:
 	return _collect_pending_user_material_bodies().size()
 
 func get_committed_layer_count() -> int:
+	var layer_count := get_bounded_history_checkpoint_operation_count()
+	for layer: Resource in protected_forge_layers:
+		if layer != null:
+			layer_count += 1
+	for layer: Resource in forge_layers:
+		if layer != null:
+			layer_count += 1
+	return layer_count
+
+func get_active_tail_layer_count() -> int:
 	var layer_count := 0
 	for layer: Resource in forge_layers:
 		if layer != null:
 			layer_count += 1
 	return layer_count
+
+func get_protected_layer_count() -> int:
+	var layer_count := 0
+	for layer: Resource in protected_forge_layers:
+		if layer != null:
+			layer_count += 1
+	return layer_count
+
+func get_bounded_history_checkpoint_operation_count() -> int:
+	if not _has_bounded_history_checkpoint():
+		return 0
+	return int(bounded_history_checkpoint.get("accumulated_operation_count"))
 
 func get_undone_layer_count() -> int:
 	var layer_count := 0
@@ -1427,6 +2450,18 @@ func get_material_ledger_summary() -> Dictionary:
 func get_material_ledger_label() -> String:
 	_ensure_material_ledger()
 	return String(material_ledger.call("get_summary_label")) if material_ledger != null else "Ledger material: 0.00 units"
+
+func get_committed_volume_cache_diagnostics() -> Dictionary:
+	var diagnostics := committed_volume_cache_diagnostics.duplicate(true)
+	if committed_volume_resolver != null and committed_volume_resolver.has_method(
+		"get_incremental_committed_cache_diagnostics"
+	):
+		var resolver_diagnostics: Dictionary = committed_volume_resolver.call(
+			"get_incremental_committed_cache_diagnostics"
+		) as Dictionary
+		for diagnostic_key: Variant in resolver_diagnostics.keys():
+			diagnostics[diagnostic_key] = resolver_diagnostics[diagnostic_key]
+	return diagnostics
 
 func get_selected_material_body() -> Resource:
 	if selected_material_body_id == StringName():
@@ -1545,6 +2580,15 @@ func remove_material_body(body_id: StringName) -> bool:
 func get_material_usage_summary() -> Dictionary:
 	if not material_usage_summary_cache_dirty and not material_usage_summary_cache.is_empty():
 		return material_usage_summary_cache.duplicate(true)
+	if _has_bounded_history_checkpoint():
+		_ensure_material_ledger()
+		material_usage_summary_cache = (
+			material_ledger.call("get_summary") as Dictionary
+			if material_ledger != null
+			else {}
+		)
+		material_usage_summary_cache_dirty = false
+		return material_usage_summary_cache.duplicate(true)
 	var active_bodies: Array[Resource] = []
 	for body: Resource in material_bodies:
 		if body == null:
@@ -1645,13 +2689,19 @@ func get_status_summary(include_material_usage: bool = true) -> Dictionary:
 		"spline_line_csg_noodle_enabled": spline_line_csg_noodle_enabled,
 		"spline_line_csg_noodle_status_label": get_spline_line_csg_noodle_status_label(),
 		"can_generate_spline_line_csg_noodle": can_generate_spline_line_csg_noodle(),
+		"detailing_brush": get_detailing_brush_summary(),
+		"detailing_brush_status_label": get_detailing_brush_status_label(),
+		"can_generate_detailing_brush": can_generate_detailing_brush(),
 		"selected_spline_point_index": selected_spline_point_index,
 		"material_body_count": get_material_body_count(),
 		"seed_material_body_count": get_seed_material_body_count(),
 		"user_material_body_count": get_user_material_body_count(),
 		"pending_material_body_count": get_pending_material_body_count(),
 		"committed_layer_count": get_committed_layer_count(),
+		"active_tail_layer_count": get_active_tail_layer_count(),
+		"protected_layer_count": get_protected_layer_count(),
 		"undone_layer_count": get_undone_layer_count(),
+		"bounded_history": get_bounded_presentation_descriptor(),
 		"selected_material_body_id": selected_material_body_id,
 		"selected_material_body": _build_selected_material_body_summary(),
 		"material_body_stack_entries": get_material_body_stack_entries(),
@@ -1659,9 +2709,13 @@ func get_status_summary(include_material_usage: bool = true) -> Dictionary:
 		"material_usage_label": resolved_material_usage_label,
 		"material_ledger_summary": get_material_ledger_summary(),
 		"material_ledger_label": get_material_ledger_label(),
+		"committed_volume_cache_diagnostics": get_committed_volume_cache_diagnostics(),
 	}
 
 func build_authoring_export_snapshot() -> Dictionary:
+	var checkpoint_persistable := (
+		materialize_bounded_history_checkpoint_for_persistence()
+	)
 	normalize()
 	var material_body_snapshots: Array[Dictionary] = []
 	for body: Resource in material_bodies:
@@ -1677,6 +2731,13 @@ func build_authoring_export_snapshot() -> Dictionary:
 		if layer.has_method("normalize"):
 			layer.call("normalize")
 		layer_snapshots.append(_build_layer_export_snapshot(layer))
+	var protected_layer_snapshots: Array[Dictionary] = []
+	for layer: Resource in protected_forge_layers:
+		if layer == null:
+			continue
+		if layer.has_method("normalize"):
+			layer.call("normalize")
+		protected_layer_snapshots.append(_build_layer_export_snapshot(layer))
 	return {
 		"schema_id": schema_id,
 		"schema_version": schema_version,
@@ -1716,10 +2777,14 @@ func build_authoring_export_snapshot() -> Dictionary:
 		"active_basic_grid_snapping_enabled": active_basic_grid_snapping_enabled,
 		"platform_contract": get_platform_contract(),
 		"spline_line": get_spline_line_summary(),
+		"detailing_brush": get_detailing_brush_summary(),
 		"material_usage_summary": get_material_usage_summary(),
 		"material_ledger_summary": get_material_ledger_summary(),
 		"forge_layers": layer_snapshots,
+		"protected_forge_layers": protected_layer_snapshots,
 		"material_bodies": material_body_snapshots,
+		"bounded_history": _build_bounded_history_export_snapshot(),
+		"bounded_history_checkpoint_persistable": checkpoint_persistable,
 	}
 
 func mark_updated() -> void:
@@ -1755,7 +2820,10 @@ func _append_material_body_record(
 	),
 	profile_contact_distance_meters: float = 0.0,
 	profile_runtime_schema_version: int = 0,
-	profile_rotation_bias_degrees: float = 0.0
+	profile_rotation_bias_degrees: float = 0.0,
+	surface_target_kind: StringName = StringName(),
+	surface_target_id: StringName = StringName(),
+	path_contact_directions: PackedVector3Array = PackedVector3Array()
 ) -> Resource:
 	var body: Resource = ForgeV2MaterialBodyScript.new()
 	body.set("source_record_id", StringName("%s_%s" % [source_prefix, str(Time.get_ticks_usec())]))
@@ -1767,7 +2835,23 @@ func _append_material_body_record(
 	body.set("amount_ratio", DEFAULT_AMOUNT_RATIO)
 	body.set("path_points", path_points)
 	body.set("path_surface_normals", path_surface_normals)
+	body.set("path_contact_directions", path_contact_directions)
 	body.set("body_kind", body_kind)
+	body.set("surface_target_kind", surface_target_kind)
+	body.set("surface_target_id", surface_target_id)
+	if ForgeV2MaterialCompositionPolicyScript.is_protected_handle_entry(body):
+		body.set(
+			"operation_mode",
+			ForgeV2MaterialCompositionPolicyScript.resolve_effective_operation_mode(
+				body
+			)
+		)
+		body.set(
+			"placement_policy",
+			ForgeV2MaterialCompositionPolicyScript.resolve_effective_placement_policy(
+				body
+			)
+		)
 	body.set("seed_role", ForgeV2MaterialBodyScript.SEED_ROLE_NONE)
 	body.set("profile_id", profile_id)
 	body.set("profile_role", profile_role)
@@ -1810,7 +2894,11 @@ func _append_active_saved_basic_profile_material_body(
 	path_points: PackedVector3Array,
 	path_surface_normals: PackedVector3Array,
 	shape_kind: StringName,
-	source_prefix: String
+	source_prefix: String,
+	body_kind: StringName = ForgeV2MaterialBodyScript.BODY_KIND_PROFILE_EXTRUSION,
+	surface_target_kind: StringName = StringName(),
+	surface_target_id: StringName = StringName(),
+	path_contact_directions: PackedVector3Array = PackedVector3Array()
 ) -> Resource:
 	if not is_saved_basic_profile_shape_active():
 		return null
@@ -1844,7 +2932,7 @@ func _append_active_saved_basic_profile_material_body(
 		DEFAULT_AMOUNT_RATIO,
 		shape_kind,
 		source_prefix,
-		ForgeV2MaterialBodyScript.BODY_KIND_PROFILE_EXTRUSION,
+		body_kind,
 		active_saved_basic_profile_id,
 		ForgeV2ProfileShapeLibraryScript.PROFILE_ROLE_NONE,
 		profile_polygon,
@@ -1858,7 +2946,10 @@ func _append_active_saved_basic_profile_material_body(
 		float(active_saved_basic_profile_data.get(
 			"rotation_degrees",
 			0.0
-		))
+		)),
+		surface_target_kind,
+		surface_target_id,
+		path_contact_directions
 	)
 	if body != null:
 		body.set(
@@ -1926,8 +3017,56 @@ func _append_profile_extrusion_material_body(is_handle_profile: bool) -> Resourc
 	var profile_record: Dictionary = ForgeV2ProfileShapeLibraryScript.get_profile_record(resolved_profile_id, active_brush_radius_meters)
 	var profile_polygon: PackedVector2Array = _resolve_active_profile_polygon(resolved_profile_id)
 	var profile_anchor := Vector2(active_profile_anchor_x_meters, active_profile_anchor_y_meters)
-	if _is_active_handle_builder_profile() and resolved_profile_id == ForgeV2ProfileShapeLibraryScript.PROFILE_HANDLE_BUILDER:
-		profile_anchor = _resolve_active_handle_builder_preview_anchor()
+	var profile_contact_point_relative := Vector2.ZERO
+	var profile_contact_direction := (
+		ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_LOCAL_SIX
+	)
+	var profile_contact_distance := 0.0
+	var profile_runtime_schema_version := 0
+	var profile_rotation_bias_degrees := 0.0
+	if (
+		is_handle_profile
+		and _is_active_handle_builder_profile()
+		and resolved_profile_id
+		== ForgeV2ProfileShapeLibraryScript.PROFILE_HANDLE_BUILDER
+	):
+		var compiled_handle_profile: Dictionary = (
+			build_active_tool_profile_preset_data("Handle Runtime")
+		)
+		var handle_runtime: Dictionary = compiled_handle_profile.get(
+			"compiled_profile",
+			{}
+		) as Dictionary
+		if not bool(handle_runtime.get("valid", false)):
+			return null
+		profile_polygon = handle_runtime.get(
+			"deposition_polygon_2d_meters",
+			PackedVector2Array()
+		) as PackedVector2Array
+		profile_anchor = handle_runtime.get(
+			"anchor_2d_meters",
+			profile_anchor
+		) as Vector2
+		profile_contact_point_relative = handle_runtime.get(
+			"contact_point_relative_2d_meters",
+			Vector2.ZERO
+		) as Vector2
+		profile_contact_direction = handle_runtime.get(
+			"contact_direction_2d",
+			ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_LOCAL_SIX
+		) as Vector2
+		profile_contact_distance = float(handle_runtime.get(
+			"contact_distance_meters",
+			0.0
+		))
+		profile_runtime_schema_version = int(handle_runtime.get(
+			"schema_version",
+			0
+		))
+		profile_rotation_bias_degrees = float(compiled_handle_profile.get(
+			"rotation_degrees",
+			0.0
+		))
 	var body_kind := (
 		ForgeV2MaterialBodyScript.BODY_KIND_HANDLE_PROFILE
 		if is_handle_profile
@@ -1952,7 +3091,13 @@ func _append_profile_extrusion_material_body(is_handle_profile: bool) -> Resourc
 		profile_role,
 		profile_polygon,
 		profile_anchor,
-		0.0
+		0.0,
+		spline_line_surface_normals,
+		profile_contact_point_relative,
+		profile_contact_direction,
+		profile_contact_distance,
+		profile_runtime_schema_version,
+		profile_rotation_bias_degrees
 	)
 
 func _find_material_body_by_id(body_id: StringName) -> Resource:
@@ -2048,6 +3193,8 @@ func _build_material_body_stack_entry(body: Resource, body_index: int) -> Dictio
 		kind_label = "Handle"
 	elif body_kind == ForgeV2MaterialBodyScript.BODY_KIND_PROFILE_EXTRUSION:
 		kind_label = "Profile"
+	elif body_kind == ForgeV2MaterialBodyScript.BODY_KIND_DETAILING_BRUSH:
+		kind_label = "Detail"
 	var state_label := "Pending"
 	if is_committed:
 		state_label = "Layer" if is_active else "Undone"
@@ -2070,6 +3217,8 @@ func _build_material_body_stack_entry(body: Resource, body_index: int) -> Dictio
 		"operation_mode": operation_mode,
 		"rough_material_units": material_units,
 		"body_kind": body_kind,
+		"surface_target_kind": StringName(body.get("surface_target_kind")),
+		"surface_target_id": StringName(body.get("surface_target_id")),
 		"seed_role": StringName(body.get("seed_role")),
 		"profile_id": StringName(body.get("profile_id")),
 		"profile_role": StringName(body.get("profile_role")),
@@ -2104,6 +3253,9 @@ func _build_material_body_export_snapshot(body: Resource) -> Dictionary:
 		"shape_kind": StringName(body.get("shape_kind")),
 		"path_points": body.get("path_points"),
 		"path_surface_normals": body.get("path_surface_normals"),
+		"path_contact_directions": body.get("path_contact_directions"),
+		"surface_target_kind": StringName(body.get("surface_target_kind")),
+		"surface_target_id": StringName(body.get("surface_target_id")),
 		"radius_meters": float(body.get("radius_meters")),
 		"profile_id": StringName(body.get("profile_id")),
 		"profile_display_name": String(body.get("profile_display_name")),
@@ -2157,6 +3309,43 @@ func _build_layer_export_snapshot(layer: Resource) -> Dictionary:
 		"undoable": bool(layer.get("undoable")),
 	}
 
+func _build_bounded_history_export_snapshot() -> Dictionary:
+	var checkpoint_packet := _get_bounded_history_checkpoint_token()
+	return {
+		"configured_enabled": bounded_history_enabled,
+		"active": _is_bounded_history_active(),
+		"suspended_reason": bounded_history_suspended_reason,
+		"recovery_blocked_reason": bounded_history_recovery_blocked_reason,
+		"tail_capacity": BOUNDED_HISTORY_TAIL_CAPACITY,
+		"lifetime_operation_count": bounded_history_lifetime_operation_count,
+		"checkpoint_operation_count": get_bounded_history_checkpoint_operation_count(),
+		"checkpoint_materialized_operation_count": int(checkpoint_packet.get(
+			"materialized_mesh_operation_count",
+			0
+		)),
+		"checkpoint_mesh_dirty": bool(checkpoint_packet.get(
+			"checkpoint_mesh_dirty",
+			false
+		)),
+		"checkpoint_vertex_count": int(checkpoint_packet.get(
+			"checkpoint_vertex_count",
+			0
+		)),
+		"checkpoint_triangle_count": int(checkpoint_packet.get(
+			"checkpoint_triangle_count",
+			0
+		)),
+		"checkpoint_cell_count": (
+			(checkpoint_packet.get(
+				"checkpoint_cell_materials",
+				{}
+			) as Dictionary).size()
+		),
+		"active_tail_layer_ids": _layer_ids(forge_layers),
+		"redo_tail_layer_ids": _layer_ids(undone_forge_layers),
+		"protected_layer_ids": _layer_ids(protected_forge_layers),
+	}
+
 func _is_material_body_active(body: Resource) -> bool:
 	if body == null:
 		return false
@@ -2166,6 +3355,16 @@ func _is_material_body_active(body: Resource) -> bool:
 func _is_material_body_commit_ready(body: Resource) -> bool:
 	if body == null:
 		return false
+	var path_points: PackedVector3Array = body.get("path_points")
+	if (
+		StringName(body.get("body_kind"))
+		== ForgeV2MaterialBodyScript.BODY_KIND_HANDLE_PROFILE
+		and (
+			path_points.size() != HANDLE_REQUIRED_POINT_COUNT
+			or not _handle_endpoint_span_meets_minimum(path_points)
+		)
+	):
+		return false
 	var shape_kind := StringName(body.get("shape_kind"))
 	if (
 		shape_kind != ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
@@ -2173,9 +3372,17 @@ func _is_material_body_commit_ready(body: Resource) -> bool:
 		!= ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
 	):
 		return true
-	var path_points: PackedVector3Array = body.get("path_points")
 	if path_points.size() < 2:
 		return false
+	if (
+		body.has_method("uses_explicit_surface_contact_authority")
+		and bool(body.call("uses_explicit_surface_contact_authority"))
+	):
+		var path_contact_directions: PackedVector3Array = body.get(
+			"path_contact_directions"
+		)
+		if path_contact_directions.size() != path_points.size():
+			return false
 	var path_length := 0.0
 	for point_index in range(path_points.size() - 1):
 		path_length += path_points[point_index].distance_to(
@@ -2269,19 +3476,777 @@ func _normalize_forge_layers() -> void:
 			layer.call("normalize")
 		normalized_undone_layers.append(layer)
 	undone_forge_layers = normalized_undone_layers
+	var normalized_protected_layers: Array[Resource] = []
+	for layer: Resource in protected_forge_layers:
+		if layer == null:
+			continue
+		if layer.has_method("normalize"):
+			layer.call("normalize")
+		normalized_protected_layers.append(layer)
+	protected_forge_layers = normalized_protected_layers
+
+func _normalize_bounded_history(loaded_schema_version: int) -> void:
+	_ensure_bounded_history_checkpoint()
+	bounded_history_checkpoint.call("normalize")
+	bounded_history_lifetime_operation_count = maxi(
+		bounded_history_lifetime_operation_count,
+		get_bounded_history_checkpoint_operation_count()
+	)
+	bounded_history_transition_revision = maxi(
+		bounded_history_transition_revision,
+		0
+	)
+	if bounded_history_suspended_reason == StringName():
+		bounded_history_suspended_reason = BOUNDED_HISTORY_SUSPENDED_NONE
+	# Schema-6 makes committed Handle layers protected/non-undoable and keeps
+	# their bodies beside, never inside, the Add history tail.
+	var retained_tail_layers: Array[Resource] = []
+	for layer: Resource in forge_layers:
+		if _is_protected_history_layer(layer):
+			if not protected_forge_layers.has(layer):
+				protected_forge_layers.append(layer)
+			continue
+		retained_tail_layers.append(layer)
+	forge_layers = retained_tail_layers
+	for layer_group: Array[Resource] in [
+		forge_layers,
+		undone_forge_layers,
+		protected_forge_layers,
+	]:
+		for layer: Resource in layer_group:
+			if layer == null:
+				continue
+			bounded_history_lifetime_operation_count = maxi(
+				bounded_history_lifetime_operation_count,
+				int(layer.get("order_index"))
+			)
+	_bounded_history_pending_promotion = {}
+	if (
+		loaded_schema_version < SCHEMA_VERSION
+		and forge_layers.size() > BOUNDED_HISTORY_TAIL_CAPACITY
+		and not _has_bounded_history_checkpoint()
+	):
+		_suspend_bounded_history(&"legacy_unbounded_history")
+	elif (
+		_is_bounded_history_active()
+		and (
+			forge_layers.size() + undone_forge_layers.size()
+			> BOUNDED_HISTORY_TAIL_CAPACITY
+		)
+	):
+		_suspend_bounded_history(&"invalid_tail_capacity")
+	if not _bounded_history_normalized_once:
+		_bounded_history_normalized_once = true
+		_publish_bounded_history_transition(
+			BOUNDED_HISTORY_TRANSITION_RESTORE,
+			null,
+			[]
+		)
+
+func _ensure_bounded_history_checkpoint() -> void:
+	if (
+		bounded_history_checkpoint == null
+		or not bounded_history_checkpoint.has_method(
+			"advance_logical_checkpoint_with_occupancy_delta"
+		)
+	):
+		bounded_history_checkpoint = ForgeV2HistoryCheckpointScript.new()
+
+func _has_bounded_history_checkpoint() -> bool:
+	return (
+		bounded_history_checkpoint != null
+		and bounded_history_checkpoint.has_method("is_initialized")
+		and bool(bounded_history_checkpoint.call("is_initialized"))
+	)
+
+func _is_bounded_history_active() -> bool:
+	return (
+		bounded_history_enabled
+		and bounded_history_suspended_reason
+		== BOUNDED_HISTORY_SUSPENDED_NONE
+	)
+
+func _suspend_bounded_history(reason: StringName) -> void:
+	bounded_history_suspended_reason = (
+		reason if reason != StringName() else &"unspecified"
+	)
+
+func _get_bounded_history_checkpoint_token() -> Dictionary:
+	if not _has_bounded_history_checkpoint():
+		return {}
+	return bounded_history_checkpoint.call("to_native_packet") as Dictionary
+
+func _get_bounded_history_checkpoint_identity() -> Dictionary:
+	_ensure_bounded_history_checkpoint()
+	if bounded_history_checkpoint.has_method("get_identity_descriptor"):
+		return bounded_history_checkpoint.call(
+			"get_identity_descriptor"
+		) as Dictionary
+	return {
+		"checkpoint_id": StringName(),
+		"checkpoint_revision": 0,
+		"checkpoint_materialization_revision": 0,
+		"checkpoint_operation_count": 0,
+		"materialized_mesh_operation_count": 0,
+		"checkpoint_mesh_dirty": false,
+	}
+
+func _ensure_bounded_resolver_cache(
+	committed_bodies: Array[Resource]
+) -> void:
+	if not _has_bounded_history_checkpoint():
+		return
+	var resolver := _ensure_committed_volume_resolver()
+	var diagnostics := resolver.call(
+		"get_incremental_committed_cache_diagnostics"
+	) as Dictionary
+	if bool(diagnostics.get("cache_valid", false)):
+		return
+	var restore_result := resolver.call(
+		"restore_incremental_committed_cache_from_checkpoint",
+		_get_bounded_history_checkpoint_token(),
+		committed_bodies
+	) as Dictionary
+	committed_volume_cache_diagnostics = restore_result.get(
+		"diagnostics",
+		{}
+	) as Dictionary
+
+func _is_protected_commit_group(bodies: Array[Resource]) -> bool:
+	if bodies.is_empty():
+		return false
+	for body: Resource in bodies:
+		if not _is_history_protected_body(body):
+			return false
+	return true
+
+func _is_history_protected_body(body: Resource) -> bool:
+	if body == null:
+		return false
+	if ForgeV2MaterialCompositionPolicyScript.is_protected_handle_entry(body):
+		return true
+	return (
+		body.has_method("is_platform_seed")
+		and bool(body.call("is_platform_seed"))
+	)
+
+func _is_protected_history_layer(layer: Resource) -> bool:
+	if layer == null:
+		return false
+	var records: Array = layer.get("input_shape_records") as Array
+	if records.is_empty():
+		return false
+	for record_variant: Variant in records:
+		if not record_variant is Dictionary:
+			return false
+		if StringName((record_variant as Dictionary).get(
+			"body_kind",
+			StringName()
+		)) != ForgeV2MaterialBodyScript.BODY_KIND_HANDLE_PROFILE:
+			return false
+	return true
+
+func _must_reject_unsupported_bounded_commit(
+	commit_ready_bodies: Array[Resource]
+) -> bool:
+	# Once bounded history has deliberately fallen back, legacy-compatible
+	# bodies must continue to commit through that fallback.  Reapplying the
+	# bounded eligibility gate here left every later primitive body pending.
+	if not _is_bounded_history_active():
+		return false
+	if (
+		(
+			not _has_bounded_history_checkpoint()
+			and forge_layers.is_empty()
+		)
+		or _is_protected_commit_group(commit_ready_bodies)
+	):
+		return false
+	if commit_ready_bodies.size() != 1:
+		return true
+	return not _is_body_bounded_add_history_eligible(
+		commit_ready_bodies[0],
+		_get_bounded_history_material_id()
+	)
+
+
+func _will_stage_bounded_history_promotion(
+	commit_ready_bodies: Array[Resource]
+) -> bool:
+	return (
+		_is_bounded_history_active()
+		and forge_layers.size() >= BOUNDED_HISTORY_TAIL_CAPACITY
+		and commit_ready_bodies.size() == 1
+		and not _is_history_protected_body(commit_ready_bodies[0])
+		and _is_body_bounded_add_history_eligible(
+			commit_ready_bodies[0],
+			_get_bounded_history_material_id()
+		)
+	)
+
+
+func _is_body_bounded_add_history_eligible(
+	body: Resource,
+	expected_material_variant_id: StringName
+) -> bool:
+	if body == null:
+		return false
+	var material_variant_id := StringName(body.get("material_variant_id"))
+	var body_kind := StringName(body.get("body_kind"))
+	var path_points: PackedVector3Array = body.get("path_points")
+	var path_normals: PackedVector3Array = body.get("path_surface_normals")
+	var path_contacts: PackedVector3Array = body.get("path_contact_directions")
+	var shape_kind := StringName(body.get("shape_kind"))
+	if shape_kind in [
+		ForgeV2MaterialBodyScript.SHAPE_KIND_CAPSULE_PATH,
+		ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH,
+	]:
+		var minimum_path_point_count := (
+			2
+			if shape_kind
+			== ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH
+			else 1
+		)
+		var radius_meters := float(body.get("radius_meters"))
+		if (
+			material_variant_id == StringName()
+			or (
+				expected_material_variant_id != StringName()
+				and material_variant_id != expected_material_variant_id
+			)
+			or StringName(body.get("operation_mode"))
+			!= ForgeV2VolumeStrokeScript.OPERATION_ADD_MATERIAL
+			or StringName(body.get("placement_policy"))
+			!= ForgeV2VolumeStrokeScript.PLACEMENT_REPLACE_EXISTING
+			or body_kind not in [
+				ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE,
+				ForgeV2MaterialBodyScript.BODY_KIND_DETAILING_BRUSH,
+			]
+			or int(body.get("profile_runtime_schema_version")) != 0
+			or path_points.size() < minimum_path_point_count
+			or path_normals.size() != path_points.size()
+			or not path_contacts.is_empty()
+			or not is_finite(radius_meters)
+			or radius_meters <= 0.0
+		):
+			return false
+		for path_point: Vector3 in path_points:
+			if not path_point.is_finite():
+				return false
+		for path_normal: Vector3 in path_normals:
+			if (
+				not is_finite(path_normal.x)
+				or not is_finite(path_normal.y)
+				or not is_finite(path_normal.z)
+				or path_normal.length_squared() <= 0.000001
+			):
+				return false
+		return true
+	return (
+		material_variant_id != StringName()
+		and (
+			expected_material_variant_id == StringName()
+			or material_variant_id == expected_material_variant_id
+		)
+		and StringName(body.get("operation_mode"))
+		== ForgeV2VolumeStrokeScript.OPERATION_ADD_MATERIAL
+		and StringName(body.get("placement_policy"))
+		== ForgeV2VolumeStrokeScript.PLACEMENT_REPLACE_EXISTING
+		and body_kind in [
+			ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE,
+			ForgeV2MaterialBodyScript.BODY_KIND_DETAILING_BRUSH,
+		]
+		and StringName(body.get("shape_kind"))
+		== ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
+		and int(body.get("profile_runtime_schema_version")) > 0
+		and path_points.size() >= 2
+		and path_normals.size() == path_points.size()
+		and path_contacts.size() == path_points.size()
+	)
+
+
+func _build_bounded_promotion_rollback_snapshot(
+	commit_ready_bodies: Array[Resource]
+) -> Dictionary:
+	var body_states: Array[Dictionary] = []
+	for body: Resource in commit_ready_bodies:
+		if body == null:
+			continue
+		body_states.append({
+			"body": body,
+			"committed_layer_id": StringName(body.get("committed_layer_id")),
+			"layer_active": bool(body.get("layer_active")),
+		})
+	return {
+		"forge_layers": forge_layers.duplicate(),
+		"undone_forge_layers": undone_forge_layers.duplicate(),
+		"material_bodies": material_bodies.duplicate(),
+		"volume_strokes": volume_strokes.duplicate(),
+		"material_ledger": material_ledger,
+		"material_usage_summary_cache": material_usage_summary_cache,
+		"material_usage_summary_cache_dirty": material_usage_summary_cache_dirty,
+		"committed_volume_cache_diagnostics": (
+			committed_volume_cache_diagnostics.duplicate(true)
+		),
+		"bounded_history_lifetime_operation_count": (
+			bounded_history_lifetime_operation_count
+		),
+		"selected_material_body_id": selected_material_body_id,
+		"updated_timestamp": updated_timestamp,
+		"body_states": body_states,
+	}
+
+
+func _abort_bounded_promotion_cache_candidate(
+	resolver: RefCounted,
+	rollback_snapshot: Dictionary
+) -> void:
+	if (
+		resolver != null
+		and resolver.has_method(
+			"abort_incremental_committed_cache_candidate"
+		)
+	):
+		resolver.call("abort_incremental_committed_cache_candidate")
+	committed_volume_cache_diagnostics = rollback_snapshot.get(
+		"committed_volume_cache_diagnostics",
+		{}
+	) as Dictionary
+
+
+func _restore_bounded_promotion_rollback_snapshot(
+	rollback_snapshot: Dictionary
+) -> void:
+	forge_layers = rollback_snapshot.get("forge_layers", []) as Array[Resource]
+	undone_forge_layers = rollback_snapshot.get(
+		"undone_forge_layers",
+		[]
+	) as Array[Resource]
+	material_bodies = rollback_snapshot.get(
+		"material_bodies",
+		[]
+	) as Array[Resource]
+	volume_strokes = rollback_snapshot.get(
+		"volume_strokes",
+		[]
+	) as Array[Resource]
+	material_ledger = rollback_snapshot.get("material_ledger", null) as Resource
+	material_usage_summary_cache = rollback_snapshot.get(
+		"material_usage_summary_cache",
+		{}
+	) as Dictionary
+	material_usage_summary_cache_dirty = bool(rollback_snapshot.get(
+		"material_usage_summary_cache_dirty",
+		true
+	))
+	committed_volume_cache_diagnostics = rollback_snapshot.get(
+		"committed_volume_cache_diagnostics",
+		{}
+	) as Dictionary
+	bounded_history_lifetime_operation_count = int(rollback_snapshot.get(
+		"bounded_history_lifetime_operation_count",
+		bounded_history_lifetime_operation_count
+	))
+	selected_material_body_id = StringName(rollback_snapshot.get(
+		"selected_material_body_id",
+		StringName()
+	))
+	updated_timestamp = float(rollback_snapshot.get(
+		"updated_timestamp",
+		updated_timestamp
+	))
+	var body_states: Array = rollback_snapshot.get("body_states", []) as Array
+	for state_variant: Variant in body_states:
+		if not state_variant is Dictionary:
+			continue
+		var body_state := state_variant as Dictionary
+		var body := body_state.get("body", null) as Resource
+		if body == null:
+			continue
+		body.set(
+			"committed_layer_id",
+			StringName(body_state.get("committed_layer_id", StringName()))
+		)
+		body.set("layer_active", bool(body_state.get("layer_active", true)))
+	_normalize_selected_material_body_id()
+
+
+func _can_commit_layer_to_bounded_add_history(
+	layer: Resource,
+	commit_ready_bodies: Array[Resource]
+) -> bool:
+	if (
+		not _is_bounded_history_active()
+		or layer == null
+		or commit_ready_bodies.size() != 1
+		or _is_history_protected_body(commit_ready_bodies[0])
+	):
+		return false
+	var expected_material_variant_id := _get_bounded_history_material_id()
+	if expected_material_variant_id == StringName():
+		expected_material_variant_id = StringName(
+			commit_ready_bodies[0].get("material_variant_id")
+		)
+	if (
+		not layer.has_method("is_bounded_add_history_eligible")
+		or not bool(layer.call(
+			"is_bounded_add_history_eligible",
+			expected_material_variant_id
+		))
+	):
+		return false
+	for active_layer: Resource in forge_layers:
+		if (
+			active_layer == null
+			or not active_layer.has_method(
+				"is_bounded_add_history_eligible"
+			)
+			or not bool(active_layer.call(
+				"is_bounded_add_history_eligible",
+				expected_material_variant_id
+			))
+		):
+			return false
+	return true
+
+func _get_bounded_history_material_id() -> StringName:
+	if _has_bounded_history_checkpoint():
+		return StringName(bounded_history_checkpoint.get("material_variant_id"))
+	for layer: Resource in forge_layers:
+		if layer == null:
+			continue
+		var material_id := StringName(layer.get("operation_material_id"))
+		if material_id != StringName():
+			return material_id
+	return StringName()
+
+func _discard_abandoned_redo_layers() -> void:
+	if undone_forge_layers.is_empty():
+		return
+	var abandoned_body_ids: Dictionary = {}
+	var abandoned_source_ids: Array[StringName] = []
+	for layer: Resource in undone_forge_layers:
+		if layer == null:
+			continue
+		for body_id_variant: Variant in layer.get("body_ids") as Array:
+			abandoned_body_ids[StringName(body_id_variant)] = true
+		for source_id_variant: Variant in layer.get("source_record_ids") as Array:
+			var source_id := StringName(source_id_variant)
+			if source_id != StringName():
+				abandoned_source_ids.append(source_id)
+	var retained_bodies: Array[Resource] = []
+	for body: Resource in material_bodies:
+		if body == null:
+			continue
+		if abandoned_body_ids.has(StringName(body.get("body_id"))):
+			continue
+		retained_bodies.append(body)
+	material_bodies = retained_bodies
+	_remove_volume_strokes_by_id(abandoned_source_ids)
+	undone_forge_layers.clear()
+	_normalize_selected_material_body_id()
+
+func _stage_bounded_history_promotion(
+	appended_layer: Resource,
+	appended_bodies: Array[Resource],
+	rollback_snapshot: Dictionary
+) -> void:
+	var pre_rebase_bodies := _collect_committed_active_user_material_bodies()
+	var pre_rebase_body_tokens := _ensure_committed_volume_resolver().call(
+		"build_committed_body_cache_tokens",
+		pre_rebase_bodies
+	) as Array
+	var previous_checkpoint_token := _get_bounded_history_checkpoint_token()
+	var promoted_layer := forge_layers.pop_front() as Resource
+	var promoted_bodies := _get_layer_material_bodies(promoted_layer)
+	_remove_material_bodies_for_layer(promoted_layer)
+	var expected_checkpoint_operation_count := (
+		get_bounded_history_checkpoint_operation_count() + 1
+	)
+	_publish_bounded_history_transition(
+		BOUNDED_HISTORY_TRANSITION_PROMOTION_APPEND,
+		appended_layer,
+		appended_bodies,
+		{
+			"requires_native_ack": true,
+			"pending_native_ack": true,
+			"promoted_layer": promoted_layer,
+			"promoted_layer_id": StringName(promoted_layer.get("layer_id")),
+			"promoted_bodies": promoted_bodies,
+			"promoted_body_ids": _body_ids(promoted_bodies),
+			"expected_checkpoint_operation_count": (
+				expected_checkpoint_operation_count
+			),
+		}
+	)
+	_bounded_history_pending_promotion = {
+		"revision": bounded_history_transition_revision,
+		"expected_checkpoint_operation_count": (
+			expected_checkpoint_operation_count
+		),
+		"promoted_layer": promoted_layer,
+		"promoted_bodies": promoted_bodies,
+		"pre_rebase_body_tokens": pre_rebase_body_tokens,
+		"previous_checkpoint_token": previous_checkpoint_token,
+		"rollback_snapshot": rollback_snapshot,
+	}
+
+func _remove_material_bodies_for_layer(layer: Resource) -> void:
+	if layer == null:
+		return
+	var layer_body_ids: Array = layer.get("body_ids") as Array
+	var retained_bodies: Array[Resource] = []
+	for body: Resource in material_bodies:
+		if body == null:
+			continue
+		if layer_body_ids.has(StringName(body.get("body_id"))):
+			continue
+		retained_bodies.append(body)
+	material_bodies = retained_bodies
+	_normalize_selected_material_body_id()
+
+func _publish_bounded_history_transition(
+	kind: StringName,
+	appended_layer: Resource,
+	appended_bodies: Array,
+	extra_fields: Dictionary = {}
+) -> void:
+	bounded_history_transition_revision += 1
+	var descriptor := get_bounded_presentation_descriptor()
+	descriptor["kind"] = kind
+	descriptor["revision"] = bounded_history_transition_revision
+	descriptor["requires_native_ack"] = false
+	descriptor["pending_native_ack"] = false
+	descriptor["appended_layer"] = appended_layer
+	descriptor["appended_layer_id"] = (
+		StringName(appended_layer.get("layer_id"))
+		if appended_layer != null
+		else StringName()
+	)
+	descriptor["appended_bodies"] = appended_bodies
+	descriptor["appended_body_ids"] = _body_ids(appended_bodies)
+	descriptor["appended_body"] = (
+		appended_bodies[0]
+		if appended_bodies.size() == 1
+		else null
+	)
+	descriptor["appended_body_id"] = (
+		StringName((appended_bodies[0] as Resource).get("body_id"))
+		if appended_bodies.size() == 1
+		and appended_bodies[0] is Resource
+		else StringName()
+	)
+	for field_key: Variant in extra_fields.keys():
+		descriptor[field_key] = extra_fields[field_key]
+	_bounded_history_transition = descriptor
+
+func _nonnull_layers(source_layers: Array) -> Array[Resource]:
+	var result: Array[Resource] = []
+	for layer_variant: Variant in source_layers:
+		if layer_variant is Resource and layer_variant != null:
+			result.append(layer_variant as Resource)
+	return result
+
+func _layer_ids(layers: Array) -> Array[StringName]:
+	var result: Array[StringName] = []
+	for layer_variant: Variant in layers:
+		if layer_variant is Resource and layer_variant != null:
+			result.append(StringName((layer_variant as Resource).get("layer_id")))
+	return result
+
+func _body_ids(bodies: Array) -> Array[StringName]:
+	var result: Array[StringName] = []
+	for body_variant: Variant in bodies:
+		if body_variant is Resource and body_variant != null:
+			result.append(StringName((body_variant as Resource).get("body_id")))
+	return result
+
+func _collect_layer_bodies(layers: Array) -> Array[Resource]:
+	var result: Array[Resource] = []
+	for layer_variant: Variant in layers:
+		if not layer_variant is Resource or layer_variant == null:
+			continue
+		result.append_array(_get_layer_material_bodies(layer_variant as Resource))
+	return result
+
+func _get_layer_material_bodies(layer: Resource) -> Array[Resource]:
+	var result: Array[Resource] = []
+	if layer == null:
+		return result
+	var layer_body_ids: Array = layer.get("body_ids") as Array
+	for body: Resource in material_bodies:
+		if body == null:
+			continue
+		if layer_body_ids.has(StringName(body.get("body_id"))):
+			result.append(body)
+	return result
+
+func _collect_protected_material_bodies() -> Array[Resource]:
+	var result: Array[Resource] = []
+	for body: Resource in material_bodies:
+		if body != null and _is_history_protected_body(body):
+			result.append(body)
+	return result
 
 func _ensure_material_ledger() -> void:
 	if material_ledger == null or not material_ledger.has_method("rebuild_from_layers"):
 		material_ledger = ForgeV2MaterialLedgerScript.new()
 
+func _ensure_committed_volume_resolver() -> RefCounted:
+	if (
+		committed_volume_resolver == null
+		or not committed_volume_resolver.has_method(
+			"build_incremental_committed_usage_summary"
+		)
+	):
+		committed_volume_resolver = ForgeV2MaterialVolumeResolverScript.new()
+	return committed_volume_resolver
+
+func _reset_committed_volume_cache(reason: StringName) -> void:
+	var resolver := _ensure_committed_volume_resolver()
+	resolver.call("reset_incremental_committed_cache", reason)
+	committed_volume_cache_diagnostics = resolver.call(
+		"get_incremental_committed_cache_diagnostics"
+	) as Dictionary
+
 func _mark_material_usage_summary_dirty() -> void:
 	material_usage_summary_cache_dirty = true
 	material_usage_summary_cache = {}
 
+func _can_reuse_committed_usage_summary(
+	resolved_usage_summary: Dictionary,
+	existing_material_bodies: Array[Resource],
+	committed_material_bodies: Array[Resource]
+) -> bool:
+	if resolved_usage_summary.is_empty():
+		return false
+	var resolved_body_ids: Dictionary = {}
+	for body_group: Array[Resource] in [
+		existing_material_bodies,
+		committed_material_bodies,
+	]:
+		for body: Resource in body_group:
+			if body == null:
+				continue
+			var body_id := StringName(body.get("body_id"))
+			if body_id == StringName():
+				return false
+			resolved_body_ids[body_id] = true
+	var active_body_ids: Dictionary = {}
+	for body: Resource in material_bodies:
+		if body == null or not _is_material_body_active(body):
+			continue
+		if body.has_method("is_platform_seed") and bool(body.call("is_platform_seed")):
+			continue
+		var body_id := StringName(body.get("body_id"))
+		if body_id == StringName():
+			return false
+		active_body_ids[body_id] = true
+	if active_body_ids.size() != resolved_body_ids.size():
+		return false
+	for body_id: StringName in resolved_body_ids.keys():
+		if not active_body_ids.has(body_id):
+			return false
+	return true
+
 func _rebuild_material_ledger() -> void:
+	_reset_committed_volume_cache(&"material_ledger_rebuilt")
 	_ensure_material_ledger()
-	if material_ledger != null:
-		material_ledger.call("rebuild_from_layers", forge_layers)
+	if material_ledger == null:
+		return
+	if _has_bounded_history_checkpoint():
+		material_ledger.call(
+			"rebuild_from_checkpoint_and_layers",
+			bounded_history_checkpoint.call("get_material_ledger_summary"),
+			protected_forge_layers,
+			forge_layers
+		)
+		var resolver := _ensure_committed_volume_resolver()
+		if resolver.has_method(
+			"restore_incremental_committed_cache_from_checkpoint"
+		):
+			var restore_result := resolver.call(
+				"restore_incremental_committed_cache_from_checkpoint",
+				_get_bounded_history_checkpoint_token(),
+				_collect_committed_active_user_material_bodies()
+			) as Dictionary
+			committed_volume_cache_diagnostics = restore_result.get(
+				"diagnostics",
+				{}
+			) as Dictionary
+		return
+	var all_layers: Array[Resource] = []
+	all_layers.append_array(protected_forge_layers)
+	all_layers.append_array(forge_layers)
+	all_layers.sort_custom(func(first: Resource, second: Resource) -> bool:
+		return int(first.get("order_index")) < int(second.get("order_index"))
+	)
+	material_ledger.call("rebuild_from_layers", all_layers)
+
+func _bounded_ledger_retains_only_live_layer_ids(
+	ledger_candidate: Resource
+) -> bool:
+	if (
+		ledger_candidate == null
+		or not ledger_candidate.has_method("get_retained_layer_ids")
+	):
+		return false
+	var allowed_ids: Dictionary = {}
+	for layer_id: StringName in _layer_ids(protected_forge_layers):
+		allowed_ids[layer_id] = true
+	for layer_id: StringName in _layer_ids(forge_layers):
+		allowed_ids[layer_id] = true
+	var retained_ids: Array = ledger_candidate.call(
+		"get_retained_layer_ids"
+	) as Array
+	if retained_ids.size() > allowed_ids.size():
+		return false
+	for layer_id_variant: Variant in retained_ids:
+		if not allowed_ids.has(StringName(layer_id_variant)):
+			return false
+	return true
+
+
+func _material_ledger_summaries_match(
+	first: Dictionary,
+	second: Dictionary
+) -> bool:
+	if (
+		int(first.get("total_rough_material_centi_units", 0))
+		!= int(second.get("total_rough_material_centi_units", 0))
+		or not is_equal_approx(
+			float(first.get("total_rough_volume_cell_equivalents", 0.0)),
+			float(second.get("total_rough_volume_cell_equivalents", 0.0))
+		)
+		or int(first.get("removed_material_record_count", 0))
+		!= int(second.get("removed_material_record_count", 0))
+	):
+		return false
+	var first_materials: Dictionary = first.get("materials", {}) as Dictionary
+	var second_materials: Dictionary = second.get("materials", {}) as Dictionary
+	if first_materials.size() != second_materials.size():
+		return false
+	for material_key: Variant in first_materials.keys():
+		if not second_materials.has(material_key):
+			return false
+		var first_entry: Dictionary = first_materials[material_key] as Dictionary
+		var second_entry: Dictionary = second_materials[material_key] as Dictionary
+		if (
+			int(first_entry.get("rough_material_centi_units", 0))
+			!= int(second_entry.get("rough_material_centi_units", 0))
+			or not is_equal_approx(
+				float(first_entry.get(
+					"rough_volume_cell_equivalents",
+					0.0
+				)),
+				float(second_entry.get(
+					"rough_volume_cell_equivalents",
+					0.0
+				))
+			)
+		):
+			return false
+	return true
 
 func _set_layer_bodies_active(layer: Resource, is_active: bool) -> void:
 	if layer == null:
@@ -2420,7 +4385,28 @@ func _resolve_active_profile_polygon(profile_id: StringName = StringName()) -> P
 	)
 
 func _is_valid_tool_id(tool_id: StringName) -> bool:
-	return tool_id == TOOL_VOLUME_STROKE or tool_id == TOOL_SPLINE_LINE or tool_id == TOOL_HANDLES
+	return (
+		tool_id == TOOL_VOLUME_STROKE
+		or tool_id == TOOL_SPLINE_LINE
+		or tool_id == TOOL_HANDLES
+		or tool_id == TOOL_DETAILING_BRUSH
+	)
+
+func _assign_active_tool_id(next_tool_id: StringName) -> void:
+	var resolved_tool_id := (
+		next_tool_id
+		if _is_valid_tool_id(next_tool_id)
+		else TOOL_VOLUME_STROKE
+	)
+	if (
+		active_tool_id != resolved_tool_id
+		and (
+			active_tool_id == TOOL_DETAILING_BRUSH
+			or resolved_tool_id == TOOL_DETAILING_BRUSH
+		)
+	):
+		_clear_spline_transient_state()
+	active_tool_id = resolved_tool_id
 
 func _normalize_active_basic_shape_authority() -> void:
 	if active_basic_shape_source_id != BASIC_SHAPE_SOURCE_SAVED_PROFILE:
@@ -2842,13 +4828,39 @@ func _constrain_active_handle_anchor(use_grid_snapping: bool = false) -> void:
 		active_profile_anchor_y_meters = _normalize_profile_anchor_meters(active_profile_anchor_y_meters)
 		return
 	var anchor := Vector2(active_profile_anchor_x_meters, active_profile_anchor_y_meters)
-	anchor = ForgeV2ProfileShapeLibraryScript.clamp_point_to_polygon(anchor, base_polygon)
+	var clearance_result := (
+		ForgeV2ProfileShapeLibraryScript.constrain_point_inside_polygon_with_clearance(
+			anchor,
+			base_polygon,
+			ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+		)
+	)
+	if bool(clearance_result.get("valid", false)):
+		anchor = clearance_result.get("point", anchor) as Vector2
+	else:
+		anchor = ForgeV2ProfileShapeLibraryScript.clamp_point_to_polygon(
+			anchor,
+			base_polygon
+		)
 	if use_grid_snapping:
 		var profile_polygon := _resolve_active_handle_builder_preview_polygon()
 		var preview_anchor := _rotate_profile_point(anchor, active_profile_rotation_degrees)
 		preview_anchor = _snap_anchor_to_grid_inside_profile(preview_anchor, profile_polygon)
 		anchor = _rotate_profile_point(preview_anchor, -active_profile_rotation_degrees)
-		anchor = ForgeV2ProfileShapeLibraryScript.clamp_point_to_polygon(anchor, base_polygon)
+		clearance_result = (
+			ForgeV2ProfileShapeLibraryScript.constrain_point_inside_polygon_with_clearance(
+				anchor,
+				base_polygon,
+				ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+			)
+		)
+		if bool(clearance_result.get("valid", false)):
+			anchor = clearance_result.get("point", anchor) as Vector2
+		else:
+			anchor = ForgeV2ProfileShapeLibraryScript.clamp_point_to_polygon(
+				anchor,
+				base_polygon
+			)
 	active_profile_anchor_x_meters = anchor.x
 	active_profile_anchor_y_meters = anchor.y
 
@@ -2965,6 +4977,17 @@ func _build_active_profile_builder_settings_summary() -> Dictionary:
 			),
 		}
 	if _is_active_handle_builder_profile():
+		var handle_base_polygon := _resolve_active_handle_builder_base_polygon()
+		var anchor_clearance_result := (
+			ForgeV2ProfileShapeLibraryScript.constrain_point_inside_polygon_with_clearance(
+				Vector2(
+					active_profile_anchor_x_meters,
+					active_profile_anchor_y_meters
+				),
+				handle_base_polygon,
+				ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+			)
+		)
 		return {
 			"is_active": true,
 			"family": ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_HANDLE,
@@ -2980,6 +5003,17 @@ func _build_active_profile_builder_settings_summary() -> Dictionary:
 			"guide_grid_snap_points_2d_meters": _resolve_active_handle_builder_preview_grid_snap_points(),
 			"guide_grid_step_meters": ForgeV2ProfileShapeLibraryScript.HANDLE_BUILDER_GRID_STEP_METERS,
 			"temporary_guide_profile_id": ForgeV2ProfileShapeLibraryScript.HANDLE_BUILDER_LIMIT_PRESET_ID,
+			"anchor_clearance_valid": bool(anchor_clearance_result.get(
+				"valid",
+				false
+			)),
+			"anchor_clearance_error": StringName(anchor_clearance_result.get(
+				"error",
+				&"anchor_clearance_unavailable"
+			)),
+			"anchor_clearance_meters": (
+				ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+			),
 		}
 	return {}
 
@@ -3014,6 +5048,130 @@ func _build_handle_builder_settings_summary() -> Dictionary:
 		"guide_grid_snap_points_2d_meters": _resolve_active_handle_builder_preview_grid_snap_points(),
 		"guide_grid_step_meters": ForgeV2ProfileShapeLibraryScript.HANDLE_BUILDER_GRID_STEP_METERS,
 	}
+
+func _migrate_legacy_surface_contact_authority(
+	loaded_schema_version: int
+) -> void:
+	if loaded_schema_version >= 5:
+		return
+	var migrated_record_fields_by_body_id: Dictionary = {}
+	for body: Resource in material_bodies:
+		if body == null:
+			continue
+		if (
+			StringName(body.get("shape_kind"))
+			!= ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
+			or int(body.get("profile_runtime_schema_version")) <= 0
+		):
+			continue
+		var body_kind := StringName(body.get("body_kind"))
+		if body_kind == ForgeV2MaterialBodyScript.BODY_KIND_PROFILE_EXTRUSION:
+			# Schema 4 saved-profile freehand strokes used the profile-extrusion
+			# default even though they were surface Volume Stroke bodies.
+			body_kind = ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE
+			body.set("body_kind", body_kind)
+		if (
+			body_kind != ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE
+			and body_kind != ForgeV2MaterialBodyScript.BODY_KIND_DETAILING_BRUSH
+		):
+			continue
+		var existing_contacts: PackedVector3Array = body.get(
+			"path_contact_directions"
+		)
+		var path_points: PackedVector3Array = body.get("path_points")
+		if existing_contacts.is_empty():
+			existing_contacts = _build_legacy_contact_directions(
+				body.get("path_surface_normals") as PackedVector3Array,
+				path_points.size()
+			)
+			body.set("path_contact_directions", existing_contacts)
+		if (
+			not existing_contacts.is_empty()
+			and existing_contacts.size() == path_points.size()
+		):
+			var migrated_body_id := StringName(body.get("body_id"))
+			if migrated_body_id != StringName():
+				migrated_record_fields_by_body_id[migrated_body_id] = {
+					"body_kind": body_kind,
+					"path_contact_directions": existing_contacts,
+				}
+	_migrate_legacy_layer_surface_contact_records(
+		forge_layers,
+		migrated_record_fields_by_body_id
+	)
+	_migrate_legacy_layer_surface_contact_records(
+		undone_forge_layers,
+		migrated_record_fields_by_body_id
+	)
+	_migrate_legacy_layer_surface_contact_records(
+		protected_forge_layers,
+		migrated_record_fields_by_body_id
+	)
+	if (
+		active_tool_id == TOOL_DETAILING_BRUSH
+		and detailing_control_contact_directions.is_empty()
+		and spline_line_surface_normals.size() == spline_line_points.size()
+	):
+		detailing_control_contact_directions = _build_legacy_contact_directions(
+			spline_line_surface_normals,
+			spline_line_points.size()
+		)
+	if (
+		active_tool_id == TOOL_DETAILING_BRUSH
+		and detailing_resolved_contact_directions.is_empty()
+		and detailing_resolved_surface_normals.size()
+		== detailing_resolved_path_points.size()
+	):
+		detailing_resolved_contact_directions = _build_legacy_contact_directions(
+			detailing_resolved_surface_normals,
+			detailing_resolved_path_points.size()
+		)
+
+func _migrate_legacy_layer_surface_contact_records(
+	layers: Array[Resource],
+	migrated_record_fields_by_body_id: Dictionary
+) -> void:
+	for layer: Resource in layers:
+		if layer == null:
+			continue
+		var source_records: Array = layer.get("input_shape_records") as Array
+		var migrated_records: Array[Dictionary] = []
+		for record_variant: Variant in source_records:
+			if not record_variant is Dictionary:
+				continue
+			var record := (record_variant as Dictionary).duplicate(true)
+			var record_body_id := StringName(record.get("body_id", StringName()))
+			if migrated_record_fields_by_body_id.has(record_body_id):
+				var migrated_fields: Dictionary = (
+					migrated_record_fields_by_body_id[record_body_id] as Dictionary
+				)
+				record["body_kind"] = StringName(migrated_fields.get(
+					"body_kind",
+					record.get("body_kind", StringName())
+				))
+				record["path_contact_directions"] = migrated_fields.get(
+					"path_contact_directions",
+					PackedVector3Array()
+				)
+			migrated_records.append(record)
+		layer.set("input_shape_records", migrated_records)
+
+func _build_legacy_contact_directions(
+	legacy_normals: PackedVector3Array,
+	expected_count: int
+) -> PackedVector3Array:
+	if legacy_normals.size() != expected_count:
+		return PackedVector3Array()
+	var migrated_contacts := PackedVector3Array()
+	for legacy_normal: Vector3 in legacy_normals:
+		if (
+			not _detail_vector3_is_finite(legacy_normal)
+			or legacy_normal.length_squared() <= 0.000001
+		):
+			return PackedVector3Array()
+		# Compatibility only: schema 4 runtime defined B->C as -normal.
+		migrated_contacts.append(-legacy_normal.normalized())
+	return migrated_contacts
 
 func _normalize_material_bodies() -> void:
 	var normalized_bodies: Array[Resource] = []
@@ -3162,11 +5320,275 @@ func _normalize_spline_line() -> void:
 		selected_spline_point_index = -1
 	if spline_line_points.size() < 2:
 		spline_line_finished = false
+	_normalize_detailing_brush_solution()
+
+func _normalize_detailing_brush_solution() -> void:
+	if active_tool_id != TOOL_DETAILING_BRUSH:
+		_clear_detailing_brush_solution()
+		return
+	if (
+		spline_line_points.is_empty()
+		and spline_line_surface_normals.is_empty()
+		and detailing_surface_target_kind == StringName()
+		and detailing_surface_target_id == StringName()
+		and detailing_control_contact_directions.is_empty()
+		and detailing_resolved_path_points.is_empty()
+		and detailing_resolved_surface_normals.is_empty()
+		and detailing_resolved_contact_directions.is_empty()
+		and detailing_span_offsets.is_empty()
+		and detailing_span_validity.is_empty()
+		and detailing_span_reasons.is_empty()
+	):
+		_clear_detailing_brush_solution()
+		return
+	var validated := _build_validated_detailing_brush_solution(
+		spline_line_points,
+		spline_line_surface_normals,
+		detailing_control_contact_directions,
+		detailing_surface_target_kind,
+		detailing_surface_target_id,
+		detailing_resolved_path_points,
+		detailing_resolved_surface_normals,
+		detailing_resolved_contact_directions,
+		detailing_span_offsets,
+		detailing_span_validity,
+		detailing_span_reasons,
+		detailing_solution_valid,
+		detailing_solution_reason
+	)
+	if not bool(validated.get("accepted", false)):
+		_clear_detailing_brush_solution()
+		detailing_solution_reason = DETAIL_SOLUTION_REASON_INVALID_PERSISTED
+		return
+	spline_line_points = validated.get(
+		"control_points",
+		PackedVector3Array()
+	) as PackedVector3Array
+	spline_line_surface_normals = validated.get(
+		"control_surface_normals",
+		PackedVector3Array()
+	) as PackedVector3Array
+	detailing_control_contact_directions = validated.get(
+		"control_contact_directions",
+		PackedVector3Array()
+	) as PackedVector3Array
+	detailing_resolved_path_points = validated.get(
+		"resolved_path_points",
+		PackedVector3Array()
+	) as PackedVector3Array
+	detailing_resolved_surface_normals = validated.get(
+		"resolved_surface_normals",
+		PackedVector3Array()
+	) as PackedVector3Array
+	detailing_resolved_contact_directions = validated.get(
+		"resolved_contact_directions",
+		PackedVector3Array()
+	) as PackedVector3Array
+	detailing_span_validity = validated.get("span_validity", []) as Array[bool]
+	detailing_span_reasons = validated.get("span_reasons", []) as Array[StringName]
+	detailing_solution_reason = (
+		DETAIL_SOLUTION_REASON_NONE
+		if detailing_solution_valid
+		else StringName(validated.get(
+			"solution_reason",
+			DETAIL_SOLUTION_REASON_NOT_READY
+		))
+	)
+
+func _build_validated_detailing_brush_solution(
+	control_points: PackedVector3Array,
+	control_surface_normals: PackedVector3Array,
+	control_contact_directions: PackedVector3Array,
+	locked_target_kind: StringName,
+	locked_target_id: StringName,
+	resolved_path_points: PackedVector3Array,
+	resolved_surface_normals: PackedVector3Array,
+	resolved_contact_directions: PackedVector3Array,
+	span_offsets: PackedInt32Array,
+	span_validity: Array,
+	span_reasons: Array,
+	solution_valid: bool,
+	solution_reason: StringName
+) -> Dictionary:
+	if locked_target_kind == StringName() or locked_target_id == StringName():
+		return {"accepted": false}
+	if control_surface_normals.size() != control_points.size():
+		return {"accepted": false}
+	if control_contact_directions.size() != control_points.size():
+		return {"accepted": false}
+	if resolved_surface_normals.size() != resolved_path_points.size():
+		return {"accepted": false}
+	if resolved_contact_directions.size() != resolved_path_points.size():
+		return {"accepted": false}
+	if span_offsets.size() != control_points.size():
+		return {"accepted": false}
+	var span_count := maxi(control_points.size() - 1, 0)
+	if span_validity.size() != span_count or span_reasons.size() != span_count:
+		return {"accepted": false}
+	var normalized_control_normals := _normalized_detailing_normals(
+		control_surface_normals
+	)
+	var normalized_resolved_normals := _normalized_detailing_normals(
+		resolved_surface_normals
+	)
+	var normalized_control_contacts := _normalized_detailing_normals(
+		control_contact_directions
+	)
+	var normalized_resolved_contacts := _normalized_detailing_normals(
+		resolved_contact_directions
+	)
+	if (
+		normalized_control_normals.size() != control_points.size()
+		or normalized_resolved_normals.size() != resolved_path_points.size()
+		or normalized_control_contacts.size() != control_points.size()
+		or normalized_resolved_contacts.size() != resolved_path_points.size()
+	):
+		return {"accepted": false}
+	for point: Vector3 in control_points:
+		if not _detail_vector3_is_finite(point):
+			return {"accepted": false}
+	for point: Vector3 in resolved_path_points:
+		if not _detail_vector3_is_finite(point):
+			return {"accepted": false}
+	if control_points.is_empty():
+		if not resolved_path_points.is_empty() or not span_offsets.is_empty():
+			return {"accepted": false}
+	elif resolved_path_points.is_empty():
+		return {"accepted": false}
+	else:
+		if int(span_offsets[0]) != 0:
+			return {"accepted": false}
+		if int(span_offsets[span_offsets.size() - 1]) != resolved_path_points.size() - 1:
+			return {"accepted": false}
+		var previous_offset := -1
+		for control_index in range(control_points.size()):
+			var resolved_index := int(span_offsets[control_index])
+			if (
+				resolved_index < previous_offset
+				or resolved_index < 0
+				or resolved_index >= resolved_path_points.size()
+			):
+				return {"accepted": false}
+			if not resolved_path_points[resolved_index].is_equal_approx(
+				control_points[control_index]
+			):
+				return {"accepted": false}
+			if not normalized_resolved_normals[resolved_index].is_equal_approx(
+				normalized_control_normals[control_index]
+			):
+				return {"accepted": false}
+			if not normalized_resolved_contacts[resolved_index].is_equal_approx(
+				normalized_control_contacts[control_index]
+			):
+				return {"accepted": false}
+			previous_offset = resolved_index
+	var normalized_span_validity: Array[bool] = []
+	var normalized_span_reasons: Array[StringName] = []
+	var all_spans_valid := true
+	for span_index in range(span_count):
+		var span_is_valid := bool(span_validity[span_index])
+		var span_reason := StringName(span_reasons[span_index])
+		if span_is_valid:
+			span_reason = DETAIL_SOLUTION_REASON_NONE
+		elif span_reason == StringName() or span_reason == DETAIL_SOLUTION_REASON_NONE:
+			span_reason = DETAIL_SOLUTION_REASON_NOT_READY
+		normalized_span_validity.append(span_is_valid)
+		normalized_span_reasons.append(span_reason)
+		all_spans_valid = all_spans_valid and span_is_valid
+	if solution_valid:
+		if (
+			control_points.size() < 2
+			or not all_spans_valid
+			or _calculate_polyline_path_length(resolved_path_points) <= 0.000001
+		):
+			return {"accepted": false}
+		solution_reason = DETAIL_SOLUTION_REASON_NONE
+	elif solution_reason == StringName() or solution_reason == DETAIL_SOLUTION_REASON_NONE:
+		solution_reason = DETAIL_SOLUTION_REASON_NOT_READY
+	return {
+		"accepted": true,
+		"control_points": control_points.duplicate(),
+		"control_surface_normals": normalized_control_normals,
+		"control_contact_directions": normalized_control_contacts,
+		"resolved_path_points": resolved_path_points.duplicate(),
+		"resolved_surface_normals": normalized_resolved_normals,
+		"resolved_contact_directions": normalized_resolved_contacts,
+		"span_validity": normalized_span_validity,
+		"span_reasons": normalized_span_reasons,
+		"solution_reason": solution_reason,
+	}
+
+func _normalized_detailing_normals(normals: PackedVector3Array) -> PackedVector3Array:
+	var normalized_normals := PackedVector3Array()
+	for normal: Vector3 in normals:
+		if (
+			not _detail_vector3_is_finite(normal)
+			or normal.length_squared() <= 0.000000000001
+		):
+			return PackedVector3Array()
+		normalized_normals.append(normal.normalized())
+	return normalized_normals
+
+func _clear_spline_transient_state() -> void:
+	spline_line_points = PackedVector3Array()
+	spline_line_surface_normals = PackedVector3Array()
+	spline_line_finished = false
+	selected_spline_point_index = -1
+	spline_line_csg_noodle_enabled = false
+	_clear_detailing_brush_solution()
+
+func _clear_detailing_brush_solution() -> void:
+	detailing_surface_target_kind = StringName()
+	detailing_surface_target_id = StringName()
+	detailing_control_contact_directions = PackedVector3Array()
+	detailing_resolved_path_points = PackedVector3Array()
+	detailing_resolved_surface_normals = PackedVector3Array()
+	detailing_resolved_contact_directions = PackedVector3Array()
+	detailing_span_offsets = PackedInt32Array()
+	detailing_span_validity = []
+	detailing_span_reasons = []
+	detailing_solution_valid = false
+	detailing_solution_reason = DETAIL_SOLUTION_REASON_NOT_READY
+
+func _has_spline_transient_state() -> bool:
+	return (
+		not spline_line_points.is_empty()
+		or not spline_line_surface_normals.is_empty()
+		or spline_line_finished
+		or selected_spline_point_index >= 0
+		or spline_line_csg_noodle_enabled
+		or detailing_surface_target_kind != StringName()
+		or detailing_surface_target_id != StringName()
+		or not detailing_control_contact_directions.is_empty()
+		or not detailing_resolved_path_points.is_empty()
+		or not detailing_resolved_surface_normals.is_empty()
+		or not detailing_resolved_contact_directions.is_empty()
+		or not detailing_span_offsets.is_empty()
+		or not detailing_span_validity.is_empty()
+		or not detailing_span_reasons.is_empty()
+	)
+
+func _calculate_polyline_path_length(points: PackedVector3Array) -> float:
+	var path_length := 0.0
+	for point_index in range(points.size() - 1):
+		path_length += points[point_index].distance_to(points[point_index + 1])
+	return path_length
+
+func _detail_vector3_is_finite(value: Vector3) -> bool:
+	return is_finite(value.x) and is_finite(value.y) and is_finite(value.z)
 
 func _normalize_path_surface_normal(surface_normal: Vector3) -> Vector3:
 	if surface_normal.length_squared() <= 0.000001:
 		return Vector3.FORWARD
 	return surface_normal.normalized()
+
+func _normalize_path_contact_direction(contact_direction: Vector3) -> Vector3:
+	if (
+		not _detail_vector3_is_finite(contact_direction)
+		or contact_direction.length_squared() <= 0.000001
+	):
+		return Vector3.ZERO
+	return contact_direction.normalized()
 
 func _calculate_spline_line_path_length() -> float:
 	_normalize_spline_line()
@@ -3176,6 +5598,19 @@ func _calculate_spline_line_path_length() -> float:
 	for point_index in range(spline_line_points.size() - 1):
 		path_length += spline_line_points[point_index].distance_to(spline_line_points[point_index + 1])
 	return path_length
+
+func _calculate_handle_endpoint_span(path_points: PackedVector3Array) -> float:
+	if path_points.size() < 2:
+		return 0.0
+	return path_points[0].distance_to(path_points[path_points.size() - 1])
+
+func _handle_endpoint_span_meets_minimum(
+	path_points: PackedVector3Array
+) -> bool:
+	return (
+		_calculate_handle_endpoint_span(path_points) + 0.000001
+		>= HANDLE_MIN_AXIAL_SPAN_METERS
+	)
 
 func _build_sample_stroke_points(stroke_index: int) -> PackedVector3Array:
 	var z_offset := (float(stroke_index % 4) - 1.5) * 0.12

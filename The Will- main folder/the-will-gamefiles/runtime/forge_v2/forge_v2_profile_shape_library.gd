@@ -167,6 +167,108 @@ static func compile_basic_profile_runtime_data(profile_data: Dictionary) -> Dict
 	compiled_profile["record_schema_version"] = BASIC_PROFILE_RECORD_SCHEMA_VERSION
 	compiled_profile["base_polygon_2d_meters"] = base_polygon
 	compiled_profile["polygon_2d_meters"] = preview_polygon
+	var base_anchor := Vector2.ZERO
+	var stored_base_anchor: Variant = compiled_profile.get(
+		"base_anchor_2d_meters",
+		null
+	)
+	if stored_base_anchor is Vector2:
+		base_anchor = stored_base_anchor as Vector2
+	else:
+		base_anchor = Vector2(
+			float(compiled_profile.get("anchor_x_meters", 0.0)),
+			float(compiled_profile.get("anchor_y_meters", 0.0))
+		)
+	var runtime_data := build_anchor_relative_profile_runtime_data(
+		base_polygon,
+		base_anchor
+	)
+	if bool(runtime_data.get("valid", false)):
+		base_anchor = runtime_data.get("anchor_2d_meters", base_anchor) as Vector2
+		compiled_profile["anchor_x_meters"] = base_anchor.x
+		compiled_profile["anchor_y_meters"] = base_anchor.y
+		compiled_profile["base_anchor_2d_meters"] = base_anchor
+		compiled_profile["anchor_2d_meters"] = base_anchor.rotated(
+			deg_to_rad(rotation_degrees)
+		)
+	compiled_profile["compiled_profile"] = runtime_data
+	return compiled_profile
+
+
+static func compile_handle_profile_runtime_data(
+	profile_data: Dictionary
+) -> Dictionary:
+	var compiled_profile := profile_data.duplicate(true)
+	if (
+		StringName(compiled_profile.get("family", StringName()))
+		!= PROFILE_FAMILY_HANDLE
+	):
+		return compiled_profile
+	var rotation_degrees := float(compiled_profile.get(
+		"rotation_degrees",
+		0.0
+	))
+	var preview_polygon: PackedVector2Array = compiled_profile.get(
+		"polygon_2d_meters",
+		PackedVector2Array()
+	)
+	var base_polygon: PackedVector2Array = compiled_profile.get(
+		"base_polygon_2d_meters",
+		PackedVector2Array()
+	)
+	if base_polygon.size() < 3 and preview_polygon.size() >= 3:
+		base_polygon = _rotate_polygon(preview_polygon, -rotation_degrees)
+	if base_polygon.size() < 3:
+		var control_points: PackedVector2Array = compiled_profile.get(
+			"control_points_2d_meters",
+			PackedVector2Array()
+		)
+		if control_points.size() >= 3:
+			base_polygon = build_handle_builder_polygon(
+				control_points,
+				bool(compiled_profile.get("rounded_enabled", true)),
+				float(compiled_profile.get(
+					"corner_radius_meters",
+					HANDLE_DEFAULT_CORNER_RADIUS_METERS
+				))
+			)
+	if preview_polygon.size() < 3 and base_polygon.size() >= 3:
+		preview_polygon = _rotate_polygon(base_polygon, rotation_degrees)
+	compiled_profile["record_schema_version"] = BASIC_PROFILE_RECORD_SCHEMA_VERSION
+	compiled_profile["base_polygon_2d_meters"] = base_polygon
+	compiled_profile["polygon_2d_meters"] = preview_polygon
+	var base_anchor := Vector2.ZERO
+	var stored_base_anchor: Variant = compiled_profile.get(
+		"base_anchor_2d_meters",
+		null
+	)
+	if stored_base_anchor is Vector2:
+		base_anchor = stored_base_anchor as Vector2
+	else:
+		base_anchor = Vector2(
+			float(compiled_profile.get("anchor_x_meters", 0.0)),
+			float(compiled_profile.get("anchor_y_meters", 0.0))
+		)
+	var runtime_data := build_anchor_relative_profile_runtime_data(
+		base_polygon,
+		base_anchor
+	)
+	if bool(runtime_data.get("valid", false)):
+		base_anchor = runtime_data.get("anchor_2d_meters", base_anchor) as Vector2
+		compiled_profile["anchor_x_meters"] = base_anchor.x
+		compiled_profile["anchor_y_meters"] = base_anchor.y
+		compiled_profile["base_anchor_2d_meters"] = base_anchor
+		compiled_profile["anchor_2d_meters"] = base_anchor.rotated(
+			deg_to_rad(rotation_degrees)
+		)
+	compiled_profile["compiled_profile"] = runtime_data
+	return compiled_profile
+
+
+static func build_anchor_relative_profile_runtime_data(
+	base_polygon: PackedVector2Array,
+	requested_anchor_2d_meters: Vector2
+) -> Dictionary:
 	var runtime_data := {
 		"schema_version": BASIC_PROFILE_RUNTIME_SCHEMA_VERSION,
 		"rule_id": BASIC_PROFILE_CONTACT_RULE_ID,
@@ -181,25 +283,10 @@ static func compile_basic_profile_runtime_data(profile_data: Dictionary) -> Dict
 		"contact_distance_meters": 0.0,
 		"deposition_polygon_2d_meters": PackedVector2Array(),
 	}
-	if (
-		not _basic_fillet_polygon_is_valid(base_polygon)
-	):
-		compiled_profile["compiled_profile"] = runtime_data
-		return compiled_profile
-	var base_anchor := Vector2.ZERO
-	var stored_base_anchor: Variant = compiled_profile.get(
-		"base_anchor_2d_meters",
-		null
-	)
-	if stored_base_anchor is Vector2:
-		base_anchor = stored_base_anchor as Vector2
-	else:
-		base_anchor = Vector2(
-			float(compiled_profile.get("anchor_x_meters", 0.0)),
-			float(compiled_profile.get("anchor_y_meters", 0.0))
-		)
+	if not _basic_fillet_polygon_is_valid(base_polygon):
+		return runtime_data
 	var clearance_result := constrain_point_inside_polygon_with_clearance(
-		base_anchor,
+		requested_anchor_2d_meters,
 		base_polygon,
 		BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
 	)
@@ -208,47 +295,49 @@ static func compile_basic_profile_runtime_data(profile_data: Dictionary) -> Dict
 			"error",
 			&"anchor_clearance_unavailable"
 		))
-		compiled_profile["compiled_profile"] = runtime_data
-		return compiled_profile
-	base_anchor = clearance_result.get("point", base_anchor) as Vector2
-	var contact_result := resolve_profile_anchor_contact(base_polygon, base_anchor)
+		return runtime_data
+	var base_anchor := clearance_result.get(
+		"point",
+		requested_anchor_2d_meters
+	) as Vector2
+	var contact_result := resolve_profile_anchor_contact(
+		base_polygon,
+		base_anchor
+	)
 	if not bool(contact_result.get("valid", false)):
 		runtime_data["error"] = &"contact_unavailable"
-		compiled_profile["compiled_profile"] = runtime_data
-		return compiled_profile
-	var contact_distance := float(contact_result.get("distance_meters", 0.0))
+		return runtime_data
+	var contact_distance := float(contact_result.get(
+		"distance_meters",
+		0.0
+	))
 	if (
-		contact_distance
-		+ BASIC_PROFILE_CONTACT_DISTANCE_EPSILON
+		contact_distance + BASIC_PROFILE_CONTACT_DISTANCE_EPSILON
 		< BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
 	):
 		runtime_data["error"] = &"anchor_inset_numerical_failure"
-		compiled_profile["compiled_profile"] = runtime_data
-		return compiled_profile
-	var contact_point := contact_result.get("point", base_anchor) as Vector2
-	var contact_direction := contact_result.get(
-		"direction",
-		BASIC_PROFILE_LOCAL_SIX
+		return runtime_data
+	var contact_point := contact_result.get(
+		"point",
+		base_anchor
 	) as Vector2
 	var deposition_polygon := PackedVector2Array()
 	for point: Vector2 in base_polygon:
 		deposition_polygon.append(point - base_anchor)
-	compiled_profile["anchor_x_meters"] = base_anchor.x
-	compiled_profile["anchor_y_meters"] = base_anchor.y
-	compiled_profile["base_anchor_2d_meters"] = base_anchor
-	compiled_profile["anchor_2d_meters"] = base_anchor.rotated(
-		deg_to_rad(rotation_degrees)
-	)
 	runtime_data["valid"] = true
 	runtime_data["error"] = StringName()
 	runtime_data["anchor_2d_meters"] = base_anchor
 	runtime_data["contact_point_2d_meters"] = contact_point
-	runtime_data["contact_point_relative_2d_meters"] = contact_point - base_anchor
-	runtime_data["contact_direction_2d"] = contact_direction
+	runtime_data["contact_point_relative_2d_meters"] = (
+		contact_point - base_anchor
+	)
+	runtime_data["contact_direction_2d"] = contact_result.get(
+		"direction",
+		BASIC_PROFILE_LOCAL_SIX
+	) as Vector2
 	runtime_data["contact_distance_meters"] = contact_distance
 	runtime_data["deposition_polygon_2d_meters"] = deposition_polygon
-	compiled_profile["compiled_profile"] = runtime_data
-	return compiled_profile
+	return runtime_data
 
 static func is_compiled_basic_profile_runtime_valid(profile_data: Dictionary) -> bool:
 	if StringName(profile_data.get("family", StringName())) != PROFILE_FAMILY_BASIC:
@@ -558,6 +647,143 @@ static func resolve_profile_path_frame(
 		"tilt_radians": tilt_radians,
 	}
 
+static func resolve_explicit_surface_profile_path_frame(
+	path_tangent: Vector3,
+	surface_normal: Vector3,
+	contact_direction_2d: Vector2,
+	contact_point_relative_2d_meters: Vector2,
+	path_contact_direction: Vector3,
+	rotation_bias_degrees: float = 0.0
+) -> Dictionary:
+	var resolved_surface_normal := surface_normal.normalized()
+	var explicit_contact := path_contact_direction.normalized()
+	if resolved_surface_normal.length_squared() <= BASIC_FILLET_GEOMETRY_EPSILON:
+		resolved_surface_normal = explicit_contact
+	var tangent := path_tangent
+	if resolved_surface_normal.length_squared() > BASIC_FILLET_GEOMETRY_EPSILON:
+		tangent -= resolved_surface_normal * tangent.dot(resolved_surface_normal)
+	if tangent.length_squared() <= BASIC_FILLET_GEOMETRY_EPSILON:
+		tangent = _resolve_surface_frame_fallback_tangent(
+			resolved_surface_normal,
+			explicit_contact
+		)
+	else:
+		tangent = tangent.normalized()
+	if explicit_contact.length_squared() <= BASIC_FILLET_GEOMETRY_EPSILON:
+		explicit_contact = resolved_surface_normal
+	explicit_contact -= tangent * explicit_contact.dot(tangent)
+	if explicit_contact.length_squared() <= BASIC_FILLET_GEOMETRY_EPSILON:
+		explicit_contact = _resolve_surface_frame_fallback_contact(
+			tangent,
+			resolved_surface_normal
+		)
+	else:
+		explicit_contact = explicit_contact.normalized()
+	var authored_contact := contact_point_relative_2d_meters.normalized()
+	if authored_contact.length_squared() <= BASIC_FILLET_GEOMETRY_EPSILON:
+		authored_contact = contact_direction_2d.normalized()
+	if authored_contact.length_squared() <= BASIC_FILLET_GEOMETRY_EPSILON:
+		authored_contact = BASIC_PROFILE_LOCAL_SIX
+	# CSGPolygon3D's authored polygon mapping is left-handed relative to the
+	# forward path tangent.  Keeping that established mapping here preserves
+	# the authored 2D profile handedness while allowing the lightweight and
+	# committed surface sweeps to consume one explicit frame.
+	var contact_perpendicular := explicit_contact.cross(tangent).normalized()
+	if contact_perpendicular.length_squared() <= BASIC_FILLET_GEOMETRY_EPSILON:
+		contact_perpendicular = _resolve_surface_frame_fallback_contact(
+			tangent,
+			explicit_contact
+		).cross(tangent).normalized()
+	var resolved_axis_x := (
+		explicit_contact * authored_contact.x
+		- contact_perpendicular * authored_contact.y
+	).normalized()
+	var resolved_axis_y := (
+		explicit_contact * authored_contact.y
+		+ contact_perpendicular * authored_contact.x
+	).normalized()
+	var rotation_bias_radians := deg_to_rad(rotation_bias_degrees)
+	if not is_zero_approx(rotation_bias_radians):
+		var rotation_bias_basis := Basis(tangent, rotation_bias_radians)
+		resolved_axis_x = (rotation_bias_basis * resolved_axis_x).normalized()
+		resolved_axis_y = (rotation_bias_basis * resolved_axis_y).normalized()
+	var resolved_contact := (
+		resolved_axis_x * authored_contact.x
+		+ resolved_axis_y * authored_contact.y
+	).normalized()
+	return {
+		"valid": (
+			tangent.length_squared() > BASIC_FILLET_GEOMETRY_EPSILON
+			and explicit_contact.length_squared()
+			> BASIC_FILLET_GEOMETRY_EPSILON
+		),
+		"tangent": tangent,
+		"axis_x": resolved_axis_x,
+		"axis_y": resolved_axis_y,
+		"base_contact": explicit_contact,
+		"resolved_contact": resolved_contact,
+		"surface_normal": resolved_surface_normal,
+		"handedness_relative_to_tangent": (
+			resolved_axis_x.cross(resolved_axis_y).dot(tangent)
+		),
+	}
+
+static func resolve_linear_path_point_tangent(
+	path_points: PackedVector3Array,
+	point_index: int
+) -> Vector3:
+	if point_index < 0 or point_index >= path_points.size():
+		return Vector3.RIGHT
+	var current_point: Vector3 = path_points[point_index]
+	var tangent := Vector3.ZERO
+	if point_index > 0:
+		tangent += current_point - path_points[point_index - 1]
+	if point_index < path_points.size() - 1:
+		tangent += path_points[point_index + 1] - current_point
+	if tangent.length_squared() > BASIC_FILLET_GEOMETRY_EPSILON:
+		return tangent.normalized()
+	for offset in range(1, path_points.size()):
+		var before_index := point_index - offset
+		if before_index >= 0:
+			var before_delta := current_point - path_points[before_index]
+			if before_delta.length_squared() > BASIC_FILLET_GEOMETRY_EPSILON:
+				return before_delta.normalized()
+		var after_index := point_index + offset
+		if after_index < path_points.size():
+			var after_delta := path_points[after_index] - current_point
+			if after_delta.length_squared() > BASIC_FILLET_GEOMETRY_EPSILON:
+				return after_delta.normalized()
+	return Vector3.RIGHT
+
+static func _resolve_surface_frame_fallback_tangent(
+	surface_normal: Vector3,
+	contact_direction: Vector3
+) -> Vector3:
+	var reference_normal := surface_normal.normalized()
+	if reference_normal.length_squared() <= BASIC_FILLET_GEOMETRY_EPSILON:
+		reference_normal = contact_direction.normalized()
+	if reference_normal.length_squared() <= BASIC_FILLET_GEOMETRY_EPSILON:
+		return Vector3.RIGHT
+	var reference_axis := Vector3.UP
+	if absf(reference_normal.dot(reference_axis)) > 0.95:
+		reference_axis = Vector3.RIGHT
+	var tangent := reference_axis.cross(reference_normal).normalized()
+	return tangent if tangent.length_squared() > BASIC_FILLET_GEOMETRY_EPSILON else Vector3.RIGHT
+
+static func _resolve_surface_frame_fallback_contact(
+	path_tangent: Vector3,
+	surface_normal: Vector3
+) -> Vector3:
+	var contact := surface_normal.normalized()
+	contact -= path_tangent * contact.dot(path_tangent)
+	if contact.length_squared() > BASIC_FILLET_GEOMETRY_EPSILON:
+		return contact.normalized()
+	var reference_axis := Vector3.UP
+	if absf(path_tangent.dot(reference_axis)) > 0.95:
+		reference_axis = Vector3.RIGHT
+	contact = path_tangent.cross(reference_axis).normalized()
+	return contact if contact.length_squared() > BASIC_FILLET_GEOMETRY_EPSILON else Vector3.FORWARD
+
 static func resolve_path_surface_normal(
 	sample_position: Vector3,
 	source_points: PackedVector3Array,
@@ -589,22 +815,11 @@ static func resolve_path_surface_normal(
 		nearest_segment_ratio = segment_ratio
 		nearest_segment_index = segment_index
 	if nearest_segment_index >= 0:
-		var from_normal_index := mini(
+		return interpolate_path_surface_normal(
+			source_surface_normals,
 			nearest_segment_index,
-			source_surface_normals.size() - 1
-		)
-		var to_normal_index := mini(
-			nearest_segment_index + 1,
-			source_surface_normals.size() - 1
-		)
-		var interpolated_normal: Vector3 = source_surface_normals[
-			from_normal_index
-		].lerp(
-			source_surface_normals[to_normal_index],
 			nearest_segment_ratio
 		)
-		if interpolated_normal.length_squared() > BASIC_FILLET_GEOMETRY_EPSILON:
-			return interpolated_normal.normalized()
 	var nearest_point_index := 0
 	nearest_distance_squared = INF
 	for point_index in range(source_points.size()):
@@ -623,6 +838,34 @@ static func resolve_path_surface_normal(
 	return (
 		surface_normal.normalized()
 		if surface_normal.length_squared() > BASIC_FILLET_GEOMETRY_EPSILON
+		else Vector3.FORWARD
+	)
+
+static func interpolate_path_surface_normal(
+	source_surface_normals: PackedVector3Array,
+	segment_index: int,
+	segment_ratio: float = 0.0
+) -> Vector3:
+	if source_surface_normals.is_empty():
+		return Vector3.FORWARD
+	var from_normal_index := clampi(
+		segment_index,
+		0,
+		source_surface_normals.size() - 1
+	)
+	var to_normal_index := mini(
+		from_normal_index + 1,
+		source_surface_normals.size() - 1
+	)
+	var interpolated_normal: Vector3 = source_surface_normals[
+		from_normal_index
+	].lerp(
+		source_surface_normals[to_normal_index],
+		clampf(segment_ratio, 0.0, 1.0)
+	)
+	return (
+		interpolated_normal.normalized()
+		if interpolated_normal.length_squared() > BASIC_FILLET_GEOMETRY_EPSILON
 		else Vector3.FORWARD
 	)
 

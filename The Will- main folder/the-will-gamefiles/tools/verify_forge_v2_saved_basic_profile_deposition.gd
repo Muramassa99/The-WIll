@@ -359,7 +359,8 @@ func _init() -> void:
 		Vector3.ZERO,
 		-1.0,
 		-1.0,
-		Vector3.UP
+		Vector3.UP,
+		Vector3.DOWN
 	) as Resource
 	if (
 		builder_profile_body == null
@@ -369,7 +370,8 @@ func _init() -> void:
 			Vector3(0.05, 0.0, 0.0),
 			0.0,
 			false,
-			Vector3.UP
+			Vector3.UP,
+			Vector3.DOWN
 		))
 		or StringName(builder_profile_body.get("profile_id"))
 		!= saved_builder_profile_id
@@ -783,7 +785,8 @@ func _init() -> void:
 		or StringName(click_controller.call(
 			"begin_material_body_path",
 			Vector3.ZERO,
-			Vector3.UP
+			Vector3.UP,
+			Vector3.DOWN
 		)) == StringName()
 	):
 		click_controller.free()
@@ -793,7 +796,8 @@ func _init() -> void:
 		"finish_material_body_path",
 		Vector3.ZERO,
 		true,
-		Vector3.UP
+		Vector3.UP,
+		Vector3.DOWN
 	)
 	if (
 		int(click_state.call("get_pending_material_body_count")) != 0
@@ -853,7 +857,8 @@ func _init() -> void:
 		Vector3.ZERO,
 		0.35,
 		-1.0,
-		Vector3.UP
+		Vector3.UP,
+		Vector3.DOWN
 	) as Resource
 	if volume_body == null:
 		_fail("saved Basic Volume Stroke did not create a material body")
@@ -865,7 +870,8 @@ func _init() -> void:
 		Vector3(0.075, 0.0, 0.0),
 		0.0,
 		false,
-		Vector3.BACK
+		Vector3.BACK,
+		Vector3.FORWARD
 	)):
 		_fail("saved Basic Volume Stroke did not accept a second path point")
 		return
@@ -879,7 +885,7 @@ func _init() -> void:
 		StringName(volume_body.get("shape_kind"))
 		!= ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
 		or StringName(volume_body.get("body_kind"))
-		!= ForgeV2MaterialBodyScript.BODY_KIND_PROFILE_EXTRUSION
+		!= ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE
 		or StringName(volume_body.get("profile_id")) != saved_profile_id
 		or String(volume_body.get("profile_display_name"))
 		!= "Verifier Fixed Profile"

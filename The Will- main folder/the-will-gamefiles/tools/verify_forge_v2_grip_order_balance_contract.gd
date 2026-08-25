@@ -9,8 +9,11 @@ const ForgeV2ProfileShapeLibraryScript = preload(
 const ForgeV2WipCompatibilityAdapterScript = preload(
 	"res://runtime/forge_v2/forge_v2_wip_compatibility_adapter.gd"
 )
-const ForgeV2SplinePathSamplerScript = preload(
-	"res://runtime/forge_v2/forge_v2_spline_path_sampler.gd"
+const PrimaryGripSeatResolverScript = preload(
+	"res://core/resolvers/primary_grip_seat_resolver.gd"
+)
+const PrimaryGripHandleMeshPacketScript = preload(
+	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
 )
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
 
@@ -21,11 +24,8 @@ const CELL_SIZE_METERS := 0.0125
 const POSITION_TOLERANCE_METERS := 0.0005
 const AXIS_TOLERANCE := 0.0001
 const SHELL_TOLERANCE_METERS := 0.0005
-const HANDLE_GRIP_CURVE_BAKE_INTERVAL_METERS := 0.001
-const MAX_PROFILE_OFFSET_SAMPLES := 256
-const GEOMETRY_EPSILON := 0.000001
-const VOLUME_EPSILON := 0.000000000001
-const HANDLE_FINAL_PROFILE_AXIS_X_SIGN := -1.0
+const PROTECTED_HANDLE_HALF_WIDTH_METERS := 0.025
+const PROTECTED_HANDLE_HALF_DEPTH_METERS := 0.02
 
 const HANDLE_START := Vector3(0.0, 0.0, 0.0)
 const HANDLE_MIDDLE := Vector3(0.19, 0.08, 0.0)
@@ -65,6 +65,10 @@ func _run_verification() -> void:
 		ORDER_MESH_MAX,
 		&"verify_order_invariant_handle"
 	)
+	order_packet = _with_primary_grip_handle_mesh(
+		order_packet,
+		forward_points
+	)
 	var forward_contract := _build_contract(
 		forward_points,
 		asymmetric_profile,
@@ -97,6 +101,10 @@ func _run_verification() -> void:
 		BALANCE_MESH_MAX,
 		&"verify_asymmetric_blade_mass_extension"
 	)
+	balance_packet = _with_primary_grip_handle_mesh(
+		balance_packet,
+		forward_points
+	)
 	var balance_contract := _build_contract(
 		forward_points,
 		PackedVector2Array(),
@@ -111,11 +119,18 @@ func _run_verification() -> void:
 		_verify_balance_seating(
 			balance_profile,
 			forward_points,
-			balance_contract.get("test_handle_body", null) as Resource,
 			AABB(
 				BALANCE_MESH_MIN,
 				BALANCE_MESH_MAX - BALANCE_MESH_MIN
-			)
+			),
+			balance_packet.get(
+				"primary_grip_handle_vertices",
+				PackedVector3Array()
+			) as PackedVector3Array,
+			balance_packet.get(
+				"primary_grip_handle_indices",
+				PackedInt32Array()
+			) as PackedInt32Array
 		)
 
 	if failure_lines.is_empty():
@@ -334,18 +349,19 @@ func _verify_order_invariance(
 func _verify_balance_seating(
 	profile: BakedProfile,
 	handle_points: PackedVector3Array,
-	handle_body: Resource,
-	visible_mesh_bounds: AABB
+	visible_mesh_bounds: AABB,
+	protected_handle_vertices: PackedVector3Array,
+	protected_handle_indices: PackedInt32Array
 ) -> void:
 	result_lines.append("scenario=asymmetric_blade_balance")
 	var center_of_mass := profile.center_of_mass * CELL_SIZE_METERS
-	var curve_oracle := _resolve_auto_curve_contact_oracle(
+	var slice_oracle := _resolve_protected_mesh_slice_contact_oracle(
 		handle_points,
-		handle_body,
-		center_of_mass,
-		CELL_SIZE_METERS
+		protected_handle_vertices,
+		protected_handle_indices,
+		center_of_mass
 	)
-	var expected_contact: Vector3 = curve_oracle.get(
+	var expected_contact: Vector3 = slice_oracle.get(
 		"contact",
 		Vector3.INF
 	) as Vector3
@@ -353,11 +369,10 @@ func _verify_balance_seating(
 		handle_points,
 		center_of_mass
 	)
-	var chord_contact := _closest_point_on_segment(
-		handle_points[0],
-		handle_points[handle_points.size() - 1],
-		center_of_mass
-	)
+	var chord_station: Vector3 = slice_oracle.get(
+		"chord_station",
+		Vector3.INF
+	) as Vector3
 	var actual_contact := _profile_contact_meters(profile)
 	var shell_points := _build_effective_shell_points(profile)
 	var shell_center := _calculate_point_mean(shell_points)
@@ -366,8 +381,8 @@ func _verify_balance_seating(
 	)
 	var actual_contact_error := actual_contact.distance_to(expected_contact)
 	var midpoint_error := HANDLE_MIDDLE.distance_to(expected_contact)
-	var curve_chord_delta := expected_contact.distance_to(chord_contact)
-	var curve_polyline_delta := expected_contact.distance_to(
+	var slice_chord_delta := expected_contact.distance_to(chord_station)
+	var slice_polyline_delta := expected_contact.distance_to(
 		linear_polyline_contact
 	)
 	var shell_contact_distance := shell_center.distance_to(actual_contact)
@@ -379,38 +394,36 @@ func _verify_balance_seating(
 	result_lines.append("metric.balance.com_m=%s" % center_of_mass)
 	result_lines.append("metric.balance.authored_middle_m=%s" % HANDLE_MIDDLE)
 	result_lines.append(
-		"metric.balance.expected_auto_curve_contact_m=%s" % expected_contact
+		"metric.balance.expected_protected_slice_center_m=%s" % expected_contact
 	)
 	result_lines.append(
-		"metric.balance.linear_polyline_contact_m=%s" % linear_polyline_contact
+		"metric.balance.legacy_com_nearest_polyline_m=%s"
+		% linear_polyline_contact
 	)
-	result_lines.append("metric.balance.chord_projection_m=%s" % chord_contact)
+	result_lines.append("metric.balance.raw_chord_station_m=%s" % chord_station)
 	result_lines.append("metric.balance.actual_contact_m=%s" % actual_contact)
 	result_lines.append(
-		"metric.balance.auto_curve_oracle_valid=%s"
-		% bool(curve_oracle.get("valid", false))
+		"metric.balance.protected_slice_oracle_valid=%s"
+		% bool(slice_oracle.get("valid", false))
 	)
 	result_lines.append(
-		"metric.balance.auto_curve_length_m=%.9f"
-		% float(curve_oracle.get("curve_length", 0.0))
+		"metric.balance.raw_chord_com_ratio=%.9f"
+		% float(slice_oracle.get("chord_ratio", -1.0))
 	)
 	result_lines.append(
-		"metric.balance.auto_curve_contact_offset_m=%.9f"
-		% float(curve_oracle.get("contact_offset", -1.0))
-	)
-	result_lines.append(
-		"metric.balance.final_profile_sample_center_m=%s"
-		% (curve_oracle.get("profile_sample_center", Vector2.INF) as Vector2)
+		"metric.balance.protected_slice_contour_count=%d"
+		% int(slice_oracle.get("contour_count", 0))
 	)
 	result_lines.append(
 		"metric.balance.middle_to_expected_m=%.9f" % midpoint_error
 	)
 	result_lines.append(
-		"metric.balance.auto_curve_vs_chord_m=%.9f" % curve_chord_delta
+		"metric.balance.protected_slice_vs_chord_m=%.9f"
+		% slice_chord_delta
 	)
 	result_lines.append(
-		"metric.balance.auto_curve_vs_linear_polyline_m=%.9f"
-		% curve_polyline_delta
+		"metric.balance.protected_slice_vs_legacy_com_nearest_polyline_m=%.9f"
+		% slice_polyline_delta
 	)
 	result_lines.append(
 		"metric.balance.actual_contact_error_m=%.9f" % actual_contact_error
@@ -435,16 +448,16 @@ func _verify_balance_seating(
 		"asymmetric blade fixture moves the COM seat materially away from p1"
 	)
 	_check(
-		bool(curve_oracle.get("valid", false)),
-		"auto Curve3D displaced-centerline oracle resolved successfully"
+		bool(slice_oracle.get("valid", false)),
+		"raw-chord COM station resolves a closed protected-Handle mesh slice"
 	)
 	_check(
-		curve_chord_delta >= 0.01 and curve_polyline_delta >= 0.005,
-		"bent-handle fixture distinguishes auto-curve seating from straight approximations"
+		slice_chord_delta >= 0.01 and slice_polyline_delta >= 0.001,
+		"bent Handle distinguishes protected-slice seating from chord-only and legacy COM-nearest seating"
 	)
 	_check(
 		actual_contact_error <= POSITION_TOLERANCE_METERS,
-		"primary contact seats at the COM-nearest point on the auto Curve3D profile centerline"
+		"primary contact uses the raw-chord COM station's protected-mesh slice center"
 	)
 	_check(
 		offset_mean.length() <= SHELL_TOLERANCE_METERS
@@ -491,12 +504,20 @@ func _build_contract(
 	wip.equipment_context = &"ctx_weapon"
 	wip.layers = []
 	wip.forge_v2_authoring_state = state.duplicate(true) as Resource
+	var handle_body := fixture.get("handle_body", null) as Resource
+	var authorized_mesh_packet := mesh_packet.duplicate(true)
+	authorized_mesh_packet["primary_grip_handle_mesh_source"] = (
+		PrimaryGripHandleMeshPacketScript.SOURCE
+	)
+	authorized_mesh_packet["primary_grip_handle_body_signature"] = (
+		PrimaryGripHandleMeshPacketScript.build_body_signature(handle_body)
+	)
 	var contract := ForgeV2WipCompatibilityAdapterScript.build_runtime_contract(
 		wip,
-		mesh_packet,
+		authorized_mesh_packet,
 		CELL_SIZE_METERS
 	)
-	contract["test_handle_body"] = fixture.get("handle_body", null)
+	contract["test_handle_body"] = handle_body
 	return contract
 
 
@@ -590,6 +611,107 @@ func _build_box_packet(
 	}
 
 
+func _with_primary_grip_handle_mesh(
+	mesh_packet: Dictionary,
+	handle_points: PackedVector3Array
+) -> Dictionary:
+	var result := mesh_packet.duplicate(true)
+	var protected_mesh := _build_protected_handle_prism(handle_points)
+	if not bool(protected_mesh.get("valid", false)):
+		return result
+	result["primary_grip_handle_vertices"] = protected_mesh.get(
+		"vertices",
+		PackedVector3Array()
+	)
+	result["primary_grip_handle_indices"] = protected_mesh.get(
+		"indices",
+		PackedInt32Array()
+	)
+	result["primary_grip_handle_mesh_source"] = (
+		PrimaryGripHandleMeshPacketScript.SOURCE
+	)
+	return result
+
+
+func _build_protected_handle_prism(
+	handle_points: PackedVector3Array
+) -> Dictionary:
+	if handle_points.size() < 2:
+		return {"valid": false}
+	var chord := handle_points[handle_points.size() - 1] - handle_points[0]
+	if chord.length_squared() <= 0.000000000001:
+		return {"valid": false}
+	var chord_axis := chord.normalized()
+	var minor_axis_a := (
+		Vector3.UP - chord_axis * chord_axis.dot(Vector3.UP)
+	)
+	if minor_axis_a.length_squared() <= 0.000000000001:
+		minor_axis_a = (
+			Vector3.RIGHT - chord_axis * chord_axis.dot(Vector3.RIGHT)
+		)
+	if minor_axis_a.length_squared() <= 0.000000000001:
+		return {"valid": false}
+	minor_axis_a = minor_axis_a.normalized()
+	var minor_axis_b := chord_axis.cross(minor_axis_a).normalized()
+	if minor_axis_b.length_squared() <= 0.000000000001:
+		return {"valid": false}
+
+	var vertices := PackedVector3Array()
+	for center: Vector3 in handle_points:
+		vertices.append(
+			center
+			- minor_axis_a * PROTECTED_HANDLE_HALF_WIDTH_METERS
+			- minor_axis_b * PROTECTED_HANDLE_HALF_DEPTH_METERS
+		)
+		vertices.append(
+			center
+			+ minor_axis_a * PROTECTED_HANDLE_HALF_WIDTH_METERS
+			- minor_axis_b * PROTECTED_HANDLE_HALF_DEPTH_METERS
+		)
+		vertices.append(
+			center
+			+ minor_axis_a * PROTECTED_HANDLE_HALF_WIDTH_METERS
+			+ minor_axis_b * PROTECTED_HANDLE_HALF_DEPTH_METERS
+		)
+		vertices.append(
+			center
+			- minor_axis_a * PROTECTED_HANDLE_HALF_WIDTH_METERS
+			+ minor_axis_b * PROTECTED_HANDLE_HALF_DEPTH_METERS
+		)
+
+	var indices := PackedInt32Array([
+		0, 2, 1,
+		0, 3, 2,
+	])
+	for ring_index: int in range(handle_points.size() - 1):
+		var ring_start := ring_index * 4
+		var next_ring_start := (ring_index + 1) * 4
+		for corner_index: int in range(4):
+			var next_corner_index := (corner_index + 1) % 4
+			var corner_a := ring_start + corner_index
+			var corner_b := ring_start + next_corner_index
+			var corner_c := next_ring_start + next_corner_index
+			var corner_d := next_ring_start + corner_index
+			indices.append(corner_a)
+			indices.append(corner_b)
+			indices.append(corner_c)
+			indices.append(corner_a)
+			indices.append(corner_c)
+			indices.append(corner_d)
+	var final_ring_start := (handle_points.size() - 1) * 4
+	indices.append(final_ring_start)
+	indices.append(final_ring_start + 1)
+	indices.append(final_ring_start + 2)
+	indices.append(final_ring_start)
+	indices.append(final_ring_start + 2)
+	indices.append(final_ring_start + 3)
+	return {
+		"valid": true,
+		"vertices": vertices,
+		"indices": indices,
+	}
+
+
 func _require_valid_profile(contract: Dictionary, label: String) -> BakedProfile:
 	if not bool(contract.get("valid", false)):
 		_check(false, "%s was rejected: %s" % [
@@ -652,381 +774,56 @@ func _canonicalize_axis(axis: Vector3) -> Vector3:
 	return -normalized if dominant_component < 0.0 else normalized
 
 
-func _resolve_auto_curve_contact_oracle(
+func _resolve_protected_mesh_slice_contact_oracle(
 	handle_points: PackedVector3Array,
-	handle_body: Resource,
-	desired_contact: Vector3,
-	cell_size_meters: float
+	protected_handle_vertices: PackedVector3Array,
+	protected_handle_indices: PackedInt32Array,
+	desired_contact: Vector3
 ) -> Dictionary:
-	if handle_body == null or handle_points.size() < 2:
-		return {"valid": false, "error": "Handle oracle input is incomplete"}
-	var curve := ForgeV2SplinePathSamplerScript.build_auto_curve(
-		handle_points,
-		HANDLE_GRIP_CURVE_BAKE_INTERVAL_METERS,
-		true
-	)
-	if curve == null or curve.point_count < 2 or curve.get_baked_length() <= 0.0:
-		return {"valid": false, "error": "auto Curve3D did not bake"}
-	_apply_oracle_curve_orientation(curve, handle_body, handle_points)
-
-	var authored_polygon: PackedVector2Array = handle_body.get(
-		"profile_polygon_2d_meters"
-	)
-	var authored_samples := _build_oracle_profile_offset_samples(
-		authored_polygon,
-		cell_size_meters
-	)
-	var final_samples := PackedVector2Array()
-	for authored_sample: Vector2 in authored_samples:
-		final_samples.append(Vector2(
-			authored_sample.x * HANDLE_FINAL_PROFILE_AXIS_X_SIGN,
-			authored_sample.y
-		))
-	var sample_center := _calculate_vector2_mean(final_samples)
-
-	var curve_length := curve.get_baked_length()
-	var sample_count := maxi(
-		int(ceil(curve_length / HANDLE_GRIP_CURVE_BAKE_INTERVAL_METERS)),
-		1
-	)
-	var curve_offsets := PackedFloat32Array()
-	var displaced_centerline := PackedVector3Array()
-	for sample_index: int in range(sample_count + 1):
-		var curve_offset := curve_length * float(sample_index) / float(sample_count)
-		var frame := _resolve_oracle_csg_profile_frame(curve, curve_offset)
-		var curve_position: Vector3 = frame.get(
-			"position",
-			curve.sample_baked(curve_offset)
-		) as Vector3
-		var axis_a: Vector3 = frame.get("axis_x", Vector3.UP) as Vector3
-		var axis_b: Vector3 = frame.get("axis_y", Vector3.FORWARD) as Vector3
-		curve_offsets.append(curve_offset)
-		displaced_centerline.append(
-			curve_position + axis_a * sample_center.x + axis_b * sample_center.y
-		)
-	var closest_state := _resolve_oracle_closest_centerline_state(
-		displaced_centerline,
-		curve_offsets,
-		desired_contact
-	)
-	var contact_offset := clampf(
-		float(closest_state.get("curve_offset", curve_length * 0.5)),
-		0.0,
-		curve_length
-	)
-	var contact_frame := _resolve_oracle_csg_profile_frame(curve, contact_offset)
-	var contact_position: Vector3 = contact_frame.get(
-		"position",
-		curve.sample_baked(contact_offset)
-	) as Vector3
-	var contact_axis_a: Vector3 = contact_frame.get("axis_x", Vector3.UP) as Vector3
-	var contact_axis_b: Vector3 = contact_frame.get(
-		"axis_y",
-		Vector3.FORWARD
-	) as Vector3
-	return {
-		"valid": true,
-		"contact": (
-			contact_position
-			+ contact_axis_a * sample_center.x
-			+ contact_axis_b * sample_center.y
-		),
-		"contact_offset": contact_offset,
-		"curve_length": curve_length,
-		"profile_sample_center": sample_center,
-		"centerline_sample_count": displaced_centerline.size(),
-	}
-
-
-func _apply_oracle_curve_orientation(
-	curve: Curve3D,
-	handle_body: Resource,
-	handle_points: PackedVector3Array
-) -> void:
-	var path_normals: PackedVector3Array = handle_body.get("path_surface_normals")
-	var contact_direction: Vector2 = handle_body.get("profile_contact_direction_2d")
-	var rotation_bias := float(handle_body.get("profile_rotation_bias_degrees"))
-	var previous_tilt := 0.0
-	var has_previous_tilt := false
-	var normals_align := (
-		curve.point_count == handle_points.size()
-		and path_normals.size() >= handle_points.size()
-	)
-	for point_index: int in range(curve.point_count):
-		var tangent := _resolve_oracle_curve_control_tangent(curve, point_index)
-		var point_position := curve.get_point_position(point_index)
-		var surface_normal := Vector3.FORWARD
-		if normals_align and point_position.is_equal_approx(handle_points[point_index]):
-			surface_normal = (
-				ForgeV2ProfileShapeLibraryScript.interpolate_path_surface_normal(
-					path_normals,
-					point_index,
-					0.0
-				)
-			)
-		else:
-			surface_normal = ForgeV2ProfileShapeLibraryScript.resolve_path_surface_normal(
-				point_position,
-				handle_points,
-				path_normals
-			)
-		var frame := ForgeV2ProfileShapeLibraryScript.resolve_profile_path_frame(
-			tangent,
-			surface_normal,
-			contact_direction,
-			rotation_bias
-		)
-		var tilt := float(frame.get("tilt_radians", 0.0))
-		if has_previous_tilt:
-			while tilt - previous_tilt > PI:
-				tilt -= TAU
-			while tilt - previous_tilt < -PI:
-				tilt += TAU
-		curve.set_point_tilt(point_index, tilt)
-		previous_tilt = tilt
-		has_previous_tilt = true
-
-
-func _resolve_oracle_curve_control_tangent(
-	curve: Curve3D,
-	point_index: int
-) -> Vector3:
-	var current_position := curve.get_point_position(point_index)
-	var tangent := Vector3.ZERO
-	if point_index > 0:
-		tangent += current_position - curve.get_point_position(point_index - 1)
-	if point_index < curve.point_count - 1:
-		tangent += curve.get_point_position(point_index + 1) - current_position
-	return (
-		tangent.normalized()
-		if tangent.length_squared() > GEOMETRY_EPSILON * GEOMETRY_EPSILON
-		else Vector3.RIGHT
-	)
-
-
-func _resolve_oracle_csg_profile_frame(
-	curve: Curve3D,
-	curve_offset: float
-) -> Dictionary:
-	var safe_offset := clampf(curve_offset, 0.0, curve.get_baked_length())
-	var pose := curve.sample_baked_with_rotation(safe_offset, false, false)
-	var tangent := (pose.basis * Vector3.FORWARD).normalized()
-	if tangent.length_squared() <= GEOMETRY_EPSILON * GEOMETRY_EPSILON:
-		var delta := maxf(curve.bake_interval * 0.5, 0.0001)
-		tangent = (
-			curve.sample_baked(minf(safe_offset + delta, curve.get_baked_length()))
-			- curve.sample_baked(maxf(safe_offset - delta, 0.0))
-		).normalized()
-	var up := curve.sample_baked_up_vector(safe_offset, true).normalized()
-	if up.length_squared() <= GEOMETRY_EPSILON * GEOMETRY_EPSILON:
-		up = _resolve_oracle_profile_frame_fallback_normal(tangent)
-	var facing := Transform3D.IDENTITY.looking_at(tangent, up)
-	var axis_x := -facing.basis.x.normalized()
-	var axis_y := facing.basis.y.normalized()
 	if (
-		axis_x.length_squared() <= GEOMETRY_EPSILON * GEOMETRY_EPSILON
-		or axis_y.length_squared() <= GEOMETRY_EPSILON * GEOMETRY_EPSILON
+		handle_points.size() < 2
+		or protected_handle_vertices.size() < 3
+		or protected_handle_indices.size() < 3
+		or protected_handle_indices.size() % 3 != 0
 	):
-		axis_x = _resolve_oracle_profile_frame_fallback_normal(tangent)
-		axis_y = tangent.cross(axis_x).normalized()
-	return {
-		"position": curve.sample_baked(safe_offset),
-		"tangent": tangent,
-		"axis_x": axis_x,
-		"axis_y": axis_y,
-	}
-
-
-func _resolve_oracle_closest_centerline_state(
-	centerline_points: PackedVector3Array,
-	curve_offsets: PackedFloat32Array,
-	desired_position: Vector3
-) -> Dictionary:
-	var best_distance_squared := INF
-	var best_offset := 0.0
-	for point_index: int in range(maxi(centerline_points.size() - 1, 0)):
-		var point_a := centerline_points[point_index]
-		var point_b := centerline_points[point_index + 1]
-		var segment := point_b - point_a
-		var segment_length_squared := segment.length_squared()
-		var ratio := 0.0
-		if segment_length_squared > GEOMETRY_EPSILON * GEOMETRY_EPSILON:
-			ratio = clampf(
-				(desired_position - point_a).dot(segment) / segment_length_squared,
-				0.0,
-				1.0
-			)
-		var candidate := point_a + segment * ratio
-		var distance_squared := desired_position.distance_squared_to(candidate)
-		if distance_squared >= best_distance_squared:
-			continue
-		best_distance_squared = distance_squared
-		best_offset = lerpf(
-			curve_offsets[point_index],
-			curve_offsets[point_index + 1],
-			ratio
-		)
-	return {
-		"curve_offset": best_offset,
-		"distance_squared": best_distance_squared,
-	}
-
-
-func _build_oracle_profile_offset_samples(
-	polygon: PackedVector2Array,
-	cell_size_meters: float
-) -> PackedVector2Array:
-	var samples := PackedVector2Array()
-	if polygon.size() < 3:
-		return samples
-	var bounds := _calculate_oracle_polygon_bounds(polygon)
-	var cell_size := maxf(cell_size_meters, 0.001)
-	var half_cell := cell_size * 0.5
-	var column_count := maxi(
-		int(floor((bounds.size.x + GEOMETRY_EPSILON) / cell_size)),
-		0
-	)
-	var row_count := maxi(
-		int(floor((bounds.size.y + GEOMETRY_EPSILON) / cell_size)),
-		0
-	)
-	if column_count <= 0 or row_count <= 0:
-		return samples
-	var occupied_size := Vector2(
-		float(column_count) * cell_size,
-		float(row_count) * cell_size
-	)
-	var leading_margin := (bounds.size - occupied_size) * 0.5
-	var first_center := bounds.position + leading_margin + Vector2.ONE * half_cell
-	var stride_cells := 1
-	while (
-		ceili(float(column_count) / float(stride_cells))
-		* ceili(float(row_count) / float(stride_cells))
-		> MAX_PROFILE_OFFSET_SAMPLES
-	):
-		stride_cells += 1
-	for column_index in range(0, column_count, stride_cells):
-		for row_index in range(0, row_count, stride_cells):
-			var candidate := first_center + Vector2(
-				float(column_index) * cell_size,
-				float(row_index) * cell_size
-			)
-			if not _oracle_point_is_strictly_inside_polygon(candidate, polygon):
-				continue
-			_append_unique_oracle_profile_sample(samples, candidate)
-			if samples.size() >= MAX_PROFILE_OFFSET_SAMPLES:
-				return samples
-	if samples.is_empty():
-		var polygon_center := _calculate_oracle_polygon_centroid(polygon)
-		var inset_bounds := bounds.grow(-half_cell)
-		if (
-			inset_bounds.has_point(polygon_center)
-			and _oracle_point_is_strictly_inside_polygon(polygon_center, polygon)
-		):
-			_append_unique_oracle_profile_sample(samples, polygon_center)
-	return samples
-
-
-func _append_unique_oracle_profile_sample(
-	samples: PackedVector2Array,
-	candidate: Vector2
-) -> void:
-	for existing: Vector2 in samples:
-		if existing.distance_squared_to(candidate) <= VOLUME_EPSILON:
-			return
-	samples.append(candidate)
-
-
-func _oracle_point_is_strictly_inside_polygon(
-	point: Vector2,
-	polygon: PackedVector2Array
-) -> bool:
-	if not Geometry2D.is_point_in_polygon(point, polygon):
-		return false
-	for point_index in range(polygon.size()):
-		if _oracle_distance_squared_to_segment(
-			point,
-			polygon[point_index],
-			polygon[(point_index + 1) % polygon.size()]
-		) <= GEOMETRY_EPSILON * GEOMETRY_EPSILON:
-			return false
-	return true
-
-
-func _oracle_point_is_inside_or_on_polygon(
-	point: Vector2,
-	polygon: PackedVector2Array
-) -> bool:
-	if Geometry2D.is_point_in_polygon(point, polygon):
-		return true
-	for point_index in range(polygon.size()):
-		if _oracle_distance_squared_to_segment(
-			point,
-			polygon[point_index],
-			polygon[(point_index + 1) % polygon.size()]
-		) <= GEOMETRY_EPSILON * GEOMETRY_EPSILON:
-			return true
-	return false
-
-
-func _oracle_distance_squared_to_segment(
-	point: Vector2,
-	segment_start: Vector2,
-	segment_end: Vector2
-) -> float:
-	var segment := segment_end - segment_start
-	var segment_length_squared := segment.length_squared()
-	if segment_length_squared <= VOLUME_EPSILON:
-		return point.distance_squared_to(segment_start)
-	var ratio := clampf(
-		(point - segment_start).dot(segment) / segment_length_squared,
+		return {"valid": false, "error": "protected Handle oracle input is incomplete"}
+	var chord_start := handle_points[0]
+	var chord_end := handle_points[handle_points.size() - 1]
+	var chord := chord_end - chord_start
+	var chord_length_squared := chord.length_squared()
+	if chord_length_squared <= 0.000000000001:
+		return {"valid": false, "error": "protected Handle chord is degenerate"}
+	var chord_ratio := clampf(
+		(desired_contact - chord_start).dot(chord) / chord_length_squared,
 		0.0,
 		1.0
 	)
-	return point.distance_squared_to(segment_start + segment * ratio)
-
-
-func _calculate_oracle_polygon_centroid(
-	polygon: PackedVector2Array
-) -> Vector2:
-	var signed_area_times_two := 0.0
-	var centroid_numerator := Vector2.ZERO
-	for point_index in range(polygon.size()):
-		var point_a := polygon[point_index]
-		var point_b := polygon[(point_index + 1) % polygon.size()]
-		var cross := point_a.cross(point_b)
-		signed_area_times_two += cross
-		centroid_numerator += (point_a + point_b) * cross
-	if absf(signed_area_times_two) > VOLUME_EPSILON:
-		var centroid := centroid_numerator / (3.0 * signed_area_times_two)
-		if _oracle_point_is_inside_or_on_polygon(centroid, polygon):
-			return centroid
-	var average := _calculate_vector2_mean(polygon)
-	return average if _oracle_point_is_inside_or_on_polygon(average, polygon) else polygon[0]
-
-
-func _calculate_oracle_polygon_bounds(polygon: PackedVector2Array) -> Rect2:
-	var min_point := polygon[0]
-	var max_point := polygon[0]
-	for point: Vector2 in polygon:
-		min_point.x = minf(min_point.x, point.x)
-		min_point.y = minf(min_point.y, point.y)
-		max_point.x = maxf(max_point.x, point.x)
-		max_point.y = maxf(max_point.y, point.y)
-	return Rect2(min_point, max_point - min_point)
-
-
-func _resolve_oracle_profile_frame_fallback_normal(axis: Vector3) -> Vector3:
-	var normalized_axis := axis.normalized()
-	var reference := Vector3.UP
-	if absf(normalized_axis.dot(reference)) > 0.95:
-		reference = Vector3.RIGHT
-	var projected := reference - normalized_axis * reference.dot(normalized_axis)
-	return (
-		projected.normalized()
-		if projected.length_squared() > GEOMETRY_EPSILON * GEOMETRY_EPSILON
-		else Vector3.FORWARD
+	var chord_station := chord_start.lerp(chord_end, chord_ratio)
+	var slice_state: Dictionary = (
+		PrimaryGripSeatResolverScript.resolve_mesh_plane_slice_center(
+			protected_handle_vertices,
+			protected_handle_indices,
+			chord_station,
+			chord.normalized()
+		)
 	)
+	if not bool(slice_state.get("valid", false)):
+		return {
+			"valid": false,
+			"error": String(slice_state.get(
+				"error",
+				"protected Handle slice did not resolve"
+			)),
+			"chord_ratio": chord_ratio,
+			"chord_station": chord_station,
+		}
+	return {
+		"valid": true,
+		"contact": slice_state.get("center_meters", Vector3.INF),
+		"chord_ratio": chord_ratio,
+		"chord_station": chord_station,
+		"contour_count": int(slice_state.get("contour_count", 0)),
+	}
 
 
 func _closest_point_on_three_point_path(

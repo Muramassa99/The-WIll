@@ -266,6 +266,14 @@ func _build_test_baked_profile() -> BakedProfile:
 	profile.primary_grip_span_end = Vector3(0.0, 0.0, -2.0)
 	profile.primary_grip_axis_ratio_from_span_start = 0.5
 	profile.primary_grip_slide_axis = Vector3(0.0, 0.0, -1.0)
+	profile.primary_grip_slice_axis_ratios_from_span_start = PackedFloat32Array([
+		0.0,
+		1.0,
+	])
+	profile.primary_grip_slice_centers = PackedVector3Array([
+		profile.primary_grip_span_start,
+		profile.primary_grip_span_end,
+	])
 	profile.primary_grip_two_hand_eligible = true
 	profile.weapon_tip_point = Vector3(0.0, 0.0, -8.0)
 	profile.weapon_pommel_point = Vector3(0.0, 0.0, 2.0)

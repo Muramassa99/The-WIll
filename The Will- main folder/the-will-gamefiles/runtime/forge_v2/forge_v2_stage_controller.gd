@@ -16,6 +16,7 @@ const ForgeV2WipCompatibilityAdapterScript = preload(
 # frame.  Give the bound presenter a small, finite acknowledgement window before
 # treating a pending history promotion as genuinely unhandled.
 const BOUNDED_PROMOTION_ACK_GRACE_PROCESS_FRAMES := 4
+const SAVE_PREPARATION_TIMEOUT_MSEC := 30000
 
 @export var default_project_name: String = "Stage 1 V2 Draft"
 
@@ -96,7 +97,154 @@ func get_active_authoring_state() -> Resource:
 func get_active_saved_wip_id() -> StringName:
 	return active_saved_wip_id
 
-func build_crafted_item_wip_for_save() -> CraftedItemWIP:
+func prepare_pending_work_for_save(
+	timeout_msec: int = SAVE_PREPARATION_TIMEOUT_MSEC
+) -> Dictionary:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	if state == null:
+		return {
+			"ok": false,
+			"reason": &"authoring_state_missing",
+		}
+	if active_placement_body_id != StringName():
+		return {
+			"ok": false,
+			"reason": &"active_placement_not_finished",
+		}
+	var scene_tree := get_tree()
+	if scene_tree == null:
+		return {
+			"ok": false,
+			"reason": &"scene_tree_missing",
+		}
+	var state_instance_id := int(state.get_instance_id())
+	var deadline_msec := Time.get_ticks_msec() + maxi(timeout_msec, 1)
+	var committed_pending_work := false
+	while Time.get_ticks_msec() <= deadline_msec:
+		if (
+			active_authoring_state != state
+			or not is_instance_valid(state)
+			or int(state.get_instance_id()) != state_instance_id
+		):
+			return {
+				"ok": false,
+				"reason": &"authoring_state_changed",
+				"committed_pending_work": committed_pending_work,
+			}
+		if active_placement_body_id != StringName():
+			return {
+				"ok": false,
+				"reason": &"active_placement_changed",
+				"committed_pending_work": committed_pending_work,
+			}
+		var pending_promotion := (
+			state.has_method("has_pending_bounded_history_promotion")
+			and bool(state.call("has_pending_bounded_history_promotion"))
+		)
+		if not _deferred_material_body_commit_queue.is_empty() or pending_promotion:
+			await scene_tree.process_frame
+			continue
+		var pending_count := int(state.call("get_pending_material_body_count"))
+		if pending_count > 0:
+			var committed_layer: Resource = commit_pending_material_bodies_as_layer()
+			if committed_layer != null:
+				committed_pending_work = true
+				await scene_tree.process_frame
+				continue
+			var finish_result := get_last_material_body_finish_result()
+			var finish_status := StringName(finish_result.get(
+				"status",
+				StringName()
+			))
+			if finish_status == &"commit_blocked_retry_required":
+				await scene_tree.process_frame
+				continue
+			return {
+				"ok": false,
+				"reason": &"pending_layer_commit_rejected",
+				"finish_status": finish_status,
+				"pending_material_body_count": pending_count,
+				"committed_pending_work": committed_pending_work,
+			}
+		var runtime_mesh_packet: Dictionary = (
+			state.call("request_runtime_contract_mesh_export") as Dictionary
+			if state.has_method("request_runtime_contract_mesh_export")
+			else {}
+		)
+		if bool(runtime_mesh_packet.get("ok", false)):
+			if not _runtime_mesh_packet_has_valid_indexed_geometry(
+				runtime_mesh_packet
+			):
+				return {
+					"ok": false,
+					"reason": &"runtime_mesh_export_invalid",
+					"error_code": String(runtime_mesh_packet.get(
+						"error_code",
+						"RUNTIME_CONTRACT_MESH_INVALID"
+					)),
+					"committed_pending_work": committed_pending_work,
+				}
+			return {
+				"ok": true,
+				"reason": &"ready",
+				"committed_pending_work": committed_pending_work,
+				"runtime_mesh_packet": runtime_mesh_packet,
+			}
+		if bool(runtime_mesh_packet.get("pending", false)):
+			await scene_tree.process_frame
+			continue
+		# Empty authoring drafts remain saveable as drafts. Once user-authored
+		# geometry exists, however, a terminal mesh error must not silently save
+		# a stale or incomplete runtime contract.
+		if int(state.call("get_user_material_body_count")) <= 0:
+			return {
+				"ok": true,
+				"reason": &"ready_authoring_only",
+				"committed_pending_work": committed_pending_work,
+				"runtime_mesh_packet": runtime_mesh_packet,
+			}
+		return {
+			"ok": false,
+			"reason": &"runtime_mesh_export_failed",
+			"error_code": String(runtime_mesh_packet.get(
+				"error_code",
+				"RUNTIME_CONTRACT_MESH_EXPORT_FAILED"
+			)),
+			"export_reason": String(runtime_mesh_packet.get("reason", "")),
+			"committed_pending_work": committed_pending_work,
+		}
+	return {
+		"ok": false,
+		"reason": &"save_preparation_timed_out",
+		"pending_material_body_count": int(
+			state.call("get_pending_material_body_count")
+		),
+		"deferred_commit_count": _deferred_material_body_commit_queue.size(),
+		"committed_pending_work": committed_pending_work,
+	}
+
+func _runtime_mesh_packet_has_valid_indexed_geometry(
+	runtime_mesh_packet: Dictionary
+) -> bool:
+	var vertices: PackedVector3Array = runtime_mesh_packet.get(
+		"vertices",
+		PackedVector3Array()
+	) as PackedVector3Array
+	var indices: PackedInt32Array = runtime_mesh_packet.get(
+		"indices",
+		PackedInt32Array()
+	) as PackedInt32Array
+	return (
+		not vertices.is_empty()
+		and not indices.is_empty()
+		and indices.size() % 3 == 0
+	)
+
+func build_crafted_item_wip_for_save(
+	requested_wip_id: StringName = StringName(),
+	requested_project_name: String = "",
+	prepared_runtime_mesh_packet: Dictionary = {}
+) -> CraftedItemWIP:
 	var state: Resource = ensure_authoring_state(default_project_name)
 	if state == null:
 		return null
@@ -107,19 +255,32 @@ func build_crafted_item_wip_for_save() -> CraftedItemWIP:
 	if state.has_method("normalize"):
 		state.call("normalize")
 	var runtime_mesh_packet: Dictionary = (
-		state.call("request_runtime_contract_mesh_export") as Dictionary
+		prepared_runtime_mesh_packet.duplicate(true)
+		if not prepared_runtime_mesh_packet.is_empty()
+		else state.call("request_runtime_contract_mesh_export") as Dictionary
 		if state.has_method("request_runtime_contract_mesh_export")
 		else {
 			"ok": false,
 			"error_code": "RUNTIME_CONTRACT_MESH_PROVIDER_UNAVAILABLE",
 		}
 	)
-	var saved_wip_id: StringName = active_saved_wip_id
+	if (
+		not bool(runtime_mesh_packet.get("ok", false))
+		and bool(runtime_mesh_packet.get("pending", false))
+	):
+		return null
+	var saved_wip_id: StringName = requested_wip_id
+	if saved_wip_id == StringName():
+		saved_wip_id = active_saved_wip_id
 	if saved_wip_id == StringName():
 		saved_wip_id = StringName(state.get("source_wip_id"))
 	var wip: CraftedItemWIP = CraftedItemWIPScript.new()
 	wip.wip_id = saved_wip_id if saved_wip_id != StringName() else StringName("draft_%s" % str(Time.get_unix_time_from_system()))
-	wip.forge_project_name = _resolve_project_name(String(state.get("project_name")))
+	wip.forge_project_name = _resolve_project_name(
+		requested_project_name
+		if not requested_project_name.strip_edges().is_empty()
+		else String(state.get("project_name"))
+	)
 	wip.forge_project_notes = String(state.get("project_notes")).strip_edges()
 	wip.creator_id = StringName(state.get("creator_id"))
 	wip.created_timestamp = float(state.get("created_timestamp"))
@@ -133,6 +294,10 @@ func build_crafted_item_wip_for_save() -> CraftedItemWIP:
 	wip.forge_v2_authoring_state = state.duplicate(true) as Resource
 	if wip.forge_v2_authoring_state != null:
 		wip.forge_v2_authoring_state.set("source_wip_id", saved_wip_id)
+		wip.forge_v2_authoring_state.set(
+			"project_name",
+			wip.forge_project_name
+		)
 		if wip.forge_v2_authoring_state.has_method("normalize"):
 			wip.forge_v2_authoring_state.call("normalize")
 	wip.layers = []
@@ -151,18 +316,150 @@ func build_crafted_item_wip_for_save() -> CraftedItemWIP:
 		wip.call("ensure_combat_animation_station_state")
 	return wip
 
-func save_current_wip(wip_library) -> CraftedItemWIP:
+func save_current_wip(
+	wip_library,
+	prepared_runtime_mesh_packet: Dictionary = {}
+) -> CraftedItemWIP:
 	if wip_library == null or not wip_library.has_method("save_wip"):
 		return null
-	var wip: CraftedItemWIP = build_crafted_item_wip_for_save()
+	var source_wip: CraftedItemWIP = _get_active_saved_wip_authoring_clone(
+		wip_library
+	)
+	var target_wip_id := active_saved_wip_id
+	if (
+		target_wip_id == StringName()
+		and wip_library.has_method("build_new_wip_id")
+	):
+		target_wip_id = StringName(wip_library.call("build_new_wip_id"))
+	var wip: CraftedItemWIP = build_crafted_item_wip_for_save(
+		target_wip_id,
+		"",
+		prepared_runtime_mesh_packet
+	)
 	if wip == null:
 		return null
+	_copy_saved_wip_sidecar_authoring(wip, source_wip)
 	var saved_wip: CraftedItemWIP = wip_library.call("save_wip", wip) as CraftedItemWIP
 	if saved_wip == null:
 		return null
 	_stamp_saved_wip_id_into_v2_state(wip_library, saved_wip)
 	load_saved_wip(saved_wip)
 	return saved_wip
+
+func save_current_wip_as(
+	wip_library,
+	requested_project_name: String,
+	prepared_runtime_mesh_packet: Dictionary = {}
+) -> CraftedItemWIP:
+	if (
+		wip_library == null
+		or not wip_library.has_method("save_wip")
+		or not wip_library.has_method("build_new_wip_id")
+	):
+		return null
+	var project_name := requested_project_name.strip_edges()
+	if project_name.is_empty():
+		return null
+	var source_wip: CraftedItemWIP = _get_active_saved_wip_authoring_clone(
+		wip_library
+	)
+	var target_wip_id := StringName(wip_library.call("build_new_wip_id"))
+	if target_wip_id == StringName():
+		return null
+	# The target identity is supplied before compatibility data is generated so
+	# every derived contract points at the new WIP, not at the source document.
+	var wip: CraftedItemWIP = build_crafted_item_wip_for_save(
+		target_wip_id,
+		project_name,
+		prepared_runtime_mesh_packet
+	)
+	if wip == null:
+		return null
+	if wip.forge_v2_authoring_state != null:
+		# Save As forks the document as well as its library record. Keeping the
+		# source draft_id would leave two independently editable WIPs sharing one
+		# authoring identity.
+		wip.forge_v2_authoring_state.set(
+			"draft_id",
+			StringName("v2_draft_%s" % String(target_wip_id))
+		)
+	_copy_saved_wip_sidecar_authoring(wip, source_wip)
+	var saved_wip: CraftedItemWIP = wip_library.call("save_wip", wip) as CraftedItemWIP
+	if saved_wip == null:
+		return null
+	_stamp_saved_wip_id_into_v2_state(wip_library, saved_wip)
+	load_saved_wip(saved_wip)
+	return saved_wip
+
+func _get_active_saved_wip_authoring_clone(wip_library) -> CraftedItemWIP:
+	if (
+		wip_library == null
+		or active_saved_wip_id == StringName()
+		or not wip_library.has_method("get_saved_wip_clone")
+	):
+		return null
+	return wip_library.call(
+		"get_saved_wip_clone",
+		active_saved_wip_id,
+		false
+	) as CraftedItemWIP
+
+func _copy_saved_wip_sidecar_authoring(
+	target_wip: CraftedItemWIP,
+	source_wip: CraftedItemWIP
+) -> void:
+	if target_wip == null:
+		return
+	if source_wip != null:
+		target_wip.builder_marker_positions = (
+			source_wip.builder_marker_positions.duplicate(true)
+			if source_wip.builder_marker_positions != null
+			else {}
+		)
+		target_wip.combat_animation_station_state = (
+			source_wip.combat_animation_station_state.duplicate(true) as Resource
+			if source_wip.combat_animation_station_state != null
+			else null
+		)
+		target_wip.stow_position_mode = source_wip.stow_position_mode
+		target_wip.grip_style_mode = source_wip.grip_style_mode
+	if target_wip.has_method("ensure_combat_animation_station_state"):
+		target_wip.call("ensure_combat_animation_station_state")
+
+func apply_active_saved_wip_project_name(
+	saved_wip_id: StringName,
+	project_name: String
+) -> bool:
+	var cleaned_name := project_name.strip_edges()
+	if (
+		saved_wip_id == StringName()
+		or active_saved_wip_id != saved_wip_id
+		or active_authoring_state == null
+		or cleaned_name.is_empty()
+	):
+		return false
+	active_authoring_state.set("project_name", cleaned_name)
+	_emit_state_changed()
+	return true
+
+func discard_deleted_active_saved_wip(saved_wip_id: StringName) -> bool:
+	if (
+		saved_wip_id == StringName()
+		or active_saved_wip_id != saved_wip_id
+		or active_authoring_state == null
+	):
+		return false
+	# Permanent deletion intentionally bypasses checkpoint materialization. The
+	# deleted document must not survive as an editable unsaved recovery copy.
+	active_placement_body_id = StringName()
+	active_saved_wip_id = StringName()
+	_clear_deferred_material_body_commit_queue()
+	active_authoring_state = ForgeV2AuthoringStateScript.new()
+	active_authoring_state.reset_new_draft(
+		_resolve_project_name(default_project_name)
+	)
+	_emit_state_changed()
+	return true
 
 func load_saved_wip(saved_wip: CraftedItemWIP) -> bool:
 	if saved_wip == null or saved_wip.forge_v2_authoring_state == null:

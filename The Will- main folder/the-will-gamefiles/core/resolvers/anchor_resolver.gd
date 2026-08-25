@@ -4,6 +4,7 @@ class_name AnchorResolver
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
 const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
 const PrimaryGripSliceProfileLibraryScript = preload("res://core/defs/primary_grip_slice_profile_library.gd")
+const PrimaryGripSeatResolverScript = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
 
 var forge_rules: ForgeRulesDef = DEFAULT_FORGE_RULES_RESOURCE
 var material_runtime_resolver = MaterialRuntimeResolverScript.new()
@@ -47,6 +48,17 @@ func build_primary_grip_anchor(segment: SegmentAtom, grip_span: Dictionary = {})
 	anchor.span_end_position_origin_id = AnchorAtom.DEFAULT_ANCHOR_ORIGIN_ID
 	anchor.span_start_index = span_start_index
 	anchor.span_end_index = span_end_index
+	anchor.span_slice_center_local_positions = grip_span.get(
+		"slice_centers",
+		PackedVector3Array()
+	) as PackedVector3Array
+	anchor.span_slice_axis_ratios_from_start = (
+		PrimaryGripSeatResolverScript.build_axis_ratios_from_centers(
+			anchor.span_slice_center_local_positions,
+			anchor.span_start_local_position,
+			anchor.span_end_local_position
+		)
+	)
 	anchor.span_anchor_material_ratio = float(grip_span.get("anchor_material_ratio", segment.anchor_material_ratio))
 	anchor.normalize()
 	return anchor
@@ -54,19 +66,24 @@ func build_primary_grip_anchor(segment: SegmentAtom, grip_span: Dictionary = {})
 func calculate_primary_grip_offset(center_of_mass: Vector3, grip_position: Vector3) -> Vector3:
 	return center_of_mass - grip_position
 
-func resolve_primary_grip_contact_position(anchor: AnchorAtom, desired_position: Vector3 = Vector3.ZERO) -> Vector3:
+func resolve_primary_grip_contact_state(
+	anchor: AnchorAtom,
+	desired_position: Vector3 = Vector3.ZERO
+) -> Dictionary:
 	if anchor == null:
-		return Vector3.ZERO
+		return {"valid": false}
 	var span_start: Vector3 = anchor.span_start_local_position
 	var span_end: Vector3 = anchor.span_end_local_position
-	if span_start.is_equal_approx(span_end):
-		return anchor.local_position
 	var span_vector: Vector3 = span_end - span_start
 	var span_length_squared: float = span_vector.length_squared()
 	if span_length_squared <= 0.00001:
-		return anchor.local_position
+		return {"valid": false}
 	var projected_ratio: float = (desired_position - span_start).dot(span_vector) / span_length_squared
-	return span_start + span_vector * clampf(projected_ratio, 0.0, 1.0)
+	return PrimaryGripSeatResolverScript.resolve_sampled_seat(
+		anchor.span_slice_axis_ratios_from_start,
+		anchor.span_slice_center_local_positions,
+		projected_ratio
+	)
 
 func _calculate_segment_center(segment: SegmentAtom) -> Vector3:
 	if segment.member_cells.is_empty():
@@ -370,6 +387,7 @@ func _build_grip_span_from_candidate_chain(chain: Array[Dictionary]) -> Dictiona
 		"start_position": first_candidate.get("center_position", Vector3.ZERO),
 		"end_position": last_candidate.get("center_position", Vector3.ZERO),
 		"center_position": _average_positions(span_centers),
+		"slice_centers": PackedVector3Array(span_centers),
 		"anchor_material_ratio": span_anchor_ratio,
 	}
 

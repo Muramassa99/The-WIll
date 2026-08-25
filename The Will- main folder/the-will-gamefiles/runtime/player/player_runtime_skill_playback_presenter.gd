@@ -2330,6 +2330,18 @@ func _resolve_cached_runtime_clip(source_result: Dictionary):
 		clip_copy = runtime_clip
 	if clip_copy == null:
 		return null
+	var raw_solved_replay_source := StringName(
+		clip_copy.get("solved_replay_track_source")
+	)
+	if (
+		raw_solved_replay_source != StringName()
+		and raw_solved_replay_source
+		!= CombatRuntimeClipScript.SOLVED_REPLAY_TRACK_SOURCE_SKILL_CRAFTER_F_PLAYBACK
+	):
+		# Solved bones, weapon transform, and grip anchors are one baked system.
+		# Reject the whole pre-slice-center cache instead of partially reseating
+		# its anchors against rotations produced by the older geometry authority.
+		return null
 	if clip_copy.has_method("normalize"):
 		clip_copy.call("normalize")
 	var has_legacy_pose_track: bool = clip_copy.has_method("has_upper_body_pose_track") and bool(clip_copy.call("has_upper_body_pose_track"))

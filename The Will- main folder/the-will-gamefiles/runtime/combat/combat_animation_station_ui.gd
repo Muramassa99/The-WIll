@@ -5046,7 +5046,7 @@ func _build_runtime_clip_cache_signature(draft: Resource) -> String:
 	if draft == null:
 		return ""
 	var parts := PackedStringArray()
-	parts.append("runtime_cache_v2")
+	parts.append("runtime_cache_v3_grip_slice_center")
 	parts.append(String(active_wip.wip_id) if active_wip != null else "")
 	parts.append(String(draft.get("draft_id")))
 	parts.append(String(draft.get("draft_kind")))
@@ -5062,11 +5062,29 @@ func _build_runtime_clip_cache_signature(draft: Resource) -> String:
 	parts.append(str(snapped(float(draft.get("speed_acceleration_percent")), 0.0001)))
 	parts.append(str(snapped(float(draft.get("speed_deceleration_percent")), 0.0001)))
 	parts.append(str(snapped(_get_active_weapon_total_length(), 0.0001)))
+	parts.append(_build_active_primary_grip_path_cache_signature())
 	var motion_node_chain: Array = draft.get("motion_node_chain") as Array
 	parts.append(str(motion_node_chain.size()))
 	for motion_node_variant: Variant in motion_node_chain:
 		parts.append(_build_motion_node_runtime_cache_signature(motion_node_variant as CombatAnimationMotionNode))
 	return "|".join(parts)
+
+func _build_active_primary_grip_path_cache_signature() -> String:
+	if active_wip == null or active_wip.latest_baked_profile_snapshot == null:
+		return "grip_slice:none"
+	var profile: BakedProfile = active_wip.latest_baked_profile_snapshot
+	var ratios := profile.primary_grip_slice_axis_ratios_from_span_start
+	var centers := profile.primary_grip_slice_centers
+	if ratios.size() < 2 or ratios.size() != centers.size():
+		return "grip_slice:invalid"
+	return "grip_slice:v1:%s" % var_to_bytes([
+		profile.primary_grip_source_body_id,
+		profile.primary_grip_span_start,
+		profile.primary_grip_span_end,
+		profile.primary_grip_slide_axis,
+		ratios,
+		centers,
+	]).hex_encode().sha256_text()
 
 func _build_motion_node_runtime_cache_signature(motion_node: CombatAnimationMotionNode) -> String:
 	if motion_node == null:

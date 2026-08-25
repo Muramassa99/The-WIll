@@ -20,6 +20,9 @@ const EDGE_V_MAX: StringName = &"edge_v_max"
 @export var current_local_aabb_size: Vector3 = Vector3.ZERO
 @export var baseline_editable_mesh_state: Resource
 @export var current_editable_mesh_state: Resource
+@export var primary_grip_handle_mesh_state: Resource
+@export var primary_grip_handle_mesh_source: StringName = &""
+@export var primary_grip_handle_body_signature: String = ""
 @export var baseline_shell_mesh_state: Resource
 @export var current_shell_mesh_state: Resource
 @export var patch_states: Array[Resource] = []

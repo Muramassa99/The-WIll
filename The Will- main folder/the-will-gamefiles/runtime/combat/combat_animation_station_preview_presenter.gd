@@ -21,6 +21,7 @@ const CombatAnimationTrajectoryVolumeResolverScript = preload("res://core/resolv
 const CombatAnimationSpeedStateSamplerScript = preload("res://core/resolvers/combat_animation_speed_state_sampler.gd")
 const CombatCollisionLegalityResolverScript = preload("res://runtime/combat/combat_collision_legality_resolver.gd")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+const PrimaryGripSeatResolverScript = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
 
 const PREVIEW_ROOT_NAME := "CombatAnimationPreviewRoot3D"
 const PREVIEW_CAMERA_NAME := "PreviewCamera3D"
@@ -2357,19 +2358,26 @@ func ensure_baked_profile_snapshot(active_wip: CraftedItemWIP) -> BakedProfile:
 		return null
 	if (
 		active_wip.latest_baked_profile_snapshot != null
-		and not _forge_v2_cached_profile_requires_runtime_bake(active_wip)
+		and not _cached_profile_requires_runtime_bake(active_wip)
 	):
 		return active_wip.latest_baked_profile_snapshot
 	return forge_service.bake_wip(active_wip, _get_material_lookup())
 
-func _forge_v2_cached_profile_requires_runtime_bake(
+func _cached_profile_requires_runtime_bake(
 	active_wip: CraftedItemWIP
 ) -> bool:
+	if active_wip == null or active_wip.latest_baked_profile_snapshot == null:
+		return false
+	if (
+		active_wip.latest_baked_profile_snapshot.primary_grip_valid
+		and not PrimaryGripSeatResolverScript.profile_has_authoritative_path(
+			active_wip.latest_baked_profile_snapshot
+		)
+	):
+		return true
 	return (
-		active_wip != null
-		and active_wip.forge_v2_authoring_state != null
+		active_wip.forge_v2_authoring_state != null
 		and active_wip.layers.is_empty()
-		and active_wip.latest_baked_profile_snapshot != null
 		and not active_wip.latest_baked_profile_snapshot.material_runtime_data_resolved
 	)
 
@@ -4605,7 +4613,40 @@ func _resolve_grip_seat_local_from_offsets(
 		target_ratio = lerpf(target_ratio, 0.0, absf(clamped_slide))
 	var clamped_axial: float = clampf(axial_offset, -1.0, 1.0)
 	target_ratio = clampf(target_ratio + (clamped_axial * 0.5), 0.0, 1.0)
-	return span_start.lerp(span_end, clampf(target_ratio, 0.0, 1.0))
+	var seat_state := _resolve_held_item_grip_slice_center(
+		held_item,
+		clampf(target_ratio, 0.0, 1.0)
+	)
+	if not bool(seat_state.get("valid", false)):
+		push_error("Skill Crafter grip seat is missing its authoritative Handle slice-center path.")
+		return Vector3.ZERO
+	return seat_state.get("position", Vector3.ZERO) as Vector3
+
+
+func _resolve_held_item_grip_slice_center(
+	held_item: Node3D,
+	target_ratio: float
+) -> Dictionary:
+	if held_item == null:
+		return {"valid": false}
+	var ratios_variant: Variant = held_item.get_meta(
+		"primary_grip_slice_axis_ratios_from_span_start",
+		null
+	)
+	var centers_variant: Variant = held_item.get_meta(
+		"primary_grip_slice_centers_local",
+		null
+	)
+	if (
+		not (ratios_variant is PackedFloat32Array)
+		or not (centers_variant is PackedVector3Array)
+	):
+		return {"valid": false}
+	return PrimaryGripSeatResolverScript.resolve_sampled_seat(
+		ratios_variant as PackedFloat32Array,
+		centers_variant as PackedVector3Array,
+		target_ratio
+	)
 
 func _resolve_secondary_grip_default_local(held_item: Node3D) -> Vector3:
 	if held_item == null:
@@ -6862,7 +6903,16 @@ func _project_world_target_to_held_item_grip_span(
 	if span_length_squared <= 0.000001:
 		return {}
 	var ratio: float = clampf((target_world - span_start_world).dot(span_vector_world) / span_length_squared, 0.0, 1.0)
-	var projected_local: Vector3 = span_start_local.lerp(span_end_local, ratio)
+	var projected_seat_state := _resolve_held_item_grip_slice_center(
+		held_item,
+		ratio
+	)
+	if not bool(projected_seat_state.get("valid", false)):
+		return {}
+	var projected_local: Vector3 = projected_seat_state.get(
+		"position",
+		Vector3.ZERO
+	) as Vector3
 	return {
 		"projected_ratio": ratio,
 		"projected_local": projected_local,

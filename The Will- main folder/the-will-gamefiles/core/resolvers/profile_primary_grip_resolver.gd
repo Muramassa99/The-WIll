@@ -2,6 +2,7 @@ extends RefCounted
 class_name ProfilePrimaryGripResolver
 
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
+const PrimaryGripSeatResolverScript = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
 
 var forge_rules: ForgeRulesDef = DEFAULT_FORGE_RULES_RESOURCE
 var anchor_resolver: AnchorResolver
@@ -28,7 +29,28 @@ func apply_primary_grip_profile(
 			profile.validation_error = "no_primary_grip_candidate"
 		return
 
-	var grip_contact_position: Vector3 = anchor_resolver.resolve_primary_grip_contact_position(primary_grip, center_of_mass)
+	profile.primary_grip_slice_axis_ratios_from_span_start = PackedFloat32Array(
+		primary_grip.span_slice_axis_ratios_from_start
+	)
+	profile.primary_grip_slice_centers = PackedVector3Array(
+		primary_grip.span_slice_center_local_positions
+	)
+	if not PrimaryGripSeatResolverScript.profile_has_authoritative_path(profile):
+		profile.primary_grip_valid = false
+		profile.validation_error = "primary_grip_slice_center_path_invalid"
+		return
+	var grip_contact_state: Dictionary = anchor_resolver.resolve_primary_grip_contact_state(
+		primary_grip,
+		center_of_mass
+	)
+	if not bool(grip_contact_state.get("valid", false)):
+		profile.primary_grip_valid = false
+		profile.validation_error = "primary_grip_slice_center_unresolved"
+		return
+	var grip_contact_position: Vector3 = grip_contact_state.get(
+		"position",
+		Vector3.ZERO
+	) as Vector3
 	var forward_axis: Vector3 = _resolve_forward_axis(primary_grip)
 	profile.primary_grip_contact_position = grip_contact_position
 	profile.primary_grip_span_start = primary_grip.span_start_local_position
@@ -64,7 +86,16 @@ func _find_primary_grip_anchor(anchors: Array[AnchorAtom], center_of_mass: Vecto
 			continue
 		if anchor.anchor_type != "primary_grip":
 			continue
-		var candidate_position: Vector3 = anchor_resolver.resolve_primary_grip_contact_position(anchor, center_of_mass)
+		var candidate_state: Dictionary = anchor_resolver.resolve_primary_grip_contact_state(
+			anchor,
+			center_of_mass
+		)
+		if not bool(candidate_state.get("valid", false)):
+			continue
+		var candidate_position: Vector3 = candidate_state.get(
+			"position",
+			Vector3.ZERO
+		) as Vector3
 		var distance_squared: float = candidate_position.distance_squared_to(center_of_mass)
 		var candidate_span_length: int = maxi(anchor.span_length, 0)
 		if best_anchor == null or distance_squared < best_distance_squared - 0.00001:
@@ -159,7 +190,13 @@ func _resolve_primary_grip_span_projection(primary_grip: AnchorAtom, desired_pos
 	return {
 		"clamped_ratio": clamped_ratio,
 		"unclamped_ratio": unclamped_ratio,
-		"projected_position": span_start + span_vector * clamped_ratio,
+		"projected_position": (
+			PrimaryGripSeatResolverScript.resolve_sampled_seat(
+				primary_grip.span_slice_axis_ratios_from_start,
+				primary_grip.span_slice_center_local_positions,
+				clamped_ratio
+			).get("position", Vector3.ZERO) as Vector3
+		),
 		"span_start_is_com_side": desired_position.distance_squared_to(span_start) <= desired_position.distance_squared_to(span_end),
 	}
 

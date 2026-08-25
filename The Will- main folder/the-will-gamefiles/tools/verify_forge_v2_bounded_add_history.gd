@@ -2454,7 +2454,7 @@ func _verify_final_extraction() -> Dictionary:
 	):
 		return {"ok": false, "reason": "full_compose_backend_unavailable"}
 	var handle_packet := _presenter.call(
-		"_build_native_static_operand_packet",
+		"_resolve_authoritative_protected_handle_packet",
 		_handle
 	) as Dictionary
 	if not bool(handle_packet.get("ok", false)):

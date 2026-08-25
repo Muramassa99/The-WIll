@@ -11,6 +11,9 @@ const ForgeV2ProfileShapeLibraryScript = preload("res://runtime/forge_v2/forge_v
 const ForgeV2SplinePathSamplerScript = preload(
 	"res://runtime/forge_v2/forge_v2_spline_path_sampler.gd"
 )
+const PrimaryGripHandleMeshPacketScript = preload(
+	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
+)
 
 const PREVIEW_TUBE_SIDES := 12
 const PREVIEW_SPHERE_RINGS := 6
@@ -105,6 +108,9 @@ var native_protected_handle_cache_signature := ""
 var native_protected_handle_cache_packet: Dictionary = {}
 var native_protected_handle_cache_failure_signature := ""
 var native_protected_handle_cache_failure_reason := ""
+var native_protected_handle_authority_generation := 0
+var native_protected_handle_authority_pending_signature := ""
+var native_protected_handle_authority_pending_root: Node3D = null
 var native_static_sync_diagnostics := {
 	"lifecycle": NATIVE_STATIC_LIFECYCLE_UNOBSERVED,
 	"last_mode": "not_started",
@@ -677,6 +683,7 @@ func _sync_csg_material_body_preview(authoring_state: Resource) -> void:
 			static_bodies.append(body)
 	if active_body_index < 0 or not csg_static_zones_initialized:
 		_sync_static_csg_zones(static_bodies, authoring_state)
+	_prime_authoritative_protected_handle_mesh(material_bodies)
 	_apply_static_zone_visibility({})
 	_sync_pending_material_body_previews(pending_preview_bodies)
 	csg_material_body_root.visible = (
@@ -2299,6 +2306,143 @@ func _provide_bounded_checkpoint_export(
 	return checkpoint_export
 
 
+func _resolve_authoritative_runtime_mesh_packet(
+	allow_empty_ordinary_mesh: bool = false
+) -> Dictionary:
+	if (
+		not native_static_active_vertices.is_empty()
+		and not native_static_active_indices.is_empty()
+		and native_static_active_indices.size() % 3 == 0
+	):
+		return {
+			"ok": true,
+			"vertices": PackedVector3Array(native_static_active_vertices),
+			"indices": PackedInt32Array(native_static_active_indices),
+			"source": &"forge_v2_native_ordinary_mesh_v1",
+			"includes_protected_handle": false,
+		}
+	var csg_packet := _bake_authoritative_csg_runtime_mesh_packet(
+		allow_empty_ordinary_mesh
+	)
+	if bool(csg_packet.get("ok", false)):
+		return csg_packet
+	if (
+		allow_empty_ordinary_mesh
+		and (
+			native_static_authoritative
+			or native_static_lifecycle == NATIVE_STATIC_LIFECYCLE_ACTIVE
+		)
+	):
+		return {
+			"ok": true,
+			"vertices": PackedVector3Array(),
+			"indices": PackedInt32Array(),
+			"source": &"forge_v2_native_handle_only_v1",
+			"includes_protected_handle": false,
+		}
+	return csg_packet
+
+
+func _bake_authoritative_csg_runtime_mesh_packet(
+	includes_protected_handle: bool
+) -> Dictionary:
+	if (
+		csg_static_body_root == null
+		or not is_instance_valid(csg_static_body_root)
+		or not csg_static_body_root.visible
+		or csg_static_body_root.get_child_count() <= 0
+	):
+		return {
+			"ok": false,
+			"pending": false,
+			"error_code": "RUNTIME_CONTRACT_CSG_PUBLICATION_UNAVAILABLE",
+			"reason": "csg_publication_unavailable",
+		}
+	var merged_vertices := PackedVector3Array()
+	var merged_indices := PackedInt32Array()
+	var published_to_forge_local := global_transform.affine_inverse()
+	for child_index: int in range(csg_static_body_root.get_child_count()):
+		var shape := csg_static_body_root.get_child(child_index) as CSGShape3D
+		if shape == null:
+			continue
+		var baked_vertices_are_global := (
+			_csg_shape_contains_path_polygon(shape)
+		)
+		if not _csg_shape_generated_mesh_is_ready(shape):
+			return {
+				"ok": false,
+				"pending": true,
+				"error_code": "RUNTIME_CONTRACT_CSG_PUBLICATION_PENDING",
+				"reason": "csg_publication_mesh_pending",
+			}
+		var baked_mesh := shape.bake_static_mesh()
+		if baked_mesh == null:
+			return {
+				"ok": false,
+				"pending": true,
+				"error_code": "RUNTIME_CONTRACT_CSG_BAKE_PENDING",
+				"reason": "csg_publication_bake_empty",
+			}
+		var flattened := _flatten_native_protected_handle_baked_mesh(
+			baked_mesh,
+			"runtime_contract_csg_%d_%d" % [
+				get_instance_id(),
+				child_index,
+			],
+			false
+		)
+		if not bool(flattened.get("ok", false)):
+			return {
+				"ok": false,
+				"pending": false,
+				"error_code": "RUNTIME_CONTRACT_CSG_BAKE_INVALID",
+				"reason": String(flattened.get("reason", "unknown")),
+			}
+		var child_vertices: PackedVector3Array = flattened.get(
+			"vertices",
+			PackedVector3Array()
+		)
+		var child_indices: PackedInt32Array = flattened.get(
+			"indices",
+			PackedInt32Array()
+		)
+		var vertex_offset := merged_vertices.size()
+		for vertex: Vector3 in child_vertices:
+			var published_vertex := (
+				vertex
+				if baked_vertices_are_global
+				else shape.global_transform * vertex
+			)
+			merged_vertices.append(published_to_forge_local * published_vertex)
+		for index_value: int in child_indices:
+			merged_indices.append(vertex_offset + index_value)
+	if merged_vertices.is_empty() or merged_indices.is_empty():
+		return {
+			"ok": false,
+			"pending": false,
+			"error_code": "RUNTIME_CONTRACT_CSG_PUBLICATION_EMPTY",
+			"reason": "csg_publication_mesh_empty",
+		}
+	return {
+		"ok": true,
+		"vertices": merged_vertices,
+		"indices": merged_indices,
+		"source": &"forge_v2_published_csg_mesh_v1",
+		"includes_protected_handle": includes_protected_handle,
+	}
+
+
+func _csg_shape_contains_path_polygon(node: Node) -> bool:
+	if node is CSGPolygon3D:
+		var polygon := node as CSGPolygon3D
+		if polygon.mode == CSGPolygon3D.MODE_PATH:
+			return true
+	for child: Node in node.get_children():
+		if _csg_shape_contains_path_polygon(child):
+			return true
+	return false
+
+
 func _provide_runtime_contract_mesh_export() -> Dictionary:
 	if (
 		native_static_bound_authoring_state == null
@@ -2311,6 +2455,50 @@ func _provide_runtime_contract_mesh_export() -> Dictionary:
 			"ok": false,
 			"error_code": "RUNTIME_CONTRACT_STATE_UNAVAILABLE",
 		}
+	var current_transition := native_static_bound_authoring_state.call(
+		"get_bounded_history_transition"
+	) as Dictionary
+	var current_transition_revision := int(current_transition.get(
+		"revision",
+		-1
+	))
+	var native_lane_active := (
+		native_static_authoritative
+		or native_static_lifecycle == NATIVE_STATIC_LIFECYCLE_ACTIVE
+		or native_static_lifecycle == NATIVE_STATIC_LIFECYCLE_ARMED_EMPTY
+	)
+	var native_transition_pending := (
+		native_static_deferred_transition_revision >= 0
+		or native_static_publication_pending
+		or native_static_staged_revision > 0
+		or int(native_static_sync_diagnostics.get(
+			"capsule_operand_pending_count",
+			0
+		)) > 0
+		or not native_protected_handle_authority_pending_signature.is_empty()
+		or (
+			native_lane_active
+			and current_transition_revision >= 0
+			and native_static_consumed_transition_revision
+			!= current_transition_revision
+		)
+		or (
+			native_lane_active
+			and native_static_expected_revision
+			!= native_static_published_revision
+		)
+	)
+	if native_transition_pending:
+		return {
+			"ok": false,
+			"pending": true,
+			"error_code": "RUNTIME_CONTRACT_NATIVE_TRANSITION_PENDING",
+			"reason": "native_transition_or_publication_pending",
+			"state_transition_revision": current_transition_revision,
+			"consumed_transition_revision": (
+				native_static_consumed_transition_revision
+			),
+		}
 	var presentation := native_static_bound_authoring_state.call(
 		"get_bounded_presentation_descriptor"
 	) as Dictionary
@@ -2320,8 +2508,19 @@ func _provide_runtime_contract_mesh_export() -> Dictionary:
 			"ok": false,
 			"error_code": "RUNTIME_CONTRACT_MULTIPLE_PROTECTED_BODIES",
 		}
-	var ordinary_vertices := PackedVector3Array(native_static_active_vertices)
-	var ordinary_indices := PackedInt32Array(native_static_active_indices)
+	var published_mesh_packet := _resolve_authoritative_runtime_mesh_packet(
+		not protected_bodies.is_empty()
+	)
+	if not bool(published_mesh_packet.get("ok", false)):
+		return published_mesh_packet
+	var ordinary_vertices: PackedVector3Array = published_mesh_packet.get(
+		"vertices",
+		PackedVector3Array()
+	)
+	var ordinary_indices: PackedInt32Array = published_mesh_packet.get(
+		"indices",
+		PackedInt32Array()
+	)
 	var ordinary_mesh_valid := (
 		not ordinary_vertices.is_empty()
 		and not ordinary_indices.is_empty()
@@ -2339,7 +2538,14 @@ func _provide_runtime_contract_mesh_export() -> Dictionary:
 			"indices": ordinary_indices,
 			"source_state_revision": native_static_expected_revision,
 			"watertight": true,
-			"final_union_performed": false,
+			"final_union_performed": bool(published_mesh_packet.get(
+				"includes_protected_handle",
+				false
+			)),
+			"runtime_mesh_source": StringName(published_mesh_packet.get(
+				"source",
+				StringName()
+			)),
 		}
 	var protected_body := protected_bodies[0] as Resource
 	if protected_body == null:
@@ -2347,15 +2553,16 @@ func _provide_runtime_contract_mesh_export() -> Dictionary:
 			"ok": false,
 			"error_code": "RUNTIME_CONTRACT_PROTECTED_BODY_INVALID",
 		}
-	var protected_signature := _build_native_static_body_signature(protected_body)
-	var protected_packet := _resolve_cached_native_protected_handle_packet(
-		protected_signature
+	var protected_signature := PrimaryGripHandleMeshPacketScript.build_body_signature(
+		protected_body
 	)
-	if not bool(protected_packet.get("ok", false)):
-		protected_packet = _build_native_static_operand_packet(protected_body)
+	var protected_packet := _resolve_authoritative_protected_handle_packet(
+		protected_body
+	)
 	if not bool(protected_packet.get("ok", false)):
 		return {
 			"ok": false,
+			"pending": bool(protected_packet.get("pending", false)),
 			"error_code": "RUNTIME_CONTRACT_PROTECTED_MESH_UNAVAILABLE",
 			"reason": String(protected_packet.get("reason", "unknown")),
 		}
@@ -2376,8 +2583,30 @@ func _provide_runtime_contract_mesh_export() -> Dictionary:
 			"ok": false,
 			"error_code": "RUNTIME_CONTRACT_PROTECTED_MESH_INVALID",
 		}
+	if bool(published_mesh_packet.get("includes_protected_handle", false)):
+		var published_result := {
+			"ok": true,
+			"vertices": ordinary_vertices,
+			"indices": ordinary_indices,
+			"source_state_revision": native_static_expected_revision,
+			"watertight": true,
+			"final_union_performed": true,
+			"runtime_mesh_source": StringName(published_mesh_packet.get(
+				"source",
+				StringName()
+			)),
+		}
+		published_result.merge(
+			PrimaryGripHandleMeshPacketScript.build(
+				protected_vertices,
+				protected_indices,
+				protected_signature
+			),
+			false
+		)
+		return published_result
 	if not ordinary_mesh_valid:
-		return {
+		var handle_only_result := {
 			"ok": true,
 			"vertices": protected_vertices,
 			"indices": protected_indices,
@@ -2386,6 +2615,15 @@ func _provide_runtime_contract_mesh_export() -> Dictionary:
 			"final_union_performed": false,
 			"handle_only": true,
 		}
+		handle_only_result.merge(
+			PrimaryGripHandleMeshPacketScript.build(
+				protected_vertices,
+				protected_indices,
+				protected_signature
+			),
+			false
+		)
+		return handle_only_result
 	if (
 		native_static_manifold_backend == null
 		or not is_instance_valid(native_static_manifold_backend)
@@ -2439,6 +2677,14 @@ func _provide_runtime_contract_mesh_export() -> Dictionary:
 	validation["watertight"] = true
 	validation["final_union_performed"] = true
 	validation["backend_method"] = backend_method
+	validation.merge(
+		PrimaryGripHandleMeshPacketScript.build(
+			protected_vertices,
+			protected_indices,
+			protected_signature
+		),
+		false
+	)
 	if composition.has("output_volume_m3"):
 		validation["output_volume_m3"] = composition.get("output_volume_m3")
 	return validation
@@ -3569,11 +3815,11 @@ func _try_build_native_static_protected_live_decomposition_revision_node(
 	native_static_sync_diagnostics[
 		"protected_live_full_compose_available"
 	] = full_compose_available
-	var protected_signature := _build_native_static_body_signature(
+	var protected_signature := PrimaryGripHandleMeshPacketScript.build_body_signature(
 		protected_handle
 	)
-	var protected_packet := _resolve_cached_native_protected_handle_packet(
-		protected_signature
+	var protected_packet := _resolve_authoritative_protected_handle_packet(
+		protected_handle
 	)
 	if not bool(protected_packet.get("ok", false)):
 		return _fail_native_protected_live_decomposition(String(
@@ -4325,11 +4571,11 @@ func _try_build_native_static_protected_composite_revision_node(
 	native_static_sync_diagnostics[
 		"protected_composition_source_state_revision"
 	] = -1
-	var protected_signature := _build_native_static_body_signature(
+	var protected_signature := PrimaryGripHandleMeshPacketScript.build_body_signature(
 		protected_handle
 	)
-	var protected_packet := _resolve_cached_native_protected_handle_packet(
-		protected_signature
+	var protected_packet := _resolve_authoritative_protected_handle_packet(
+		protected_handle
 	)
 	if not bool(protected_packet.get("ok", false)):
 		return {
@@ -5060,6 +5306,232 @@ func _capture_native_protected_handle_bootstrap_pending() -> void:
 	] = true
 
 
+func _prime_authoritative_protected_handle_mesh(bodies: Array) -> void:
+	for body_variant: Variant in bodies:
+		var body := body_variant as Resource
+		if (
+			body == null
+			or not ForgeV2MaterialCompositionPolicyScript.is_protected_handle_entry(
+				body
+			)
+			or _is_pending_user_material_body(body)
+		):
+			continue
+		_resolve_authoritative_protected_handle_packet(body)
+		return
+
+
+func _resolve_authoritative_protected_handle_packet(
+	protected_handle: Resource
+) -> Dictionary:
+	if (
+		protected_handle == null
+		or not ForgeV2MaterialCompositionPolicyScript.is_protected_handle_entry(
+			protected_handle
+		)
+	):
+		return {
+			"ok": false,
+			"reason": "protected_handle_authority_body_invalid",
+		}
+	var protected_signature := PrimaryGripHandleMeshPacketScript.build_body_signature(
+		protected_handle
+	)
+	if protected_signature.is_empty():
+		return {
+			"ok": false,
+			"reason": "protected_handle_signature_empty",
+		}
+	var cached_packet := _resolve_cached_native_protected_handle_packet(
+		protected_signature
+	)
+	if bool(cached_packet.get("ok", false)):
+		var authoritative_packet := cached_packet.duplicate(true)
+		authoritative_packet.merge(
+			PrimaryGripHandleMeshPacketScript.build(
+				cached_packet.get("vertices", PackedVector3Array()),
+				cached_packet.get("indices", PackedInt32Array()),
+				protected_signature
+			),
+			true
+		)
+		return authoritative_packet
+	if native_protected_handle_cache_failure_signature == protected_signature:
+		return cached_packet
+	if native_protected_handle_authority_pending_signature == protected_signature:
+		return {
+			"ok": false,
+			"pending": true,
+			"signature": protected_signature,
+			"reason": "protected_handle_exact_csg_bake_pending",
+		}
+	if _native_publication_handle_bootstrap_is_pending(protected_signature):
+		return {
+			"ok": false,
+			"pending": true,
+			"signature": protected_signature,
+			"reason": "protected_handle_exact_csg_publication_pending",
+		}
+	if not native_protected_handle_authority_pending_signature.is_empty():
+		_cancel_authoritative_protected_handle_bake()
+	return _request_authoritative_protected_handle_bake(
+		protected_handle,
+		protected_signature
+	)
+
+
+func _request_authoritative_protected_handle_bake(
+	protected_handle: Resource,
+	protected_signature: String
+) -> Dictionary:
+	_ensure_native_capsule_operand_staging_root()
+	if (
+		native_capsule_operand_staging_root == null
+		or not is_instance_valid(native_capsule_operand_staging_root)
+		or not native_capsule_operand_staging_root.is_inside_tree()
+	):
+		return {
+			"ok": false,
+			"reason": "protected_handle_exact_csg_staging_unavailable",
+		}
+	var pending_root := Node3D.new()
+	pending_root.name = "AuthoritativeProtectedHandleMeshBake"
+	native_capsule_operand_staging_root.add_child(pending_root)
+	# The forge presenter is scaled and offset in the bench scene. Exact runtime
+	# Handle geometry must remain in forge-local meters instead of inheriting
+	# that display transform while Godot bakes the isolated CSG shell.
+	pending_root.top_level = true
+	pending_root.global_transform = Transform3D.IDENTITY
+	if not _append_native_protected_handle_bootstrap(
+		pending_root,
+		protected_handle,
+		protected_signature
+	):
+		pending_root.free()
+		return {
+			"ok": false,
+			"reason": "protected_handle_exact_csg_shape_build_failed",
+		}
+	native_protected_handle_authority_generation += 1
+	var request_generation := native_protected_handle_authority_generation
+	native_protected_handle_authority_pending_signature = protected_signature
+	native_protected_handle_authority_pending_root = pending_root
+	_bake_authoritative_protected_handle_after_update(
+		protected_signature,
+		request_generation
+	)
+	return {
+		"ok": false,
+		"pending": true,
+		"signature": protected_signature,
+		"reason": "protected_handle_exact_csg_bake_pending",
+	}
+
+
+func _bake_authoritative_protected_handle_after_update(
+	protected_signature: String,
+	request_generation: int
+) -> void:
+	for _readiness_frame: int in range(
+		NATIVE_STATIC_CSG_READINESS_FRAME_LIMIT
+	):
+		await get_tree().process_frame
+		if (
+			request_generation != native_protected_handle_authority_generation
+			or native_protected_handle_authority_pending_signature
+			!= protected_signature
+		):
+			return
+		var pending_root := native_protected_handle_authority_pending_root
+		if (
+			pending_root == null
+			or not is_instance_valid(pending_root)
+			or not pending_root.is_inside_tree()
+		):
+			return
+		var bootstrap_shape := pending_root.get_node_or_null(
+			NATIVE_PROTECTED_HANDLE_BOOTSTRAP_NODE_NAME
+		) as CSGShape3D
+		if (
+			bootstrap_shape == null
+			or not _csg_shape_generated_mesh_is_ready(bootstrap_shape)
+		):
+			continue
+		var bake_result := _materialize_native_protected_handle_bootstrap(
+			pending_root,
+			bootstrap_shape
+		)
+		if is_instance_valid(pending_root):
+			pending_root.free()
+		native_protected_handle_authority_pending_root = null
+		native_protected_handle_authority_pending_signature = ""
+		if not bool(bake_result.get("ok", false)):
+			return
+		call_deferred("_retry_authoritative_protected_handle_sync")
+		return
+	_record_authoritative_protected_handle_bake_failure(
+		protected_signature,
+		"protected_handle_exact_csg_not_ready_after_frame_limit"
+	)
+
+
+func _record_authoritative_protected_handle_bake_failure(
+	protected_signature: String,
+	reason: String
+) -> void:
+	var pending_root := native_protected_handle_authority_pending_root
+	if pending_root != null and is_instance_valid(pending_root):
+		pending_root.free()
+	native_protected_handle_authority_pending_root = null
+	native_protected_handle_authority_pending_signature = ""
+	native_protected_handle_cache_failure_signature = protected_signature
+	native_protected_handle_cache_failure_reason = reason
+	native_static_sync_diagnostics[
+		"protected_handle_bootstrap_last_failure_reason"
+	] = reason
+	_refresh_native_protected_handle_cache_diagnostics()
+
+
+func _retry_authoritative_protected_handle_sync() -> void:
+	if not is_inside_tree() or active_stage_controller == null:
+		return
+	_sync_from_controller()
+
+
+func _cancel_authoritative_protected_handle_bake() -> void:
+	native_protected_handle_authority_generation += 1
+	var pending_root := native_protected_handle_authority_pending_root
+	if pending_root != null and is_instance_valid(pending_root):
+		pending_root.free()
+	native_protected_handle_authority_pending_root = null
+	native_protected_handle_authority_pending_signature = ""
+
+
+func _native_publication_handle_bootstrap_is_pending(
+	protected_signature: String
+) -> bool:
+	if protected_signature.is_empty():
+		return false
+	for revision_node: Node3D in [
+		native_static_staged_node,
+		native_static_published_node,
+	]:
+		if revision_node == null or not is_instance_valid(revision_node):
+			continue
+		var bootstrap_shape := revision_node.get_node_or_null(
+			NATIVE_PROTECTED_HANDLE_BOOTSTRAP_NODE_NAME
+		) as CSGShape3D
+		if (
+			bootstrap_shape != null
+			and String(bootstrap_shape.get_meta(
+				"forge_v2_native_protected_handle_signature",
+				""
+			)) == protected_signature
+		):
+			return true
+	return false
+
+
 func _resolve_cached_native_protected_handle_packet(
 	protected_signature: String
 ) -> Dictionary:
@@ -5183,6 +5655,8 @@ func _native_protected_handle_cache_needs_bootstrap(
 			protected_signature
 		)
 	):
+		return false
+	if native_protected_handle_authority_pending_signature == protected_signature:
 		return false
 	return (
 		native_protected_handle_cache_failure_signature
@@ -5333,7 +5807,7 @@ func _build_native_static_handle_composite_revision_node(
 			"ok": false,
 			"reason": "protected_handle_union_shape_invalid",
 		}
-	var protected_signature := _build_native_static_body_signature(
+	var protected_signature := PrimaryGripHandleMeshPacketScript.build_body_signature(
 		protected_handle
 	)
 	if _native_protected_handle_cache_needs_bootstrap(protected_signature):
@@ -5750,7 +6224,8 @@ func _materialize_native_protected_handle_bootstrap(
 
 func _flatten_native_protected_handle_baked_mesh(
 	baked_mesh: ArrayMesh,
-	protected_signature: String
+	protected_signature: String,
+	reject_degenerate_triangles: bool = true
 ) -> Dictionary:
 	if (
 		baked_mesh == null
@@ -5848,27 +6323,39 @@ func _flatten_native_protected_handle_baked_mesh(
 			"ok": false,
 			"reason": "protected_handle_bootstrap_flattened_empty",
 		}
+	var validated_indices := PackedInt32Array()
 	var signed_volume := 0.0
 	for triangle_offset in range(0, flattened_indices.size(), 3):
 		var a := flattened_indices[triangle_offset]
 		var b := flattened_indices[triangle_offset + 1]
 		var c := flattened_indices[triangle_offset + 2]
 		if a == b or b == c or c == a:
-			return {
-				"ok": false,
-				"reason": "protected_handle_bootstrap_degenerate_index",
-			}
+			if reject_degenerate_triangles:
+				return {
+					"ok": false,
+					"reason": "protected_handle_bootstrap_degenerate_index",
+				}
+			continue
 		var va := flattened_vertices[a]
 		var vb := flattened_vertices[b]
 		var vc := flattened_vertices[c]
 		var area_cross := (vb - va).cross(vc - va)
 		if not area_cross.is_finite() or area_cross.length_squared() <= 0.0:
-			return {
-				"ok": false,
-				"reason": "protected_handle_bootstrap_degenerate_triangle",
-			}
+			if reject_degenerate_triangles:
+				return {
+					"ok": false,
+					"reason": "protected_handle_bootstrap_degenerate_triangle",
+				}
+			continue
+		validated_indices.append(a)
+		validated_indices.append(b)
+		validated_indices.append(c)
 		signed_volume += va.dot(vb.cross(vc)) / 6.0
-	if not is_finite(signed_volume) or is_zero_approx(signed_volume):
+	if (
+		validated_indices.is_empty()
+		or not is_finite(signed_volume)
+		or is_zero_approx(signed_volume)
+	):
 		return {
 			"ok": false,
 			"reason": "protected_handle_bootstrap_volume_invalid",
@@ -5877,9 +6364,9 @@ func _flatten_native_protected_handle_baked_mesh(
 		"ok": true,
 		"signature": protected_signature,
 		"vertices": flattened_vertices,
-		"indices": flattened_indices,
+		"indices": validated_indices,
 		"vertex_count": flattened_vertices.size(),
-		"triangle_count": flattened_indices.size() / 3,
+		"triangle_count": validated_indices.size() / 3,
 		"signed_volume_m3": signed_volume,
 	}
 
@@ -5919,7 +6406,7 @@ func _try_restage_native_protected_composite_after_bootstrap(
 	) as Resource
 	if (
 		protected_handle == null
-		or _build_native_static_body_signature(protected_handle)
+		or PrimaryGripHandleMeshPacketScript.build_body_signature(protected_handle)
 		!= native_protected_handle_cache_signature
 	):
 		return {
@@ -6293,6 +6780,7 @@ func _discard_native_static_lane(
 func _cancel_native_capsule_operand_staging(
 	retain_ready_previews: bool = false
 ) -> void:
+	_cancel_authoritative_protected_handle_bake()
 	native_capsule_operand_generation += 1
 	if (
 		native_capsule_operand_staging_root != null

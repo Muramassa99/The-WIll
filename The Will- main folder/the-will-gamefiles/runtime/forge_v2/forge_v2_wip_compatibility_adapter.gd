@@ -15,6 +15,12 @@ const ForgeV2ProfileShapeLibraryScript = preload(
 const ForgeV2SplinePathSamplerScript = preload(
 	"res://runtime/forge_v2/forge_v2_spline_path_sampler.gd"
 )
+const PrimaryGripSeatResolverScript = preload(
+	"res://core/resolvers/primary_grip_seat_resolver.gd"
+)
+const PrimaryGripHandleMeshPacketScript = preload(
+	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
+)
 
 const DEFAULT_MATERIAL_CATALOG: Resource = preload(
 	"res://core/defs/forge/forge_material_catalog_default.tres"
@@ -45,6 +51,23 @@ static func build_runtime_contract(
 	var resolved_cell_size := maxf(cell_size_meters, 0.0001)
 	var profile: BakedProfile = BakedProfileScript.new()
 	profile.profile_id = _build_profile_id(wip)
+	if final_mesh_packet.has("ok") and not bool(final_mesh_packet.get(
+		"ok",
+		false
+	)):
+		var provider_error := String(final_mesh_packet.get(
+			"error_code",
+			"forge_v2_runtime_mesh_provider_failed"
+		))
+		var provider_reason := String(final_mesh_packet.get("reason", ""))
+		return _build_invalid_result(
+			profile,
+			null,
+			provider_error if provider_reason.is_empty() else "%s:%s" % [
+				provider_error,
+				provider_reason,
+			]
+		)
 
 	var mesh_validation := _validate_mesh_packet(final_mesh_packet)
 	if not bool(mesh_validation.get("valid", false)):
@@ -62,13 +85,44 @@ static func build_runtime_contract(
 		"indices",
 		PackedInt32Array()
 	)
+	var protected_handle_mesh_validation := (
+		PrimaryGripHandleMeshPacketScript.validate(final_mesh_packet)
+	)
+	var protected_handle_vertices_meters := PackedVector3Array()
+	var protected_handle_indices := PackedInt32Array()
+	var protected_handle_mesh_source := StringName()
+	var protected_handle_body_signature := ""
+	if bool(protected_handle_mesh_validation.get("valid", false)):
+		protected_handle_vertices_meters = (
+			protected_handle_mesh_validation.get(
+				"vertices",
+				PackedVector3Array()
+			) as PackedVector3Array
+		)
+		protected_handle_indices = protected_handle_mesh_validation.get(
+			"indices",
+			PackedInt32Array()
+		) as PackedInt32Array
+		protected_handle_mesh_source = StringName(
+			protected_handle_mesh_validation.get("source", StringName())
+		)
+		protected_handle_body_signature = String(
+			protected_handle_mesh_validation.get("body_signature", "")
+		)
+	else:
+		protected_handle_vertices_meters = PackedVector3Array()
+		protected_handle_indices = PackedInt32Array()
 	var mesh_metrics := _calculate_mesh_metrics(vertices_meters, indices)
 	var stage2_item_state: Resource = _build_stage2_item_state(
 		wip,
 		vertices_meters,
 		indices,
 		mesh_metrics,
-		resolved_cell_size
+		resolved_cell_size,
+		protected_handle_vertices_meters,
+		protected_handle_indices,
+		protected_handle_mesh_source,
+		protected_handle_body_signature
 	)
 	_populate_profile_mesh_metrics(profile, mesh_metrics, resolved_cell_size)
 	var mesh_component_count := _count_indexed_triangle_components(
@@ -118,6 +172,24 @@ static func build_runtime_contract(
 			stage2_item_state,
 			String(handle_validation.get("error", "forge_v2_handle_invalid"))
 		)
+	if not bool(protected_handle_mesh_validation.get("valid", false)):
+		return _build_invalid_result(
+			profile,
+			stage2_item_state,
+			"forge_v2_primary_handle_exact_mesh_missing"
+		)
+	var expected_handle_body_signature := (
+		PrimaryGripHandleMeshPacketScript.build_body_signature(handle_body)
+	)
+	if (
+		protected_handle_body_signature.is_empty()
+		or protected_handle_body_signature != expected_handle_body_signature
+	):
+		return _build_invalid_result(
+			profile,
+			stage2_item_state,
+			"forge_v2_primary_handle_exact_mesh_signature_mismatch"
+		)
 
 	var handle_path: PackedVector3Array = handle_validation.get(
 		"path_points",
@@ -136,11 +208,29 @@ static func build_runtime_contract(
 	var grip_geometry := _resolve_handle_grip_geometry(
 		handle_body,
 		handle_path,
-		handle_axis,
 		profile_offsets,
 		mesh_metrics.get("centroid_meters", Vector3.ZERO) as Vector3,
-		vertices_meters
+		vertices_meters,
+		protected_handle_vertices_meters,
+		protected_handle_indices
 	)
+	var slice_axis_ratios: PackedFloat32Array = grip_geometry.get(
+		"slice_axis_ratios",
+		PackedFloat32Array()
+	) as PackedFloat32Array
+	var slice_centers_meters: PackedVector3Array = grip_geometry.get(
+		"slice_centers_meters",
+		PackedVector3Array()
+	) as PackedVector3Array
+	if not PrimaryGripSeatResolverScript.sampled_path_is_valid(
+		slice_axis_ratios,
+		slice_centers_meters
+	):
+		return _build_invalid_result(
+			profile,
+			stage2_item_state,
+			"forge_v2_primary_handle_slice_center_path_invalid"
+		)
 	handle_path = grip_geometry.get(
 		"profile_path",
 		handle_path
@@ -176,7 +266,9 @@ static func build_runtime_contract(
 		mesh_metrics,
 		resolved_cell_size,
 		float(grip_geometry.get("contact_ratio", 0.5)),
-		float(grip_geometry.get("span_length_meters", -1.0))
+		float(grip_geometry.get("span_length_meters", -1.0)),
+		slice_axis_ratios,
+		slice_centers_meters
 	)
 	return {
 		"stage2_item_state": stage2_item_state,
@@ -515,7 +607,11 @@ static func _build_stage2_item_state(
 	vertices_meters: PackedVector3Array,
 	indices: PackedInt32Array,
 	mesh_metrics: Dictionary,
-	cell_size_meters: float
+	cell_size_meters: float,
+	protected_handle_vertices_meters: PackedVector3Array = PackedVector3Array(),
+	protected_handle_indices: PackedInt32Array = PackedInt32Array(),
+	protected_handle_mesh_source: StringName = StringName(),
+	protected_handle_body_signature: String = ""
 ) -> Resource:
 	var vertices_cells := PackedVector3Array()
 	for vertex: Vector3 in vertices_meters:
@@ -570,6 +666,64 @@ static func _build_stage2_item_state(
 	stage2_item_state.set("refinement_initialized", true)
 	stage2_item_state.set("dirty", true)
 	stage2_item_state.set("last_active_tool_id", &"forge_v2_finalized_mesh")
+	if (
+		not protected_handle_vertices_meters.is_empty()
+		and not protected_handle_indices.is_empty()
+		and protected_handle_indices.size() % 3 == 0
+	):
+		var protected_vertices_cells := PackedVector3Array()
+		protected_vertices_cells.resize(
+			protected_handle_vertices_meters.size()
+		)
+		for vertex_index: int in range(
+			protected_handle_vertices_meters.size()
+		):
+			protected_vertices_cells[vertex_index] = (
+				protected_handle_vertices_meters[vertex_index]
+				/ cell_size_meters
+			)
+		var protected_surface_arrays: Array = []
+		protected_surface_arrays.resize(Mesh.ARRAY_MAX)
+		protected_surface_arrays[Mesh.ARRAY_VERTEX] = (
+			protected_vertices_cells
+		)
+		protected_surface_arrays[Mesh.ARRAY_NORMAL] = _build_vertex_normals(
+			protected_vertices_cells,
+			protected_handle_indices
+		)
+		protected_surface_arrays[Mesh.ARRAY_INDEX] = PackedInt32Array(
+			protected_handle_indices
+		)
+		var protected_aabb_cells := AABB()
+		if not protected_vertices_cells.is_empty():
+			protected_aabb_cells = AABB(
+				protected_vertices_cells[0],
+				Vector3.ZERO
+			)
+			for vertex: Vector3 in protected_vertices_cells:
+				protected_aabb_cells = protected_aabb_cells.expand(vertex)
+		var protected_mesh_state: Resource = (
+			Stage2EditableMeshStateScript.new()
+		)
+		protected_mesh_state.call(
+			"copy_from_surface_arrays",
+			protected_surface_arrays,
+			Mesh.PRIMITIVE_TRIANGLES,
+			protected_aabb_cells
+		)
+		protected_mesh_state.set("dirty", false)
+		stage2_item_state.set(
+			"primary_grip_handle_mesh_state",
+			protected_mesh_state
+		)
+		stage2_item_state.set(
+			"primary_grip_handle_mesh_source",
+			protected_handle_mesh_source
+		)
+		stage2_item_state.set(
+			"primary_grip_handle_body_signature",
+			protected_handle_body_signature
+		)
 	return stage2_item_state
 
 
@@ -744,7 +898,9 @@ static func _populate_primary_grip_profile(
 	mesh_metrics: Dictionary,
 	cell_size_meters: float,
 	resolved_contact_ratio: float = -1.0,
-	resolved_span_length_meters: float = -1.0
+	resolved_span_length_meters: float = -1.0,
+	resolved_slice_axis_ratios: PackedFloat32Array = PackedFloat32Array(),
+	resolved_slice_centers_meters: PackedVector3Array = PackedVector3Array()
 ) -> void:
 	var span_start_meters := handle_path_meters[0]
 	var contact_meters := handle_path_meters[1]
@@ -774,6 +930,16 @@ static func _populate_primary_grip_profile(
 		)),
 		1
 	)
+	profile.primary_grip_slice_axis_ratios_from_span_start = PackedFloat32Array(
+		resolved_slice_axis_ratios
+	)
+	var slice_centers_cells := PackedVector3Array()
+	slice_centers_cells.resize(resolved_slice_centers_meters.size())
+	for sample_index: int in range(resolved_slice_centers_meters.size()):
+		slice_centers_cells[sample_index] = (
+			resolved_slice_centers_meters[sample_index] / cell_size_meters
+		)
+	profile.primary_grip_slice_centers = slice_centers_cells
 	profile.primary_grip_offset = center_of_mass_cells - contact_cells
 	profile.set("primary_grip_minor_axis_a", minor_axis_a.normalized())
 	profile.set("primary_grip_minor_axis_b", minor_axis_b.normalized())
@@ -914,7 +1080,10 @@ static func _resolve_weapon_extremities(
 	var max_point := contact_meters + handle_axis * max_projection
 	var min_distance := absf(min_projection)
 	var max_distance := absf(max_projection)
-	var max_is_tip := max_distance >= min_distance
+	# An exactly centered Handle is a legitimate tie. Keep that tie on the
+	# already-resolved positive Handle axis instead of letting float noise swap
+	# tip and pommel when the three authored Handle points are reversed.
+	var max_is_tip := max_distance + GEOMETRY_EPSILON >= min_distance
 	return {
 		"tip_meters": max_point if max_is_tip else min_point,
 		"pommel_meters": min_point if max_is_tip else max_point,
@@ -1000,34 +1169,87 @@ static func _map_handle_profile_samples_to_final_csg(
 static func _resolve_handle_grip_geometry(
 	handle_body: Resource,
 	handle_path: PackedVector3Array,
-	handle_axis: Vector3,
 	final_samples: PackedVector2Array,
 	desired_contact_meters: Vector3,
-	mesh_vertices_meters: PackedVector3Array
+	mesh_vertices_meters: PackedVector3Array,
+	protected_handle_vertices_meters: PackedVector3Array,
+	protected_handle_indices: PackedInt32Array
 ) -> Dictionary:
+	if handle_path.size() < 2:
+		return {}
 	var sample_center := Vector2.ZERO
 	for sample: Vector2 in final_samples:
 		sample_center += sample
 	if not final_samples.is_empty():
 		sample_center /= float(final_samples.size())
+	var chronological_span_start := handle_path[0]
+	var chronological_span_end := handle_path[handle_path.size() - 1]
+	var chronological_span := (
+		chronological_span_end - chronological_span_start
+	)
+	if (
+		chronological_span.length_squared()
+		<= GEOMETRY_EPSILON * GEOMETRY_EPSILON
+	):
+		return {}
+	var exact_slice_path := (
+		PrimaryGripSeatResolverScript.build_mesh_slice_center_path(
+			protected_handle_vertices_meters,
+			protected_handle_indices,
+			chronological_span_start,
+			chronological_span_end,
+			HANDLE_GRIP_CURVE_BAKE_INTERVAL_METERS
+		)
+	)
+	if not bool(exact_slice_path.get("valid", false)):
+		return {}
+	var chronological_ratios: PackedFloat32Array = exact_slice_path.get(
+		"ratios",
+		PackedFloat32Array()
+	) as PackedFloat32Array
+	var slice_centers := exact_slice_path.get(
+		"centers_meters",
+		PackedVector3Array()
+	) as PackedVector3Array
+	if not PrimaryGripSeatResolverScript.sampled_path_is_valid(
+		chronological_ratios,
+		slice_centers
+	):
+		return {}
+	var desired_contact_ratio := clampf(
+		(desired_contact_meters - chronological_span_start).dot(
+			chronological_span
+		) / chronological_span.length_squared(),
+		0.0,
+		1.0
+	)
+	var chronological_contact_state := (
+		PrimaryGripSeatResolverScript.resolve_sampled_seat(
+			chronological_ratios,
+			slice_centers,
+			desired_contact_ratio
+		)
+	)
+	if not bool(chronological_contact_state.get("valid", false)):
+		return {}
+	var contact_center: Vector3 = chronological_contact_state.get(
+		"position",
+		Vector3.ZERO
+	) as Vector3
+
+	# The exact Handle-only mesh owns the seat position. The construction curve
+	# remains useful only for the already-authored transverse roll of the grip
+	# shell; it is not a positional fallback.
 	var curve := _build_handle_authority_curve(handle_body, handle_path)
 	if curve == null or curve.point_count < 2 or curve.get_baked_length() <= 0.0:
-		return _build_fallback_handle_grip_geometry(
-			handle_body,
-			handle_path,
-			handle_axis,
-			final_samples,
-			sample_center,
-			mesh_vertices_meters
-		)
+		return {}
 	var curve_length := curve.get_baked_length()
 	var sample_count := maxi(
 		int(ceil(curve_length / HANDLE_GRIP_CURVE_BAKE_INTERVAL_METERS)),
 		1
 	)
 	var curve_offsets := PackedFloat32Array()
-	var centerline_points := PackedVector3Array()
-	var centerline_length := 0.0
+	var construction_centers := PackedVector3Array()
 	for sample_index: int in range(sample_count + 1):
 		var curve_offset := (
 			curve_length * float(sample_index) / float(sample_count)
@@ -1044,48 +1266,56 @@ static func _resolve_handle_grip_geometry(
 			+ axis_a * sample_center.x
 			+ axis_b * sample_center.y
 		)
-		if not centerline_points.is_empty():
-			centerline_length += centerline_points[
-				centerline_points.size() - 1
-			].distance_to(centerline_point)
 		curve_offsets.append(curve_offset)
-		centerline_points.append(centerline_point)
-	var closest_state := _resolve_closest_centerline_state(
-		centerline_points,
-		curve_offsets,
-		desired_contact_meters
+		construction_centers.append(centerline_point)
+	if construction_centers.size() < 2:
+		return {}
+	var construction_ratios := (
+		PrimaryGripSeatResolverScript.build_axis_ratios_from_centers(
+			construction_centers,
+			chronological_span_start,
+			chronological_span_end
+		)
 	)
-	var contact_offset := clampf(
-		float(closest_state.get("curve_offset", curve_length * 0.5)),
-		0.0,
-		curve_length
+	if not PrimaryGripSeatResolverScript.sampled_path_is_valid(
+		construction_ratios,
+		construction_centers
+	):
+		return {}
+	var construction_contact_state := (
+		PrimaryGripSeatResolverScript.resolve_sampled_seat(
+			construction_ratios,
+			construction_centers,
+			desired_contact_ratio
+		)
 	)
+	if not bool(construction_contact_state.get("valid", false)):
+		return {}
+	var contact_segment_index := int(
+		construction_contact_state.get("segment_index", -1)
+	)
+	if contact_segment_index < 0 or contact_segment_index + 1 >= curve_offsets.size():
+		return {}
+	var contact_offset := lerpf(
+		curve_offsets[contact_segment_index],
+		curve_offsets[contact_segment_index + 1],
+		float(construction_contact_state.get("segment_ratio", 0.0))
+	)
+	contact_offset = clampf(contact_offset, 0.0, curve_length)
 	var contact_frame := _resolve_handle_csg_profile_frame(curve, contact_offset)
-	var contact_path_position: Vector3 = contact_frame.get(
-		"position",
-		curve.sample_baked(contact_offset)
-	)
-	var chronological_axis: Vector3 = contact_frame.get(
-		"tangent",
-		handle_axis
-	)
+	var chronological_axis := chronological_span.normalized()
 	var physical_axis_a: Vector3 = contact_frame.get("axis_x", Vector3.UP)
 	var physical_axis_b: Vector3 = contact_frame.get(
 		"axis_y",
 		Vector3.FORWARD
 	)
-	var contact_center := (
-		contact_path_position
-		+ physical_axis_a * sample_center.x
-		+ physical_axis_b * sample_center.y
-	)
-	var major_axis := _resolve_order_independent_major_axis(
+	var ordering_axis := _resolve_order_independent_major_axis(
 		mesh_vertices_meters,
 		contact_center,
 		chronological_axis
 	)
 	var direction_sign := (
-		-1.0 if chronological_axis.dot(major_axis) < 0.0 else 1.0
+		-1.0 if chronological_axis.dot(ordering_axis) < 0.0 else 1.0
 	)
 	var exported_axis_a := physical_axis_a * direction_sign
 	var exported_axis_b := physical_axis_b
@@ -1098,28 +1328,42 @@ static func _resolve_handle_grip_geometry(
 			centered_sample.y
 		)
 
-	var start_frame := _resolve_handle_csg_profile_frame(curve, 0.0)
-	var end_frame := _resolve_handle_csg_profile_frame(curve, curve_length)
-	var span_start := (
-		(start_frame.get("position", handle_path[0]) as Vector3)
-		+ (start_frame.get("axis_x", exported_axis_a) as Vector3)
-		* sample_center.x
-		+ (start_frame.get("axis_y", exported_axis_b) as Vector3)
-		* sample_center.y
+	var path_reversed := false
+	var span_start := chronological_span_start
+	var span_end := chronological_span_end
+	if chronological_span.dot(ordering_axis) < 0.0:
+		span_start = chronological_span_end
+		span_end = chronological_span_start
+		slice_centers = _reverse_vector3_samples(slice_centers)
+		path_reversed = true
+	var major_axis := (span_end - span_start).normalized()
+	if major_axis.length_squared() <= GEOMETRY_EPSILON * GEOMETRY_EPSILON:
+		return {}
+	var slice_axis_ratios := (
+		PrimaryGripSeatResolverScript.build_axis_ratios_from_centers(
+			slice_centers,
+			span_start,
+			span_end
+		)
 	)
-	var span_end := (
-		(end_frame.get("position", handle_path[handle_path.size() - 1]) as Vector3)
-		+ (end_frame.get("axis_x", exported_axis_a) as Vector3)
-		* sample_center.x
-		+ (end_frame.get("axis_y", exported_axis_b) as Vector3)
-		* sample_center.y
+	if not PrimaryGripSeatResolverScript.sampled_path_is_valid(
+		slice_axis_ratios,
+		slice_centers
+	):
+		return {}
+	var contact_ratio := (
+		1.0 - desired_contact_ratio
+		if path_reversed
+		else desired_contact_ratio
 	)
-	var contact_ratio := clampf(contact_offset / curve_length, 0.0, 1.0)
-	if (span_end - span_start).dot(major_axis) < 0.0:
-		var swapped_start := span_end
-		span_end = span_start
-		span_start = swapped_start
-		contact_ratio = 1.0 - contact_ratio
+	var contact_seat_state := PrimaryGripSeatResolverScript.resolve_sampled_seat(
+		slice_axis_ratios,
+		slice_centers,
+		contact_ratio
+	)
+	if not bool(contact_seat_state.get("valid", false)):
+		return {}
+	contact_center = contact_seat_state.get("position", contact_center) as Vector3
 	return {
 		"profile_path": PackedVector3Array([
 			span_start,
@@ -1132,7 +1376,9 @@ static func _resolve_handle_grip_geometry(
 		"centered_offsets": centered_offsets,
 		"sample_center": sample_center,
 		"contact_ratio": contact_ratio,
-		"span_length_meters": centerline_length,
+		"span_length_meters": span_start.distance_to(span_end),
+		"slice_axis_ratios": slice_axis_ratios,
+		"slice_centers_meters": slice_centers,
 	}
 
 
@@ -1343,59 +1589,14 @@ static func _canonicalize_axis(axis: Vector3) -> Vector3:
 	return -normalized_axis if dominant_component < 0.0 else normalized_axis
 
 
-static func _build_fallback_handle_grip_geometry(
-	handle_body: Resource,
-	handle_path: PackedVector3Array,
-	handle_axis: Vector3,
-	final_samples: PackedVector2Array,
-	sample_center: Vector2,
-	mesh_vertices_meters: PackedVector3Array
-) -> Dictionary:
-	var frame := _resolve_handle_profile_frame(
-		handle_body,
-		handle_path,
-		handle_axis,
-		1
-	)
-	var chronological_axis: Vector3 = frame.get("tangent", handle_axis)
-	var axis_a: Vector3 = frame.get("axis_x", Vector3.UP)
-	var axis_b: Vector3 = frame.get("axis_y", Vector3.FORWARD)
-	var contact_center := (
-		handle_path[1] + axis_a * sample_center.x + axis_b * sample_center.y
-	)
-	var major_axis := _resolve_order_independent_major_axis(
-		mesh_vertices_meters,
-		contact_center,
-		chronological_axis
-	)
-	var direction_sign := -1.0 if chronological_axis.dot(major_axis) < 0.0 else 1.0
-	var centered_offsets := PackedVector2Array()
-	for sample: Vector2 in final_samples:
-		var centered_sample := sample - sample_center
-		centered_offsets.append(Vector2(
-			centered_sample.x * direction_sign,
-			centered_sample.y
-		))
-	var start_center := handle_path[0] + axis_a * sample_center.x + axis_b * sample_center.y
-	var end_center := handle_path[2] + axis_a * sample_center.x + axis_b * sample_center.y
-	if (end_center - start_center).dot(major_axis) < 0.0:
-		var swapped_start := end_center
-		end_center = start_center
-		start_center = swapped_start
-	return {
-		"profile_path": PackedVector3Array([
-			start_center,
-			contact_center,
-			end_center,
-		]),
-		"major_axis": major_axis,
-		"minor_axis_a": axis_a * direction_sign,
-		"minor_axis_b": axis_b,
-		"centered_offsets": centered_offsets,
-		"sample_center": sample_center,
-		"contact_ratio": 0.5,
-		"span_length_meters": start_center.distance_to(end_center),
-	}
+static func _reverse_vector3_samples(
+	samples: PackedVector3Array
+) -> PackedVector3Array:
+	var reversed := PackedVector3Array()
+	reversed.resize(samples.size())
+	for sample_index: int in range(samples.size()):
+		reversed[sample_index] = samples[samples.size() - 1 - sample_index]
+	return reversed
 
 
 static func _append_unique_profile_sample(

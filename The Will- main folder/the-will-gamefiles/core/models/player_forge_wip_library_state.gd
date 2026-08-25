@@ -8,6 +8,7 @@ const PersistentResourceStateIOScript = preload("res://core/models/persistent_re
 @export var unarmed_authoring_wip: CraftedItemWIP
 @export var selected_wip_id: StringName = &""
 @export var save_file_path: String = DEFAULT_SAVE_FILE_PATH
+@export var wip_id_generation_sequence: int = 0
 
 static func load_or_create(save_path: String = DEFAULT_SAVE_FILE_PATH):
 	return PersistentResourceStateIOScript.load_or_create(save_path, "res://core/models/player_forge_wip_library_state.gd")
@@ -34,6 +35,9 @@ func get_saved_wip_clone(saved_wip_id: StringName, include_runtime_caches: bool 
 	if saved_clone != null and saved_clone.has_method("ensure_combat_animation_station_state"):
 		saved_clone.call("ensure_combat_animation_station_state")
 	return saved_clone
+
+func build_new_wip_id() -> StringName:
+	return _build_generated_wip_id()
 
 func get_unarmed_authoring_wip() -> CraftedItemWIP:
 	if unarmed_authoring_wip != null:
@@ -110,12 +114,24 @@ func save_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 	if saved_clone.has_method("ensure_combat_animation_station_state"):
 		saved_clone.call("ensure_combat_animation_station_state")
 	var existing_index: int = _find_saved_wip_index(resolved_wip_id)
+	var previous_saved_wip: CraftedItemWIP = (
+		saved_wips[existing_index]
+		if existing_index >= 0
+		else null
+	)
+	var previous_selected_wip_id := selected_wip_id
 	if existing_index >= 0:
 		saved_wips[existing_index] = saved_clone
 	else:
 		saved_wips.append(saved_clone)
 	selected_wip_id = resolved_wip_id
-	persist()
+	if not persist():
+		selected_wip_id = previous_selected_wip_id
+		if existing_index >= 0:
+			saved_wips[existing_index] = previous_saved_wip
+		else:
+			saved_wips.remove_at(saved_wips.size() - 1)
+		return null
 	return saved_clone.duplicate(true) as CraftedItemWIP
 
 func save_unarmed_authoring_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
@@ -133,9 +149,14 @@ func save_unarmed_authoring_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 	saved_clone.layers.clear()
 	if saved_clone.has_method("ensure_combat_animation_station_state"):
 		saved_clone.call("ensure_combat_animation_station_state")
+	var previous_unarmed_wip := unarmed_authoring_wip
+	var previous_selected_wip_id := selected_wip_id
 	unarmed_authoring_wip = saved_clone
 	selected_wip_id = CraftedItemWIP.UNARMED_AUTHORING_WIP_ID
-	persist()
+	if not persist():
+		unarmed_authoring_wip = previous_unarmed_wip
+		selected_wip_id = previous_selected_wip_id
+		return null
 	return saved_clone.duplicate(true) as CraftedItemWIP
 
 func duplicate_saved_wip(saved_wip_id: StringName) -> CraftedItemWIP:
@@ -154,19 +175,64 @@ func duplicate_saved_wip(saved_wip_id: StringName) -> CraftedItemWIP:
 	)
 	if duplicate_wip.has_method("ensure_combat_animation_station_state"):
 		duplicate_wip.call("ensure_combat_animation_station_state")
+	var previous_selected_wip_id := selected_wip_id
 	saved_wips.append(duplicate_wip)
 	selected_wip_id = duplicate_wip.wip_id
-	persist()
+	if not persist():
+		saved_wips.remove_at(saved_wips.size() - 1)
+		selected_wip_id = previous_selected_wip_id
+		return null
 	return duplicate_wip.duplicate(true) as CraftedItemWIP
 
-func delete_saved_wip(saved_wip_id: StringName) -> bool:
+func rename_saved_wip(
+	saved_wip_id: StringName,
+	requested_name: String
+) -> CraftedItemWIP:
+	var saved_index: int = _find_saved_wip_index(saved_wip_id)
+	var cleaned_name := requested_name.strip_edges()
+	if saved_index < 0 or cleaned_name.is_empty():
+		return null
+	var source_wip: CraftedItemWIP = saved_wips[saved_index]
+	if source_wip == null or CraftedItemWIP.is_unarmed_authoring_wip(source_wip):
+		return null
+	var renamed_wip: CraftedItemWIP = source_wip.duplicate(true) as CraftedItemWIP
+	if renamed_wip == null:
+		return null
+	renamed_wip.forge_project_name = cleaned_name
+	if renamed_wip.forge_v2_authoring_state != null:
+		renamed_wip.forge_v2_authoring_state.set("project_name", cleaned_name)
+		if renamed_wip.forge_v2_authoring_state.has_method("normalize"):
+			renamed_wip.forge_v2_authoring_state.call("normalize")
+	saved_wips[saved_index] = renamed_wip
+	if not persist():
+		saved_wips[saved_index] = source_wip
+		return null
+	return renamed_wip.duplicate(true) as CraftedItemWIP
+
+func delete_saved_wip(
+	saved_wip_id: StringName,
+	select_fallback: bool = true
+) -> bool:
 	var saved_index: int = _find_saved_wip_index(saved_wip_id)
 	if saved_index < 0:
 		return false
+	var deleted_wip: CraftedItemWIP = saved_wips[saved_index]
+	var previous_selected_wip_id := selected_wip_id
 	saved_wips.remove_at(saved_index)
 	if selected_wip_id == saved_wip_id:
-		selected_wip_id = saved_wips[0].wip_id if not saved_wips.is_empty() and saved_wips[0] != null else StringName()
-	persist()
+		selected_wip_id = (
+			saved_wips[0].wip_id
+			if (
+				select_fallback
+				and not saved_wips.is_empty()
+				and saved_wips[0] != null
+			)
+			else StringName()
+		)
+	if not persist():
+		saved_wips.insert(saved_index, deleted_wip)
+		selected_wip_id = previous_selected_wip_id
+		return false
 	return true
 
 func set_selected_wip_id(saved_wip_id: StringName, persist_selection: bool = true) -> void:
@@ -246,7 +312,19 @@ func _resolve_forge_project_notes(saved_wip: CraftedItemWIP) -> String:
 	return saved_wip.forge_project_notes.strip_edges()
 
 func _build_generated_wip_id() -> StringName:
-	return StringName("player_wip_%s_%d" % [str(Time.get_unix_time_from_system()), saved_wips.size() + 1])
+	wip_id_generation_sequence += 1
+	var base_id := "player_wip_%s_%d" % [
+		str(Time.get_unix_time_from_system()),
+		wip_id_generation_sequence,
+	]
+	var candidate := StringName(base_id)
+	while _find_saved_wip_index(candidate) >= 0:
+		wip_id_generation_sequence += 1
+		candidate = StringName("%s_%d" % [
+			base_id,
+			wip_id_generation_sequence,
+		])
+	return candidate
 
 func _build_generated_project_name() -> String:
 	return "Forge Project %03d" % (saved_wips.size() + 1)

@@ -7,6 +7,7 @@ const CombatAnimationStationStateScript = preload("res://core/models/combat_anim
 const CombatAnimationDraftScript = preload("res://core/models/combat_animation_draft.gd")
 const CombatAnimationWeaponFrameSolverScript = preload("res://runtime/combat/combat_animation_weapon_frame_solver.gd")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+const PrimaryGripSeatResolverScript = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
 const BASE_WEAPON_HOLD_ROTATION_DEGREES := Vector3(180.0, 0.0, 0.0)
 const LEFT_HAND_WEAPON_HOLD_ROTATION_DEGREES := Vector3(0.0, 180.0, 0.0)
 const REVERSE_GRIP_ROTATION_DEGREES := Vector3(0.0, 180.0, 0.0)
@@ -473,7 +474,14 @@ func build_equipped_item_node(
 		{},
 		prefer_cached_profile
 	)
-	if test_print == null or test_print.baked_profile == null or not test_print.baked_profile.primary_grip_valid:
+	if (
+		test_print == null
+		or test_print.baked_profile == null
+		or not test_print.baked_profile.primary_grip_valid
+		or not PrimaryGripSeatResolverScript.profile_has_authoritative_path(
+			test_print.baked_profile
+		)
+	):
 		if preserved_baked_profile_snapshot != null:
 			saved_wip.latest_baked_profile_snapshot = preserved_baked_profile_snapshot
 		return null
@@ -688,6 +696,20 @@ func build_equipped_item_node(
 	var primary_grip_span_start_local: Vector3 = (test_print.baked_profile.primary_grip_span_start - dominant_grip_center_local) * cell_world_size
 	var primary_grip_span_end_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var primary_grip_span_end_local: Vector3 = (test_print.baked_profile.primary_grip_span_end - dominant_grip_center_local) * cell_world_size
+	var primary_grip_slice_centers_local := PackedVector3Array()
+	primary_grip_slice_centers_local.resize(
+		test_print.baked_profile.primary_grip_slice_centers.size()
+	)
+	for sample_index: int in range(
+		test_print.baked_profile.primary_grip_slice_centers.size()
+	):
+		primary_grip_slice_centers_local[sample_index] = (
+			(
+				test_print.baked_profile.primary_grip_slice_centers[sample_index]
+				- dominant_grip_center_local
+			)
+			* cell_world_size
+		)
 	var primary_grip_slide_axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var primary_grip_slide_axis_local: Vector3 = test_print.baked_profile.primary_grip_slide_axis.normalized()
 	held_root.set_meta("dominant_grip_center_weapon_origin_id", dominant_grip_center_weapon_origin_id)
@@ -722,6 +744,20 @@ func build_equipped_item_node(
 	held_root.set_meta("primary_grip_span_start_origin_id", primary_grip_span_start_origin_id)
 	held_root.set_meta("primary_grip_span_end_local", primary_grip_span_end_local)
 	held_root.set_meta("primary_grip_span_end_origin_id", primary_grip_span_end_origin_id)
+	held_root.set_meta(
+		"primary_grip_slice_axis_ratios_from_span_start",
+		PackedFloat32Array(
+			test_print.baked_profile.primary_grip_slice_axis_ratios_from_span_start
+		)
+	)
+	held_root.set_meta(
+		"primary_grip_slice_centers_local",
+		primary_grip_slice_centers_local
+	)
+	held_root.set_meta(
+		"primary_grip_slice_center_path_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
 	held_root.set_meta("primary_grip_axis_ratio_from_span_start", float(test_print.baked_profile.primary_grip_axis_ratio_from_span_start))
 	held_root.set_meta("primary_grip_slide_axis_local", primary_grip_slide_axis_local)
 	held_root.set_meta("primary_grip_slide_axis_origin_id", primary_grip_slide_axis_origin_id)
@@ -2146,8 +2182,6 @@ func _resolve_weapon_tip_axis_world(held_item: Node3D, finger_guide_node: Node3D
 		Vector3.ZERO,
 		tip_direction_origin_id
 	)
-	if local_tip_direction.length_squared() > 0.000001:
-		return (held_item.global_basis * local_tip_direction.normalized()).normalized()
 	var grip_axis_local: Vector3 = Vector3.ZERO
 	var grip_axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	if grip_center != null:

@@ -868,6 +868,9 @@ const PROFILE_BUILDER_POPUP_SIZE := Vector2i(960, 560)
 const PROFILE_BUILDER_PREVIEW_SIZE := Vector2(420, 420)
 const PROFILE_CANVAS_CONTEXT_POPUP_WIDTH := 148
 const PROFILE_FILLET_DIALOG_SIZE := Vector2i(280, 178)
+const V2_WIP_NAME_POPUP_SIZE := Vector2i(440, 150)
+const V2_WIP_DELETE_POPUP_SIZE := Vector2i(520, 150)
+const V2_WIP_NAME_MAX_LENGTH := 96
 const PROFILE_BUILDER_SIZE_MIN_METERS := ForgeV2ProfileShapeLibraryScript.DEFAULT_CELL_WORLD_SIZE_METERS
 const PROFILE_BUILDER_SIZE_MAX_METERS := 4.0
 
@@ -937,6 +940,20 @@ var tool_profile_library_state: Resource = null
 var editor_loaded_saved_profile_id: StringName = StringName()
 var profile_saved_profiles_context_profile_id: StringName = StringName()
 var profile_saved_profile_ids_by_index: Array[StringName] = []
+var saved_v2_drafts_submenu: PopupMenu = null
+var saved_v2_drafts_context_panel: PopupPanel = null
+var saved_v2_drafts_context_wip_id: StringName = StringName()
+var v2_wip_name_popup: PopupPanel = null
+var v2_wip_name_popup_title: Label = null
+var v2_wip_name_line_edit: LineEdit = null
+var v2_wip_name_confirm_button: Button = null
+var v2_wip_name_pending_action: StringName = StringName()
+var v2_wip_name_pending_wip_id: StringName = StringName()
+var v2_wip_delete_popup: PopupPanel = null
+var v2_wip_delete_prompt_label: Label = null
+var v2_wip_delete_no_button: Button = null
+var v2_wip_delete_pending_wip_id: StringName = StringName()
+var v2_save_in_progress: bool = false
 var keybindings_popup: PopupPanel = null
 var keybindings_list_vbox: VBoxContainer = null
 var keybinding_buttons_by_action: Dictionary = {}
@@ -1077,6 +1094,9 @@ func close_ui() -> void:
 	_close_profile_builder_popup()
 	_close_profile_saved_profiles_popup()
 	_close_profile_name_popup(false)
+	_close_v2_wip_delete_popup()
+	_close_v2_wip_name_popup(false)
+	_hide_saved_v2_draft_context_menu()
 	if workspace_preview != null and workspace_preview.has_method("clear_stage_controller"):
 		if not bool(workspace_preview.call("clear_stage_controller")):
 			return
@@ -1192,6 +1212,7 @@ func _on_settings_top_level_pressed() -> void:
 	_open_settings_popup()
 
 func _on_v2_top_menu_about_to_popup(requested_button: MenuButton) -> void:
+	_hide_saved_v2_draft_context_menu()
 	_close_v2_top_menu_popup_trees(requested_button)
 	if is_instance_valid(profile_builder_popup) and profile_builder_popup.visible:
 		_close_profile_builder_popup()
@@ -2331,6 +2352,383 @@ func _on_saved_profile_context_delete_pressed() -> void:
 	_hide_saved_profile_context_menu()
 	if profile_id != StringName():
 		_delete_saved_profile(profile_id)
+
+func _ensure_v2_wip_name_popup() -> void:
+	if is_instance_valid(v2_wip_name_popup):
+		return
+	v2_wip_name_popup = PopupPanel.new()
+	v2_wip_name_popup.name = "V2WipNamePopup"
+	v2_wip_name_popup.visible = false
+	v2_wip_name_popup.unresizable = true
+	UiWindowLayerPolicyScript.configure_owned_popup(v2_wip_name_popup)
+	_apply_v2_popup_theme(v2_wip_name_popup)
+	add_child(v2_wip_name_popup)
+	v2_wip_name_popup.popup_hide.connect(_on_v2_wip_name_popup_hidden)
+
+	var popup_margin := MarginContainer.new()
+	popup_margin.name = "V2WipNameMargin"
+	_apply_margin(popup_margin, 12)
+	v2_wip_name_popup.add_child(popup_margin)
+
+	var popup_vbox := VBoxContainer.new()
+	popup_vbox.name = "V2WipNameVBox"
+	popup_vbox.add_theme_constant_override("separation", 10)
+	popup_margin.add_child(popup_vbox)
+
+	v2_wip_name_popup_title = Label.new()
+	v2_wip_name_popup_title.name = "V2WipNameTitle"
+	v2_wip_name_popup_title.add_theme_font_size_override("font_size", 18)
+	popup_vbox.add_child(v2_wip_name_popup_title)
+
+	v2_wip_name_line_edit = LineEdit.new()
+	v2_wip_name_line_edit.name = "V2WipNameLineEdit"
+	v2_wip_name_line_edit.max_length = V2_WIP_NAME_MAX_LENGTH
+	v2_wip_name_line_edit.custom_minimum_size = Vector2(360.0, 32.0)
+	v2_wip_name_line_edit.text_submitted.connect(
+		func(_text: String) -> void: _confirm_v2_wip_name_popup()
+	)
+	popup_vbox.add_child(v2_wip_name_line_edit)
+
+	var button_row := HBoxContainer.new()
+	button_row.name = "V2WipNameButtonRow"
+	button_row.add_theme_constant_override("separation", 8)
+	popup_vbox.add_child(button_row)
+
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button_row.add_child(spacer)
+
+	var cancel_button := Button.new()
+	cancel_button.name = "CancelButton"
+	cancel_button.text = "Cancel"
+	cancel_button.custom_minimum_size = Vector2(90.0, 30.0)
+	cancel_button.focus_mode = Control.FOCUS_NONE
+	cancel_button.pressed.connect(_close_v2_wip_name_popup)
+	button_row.add_child(cancel_button)
+
+	v2_wip_name_confirm_button = Button.new()
+	v2_wip_name_confirm_button.name = "ConfirmButton"
+	v2_wip_name_confirm_button.custom_minimum_size = Vector2(90.0, 30.0)
+	v2_wip_name_confirm_button.focus_mode = Control.FOCUS_NONE
+	v2_wip_name_confirm_button.pressed.connect(_confirm_v2_wip_name_popup)
+	button_row.add_child(v2_wip_name_confirm_button)
+
+func _connect_saved_v2_drafts_submenu(submenu: PopupMenu) -> void:
+	if submenu == null:
+		return
+	saved_v2_drafts_submenu = submenu
+	var input_callback := Callable(
+		self,
+		"_on_saved_v2_drafts_submenu_window_input"
+	).bind(submenu)
+	if not submenu.window_input.is_connected(input_callback):
+		submenu.window_input.connect(input_callback)
+
+func _on_saved_v2_drafts_submenu_window_input(
+	event: InputEvent,
+	source_popup: PopupMenu
+) -> void:
+	if not event is InputEventMouseButton or not is_instance_valid(source_popup):
+		return
+	var mouse_event := event as InputEventMouseButton
+	if not mouse_event.pressed:
+		return
+	if mouse_event.button_index == MOUSE_BUTTON_LEFT:
+		_hide_saved_v2_draft_context_menu()
+		return
+	if mouse_event.button_index != MOUSE_BUTTON_RIGHT:
+		return
+	var hovered_item_index := source_popup.get_focused_item()
+	if (
+		hovered_item_index < 0
+		or hovered_item_index >= source_popup.get_item_count()
+		or source_popup.is_item_disabled(hovered_item_index)
+	):
+		_hide_saved_v2_draft_context_menu()
+		return
+	var menu_id := source_popup.get_item_id(hovered_item_index)
+	var menu_entry: Dictionary = menu_action_lookup.get(menu_id, {}) as Dictionary
+	if StringName(menu_entry.get("action", StringName())) != &"draft_load_saved":
+		_hide_saved_v2_draft_context_menu()
+		return
+	var saved_wip_id := StringName(menu_entry.get("value", StringName()))
+	if saved_wip_id == StringName():
+		_hide_saved_v2_draft_context_menu()
+		return
+	var pointer_position := source_popup.position + Vector2i(
+		roundi(mouse_event.position.x),
+		roundi(mouse_event.position.y)
+	)
+	_open_saved_v2_draft_context_menu(
+		saved_wip_id,
+		source_popup,
+		pointer_position
+	)
+	source_popup.set_input_as_handled()
+
+func _open_saved_v2_draft_context_menu(
+	saved_wip_id: StringName,
+	source_popup: PopupMenu,
+	pointer_position: Vector2i
+) -> void:
+	if saved_wip_id == StringName():
+		return
+	if source_popup == null:
+		source_popup = saved_v2_drafts_submenu
+	if not is_instance_valid(source_popup):
+		return
+	_hide_saved_v2_draft_context_menu()
+	saved_v2_drafts_context_wip_id = saved_wip_id
+	saved_v2_drafts_context_panel = _build_saved_v2_draft_context_panel()
+	if not UiWindowLayerPolicyScript.attach_owned_popup(
+		source_popup,
+		saved_v2_drafts_context_panel
+	):
+		saved_v2_drafts_context_panel.queue_free()
+		saved_v2_drafts_context_panel = null
+		saved_v2_drafts_context_wip_id = StringName()
+		return
+	saved_v2_drafts_context_panel.popup(Rect2i(
+		pointer_position,
+		Vector2i(132, 68)
+	))
+
+func _hide_saved_v2_draft_context_menu() -> void:
+	saved_v2_drafts_context_wip_id = StringName()
+	var context_panel := saved_v2_drafts_context_panel
+	saved_v2_drafts_context_panel = null
+	if is_instance_valid(context_panel):
+		context_panel.hide()
+		context_panel.queue_free()
+
+func _build_saved_v2_draft_context_panel() -> PopupPanel:
+	var context_panel := PopupPanel.new()
+	context_panel.name = "SavedV2DraftContextPanel"
+	context_panel.unresizable = true
+	UiWindowLayerPolicyScript.configure_owned_popup(context_panel)
+	context_panel.popup_hide.connect(
+		_on_saved_v2_draft_context_popup_hide.bind(context_panel)
+	)
+	_apply_v2_popup_theme(context_panel)
+
+	var context_margin := MarginContainer.new()
+	context_margin.name = "SavedV2DraftContextMargin"
+	_apply_margin(context_margin, 4)
+	context_panel.add_child(context_margin)
+
+	var context_vbox := VBoxContainer.new()
+	context_vbox.name = "SavedV2DraftContextVBox"
+	context_vbox.add_theme_constant_override("separation", 0)
+	context_margin.add_child(context_vbox)
+	context_vbox.add_child(_build_v2_wip_context_button(
+		"Rename",
+		_on_saved_v2_draft_context_rename_pressed
+	))
+	context_vbox.add_child(_build_v2_wip_context_button(
+		"Delete",
+		_on_saved_v2_draft_context_delete_pressed
+	))
+	return context_panel
+
+func _build_v2_wip_context_button(
+	button_text: String,
+	pressed_callback: Callable
+) -> Button:
+	var button := Button.new()
+	button.text = button_text
+	button.custom_minimum_size = Vector2(120.0, 28.0)
+	button.focus_mode = Control.FOCUS_NONE
+	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	button.pressed.connect(pressed_callback)
+	return button
+
+func _on_saved_v2_draft_context_popup_hide(
+	context_panel: PopupPanel
+) -> void:
+	if saved_v2_drafts_context_panel != context_panel:
+		return
+	saved_v2_drafts_context_wip_id = StringName()
+	saved_v2_drafts_context_panel = null
+	if is_instance_valid(context_panel):
+		context_panel.queue_free()
+
+func _on_saved_v2_draft_context_rename_pressed() -> void:
+	var saved_wip_id := saved_v2_drafts_context_wip_id
+	_hide_saved_v2_draft_context_menu()
+	if saved_wip_id != StringName():
+		_close_v2_top_menu_popup_trees()
+		call_deferred("_open_rename_v2_wip_name_popup", saved_wip_id)
+
+func _on_saved_v2_draft_context_delete_pressed() -> void:
+	var saved_wip_id := saved_v2_drafts_context_wip_id
+	_hide_saved_v2_draft_context_menu()
+	if saved_wip_id != StringName():
+		_close_v2_top_menu_popup_trees()
+		call_deferred("_open_delete_v2_wip_confirmation", saved_wip_id)
+
+func _open_save_as_v2_wip_name_popup() -> void:
+	if active_stage_controller == null:
+		return
+	_ensure_v2_wip_name_popup()
+	_close_v2_wip_delete_popup()
+	_hide_saved_v2_draft_context_menu()
+	v2_wip_name_pending_action = &"save_as_v2_wip"
+	v2_wip_name_pending_wip_id = StringName()
+	v2_wip_name_popup_title.text = "Save V2 Draft As"
+	v2_wip_name_confirm_button.text = "Save"
+	var summary: Dictionary = active_stage_controller.get_status_summary()
+	var current_name := String(summary.get("project_name", "V2 Draft")).strip_edges()
+	v2_wip_name_line_edit.text = (
+		"%s Copy" % current_name
+		if not current_name.is_empty()
+		else "V2 Draft"
+	)
+	v2_wip_name_line_edit.select_all()
+	v2_wip_name_popup.popup_centered(V2_WIP_NAME_POPUP_SIZE)
+	v2_wip_name_popup.grab_focus()
+	v2_wip_name_line_edit.grab_focus()
+
+func _open_rename_v2_wip_name_popup(saved_wip_id: StringName) -> void:
+	var wip_library := _get_player_forge_wip_library_state()
+	if wip_library == null or saved_wip_id == StringName():
+		return
+	var saved_wip := wip_library.get_saved_wip(saved_wip_id)
+	if saved_wip == null or saved_wip.forge_v2_authoring_state == null:
+		return
+	_ensure_v2_wip_name_popup()
+	_close_v2_wip_delete_popup()
+	v2_wip_name_pending_action = &"rename_v2_wip"
+	v2_wip_name_pending_wip_id = saved_wip_id
+	v2_wip_name_popup_title.text = "Rename V2 Draft"
+	v2_wip_name_confirm_button.text = "Save"
+	v2_wip_name_line_edit.text = _format_saved_v2_wip_label(saved_wip)
+	v2_wip_name_line_edit.select_all()
+	v2_wip_name_popup.popup_centered(V2_WIP_NAME_POPUP_SIZE)
+	v2_wip_name_popup.grab_focus()
+	v2_wip_name_line_edit.grab_focus()
+
+func _on_v2_wip_name_popup_hidden() -> void:
+	v2_wip_name_pending_action = StringName()
+	v2_wip_name_pending_wip_id = StringName()
+
+func _close_v2_wip_name_popup(_restore_workspace: bool = true) -> void:
+	v2_wip_name_pending_action = StringName()
+	v2_wip_name_pending_wip_id = StringName()
+	if is_instance_valid(v2_wip_name_popup):
+		v2_wip_name_popup.hide()
+
+func _confirm_v2_wip_name_popup() -> void:
+	var submitted_name := (
+		v2_wip_name_line_edit.text.strip_edges()
+		if v2_wip_name_line_edit != null
+		else ""
+	)
+	if submitted_name.is_empty():
+		_set_v2_action_status_text("Name required")
+		if v2_wip_name_line_edit != null:
+			v2_wip_name_line_edit.grab_focus()
+		return
+	var succeeded := false
+	match v2_wip_name_pending_action:
+		&"save_as_v2_wip":
+			succeeded = _save_current_v2_draft_as(submitted_name)
+		&"rename_v2_wip":
+			succeeded = _rename_saved_v2_draft(
+				v2_wip_name_pending_wip_id,
+				submitted_name
+			)
+	if not succeeded:
+		if v2_wip_name_line_edit != null:
+			v2_wip_name_line_edit.grab_focus()
+		return
+	_close_v2_wip_name_popup()
+
+func _ensure_v2_wip_delete_popup() -> void:
+	if is_instance_valid(v2_wip_delete_popup):
+		return
+	v2_wip_delete_popup = PopupPanel.new()
+	v2_wip_delete_popup.name = "V2WipDeletePopup"
+	v2_wip_delete_popup.visible = false
+	v2_wip_delete_popup.unresizable = true
+	UiWindowLayerPolicyScript.configure_owned_popup(v2_wip_delete_popup)
+	_apply_v2_popup_theme(v2_wip_delete_popup)
+	add_child(v2_wip_delete_popup)
+	v2_wip_delete_popup.popup_hide.connect(_on_v2_wip_delete_popup_hidden)
+
+	var popup_margin := MarginContainer.new()
+	popup_margin.name = "V2WipDeleteMargin"
+	_apply_margin(popup_margin, 12)
+	v2_wip_delete_popup.add_child(popup_margin)
+
+	var popup_vbox := VBoxContainer.new()
+	popup_vbox.name = "V2WipDeleteVBox"
+	popup_vbox.add_theme_constant_override("separation", 12)
+	popup_margin.add_child(popup_vbox)
+
+	v2_wip_delete_prompt_label = Label.new()
+	v2_wip_delete_prompt_label.name = "DeletePromptLabel"
+	v2_wip_delete_prompt_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v2_wip_delete_prompt_label.custom_minimum_size = Vector2(470.0, 48.0)
+	popup_vbox.add_child(v2_wip_delete_prompt_label)
+
+	var button_row := HBoxContainer.new()
+	button_row.name = "DeleteButtonRow"
+	button_row.add_theme_constant_override("separation", 8)
+	popup_vbox.add_child(button_row)
+
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button_row.add_child(spacer)
+
+	var yes_button := Button.new()
+	yes_button.name = "YesButton"
+	yes_button.text = "Yes"
+	yes_button.custom_minimum_size = Vector2(90.0, 30.0)
+	yes_button.pressed.connect(_confirm_delete_v2_wip)
+	button_row.add_child(yes_button)
+
+	v2_wip_delete_no_button = Button.new()
+	v2_wip_delete_no_button.name = "NoButton"
+	v2_wip_delete_no_button.text = "No"
+	v2_wip_delete_no_button.custom_minimum_size = Vector2(90.0, 30.0)
+	v2_wip_delete_no_button.pressed.connect(_close_v2_wip_delete_popup)
+	button_row.add_child(v2_wip_delete_no_button)
+
+func _open_delete_v2_wip_confirmation(saved_wip_id: StringName) -> void:
+	var wip_library := _get_player_forge_wip_library_state()
+	if wip_library == null or saved_wip_id == StringName():
+		return
+	var saved_wip := wip_library.get_saved_wip(saved_wip_id)
+	if saved_wip == null or saved_wip.forge_v2_authoring_state == null:
+		return
+	_ensure_v2_wip_delete_popup()
+	_close_v2_wip_name_popup(false)
+	v2_wip_delete_pending_wip_id = saved_wip_id
+	v2_wip_delete_prompt_label.text = (
+		"Do you want to permanently delete %s?"
+		% _format_saved_v2_wip_label(saved_wip)
+	)
+	v2_wip_delete_popup.popup_centered(V2_WIP_DELETE_POPUP_SIZE)
+	v2_wip_delete_popup.grab_focus()
+	if v2_wip_delete_no_button != null:
+		v2_wip_delete_no_button.grab_focus()
+
+func _on_v2_wip_delete_popup_hidden() -> void:
+	v2_wip_delete_pending_wip_id = StringName()
+
+func _close_v2_wip_delete_popup() -> void:
+	v2_wip_delete_pending_wip_id = StringName()
+	if is_instance_valid(v2_wip_delete_popup):
+		v2_wip_delete_popup.hide()
+
+func _confirm_delete_v2_wip() -> void:
+	var saved_wip_id := v2_wip_delete_pending_wip_id
+	if saved_wip_id == StringName():
+		_close_v2_wip_delete_popup()
+		return
+	if not _delete_saved_v2_draft(saved_wip_id):
+		return
+	_close_v2_wip_delete_popup()
 
 func _on_profile_canvas_context_requested(
 	target_kind: StringName,
@@ -3776,18 +4174,23 @@ func _rebuild_v2_draft_menu(summary: Dictionary) -> void:
 	var source_wip_id := StringName(summary.get("source_wip_id", StringName()))
 	var saved_label := "Saved WIP: %s" % String(source_wip_id) if source_wip_id != StringName() else "Unsaved V2 draft"
 	_add_v2_disabled_line(popup, saved_label)
-	_add_v2_menu_action(popup, "Save Draft (Ctrl+S)", &"draft_save", null, not has_draft or wip_library == null)
+	var save_disabled := not has_draft or wip_library == null or v2_save_in_progress
+	_add_v2_menu_action(popup, "Save Draft (Ctrl+S)", &"draft_save", null, save_disabled)
+	_add_v2_menu_action(popup, "Save As...", &"draft_save_as", null, save_disabled)
 	popup.add_separator()
-	_add_v2_menu_action(popup, "New V2 Draft", &"draft_new", null, not has_draft)
+	_add_v2_menu_action(popup, "New V2 Draft", &"draft_new", null, not has_draft or v2_save_in_progress)
 	_add_v2_menu_action(
 		popup,
 		"Clear Pending Work",
 		&"draft_clear",
 		null,
-		not has_draft or int(summary.get("pending_material_body_count", 0)) <= 0
+		not has_draft
+		or v2_save_in_progress
+		or int(summary.get("pending_material_body_count", 0)) <= 0
 	)
 	popup.add_separator()
 	var saved_submenu: PopupMenu = _prepare_v2_submenu(popup, "SavedV2DraftSubmenu")
+	_connect_saved_v2_drafts_submenu(saved_submenu)
 	if saved_v2_wips.is_empty():
 		_add_v2_disabled_line(saved_submenu, "No saved V2 drafts")
 	else:
@@ -3799,7 +4202,10 @@ func _rebuild_v2_draft_menu(summary: Dictionary) -> void:
 				saved_wip.wip_id
 			)
 	popup.add_submenu_item("Saved V2 Drafts", String(saved_submenu.name))
-	popup.set_item_disabled(popup.get_item_count() - 1, saved_v2_wips.is_empty())
+	popup.set_item_disabled(
+		popup.get_item_count() - 1,
+		saved_v2_wips.is_empty() or v2_save_in_progress
+	)
 	popup.add_separator()
 	_add_v2_menu_action(popup, "Close Forge", &"close")
 
@@ -4159,10 +4565,23 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 		return
 	var action_id := StringName(menu_entry.get("action", StringName()))
 	var action_value: Variant = menu_entry.get("value", null)
+	if (
+		v2_save_in_progress
+		and action_id not in [
+			&"view_fit",
+			&"view_reset",
+			&"view_zoom_in",
+			&"view_zoom_out",
+		]
+	):
+		_set_v2_action_status_text("Save in progress")
+		return
 	var keep_shape_popup_open := _is_v2_shape_repeat_action(action_id)
 	match action_id:
 		&"draft_save":
 			_save_current_v2_draft()
+		&"draft_save_as":
+			_open_save_as_v2_wip_name_popup()
 		&"draft_new":
 			_on_new_draft_pressed()
 		&"draft_clear":
@@ -4380,6 +4799,9 @@ func _save_current_v2_draft() -> bool:
 	if active_stage_controller == null or not active_stage_controller.has_method("save_current_wip"):
 		_set_v2_action_status_text("Save failed: no V2 draft")
 		return false
+	if v2_save_in_progress:
+		_set_v2_action_status_text("Save already in progress")
+		return false
 	var wip_library: PlayerForgeWipLibraryState = _get_player_forge_wip_library_state()
 	if wip_library == null:
 		_set_v2_action_status_text("Save failed: no WIP library")
@@ -4387,13 +4809,217 @@ func _save_current_v2_draft() -> bool:
 	if workspace_brush_stroke_active:
 		_finish_workspace_brush_stroke(Vector2.ZERO, false)
 	_finish_workspace_spline_point_drag()
-	var saved_wip: CraftedItemWIP = active_stage_controller.call("save_current_wip", wip_library) as CraftedItemWIP
-	if saved_wip == null:
-		_set_v2_action_status_text("Save failed")
+	_begin_v2_save_transaction(false, "", wip_library)
+	return true
+
+func _save_current_v2_draft_as(project_name: String) -> bool:
+	if (
+		active_stage_controller == null
+		or not active_stage_controller.has_method("save_current_wip_as")
+	):
+		_set_v2_action_status_text("Save As failed: no V2 draft")
 		return false
+	if v2_save_in_progress:
+		_set_v2_action_status_text("Save already in progress")
+		return false
+	var cleaned_name := project_name.strip_edges()
+	if cleaned_name.is_empty():
+		_set_v2_action_status_text("Save As failed: name required")
+		return false
+	var wip_library := _get_player_forge_wip_library_state()
+	if wip_library == null:
+		_set_v2_action_status_text("Save As failed: no WIP library")
+		return false
+	if workspace_brush_stroke_active:
+		_finish_workspace_brush_stroke(Vector2.ZERO, false)
+	_finish_workspace_spline_point_drag()
+	_begin_v2_save_transaction(true, cleaned_name, wip_library)
+	return true
+
+func _begin_v2_save_transaction(
+	save_as: bool,
+	project_name: String,
+	wip_library: PlayerForgeWipLibraryState
+) -> void:
+	if v2_save_in_progress:
+		return
+	v2_save_in_progress = true
+	_rebuild_v2_action_menus()
+	_set_v2_action_status_text(
+		"Saving as: committing pending work..."
+		if save_as
+		else "Saving: committing pending work..."
+	)
+	_run_v2_save_transaction(
+		save_as,
+		project_name,
+		wip_library,
+		active_stage_controller
+	)
+
+func _run_v2_save_transaction(
+	save_as: bool,
+	project_name: String,
+	wip_library: PlayerForgeWipLibraryState,
+	stage_controller: Node
+) -> void:
+	var preparation: Dictionary = {"ok": true}
+	if (
+		is_instance_valid(stage_controller)
+		and stage_controller.has_method("prepare_pending_work_for_save")
+	):
+		preparation = await stage_controller.call(
+			"prepare_pending_work_for_save"
+		) as Dictionary
+	if (
+		not is_instance_valid(stage_controller)
+		or stage_controller != active_stage_controller
+		or not bool(preparation.get("ok", false))
+	):
+		_finish_v2_save_transaction_failure(save_as, preparation)
+		return
+	var saved_wip: CraftedItemWIP = (
+		stage_controller.call(
+			"save_current_wip_as",
+			wip_library,
+			project_name,
+			preparation.get("runtime_mesh_packet", {}) as Dictionary
+		) as CraftedItemWIP
+		if save_as
+		else stage_controller.call(
+			"save_current_wip",
+			wip_library,
+			preparation.get("runtime_mesh_packet", {}) as Dictionary
+		) as CraftedItemWIP
+	)
+	v2_save_in_progress = false
+	if saved_wip == null:
+		_rebuild_v2_action_menus()
+		_set_v2_action_status_text(
+			"Save As failed" if save_as else "Save failed"
+		)
+		return
 	_configure_options_from_controller()
 	_refresh_from_controller()
-	_set_v2_action_status_text("Saved: %s" % _format_saved_v2_wip_label(saved_wip))
+	_set_v2_action_status_text(
+		("Saved as: %s" if save_as else "Saved: %s")
+		% _format_saved_v2_wip_label(saved_wip)
+	)
+
+func _finish_v2_save_transaction_failure(
+	save_as: bool,
+	preparation: Dictionary
+) -> void:
+	v2_save_in_progress = false
+	_rebuild_v2_action_menus()
+	var reason := StringName(preparation.get("reason", &"preparation_failed"))
+	var reason_label := String(reason).replace("_", " ")
+	var error_code := String(preparation.get("error_code", ""))
+	if not error_code.is_empty():
+		reason_label = "%s (%s)" % [reason_label, error_code]
+	_set_v2_action_status_text(
+		"%s failed: %s" % [
+			"Save As" if save_as else "Save",
+			reason_label,
+		]
+	)
+
+func _rename_saved_v2_draft(
+	saved_wip_id: StringName,
+	project_name: String
+) -> bool:
+	var wip_library := _get_player_forge_wip_library_state()
+	var cleaned_name := project_name.strip_edges()
+	if (
+		wip_library == null
+		or saved_wip_id == StringName()
+		or cleaned_name.is_empty()
+		or not wip_library.has_method("rename_saved_wip")
+	):
+		_set_v2_action_status_text("Rename failed")
+		return false
+	var renamed_wip := wip_library.call(
+		"rename_saved_wip",
+		saved_wip_id,
+		cleaned_name
+	) as CraftedItemWIP
+	if renamed_wip == null:
+		_set_v2_action_status_text("Rename failed")
+		return false
+	if (
+		active_stage_controller != null
+		and active_stage_controller.has_method(
+			"apply_active_saved_wip_project_name"
+		)
+	):
+		active_stage_controller.call(
+			"apply_active_saved_wip_project_name",
+			saved_wip_id,
+			renamed_wip.forge_project_name
+		)
+	_refresh_from_controller()
+	_set_v2_action_status_text(
+		"Renamed: %s" % _format_saved_v2_wip_label(renamed_wip)
+	)
+	return true
+
+func _delete_saved_v2_draft(saved_wip_id: StringName) -> bool:
+	var wip_library := _get_player_forge_wip_library_state()
+	if wip_library == null or saved_wip_id == StringName():
+		_set_v2_action_status_text("Delete failed")
+		return false
+	var saved_wip := wip_library.get_saved_wip(saved_wip_id)
+	if saved_wip == null or saved_wip.forge_v2_authoring_state == null:
+		_set_v2_action_status_text("Delete failed: V2 draft not found")
+		return false
+	var deleted_name := _format_saved_v2_wip_label(saved_wip)
+	var selected_wip_id_before := wip_library.selected_wip_id
+	var active_saved_wip_id := (
+		StringName(active_stage_controller.call("get_active_saved_wip_id"))
+		if (
+			active_stage_controller != null
+			and active_stage_controller.has_method("get_active_saved_wip_id")
+		)
+		else StringName()
+	)
+	if not wip_library.delete_saved_wip(saved_wip_id, false):
+		_set_v2_action_status_text("Delete failed")
+		return false
+	var discarded_active_wip := false
+	if (
+		active_stage_controller != null
+		and active_stage_controller.has_method("discard_deleted_active_saved_wip")
+	):
+		discarded_active_wip = bool(active_stage_controller.call(
+			"discard_deleted_active_saved_wip",
+			saved_wip_id
+		))
+	var selected_wip_id_after := selected_wip_id_before
+	if selected_wip_id_after == saved_wip_id:
+		selected_wip_id_after = (
+			active_saved_wip_id
+			if (
+				active_saved_wip_id != saved_wip_id
+				and wip_library.get_saved_wip(active_saved_wip_id) != null
+			)
+			else StringName()
+		)
+	if wip_library.selected_wip_id != selected_wip_id_after:
+		wip_library.set_selected_wip_id(selected_wip_id_after)
+	if wip_library.get_saved_wip(saved_wip_id) != null:
+		_set_v2_action_status_text("Delete failed: saved WIP still exists")
+		return false
+	_refresh_from_controller()
+	# CRUD can happen while the native Saved Drafts submenu is still alive.
+	# Rebuild it immediately so a removed stable ID cannot remain as a stale,
+	# apparently-openable row until the next top-menu activation.
+	_rebuild_v2_action_menus()
+	_set_v2_action_status_text(
+		"Deleted permanently: %s%s" % [
+			deleted_name,
+			" | opened a new blank draft" if discarded_active_wip else "",
+		]
+	)
 	return true
 
 func _load_saved_v2_draft(saved_wip_id: StringName) -> bool:
@@ -4679,6 +5305,19 @@ func _cancel_profile_builder_metric_pan() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_open():
 		return
+	if v2_save_in_progress:
+		if _v2_event_matches_binding(
+			ForgeV2KeybindingStateScript.ACTION_VIEW_FIT,
+			event
+		):
+			_call_workspace_preview_action(&"fit_view")
+		elif _v2_event_matches_binding(
+			ForgeV2KeybindingStateScript.ACTION_VIEW_RESET,
+			event
+		):
+			_call_workspace_preview_action(&"reset_view")
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed(&"ui_cancel"):
 		if _close_focused_temporary_window_layer():
 			get_viewport().set_input_as_handled()
@@ -4736,6 +5375,9 @@ func _close_focused_temporary_window_layer() -> bool:
 		profile_fillet_popup,
 		profile_canvas_context_panel,
 		keybindings_popup,
+		v2_wip_delete_popup,
+		v2_wip_name_popup,
+		saved_v2_drafts_context_panel,
 		profile_name_popup,
 		profile_saved_profiles_context_panel,
 		profile_saved_profiles_popup,
@@ -4780,6 +5422,12 @@ func _close_focused_temporary_window_layer() -> bool:
 		_hide_profile_canvas_context_menu()
 	elif target_layer == keybindings_popup:
 		_close_keybindings_popup()
+	elif target_layer == v2_wip_delete_popup:
+		_close_v2_wip_delete_popup()
+	elif target_layer == v2_wip_name_popup:
+		_close_v2_wip_name_popup()
+	elif target_layer == saved_v2_drafts_context_panel:
+		_hide_saved_v2_draft_context_menu()
 	elif target_layer == profile_name_popup:
 		_close_profile_name_popup()
 	elif target_layer == profile_saved_profiles_context_panel:
@@ -4810,6 +5458,9 @@ func _has_focused_window_layer() -> bool:
 		profile_fillet_popup,
 		profile_canvas_context_panel,
 		keybindings_popup,
+		v2_wip_delete_popup,
+		v2_wip_name_popup,
+		saved_v2_drafts_context_panel,
 		profile_name_popup,
 		profile_saved_profiles_context_panel,
 		profile_saved_profiles_popup,
@@ -5300,6 +5951,9 @@ func _handle_workspace_mouse_button(mouse_button_event: InputEventMouseButton) -
 		workspace_view_container.accept_event()
 		return
 	if mouse_button_event.button_index != paint_mouse_button:
+		return
+	if v2_save_in_progress:
+		workspace_view_container.accept_event()
 		return
 	if mouse_button_event.pressed:
 		if _is_v2_path_point_tool_active():

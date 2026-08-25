@@ -9,6 +9,9 @@ const ForgeV2ProfileShapeLibraryScript = preload(
 const ForgeV2WipCompatibilityAdapterScript = preload(
 	"res://runtime/forge_v2/forge_v2_wip_compatibility_adapter.gd"
 )
+const PrimaryGripHandleMeshPacketScript = preload(
+	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
+)
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
 const PlayerForgeWipLibraryStateScript = preload(
 	"res://core/models/player_forge_wip_library_state.gd"
@@ -311,6 +314,20 @@ func _build_v2_fixture(
 			"valid": false,
 			"error": String(mesh_packet.get("error", "could not build final prism")),
 		}
+	mesh_packet["primary_grip_handle_vertices"] = mesh_packet.get(
+		"vertices",
+		PackedVector3Array()
+	)
+	mesh_packet["primary_grip_handle_indices"] = mesh_packet.get(
+		"indices",
+		PackedInt32Array()
+	)
+	mesh_packet["primary_grip_handle_mesh_source"] = (
+		PrimaryGripHandleMeshPacketScript.SOURCE
+	)
+	mesh_packet["primary_grip_handle_body_signature"] = (
+		PrimaryGripHandleMeshPacketScript.build_body_signature(handle_body)
+	)
 	var wip := _build_v2_wip_from_state(state, wip_id, project_name)
 	var contract: Dictionary = ForgeV2WipCompatibilityAdapterScript.build_runtime_contract(
 		wip,

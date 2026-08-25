@@ -9,6 +9,9 @@ const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_run
 const ForgeV2WipCompatibilityAdapterScript = preload(
 	"res://runtime/forge_v2/forge_v2_wip_compatibility_adapter.gd"
 )
+const PrimaryGripHandleMeshPacketScript = preload(
+	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
+)
 
 var forge_rules: ForgeRulesDef = DEFAULT_FORGE_RULES_RESOURCE
 var tier_resolver: TierResolver
@@ -339,13 +342,80 @@ func _build_forge_v2_runtime_mesh_packet(wip: CraftedItemWIP) -> Dictionary:
 		vertices_meters[vertex_index] = (
 			vertices_cell_units[vertex_index] * cell_size_meters
 		)
-	return {
+	var runtime_mesh_packet := {
 		"ok": true,
 		"vertices": vertices_meters,
 		"indices": indices,
 		"watertight": true,
 		"source": &"stage2_authoritative_editable_mesh",
 	}
+	var primary_grip_handle_mesh_state := stage2_item_state.get(
+		"primary_grip_handle_mesh_state"
+	) as Resource
+	var primary_grip_handle_mesh_source := StringName(stage2_item_state.get(
+		"primary_grip_handle_mesh_source"
+	))
+	var primary_grip_handle_body_signature := String(stage2_item_state.get(
+		"primary_grip_handle_body_signature"
+	))
+	if (
+		primary_grip_handle_mesh_state != null
+		and primary_grip_handle_mesh_source
+		== PrimaryGripHandleMeshPacketScript.SOURCE
+		and not primary_grip_handle_body_signature.is_empty()
+		and primary_grip_handle_mesh_state.has_method("has_surface_arrays")
+		and bool(primary_grip_handle_mesh_state.call("has_surface_arrays"))
+		and int(primary_grip_handle_mesh_state.get("primitive_type"))
+		== Mesh.PRIMITIVE_TRIANGLES
+	):
+		var primary_grip_surface_arrays: Array = primary_grip_handle_mesh_state.get(
+			"surface_arrays"
+		) as Array
+		if (
+			primary_grip_surface_arrays.size() > Mesh.ARRAY_INDEX
+			and primary_grip_surface_arrays[Mesh.ARRAY_VERTEX]
+			is PackedVector3Array
+			and primary_grip_surface_arrays[Mesh.ARRAY_INDEX]
+			is PackedInt32Array
+		):
+			var primary_grip_vertices_cell_units := (
+				primary_grip_surface_arrays[Mesh.ARRAY_VERTEX]
+				as PackedVector3Array
+			)
+			var primary_grip_indices := PackedInt32Array(
+				primary_grip_surface_arrays[Mesh.ARRAY_INDEX]
+			)
+			if (
+				not primary_grip_vertices_cell_units.is_empty()
+				and not primary_grip_indices.is_empty()
+				and primary_grip_indices.size() % 3 == 0
+			):
+				var primary_grip_vertices_meters := PackedVector3Array()
+				primary_grip_vertices_meters.resize(
+					primary_grip_vertices_cell_units.size()
+				)
+				for vertex_index: int in range(
+					primary_grip_vertices_cell_units.size()
+				):
+					primary_grip_vertices_meters[vertex_index] = (
+						primary_grip_vertices_cell_units[vertex_index]
+						* cell_size_meters
+					)
+				runtime_mesh_packet["primary_grip_handle_vertices"] = (
+					primary_grip_vertices_meters
+				)
+				runtime_mesh_packet["primary_grip_handle_indices"] = (
+					primary_grip_indices
+				)
+				runtime_mesh_packet["primary_grip_handle_mesh_source"] = (
+					primary_grip_handle_mesh_source
+				)
+				runtime_mesh_packet[
+					"primary_grip_handle_body_signature"
+				] = (
+					primary_grip_handle_body_signature
+				)
+	return runtime_mesh_packet
 
 func _enrich_forge_v2_profile_material_data(
 	profile: BakedProfile,

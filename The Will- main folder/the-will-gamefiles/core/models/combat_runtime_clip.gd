@@ -5,7 +5,7 @@ const CombatOriginRecordScript = preload("res://core/models/combat_origin_record
 
 const SCHEMA_VERSION := 7
 const UPPER_BODY_POSE_TRACK_SOURCE_SKILL_CRAFTER_AUTHORED_POSE: StringName = &"skill_crafter_authored_pose"
-const SOLVED_REPLAY_TRACK_SOURCE_SKILL_CRAFTER_F_PLAYBACK: StringName = &"skill_crafter_f_playback"
+const SOLVED_REPLAY_TRACK_SOURCE_SKILL_CRAFTER_F_PLAYBACK: StringName = &"skill_crafter_f_playback_grip_slice_center_v1"
 const SOLVED_REPLAY_REFERENCE_BONE_NAME: StringName = &"RL_BoneRoot"
 
 const CLIP_KIND_SKILL_BODY: StringName = &"skill_body"

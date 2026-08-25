@@ -2,6 +2,7 @@ extends RefCounted
 class_name PlayerRigGripLayoutPresenter
 
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+const PrimaryGripSeatResolverScript = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
 
 func resolve_grip_hold_layout(
 	baked_profile: BakedProfile,
@@ -34,17 +35,33 @@ func resolve_grip_hold_layout(
 	}
 	if baked_profile == null or not baked_profile.primary_grip_valid:
 		return layout
+	if not PrimaryGripSeatResolverScript.profile_has_authoritative_path(baked_profile):
+		return layout
 
 	var safe_cell_world_size_meters: float = maxf(cell_world_size_meters, 0.00001)
 	var slide_axis: Vector3 = resolve_profile_slide_axis(baked_profile)
 	if slide_axis == Vector3.ZERO:
 		return layout
 
-	var dominant_position: Vector3 = baked_profile.primary_grip_contact_position
+	var dominant_ratio := clampf(
+		baked_profile.primary_grip_axis_ratio_from_span_start,
+		0.0,
+		1.0
+	)
+	var dominant_seat_state := PrimaryGripSeatResolverScript.resolve_profile_seat(
+		baked_profile,
+		dominant_ratio
+	)
+	if not bool(dominant_seat_state.get("valid", false)):
+		return layout
+	var dominant_position: Vector3 = dominant_seat_state.get(
+		"position",
+		Vector3.ZERO
+	) as Vector3
 	layout.valid = true
 	layout.dominant_hand_local_position = dominant_position
 	layout.dominant_hand_position_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
-	layout.dominant_hand_axis_ratio_from_span_start = project_axis_ratio_on_profile_span(dominant_position, baked_profile)
+	layout.dominant_hand_axis_ratio_from_span_start = dominant_ratio
 	layout.dominant_hand_contact_percent = resolve_profile_contact_percent(float(layout.dominant_hand_axis_ratio_from_span_start), baked_profile)
 	layout.two_hand_weapon_eligible = baked_profile.primary_grip_two_hand_eligible
 	layout.center_balance_valid = baked_profile.primary_grip_center_balance_valid
@@ -69,15 +86,47 @@ func resolve_grip_hold_layout(
 		if effective_half_span_meters <= 0.0:
 			return layout
 		var dominant_offset_units: float = effective_half_span_meters / safe_cell_world_size_meters
-		var support_offset_units: float = -dominant_offset_units
-		dominant_position = baked_profile.primary_grip_center_balance_origin + slide_axis * dominant_offset_units
-		var balanced_support_position: Vector3 = baked_profile.primary_grip_center_balance_origin + slide_axis * support_offset_units
+		var chord_span_units := baked_profile.primary_grip_span_start.distance_to(
+			baked_profile.primary_grip_span_end
+		)
+		if chord_span_units <= 0.00001:
+			layout.valid = false
+			return layout
+		var center_ratio := project_axis_ratio_on_profile_span(
+			baked_profile.primary_grip_center_balance_origin,
+			baked_profile
+		)
+		var ratio_offset := dominant_offset_units / chord_span_units
+		var balanced_dominant_ratio := clampf(center_ratio + ratio_offset, 0.0, 1.0)
+		var balanced_support_ratio := clampf(center_ratio - ratio_offset, 0.0, 1.0)
+		var balanced_dominant_state := PrimaryGripSeatResolverScript.resolve_profile_seat(
+			baked_profile,
+			balanced_dominant_ratio
+		)
+		var balanced_support_state := PrimaryGripSeatResolverScript.resolve_profile_seat(
+			baked_profile,
+			balanced_support_ratio
+		)
+		if (
+			not bool(balanced_dominant_state.get("valid", false))
+			or not bool(balanced_support_state.get("valid", false))
+		):
+			layout.valid = false
+			return layout
+		dominant_position = balanced_dominant_state.get(
+			"position",
+			Vector3.ZERO
+		) as Vector3
+		var balanced_support_position: Vector3 = balanced_support_state.get(
+			"position",
+			Vector3.ZERO
+		) as Vector3
 		layout.dominant_hand_local_position = dominant_position
 		layout.dominant_hand_position_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 		layout.support_hand_local_position = balanced_support_position
 		layout.support_hand_position_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
-		layout.dominant_hand_axis_ratio_from_span_start = project_axis_ratio_on_profile_span(dominant_position, baked_profile)
-		layout.support_hand_axis_ratio_from_span_start = project_axis_ratio_on_profile_span(balanced_support_position, baked_profile)
+		layout.dominant_hand_axis_ratio_from_span_start = balanced_dominant_ratio
+		layout.support_hand_axis_ratio_from_span_start = balanced_support_ratio
 		layout.dominant_hand_contact_percent = resolve_profile_contact_percent(float(layout.dominant_hand_axis_ratio_from_span_start), baked_profile)
 		layout.support_hand_contact_percent = resolve_profile_contact_percent(float(layout.support_hand_axis_ratio_from_span_start), baked_profile)
 		layout.effective_two_hand_span_meters = effective_half_span_meters * 2.0
@@ -87,18 +136,42 @@ func resolve_grip_hold_layout(
 		return layout
 
 	var far_side_position: Vector3 = baked_profile.primary_grip_far_side_position
-	var support_direction: Vector3 = far_side_position - dominant_position
-	if support_direction.length_squared() <= 0.00001:
+	var far_side_ratio := project_axis_ratio_on_profile_span(
+		far_side_position,
+		baked_profile
+	)
+	var ratio_distance := absf(far_side_ratio - dominant_ratio)
+	if ratio_distance <= 0.00001:
 		return layout
-	var available_support_distance_meters: float = dominant_position.distance_to(far_side_position) * safe_cell_world_size_meters
+	var chord_span_units := baked_profile.primary_grip_span_start.distance_to(
+		baked_profile.primary_grip_span_end
+	)
+	var available_support_distance_meters: float = (
+		ratio_distance * chord_span_units * safe_cell_world_size_meters
+	)
 	var effective_support_distance_meters: float = minf(max_model_arm_reach_combat_meters, available_support_distance_meters)
 	layout.weapon_two_hand_span_meters = available_support_distance_meters
 	if effective_support_distance_meters <= 0.0:
 		return layout
-	var far_side_support_position: Vector3 = dominant_position + support_direction.normalized() * (effective_support_distance_meters / safe_cell_world_size_meters)
+	var support_ratio := lerpf(
+		dominant_ratio,
+		far_side_ratio,
+		effective_support_distance_meters / available_support_distance_meters
+	)
+	var support_seat_state := PrimaryGripSeatResolverScript.resolve_profile_seat(
+		baked_profile,
+		support_ratio
+	)
+	if not bool(support_seat_state.get("valid", false)):
+		layout.valid = false
+		return layout
+	var far_side_support_position: Vector3 = support_seat_state.get(
+		"position",
+		Vector3.ZERO
+	) as Vector3
 	layout.support_hand_local_position = far_side_support_position
 	layout.support_hand_position_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
-	layout.support_hand_axis_ratio_from_span_start = project_axis_ratio_on_profile_span(far_side_support_position, baked_profile)
+	layout.support_hand_axis_ratio_from_span_start = support_ratio
 	layout.support_hand_contact_percent = resolve_profile_contact_percent(float(layout.support_hand_axis_ratio_from_span_start), baked_profile)
 	layout.effective_two_hand_span_meters = effective_support_distance_meters
 	layout.two_hand_character_eligible = true
@@ -119,12 +192,9 @@ func apply_pole_grip_arm_reach_limits(max_model_arm_reach_meters: float, pole_gr
 func resolve_profile_slide_axis(baked_profile: BakedProfile) -> Vector3:
 	if baked_profile == null:
 		return Vector3.ZERO
-	if baked_profile.primary_grip_slide_axis != Vector3.ZERO:
-		return baked_profile.primary_grip_slide_axis.normalized()
-	var span_vector: Vector3 = baked_profile.primary_grip_span_end - baked_profile.primary_grip_span_start
-	if span_vector == Vector3.ZERO:
+	if baked_profile.primary_grip_slide_axis == Vector3.ZERO:
 		return Vector3.ZERO
-	return span_vector.normalized()
+	return baked_profile.primary_grip_slide_axis.normalized()
 
 func resolve_profile_half_span_limit_meters(limit_ratio: float, baked_profile: BakedProfile, cell_world_size_meters: float) -> float:
 	if baked_profile == null:

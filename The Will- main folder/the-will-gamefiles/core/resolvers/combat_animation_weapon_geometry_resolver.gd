@@ -3,6 +3,9 @@ class_name CombatAnimationWeaponGeometryResolver
 
 const DEFAULT_FORGE_RULES_RESOURCE: ForgeRulesDef = preload("res://core/defs/forge/forge_rules_default.tres")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+const PrimaryGripSeatResolverScript = preload(
+	"res://core/resolvers/primary_grip_seat_resolver.gd"
+)
 
 var forge_rules: ForgeRulesDef = DEFAULT_FORGE_RULES_RESOURCE
 
@@ -12,7 +15,16 @@ func _init(rules: ForgeRulesDef = null) -> void:
 func resolve_motion_seed_data(baked_profile: BakedProfile) -> Dictionary:
 	if baked_profile == null or not baked_profile.primary_grip_valid:
 		return {}
-	var grip_origin_local: Vector3 = baked_profile.primary_grip_contact_position
+	var grip_seat_state := PrimaryGripSeatResolverScript.resolve_profile_seat(
+		baked_profile,
+		baked_profile.primary_grip_axis_ratio_from_span_start
+	)
+	if not bool(grip_seat_state.get("valid", false)):
+		return {}
+	var grip_origin_local: Vector3 = grip_seat_state.get(
+		"position",
+		Vector3.ZERO
+	) as Vector3
 	var tip_point_local: Vector3 = baked_profile.weapon_tip_point
 	var pommel_point_local: Vector3 = baked_profile.weapon_pommel_point
 	if tip_point_local.is_equal_approx(pommel_point_local):

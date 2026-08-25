@@ -12,6 +12,9 @@ const ForgeV2ProfileShapeLibraryScript = preload(
 const ForgeV2WipCompatibilityAdapterScript = preload(
 	"res://runtime/forge_v2/forge_v2_wip_compatibility_adapter.gd"
 )
+const PrimaryGripHandleMeshPacketScript = preload(
+	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
+)
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
 const PlayerForgeWipLibraryStateScript = preload(
 	"res://core/models/player_forge_wip_library_state.gd"
@@ -92,7 +95,10 @@ func _run_verification() -> void:
 		authoring_state,
 		&"verify_forge_v2_runtime_contract"
 	)
-	var final_mesh_packet: Dictionary = _build_watertight_box_packet()
+	var final_mesh_packet := _authorize_primary_grip_handle_packet(
+		_build_watertight_box_packet(),
+		handle_body
+	)
 	var contract: Dictionary = ForgeV2WipCompatibilityAdapterScript.build_runtime_contract(
 		wip,
 		final_mesh_packet,
@@ -205,12 +211,12 @@ func _run_verification() -> void:
 	result_lines.append(
 		"PASS: diagonal Handle retained exact orthogonal authored basis and valid equip/grip"
 	)
-	if not _verify_face_duplicated_single_unit_acceptance(wip):
+	if not _verify_face_duplicated_single_unit_acceptance(wip, handle_body):
 		return
 	result_lines.append(
 		"PASS: coincident face-duplicated vertices weld into one valid final unit"
 	)
-	if not _verify_disconnected_final_mesh_rejection(wip):
+	if not _verify_disconnected_final_mesh_rejection(wip, handle_body):
 		return
 	result_lines.append(
 		"PASS: disconnected two-box final mesh was rejected while retaining diagnostic Stage2 mesh"
@@ -405,6 +411,11 @@ func _build_watertight_box_packet() -> Dictionary:
 		"ok": true,
 		"vertices": vertices,
 		"indices": indices,
+		"primary_grip_handle_vertices": PackedVector3Array(vertices),
+		"primary_grip_handle_indices": PackedInt32Array(indices),
+		"primary_grip_handle_mesh_source": (
+			PrimaryGripHandleMeshPacketScript.SOURCE
+		),
 		"watertight": true,
 		"output_volume_m3": 0.32 * 0.05 * 0.04,
 		"source_original_ids": PackedStringArray(["verify_handle"]),
@@ -444,6 +455,14 @@ func _build_oriented_handle_box_packet(handle_body: Resource) -> Dictionary:
 		"ok": true,
 		"vertices": vertices,
 		"indices": _build_box_triangle_indices(),
+		"primary_grip_handle_vertices": PackedVector3Array(vertices),
+		"primary_grip_handle_indices": _build_box_triangle_indices(),
+		"primary_grip_handle_mesh_source": (
+			PrimaryGripHandleMeshPacketScript.SOURCE
+		),
+		"primary_grip_handle_body_signature": (
+			PrimaryGripHandleMeshPacketScript.build_body_signature(handle_body)
+		),
 		"watertight": true,
 		"output_volume_m3": (
 			start.distance_to(end) * bounds.size.x * bounds.size.y
@@ -474,6 +493,17 @@ func _build_disconnected_two_box_packet() -> Dictionary:
 		"ok": true,
 		"vertices": vertices,
 		"indices": indices,
+		"primary_grip_handle_vertices": PackedVector3Array(first_box.get(
+			"primary_grip_handle_vertices",
+			PackedVector3Array()
+		)),
+		"primary_grip_handle_indices": PackedInt32Array(first_box.get(
+			"primary_grip_handle_indices",
+			PackedInt32Array()
+		)),
+		"primary_grip_handle_mesh_source": (
+			PrimaryGripHandleMeshPacketScript.SOURCE
+		),
 		"watertight": true,
 		"output_volume_m3": 2.0 * 0.32 * 0.05 * 0.04,
 		"source_original_ids": PackedStringArray([
@@ -513,6 +543,11 @@ func _build_face_duplicated_single_box_packet() -> Dictionary:
 		"ok": true,
 		"vertices": duplicated_vertices,
 		"indices": duplicated_indices,
+		"primary_grip_handle_vertices": PackedVector3Array(source_vertices),
+		"primary_grip_handle_indices": PackedInt32Array(source_indices),
+		"primary_grip_handle_mesh_source": (
+			PrimaryGripHandleMeshPacketScript.SOURCE
+		),
 		"watertight": true,
 		"output_volume_m3": 0.32 * 0.05 * 0.04,
 		"source_original_ids": PackedStringArray([
@@ -532,6 +567,20 @@ func _build_box_triangle_indices() -> PackedInt32Array:
 		0, 1, 5, 0, 5, 4,
 		3, 7, 6, 3, 6, 2,
 	])
+
+
+func _authorize_primary_grip_handle_packet(
+	mesh_packet: Dictionary,
+	handle_body: Resource
+) -> Dictionary:
+	var result := mesh_packet.duplicate(true)
+	result["primary_grip_handle_mesh_source"] = (
+		PrimaryGripHandleMeshPacketScript.SOURCE
+	)
+	result["primary_grip_handle_body_signature"] = (
+		PrimaryGripHandleMeshPacketScript.build_body_signature(handle_body)
+	)
+	return result
 
 
 func _verify_v2_grip_profile_contract(
@@ -888,12 +937,16 @@ func _verify_diagonal_handle_runtime_contract() -> bool:
 
 
 func _verify_disconnected_final_mesh_rejection(
-	valid_handle_wip: CraftedItemWIP
+	valid_handle_wip: CraftedItemWIP,
+	handle_body: Resource
 ) -> bool:
 	var disconnected_contract := (
 		ForgeV2WipCompatibilityAdapterScript.build_runtime_contract(
 			valid_handle_wip,
-			_build_disconnected_two_box_packet(),
+			_authorize_primary_grip_handle_packet(
+				_build_disconnected_two_box_packet(),
+				handle_body
+			),
 			CELL_SIZE_METERS
 		)
 	)
@@ -928,11 +981,15 @@ func _verify_disconnected_final_mesh_rejection(
 
 
 func _verify_face_duplicated_single_unit_acceptance(
-	valid_handle_wip: CraftedItemWIP
+	valid_handle_wip: CraftedItemWIP,
+	handle_body: Resource
 ) -> bool:
 	var contract := ForgeV2WipCompatibilityAdapterScript.build_runtime_contract(
 		valid_handle_wip,
-		_build_face_duplicated_single_box_packet(),
+		_authorize_primary_grip_handle_packet(
+			_build_face_duplicated_single_box_packet(),
+			handle_body
+		),
 		CELL_SIZE_METERS
 	)
 	return _expect(
@@ -1141,10 +1198,40 @@ func _verify_temp_save_reload(wip: CraftedItemWIP) -> bool:
 	):
 		return false
 	var fresh_service: ForgeService = ForgeServiceScript.new(DEFAULT_FORGE_RULES)
+	var persisted_handle_signature := String(
+		reloaded_wip.stage2_item_state.get(
+			"primary_grip_handle_body_signature"
+		)
+	)
+	var reloaded_handle_signature := ""
+	for body_variant: Variant in (
+		reloaded_wip.forge_v2_authoring_state.get("material_bodies") as Array
+	):
+		var body := body_variant as Resource
+		if (
+			body != null
+			and StringName(body.get("body_kind"))
+			== ForgeV2MaterialBodyScript.BODY_KIND_HANDLE_PROFILE
+		):
+			reloaded_handle_signature = (
+				PrimaryGripHandleMeshPacketScript.build_body_signature(body)
+			)
+			break
 	var reloaded_profile: BakedProfile = fresh_service.bake_wip(reloaded_wip, {})
 	var reloaded_print: TestPrintInstance = fresh_service.build_test_print_from_wip(
 		reloaded_wip,
 		{}
+	)
+	result_lines.append(
+		"reload.persisted_handle_signature=%s" % persisted_handle_signature
+	)
+	result_lines.append(
+		"reload.recomputed_handle_signature=%s" % reloaded_handle_signature
+	)
+	result_lines.append(
+		"reload.profile_validation_error=%s" % String(
+			reloaded_profile.validation_error if reloaded_profile != null else "profile_null"
+		)
 	)
 	if not _expect(
 		reloaded_profile != null

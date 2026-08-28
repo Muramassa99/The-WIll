@@ -35,6 +35,9 @@ func apply_primary_grip_profile(
 	profile.primary_grip_slice_centers = PackedVector3Array(
 		primary_grip.span_slice_center_local_positions
 	)
+	profile.primary_grip_slice_centers_origin_id = (
+		primary_grip.span_slice_center_positions_origin_id
+	)
 	if not PrimaryGripSeatResolverScript.profile_has_authoritative_path(profile):
 		profile.primary_grip_valid = false
 		profile.validation_error = "primary_grip_slice_center_path_invalid"
@@ -194,6 +197,7 @@ func _resolve_primary_grip_span_projection(primary_grip: AnchorAtom, desired_pos
 			PrimaryGripSeatResolverScript.resolve_sampled_seat(
 				primary_grip.span_slice_axis_ratios_from_start,
 				primary_grip.span_slice_center_local_positions,
+				primary_grip.span_slice_center_positions_origin_id,
 				clamped_ratio
 			).get("position", Vector3.ZERO) as Vector3
 		),

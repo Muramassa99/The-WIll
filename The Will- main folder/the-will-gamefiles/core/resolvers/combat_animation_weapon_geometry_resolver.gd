@@ -21,6 +21,12 @@ func resolve_motion_seed_data(baked_profile: BakedProfile) -> Dictionary:
 	)
 	if not bool(grip_seat_state.get("valid", false)):
 		return {}
+	var grip_origin_id: StringName = grip_seat_state.get(
+		"position_origin_id",
+		StringName()
+	) as StringName
+	if grip_origin_id != CombatOriginRecordScript.ORIGIN_WEAPON_ROOT:
+		return {}
 	var grip_origin_local: Vector3 = grip_seat_state.get(
 		"position",
 		Vector3.ZERO

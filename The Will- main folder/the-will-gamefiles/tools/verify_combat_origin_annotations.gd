@@ -40,6 +40,13 @@ const STRICT_SOURCE_PAIR_CHECKS := [
 		"max_lines": 2,
 	},
 	{
+		"id": "anchor_atom_span_slice_centers_export",
+		"path": "res://core/atoms/anchor_atom.gd",
+		"local": "@export var span_slice_center_local_positions",
+		"origin": "@export var span_slice_center_positions_origin_id",
+		"max_lines": 2,
+	},
+	{
 		"id": "anchor_resolver_position_origin_write",
 		"path": "res://core/resolvers/anchor_resolver.gd",
 		"local": "anchor.local_position = grip_span.get",
@@ -66,6 +73,34 @@ const STRICT_SOURCE_PAIR_CHECKS := [
 		"local": "anchor.span_end_local_position = grip_span.get",
 		"origin": "anchor.span_end_position_origin_id = AnchorAtom.DEFAULT_ANCHOR_ORIGIN_ID",
 		"max_lines": 2,
+	},
+	{
+		"id": "anchor_resolver_span_slice_centers_origin_write",
+		"path": "res://core/resolvers/anchor_resolver.gd",
+		"local": "anchor.span_slice_center_local_positions = grip_span.get",
+		"origin": "anchor.span_slice_center_positions_origin_id = AnchorAtom.DEFAULT_ANCHOR_ORIGIN_ID",
+		"max_lines": 5,
+	},
+	{
+		"id": "baked_profile_grip_slice_centers_origin_export",
+		"path": "res://core/models/baked_profile.gd",
+		"local": "@export var primary_grip_slice_centers:",
+		"origin": "@export var primary_grip_slice_centers_origin_id:",
+		"max_lines": 2,
+	},
+	{
+		"id": "station_ui_grip_slice_centers_cache_read_origin",
+		"path": "res://runtime/combat/combat_animation_station_ui.gd",
+		"local": "var centers := profile.primary_grip_slice_centers",
+		"origin": "var centers_origin_id := profile.primary_grip_slice_centers_origin_id",
+		"max_lines": 2,
+	},
+	{
+		"id": "profile_grip_slice_centers_origin_copy",
+		"path": "res://core/resolvers/profile_primary_grip_resolver.gd",
+		"local": "profile.primary_grip_slice_centers = PackedVector3Array(",
+		"origin": "profile.primary_grip_slice_centers_origin_id = (",
+		"max_lines": 5,
 	},
 	{
 		"id": "motion_node_tip_export",
@@ -903,7 +938,7 @@ const STRICT_SOURCE_PAIR_CHECKS := [
 	{
 		"id": "preview_unarmed_grip_axis_origin",
 		"path": "res://runtime/combat/combat_animation_station_preview_presenter.gd",
-		"local": "var grip_axis_local: Vector3 = (local_tip - local_pommel).normalized()",
+		"local": "var grip_axis_local: Vector3 = resolved_tip - resolved_pommel",
 		"origin": "var grip_axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT",
 		"max_lines": 2,
 	},
@@ -1008,8 +1043,8 @@ const STRICT_SOURCE_PAIR_CHECKS := [
 	{
 		"id": "preview_unarmed_hand_mount_transform_write_origin",
 		"path": "res://runtime/combat/combat_animation_station_preview_presenter.gd",
-		"local": "held_root.set_meta(PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_META",
-		"origin": "held_root.set_meta(PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_ORIGIN_META",
+		"local": "proxy_root.set_meta(PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_META",
+		"origin": "proxy_root.set_meta(PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_ORIGIN_META",
 		"max_lines": 2,
 	},
 	{
@@ -1992,6 +2027,104 @@ const STRICT_SOURCE_PAIR_CHECKS := [
 		"origin": "target_node.set_meta(\"restriction_offset_origin_id\", offset_origin_id)",
 		"max_lines": 2,
 	},
+	{
+		"id": "digit_rule_hinge_axis_origin",
+		"path": "res://runtime/player/player_digit_hinge_rules.gd",
+		"local": "expanded_rule[\"hinge_axis_local\"] = HINGE_AXIS_LOCAL",
+		"origin": "expanded_rule[\"hinge_axis_origin_id\"] = bone_name",
+		"max_lines": 2,
+	},
+	{
+		"id": "digit_rule_zero_direction_origin",
+		"path": "res://runtime/player/player_digit_hinge_rules.gd",
+		"local": "expanded_rule[\"zero_direction_local\"] = ZERO_DIRECTION_LOCAL",
+		"origin": "expanded_rule[\"zero_direction_origin_id\"] = bone_name",
+		"max_lines": 2,
+	},
+	{
+		"id": "humanoid_digit_hinge_axis_read_origin",
+		"path": "res://runtime/player/player_humanoid_rig.gd",
+		"local": "var hinge_axis_local: Vector3 = rule.get(\"hinge_axis_local\"",
+		"origin": "var hinge_axis_origin_id: StringName = rule.get(\"hinge_axis_origin_id\"",
+		"max_lines": 2,
+	},
+	{
+		"id": "humanoid_digit_zero_direction_read_origin",
+		"path": "res://runtime/player/player_humanoid_rig.gd",
+		"local": "var zero_direction_local: Vector3 = rule.get(\"zero_direction_local\"",
+		"origin": "var zero_direction_origin_id: StringName = rule.get(\"zero_direction_origin_id\"",
+		"max_lines": 2,
+	},
+	{
+		"id": "humanoid_digit_neutral_rotation_result_origin",
+		"path": "res://runtime/player/player_humanoid_rig.gd",
+		"local": "result[\"neutral_local_rotation\"] = neutral_local_rotation",
+		"origin": "result[\"neutral_rotation_origin_id\"] = bone_name",
+		"max_lines": 2,
+	},
+	{
+		"id": "finger_grip_hinge_axis_read_origin",
+		"path": "res://runtime/player/player_rig_finger_grip_presenter.gd",
+		"local": "var hinge_axis_local: Vector3 = rule.get(",
+		"origin": "var hinge_axis_origin_id: StringName = rule.get(",
+		"max_lines": 8,
+	},
+	{
+		"id": "primary_grip_handle_vertices_origin_packet",
+		"path": "res://core/resolvers/primary_grip_handle_mesh_packet.gd",
+		"local": "\"primary_grip_handle_vertices\": PackedVector3Array(vertices_meters)",
+		"origin": "\"primary_grip_handle_vertices_origin_id\": VERTICES_ORIGIN_ID",
+		"max_lines": 6,
+	},
+	{
+		"id": "equipped_exact_grip_center_state_origin",
+		"path": "res://runtime/player/player_equipped_item_presenter.gd",
+		"local": "\"grip_center_cells_local\": dominant_grip_center_local",
+		"origin": "\"grip_center_cells_origin_id\": dominant_grip_center_origin_id",
+		"max_lines": 2,
+	},
+	{
+		"id": "equipped_exact_faces_local_origin",
+		"path": "res://runtime/player/player_equipped_item_presenter.gd",
+		"local": "\"grip_contact_faces_local_origin_id\"",
+		"origin": "contact_surface_origin_id",
+		"max_lines": 2,
+	},
+	{
+		"id": "equipped_exact_base_guide_position_origin",
+		"path": "res://runtime/player/player_equipped_item_presenter.gd",
+		"local": "\"grip_contact_base_guide_position_local\"",
+		"origin": "\"grip_contact_base_guide_position_origin_id\"",
+		"max_lines": 2,
+	},
+	{
+		"id": "equipped_exact_reseat_offset_origin",
+		"path": "res://runtime/player/player_equipped_item_presenter.gd",
+		"local": "\"grip_contact_reseat_offset_local\"",
+		"origin": "\"grip_contact_reseat_offset_origin_id\"",
+		"max_lines": 2,
+	},
+	{
+		"id": "equipped_exact_reseat_position_param_origin",
+		"path": "res://runtime/player/player_equipped_item_presenter.gd",
+		"local": "guide_position_local: Vector3,",
+		"origin": "guide_position_origin_id: StringName",
+		"max_lines": 2,
+	},
+	{
+		"id": "preview_grip_guide_position_origin",
+		"path": "res://runtime/combat/combat_animation_station_preview_presenter.gd",
+		"local": "\"grip_guide_position_local\"",
+		"origin": "\"grip_guide_position_origin_id\"",
+		"max_lines": 2,
+	},
+	{
+		"id": "equipped_slice_center_path_origin",
+		"path": "res://runtime/player/player_equipped_item_presenter.gd",
+		"local": "\"primary_grip_slice_centers_local\"",
+		"origin": "\"primary_grip_slice_center_path_origin_id\"",
+		"max_lines": 6,
+	},
 ]
 
 const STRICT_FORBIDDEN_SOURCE_PATTERNS := [
@@ -2309,6 +2442,7 @@ func _run_verification() -> void:
 		and anchor_atom.axis_origin_id == CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 		and anchor_atom.span_start_position_origin_id == CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 		and anchor_atom.span_end_position_origin_id == CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		and anchor_atom.span_slice_center_positions_origin_id == CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	)
 	lines.append("anchor_atom_origin_ids_ok=%s" % str(anchor_atom_ok))
 

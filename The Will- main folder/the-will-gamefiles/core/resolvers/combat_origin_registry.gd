@@ -88,6 +88,22 @@ func register_default_combat_origins(owner_system: StringName = CombatOriginReco
 		true
 	)
 	_register_identity_child(
+		CombatOriginRecordScript.ORIGIN_PRIMARY_GRIP_CONTACT_SURFACE,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		owner_system,
+		CombatOriginRecordScript.PHASE_POST_FINAL_POSE,
+		CombatOriginRecordScript.SPACE_TYPE_COLLISION,
+		true
+	)
+	_register_identity_child(
+		CombatOriginRecordScript.ORIGIN_SUPPORT_GRIP_CONTACT_SURFACE,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		owner_system,
+		CombatOriginRecordScript.PHASE_POST_FINAL_POSE,
+		CombatOriginRecordScript.SPACE_TYPE_COLLISION,
+		true
+	)
+	_register_identity_child(
 		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT,
 		CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
 		owner_system,

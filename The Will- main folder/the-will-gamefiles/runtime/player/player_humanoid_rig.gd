@@ -7,6 +7,7 @@ const PlayerRigLocomotionPresenterScript = preload("res://runtime/player/player_
 const PlayerRigGripLayoutPresenterScript = preload("res://runtime/player/player_rig_grip_layout_presenter.gd")
 const PlayerRigSupportArmIkPresenterScript = preload("res://runtime/player/player_rig_support_arm_ik_presenter.gd")
 const PlayerRigFingerGripPresenterScript = preload("res://runtime/player/player_rig_finger_grip_presenter.gd")
+const PlayerDigitHingeRulesScript = preload("res://runtime/player/player_digit_hinge_rules.gd")
 const PlayerRigUpperBodyPosePresenterScript = preload("res://runtime/player/player_rig_upper_body_pose_presenter.gd")
 const PlayerCombatAuthoringModifier3DScript = preload("res://runtime/player/player_combat_authoring_modifier_3d.gd")
 const PlayerRuntimeSolvedReplayModifier3DScript = preload("res://runtime/player/player_runtime_solved_replay_modifier_3d.gd")
@@ -146,6 +147,9 @@ const AUTHORING_JOINT_RANGE_DEBUG_ROOT_NAME := "AuthoringJointRangeDebugRoot"
 const AUTHORING_JOINT_RANGE_ARC_STEPS: int = 28
 const AUTHORING_JOINT_RANGE_WARNING_MARGIN_DEGREES: float = 8.0
 const AUTHORING_JOINT_RANGE_EPSILON_DEGREES: float = 0.05
+const AUTHORING_DIGIT_HINGE_OFF_AXIS_TOLERANCE_DEGREES: float = 0.5
+const AUTHORING_DIGIT_RANGE_MIN_RADIUS_METERS: float = 0.012
+const AUTHORING_DIGIT_RANGE_MAX_RADIUS_METERS: float = 0.032
 const RUNTIME_LOCOMOTION_ANIMATION_TREE_NAME := "RuntimeLocomotionAnimationTree"
 const RUNTIME_LOCOMOTION_PLAYBACK_PATH := "parameters/playback"
 const RUNTIME_SOLVED_REPLAY_MODIFIER_NAME := "RuntimeSolvedReplayModifier"
@@ -290,6 +294,7 @@ var runtime_locomotion_state_machine_playback: AnimationNodeStateMachinePlayback
 var upper_body_authoring_state: Dictionary = {}
 var authoring_contact_anchor_basis_lookup: Dictionary = {}
 var authoring_limb_twist_neutral_rotation_lookup: Dictionary = {}
+var authoring_digit_hinge_neutral_rotation_lookup: Dictionary = {}
 var authoring_limb_twist_distribution_state: Dictionary = {}
 var last_two_hand_solve_result: Dictionary = {}
 var upper_body_authoring_auto_apply_enabled: bool = true
@@ -509,11 +514,80 @@ func resolve_hand_grip_alignment_offset_local(slot_id: StringName) -> Vector3:
 	return hand_anchor.to_local(grip_center_world)
 
 func resolve_hand_grip_alignment_world_position(slot_id: StringName) -> Vector3:
+	return _resolve_default_hand_grip_alignment_world_position(slot_id)
+
+func _resolve_default_hand_grip_alignment_world_position(slot_id: StringName) -> Vector3:
 	var hand_anchor: Node3D = get_right_hand_item_anchor() if slot_id == &"hand_right" else get_left_hand_item_anchor()
 	if hand_anchor == null:
 		return Vector3.ZERO
 	var grip_alignment_offset_local: Vector3 = resolve_hand_grip_alignment_offset_local(slot_id)
 	return hand_anchor.to_global(grip_alignment_offset_local)
+
+func resolve_hand_surface_seat_anatomy_state(slot_id: StringName) -> Dictionary:
+	var invalid := {
+		"valid": false,
+		"status": &"missing_hand_surface_seat_anatomy",
+	}
+	if skeleton == null:
+		return invalid
+	var index_bone: StringName = RIGHT_INDEX1_BONE
+	var pinky_bone: StringName = RIGHT_PINKY1_BONE
+	if slot_id == &"hand_left":
+		index_bone = LEFT_INDEX1_BONE
+		pinky_bone = LEFT_PINKY1_BONE
+	var index_index: int = skeleton.find_bone(String(index_bone))
+	var pinky_index: int = skeleton.find_bone(String(pinky_bone))
+	if index_index < 0 or pinky_index < 0:
+		invalid["status"] = &"hand_surface_seat_bones_missing"
+		return invalid
+	var index_world: Vector3 = skeleton.to_global(
+		skeleton.get_bone_global_pose(index_index).origin
+	)
+	var pinky_world: Vector3 = skeleton.to_global(
+		skeleton.get_bone_global_pose(pinky_index).origin
+	)
+	if (
+		not index_world.is_finite()
+		or not pinky_world.is_finite()
+		or index_world.distance_squared_to(pinky_world) <= 0.000001
+	):
+		invalid["status"] = &"hand_surface_seat_anatomy_degenerate"
+		return invalid
+	var index_skin_radius_meters: float = (
+		PlayerDigitHingeRulesScript.get_contact_capsule_radius_meters(
+			slot_id,
+			&"index",
+			1
+		)
+	)
+	var pinky_skin_radius_meters: float = (
+		PlayerDigitHingeRulesScript.get_contact_capsule_radius_meters(
+			slot_id,
+			&"pinky",
+			1
+		)
+	)
+	if index_skin_radius_meters <= 0.0 or pinky_skin_radius_meters <= 0.0:
+		invalid["status"] = &"hand_surface_seat_skin_calibration_missing"
+		return invalid
+	return {
+		"valid": true,
+		"status": &"hand_surface_seat_anatomy_ready",
+		"slot_id": slot_id,
+		"index_bone": index_bone,
+		"pinky_bone": pinky_bone,
+		"index_point_world": index_world,
+		"index_point_world_origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
+		"index_point_source_origin_id": index_bone,
+		"pinky_point_world": pinky_world,
+		"pinky_point_world_origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
+		"pinky_point_source_origin_id": pinky_bone,
+		"index_skin_to_bone_radius_meters": index_skin_radius_meters,
+		"index_skin_to_bone_radius_source_id": PlayerDigitHingeRulesScript.get_revision(),
+		"pinky_skin_to_bone_radius_meters": pinky_skin_radius_meters,
+		"pinky_skin_to_bone_radius_source_id": PlayerDigitHingeRulesScript.get_revision(),
+		"skin_radius_calibration_revision": PlayerDigitHingeRulesScript.get_revision(),
+	}
 
 func _resolve_hand_index_pinky_contact_center_world(slot_id: StringName) -> Vector3:
 	if skeleton == null:
@@ -736,12 +810,16 @@ func set_finger_grip_target(slot_id: StringName, guide_node: Node3D) -> void:
 	if slot_id != &"hand_right" and slot_id != &"hand_left":
 		return
 	finger_grip_source_lookup[slot_id] = guide_node
+	if finger_grip_presenter.has_method("note_grip_source_assigned"):
+		finger_grip_presenter.call("note_grip_source_assigned", slot_id, guide_node)
 	_refresh_finger_grip_ik_influences()
 
 func clear_finger_grip_target(slot_id: StringName) -> void:
 	if slot_id != &"hand_right" and slot_id != &"hand_left":
 		return
 	finger_grip_source_lookup.erase(slot_id)
+	if finger_grip_presenter.has_method("note_grip_source_cleared"):
+		finger_grip_presenter.call("note_grip_source_cleared", slot_id)
 	_refresh_finger_grip_ik_influences()
 
 func set_authoring_contact_anchor_basis(slot_id: StringName, anchor_basis_world: Basis) -> void:
@@ -1265,8 +1343,22 @@ func get_grip_contact_debug_state() -> Dictionary:
 func get_authoring_joint_range_debug_state() -> Dictionary:
 	return authoring_joint_range_debug_state.duplicate(true)
 
-func sync_authoring_joint_range_debug_now(debug_visible: bool = true) -> void:
+func set_authoring_joint_range_debug_visible(debug_visible: bool) -> void:
 	show_authoring_joint_range_debug = debug_visible
+	var debug_root: Node3D = _ensure_authoring_joint_range_debug_root()
+	if debug_root != null:
+		debug_root.visible = (
+			authoring_preview_mode_enabled
+			and show_authoring_joint_range_debug
+			and skeleton != null
+		)
+	if not authoring_joint_range_debug_state.is_empty():
+		authoring_joint_range_debug_state["visible"] = (
+			debug_root != null and debug_root.visible
+		)
+
+func sync_authoring_joint_range_debug_now(debug_visible: bool = true) -> void:
+	set_authoring_joint_range_debug_visible(debug_visible)
 	_sync_authoring_joint_range_debug()
 
 func resolve_hand_anatomical_y_axis_world(slot_id: StringName) -> Vector3:
@@ -1324,21 +1416,21 @@ func set_upper_body_authoring_auto_apply_enabled(enabled: bool) -> void:
 func apply_upper_body_authoring_pose_now() -> void:
 	_apply_upper_body_authoring_pose()
 
-func apply_authoring_preview_frame_now() -> void:
+func apply_authoring_preview_frame_now(allow_exact_surface_solve: bool = false) -> void:
 	_apply_upper_body_authoring_pose()
 	_refresh_support_arm_ik_influences()
 	var support_snap_delta: float = 1.0 / maxf(support_arm_ik_target_smoothing_speed, 0.001)
 	var finger_snap_delta: float = 1.0 / maxf(finger_grip_target_smoothing_speed, 0.001)
 	_update_support_arm_ik_targets(support_snap_delta)
 	_apply_authoring_contact_alignment_pose()
-	_update_finger_grip_targets(finger_snap_delta)
+	_update_finger_grip_targets(finger_snap_delta, allow_exact_surface_solve)
 	_refresh_finger_grip_ik_influences()
 	if skeleton != null:
 		_advance_skeleton_modifiers_now(1.0 / 60.0)
 		skeleton.force_update_all_bone_transforms()
 	_sync_authoring_joint_range_debug()
 
-func apply_authoring_preview_drag_frame_now() -> void:
+func apply_authoring_preview_drag_frame_now(allow_exact_surface_solve: bool = false) -> void:
 	_apply_upper_body_authoring_pose()
 	_refresh_support_arm_ik_influences()
 	var support_snap_delta: float = 1.0 / maxf(support_arm_ik_target_smoothing_speed, 0.001)
@@ -1349,7 +1441,7 @@ func apply_authoring_preview_drag_frame_now() -> void:
 		AUTHORING_DRAG_DIRECT_ARM_SOLVE_ITERATIONS,
 		AUTHORING_DRAG_ARM_SPLINE_RESEAT_ITERATIONS
 	)
-	_update_finger_grip_targets(finger_snap_delta)
+	_update_finger_grip_targets(finger_snap_delta, allow_exact_surface_solve)
 	_refresh_finger_grip_ik_influences()
 	if skeleton != null:
 		_advance_skeleton_modifiers_now(1.0 / 60.0)
@@ -1408,6 +1500,7 @@ func reset_authoring_preview_baseline_pose(baseline_animation_name: StringName =
 	_refresh_support_arm_ik_influences()
 	_refresh_finger_grip_ik_influences()
 	_cache_authoring_limb_twist_neutral_pose()
+	_cache_authoring_digit_hinge_neutral_pose()
 	if skeleton != null:
 		skeleton.force_update_all_bone_transforms()
 
@@ -1427,11 +1520,15 @@ func set_authoring_preview_mode_enabled(enabled: bool, baseline_animation_name: 
 		if baseline_animation_name != authoring_preview_baseline_animation_name:
 			_apply_authoring_preview_baseline_pose(baseline_animation_name)
 			_cache_authoring_limb_twist_neutral_pose()
+			_cache_authoring_digit_hinge_neutral_pose()
+		elif authoring_digit_hinge_neutral_rotation_lookup.is_empty():
+			_cache_authoring_digit_hinge_neutral_pose()
 		authoring_preview_baseline_animation_name = baseline_animation_name
 		return
 	authoring_preview_baseline_animation_name = StringName()
 	clear_authoring_contact_anchor_bases()
 	authoring_limb_twist_distribution_state.clear()
+	authoring_digit_hinge_neutral_rotation_lookup.clear()
 	if runtime_locomotion_animation_tree != null:
 		runtime_locomotion_animation_tree.active = true
 	_refresh_combat_authoring_modifier_state()
@@ -1635,19 +1732,23 @@ func _sync_authoring_joint_range_debug() -> void:
 	authoring_joint_range_debug_state = {
 		"visible": false,
 		"visual_count": 0,
+		"digit_visual_count": 0,
 		"joints": {},
 		"twist_bones": {},
+		"digit_bones": {},
 	}
 	var debug_root: Node3D = _ensure_authoring_joint_range_debug_root()
 	if debug_root == null:
 		return
-	var debug_visible: bool = authoring_preview_mode_enabled and show_authoring_joint_range_debug and skeleton != null
+	var debug_active: bool = authoring_preview_mode_enabled and skeleton != null
+	var debug_visible: bool = debug_active and show_authoring_joint_range_debug
 	debug_root.visible = debug_visible
-	if not debug_visible:
+	if not debug_active:
 		return
 	debug_root.global_transform = Transform3D.IDENTITY
 	var joints: Dictionary = {}
 	var twist_bones: Dictionary = {}
+	var digit_bones: Dictionary = {}
 	var visual_count: int = 0
 	var right_shoulder: Dictionary = _sync_authoring_joint_range_visual(
 		debug_root,
@@ -1749,11 +1850,18 @@ func _sync_authoring_joint_range_debug() -> void:
 		0.12,
 		Color(0.96, 0.28, 0.82, 0.24)
 	)
+	var digit_visual_count: int = _sync_authoring_digit_hinge_range_chain(
+		debug_root,
+		digit_bones
+	)
+	visual_count += digit_visual_count
 	authoring_joint_range_debug_state = {
-		"visible": true,
+		"visible": debug_visible,
 		"visual_count": visual_count,
+		"digit_visual_count": digit_visual_count,
 		"joints": joints,
 		"twist_bones": twist_bones,
+		"digit_bones": digit_bones,
 	}
 
 func _ensure_authoring_joint_range_debug_root() -> Node3D:
@@ -2002,6 +2110,341 @@ func _sync_authoring_twist_range_visual(
 	result["state"] = state_text
 	return result
 
+func _sync_authoring_digit_hinge_range_chain(
+	debug_root: Node3D,
+	digit_bones: Dictionary
+) -> int:
+	if authoring_digit_hinge_neutral_rotation_lookup.is_empty():
+		_cache_authoring_digit_hinge_neutral_pose()
+	var visual_count: int = 0
+	for rule: Dictionary in PlayerDigitHingeRulesScript.get_all_rules():
+		var slot_id: StringName = rule.get("slot_id", StringName()) as StringName
+		var bone_name: StringName = rule.get("bone", StringName()) as StringName
+		var digit_id: StringName = rule.get("digit", StringName()) as StringName
+		var section_index: int = int(rule.get("section", 0))
+		var side_label: String = "R" if slot_id == &"hand_right" else "L"
+		var side_name: String = "Right" if slot_id == &"hand_right" else "Left"
+		var visual_state: Dictionary = _sync_authoring_digit_hinge_range_visual(
+			debug_root,
+			"%s%s%02dDigitRange" % [side_name, String(digit_id).capitalize(), section_index],
+			"%s %s %d" % [side_label, String(digit_id), section_index],
+			rule,
+			_resolve_authoring_digit_range_color(slot_id, digit_id, section_index)
+		)
+		if bool(visual_state.get("visible", false)):
+			visual_count += 1
+		digit_bones[String(bone_name)] = visual_state
+	return visual_count
+
+func _sync_authoring_digit_hinge_range_visual(
+	debug_root: Node3D,
+	visual_name: String,
+	label_text: String,
+	rule: Dictionary,
+	base_color: Color
+) -> Dictionary:
+	var visual_root: Node3D = _ensure_named_node3d(debug_root, visual_name)
+	var slot_id: StringName = rule.get("slot_id", StringName()) as StringName
+	var bone_name: StringName = rule.get("bone", StringName()) as StringName
+	var next_bone_name: StringName = rule.get("next_bone", StringName()) as StringName
+	var digit_id: StringName = rule.get("digit", StringName()) as StringName
+	var section_index: int = int(rule.get("section", 0))
+	var open_angle_degrees: float = float(rule.get("open_degrees", 0.0))
+	var closed_angle_degrees: float = float(rule.get("closed_degrees", 90.0))
+	var min_angle_degrees: float = float(rule.get("min_degrees", 0.0))
+	var max_angle_degrees: float = float(rule.get("max_degrees", 90.0))
+	var hinge_axis_local: Vector3 = rule.get("hinge_axis_local", Vector3.FORWARD) as Vector3
+	var hinge_axis_origin_id: StringName = rule.get("hinge_axis_origin_id", StringName()) as StringName
+	var zero_direction_local: Vector3 = rule.get("zero_direction_local", Vector3.UP) as Vector3
+	var zero_direction_origin_id: StringName = rule.get("zero_direction_origin_id", StringName()) as StringName
+	var bone_root_origin_id: StringName = rule.get("bone_root_origin_id", StringName()) as StringName
+	var result := {
+		"visible": false,
+		"bone": String(bone_name),
+		"slot_id": String(slot_id),
+		"digit": String(digit_id),
+		"section": section_index,
+		"angle_degrees": -999.0,
+		"open_angle_degrees": open_angle_degrees,
+		"closed_angle_degrees": closed_angle_degrees,
+		"min_angle_degrees": min_angle_degrees,
+		"max_angle_degrees": max_angle_degrees,
+		"allowed_sweep_degrees": absf(max_angle_degrees - min_angle_degrees),
+		"hinge_axis_local": hinge_axis_local,
+		"hinge_axis_origin_id": hinge_axis_origin_id,
+		"zero_direction_local": zero_direction_local,
+		"zero_direction_origin_id": zero_direction_origin_id,
+		"bone_root_origin_id": bone_root_origin_id,
+		"state": "missing",
+	}
+	var bone_index: int = skeleton.find_bone(String(bone_name)) if skeleton != null else -1
+	if bone_index < 0:
+		visual_root.visible = false
+		return result
+	var parent_index: int = skeleton.get_bone_parent(bone_index)
+	if (
+		parent_index < 0
+		or not PlayerDigitHingeRulesScript.rule_has_valid_origin_chain(rule, skeleton)
+		or hinge_axis_local.length_squared() <= 0.000001
+		or zero_direction_local.length_squared() <= 0.000001
+	):
+		visual_root.visible = false
+		return result
+	hinge_axis_local = hinge_axis_local.normalized()
+	zero_direction_local = zero_direction_local.normalized()
+	var neutral_local_rotation: Quaternion = (
+		authoring_digit_hinge_neutral_rotation_lookup.get(
+			bone_name,
+			skeleton.get_bone_pose_rotation(bone_index)
+		) as Quaternion
+	).normalized()
+	var parent_pose: Transform3D = skeleton.get_bone_global_pose(parent_index)
+	var neutral_skeleton_basis: Basis = (
+		parent_pose.basis * Basis(neutral_local_rotation)
+	).orthonormalized()
+	var neutral_world_basis: Basis = (skeleton.global_basis * neutral_skeleton_basis).orthonormalized()
+	var current_skeleton_pose: Transform3D = skeleton.get_bone_global_pose(bone_index)
+	var current_world_basis: Basis = (skeleton.global_basis * current_skeleton_pose.basis).orthonormalized()
+	var joint_world: Vector3 = skeleton.to_global(current_skeleton_pose.origin)
+	var hinge_axis_world: Vector3 = neutral_world_basis * hinge_axis_local
+	if hinge_axis_world.length_squared() <= 0.000001:
+		visual_root.visible = false
+		return result
+	hinge_axis_world = hinge_axis_world.normalized()
+	var zero_direction_world: Vector3 = neutral_world_basis * zero_direction_local
+	zero_direction_world -= hinge_axis_world * zero_direction_world.dot(hinge_axis_world)
+	if zero_direction_world.length_squared() <= 0.000001:
+		visual_root.visible = false
+		return result
+	zero_direction_world = zero_direction_world.normalized()
+	var actual_direction_world: Vector3 = current_world_basis * zero_direction_local
+	actual_direction_world -= hinge_axis_world * actual_direction_world.dot(hinge_axis_world)
+	if actual_direction_world.length_squared() <= 0.000001:
+		actual_direction_world = zero_direction_world
+	else:
+		actual_direction_world = actual_direction_world.normalized()
+	var current_local_rotation: Quaternion = skeleton.get_bone_pose_rotation(bone_index).normalized()
+	var current_local_delta: Quaternion = (
+		neutral_local_rotation.inverse() * current_local_rotation
+	).normalized()
+	var current_hinge_rotation: Quaternion = _extract_quaternion_twist(current_local_delta, hinge_axis_local)
+	var current_angle_degrees: float = rad_to_deg(
+		_resolve_signed_twist_angle(current_hinge_rotation, hinge_axis_local)
+	)
+	var current_hinge_direction_world: Vector3 = (
+		Basis(hinge_axis_world, deg_to_rad(current_angle_degrees)) * zero_direction_world
+	).normalized()
+	var actual_hinge_axis_world: Vector3 = (current_world_basis * hinge_axis_local).normalized()
+	var axis_alignment_dot: float = clampf(hinge_axis_world.dot(actual_hinge_axis_world), -1.0, 1.0)
+	var off_axis_degrees: float = rad_to_deg(acos(axis_alignment_dot))
+	var status_color: Color = _resolve_joint_range_status_color(
+		current_angle_degrees,
+		min_angle_degrees,
+		max_angle_degrees
+	)
+	var state_text: String = _resolve_joint_range_state_text(
+		current_angle_degrees,
+		min_angle_degrees,
+		max_angle_degrees
+	)
+	var is_off_axis: bool = off_axis_degrees > AUTHORING_DIGIT_HINGE_OFF_AXIS_TOLERANCE_DEGREES
+	if is_off_axis:
+		status_color = Color(1.0, 0.12, 0.68, 0.98)
+		state_text = "off_axis"
+	var radius: float = _resolve_authoring_digit_range_radius(
+		bone_index,
+		next_bone_name,
+		joint_world
+	)
+	visual_root.visible = true
+	_update_joint_range_plane_mesh(
+		visual_root,
+		joint_world,
+		zero_direction_world,
+		hinge_axis_world,
+		min_angle_degrees,
+		max_angle_degrees,
+		radius,
+		base_color,
+		true
+	)
+	_update_digit_hinge_range_line_mesh(
+		visual_root,
+		joint_world,
+		hinge_axis_world,
+		actual_hinge_axis_world,
+		zero_direction_world,
+		current_hinge_direction_world,
+		actual_direction_world,
+		min_angle_degrees,
+		max_angle_degrees,
+		current_angle_degrees,
+		radius,
+		status_color
+	)
+	_update_joint_range_label(
+		visual_root,
+		"%s OFF-AXIS" % label_text if is_off_axis else label_text,
+		joint_world,
+		zero_direction_world,
+		hinge_axis_world,
+		min_angle_degrees,
+		max_angle_degrees,
+		current_angle_degrees,
+		radius,
+		status_color,
+		true,
+		open_angle_degrees,
+		closed_angle_degrees
+	)
+	result["visible"] = true
+	result["angle_degrees"] = current_angle_degrees
+	result["angle_delta_degrees"] = current_angle_degrees
+	result["reference_pose"] = "authoring_baseline"
+	result["hinge_axis_local"] = hinge_axis_local
+	result["hinge_axis_origin_id"] = hinge_axis_origin_id
+	result["zero_direction_local"] = zero_direction_local
+	result["zero_direction_origin_id"] = zero_direction_origin_id
+	result["hinge_axis_world"] = hinge_axis_world
+	result["actual_hinge_axis_world"] = actual_hinge_axis_world
+	result["zero_direction_world"] = zero_direction_world
+	result["current_hinge_direction_world"] = current_hinge_direction_world
+	result["actual_direction_world"] = actual_direction_world
+	result["joint_world"] = joint_world
+	result["neutral_local_rotation"] = neutral_local_rotation
+	result["neutral_rotation_origin_id"] = bone_name
+	result["axis_alignment_dot"] = axis_alignment_dot
+	result["off_axis_degrees"] = off_axis_degrees
+	result["off_axis_tolerance_degrees"] = AUTHORING_DIGIT_HINGE_OFF_AXIS_TOLERANCE_DEGREES
+	result["visual_node_path"] = String(visual_root.get_path())
+	result["state"] = state_text
+	return result
+
+func _resolve_authoring_digit_range_radius(
+	bone_index: int,
+	next_bone_name: StringName,
+	joint_world: Vector3
+) -> float:
+	var segment_length: float = 0.0
+	var next_bone_index: int = skeleton.find_bone(String(next_bone_name)) if next_bone_name != StringName() else -1
+	if next_bone_index >= 0:
+		segment_length = joint_world.distance_to(
+			skeleton.to_global(skeleton.get_bone_global_pose(next_bone_index).origin)
+		)
+	if segment_length <= 0.000001:
+		segment_length = skeleton.get_bone_rest(bone_index).origin.length()
+	return clampf(
+		segment_length * 0.72,
+		AUTHORING_DIGIT_RANGE_MIN_RADIUS_METERS,
+		AUTHORING_DIGIT_RANGE_MAX_RADIUS_METERS
+	)
+
+func _resolve_authoring_digit_range_color(
+	slot_id: StringName,
+	digit_id: StringName,
+	section_index: int
+) -> Color:
+	var digit_bias_lookup := {
+		&"thumb": 0.00,
+		&"index": 0.04,
+		&"middle": 0.08,
+		&"ring": 0.12,
+		&"pinky": 0.16,
+	}
+	var digit_bias: float = float(digit_bias_lookup.get(digit_id, 0.0))
+	var section_bias: float = clampf(float(section_index - 1) * 0.035, 0.0, 0.07)
+	if slot_id == &"hand_left":
+		return Color(0.34 + section_bias, 0.48 + digit_bias, 1.0, 0.18)
+	return Color(1.0, 0.42 + digit_bias, 0.12 + section_bias, 0.18)
+
+func _update_digit_hinge_range_line_mesh(
+	visual_root: Node3D,
+	joint_world: Vector3,
+	hinge_axis_world: Vector3,
+	actual_hinge_axis_world: Vector3,
+	zero_direction_world: Vector3,
+	current_hinge_direction_world: Vector3,
+	actual_direction_world: Vector3,
+	min_angle_degrees: float,
+	max_angle_degrees: float,
+	current_angle_degrees: float,
+	radius: float,
+	status_color: Color
+) -> void:
+	var line_instance: MeshInstance3D = _ensure_debug_mesh_instance(visual_root, "BoundaryLines")
+	var vertices := PackedVector3Array()
+	var colors := PackedColorArray()
+	var axis_color := Color(0.08, 0.92, 1.0, 0.96)
+	var actual_axis_color := Color(0.88, 0.24, 1.0, 0.82)
+	var zero_color := Color(0.96, 0.96, 0.96, 0.94)
+	var min_color := Color(1.0, 0.28, 0.20, 0.98)
+	var max_color := Color(0.22, 1.0, 0.42, 0.98)
+	var actual_direction_color := Color(0.94, 0.28, 1.0, 0.88)
+	var min_direction: Vector3 = (
+		Basis(hinge_axis_world, deg_to_rad(min_angle_degrees)) * zero_direction_world
+	).normalized()
+	var max_direction: Vector3 = (
+		Basis(hinge_axis_world, deg_to_rad(max_angle_degrees)) * zero_direction_world
+	).normalized()
+	_append_debug_line(
+		vertices,
+		colors,
+		joint_world - hinge_axis_world * (radius * 0.48),
+		joint_world + hinge_axis_world * (radius * 0.48),
+		axis_color
+	)
+	if hinge_axis_world.dot(actual_hinge_axis_world) < 0.9995:
+		_append_debug_line(
+			vertices,
+			colors,
+			joint_world - actual_hinge_axis_world * (radius * 0.40),
+			joint_world + actual_hinge_axis_world * (radius * 0.40),
+			actual_axis_color
+		)
+	_append_debug_line(vertices, colors, joint_world, joint_world + zero_direction_world * (radius * 1.02), zero_color)
+	_append_debug_line(vertices, colors, joint_world, joint_world + min_direction * (radius * 1.12), min_color)
+	_append_debug_line(vertices, colors, joint_world, joint_world + max_direction * (radius * 1.12), max_color)
+	_append_debug_line(vertices, colors, joint_world, joint_world + current_hinge_direction_world * (radius * 1.30), status_color)
+	if current_hinge_direction_world.dot(actual_direction_world) < 0.9995:
+		_append_debug_line(vertices, colors, joint_world, joint_world + actual_direction_world * (radius * 1.18), actual_direction_color)
+	_append_debug_ring(
+		vertices,
+		colors,
+		joint_world,
+		zero_direction_world,
+		hinge_axis_world,
+		min_angle_degrees,
+		max_angle_degrees,
+		radius,
+		Color(1.0, 1.0, 1.0, 0.84)
+	)
+	_append_debug_ring(
+		vertices,
+		colors,
+		joint_world,
+		zero_direction_world,
+		hinge_axis_world,
+		current_angle_degrees - 2.5,
+		current_angle_degrees + 2.5,
+		radius * 1.08,
+		status_color
+	)
+	line_instance.mesh = _build_debug_array_mesh(
+		Mesh.PRIMITIVE_LINES,
+		vertices,
+		colors,
+		line_instance.mesh as ArrayMesh
+	)
+	line_instance.material_override = _build_debug_vertex_material(
+		true,
+		line_instance.material_override as StandardMaterial3D
+	)
+	line_instance.visible = true
+	_update_debug_sphere_marker(visual_root, "HingeMinMarker", joint_world + min_direction * (radius * 1.12), radius * 0.085, min_color, 0.0015, true)
+	_update_debug_sphere_marker(visual_root, "HingeMaxMarker", joint_world + max_direction * (radius * 1.12), radius * 0.085, max_color, 0.0015, true)
+	_update_debug_sphere_marker(visual_root, "HingeCurrentMarker", joint_world + current_hinge_direction_world * (radius * 1.30), radius * 0.105, status_color, 0.0015, true)
+	_update_debug_sphere_marker(visual_root, "HingePivotMarker", joint_world, radius * 0.070, axis_color, 0.0015, true)
+
 func _ensure_named_node3d(parent: Node3D, node_name: String) -> Node3D:
 	var node: Node3D = parent.get_node_or_null(node_name) as Node3D if parent != null else null
 	if node == null:
@@ -2018,7 +2461,8 @@ func _update_joint_range_plane_mesh(
 	min_angle_degrees: float,
 	max_angle_degrees: float,
 	radius: float,
-	base_color: Color
+	base_color: Color,
+	no_depth_test: bool = false
 ) -> void:
 	var plane_instance: MeshInstance3D = _ensure_debug_mesh_instance(visual_root, "AllowedPlane")
 	var vertices := PackedVector3Array()
@@ -2036,8 +2480,16 @@ func _update_joint_range_plane_mesh(
 		colors.append(plane_color)
 		colors.append(plane_color)
 		colors.append(plane_color)
-	plane_instance.mesh = _build_debug_array_mesh(Mesh.PRIMITIVE_TRIANGLES, vertices, colors)
-	plane_instance.material_override = _build_debug_vertex_material()
+	plane_instance.mesh = _build_debug_array_mesh(
+		Mesh.PRIMITIVE_TRIANGLES,
+		vertices,
+		colors,
+		plane_instance.mesh as ArrayMesh
+	)
+	plane_instance.material_override = _build_debug_vertex_material(
+		no_depth_test,
+		plane_instance.material_override as StandardMaterial3D
+	)
 	plane_instance.visible = true
 
 func _update_joint_range_line_mesh(
@@ -2072,8 +2524,16 @@ func _update_joint_range_line_mesh(
 		var arc_point: Vector3 = joint_world + (Basis(plane_normal, angle) * parent_dir).normalized() * radius
 		_append_debug_line(vertices, colors, previous_arc, arc_point, Color(0.96, 0.96, 0.96, 0.68))
 		previous_arc = arc_point
-	line_instance.mesh = _build_debug_array_mesh(Mesh.PRIMITIVE_LINES, vertices, colors)
-	line_instance.material_override = _build_debug_vertex_material()
+	line_instance.mesh = _build_debug_array_mesh(
+		Mesh.PRIMITIVE_LINES,
+		vertices,
+		colors,
+		line_instance.mesh as ArrayMesh
+	)
+	line_instance.material_override = _build_debug_vertex_material(
+		false,
+		line_instance.material_override as StandardMaterial3D
+	)
 	line_instance.visible = true
 
 func _update_twist_range_rotation_mesh(
@@ -2112,8 +2572,16 @@ func _update_twist_range_rotation_mesh(
 	_append_debug_ring(vertices, colors, twist_world, resolved_neutral, resolved_axis, 0.0, 360.0, radius * 0.96, faint_color)
 	_append_debug_ring(vertices, colors, twist_world, resolved_neutral, resolved_axis, min_angle_degrees, max_angle_degrees, radius * 1.10, Color(1.0, 1.0, 1.0, 0.78))
 	_append_debug_ring(vertices, colors, twist_world, resolved_neutral, resolved_axis, current_angle_degrees - 4.0, current_angle_degrees + 4.0, radius * 1.18, status_color)
-	line_instance.mesh = _build_debug_array_mesh(Mesh.PRIMITIVE_LINES, vertices, colors)
-	line_instance.material_override = _build_debug_vertex_material()
+	line_instance.mesh = _build_debug_array_mesh(
+		Mesh.PRIMITIVE_LINES,
+		vertices,
+		colors,
+		line_instance.mesh as ArrayMesh
+	)
+	line_instance.material_override = _build_debug_vertex_material(
+		false,
+		line_instance.material_override as StandardMaterial3D
+	)
 	line_instance.visible = true
 	_update_debug_sphere_marker(visual_root, "TwistMinMarker", twist_world + min_dir * (radius * 1.24), radius * 0.105, min_color)
 	_update_debug_sphere_marker(visual_root, "TwistMaxMarker", twist_world + max_dir * (radius * 1.24), radius * 0.105, max_color)
@@ -2130,7 +2598,10 @@ func _update_joint_range_label(
 	max_angle_degrees: float,
 	current_angle_degrees: float,
 	radius: float,
-	status_color: Color
+	status_color: Color,
+	angle_is_delta: bool = false,
+	display_start_degrees: float = NAN,
+	display_end_degrees: float = NAN
 ) -> void:
 	var label: Label3D = visual_root.get_node_or_null("AngleLabel") as Label3D
 	if not show_authoring_joint_range_labels:
@@ -2147,12 +2618,26 @@ func _update_joint_range_label(
 	var mid_angle: float = deg_to_rad((min_angle_degrees + max_angle_degrees) * 0.5)
 	var label_dir: Vector3 = (Basis(plane_normal, mid_angle) * parent_dir).normalized()
 	label.position = joint_world + label_dir * (radius * 1.12) + plane_normal * 0.018
-	label.text = "%s %.0f / %.0f-%.0f" % [
-		label_text,
-		current_angle_degrees,
-		min_angle_degrees,
-		max_angle_degrees,
-	]
+	var angle_prefix: String = "delta " if angle_is_delta else ""
+	var range_start_degrees: float = display_start_degrees if is_finite(display_start_degrees) else min_angle_degrees
+	var range_end_degrees: float = display_end_degrees if is_finite(display_end_degrees) else max_angle_degrees
+	if angle_is_delta:
+		label.text = "%s %s%.0f | ROM %.0f..%.0f | close %.0f->%.0f" % [
+			label_text,
+			angle_prefix,
+			current_angle_degrees,
+			min_angle_degrees,
+			max_angle_degrees,
+			range_start_degrees,
+			range_end_degrees,
+		]
+	else:
+		label.text = "%s %.0f / %.0f-%.0f" % [
+			label_text,
+			current_angle_degrees,
+			min_angle_degrees,
+			max_angle_degrees,
+		]
 	label.modulate = status_color
 	label.visible = true
 
@@ -2192,7 +2677,9 @@ func _update_debug_sphere_marker(
 	marker_name: String,
 	world_position: Vector3,
 	radius: float,
-	color: Color
+	color: Color,
+	minimum_radius: float = 0.004,
+	no_depth_test: bool = false
 ) -> void:
 	var marker: MeshInstance3D = _ensure_debug_mesh_instance(parent, marker_name)
 	var sphere: SphereMesh = marker.mesh as SphereMesh
@@ -2201,18 +2688,27 @@ func _update_debug_sphere_marker(
 		sphere.radial_segments = 12
 		sphere.rings = 6
 		marker.mesh = sphere
-	sphere.radius = maxf(radius, 0.004)
-	sphere.height = maxf(radius * 2.0, 0.008)
-	var material := StandardMaterial3D.new()
+	sphere.radius = maxf(radius, minimum_radius)
+	sphere.height = maxf(radius * 2.0, minimum_radius * 2.0)
+	var material: StandardMaterial3D = marker.material_override as StandardMaterial3D
+	if material == null:
+		material = StandardMaterial3D.new()
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.albedo_color = color
+	material.no_depth_test = no_depth_test
 	marker.material_override = material
 	marker.global_position = world_position
 	marker.visible = true
 
-func _build_debug_array_mesh(primitive: Mesh.PrimitiveType, vertices: PackedVector3Array, colors: PackedColorArray) -> ArrayMesh:
-	var mesh := ArrayMesh.new()
+func _build_debug_array_mesh(
+	primitive: Mesh.PrimitiveType,
+	vertices: PackedVector3Array,
+	colors: PackedColorArray,
+	existing_mesh: ArrayMesh = null
+) -> ArrayMesh:
+	var mesh: ArrayMesh = existing_mesh if existing_mesh != null else ArrayMesh.new()
+	mesh.clear_surfaces()
 	if vertices.is_empty():
 		return mesh
 	var arrays: Array = []
@@ -2231,13 +2727,19 @@ func _ensure_debug_mesh_instance(parent: Node3D, instance_name: String) -> MeshI
 		parent.add_child(instance)
 	return instance
 
-func _build_debug_vertex_material() -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
+func _build_debug_vertex_material(
+	no_depth_test: bool = false,
+	existing_material: StandardMaterial3D = null
+) -> StandardMaterial3D:
+	var material: StandardMaterial3D = (
+		existing_material if existing_material != null else StandardMaterial3D.new()
+	)
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.vertex_color_use_as_albedo = true
 	material.albedo_color = Color.WHITE
 	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	material.no_depth_test = no_depth_test
 	return material
 
 func _resolve_joint_range_status_color(current_angle: float, min_angle: float, max_angle: float) -> Color:
@@ -2560,6 +3062,19 @@ func _cache_authoring_limb_twist_neutral_bone(twist_bone: StringName) -> void:
 	if twist_index < 0:
 		return
 	authoring_limb_twist_neutral_rotation_lookup[twist_bone] = skeleton.get_bone_pose_rotation(twist_index).normalized()
+
+func _cache_authoring_digit_hinge_neutral_pose() -> void:
+	authoring_digit_hinge_neutral_rotation_lookup.clear()
+	if skeleton == null:
+		return
+	for rule: Dictionary in PlayerDigitHingeRulesScript.get_all_rules():
+		var bone_name: StringName = rule.get("bone", StringName()) as StringName
+		var bone_index: int = skeleton.find_bone(String(bone_name))
+		if bone_index < 0:
+			continue
+		authoring_digit_hinge_neutral_rotation_lookup[bone_name] = (
+			skeleton.get_bone_pose_rotation(bone_index).normalized()
+		)
 
 func _get_slot_forearm_twist_bones(slot_id: StringName) -> Array:
 	return LEFT_FOREARM_TWIST_BONES if slot_id == &"hand_left" else RIGHT_FOREARM_TWIST_BONES
@@ -3319,14 +3834,74 @@ func _uses_direct_authoring_solver_mode() -> bool:
 		and bool(upper_body_authoring_state.get("active", false))
 	)
 
-func _update_finger_grip_targets(delta: float) -> void:
+func resolve_exact_surface_weapon_seat(
+	slot_id: StringName,
+	allow_surface_solve: bool = true
+) -> Dictionary:
+	if skeleton == null or not finger_grip_presenter.has_method(
+		"resolve_exact_surface_weapon_seat"
+	):
+		return {
+			"valid": false,
+			"status": &"weapon_surface_seat_unavailable",
+		}
+	var grip_guide: Node3D = finger_grip_source_lookup.get(slot_id) as Node3D
+	if grip_guide == null or not is_instance_valid(grip_guide):
+		return {
+			"valid": false,
+			"status": &"weapon_surface_seat_guide_missing",
+		}
+	var anatomy_state: Dictionary = resolve_hand_surface_seat_anatomy_state(slot_id)
+	if not bool(anatomy_state.get("valid", false)):
+		return anatomy_state
+	return finger_grip_presenter.call(
+		"resolve_exact_surface_weapon_seat",
+		skeleton,
+		slot_id,
+		grip_guide,
+		anatomy_state,
+		allow_surface_solve
+	) as Dictionary
+
+func apply_authoring_digit_grip_now(
+	allow_exact_surface_solve: bool = true
+) -> void:
+	if skeleton == null:
+		return
+	var finger_snap_delta: float = 1.0 / maxf(
+		finger_grip_target_smoothing_speed,
+		0.001
+	)
+	_update_finger_grip_targets(
+		finger_snap_delta,
+		allow_exact_surface_solve
+	)
+	_refresh_finger_grip_ik_influences()
+	skeleton.force_update_all_bone_transforms()
+
+func get_weapon_surface_seat_debug_state(slot_id: StringName) -> Dictionary:
+	if finger_grip_presenter.has_method("get_hand_surface_seat_debug_state"):
+		return finger_grip_presenter.call(
+			"get_hand_surface_seat_debug_state",
+			slot_id
+		) as Dictionary
+	return {}
+
+func get_hand_surface_seat_debug_state(slot_id: StringName) -> Dictionary:
+	return get_weapon_surface_seat_debug_state(slot_id)
+
+func _update_finger_grip_targets(
+	delta: float,
+	allow_exact_surface_solve: bool = true
+) -> void:
 	finger_grip_presenter.update_finger_grip_targets(
 		skeleton,
 		finger_grip_source_lookup,
 		finger_grip_target_lookup,
 		Callable(self, "_get_bone_world_position"),
 		finger_grip_target_smoothing_speed,
-		delta
+		delta,
+		allow_exact_surface_solve
 	)
 
 func _refresh_finger_grip_ik_influences() -> void:

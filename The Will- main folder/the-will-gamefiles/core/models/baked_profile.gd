@@ -1,6 +1,8 @@
 extends Resource
 class_name BakedProfile
 
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+
 @export var profile_id: StringName = &""
 @export var total_mass: float = 0.0
 @export var total_volume_cell_equivalents: float = 0.0
@@ -18,6 +20,7 @@ class_name BakedProfile
 @export var primary_grip_slide_axis: Vector3 = Vector3.ZERO
 @export var primary_grip_slice_axis_ratios_from_span_start: PackedFloat32Array = PackedFloat32Array()
 @export var primary_grip_slice_centers: PackedVector3Array = PackedVector3Array()
+@export var primary_grip_slice_centers_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 @export var primary_grip_minor_axis_a: Vector3 = Vector3.ZERO
 @export var primary_grip_minor_axis_b: Vector3 = Vector3.ZERO
 @export var primary_grip_profile_offsets_minor_meters: PackedVector2Array = PackedVector2Array()

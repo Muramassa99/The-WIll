@@ -8,6 +8,12 @@ const CombatAnimationDraftScript = preload("res://core/models/combat_animation_d
 const CombatAnimationWeaponFrameSolverScript = preload("res://runtime/combat/combat_animation_weapon_frame_solver.gd")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const PrimaryGripSeatResolverScript = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
+const PrimaryGripHandleMeshPacketScript = preload(
+	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
+)
+const ForgeV2WipCompatibilityAdapterScript = preload(
+	"res://runtime/forge_v2/forge_v2_wip_compatibility_adapter.gd"
+)
 const BASE_WEAPON_HOLD_ROTATION_DEGREES := Vector3(180.0, 0.0, 0.0)
 const LEFT_HAND_WEAPON_HOLD_ROTATION_DEGREES := Vector3(0.0, 180.0, 0.0)
 const REVERSE_GRIP_ROTATION_DEGREES := Vector3(0.0, 180.0, 0.0)
@@ -485,6 +491,13 @@ func build_equipped_item_node(
 		if preserved_baked_profile_snapshot != null:
 			saved_wip.latest_baked_profile_snapshot = preserved_baked_profile_snapshot
 		return null
+	if not _stage2_exact_handle_authority_matches_wip(
+		saved_wip,
+		test_print.stage2_item_state
+	):
+		if preserved_baked_profile_snapshot != null:
+			saved_wip.latest_baked_profile_snapshot = preserved_baked_profile_snapshot
+		return null
 	var canonical_solid = test_print.canonical_solid if test_print.canonical_solid != null else held_item_mesh_builder.build_canonical_solid(test_print.display_cells)
 	var canonical_geometry = test_print.canonical_geometry if test_print.canonical_geometry != null else held_item_mesh_builder.build_canonical_geometry(canonical_solid)
 	var use_authoritative_editable_mesh := (
@@ -646,6 +659,21 @@ func build_equipped_item_node(
 		)
 	else:
 		_configure_grip_contact_guide_from_shell_data(primary_grip_guide, dominant_grip_shell_data, cell_world_size)
+	var primary_exact_surface_configured := _configure_exact_grip_contact_surface(
+		primary_grip_guide,
+		test_print.stage2_item_state,
+		{
+			"grip_center_cells_local": dominant_grip_center_local,
+			"grip_center_cells_origin_id": dominant_grip_center_origin_id,
+		},
+		cell_world_size,
+		CombatOriginRecordScript.ORIGIN_PRIMARY_GRIP_CONTACT_SURFACE
+	)
+	if (
+		_stage2_requires_exact_grip_contact_surface(test_print.stage2_item_state)
+		and not primary_exact_surface_configured
+	):
+		_invalidate_grip_contact_surface(primary_grip_guide)
 	var secondary_grip_guide: Node3D = null
 	var support_grip_contact_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var support_grip_contact_local: Vector3 = Vector3.ZERO
@@ -683,6 +711,21 @@ func build_equipped_item_node(
 				)
 			else:
 				_configure_grip_contact_guide_from_shell_data(secondary_grip_guide, support_grip_shell_data, cell_world_size)
+			var support_exact_surface_configured := _configure_exact_grip_contact_surface(
+				secondary_grip_guide,
+				test_print.stage2_item_state,
+				{
+					"grip_center_cells_local": support_grip_center_local,
+					"grip_center_cells_origin_id": support_grip_center_origin_id,
+				},
+				cell_world_size,
+				CombatOriginRecordScript.ORIGIN_SUPPORT_GRIP_CONTACT_SURFACE
+			)
+			if (
+				_stage2_requires_exact_grip_contact_surface(test_print.stage2_item_state)
+				and not support_exact_surface_configured
+			):
+				_invalidate_grip_contact_surface(secondary_grip_guide)
 	var dominant_grip_center_weapon_origin_id: StringName = dominant_grip_center_origin_id
 	var weapon_tip_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var weapon_tip_local: Vector3 = (test_print.baked_profile.weapon_tip_point - dominant_grip_center_local) * cell_world_size
@@ -696,20 +739,26 @@ func build_equipped_item_node(
 	var primary_grip_span_start_local: Vector3 = (test_print.baked_profile.primary_grip_span_start - dominant_grip_center_local) * cell_world_size
 	var primary_grip_span_end_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var primary_grip_span_end_local: Vector3 = (test_print.baked_profile.primary_grip_span_end - dominant_grip_center_local) * cell_world_size
+	var primary_grip_slice_centers_origin_id: StringName = StringName()
 	var primary_grip_slice_centers_local := PackedVector3Array()
-	primary_grip_slice_centers_local.resize(
-		test_print.baked_profile.primary_grip_slice_centers.size()
+	var source_slice_centers_origin_id: StringName = (
+		test_print.baked_profile.primary_grip_slice_centers_origin_id
 	)
-	for sample_index: int in range(
-		test_print.baked_profile.primary_grip_slice_centers.size()
-	):
-		primary_grip_slice_centers_local[sample_index] = (
-			(
-				test_print.baked_profile.primary_grip_slice_centers[sample_index]
-				- dominant_grip_center_local
-			)
-			* cell_world_size
+	if source_slice_centers_origin_id == dominant_grip_center_origin_id:
+		primary_grip_slice_centers_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		primary_grip_slice_centers_local.resize(
+			test_print.baked_profile.primary_grip_slice_centers.size()
 		)
+		for sample_index: int in range(
+			test_print.baked_profile.primary_grip_slice_centers.size()
+		):
+			primary_grip_slice_centers_local[sample_index] = (
+				(
+					test_print.baked_profile.primary_grip_slice_centers[sample_index]
+						- dominant_grip_center_local
+				)
+				* cell_world_size
+			)
 	var primary_grip_slide_axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var primary_grip_slide_axis_local: Vector3 = test_print.baked_profile.primary_grip_slide_axis.normalized()
 	held_root.set_meta("dominant_grip_center_weapon_origin_id", dominant_grip_center_weapon_origin_id)
@@ -756,7 +805,7 @@ func build_equipped_item_node(
 	)
 	held_root.set_meta(
 		"primary_grip_slice_center_path_origin_id",
-		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		primary_grip_slice_centers_origin_id
 	)
 	held_root.set_meta("primary_grip_axis_ratio_from_span_start", float(test_print.baked_profile.primary_grip_axis_ratio_from_span_start))
 	held_root.set_meta("primary_grip_slide_axis_local", primary_grip_slide_axis_local)
@@ -1179,7 +1228,9 @@ func _attach_grip_contact_area(grip_center: Node3D, grip_shell_data: Dictionary,
 	grip_area.collision_mask = 0
 	grip_area.monitoring = false
 	grip_area.monitorable = true
+	_clear_exact_grip_contact_metadata(grip_center, grip_area)
 	for child_node: Node in grip_area.get_children():
+		grip_area.remove_child(child_node)
 		child_node.queue_free()
 	var major_axis_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
 		grip_shell_data,
@@ -1248,6 +1299,319 @@ func _attach_grip_contact_area(grip_center: Node3D, grip_shell_data: Dictionary,
 		collision_shape.set_meta("grip_contact_offset_minor_axis_a_origin_id", minor_axis_a_offset_origin_id)
 		collision_shape.set_meta("grip_contact_offset_minor_axis_b_origin_id", minor_axis_b_offset_origin_id)
 		grip_area.add_child(collision_shape)
+
+func _stage2_requires_exact_grip_contact_surface(
+	stage2_item_state: Resource
+) -> bool:
+	return (
+		stage2_item_state != null
+		and StringName(stage2_item_state.get(
+			"primary_grip_handle_mesh_source"
+		)) == PrimaryGripHandleMeshPacketScript.SOURCE
+	)
+
+func _stage2_exact_handle_authority_matches_wip(
+	saved_wip: CraftedItemWIP,
+	stage2_item_state: Resource
+) -> bool:
+	if saved_wip == null:
+		return false
+	if saved_wip.forge_v2_authoring_state == null:
+		return not _stage2_requires_exact_grip_contact_surface(stage2_item_state)
+	if not _stage2_requires_exact_grip_contact_surface(stage2_item_state):
+		return false
+	var handle_validation := (
+		ForgeV2WipCompatibilityAdapterScript.resolve_valid_handle_body(
+			saved_wip.forge_v2_authoring_state
+		)
+	)
+	if not bool(handle_validation.get("valid", false)):
+		return false
+	var handle_body: Resource = handle_validation.get("body") as Resource
+	if handle_body == null:
+		return false
+	var expected_signature := (
+		PrimaryGripHandleMeshPacketScript.build_body_signature(handle_body)
+	)
+	return (
+		not expected_signature.is_empty()
+		and String(stage2_item_state.get(
+			"primary_grip_handle_body_signature"
+		)) == expected_signature
+	)
+
+func _invalidate_grip_contact_surface(grip_guide: Node3D) -> void:
+	if grip_guide == null:
+		return
+	var grip_center: Node3D = grip_guide.get_node_or_null("GripShellCenter") as Node3D
+	if grip_center == null:
+		return
+	var grip_area: Area3D = grip_center.get_node_or_null("GripContactArea") as Area3D
+	_clear_exact_grip_contact_metadata(grip_center, grip_area)
+	grip_center.set_meta("grip_shell_valid", false)
+	if grip_area == null:
+		return
+	grip_area.collision_layer = 0
+	for child_node: Node in grip_area.get_children():
+		grip_area.remove_child(child_node)
+		child_node.queue_free()
+
+func _configure_exact_grip_contact_surface(
+	grip_guide: Node3D,
+	stage2_item_state: Resource,
+	grip_center_state: Dictionary,
+	cell_world_size: float,
+	contact_surface_origin_id: StringName
+) -> bool:
+	if (
+		grip_guide == null
+		or stage2_item_state == null
+		or cell_world_size <= 0.0
+		or contact_surface_origin_id == StringName()
+		or not grip_center_state.has("grip_center_cells_local")
+		or not grip_center_state.has("grip_center_cells_origin_id")
+		or grip_center_state.get("grip_center_cells_local") is not Vector3
+	):
+		return false
+	if StringName(stage2_item_state.get(
+		"primary_grip_handle_mesh_source"
+	)) != PrimaryGripHandleMeshPacketScript.SOURCE:
+		return false
+	var source_vertices_origin_id := StringName(stage2_item_state.get(
+		"primary_grip_handle_mesh_origin_id"
+	))
+	if source_vertices_origin_id == StringName():
+		# Explicit migration for SOURCE v1 saves: that source schema is defined in
+		# WeaponRootOrigin. This writes the missing provenance onto the duplicated
+		# runtime Stage2 state before any Vector3 arithmetic occurs.
+		source_vertices_origin_id = PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+		stage2_item_state.set(
+			"primary_grip_handle_mesh_origin_id",
+			source_vertices_origin_id
+		)
+	if source_vertices_origin_id != PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID:
+		return false
+	var grip_center_origin_id := StringName(grip_center_state.get(
+		"grip_center_cells_origin_id",
+		StringName()
+	))
+	if grip_center_origin_id != source_vertices_origin_id:
+		return false
+	var grip_center_cells := grip_center_state.get(
+		"grip_center_cells_local"
+	) as Vector3
+	var body_signature := String(stage2_item_state.get(
+		"primary_grip_handle_body_signature"
+	))
+	if body_signature.is_empty():
+		return false
+	var handle_mesh_state := stage2_item_state.get(
+		"primary_grip_handle_mesh_state"
+	) as Resource
+	if (
+		handle_mesh_state == null
+		or not handle_mesh_state.has_method("has_surface_arrays")
+		or not bool(handle_mesh_state.call("has_surface_arrays"))
+		or int(handle_mesh_state.get("primitive_type")) != Mesh.PRIMITIVE_TRIANGLES
+	):
+		return false
+	var surface_arrays: Array = handle_mesh_state.get("surface_arrays") as Array
+	if (
+		surface_arrays.size() <= Mesh.ARRAY_INDEX
+		or surface_arrays[Mesh.ARRAY_VERTEX] is not PackedVector3Array
+		or surface_arrays[Mesh.ARRAY_INDEX] is not PackedInt32Array
+	):
+		return false
+	var vertices_cells := surface_arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array
+	var indices := surface_arrays[Mesh.ARRAY_INDEX] as PackedInt32Array
+	if vertices_cells.is_empty() or indices.is_empty() or indices.size() % 3 != 0:
+		return false
+	var grip_center: Node3D = grip_guide.get_node_or_null("GripShellCenter") as Node3D
+	if grip_center == null:
+		return false
+	var grip_area: Area3D = grip_center.get_node_or_null("GripContactArea") as Area3D
+	if grip_area == null:
+		return false
+	_clear_exact_grip_contact_metadata(grip_center, grip_area)
+	grip_area.collision_layer = GRIP_CONTACT_COLLISION_LAYER
+	grip_area.collision_mask = 0
+	grip_area.monitoring = false
+	grip_area.monitorable = true
+	var grip_center_meters := grip_center_cells * cell_world_size
+	var exact_faces := PackedVector3Array()
+	exact_faces.resize(indices.size())
+	for face_vertex_index: int in range(indices.size()):
+		var source_vertex_index: int = indices[face_vertex_index]
+		if source_vertex_index < 0 or source_vertex_index >= vertices_cells.size():
+			return false
+		exact_faces[face_vertex_index] = (
+			vertices_cells[source_vertex_index] * cell_world_size
+			- grip_center_meters
+		)
+	var exact_shape := ConcavePolygonShape3D.new()
+	exact_shape.set_faces(exact_faces)
+	exact_shape.set("backface_collision", true)
+	if exact_shape.get_faces().is_empty():
+		return false
+	for child_node: Node in grip_area.get_children():
+		grip_area.remove_child(child_node)
+		child_node.queue_free()
+	var collision_shape := CollisionShape3D.new()
+	collision_shape.name = "ExactProtectedHandleMeshShape"
+	collision_shape.shape = exact_shape
+	# The guide follows the authored hand seat, while this collision surface must
+	# remain welded to the weapon. Preserve the build-time guide position so a
+	# later seat move can apply the exact inverse translation to the shape only.
+	var base_guide_position_origin_id := source_vertices_origin_id
+	var base_guide_position_local: Vector3 = grip_guide.position
+	_set_origin_tracked_vector3_meta(
+		grip_area,
+		"grip_contact_base_guide_position_local",
+		"grip_contact_base_guide_position_origin_id",
+		base_guide_position_local,
+		base_guide_position_origin_id
+	)
+	_set_origin_tracked_vector3_meta(
+		collision_shape,
+		"grip_contact_reseat_offset_local",
+		"grip_contact_reseat_offset_origin_id",
+		Vector3.ZERO,
+		base_guide_position_origin_id
+	)
+	collision_shape.set_meta(
+		"grip_contact_surface_authority",
+		PrimaryGripHandleMeshPacketScript.SOURCE
+	)
+	collision_shape.set_meta("grip_contact_handle_body_signature", body_signature)
+	collision_shape.set_meta(
+		"grip_contact_source_vertices_origin_id",
+		source_vertices_origin_id
+	)
+	collision_shape.set_meta(
+		"grip_contact_grip_center_origin_id",
+		grip_center_origin_id
+	)
+	collision_shape.set_meta(
+		"grip_contact_faces_local_origin_id",
+		contact_surface_origin_id
+	)
+	grip_area.add_child(collision_shape)
+	grip_area.set_meta(
+		"grip_contact_surface_authority",
+		PrimaryGripHandleMeshPacketScript.SOURCE
+	)
+	grip_area.set_meta("grip_contact_handle_body_signature", body_signature)
+	grip_area.set_meta("grip_contact_handle_only", true)
+	grip_area.set_meta(
+		"grip_contact_source_vertices_origin_id",
+		source_vertices_origin_id
+	)
+	grip_area.set_meta(
+		"grip_contact_grip_center_origin_id",
+		grip_center_origin_id
+	)
+	grip_area.set_meta(
+		"grip_contact_faces_local_origin_id",
+		contact_surface_origin_id
+	)
+	grip_center.set_meta("grip_shell_exact_surface", true)
+	grip_center.set_meta(
+		"grip_shell_surface_authority",
+		PrimaryGripHandleMeshPacketScript.SOURCE
+	)
+	grip_center.set_meta("grip_shell_handle_body_signature", body_signature)
+	grip_center.set_meta(
+		"grip_shell_surface_local_origin_id",
+		contact_surface_origin_id
+	)
+	grip_center.set_meta("grip_shell_valid", true)
+	return true
+
+func sync_exact_grip_contact_surface_to_guide(
+	grip_guide: Node3D,
+	guide_position_local: Vector3,
+	guide_position_origin_id: StringName
+) -> bool:
+	if grip_guide == null or guide_position_origin_id == StringName():
+		return false
+	var grip_center: Node3D = grip_guide.get_node_or_null(
+		"GripShellCenter"
+	) as Node3D
+	if grip_center == null:
+		return false
+	var grip_area: Area3D = grip_center.get_node_or_null(
+		"GripContactArea"
+	) as Area3D
+	if (
+		grip_area == null
+		or StringName(grip_area.get_meta(
+			"grip_contact_surface_authority",
+			StringName()
+		)) != PrimaryGripHandleMeshPacketScript.SOURCE
+	):
+		return false
+	var base_guide_position_origin_id := _resolve_origin_meta_value(
+		grip_area,
+		"grip_contact_base_guide_position_origin_id",
+		StringName()
+	)
+	if base_guide_position_origin_id != guide_position_origin_id:
+		return false
+	var base_guide_position_local := _get_origin_tracked_vector3_meta(
+		grip_area,
+		"grip_contact_base_guide_position_local",
+		"grip_contact_base_guide_position_origin_id",
+		Vector3.ZERO,
+		base_guide_position_origin_id
+	)
+	var reseat_offset_origin_id := base_guide_position_origin_id
+	var reseat_offset_local := base_guide_position_local - guide_position_local
+	for child_node: Node in grip_area.get_children():
+		var collision_shape := child_node as CollisionShape3D
+		if (
+			collision_shape == null
+			or String(collision_shape.name) != "ExactProtectedHandleMeshShape"
+			or collision_shape.shape is not ConcavePolygonShape3D
+		):
+			continue
+		collision_shape.position = reseat_offset_local
+		_set_origin_tracked_vector3_meta(
+			collision_shape,
+			"grip_contact_reseat_offset_local",
+			"grip_contact_reseat_offset_origin_id",
+			reseat_offset_local,
+			reseat_offset_origin_id
+		)
+		return true
+	return false
+
+func _clear_exact_grip_contact_metadata(
+	grip_center: Node3D,
+	grip_area: Area3D
+) -> void:
+	if grip_center != null:
+		for meta_key: StringName in [
+			&"grip_shell_surface_authority",
+			&"grip_shell_handle_body_signature",
+			&"grip_shell_surface_local_origin_id",
+		]:
+			if grip_center.has_meta(meta_key):
+				grip_center.remove_meta(meta_key)
+		grip_center.set_meta("grip_shell_exact_surface", false)
+	if grip_area == null:
+		return
+	for meta_key: StringName in [
+		&"grip_contact_surface_authority",
+		&"grip_contact_handle_body_signature",
+		&"grip_contact_handle_only",
+		&"grip_contact_source_vertices_origin_id",
+		&"grip_contact_grip_center_origin_id",
+		&"grip_contact_faces_local_origin_id",
+		&"grip_contact_base_guide_position_local",
+		&"grip_contact_base_guide_position_origin_id",
+	]:
+		if grip_area.has_meta(meta_key):
+			grip_area.remove_meta(meta_key)
 
 func build_weapon_hold_basis(grip_style_mode: StringName, slot_id: StringName) -> Basis:
 	var final_basis := basis_from_rotation_degrees(BASE_WEAPON_HOLD_ROTATION_DEGREES)
@@ -1851,10 +2215,43 @@ func apply_held_item_grip_style_mode(
 	slot_id: StringName,
 	grip_style_mode: StringName
 ) -> void:
-	if held_item == null or not is_instance_valid(held_item):
+	var resolved_state: Dictionary = resolve_held_item_grip_style_state(
+		held_item,
+		humanoid_rig,
+		slot_id,
+		grip_style_mode
+	)
+	if resolved_state.is_empty():
 		return
+	held_item.set_meta(
+		"grip_style_mode",
+		resolved_state.get("grip_style_mode", CraftedItemWIP.GRIP_NORMAL)
+	)
+	held_item.set_meta(HAND_MOUNT_LOCAL_TRANSFORM_META, resolved_state.get("hand_mount_local_transform", Transform3D.IDENTITY))
+	held_item.set_meta(HAND_MOUNT_LOCAL_TRANSFORM_ORIGIN_META, resolved_state.get(
+			"hand_mount_local_transform_origin_id",
+			CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+		)
+	)
+	_set_origin_tracked_vector3_meta(held_item, "hand_alignment_offset_local",
+		"hand_alignment_offset_origin_id",
+		resolved_state.get("hand_alignment_offset_local", Vector3.ZERO) as Vector3,
+		resolved_state.get(
+			"hand_alignment_offset_origin_id",
+			CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+		) as StringName
+	)
+
+
+func resolve_held_item_grip_style_state(
+	held_item: Node3D,
+	humanoid_rig: Node3D,
+	slot_id: StringName,
+	grip_style_mode: StringName
+) -> Dictionary:
+	if held_item == null or not is_instance_valid(held_item):
+		return {}
 	var resolved_grip_style: StringName = CraftedItemWIP.normalize_grip_style_mode(grip_style_mode)
-	held_item.set_meta("grip_style_mode", resolved_grip_style)
 	_ensure_origin_meta(held_item, "weapon_tip_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
 	_ensure_origin_meta(held_item, "primary_grip_contact_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
 	var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
@@ -1895,9 +2292,13 @@ func apply_held_item_grip_style_mode(
 		primary_grip_contact_origin_id,
 		mount_transform.basis
 	)
-	held_item.set_meta(HAND_MOUNT_LOCAL_TRANSFORM_META, mount_transform)
-	held_item.set_meta(HAND_MOUNT_LOCAL_TRANSFORM_ORIGIN_META, CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT)
-	_set_origin_tracked_vector3_meta(held_item, "hand_alignment_offset_local", "hand_alignment_offset_origin_id", target_contact_local, target_contact_origin_id)
+	return {
+		"grip_style_mode": resolved_grip_style,
+		"hand_mount_local_transform": mount_transform,
+		"hand_mount_local_transform_origin_id": CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT,
+		"hand_alignment_offset_local": target_contact_local,
+		"hand_alignment_offset_origin_id": target_contact_origin_id,
+	}
 
 func clear_rig_weapon_contact_guidance(humanoid_rig: Node3D) -> void:
 	if humanoid_rig == null:

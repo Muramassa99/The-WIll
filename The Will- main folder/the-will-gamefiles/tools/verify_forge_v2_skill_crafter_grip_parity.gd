@@ -12,6 +12,9 @@ const ForgeV2WipCompatibilityAdapterScript = preload(
 const PrimaryGripHandleMeshPacketScript = preload(
 	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
 )
+const CombatOriginRecordScript = preload(
+	"res://core/models/combat_origin_record.gd"
+)
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
 const PlayerForgeWipLibraryStateScript = preload(
 	"res://core/models/player_forge_wip_library_state.gd"
@@ -24,11 +27,22 @@ const CellAtomScript = preload("res://core/atoms/cell_atom.gd")
 const PlayerRigFingerGripPresenterScript = preload(
 	"res://runtime/player/player_rig_finger_grip_presenter.gd"
 )
+const CombatRuntimeClipBakerScript = preload(
+	"res://core/resolvers/combat_runtime_clip_baker.gd"
+)
+const CombatRuntimeClipScript = preload(
+	"res://core/models/combat_runtime_clip.gd"
+)
 
 const RESULT_PATH := (
 	"C:/WORKSPACE/godot_runs/"
 	+ "verify_forge_v2_skill_crafter_grip_parity_2026-08-23.txt"
 )
+const LIFECYCLE_RESULT_PATH := (
+	"C:/WORKSPACE/godot_runs/"
+	+ "verify_forge_v2_skill_crafter_grip_lifecycle_2026-08-26.txt"
+)
+const LIFECYCLE_ONLY_ARGUMENT := "--surface-grasp-lifecycle-only"
 const TEMP_LIBRARY_PATH := (
 	"user://verification/verify_forge_v2_skill_crafter_grip_parity_library.tres"
 )
@@ -36,13 +50,28 @@ const CELL_SIZE_METERS := 0.0125
 const HANDLE_HALF_LENGTH_METERS := 0.1625
 const POSITION_EPSILON_METERS := 0.00025
 const LEGACY_AXIAL_QUANTIZATION_EPSILON_METERS := CELL_SIZE_METERS * 0.11
-# Legacy GripContactArea cells are identity-basis cubes. A square profile cell
-# rotated 45 degrees therefore differs from its visible boundary by at most
-# half_cell * (sqrt(2) - 1); retain that V1 proxy quantization in this adapter
-# parity test while still requiring every expected boundary probe to hit.
-const RAY_HIT_EPSILON_METERS := (
-	CELL_SIZE_METERS * 0.5 * (sqrt(2.0) - 1.0) + 0.0001
+const EXACT_RAY_HIT_EPSILON_METERS := 0.00008
+const EXACT_VERTEX_EPSILON_METERS := 0.000001
+const V2_GRIP_SEAT_MOVE_VALUES: Array[float] = [-0.65, 0.45, -0.20]
+const WEAPON_SEAT_POSITION_EPSILON_METERS := 0.00001
+const WEAPON_SEAT_BASIS_EPSILON := 0.00001
+const WEAPON_SEAT_SOURCE_EPSILON := 0.0000001
+const WEAPON_SEAT_AXIAL_DISPLACEMENT_EPSILON_METERS := 0.00001
+const WEAPON_SEAT_AXIAL_TWIST_EPSILON_RADIANS := 0.0001
+const PREVIEW_PRIMARY_GRIP_SEAT_RATIO_META := (
+	&"preview_primary_grip_seat_axis_ratio_from_span_start"
 )
+const WEAPON_SEAT_MOTION_SOURCE_FIELDS: Array[String] = [
+	"tip_position_local",
+	"pommel_position_local",
+	"axial_reposition_offset",
+	"grip_seat_slide_offset",
+	"weapon_orientation_degrees",
+	"weapon_roll_degrees",
+	"preferred_grip_style_mode",
+	"two_hand_state",
+	"primary_hand_slot",
+]
 const BASIS_EPSILON_DEGREES := 1.0
 const THUMB_EPSILON_DEGREES := 2.0
 const WOOD_MATERIAL_ID := &"mat_wood_gray"
@@ -113,6 +142,7 @@ class FakePlayer:
 
 var result_lines: PackedStringArray = []
 var failures: PackedStringArray = []
+var result_output_path: String = RESULT_PATH
 
 
 func _init() -> void:
@@ -122,6 +152,9 @@ func _init() -> void:
 func _run_verification() -> void:
 	DirAccess.make_dir_recursive_absolute(RESULT_PATH.get_base_dir())
 	_cleanup_temp_library()
+	if OS.get_cmdline_user_args().has(LIFECYCLE_ONLY_ARGUMENT):
+		await _run_surface_grasp_lifecycle_only()
+		return
 	result_lines.append("scope=adapter_side_v1_v2_skill_crafter_grip_parity")
 	result_lines.append("skill_crafter_and_grip_solver_modified=false")
 	result_lines.append(
@@ -146,6 +179,16 @@ func _run_verification() -> void:
 	if not _fixture_is_valid(asymmetric_v2, "asymmetric V2"):
 		_finish()
 		return
+	var decoy_v2: Dictionary = _build_v2_fixture(
+		ASYMMETRIC_AUTHORED_ROWS,
+		ASYMMETRIC_REQUESTED_ANCHOR,
+		&"verify_v2_skill_crafter_grip_non_handle_decoy",
+		"Forge V2 Skill Crafter Grip Non-Handle Decoy",
+		true
+	)
+	if not _fixture_is_valid(decoy_v2, "non-Handle decoy V2"):
+		_finish()
+		return
 	var baseline_v1: CraftedItemWIP = _build_v1_visible_oracle_wip(
 		BASELINE_AUTHORED_ROWS,
 		&"verify_v1_skill_crafter_grip_oracle"
@@ -166,7 +209,15 @@ func _run_verification() -> void:
 	var saved_asymmetric: CraftedItemWIP = library.save_wip(
 		asymmetric_v2.get("wip") as CraftedItemWIP
 	)
-	if saved_v1 == null or saved_v2 == null or saved_asymmetric == null:
+	var saved_decoy: CraftedItemWIP = library.save_wip(
+		decoy_v2.get("wip") as CraftedItemWIP
+	)
+	if (
+		saved_v1 == null
+		or saved_v2 == null
+		or saved_asymmetric == null
+		or saved_decoy == null
+	):
 		_record_failure("temporary WIP library rejected a parity fixture")
 		_finish()
 		return
@@ -189,12 +240,71 @@ func _run_verification() -> void:
 		"v2_asymmetric",
 		asymmetric_v2
 	)
+	var decoy_snapshot: Dictionary = await _capture_skill_crafter_snapshot(
+		library,
+		saved_decoy.wip_id,
+		"v2_non_handle_decoy",
+		decoy_v2
+	)
 
 	_append_snapshot_summary("v1", v1_snapshot)
 	_append_snapshot_summary("v2", v2_snapshot)
 	_append_snapshot_summary("asymmetric", asymmetric_snapshot)
+	_append_snapshot_summary("decoy", decoy_snapshot)
 	_evaluate_baseline_parity(v1_snapshot, v2_snapshot)
 	_evaluate_asymmetric_surface_alignment(asymmetric_v2, asymmetric_snapshot)
+	_evaluate_v2_exact_surface_contract(
+		baseline_v2,
+		v2_snapshot,
+		"baseline",
+		false
+	)
+	_evaluate_v2_exact_surface_contract(
+		asymmetric_v2,
+		asymmetric_snapshot,
+		"asymmetric",
+		false
+	)
+	_evaluate_v2_exact_surface_contract(
+		decoy_v2,
+		decoy_snapshot,
+		"non_handle_decoy",
+		true
+	)
+	_finish()
+
+
+func _run_surface_grasp_lifecycle_only() -> void:
+	result_output_path = LIFECYCLE_RESULT_PATH
+	result_lines.clear()
+	failures.clear()
+	result_lines.append("scope=forge_v2_skill_crafter_exact_surface_grasp_lifecycle")
+	result_lines.append("unrelated_actions=pommel,tip,weapon_orientation,debug_on,debug_off,explicit_refresh")
+	result_lines.append("grip_change=axial_reposition_offset_new_slice")
+	var fixture: Dictionary = _build_v2_fixture(
+		BASELINE_AUTHORED_ROWS,
+		Vector2.ZERO,
+		&"verify_v2_skill_crafter_grip_lifecycle",
+		"Forge V2 Skill Crafter Grip Lifecycle"
+	)
+	if not _fixture_is_valid(fixture, "lifecycle V2"):
+		_finish()
+		return
+	var library: PlayerForgeWipLibraryState = PlayerForgeWipLibraryStateScript.new()
+	library.save_file_path = TEMP_LIBRARY_PATH
+	library.saved_wips.clear()
+	library.selected_wip_id = StringName()
+	var saved_wip: CraftedItemWIP = library.save_wip(
+		fixture.get("wip") as CraftedItemWIP
+	)
+	if saved_wip == null:
+		_record_failure("temporary WIP library rejected the lifecycle fixture")
+		_finish()
+		return
+	await _verify_skill_crafter_surface_grasp_lifecycle(
+		library,
+		saved_wip.wip_id
+	)
 	_finish()
 
 
@@ -212,7 +322,8 @@ func _build_v2_fixture(
 	authored_rows: Array[String],
 	requested_anchor: Vector2,
 	wip_id: StringName,
-	project_name: String
+	project_name: String,
+	include_non_handle_decoy: bool = false
 ) -> Dictionary:
 	var profile_entries: Array[Dictionary] = (
 		ForgeV2ProfileShapeLibraryScript.build_handle_profile_entries()
@@ -314,19 +425,44 @@ func _build_v2_fixture(
 			"valid": false,
 			"error": String(mesh_packet.get("error", "could not build final prism")),
 		}
-	mesh_packet["primary_grip_handle_vertices"] = mesh_packet.get(
+	var protected_handle_vertices := PackedVector3Array(mesh_packet.get(
 		"vertices",
 		PackedVector3Array()
-	)
-	mesh_packet["primary_grip_handle_indices"] = mesh_packet.get(
+	))
+	var protected_handle_indices := PackedInt32Array(mesh_packet.get(
 		"indices",
 		PackedInt32Array()
-	)
+	))
+	var decoy_face := PackedVector3Array()
+	if include_non_handle_decoy:
+		var decoy_mesh := _append_non_handle_decoy_tetrahedron(
+			protected_handle_vertices,
+			protected_handle_indices,
+			frame
+		)
+		mesh_packet["vertices"] = decoy_mesh.get(
+			"vertices",
+			protected_handle_vertices
+		)
+		mesh_packet["indices"] = decoy_mesh.get(
+			"indices",
+			protected_handle_indices
+		)
+		decoy_face = decoy_mesh.get(
+			"decoy_face",
+			PackedVector3Array()
+		) as PackedVector3Array
+	mesh_packet["primary_grip_handle_vertices"] = protected_handle_vertices
+	mesh_packet["primary_grip_handle_indices"] = protected_handle_indices
 	mesh_packet["primary_grip_handle_mesh_source"] = (
 		PrimaryGripHandleMeshPacketScript.SOURCE
 	)
-	mesh_packet["primary_grip_handle_body_signature"] = (
+	var body_signature := (
 		PrimaryGripHandleMeshPacketScript.build_body_signature(handle_body)
+	)
+	mesh_packet["primary_grip_handle_body_signature"] = body_signature
+	mesh_packet["primary_grip_handle_vertices_origin_id"] = (
+		PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
 	)
 	var wip := _build_v2_wip_from_state(state, wip_id, project_name)
 	var contract: Dictionary = ForgeV2WipCompatibilityAdapterScript.build_runtime_contract(
@@ -346,6 +482,15 @@ func _build_v2_fixture(
 		"valid": true,
 		"wip": wip,
 		"handle_body": handle_body,
+		"protected_handle_vertices_meters": protected_handle_vertices,
+		"protected_handle_indices": protected_handle_indices,
+		"protected_handle_mesh_source": PrimaryGripHandleMeshPacketScript.SOURCE,
+		"protected_handle_body_signature": body_signature,
+		"protected_handle_vertices_origin_id": (
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+		),
+		"non_handle_decoy_face_item_meters": decoy_face,
+		"includes_non_handle_decoy": include_non_handle_decoy,
 		"frame": frame,
 		"authored_polygon": authored_polygon,
 		# GripShellCenter follows the arithmetic mean of the sampled profile,
@@ -483,30 +628,3135 @@ func _capture_skill_crafter_snapshot(
 	)
 	await _wait_process_frames(10)
 	await _wait_physics_frames(3)
+	# Preserve the original authored pose for the legitimate V1/V2 macro-grip
+	# parity assertions before deliberately exercising later seat edits.
 	var snapshot := _read_skill_crafter_snapshot(ui, label)
 	snapshot["open_ok"] = open_ok
 	snapshot["slot_ok"] = slot_ok
 	snapshot["authored_pose_ok"] = authored_pose_ok
-	if not fixture.is_empty() and bool(snapshot.get("valid", false)):
-		var grip_center: Node3D = snapshot.get("_grip_center") as Node3D
-		var grip_area: Area3D = snapshot.get("_grip_area") as Area3D
-		var frame: Dictionary = fixture.get("frame", {}) as Dictionary
-		var expected_centers: PackedVector2Array = fixture.get(
-			"expected_profile_centers_2d",
-			PackedVector2Array()
+	_attach_fixture_surface_observations(snapshot, fixture)
+	var exact_surface_seat_move_samples: Array[Dictionary] = []
+	if not fixture.is_empty():
+		for requested_slide: float in V2_GRIP_SEAT_MOVE_VALUES:
+			var move_ok: bool = ui.set_selected_motion_node_grip_seat_slide(
+				requested_slide,
+				false,
+				false,
+				false,
+				true,
+				false
+			)
+			await _wait_process_frames(6)
+			await _wait_physics_frames(3)
+			exact_surface_seat_move_samples.append(
+				_capture_exact_surface_seat_move_sample(
+					ui,
+					fixture,
+					requested_slide,
+					move_ok
+				)
+			)
+		# Preserve the legacy parity fixture's authored default after exercising
+		# several distinct seat positions. The move samples above remain the strict
+		# regression evidence for the counter-translation bridge.
+		ui.set_selected_motion_node_grip_seat_slide(
+			0.20,
+			false,
+			false,
+			false,
+			true,
+			false
 		)
-		snapshot["ray_probe"] = _probe_expected_grip_surface(
-			grip_center,
-			grip_area,
-			expected_centers,
-			frame
-		)
+		await _wait_process_frames(6)
+		await _wait_physics_frames(3)
+	snapshot["exact_surface_seat_move_samples"] = exact_surface_seat_move_samples
 	snapshot.erase("_grip_center")
 	snapshot.erase("_grip_area")
+	snapshot.erase("_secondary_grip_area")
+	snapshot.erase("_exact_shape_node")
+	snapshot.erase("_held_item")
+	snapshot.erase("_mesh_instance")
 	ui.free()
 	fake_player.free()
 	await process_frame
 	return snapshot
+
+
+func _verify_skill_crafter_surface_grasp_lifecycle(
+	library: PlayerForgeWipLibraryState,
+	wip_id: StringName
+) -> void:
+	var total_started_usec: int = Time.get_ticks_usec()
+	var fake_player := FakePlayer.new()
+	fake_player.forge_wip_library_state = library
+	root.add_child(fake_player)
+	var ui = CombatAnimationStationUIScene.instantiate()
+	root.add_child(ui)
+	await _wait_process_frames(3)
+	ui.open_for(fake_player, "Exact Surface Grip Lifecycle")
+	await _wait_process_frames(5)
+	var open_ok: bool = ui.open_saved_wip_with_hand_setup(
+		wip_id,
+		&"hand_right",
+		false,
+		true
+	)
+	await _wait_process_frames(8)
+	var slot_ok: bool = ui.select_skill_slot(&"skill_slot_1", true)
+	await _wait_process_frames(8)
+	await _wait_physics_frames(2)
+	_check(open_ok, "lifecycle_open_ok", "Skill Crafter rejected the exact Handle fixture")
+	_check(slot_ok, "lifecycle_slot_ok", "Skill Crafter rejected skill slot 1")
+
+	var entry_state: Dictionary = _read_surface_grasp_lifecycle_state(
+		ui,
+		&"hand_right"
+	)
+	_append_surface_grasp_lifecycle_sample("entry_default", entry_state, 0.0)
+	var entry_solve_count: int = int(entry_state.get("solve_count", -1))
+	var entry_geometry_load_count: int = int(entry_state.get(
+		"surface_geometry_load_count",
+		-1
+	))
+	var entry_weapon_seat_solve_count: int = int(entry_state.get(
+		"weapon_seat_solve_count",
+		-1
+	))
+	var entry_weapon_seat_geometry_load_count: int = int(entry_state.get(
+		"weapon_seat_surface_geometry_load_count",
+		-1
+	))
+	_check(
+		bool(entry_state.get("available", false))
+		and bool(entry_state.get("exact_surface", false))
+		and entry_solve_count == 1
+		and entry_geometry_load_count == 1,
+		"lifecycle_entry_attempts_exact_grip_once",
+		"editor entry did not perform exactly one exact Handle solve/geometry load"
+	)
+	_check(
+		not bool(entry_state.get("valid", false))
+		and StringName(entry_state.get("status", StringName()))
+			== &"surface_solve_rejected",
+		"lifecycle_entry_default_rejection_is_explicit",
+		"fixture default -0.2 seat did not expose its known rejected diagnostic"
+	)
+	_check(
+		bool(entry_state.get("weapon_seat_available", false))
+		and entry_weapon_seat_solve_count == 1
+		and entry_weapon_seat_geometry_load_count == 1,
+		"lifecycle_entry_attempts_weapon_seat_once",
+		"editor entry did not perform exactly one weapon-seat solve/geometry load"
+	)
+
+	var motion_node: CombatAnimationMotionNode = ui.call(
+		"_get_active_motion_node"
+	) as CombatAnimationMotionNode
+	_check(
+		motion_node != null,
+		"lifecycle_motion_node_available",
+		"Skill Crafter exposed no active motion node for lifecycle actions"
+	)
+	if motion_node == null:
+		ui.free()
+		fake_player.free()
+		await process_frame
+		return
+
+	# The deterministic profile's known-safe -0.5 station establishes the exact
+	# cached grip used by the lifecycle contract below. The known -0.2 entry
+	# rejection above remains visible instead of being mistaken for a lifecycle
+	# failure.
+	var action_started_usec: int = Time.get_ticks_usec()
+	var baseline_axial_changed: bool = ui.set_selected_motion_node_axial_reposition(
+		-0.5,
+		false,
+		false,
+		false,
+		true,
+		false
+	)
+	var baseline_state: Dictionary = await _read_surface_grasp_lifecycle_state_after_action(
+		ui,
+		&"hand_right",
+		"baseline_axial_minus_0_5",
+		action_started_usec
+	)
+	var baseline_solve_count: int = int(baseline_state.get("solve_count", -1))
+	var baseline_geometry_load_count: int = int(baseline_state.get(
+		"surface_geometry_load_count",
+		-1
+	))
+	var baseline_context_key: String = String(baseline_state.get("context_key", ""))
+	var baseline_guide_position: Vector3 = baseline_state.get(
+		"guide_position_local",
+		Vector3.INF
+	) as Vector3
+	var baseline_cached_rotations: Dictionary = baseline_state.get(
+		"cached_rotations",
+		{}
+	) as Dictionary
+	var baseline_live_rotations: Dictionary = baseline_state.get(
+		"live_rotations",
+		{}
+	) as Dictionary
+	var baseline_weapon_seat_ready: bool = _check_weapon_surface_seat_contract(
+		"safe_baseline",
+		baseline_state
+	)
+	var baseline_weapon_seat_solve_count: int = int(baseline_state.get(
+		"weapon_seat_solve_count",
+		-1
+	))
+	var baseline_weapon_seat_geometry_load_count: int = int(baseline_state.get(
+		"weapon_seat_surface_geometry_load_count",
+		-1
+	))
+	var baseline_ready: bool = (
+		baseline_axial_changed
+		and bool(baseline_state.get("valid", false))
+		and int(baseline_state.get("rotation_count", 0)) == 15
+		and baseline_live_rotations.size() == 15
+		and baseline_solve_count == entry_solve_count + 1
+		and baseline_geometry_load_count == entry_geometry_load_count + 1
+		and not baseline_context_key.is_empty()
+		and baseline_weapon_seat_ready
+		and baseline_weapon_seat_solve_count == entry_weapon_seat_solve_count + 1
+		and baseline_weapon_seat_geometry_load_count
+			== entry_weapon_seat_geometry_load_count + 1
+	)
+	_check(
+		baseline_ready,
+		"lifecycle_safe_baseline_exact_grip_ready",
+		"known-safe -0.5 Handle station did not produce exactly one valid exact solve"
+	)
+	if not baseline_ready:
+		ui.free()
+		fake_player.free()
+		await process_frame
+		result_lines.append("lifecycle_total_time_ms=%.3f" % (
+			float(Time.get_ticks_usec() - total_started_usec) / 1000.0
+		))
+		return
+	_verify_cached_weapon_surface_seat_resolve_is_hand_read_only(
+		ui,
+		&"hand_right",
+		"safe_baseline_cached_resolve",
+		baseline_state
+	)
+
+	# A second refresh at the settled baseline must be a pure cache reuse.
+	var baseline_refresh_source_before: Dictionary = _capture_active_motion_source_state(ui)
+	action_started_usec = Time.get_ticks_usec()
+	ui.call("_refresh_preview_scene")
+	var baseline_refresh_state: Dictionary = await _read_surface_grasp_lifecycle_state_after_action(
+		ui,
+		&"hand_right",
+		"baseline_same_context_refresh",
+		action_started_usec
+	)
+	_check_surface_grasp_lifecycle_unchanged(
+		"baseline_same_context_refresh",
+		baseline_refresh_state,
+		baseline_solve_count,
+		baseline_geometry_load_count,
+		baseline_context_key,
+		baseline_cached_rotations,
+		baseline_live_rotations,
+		baseline_state
+	)
+	_check_motion_source_transition(
+		"baseline_same_context_refresh",
+		baseline_refresh_source_before,
+		baseline_refresh_state.get("motion_source_state", {}) as Dictionary
+	)
+
+	# Twenty unrelated authoring actions exercise the same paths used by direct
+	# pommel/tip/orientation manipulation and the visibility-only debugger toggle.
+	var debugger_button: Button = ui.get("debugger_view_button") as Button
+	_check(
+		debugger_button != null,
+		"lifecycle_debugger_button_available",
+		"Skill Crafter exposed no debugger visibility toggle"
+	)
+	var unrelated_action_count := 0
+	for cycle_index: int in range(4):
+		var direction := 1.0 if cycle_index % 2 == 0 else -1.0
+		motion_node = ui.call("_get_active_motion_node") as CombatAnimationMotionNode
+		var source_before: Dictionary = _capture_active_motion_source_state(ui)
+		var requested_pommel: Vector3 = (
+			motion_node.pommel_position_local
+			+ Vector3(0.0015, 0.0005, -0.00075) * direction
+		)
+		action_started_usec = Time.get_ticks_usec()
+		var pommel_changed: bool = ui.set_selected_motion_node_pommel_position(
+			requested_pommel,
+			false,
+			false,
+			false,
+			true,
+			false
+		)
+		unrelated_action_count += 1
+		var label := "macro_%02d_pommel" % unrelated_action_count
+		var action_state: Dictionary = await _read_surface_grasp_lifecycle_state_after_action(
+			ui,
+			&"hand_right",
+			label,
+			action_started_usec
+		)
+		_check(pommel_changed, "%s_changed" % label, "pommel action made no authored change")
+		_check_surface_grasp_lifecycle_unchanged(
+			label,
+			action_state,
+			baseline_solve_count,
+			baseline_geometry_load_count,
+			baseline_context_key,
+			baseline_cached_rotations,
+			baseline_live_rotations,
+			baseline_state
+		)
+		_check_motion_source_transition(
+			label,
+			source_before,
+			action_state.get("motion_source_state", {}) as Dictionary,
+			{"pommel_position_local": requested_pommel}
+		)
+
+		motion_node = ui.call("_get_active_motion_node") as CombatAnimationMotionNode
+		source_before = _capture_active_motion_source_state(ui)
+		var requested_tip: Vector3 = (
+			motion_node.tip_position_local
+			+ Vector3(-0.00075, 0.001, 0.0005) * direction
+		)
+		action_started_usec = Time.get_ticks_usec()
+		var tip_changed: bool = ui.set_selected_motion_node_tip_position(
+			requested_tip,
+			false,
+			false,
+			false,
+			true,
+			false
+		)
+		unrelated_action_count += 1
+		label = "macro_%02d_tip" % unrelated_action_count
+		action_state = await _read_surface_grasp_lifecycle_state_after_action(
+			ui,
+			&"hand_right",
+			label,
+			action_started_usec
+		)
+		_check(tip_changed, "%s_changed" % label, "tip action made no authored change")
+		_check_surface_grasp_lifecycle_unchanged(
+			label,
+			action_state,
+			baseline_solve_count,
+			baseline_geometry_load_count,
+			baseline_context_key,
+			baseline_cached_rotations,
+			baseline_live_rotations,
+			baseline_state
+		)
+		_check_motion_source_transition(
+			label,
+			source_before,
+			action_state.get("motion_source_state", {}) as Dictionary,
+			{"tip_position_local": requested_tip}
+		)
+
+		motion_node = ui.call("_get_active_motion_node") as CombatAnimationMotionNode
+		source_before = _capture_active_motion_source_state(ui)
+		var requested_orientation: Vector3 = (
+			motion_node.weapon_orientation_degrees
+			+ Vector3(0.25, -0.375, 0.5) * direction
+		)
+		action_started_usec = Time.get_ticks_usec()
+		var orientation_changed: bool = ui.set_selected_motion_node_weapon_orientation(
+			requested_orientation,
+			false,
+			false,
+			false,
+			true,
+			false
+		)
+		unrelated_action_count += 1
+		label = "macro_%02d_orientation" % unrelated_action_count
+		action_state = await _read_surface_grasp_lifecycle_state_after_action(
+			ui,
+			&"hand_right",
+			label,
+			action_started_usec
+		)
+		_check(
+			orientation_changed,
+			"%s_changed" % label,
+			"weapon-orientation action made no authored change"
+		)
+		_check_surface_grasp_lifecycle_unchanged(
+			label,
+			action_state,
+			baseline_solve_count,
+			baseline_geometry_load_count,
+			baseline_context_key,
+			baseline_cached_rotations,
+			baseline_live_rotations,
+			baseline_state
+		)
+		_check_motion_source_transition(
+			label,
+			source_before,
+			action_state.get("motion_source_state", {}) as Dictionary,
+			{"weapon_orientation_degrees": requested_orientation}
+		)
+
+		for debug_visible: bool in [true, false]:
+			unrelated_action_count += 1
+			label = "macro_%02d_debug_%s" % [
+				unrelated_action_count,
+				"on" if debug_visible else "off",
+			]
+			source_before = _capture_active_motion_source_state(ui)
+			action_started_usec = Time.get_ticks_usec()
+			if debugger_button != null:
+				debugger_button.set_pressed_no_signal(debug_visible)
+				debugger_button.emit_signal("toggled", debug_visible)
+			action_state = await _read_surface_grasp_lifecycle_state_after_action(
+				ui,
+				&"hand_right",
+				label,
+				action_started_usec
+			)
+			_check_surface_grasp_lifecycle_unchanged(
+				label,
+				action_state,
+				baseline_solve_count,
+				baseline_geometry_load_count,
+				baseline_context_key,
+				baseline_cached_rotations,
+				baseline_live_rotations,
+				baseline_state
+			)
+			_check_motion_source_transition(
+				label,
+				source_before,
+				action_state.get("motion_source_state", {}) as Dictionary
+			)
+	_check(
+		unrelated_action_count == 20,
+		"lifecycle_twenty_unrelated_actions_exercised",
+		"focused lifecycle sequence did not execute all 20 unrelated actions"
+	)
+	# Axial roll is independent macro authority. It must recompose the cached
+	# weapon-local seat without entering the seat context or rewriting endpoints.
+	motion_node = ui.call("_get_active_motion_node") as CombatAnimationMotionNode
+	var roll_source_before: Dictionary = _capture_active_motion_source_state(ui)
+	var requested_roll: float = motion_node.weapon_roll_degrees + 7.0
+	action_started_usec = Time.get_ticks_usec()
+	var roll_changed: bool = ui.set_selected_motion_node_weapon_roll(
+		requested_roll,
+		false,
+		false,
+		false,
+		true,
+		false
+	)
+	var roll_state: Dictionary = await _read_surface_grasp_lifecycle_state_after_action(
+		ui,
+		&"hand_right",
+		"macro_weapon_roll",
+		action_started_usec
+	)
+	_check(
+		roll_changed,
+		"lifecycle_macro_weapon_roll_changed",
+		"weapon-roll authority action made no authored change"
+	)
+	_check_surface_grasp_lifecycle_unchanged(
+		"macro_weapon_roll",
+		roll_state,
+		baseline_solve_count,
+		baseline_geometry_load_count,
+		baseline_context_key,
+		baseline_cached_rotations,
+		baseline_live_rotations,
+		baseline_state
+	)
+	_check_motion_source_transition(
+		"macro_weapon_roll",
+		roll_source_before,
+		roll_state.get("motion_source_state", {}) as Dictionary,
+		{"weapon_roll_degrees": requested_roll}
+	)
+	# A new axial Handle station is the one intended reason to invalidate and
+	# recompute the exact surface grip.
+	motion_node = ui.call("_get_active_motion_node") as CombatAnimationMotionNode
+	var axial_source_before: Dictionary = _capture_active_motion_source_state(ui)
+	var axial_tip_before: Vector3 = motion_node.tip_position_local
+	var axial_pommel_before: Vector3 = motion_node.pommel_position_local
+	action_started_usec = Time.get_ticks_usec()
+	var axial_changed: bool = ui.set_selected_motion_node_axial_reposition(
+		-0.8,
+		false,
+		false,
+		false,
+		true,
+		false
+	)
+	var axial_state: Dictionary = await _read_surface_grasp_lifecycle_state_after_action(
+		ui,
+		&"hand_right",
+		"axial_new_slice",
+		action_started_usec
+	)
+	var axial_solve_count: int = int(axial_state.get("solve_count", -1))
+	var axial_geometry_load_count: int = int(axial_state.get(
+		"surface_geometry_load_count",
+		-1
+	))
+	var axial_context_key: String = String(axial_state.get("context_key", ""))
+	var axial_guide_position: Vector3 = axial_state.get(
+		"guide_position_local",
+		Vector3.INF
+	) as Vector3
+	var axial_weapon_seat_solve_count: int = int(axial_state.get(
+		"weapon_seat_solve_count",
+		-1
+	))
+	var axial_weapon_seat_geometry_load_count: int = int(axial_state.get(
+		"weapon_seat_surface_geometry_load_count",
+		-1
+	))
+	var axial_weapon_seat_context_key: String = String(axial_state.get(
+		"weapon_seat_context_key",
+		""
+	))
+	motion_node = ui.call("_get_active_motion_node") as CombatAnimationMotionNode
+	_check(axial_changed, "lifecycle_axial_action_changed", "new axial value made no authored change")
+	_check(
+		bool(axial_state.get("valid", false)),
+		"lifecycle_axial_exact_grip_valid",
+		"new axial Handle slice did not leave a valid exact grip"
+	)
+	_check(
+		axial_solve_count == baseline_solve_count + 1,
+		"lifecycle_axial_increments_solve_once",
+		"new axial Handle slice did not trigger exactly one exact-surface solve"
+	)
+	_check(
+		axial_geometry_load_count == baseline_geometry_load_count + 1,
+		"lifecycle_axial_loads_surface_geometry_once",
+		"new axial Handle slice did not load exact surface geometry exactly once"
+	)
+	_check(
+		not String(axial_state.get("last_attempt_context_key", "")).is_empty()
+		and String(axial_state.get("last_attempt_context_key", "")) != baseline_context_key
+		and (
+			axial_context_key != baseline_context_key
+			or (
+				StringName(axial_state.get("last_attempt_status", StringName()))
+					== &"surface_solve_rejected"
+				and axial_context_key == baseline_context_key
+			)
+		),
+		"lifecycle_axial_context_changed",
+		"new axial Handle slice produced neither a committed nor rejected distinct context"
+	)
+	_check(
+		motion_node != null
+		and motion_node.tip_position_local.distance_to(axial_tip_before) <= 0.0000001
+		and motion_node.pommel_position_local.distance_to(axial_pommel_before) <= 0.0000001,
+		"lifecycle_axial_preserves_tip_pommel_authority",
+		"Handle-position change rewrote the authored tip or pommel endpoint"
+	)
+	_check(
+		baseline_guide_position != Vector3.INF
+		and axial_guide_position != Vector3.INF
+		and baseline_guide_position.distance_to(axial_guide_position) > 0.000001,
+		"lifecycle_axial_guide_moved_to_new_slice",
+		"axial reposition did not move the authoritative grip guide"
+	)
+	_check_weapon_surface_seat_contract("axial_new_slice", axial_state)
+	_check(
+		axial_weapon_seat_solve_count == baseline_weapon_seat_solve_count + 1
+		and axial_weapon_seat_geometry_load_count
+			== baseline_weapon_seat_geometry_load_count + 1,
+		"lifecycle_axial_weapon_seat_solves_and_loads_once",
+		"new axial Handle station did not perform exactly one weapon-seat solve/load"
+	)
+	_check(
+		not axial_weapon_seat_context_key.is_empty()
+		and axial_weapon_seat_context_key
+			!= String(baseline_state.get("weapon_seat_context_key", ""))
+		and String(axial_state.get("seat_signature", ""))
+			!= String(baseline_state.get("seat_signature", "")),
+		"lifecycle_axial_weapon_seat_identity_changed",
+		"new axial Handle station reused the previous seat context or result signature"
+	)
+	var axial_pivot_variant: Variant = axial_state.get("grip_pivot_local", null)
+	var baseline_pivot_variant: Variant = baseline_state.get("grip_pivot_local", null)
+	_check(
+		axial_pivot_variant is Vector3
+		and baseline_pivot_variant is Vector3
+		and (axial_pivot_variant as Vector3).distance_to(
+			baseline_pivot_variant as Vector3
+		) > WEAPON_SEAT_POSITION_EPSILON_METERS,
+		"lifecycle_axial_weapon_seat_c0_moves_to_new_station",
+		"new axial Handle station did not change the weapon-local C0 pivot"
+	)
+	_check_motion_source_transition(
+		"axial_new_slice",
+		axial_source_before,
+		axial_state.get("motion_source_state", {}) as Dictionary,
+		{"axial_reposition_offset": -0.8}
+	)
+
+	var repeated_axial_source_before: Dictionary = _capture_active_motion_source_state(ui)
+	action_started_usec = Time.get_ticks_usec()
+	ui.call("_refresh_preview_scene")
+	var repeated_axial_state: Dictionary = await _read_surface_grasp_lifecycle_state_after_action(
+		ui,
+		&"hand_right",
+		"axial_same_value_refresh",
+		action_started_usec
+	)
+	_check(
+		int(repeated_axial_state.get("solve_count", -1)) == axial_solve_count,
+		"lifecycle_same_axial_refresh_does_not_resolve",
+		"refreshing the same axial Handle slice triggered another exact-surface solve"
+	)
+	_check(
+		int(repeated_axial_state.get("surface_geometry_load_count", -1))
+			== axial_geometry_load_count,
+		"lifecycle_same_axial_refresh_does_not_reload_surface_geometry",
+		"refreshing the same axial Handle slice reloaded surface geometry"
+	)
+	_check(
+		String(repeated_axial_state.get("context_key", "")) == axial_context_key,
+		"lifecycle_same_axial_context_stable",
+		"refreshing the same axial value changed the stable grip context"
+	)
+	_check(
+		(repeated_axial_state.get("guide_position_local", Vector3.INF) as Vector3).distance_to(
+			axial_guide_position
+		) <= 0.000001,
+		"lifecycle_same_axial_guide_stable",
+		"refreshing the same axial value moved the authoritative grip guide"
+	)
+
+	_check(
+		_surface_grasp_lifecycle_rotations_match(
+			repeated_axial_state.get("cached_rotations", {}) as Dictionary,
+			axial_state.get("cached_rotations", {}) as Dictionary
+		),
+		"lifecycle_same_axial_cached_rotations_stable",
+		"refreshing the same axial value altered cached local digit rotations"
+	)
+	_check_weapon_surface_seat_unchanged(
+		"axial_same_value_refresh",
+		repeated_axial_state,
+		axial_state
+	)
+	_check_motion_source_transition(
+		"axial_same_value_refresh",
+		repeated_axial_source_before,
+		repeated_axial_state.get("motion_source_state", {}) as Dictionary
+	)
+
+	# A solve candidate is scratch work until all safety gates accept it. Inject a
+	# deterministic unsafe surface relationship under a distinct semantic context,
+	# then restore the real surface. This exercises the exact presenter's commit
+	# boundary without changing hinge/contact rules or depending on one authored
+	# axial station happening to reject after earlier macro motion.
+	var preview_subviewport: SubViewport = ui.get("preview_subviewport") as SubViewport
+	var preview_root: Node3D = preview_subviewport.get_node_or_null(
+		"CombatAnimationPreviewRoot3D"
+	) as Node3D if preview_subviewport != null else null
+	var transaction_actor: Node3D = preview_root.get_node_or_null(
+		"PreviewActorPivot/PreviewActor"
+	) as Node3D if preview_root != null else null
+	var transaction_held_item: Node3D = preview_root.get_meta(
+		"preview_held_item",
+		null
+	) as Node3D if preview_root != null else null
+	var transaction_guide: Node3D = transaction_held_item.get_node_or_null(
+		"PrimaryGripGuide"
+	) as Node3D if transaction_held_item != null else null
+	var transaction_center: Node3D = transaction_guide.get_node_or_null(
+		"GripShellCenter"
+	) as Node3D if transaction_guide != null else null
+	var transaction_exact_shape: CollisionShape3D = transaction_center.get_node_or_null(
+		"GripContactArea/ExactProtectedHandleMeshShape"
+	) as CollisionShape3D if transaction_center != null else null
+	var transaction_skeleton: Skeleton3D = transaction_actor.get_node_or_null(
+		"JosieModel/Josie/Skeleton3D"
+	) as Skeleton3D if transaction_actor != null else null
+	var transaction_presenter: RefCounted = transaction_actor.get(
+		"finger_grip_presenter"
+	) as RefCounted if transaction_actor != null else null
+	var transaction_graph_valid: bool = (
+		transaction_actor != null
+		and transaction_guide != null
+		and transaction_exact_shape != null
+		and transaction_skeleton != null
+		and transaction_presenter != null
+		and transaction_actor.has_method("_update_finger_grip_targets")
+		and transaction_presenter.has_method("_apply_animation_contact_open_pose")
+	)
+	_check(
+		transaction_graph_valid,
+		"lifecycle_rejection_transaction_graph_available",
+		"exact-grip transaction fixture graph is incomplete"
+	)
+	var original_shape_transform: Transform3D = (
+		transaction_exact_shape.global_transform
+		if transaction_exact_shape != null
+		else Transform3D.IDENTITY
+	)
+	var original_guide_position_meta: Variant = (
+		transaction_guide.get_meta("grip_guide_position_local", transaction_guide.position)
+		if transaction_guide != null
+		else Vector3.ZERO
+	)
+	var rejected_axial_state: Dictionary = repeated_axial_state
+	var suppressed_rejected_state: Dictionary = repeated_axial_state
+	var restored_axial_state: Dictionary = repeated_axial_state
+	if transaction_graph_valid:
+		var pinky_root_index: int = transaction_skeleton.find_bone("CC_Base_R_Pinky1")
+		var pinky_mid_index: int = transaction_skeleton.find_bone("CC_Base_R_Pinky2")
+		_check(
+			pinky_root_index >= 0 and pinky_mid_index >= 0,
+			"lifecycle_rejection_transaction_pinky_chain_available",
+			"right pinky chain is unavailable for deterministic unsafe-surface injection"
+		)
+		var pinky_root_world: Vector3 = transaction_skeleton.to_global(
+			transaction_skeleton.get_bone_global_pose(pinky_root_index).origin
+		)
+		var pinky_mid_world: Vector3 = transaction_skeleton.to_global(
+			transaction_skeleton.get_bone_global_pose(pinky_mid_index).origin
+		)
+		var candidate_guide_position: Vector3 = (
+			original_guide_position_meta as Vector3
+			if original_guide_position_meta is Vector3
+			else transaction_guide.position
+		) + Vector3(0.0002, 0.0, 0.0)
+		transaction_guide.set_meta("grip_guide_position_local", candidate_guide_position)
+		transaction_exact_shape.global_position = pinky_root_world.lerp(pinky_mid_world, 0.5)
+		action_started_usec = Time.get_ticks_usec()
+		transaction_actor.call("_update_finger_grip_targets", 1.0, true)
+		rejected_axial_state = _read_surface_grasp_lifecycle_state(ui, &"hand_right")
+		_append_surface_grasp_lifecycle_sample(
+			"unsafe_candidate_transaction",
+			rejected_axial_state,
+			float(Time.get_ticks_usec() - action_started_usec) / 1000.0
+		)
+	var rejected_solve_count: int = int(rejected_axial_state.get("solve_count", -1))
+	var rejected_geometry_load_count: int = int(rejected_axial_state.get(
+		"surface_geometry_load_count",
+		-1
+	))
+	var rejected_context_key: String = String(rejected_axial_state.get(
+		"last_rejected_context_key",
+		""
+	))
+	_check(
+		bool(rejected_axial_state.get("valid", false))
+		and String(rejected_axial_state.get("context_key", "")) == axial_context_key,
+		"lifecycle_rejected_candidate_preserves_committed_context",
+		"unsafe surface candidate invalidated or replaced the committed exact grip"
+	)
+	_check(
+		rejected_solve_count == axial_solve_count + 1
+		and rejected_geometry_load_count == axial_geometry_load_count + 1,
+		"lifecycle_rejected_candidate_attempted_once",
+		"unsafe surface candidate did not perform exactly one solve/load attempt"
+	)
+	_check(
+		not rejected_context_key.is_empty()
+		and rejected_context_key != axial_context_key
+		and String(rejected_axial_state.get("last_attempt_context_key", ""))
+			== rejected_context_key
+		and StringName(rejected_axial_state.get("last_attempt_status", StringName()))
+			== &"surface_solve_rejected"
+		and StringName(rejected_axial_state.get(
+			"last_attempt_diagnostic_status",
+			StringName()
+		)) == &"unsafe_no_verified_fallback",
+		"lifecycle_rejected_candidate_recorded_separately",
+		"rejected candidate did not retain its distinct attempt diagnostics"
+	)
+	_check(
+		_surface_grasp_lifecycle_rotations_match(
+			rejected_axial_state.get("cached_rotations", {}) as Dictionary,
+			axial_state.get("cached_rotations", {}) as Dictionary
+		)
+		and _surface_grasp_lifecycle_rotations_match(
+			rejected_axial_state.get("live_rotations", {}) as Dictionary,
+			axial_state.get("live_rotations", {}) as Dictionary
+		),
+		"lifecycle_rejected_candidate_restores_committed_rotations",
+		"rejected candidate exposed its temporary open pose or altered the committed cache"
+	)
+
+	if transaction_graph_valid:
+		# Prove suppression does real pose restoration rather than merely returning:
+		# deliberately expose the scratch open pose, then invoke the same rejected
+		# context. The second call must reapply all 15 committed local rotations.
+		transaction_presenter.call(
+			"_apply_animation_contact_open_pose",
+			transaction_skeleton,
+			&"hand_right"
+		)
+		action_started_usec = Time.get_ticks_usec()
+		transaction_actor.call("_update_finger_grip_targets", 1.0, true)
+		suppressed_rejected_state = _read_surface_grasp_lifecycle_state(ui, &"hand_right")
+		_append_surface_grasp_lifecycle_sample(
+			"unsafe_candidate_repeat_suppressed",
+			suppressed_rejected_state,
+			float(Time.get_ticks_usec() - action_started_usec) / 1000.0
+		)
+	_check(
+		int(suppressed_rejected_state.get("solve_count", -1)) == rejected_solve_count
+		and int(suppressed_rejected_state.get("surface_geometry_load_count", -1))
+			== rejected_geometry_load_count
+		and int(suppressed_rejected_state.get("suppressed_repeat_attempt_count", 0)) > 0,
+		"lifecycle_rejected_context_repeat_suppressed",
+		"refreshing the rejected context retried its terminal exact solve"
+	)
+	_check(
+		bool(suppressed_rejected_state.get("valid", false))
+		and String(suppressed_rejected_state.get("context_key", "")) == axial_context_key
+		and _surface_grasp_lifecycle_rotations_match(
+			suppressed_rejected_state.get("live_rotations", {}) as Dictionary,
+			axial_state.get("live_rotations", {}) as Dictionary
+		),
+		"lifecycle_rejected_context_suppression_reapplies_committed_grasp",
+		"rejected-context suppression failed to reapply the committed local rotations"
+	)
+
+	if transaction_graph_valid:
+		transaction_exact_shape.global_transform = original_shape_transform
+		transaction_guide.set_meta("grip_guide_position_local", original_guide_position_meta)
+		action_started_usec = Time.get_ticks_usec()
+		transaction_actor.call("_update_finger_grip_targets", 1.0, true)
+		restored_axial_state = _read_surface_grasp_lifecycle_state(ui, &"hand_right")
+		_append_surface_grasp_lifecycle_sample(
+			"committed_context_restored_after_rejection",
+			restored_axial_state,
+			float(Time.get_ticks_usec() - action_started_usec) / 1000.0
+		)
+	_check(
+		bool(restored_axial_state.get("valid", false))
+		and String(restored_axial_state.get("context_key", "")) == axial_context_key,
+		"lifecycle_safe_rejected_safe_context_restored",
+		"returning from a rejected station did not recover the committed safe context"
+	)
+	_check(
+		int(restored_axial_state.get("solve_count", -1)) == rejected_solve_count
+		and int(restored_axial_state.get("surface_geometry_load_count", -1))
+			== rejected_geometry_load_count
+		and _surface_grasp_lifecycle_rotations_match(
+			restored_axial_state.get("live_rotations", {}) as Dictionary,
+			axial_state.get("live_rotations", {}) as Dictionary
+		),
+		"lifecycle_safe_rejected_safe_reuses_committed_grasp",
+		"returning to the committed safe station re-solved or changed its local rotations"
+	)
+	_verify_surface_grasp_fallback_playback_lifecycle(
+		ui,
+		rejected_solve_count,
+		rejected_geometry_load_count,
+		axial_context_key,
+		axial_state.get("cached_rotations", {}) as Dictionary,
+		axial_state.get("live_rotations", {}) as Dictionary,
+		axial_state
+	)
+	result_lines.append("lifecycle_entry_solve_count=%d" % entry_solve_count)
+	result_lines.append("lifecycle_baseline_solve_count=%d" % baseline_solve_count)
+	result_lines.append("lifecycle_axial_solve_count=%d" % axial_solve_count)
+	result_lines.append("lifecycle_rejected_solve_count=%d" % rejected_solve_count)
+	result_lines.append("lifecycle_final_solve_count=%d" % int(
+		restored_axial_state.get("solve_count", -1)
+	))
+	result_lines.append("lifecycle_baseline_geometry_load_count=%d" % baseline_geometry_load_count)
+	result_lines.append("lifecycle_axial_geometry_load_count=%d" % axial_geometry_load_count)
+	result_lines.append("lifecycle_rejected_geometry_load_count=%d" % rejected_geometry_load_count)
+	result_lines.append("lifecycle_final_geometry_load_count=%d" % int(
+		restored_axial_state.get("surface_geometry_load_count", -1)
+	))
+	result_lines.append("lifecycle_baseline_context_key=%s" % baseline_context_key)
+	result_lines.append("lifecycle_axial_context_key=%s" % axial_context_key)
+	result_lines.append("lifecycle_entry_weapon_seat_solve_count=%d" % (
+		entry_weapon_seat_solve_count
+	))
+	result_lines.append("lifecycle_baseline_weapon_seat_solve_count=%d" % (
+		baseline_weapon_seat_solve_count
+	))
+	result_lines.append("lifecycle_axial_weapon_seat_solve_count=%d" % (
+		axial_weapon_seat_solve_count
+	))
+	result_lines.append("lifecycle_baseline_weapon_seat_context_key=%s" % String(
+		baseline_state.get("weapon_seat_context_key", "")
+	))
+	result_lines.append("lifecycle_axial_weapon_seat_context_key=%s" % (
+		axial_weapon_seat_context_key
+	))
+	result_lines.append("lifecycle_baseline_weapon_seat_signature=%s" % String(
+		baseline_state.get("seat_signature", "")
+	))
+	result_lines.append("lifecycle_axial_weapon_seat_signature=%s" % String(
+		axial_state.get("seat_signature", "")
+	))
+	result_lines.append("lifecycle_baseline_guide_position=%s" % str(baseline_guide_position))
+	result_lines.append("lifecycle_axial_guide_position=%s" % str(axial_guide_position))
+	result_lines.append("lifecycle_total_time_ms=%.3f" % (
+		float(Time.get_ticks_usec() - total_started_usec) / 1000.0
+	))
+	ui.free()
+	fake_player.free()
+	await process_frame
+
+
+func _verify_surface_grasp_fallback_playback_lifecycle(
+	ui: Node,
+	expected_solve_count: int,
+	expected_surface_geometry_load_count: int,
+	expected_context_key: String,
+	expected_cached_rotations: Dictionary,
+	expected_live_rotations: Dictionary,
+	expected_weapon_seat_state: Dictionary
+) -> void:
+	var source_node: CombatAnimationMotionNode = ui.call(
+		"_get_active_motion_node"
+	) as CombatAnimationMotionNode
+	_check(
+		source_node != null,
+		"lifecycle_fallback_playback_source_available",
+		"fallback playback had no active source motion node"
+	)
+	if source_node == null:
+		return
+	var source_state_before_playback: Dictionary = _capture_active_motion_source_state(ui)
+	var from_axial: float = source_node.axial_reposition_offset
+	var to_axial: float = -0.5 if from_axial >= 0.0 else 0.5
+	var from_node: CombatAnimationMotionNode = source_node.duplicate_node()
+	var to_node: CombatAnimationMotionNode = source_node.duplicate_node()
+	from_node.node_index = 0
+	from_node.axial_reposition_offset = from_axial
+	from_node.weapon_orientation_authored = true
+	from_node.transition_duration_seconds = 0.01
+	to_node.node_index = 1
+	to_node.axial_reposition_offset = to_axial
+	to_node.tip_position_local += Vector3(0.04, 0.015, -0.01)
+	to_node.pommel_position_local += Vector3(0.04, 0.015, -0.01)
+	to_node.weapon_orientation_authored = true
+	to_node.weapon_orientation_degrees += Vector3(4.0, -3.0, 6.0)
+	to_node.transition_duration_seconds = 1.0
+	from_node.normalize()
+	to_node.normalize()
+	var baker = CombatRuntimeClipBakerScript.new()
+	var runtime_clip = baker.call(
+		"bake_from_motion_node_chain",
+		[from_node, to_node],
+		{
+			"clip_kind": CombatRuntimeClipScript.CLIP_KIND_SKILL_PLAYBACK,
+			"clip_id": &"verify_exact_grip_fallback_playback",
+			"source_draft_id": &"verify_exact_grip_lifecycle",
+			"source_skill_slot_id": &"skill_slot_1",
+			"source_equipment_slot_id": &"hand_right",
+			"source_weapon_wip_id": &"verify_v2_skill_crafter_grip_lifecycle",
+			"sample_rate_hz": 30.0,
+			"playback_speed_scale": 1.0,
+		}
+	)
+	var frame_count: int = (
+		int(runtime_clip.call("get_frame_count"))
+		if runtime_clip != null and runtime_clip.has_method("get_frame_count")
+		else 0
+	)
+	var clip_has_solved_replay: bool = (
+		bool(runtime_clip.call("has_solved_replay_track"))
+		if runtime_clip != null and runtime_clip.has_method("has_solved_replay_track")
+		else false
+	)
+	var clip_ready: bool = (
+		runtime_clip != null
+		and frame_count > 2
+		and not clip_has_solved_replay
+		and float(runtime_clip.get("total_duration_seconds")) > 0.0
+	)
+	_check(
+		clip_ready,
+		"lifecycle_fallback_playback_clip_ready",
+		"focused fallback clip was missing, empty, or unexpectedly had solved replay"
+	)
+	result_lines.append("lifecycle_fallback_playback_frame_count=%d" % frame_count)
+	result_lines.append("lifecycle_fallback_playback_has_solved_replay=%s" % str(
+		clip_has_solved_replay
+	))
+	if not clip_ready:
+		return
+
+	var chain_player = ui.get("chain_player")
+	var session_state: RefCounted = ui.get("session_state") as RefCounted
+	var debugger_button: Button = ui.get("debugger_view_button") as Button
+	var preview_subviewport: SubViewport = ui.get("preview_subviewport") as SubViewport
+	var preview_root: Node3D = preview_subviewport.get_node_or_null(
+		"CombatAnimationPreviewRoot3D"
+	) as Node3D if preview_subviewport != null else null
+	_check(
+		chain_player != null
+		and session_state != null
+		and debugger_button != null
+		and preview_root != null,
+		"lifecycle_fallback_playback_ui_graph_available",
+		"Skill Crafter did not expose its playback chain, session, debug toggle, or preview root"
+	)
+	if (
+		chain_player == null
+		or session_state == null
+		or debugger_button == null
+		or preview_root == null
+	):
+		return
+	chain_player.call("prepare_runtime_clip", runtime_clip, 1.0, false)
+	chain_player.call("start")
+	session_state.set("playback_active", true)
+	var playback_started: bool = bool(chain_player.call("is_playing"))
+	_check(
+		playback_started,
+		"lifecycle_fallback_playback_started",
+		"focused fallback runtime clip did not enter live playback"
+	)
+	if not playback_started:
+		session_state.set("playback_active", false)
+		return
+
+	var total_duration: float = float(runtime_clip.get("total_duration_seconds"))
+	var sample_ratios: Array[float] = [0.0, 0.12, 0.28, 0.46, 0.64, 0.80, 0.94]
+	var previous_ratio := 0.0
+	var minimum_axial := INF
+	var maximum_axial := -INF
+	var sample_count := 0
+	var saw_debug_on := false
+	var saw_debug_off := false
+	var saw_pending_distinct_context := false
+	var all_frames_used_fallback := true
+	var all_requested_states_match_chain := true
+	var all_resolved_states_used_fallback := true
+	var all_debug_outputs_match_request := true
+	var first_tip := Vector3.INF
+	var first_pommel := Vector3.INF
+	var first_orientation := Vector3.INF
+	var final_tip := Vector3.INF
+	var final_pommel := Vector3.INF
+	var final_orientation := Vector3.INF
+	var first_held_transform := Transform3D.IDENTITY
+	var final_held_transform := Transform3D.IDENTITY
+	var captured_held_transform := false
+	for sample_index: int in range(sample_ratios.size()):
+		var ratio: float = sample_ratios[sample_index]
+		if sample_index > 0:
+			chain_player.call(
+				"advance",
+				maxf(ratio - previous_ratio, 0.0) * total_duration
+			)
+		previous_ratio = ratio
+		var debugger_visible: bool = sample_index % 2 == 1
+		debugger_button.set_pressed_no_signal(debugger_visible)
+		debugger_button.emit_signal("toggled", debugger_visible)
+		saw_debug_on = saw_debug_on or debugger_visible
+		saw_debug_off = saw_debug_off or not debugger_visible
+		var frame_started_usec: int = Time.get_ticks_usec()
+		ui.call("_sync_preview_playback_pose_only")
+		var requested_playback_state: Dictionary = ui.call(
+			"_build_preview_playback_state"
+		) as Dictionary
+		var resolved_playback_state: Dictionary = preview_root.get_meta(
+			"resolved_playback_state",
+			{}
+		) as Dictionary
+		var held_item: Node3D = preview_root.get_meta(
+			"preview_held_item",
+			null
+		) as Node3D
+		var label := "fallback_playback_%02d" % sample_index
+		var state: Dictionary = _read_surface_grasp_lifecycle_state(
+			ui,
+			&"hand_right"
+		)
+		_append_surface_grasp_lifecycle_sample(
+			label,
+			state,
+			float(Time.get_ticks_usec() - frame_started_usec) / 1000.0
+		)
+		_check_surface_grasp_lifecycle_unchanged(
+			label,
+			state,
+			expected_solve_count,
+			expected_surface_geometry_load_count,
+			expected_context_key,
+			expected_cached_rotations,
+			expected_live_rotations,
+			expected_weapon_seat_state
+		)
+		var current_axial: float = float(chain_player.get("current_axial_reposition"))
+		var expected_axial: float = lerpf(from_axial, to_axial, ratio)
+		var current_tip: Vector3 = chain_player.get("current_tip_position") as Vector3
+		var current_pommel: Vector3 = chain_player.get("current_pommel_position") as Vector3
+		var current_orientation: Vector3 = chain_player.get(
+			"current_weapon_orientation_degrees"
+		) as Vector3
+		var solved_replay_available: bool = bool(chain_player.get(
+			"current_solved_replay_available"
+		))
+		var requested_state_matches_chain: bool = (
+			bool(requested_playback_state.get("active", false))
+			and bool(requested_playback_state.get("runtime_clip_playback", false))
+			and not bool(requested_playback_state.get("solved_replay_available", false))
+			and (requested_playback_state.get(
+				"tip_position_local",
+				Vector3.INF
+			) as Vector3).distance_to(current_tip) <= 0.000001
+			and (requested_playback_state.get(
+				"pommel_position_local",
+				Vector3.INF
+			) as Vector3).distance_to(current_pommel) <= 0.000001
+			and (requested_playback_state.get(
+				"weapon_orientation_degrees",
+				Vector3.INF
+			) as Vector3).distance_to(current_orientation) <= 0.000001
+			and absf(float(requested_playback_state.get(
+				"axial_reposition_offset",
+				INF
+			)) - current_axial) <= 0.000001
+		)
+		var resolved_state_used_fallback: bool = (
+			bool(resolved_playback_state.get("runtime_clip_playback", false))
+			and not bool(resolved_playback_state.get("solved_replay_applied", false))
+			and (resolved_playback_state.get(
+				"weapon_orientation_degrees",
+				Vector3.INF
+			) as Vector3).distance_to(current_orientation) <= 0.001
+		)
+		var debug_output_matches_request: bool = (
+			bool(preview_root.get_meta("debugger_view_enabled", false))
+			== debugger_visible
+		)
+		all_requested_states_match_chain = (
+			all_requested_states_match_chain and requested_state_matches_chain
+		)
+		all_resolved_states_used_fallback = (
+			all_resolved_states_used_fallback and resolved_state_used_fallback
+		)
+		all_debug_outputs_match_request = (
+			all_debug_outputs_match_request and debug_output_matches_request
+		)
+		all_frames_used_fallback = all_frames_used_fallback and not solved_replay_available
+		minimum_axial = minf(minimum_axial, current_axial)
+		maximum_axial = maxf(maximum_axial, current_axial)
+		var pending_context_key: String = String(state.get("pending_context_key", ""))
+		if not pending_context_key.is_empty() and pending_context_key != expected_context_key:
+			saw_pending_distinct_context = true
+		if sample_index == 0:
+			first_tip = current_tip
+			first_pommel = current_pommel
+			first_orientation = current_orientation
+		final_tip = current_tip
+		final_pommel = current_pommel
+		final_orientation = current_orientation
+		if held_item != null and is_instance_valid(held_item):
+			if not captured_held_transform:
+				first_held_transform = held_item.global_transform
+				captured_held_transform = true
+			final_held_transform = held_item.global_transform
+		sample_count += 1
+		result_lines.append("lifecycle_%s_ratio=%.3f" % [label, ratio])
+		result_lines.append("lifecycle_%s_axial=%.6f" % [label, current_axial])
+		result_lines.append("lifecycle_%s_debug_visible=%s" % [
+			label,
+			str(debugger_visible),
+		])
+		result_lines.append("lifecycle_%s_pending_context_key=%s" % [
+			label,
+			pending_context_key,
+		])
+		result_lines.append("lifecycle_%s_requested_state_matches_chain=%s" % [
+			label,
+			str(requested_state_matches_chain),
+		])
+		result_lines.append("lifecycle_%s_resolved_state_used_fallback=%s" % [
+			label,
+			str(resolved_state_used_fallback),
+		])
+		result_lines.append("lifecycle_%s_debug_output_matches_request=%s" % [
+			label,
+			str(debug_output_matches_request),
+		])
+		_check(
+			absf(current_axial - expected_axial) <= 0.002,
+			"lifecycle_%s_axial_interpolated" % label,
+			"fallback playback did not interpolate the expected axial station"
+		)
+	chain_player.call("stop")
+	session_state.set("playback_active", false)
+	debugger_button.set_pressed_no_signal(false)
+	debugger_button.emit_signal("toggled", false)
+	_check_motion_source_transition(
+		"fallback_playback_source",
+		source_state_before_playback,
+		_capture_active_motion_source_state(ui)
+	)
+	_check(
+		sample_count == sample_ratios.size(),
+		"lifecycle_fallback_playback_sample_count",
+		"focused fallback playback did not execute every requested live frame"
+	)
+	_check(
+		all_frames_used_fallback,
+		"lifecycle_fallback_playback_never_uses_solved_replay_fast_path",
+		"focused fallback playback unexpectedly entered solved-replay playback"
+	)
+	_check(
+		all_requested_states_match_chain,
+		"lifecycle_fallback_playback_requested_states_match_chain",
+		"Skill Crafter playback state did not consume the live chain-player fields"
+	)
+	_check(
+		all_resolved_states_used_fallback,
+		"lifecycle_fallback_playback_resolved_states_use_fallback",
+		"preview playback did not use the unsolved runtime-clip fallback path"
+	)
+	_check(
+		all_debug_outputs_match_request,
+		"lifecycle_fallback_playback_debug_output_matches",
+		"preview debugger visibility did not follow live playback requests"
+	)
+	_check(
+		maximum_axial - minimum_axial >= 0.90,
+		"lifecycle_fallback_playback_axial_sequence_spans_handle",
+		"fallback playback did not traverse the intended interpolated Handle range"
+	)
+	_check(
+		first_tip.distance_to(final_tip) > 0.02
+		and first_pommel.distance_to(final_pommel) > 0.02
+		and first_orientation.distance_to(final_orientation) > 2.0,
+		"lifecycle_fallback_playback_pose_fields_changed",
+		"fallback playback did not vary tip, pommel, and weapon orientation"
+	)
+	_check(
+		captured_held_transform
+		and (
+			first_held_transform.origin.distance_to(final_held_transform.origin) > 0.005
+			or first_held_transform.basis.x.distance_to(
+				final_held_transform.basis.x
+			) > 0.01
+		),
+		"lifecycle_fallback_playback_preview_pose_changed",
+		"fallback playback chain changed but the preview weapon pose stayed static"
+	)
+	_check(
+		saw_debug_on and saw_debug_off,
+		"lifecycle_fallback_playback_debug_toggled",
+		"fallback playback did not exercise both debugger visibility states"
+	)
+	_check(
+		saw_pending_distinct_context,
+		"lifecycle_fallback_playback_defers_changed_axial_context",
+		"moving fallback playback never exposed a deferred distinct Handle context"
+	)
+	result_lines.append("lifecycle_fallback_playback_min_axial=%.6f" % minimum_axial)
+	result_lines.append("lifecycle_fallback_playback_max_axial=%.6f" % maximum_axial)
+
+
+func _read_surface_grasp_lifecycle_state_after_action(
+	ui: Node,
+	slot_id: StringName,
+	label: String,
+	action_started_usec: int
+) -> Dictionary:
+	await _wait_process_frames(2)
+	await _wait_physics_frames(1)
+	var state: Dictionary = _read_surface_grasp_lifecycle_state(ui, slot_id)
+	var elapsed_ms: float = float(
+		Time.get_ticks_usec() - action_started_usec
+	) / 1000.0
+	_append_surface_grasp_lifecycle_sample(label, state, elapsed_ms)
+	return state
+
+
+func _read_surface_grasp_lifecycle_state(
+	ui: Node,
+	slot_id: StringName
+) -> Dictionary:
+	var result: Dictionary = {
+		"available": false,
+		"valid": false,
+		"solve_count": -1,
+		"surface_geometry_load_count": -1,
+		"rotation_count": 0,
+		"cached_rotations": {},
+		"live_rotations": {},
+		"context_key": "",
+		"last_attempt_context_key": "",
+		"last_attempt_status": StringName(),
+		"last_attempt_diagnostic_status": StringName(),
+		"last_rejected_context_key": "",
+		"last_rejected_status": StringName(),
+		"guide_position_local": Vector3.INF,
+		"exact_surface": false,
+		"weapon_seat_available": false,
+		"weapon_seat_valid": false,
+		"weapon_seat_status": StringName(),
+		"weapon_seat_context_key": "",
+		"weapon_seat_solve_count": -1,
+		"weapon_seat_surface_geometry_load_count": -1,
+		"seat_signature": "",
+		"seat_correction_grip_local": null,
+		"seat_correction_grip_local_origin_id": StringName(),
+		"seat_rotation_grip_local": null,
+		"grip_pivot_local": null,
+		"grip_pivot_local_origin_id": StringName(),
+		"weapon_seat_diagnostics": {},
+		"weapon_seat_stations": {},
+		"weapon_seat_anatomy_state": {},
+		"weapon_seat_applied_state": {},
+		"weapon_seat_composition": {},
+		"grasp_diagnostics": {},
+		"last_attempt_diagnostics": {},
+		"motion_source_state": {},
+	}
+	if ui == null or ui.get("preview_subviewport") == null:
+		result["error"] = "preview viewport missing"
+		return result
+	var preview_subviewport: SubViewport = ui.get("preview_subviewport") as SubViewport
+	var preview_root: Node3D = preview_subviewport.get_node_or_null(
+		"CombatAnimationPreviewRoot3D"
+	) as Node3D
+	var actor: Node3D = preview_root.get_node_or_null(
+		"PreviewActorPivot/PreviewActor"
+	) as Node3D if preview_root != null else null
+	var held_item: Node3D = preview_root.get_meta(
+		"preview_held_item",
+		null
+	) as Node3D if preview_root != null else null
+	var guide_name: String = (
+		"SecondaryGripGuide" if slot_id == &"hand_left" else "PrimaryGripGuide"
+	)
+	var grip_guide: Node3D = held_item.get_node_or_null(
+		guide_name
+	) as Node3D if held_item != null else null
+	var grip_center: Node3D = grip_guide.get_node_or_null(
+		"GripShellCenter"
+	) as Node3D if grip_guide != null else null
+	var finger_presenter: RefCounted = actor.get(
+		"finger_grip_presenter"
+	) as RefCounted if actor != null else null
+	var skeleton: Skeleton3D = actor.get_node_or_null(
+		"JosieModel/Josie/Skeleton3D"
+	) as Skeleton3D if actor != null else null
+	if (
+		actor == null
+		or held_item == null
+		or grip_guide == null
+		or grip_center == null
+		or finger_presenter == null
+		or skeleton == null
+		or not finger_presenter.has_method("get_surface_grasp_debug_state")
+	):
+		result["error"] = "exact grip graph or presenter missing"
+		return result
+	var grasp_state: Dictionary = finger_presenter.call(
+		"get_surface_grasp_debug_state",
+		slot_id
+	) as Dictionary
+	var guide_position_variant: Variant = grip_guide.get_meta(
+		"grip_guide_position_local",
+		grip_guide.position
+	)
+	var cached_rotations: Dictionary = (
+		grasp_state.get("rotations", {}) as Dictionary
+	).duplicate(true)
+	var live_rotations: Dictionary = {}
+	for bone_name: String in RIGHT_FINGER_BONES:
+		var bone_index: int = skeleton.find_bone(bone_name)
+		if bone_index >= 0:
+			live_rotations[bone_name] = skeleton.get_bone_pose_rotation(bone_index)
+	var diagnostics: Dictionary = grasp_state.get("diagnostics", {}) as Dictionary
+	var last_attempt_diagnostics: Dictionary = grasp_state.get(
+		"last_attempt_diagnostics",
+		{}
+	) as Dictionary
+	var weapon_seat_state: Dictionary = {}
+	if actor.has_method("get_weapon_surface_seat_debug_state"):
+		weapon_seat_state = actor.call(
+			"get_weapon_surface_seat_debug_state",
+			slot_id
+		) as Dictionary
+	elif finger_presenter.has_method("get_hand_surface_seat_debug_state"):
+		weapon_seat_state = finger_presenter.call(
+			"get_hand_surface_seat_debug_state",
+			slot_id
+		) as Dictionary
+	var seat_rotation_variant: Variant = weapon_seat_state.get(
+		"seat_rotation_grip_local",
+		null
+	)
+	var seat_correction_variant: Variant = weapon_seat_state.get(
+		"seat_correction_grip_local",
+		null
+	)
+	var grip_pivot_variant: Variant = weapon_seat_state.get(
+		"grip_pivot_local",
+		null
+	)
+	var weapon_seat_diagnostics: Dictionary = weapon_seat_state.get(
+		"diagnostics",
+		{}
+	) as Dictionary
+	var weapon_seat_stations: Dictionary = weapon_seat_diagnostics.get(
+		"stations",
+		{}
+	) as Dictionary
+	var weapon_seat_anatomy_state: Dictionary = {}
+	if actor.has_method("resolve_hand_surface_seat_anatomy_state"):
+		weapon_seat_anatomy_state = actor.call(
+			"resolve_hand_surface_seat_anatomy_state",
+			slot_id
+		) as Dictionary
+	var weapon_seat_applied_state: Dictionary = {}
+	var applied_state_variant: Variant = held_item.get_meta(
+		"weapon_surface_seat_state",
+		{}
+	)
+	if applied_state_variant is Dictionary:
+		weapon_seat_applied_state = (
+			applied_state_variant as Dictionary
+		).duplicate(true)
+	var weapon_seat_composition: Dictionary = (
+		_resolve_weapon_surface_seat_composition_state(
+			ui,
+			held_item,
+			weapon_seat_state,
+			weapon_seat_applied_state
+		)
+	)
+	var motion_source_state: Dictionary = _capture_active_motion_source_state(ui)
+	result.merge({
+		"available": true,
+		"valid": bool(grasp_state.get("valid", false)),
+		"status": StringName(grasp_state.get("status", StringName())),
+		"solve_count": int(grasp_state.get("solve_count", 0)),
+		"surface_geometry_load_count": int(grasp_state.get(
+			"surface_geometry_load_count",
+			0
+		)),
+		"cache_hit_count": int(grasp_state.get("cache_hit_count", 0)),
+		"deferred_surface_solve_count": int(grasp_state.get(
+			"deferred_surface_solve_count",
+			0
+		)),
+		"rotation_count": cached_rotations.size(),
+		"cached_rotations": cached_rotations,
+		"live_rotations": live_rotations,
+		"context_key": String(grasp_state.get("context_key", "")),
+		"pending_context_key": String(grasp_state.get("pending_context_key", "")),
+		"last_attempt_context_key": String(grasp_state.get(
+			"last_attempt_context_key",
+			""
+		)),
+		"last_attempt_status": StringName(grasp_state.get(
+			"last_attempt_status",
+			StringName()
+		)),
+		"last_attempt_diagnostic_status": StringName(last_attempt_diagnostics.get(
+			"status",
+			StringName()
+		)),
+		"last_rejected_context_key": String(grasp_state.get(
+			"last_rejected_context_key",
+			""
+		)),
+		"last_rejected_status": StringName(grasp_state.get(
+			"last_rejected_status",
+			StringName()
+		)),
+		"retained_committed_after_rejection_count": int(grasp_state.get(
+			"retained_committed_after_rejection_count",
+			0
+		)),
+		"suppressed_repeat_attempt_count": int(grasp_state.get(
+			"suppressed_repeat_attempt_count",
+			0
+		)),
+		"guide_position_local": (
+			guide_position_variant as Vector3
+			if guide_position_variant is Vector3
+			else Vector3.INF
+		),
+		"exact_surface": bool(grip_center.get_meta(
+			"grip_shell_exact_surface",
+			false
+		)),
+		"diagnostic_status": StringName(diagnostics.get("status", StringName())),
+		"diagnostic_solved_digit_count": int(diagnostics.get("solved_digit_count", -1)),
+		"diagnostic_contacted_section_count": int(diagnostics.get(
+			"contacted_section_count",
+			-1
+		)),
+		"diagnostic_max_penetration_meters": float(diagnostics.get(
+			"max_penetration_meters",
+			INF
+		)),
+		"diagnostic_overlap_limit_respected": bool(diagnostics.get(
+			"overlap_limit_respected",
+			false
+		)),
+		"grasp_diagnostics": diagnostics.duplicate(true),
+		"last_attempt_diagnostics": last_attempt_diagnostics.duplicate(true),
+		"weapon_seat_available": not weapon_seat_state.is_empty(),
+		"weapon_seat_valid": bool(weapon_seat_state.get("valid", false)),
+		"weapon_seat_status": StringName(weapon_seat_state.get(
+			"status",
+			StringName()
+		)),
+		"weapon_seat_context_key": String(weapon_seat_state.get(
+			"context_key",
+			""
+		)),
+		"weapon_seat_solve_count": int(weapon_seat_state.get(
+			"solve_count",
+			-1
+		)),
+		"weapon_seat_surface_geometry_load_count": int(weapon_seat_state.get(
+			"surface_geometry_load_count",
+			-1
+		)),
+		"seat_signature": String(weapon_seat_state.get("seat_signature", "")),
+		"seat_correction_grip_local": seat_correction_variant,
+		"seat_correction_grip_local_origin_id": StringName(weapon_seat_state.get(
+			"seat_correction_grip_local_origin_id",
+			StringName()
+		)),
+		"seat_rotation_grip_local": seat_rotation_variant,
+		"grip_pivot_local": grip_pivot_variant,
+		"grip_pivot_local_origin_id": StringName(weapon_seat_state.get(
+			"grip_pivot_local_origin_id",
+			StringName()
+		)),
+		"weapon_seat_diagnostics": weapon_seat_diagnostics.duplicate(true),
+		"weapon_seat_stations": weapon_seat_stations.duplicate(true),
+		"weapon_seat_anatomy_state": weapon_seat_anatomy_state.duplicate(true),
+		"weapon_seat_applied_state": weapon_seat_applied_state,
+		"weapon_seat_composition": weapon_seat_composition,
+		"motion_source_state": motion_source_state,
+	}, true)
+	return result
+
+
+func _capture_active_motion_source_state(ui: Node) -> Dictionary:
+	var result := {"available": false}
+	if ui == null or not ui.has_method("_get_active_motion_node"):
+		return result
+	var motion_node: CombatAnimationMotionNode = ui.call(
+		"_get_active_motion_node"
+	) as CombatAnimationMotionNode
+	if motion_node == null:
+		return result
+	return {
+		"available": true,
+		"tip_position_local": motion_node.tip_position_local,
+		"pommel_position_local": motion_node.pommel_position_local,
+		"axial_reposition_offset": motion_node.axial_reposition_offset,
+		"grip_seat_slide_offset": motion_node.grip_seat_slide_offset,
+		"weapon_orientation_degrees": motion_node.weapon_orientation_degrees,
+		"weapon_roll_degrees": motion_node.weapon_roll_degrees,
+		"preferred_grip_style_mode": motion_node.preferred_grip_style_mode,
+		"two_hand_state": motion_node.two_hand_state,
+		"primary_hand_slot": motion_node.primary_hand_slot,
+	}
+
+
+func _resolve_weapon_surface_seat_composition_state(
+	ui: Node,
+	held_item: Node3D,
+	weapon_seat_state: Dictionary,
+	weapon_seat_applied_state: Dictionary = {}
+) -> Dictionary:
+	var result := {
+		"available": false,
+		"valid": false,
+		"status": &"weapon_seat_composition_unavailable",
+		"actual_transform_world": Transform3D.IDENTITY,
+		"macro_base_transform_world": Transform3D.IDENTITY,
+		"expected_transform_world": Transform3D.IDENTITY,
+		"pivot_world_before": Vector3.INF,
+		"pivot_world_after": Vector3.INF,
+		"pivot_world_expected_after": Vector3.INF,
+		"origin_error_meters": INF,
+		"basis_error": INF,
+		"pivot_error_meters": INF,
+		"c0_displacement_meters": INF,
+		"c0_axial_displacement_meters": INF,
+		"c0_radial_displacement_meters": INF,
+		"axial_twist_radians": INF,
+		"macro_tip_error_meters": INF,
+		"macro_pommel_error_meters": INF,
+		"visible_origin_delta_meters": 0.0,
+		"visible_basis_delta": 0.0,
+		"visible_tip_delta_meters": 0.0,
+		"visible_pommel_delta_meters": 0.0,
+		"recorded_application_available": false,
+		"recorded_base_transform_world": Transform3D.IDENTITY,
+		"recorded_resolved_transform_world": Transform3D.IDENTITY,
+		"recorded_base_vs_macro_origin_error_meters": INF,
+		"recorded_base_vs_macro_basis_error": INF,
+		"recorded_resolved_vs_expected_origin_error_meters": INF,
+		"recorded_resolved_vs_expected_basis_error": INF,
+		"actual_vs_recorded_resolved_origin_error_meters": INF,
+		"actual_vs_recorded_resolved_basis_error": INF,
+		"recorded_base_times_correction_origin_error_meters": INF,
+		"recorded_base_times_correction_basis_error": INF,
+	}
+	if ui == null or held_item == null or not is_instance_valid(held_item):
+		return result
+	var correction_state: Dictionary = _coerce_weapon_seat_correction_transform(
+		weapon_seat_state.get("seat_correction_grip_local", null)
+	)
+	var grip_pivot_variant: Variant = weapon_seat_state.get(
+		"grip_pivot_local",
+		null
+	)
+	if (
+		not bool(correction_state.get("valid", false))
+		or not (grip_pivot_variant is Vector3)
+		or not (grip_pivot_variant as Vector3).is_finite()
+	):
+		result["status"] = &"weapon_seat_local_result_invalid"
+		return result
+	var preview_subviewport: SubViewport = ui.get("preview_subviewport") as SubViewport
+	var preview_root: Node3D = preview_subviewport.get_node_or_null(
+		"CombatAnimationPreviewRoot3D"
+	) as Node3D if preview_subviewport != null else null
+	var trajectory_root: Node3D = preview_root.find_child(
+		"TrajectoryRoot",
+		true,
+		false
+	) as Node3D if preview_root != null else null
+	var preview_presenter: RefCounted = ui.get("preview_presenter") as RefCounted
+	var motion_node: CombatAnimationMotionNode = null
+	if ui.has_method("_get_active_motion_node"):
+		motion_node = ui.call(
+			"_get_active_motion_node"
+		) as CombatAnimationMotionNode
+	if (
+		preview_root == null
+		or trajectory_root == null
+		or preview_presenter == null
+		or motion_node == null
+		or not preview_presenter.has_method("_solve_weapon_segment_transform")
+	):
+		result["status"] = &"weapon_seat_macro_composition_graph_missing"
+		return result
+	var local_tip_variant: Variant = held_item.get_meta("weapon_tip_local", null)
+	var local_pommel_variant: Variant = held_item.get_meta("weapon_pommel_local", null)
+	var span_start_variant: Variant = held_item.get_meta(
+		"primary_grip_span_start_local",
+		null
+	)
+	var span_end_variant: Variant = held_item.get_meta(
+		"primary_grip_span_end_local",
+		null
+	)
+	if (
+		not (local_tip_variant is Vector3)
+		or not (local_pommel_variant is Vector3)
+		or not (span_start_variant is Vector3)
+		or not (span_end_variant is Vector3)
+	):
+		result["status"] = &"weapon_seat_weapon_endpoints_missing"
+		return result
+	var local_tip: Vector3 = local_tip_variant as Vector3
+	var local_pommel: Vector3 = local_pommel_variant as Vector3
+	var endcap_axis_local: Vector3 = (
+		(span_end_variant as Vector3) - (span_start_variant as Vector3)
+	)
+	var resolved_playback_state: Dictionary = preview_root.get_meta(
+		"resolved_playback_state",
+		{}
+	) as Dictionary
+	var authored_tip_local: Vector3 = resolved_playback_state.get(
+		"tip_position_local",
+		motion_node.tip_position_local
+	) as Vector3
+	var authored_pommel_local: Vector3 = resolved_playback_state.get(
+		"pommel_position_local",
+		motion_node.pommel_position_local
+	) as Vector3
+	var orientation_degrees: Vector3 = resolved_playback_state.get(
+		"weapon_orientation_degrees",
+		motion_node.weapon_orientation_degrees
+	) as Vector3
+	if (
+		not local_tip.is_finite()
+		or not local_pommel.is_finite()
+		or not authored_tip_local.is_finite()
+		or not authored_pommel_local.is_finite()
+		or not orientation_degrees.is_finite()
+		or not endcap_axis_local.is_finite()
+		or endcap_axis_local.length_squared() <= 0.0000000001
+		or local_tip.distance_squared_to(local_pommel) <= 0.0000000001
+		or authored_tip_local.distance_squared_to(authored_pommel_local)
+			<= 0.0000000001
+	):
+		result["status"] = &"weapon_seat_macro_segment_invalid"
+		return result
+	var authored_tip_world: Vector3 = trajectory_root.to_global(authored_tip_local)
+	var authored_pommel_world: Vector3 = trajectory_root.to_global(authored_pommel_local)
+	var macro_base: Transform3D = preview_presenter.call(
+		"_solve_weapon_segment_transform",
+		held_item,
+		trajectory_root,
+		motion_node,
+		local_tip,
+		local_pommel,
+		authored_tip_world,
+		authored_pommel_world,
+		orientation_degrees
+	) as Transform3D
+	var seat_correction_local: Transform3D = correction_state.get(
+		"transform",
+		Transform3D.IDENTITY
+	) as Transform3D
+	var grip_pivot_local: Vector3 = grip_pivot_variant as Vector3
+	var recorded_base_variant: Variant = weapon_seat_applied_state.get(
+		"base_weapon_transform_world",
+		null
+	)
+	var recorded_resolved_variant: Variant = weapon_seat_applied_state.get(
+		"resolved_weapon_transform_world",
+		null
+	)
+	var recorded_application_available: bool = (
+		recorded_base_variant is Transform3D
+		and recorded_resolved_variant is Transform3D
+	)
+	if not recorded_application_available:
+		result["status"] = &"weapon_seat_recorded_application_missing"
+		return result
+	var recorded_base := Transform3D.IDENTITY
+	var recorded_resolved := Transform3D.IDENTITY
+	recorded_base = recorded_base_variant as Transform3D
+	recorded_resolved = recorded_resolved_variant as Transform3D
+	var expected_transform: Transform3D = recorded_base * seat_correction_local
+	var pivot_world_before: Vector3 = recorded_base * grip_pivot_local
+	var pivot_world_expected_after: Vector3 = expected_transform * grip_pivot_local
+	var actual_transform: Transform3D = held_item.global_transform
+	var pivot_world_after: Vector3 = actual_transform * grip_pivot_local
+	var origin_error: float = actual_transform.origin.distance_to(
+		expected_transform.origin
+	)
+	var basis_error: float = _basis_max_axis_error(
+		actual_transform.basis.orthonormalized(),
+		expected_transform.basis.orthonormalized()
+	)
+	var pivot_error: float = pivot_world_expected_after.distance_to(
+		pivot_world_after
+	)
+	endcap_axis_local = endcap_axis_local.normalized()
+	var base_endcap_axis_world: Vector3 = (
+		recorded_base.basis * endcap_axis_local
+	).normalized()
+	var c0_displacement_world: Vector3 = (
+		pivot_world_expected_after - pivot_world_before
+	)
+	var c0_axial_displacement: float = absf(
+		c0_displacement_world.dot(base_endcap_axis_world)
+	)
+	var c0_radial_displacement: float = (
+		c0_displacement_world
+		- base_endcap_axis_world
+			* c0_displacement_world.dot(base_endcap_axis_world)
+	).length()
+	var axial_twist_radians: float = _resolve_weapon_seat_axial_twist_radians(
+		seat_correction_local.basis,
+		endcap_axis_local
+	)
+	var macro_tip_error: float = (macro_base * local_tip).distance_to(
+		authored_tip_world
+	)
+	var macro_pommel_error: float = (macro_base * local_pommel).distance_to(
+		authored_pommel_world
+	)
+	var preview_pose_mode := StringName(preview_root.get_meta(
+		"preview_pose_mode",
+		StringName()
+	))
+	var authored_segment_base_expected: bool = preview_pose_mode == &"hand_authored"
+	var recorded_base_vs_macro_origin_error := INF
+	var recorded_base_vs_macro_basis_error := INF
+	var recorded_resolved_vs_expected_origin_error := INF
+	var recorded_resolved_vs_expected_basis_error := INF
+	var actual_vs_recorded_resolved_origin_error := INF
+	var actual_vs_recorded_resolved_basis_error := INF
+	var recorded_base_times_correction_origin_error := INF
+	var recorded_base_times_correction_basis_error := INF
+	var recorded_recomposition: Transform3D = recorded_base * seat_correction_local
+	recorded_base_vs_macro_origin_error = recorded_base.origin.distance_to(
+		macro_base.origin
+	)
+	recorded_base_vs_macro_basis_error = _basis_max_axis_error(
+		recorded_base.basis.orthonormalized(),
+		macro_base.basis.orthonormalized()
+	)
+	recorded_resolved_vs_expected_origin_error = (
+		recorded_resolved.origin.distance_to(expected_transform.origin)
+	)
+	recorded_resolved_vs_expected_basis_error = _basis_max_axis_error(
+		recorded_resolved.basis.orthonormalized(),
+		expected_transform.basis.orthonormalized()
+	)
+	actual_vs_recorded_resolved_origin_error = actual_transform.origin.distance_to(
+		recorded_resolved.origin
+	)
+	actual_vs_recorded_resolved_basis_error = _basis_max_axis_error(
+		actual_transform.basis.orthonormalized(),
+		recorded_resolved.basis.orthonormalized()
+	)
+	recorded_base_times_correction_origin_error = (
+		recorded_recomposition.origin.distance_to(recorded_resolved.origin)
+	)
+	recorded_base_times_correction_basis_error = _basis_max_axis_error(
+		recorded_recomposition.basis.orthonormalized(),
+		recorded_resolved.basis.orthonormalized()
+	)
+	var recorded_transform_origins_valid: bool = (
+		StringName(weapon_seat_applied_state.get(
+			"base_weapon_transform_world_origin_id",
+			StringName()
+		)) == CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+		and StringName(weapon_seat_applied_state.get(
+			"resolved_weapon_transform_world_origin_id",
+			StringName()
+		)) == CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+	)
+	result.merge({
+		"available": true,
+		"valid": (
+			origin_error <= WEAPON_SEAT_POSITION_EPSILON_METERS
+			and basis_error <= WEAPON_SEAT_BASIS_EPSILON
+			and pivot_error <= WEAPON_SEAT_POSITION_EPSILON_METERS
+			and c0_axial_displacement
+				<= WEAPON_SEAT_AXIAL_DISPLACEMENT_EPSILON_METERS
+			and axial_twist_radians
+				<= WEAPON_SEAT_AXIAL_TWIST_EPSILON_RADIANS
+			and recorded_transform_origins_valid
+			and recorded_resolved_vs_expected_origin_error
+				<= WEAPON_SEAT_POSITION_EPSILON_METERS
+			and recorded_resolved_vs_expected_basis_error
+				<= WEAPON_SEAT_BASIS_EPSILON
+			and (
+				not authored_segment_base_expected
+				or (
+					recorded_base_vs_macro_origin_error
+						<= WEAPON_SEAT_POSITION_EPSILON_METERS
+					and recorded_base_vs_macro_basis_error
+						<= WEAPON_SEAT_BASIS_EPSILON
+					and macro_tip_error <= WEAPON_SEAT_POSITION_EPSILON_METERS
+					and macro_pommel_error <= WEAPON_SEAT_POSITION_EPSILON_METERS
+				)
+			)
+		),
+		"status": &"weapon_seat_composition_ready",
+		"actual_transform_world": actual_transform,
+		"macro_base_transform_world": recorded_base,
+		"reconstructed_segment_base_transform_world": macro_base,
+		"expected_transform_world": expected_transform,
+		"pivot_world_before": pivot_world_before,
+		"pivot_world_after": pivot_world_after,
+		"pivot_world_expected_after": pivot_world_expected_after,
+		"origin_error_meters": origin_error,
+		"basis_error": basis_error,
+		"pivot_error_meters": pivot_error,
+		"c0_displacement_world": c0_displacement_world,
+		"c0_displacement_meters": c0_displacement_world.length(),
+		"c0_axial_displacement_meters": c0_axial_displacement,
+		"c0_radial_displacement_meters": c0_radial_displacement,
+		"base_endcap_axis_world": base_endcap_axis_world,
+		"axial_twist_radians": axial_twist_radians,
+		"macro_tip_error_meters": macro_tip_error,
+		"macro_pommel_error_meters": macro_pommel_error,
+		"visible_origin_delta_meters": actual_transform.origin.distance_to(
+			macro_base.origin
+		),
+		"visible_basis_delta": _basis_max_axis_error(
+			actual_transform.basis.orthonormalized(),
+			macro_base.basis.orthonormalized()
+		),
+		"visible_tip_delta_meters": (actual_transform * local_tip).distance_to(
+			authored_tip_world
+		),
+		"visible_pommel_delta_meters": (
+			actual_transform * local_pommel
+		).distance_to(authored_pommel_world),
+		"recorded_application_available": recorded_application_available,
+		"recorded_transform_origins_valid": recorded_transform_origins_valid,
+		"preview_pose_mode": preview_pose_mode,
+		"authored_segment_base_expected": authored_segment_base_expected,
+		"recorded_base_transform_world": recorded_base,
+		"recorded_resolved_transform_world": recorded_resolved,
+		"recorded_base_vs_macro_origin_error_meters": (
+			recorded_base_vs_macro_origin_error
+		),
+		"recorded_base_vs_macro_basis_error": recorded_base_vs_macro_basis_error,
+		"recorded_resolved_vs_expected_origin_error_meters": (
+			recorded_resolved_vs_expected_origin_error
+		),
+		"recorded_resolved_vs_expected_basis_error": (
+			recorded_resolved_vs_expected_basis_error
+		),
+		"actual_vs_recorded_resolved_origin_error_meters": (
+			actual_vs_recorded_resolved_origin_error
+		),
+		"actual_vs_recorded_resolved_basis_error": (
+			actual_vs_recorded_resolved_basis_error
+		),
+		"recorded_base_times_correction_origin_error_meters": (
+			recorded_base_times_correction_origin_error
+		),
+		"recorded_base_times_correction_basis_error": (
+			recorded_base_times_correction_basis_error
+		),
+		"recorded_base_transform_world_origin_id": StringName(
+			weapon_seat_applied_state.get(
+				"base_weapon_transform_world_origin_id",
+				StringName()
+			)
+		),
+		"recorded_resolved_transform_world_origin_id": StringName(
+			weapon_seat_applied_state.get(
+				"resolved_weapon_transform_world_origin_id",
+				StringName()
+			)
+		),
+	}, true)
+	return result
+
+
+func _coerce_weapon_seat_correction_transform(value: Variant) -> Dictionary:
+	if not (value is Transform3D):
+		return {"valid": false, "transform": Transform3D.IDENTITY}
+	var correction: Transform3D = value as Transform3D
+	if (
+		not correction.origin.is_finite()
+		or not correction.basis.x.is_finite()
+		or not correction.basis.y.is_finite()
+		or not correction.basis.z.is_finite()
+		or absf(correction.basis.determinant()) <= 0.000001
+	):
+		return {"valid": false, "transform": Transform3D.IDENTITY}
+	var normalized_basis: Basis = correction.basis.orthonormalized()
+	return {
+		"valid": (
+			absf(normalized_basis.determinant() - 1.0)
+				<= WEAPON_SEAT_BASIS_EPSILON
+		),
+		"transform": Transform3D(normalized_basis, correction.origin),
+	}
+
+
+func _resolve_weapon_seat_axial_twist_radians(
+	correction_basis: Basis,
+	endcap_axis_local: Vector3
+) -> float:
+	if (
+		endcap_axis_local.length_squared() <= 0.0000000001
+		or absf(correction_basis.determinant()) <= 0.000001
+	):
+		return INF
+	var axis: Vector3 = endcap_axis_local.normalized()
+	var rotation := Quaternion(correction_basis.orthonormalized()).normalized()
+	var rotation_vector := Vector3(rotation.x, rotation.y, rotation.z)
+	var projected_vector: Vector3 = axis * rotation_vector.dot(axis)
+	var twist_length: float = sqrt(
+		projected_vector.length_squared() + rotation.w * rotation.w
+	)
+	if twist_length <= 0.000000001:
+		return 0.0
+	var twist_w: float = clampf(absf(rotation.w / twist_length), 0.0, 1.0)
+	return 2.0 * acos(twist_w)
+
+
+func _coerce_weapon_seat_rotation_basis(value: Variant) -> Dictionary:
+	var basis := Basis.IDENTITY
+	if value is Basis:
+		basis = value as Basis
+	elif value is Quaternion:
+		basis = Basis(value as Quaternion)
+	elif value is Transform3D:
+		basis = (value as Transform3D).basis
+	else:
+		return {"valid": false, "basis": Basis.IDENTITY}
+	if (
+		not basis.x.is_finite()
+		or not basis.y.is_finite()
+		or not basis.z.is_finite()
+		or absf(basis.determinant()) <= 0.000001
+	):
+		return {"valid": false, "basis": Basis.IDENTITY}
+	var normalized: Basis = basis.orthonormalized()
+	return {
+		"valid": (
+			absf(normalized.determinant() - 1.0) <= WEAPON_SEAT_BASIS_EPSILON
+		),
+		"basis": normalized,
+	}
+
+
+func _append_surface_grasp_lifecycle_sample(
+	label: String,
+	state: Dictionary,
+	elapsed_ms: float
+) -> void:
+	result_lines.append("lifecycle_%s_time_ms=%.3f" % [label, elapsed_ms])
+	result_lines.append("lifecycle_%s_available=%s" % [
+		label,
+		str(bool(state.get("available", false))),
+	])
+	result_lines.append("lifecycle_%s_valid=%s" % [
+		label,
+		str(bool(state.get("valid", false))),
+	])
+	result_lines.append("lifecycle_%s_status=%s" % [
+		label,
+		String(state.get("status", "")),
+	])
+	result_lines.append("lifecycle_%s_solve_count=%d" % [
+		label,
+		int(state.get("solve_count", -1)),
+	])
+	result_lines.append("lifecycle_%s_surface_geometry_load_count=%d" % [
+		label,
+		int(state.get("surface_geometry_load_count", -1)),
+	])
+	result_lines.append("lifecycle_%s_rotation_count=%d" % [
+		label,
+		int(state.get("rotation_count", 0)),
+	])
+	result_lines.append("lifecycle_%s_context_key=%s" % [
+		label,
+		String(state.get("context_key", "")),
+	])
+	result_lines.append("lifecycle_%s_last_attempt_context_key=%s" % [
+		label,
+		String(state.get("last_attempt_context_key", "")),
+	])
+	result_lines.append("lifecycle_%s_last_attempt_status=%s" % [
+		label,
+		String(state.get("last_attempt_status", "")),
+	])
+	result_lines.append("lifecycle_%s_last_attempt_diagnostic_status=%s" % [
+		label,
+		String(state.get("last_attempt_diagnostic_status", "")),
+	])
+	result_lines.append("lifecycle_%s_last_rejected_context_key=%s" % [
+		label,
+		String(state.get("last_rejected_context_key", "")),
+	])
+	result_lines.append("lifecycle_%s_retained_rejection_count=%d" % [
+		label,
+		int(state.get("retained_committed_after_rejection_count", 0)),
+	])
+	result_lines.append("lifecycle_%s_guide_position=%s" % [
+		label,
+		str(state.get("guide_position_local", Vector3.INF)),
+	])
+	result_lines.append("lifecycle_%s_diagnostic_status=%s" % [
+		label,
+		String(state.get("diagnostic_status", "")),
+	])
+	result_lines.append("lifecycle_%s_diagnostic_solved_digit_count=%d" % [
+		label,
+		int(state.get("diagnostic_solved_digit_count", -1)),
+	])
+	result_lines.append("lifecycle_%s_diagnostic_contacted_section_count=%d" % [
+		label,
+		int(state.get("diagnostic_contacted_section_count", -1)),
+	])
+	result_lines.append("lifecycle_%s_diagnostic_max_penetration_meters=%.9f" % [
+		label,
+		float(state.get("diagnostic_max_penetration_meters", INF)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_available=%s" % [
+		label,
+		str(bool(state.get("weapon_seat_available", false))),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_valid=%s" % [
+		label,
+		str(bool(state.get("weapon_seat_valid", false))),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_status=%s" % [
+		label,
+		String(state.get("weapon_seat_status", "")),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_solve_count=%d" % [
+		label,
+		int(state.get("weapon_seat_solve_count", -1)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_surface_geometry_load_count=%d" % [
+		label,
+		int(state.get("weapon_seat_surface_geometry_load_count", -1)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_context_key=%s" % [
+		label,
+		String(state.get("weapon_seat_context_key", "")),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_signature=%s" % [
+		label,
+		String(state.get("seat_signature", "")),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_correction_grip_local=%s" % [
+		label,
+		str(state.get("seat_correction_grip_local", null)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_rotation_grip_local=%s" % [
+		label,
+		str(state.get("seat_rotation_grip_local", null)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_grip_pivot_local=%s" % [
+		label,
+		str(state.get("grip_pivot_local", null)),
+	])
+	var composition: Dictionary = state.get(
+		"weapon_seat_composition",
+		{}
+	) as Dictionary
+	result_lines.append("lifecycle_%s_weapon_seat_composition_status=%s" % [
+		label,
+		String(composition.get("status", "")),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_composition_valid=%s" % [
+		label,
+		str(bool(composition.get("valid", false))),
+	])
+	for metric_name: String in [
+		"origin_error_meters",
+		"basis_error",
+		"pivot_error_meters",
+		"c0_displacement_meters",
+		"c0_axial_displacement_meters",
+		"c0_radial_displacement_meters",
+		"axial_twist_radians",
+		"macro_tip_error_meters",
+		"macro_pommel_error_meters",
+		"visible_origin_delta_meters",
+		"visible_basis_delta",
+		"visible_tip_delta_meters",
+		"visible_pommel_delta_meters",
+		"recorded_base_vs_macro_origin_error_meters",
+		"recorded_base_vs_macro_basis_error",
+		"recorded_resolved_vs_expected_origin_error_meters",
+		"recorded_resolved_vs_expected_basis_error",
+		"actual_vs_recorded_resolved_origin_error_meters",
+		"actual_vs_recorded_resolved_basis_error",
+		"recorded_base_times_correction_origin_error_meters",
+		"recorded_base_times_correction_basis_error",
+	]:
+		result_lines.append("lifecycle_%s_weapon_seat_%s=%.9f" % [
+			label,
+			metric_name,
+			float(composition.get(metric_name, INF)),
+		])
+	result_lines.append("lifecycle_%s_weapon_seat_recorded_application_available=%s" % [
+		label,
+		str(bool(composition.get("recorded_application_available", false))),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_recorded_base_transform_world=%s" % [
+		label,
+		str(composition.get("recorded_base_transform_world", Transform3D.IDENTITY)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_recorded_resolved_transform_world=%s" % [
+		label,
+		str(composition.get(
+			"recorded_resolved_transform_world",
+			Transform3D.IDENTITY
+		)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_recorded_base_authority_world=%s" % [
+		label,
+		str(composition.get("macro_base_transform_world", Transform3D.IDENTITY)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_reconstructed_segment_base_world=%s" % [
+		label,
+		str(composition.get(
+			"reconstructed_segment_base_transform_world",
+			Transform3D.IDENTITY
+		)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_preview_pose_mode=%s" % [
+		label,
+		String(composition.get("preview_pose_mode", StringName())),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_actual_transform_world=%s" % [
+		label,
+		str(composition.get("actual_transform_world", Transform3D.IDENTITY)),
+	])
+	var source_state: Dictionary = state.get("motion_source_state", {}) as Dictionary
+	result_lines.append("lifecycle_%s_source_tip_position=%s" % [
+		label,
+		str(source_state.get("tip_position_local", Vector3.INF)),
+	])
+	result_lines.append("lifecycle_%s_source_pommel_position=%s" % [
+		label,
+		str(source_state.get("pommel_position_local", Vector3.INF)),
+	])
+	result_lines.append("lifecycle_%s_source_axial_reposition_offset=%s" % [
+		label,
+		str(source_state.get("axial_reposition_offset", INF)),
+	])
+	result_lines.append("lifecycle_%s_source_weapon_orientation_degrees=%s" % [
+		label,
+		str(source_state.get("weapon_orientation_degrees", Vector3.INF)),
+	])
+	result_lines.append("lifecycle_%s_source_weapon_roll_degrees=%s" % [
+		label,
+		str(source_state.get("weapon_roll_degrees", INF)),
+	])
+	_append_surface_grasp_digit_diagnostic_sample(label, state)
+	_append_weapon_surface_seat_diagnostic_sample(label, state)
+
+
+func _append_surface_grasp_digit_diagnostic_sample(
+	label: String,
+	state: Dictionary
+) -> void:
+	var diagnostics: Dictionary = state.get("grasp_diagnostics", {}) as Dictionary
+	var digit_results: Dictionary = diagnostics.get("digit_results", {}) as Dictionary
+	for digit_id: StringName in [&"thumb", &"index", &"middle", &"ring", &"pinky"]:
+		var digit: Dictionary = digit_results.get(digit_id, {}) as Dictionary
+		var prefix := "lifecycle_%s_digit_%s" % [label, String(digit_id)]
+		result_lines.append("%s_status=%s" % [
+			prefix,
+			String(digit.get("status", "missing")),
+		])
+		for count_name: String in [
+			"contacted_section_count",
+			"accepted_section_count",
+			"ray_hit_section_count",
+			"backsolve_pass_count",
+		]:
+			result_lines.append("%s_%s=%d" % [
+				prefix,
+				count_name,
+				int(digit.get(count_name, -1)),
+			])
+		for metric_name: String in [
+			"max_contact_error_meters",
+			"max_penetration_meters",
+			"attempted_max_contact_error_meters",
+			"attempted_max_penetration_meters",
+		]:
+			result_lines.append("%s_%s=%.9f" % [
+				prefix,
+				metric_name,
+				float(digit.get(metric_name, INF)),
+			])
+		for flag_name: String in [
+			"overlap_limit_respected",
+			"unsafe_attempt_rejected",
+			"serial_acquisition_all_stages_accepted",
+			"serial_acquisition_all_targets_reached",
+			"constrained_serial_gap_accepted",
+		]:
+			result_lines.append("%s_%s=%s" % [
+				prefix,
+				flag_name,
+				str(bool(digit.get(flag_name, false))),
+			])
+		result_lines.append("%s_joint_angles_rad=%s" % [
+			prefix,
+			str(digit.get("joint_angles_rad", [])),
+		])
+		for sequence_name: String in [
+			"section_contacts",
+			"serial_acquired_sections",
+			"post_unlock_sections",
+			"final_sections",
+			"attempted_final_sections",
+		]:
+			result_lines.append("%s_%s=%s" % [
+				prefix,
+				sequence_name,
+				str(_compact_digit_section_diagnostics(
+					digit.get(sequence_name, [])
+				)),
+			])
+
+
+func _compact_digit_section_diagnostics(value: Variant) -> Array[Dictionary]:
+	var compact_sections: Array[Dictionary] = []
+	if not value is Array:
+		return compact_sections
+	var retained_fields: Array[String] = [
+		"section_index",
+		"status",
+		"angle_rad",
+		"open_angle_rad",
+		"closed_angle_rad",
+		"target_overlap_meters",
+		"target_lower_bound_meters",
+		"target_upper_bound_meters",
+		"target_reached",
+		"stage_accepted",
+		"accepted_safe_gap",
+		"blocked_by_section_index",
+		"ray_hit",
+		"surface_query_hit",
+		"signed_overlap_meters",
+		"penetration_meters",
+		"maximum_sample_penetration_meters",
+		"surface_gap_meters",
+		"contact_error_meters",
+		"within_overlap_limit",
+		"in_contact",
+		"inside_solid",
+	]
+	for section_variant: Variant in value as Array:
+		if not section_variant is Dictionary:
+			continue
+		var section: Dictionary = section_variant as Dictionary
+		var compact: Dictionary = {}
+		for field_name: String in retained_fields:
+			if section.has(field_name):
+				compact[field_name] = section[field_name]
+		compact_sections.append(compact)
+	return compact_sections
+
+
+func _append_weapon_surface_seat_diagnostic_sample(
+	label: String,
+	state: Dictionary
+) -> void:
+	var diagnostics: Dictionary = state.get(
+		"weapon_seat_diagnostics",
+		{}
+	) as Dictionary
+	var best_overall: Dictionary = diagnostics.get("best_overall", {}) as Dictionary
+	var stations: Dictionary = state.get("weapon_seat_stations", {}) as Dictionary
+	var anatomy: Dictionary = state.get(
+		"weapon_seat_anatomy_state",
+		{}
+	) as Dictionary
+	result_lines.append("lifecycle_%s_weapon_seat_diagnostic_status=%s" % [
+		label,
+		String(diagnostics.get("status", "")),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_completed_iterations=%d" % [
+		label,
+		int(diagnostics.get("completed_iterations", -1)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_iteration_limit=%d" % [
+		label,
+		int(diagnostics.get("iteration_limit", -1)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_radial_ray_count=%d" % [
+		label,
+		int(diagnostics.get("radial_ray_count", -1)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_radial_triangle_test_count=%d" % [
+		label,
+		int(diagnostics.get("radial_triangle_test_count", -1)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_solve_time_msec=%.6f" % [
+		label,
+		float(diagnostics.get("solve_time_msec", INF)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_best_sample_index=%d" % [
+		label,
+		int(best_overall.get("sample_index", -1)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_best_accepted=%s" % [
+		label,
+		str(bool(best_overall.get("accepted", false))),
+	])
+	for metric_name: String in [
+		"index_radial_error_meters",
+		"pinky_radial_error_meters",
+		"max_abs_radial_error_meters",
+		"radial_error_balance_meters",
+		"max_target_point_distance_meters",
+		"correction_angle_radians",
+	]:
+		result_lines.append("lifecycle_%s_weapon_seat_best_%s=%.9f" % [
+			label,
+			metric_name,
+			float(best_overall.get(metric_name, INF)),
+		])
+	var c0_local: Vector3 = stations.get(
+		"grip_pivot_c0_local",
+		Vector3.INF
+	) as Vector3
+	var c0_world: Vector3 = stations.get(
+		"grip_pivot_c0_world",
+		Vector3.INF
+	) as Vector3
+	var ci_world: Vector3 = stations.get(
+		"index_slice_center_ci_world",
+		Vector3.INF
+	) as Vector3
+	var cp_world: Vector3 = stations.get(
+		"pinky_slice_center_cp_world",
+		Vector3.INF
+	) as Vector3
+	var index_world: Vector3 = anatomy.get(
+		"index_point_world",
+		Vector3.INF
+	) as Vector3
+	var pinky_world: Vector3 = anatomy.get(
+		"pinky_point_world",
+		Vector3.INF
+	) as Vector3
+	result_lines.append("lifecycle_%s_weapon_seat_station_status=%s" % [
+		label,
+		String(stations.get("status", "")),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_station_c0_local=%s" % [
+		label,
+		str(c0_local),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_station_c0_world=%s" % [
+		label,
+		str(c0_world),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_station_ci_world=%s" % [
+		label,
+		str(ci_world),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_station_cp_world=%s" % [
+		label,
+		str(cp_world),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_endcap_axis_world=%s" % [
+		label,
+		str(stations.get("endcap_axis_world", Vector3.INF)),
+	])
+	for metric_name: String in [
+		"grip_axis_ratio_from_span_start",
+		"index_station_ratio_from_span_start",
+		"pinky_station_ratio_from_span_start",
+		"index_signed_offset_from_grip_meters",
+		"pinky_signed_offset_from_grip_meters",
+		"span_length_meters",
+	]:
+		result_lines.append("lifecycle_%s_weapon_seat_station_%s=%s" % [
+			label,
+			metric_name,
+			str(stations.get(metric_name, INF)),
+		])
+	result_lines.append("lifecycle_%s_weapon_seat_anatomy_status=%s" % [
+		label,
+		String(anatomy.get("status", "")),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_anatomy_index_world=%s" % [
+		label,
+		str(index_world),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_anatomy_pinky_world=%s" % [
+		label,
+		str(pinky_world),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_anatomy_index_skin_radius_meters=%s" % [
+		label,
+		str(anatomy.get("index_skin_to_bone_radius_meters", INF)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_anatomy_pinky_skin_radius_meters=%s" % [
+		label,
+		str(anatomy.get("pinky_skin_to_bone_radius_meters", INF)),
+	])
+	var station_chord := Vector3.INF
+	var bone_chord := Vector3.INF
+	var station_chord_length := INF
+	var bone_chord_length := INF
+	var chord_angle_degrees := INF
+	if ci_world.is_finite() and cp_world.is_finite():
+		station_chord = ci_world - cp_world
+		station_chord_length = station_chord.length()
+	if index_world.is_finite() and pinky_world.is_finite():
+		bone_chord = index_world - pinky_world
+		bone_chord_length = bone_chord.length()
+	if station_chord_length > 0.000001 and bone_chord_length > 0.000001:
+		chord_angle_degrees = rad_to_deg(
+			station_chord.angle_to(bone_chord)
+		)
+	result_lines.append("lifecycle_%s_weapon_seat_station_chord_length_meters=%s" % [
+		label,
+		str(station_chord_length),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_bone_chord_length_meters=%s" % [
+		label,
+		str(bone_chord_length),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_station_to_bone_chord_angle_degrees=%s" % [
+		label,
+		str(chord_angle_degrees),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_ci_to_index_bone_meters=%s" % [
+		label,
+		str(ci_world.distance_to(index_world) if (
+			ci_world.is_finite() and index_world.is_finite()
+		) else INF),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_cp_to_pinky_bone_meters=%s" % [
+		label,
+		str(cp_world.distance_to(pinky_world) if (
+			cp_world.is_finite() and pinky_world.is_finite()
+		) else INF),
+	])
+
+
+func _weapon_surface_seat_contract_ready(state: Dictionary) -> bool:
+	var correction_state: Dictionary = _coerce_weapon_seat_correction_transform(
+		state.get("seat_correction_grip_local", null)
+	)
+	var pivot_variant: Variant = state.get("grip_pivot_local", null)
+	var stations: Dictionary = state.get("weapon_seat_stations", {}) as Dictionary
+	var station_c0_variant: Variant = stations.get("grip_pivot_c0_local", null)
+	var composition: Dictionary = state.get(
+		"weapon_seat_composition",
+		{}
+	) as Dictionary
+	return (
+		bool(state.get("weapon_seat_available", false))
+		and bool(state.get("weapon_seat_valid", false))
+		and StringName(state.get("weapon_seat_status", StringName()))
+			== &"weapon_surface_seat_solved"
+		and int(state.get("weapon_seat_solve_count", -1)) >= 1
+		and int(state.get("weapon_seat_surface_geometry_load_count", -1)) >= 1
+		and not String(state.get("weapon_seat_context_key", "")).is_empty()
+		and not String(state.get("seat_signature", "")).is_empty()
+		and bool(correction_state.get("valid", false))
+		and pivot_variant is Vector3
+		and (pivot_variant as Vector3).is_finite()
+		and station_c0_variant is Vector3
+		and (pivot_variant as Vector3).distance_to(station_c0_variant as Vector3)
+			<= WEAPON_SEAT_POSITION_EPSILON_METERS
+		and StringName(state.get(
+			"seat_correction_grip_local_origin_id",
+			StringName()
+		)) == CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		and StringName(state.get("grip_pivot_local_origin_id", StringName()))
+			== CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		and bool(composition.get("available", false))
+		and bool(composition.get("valid", false))
+	)
+
+
+func _check_weapon_surface_seat_contract(
+	label: String,
+	state: Dictionary
+) -> bool:
+	var correction_state: Dictionary = _coerce_weapon_seat_correction_transform(
+		state.get("seat_correction_grip_local", null)
+	)
+	var pivot_variant: Variant = state.get("grip_pivot_local", null)
+	var stations: Dictionary = state.get("weapon_seat_stations", {}) as Dictionary
+	var station_c0_variant: Variant = stations.get("grip_pivot_c0_local", null)
+	var composition: Dictionary = state.get(
+		"weapon_seat_composition",
+		{}
+	) as Dictionary
+	_check(
+		bool(state.get("weapon_seat_available", false)),
+		"lifecycle_%s_weapon_seat_available" % label,
+		"%s exposed no fixed-hand weapon-seat lifecycle state" % label
+	)
+	_check(
+		bool(state.get("weapon_seat_valid", false))
+		and StringName(state.get("weapon_seat_status", StringName()))
+			== &"weapon_surface_seat_solved",
+		"lifecycle_%s_weapon_seat_valid" % label,
+		"%s did not retain a solved weapon-side Handle seat" % label
+	)
+	_check(
+		int(state.get("weapon_seat_solve_count", -1)) >= 1
+		and int(state.get("weapon_seat_surface_geometry_load_count", -1)) >= 1,
+		"lifecycle_%s_weapon_seat_counters_available" % label,
+		"%s exposed no weapon-seat solve/Handle-geometry counters" % label
+	)
+	_check(
+		not String(state.get("weapon_seat_context_key", "")).is_empty()
+		and not String(state.get("seat_signature", "")).is_empty(),
+		"lifecycle_%s_weapon_seat_identity_available" % label,
+		"%s exposed no context key or deterministic seat signature" % label
+	)
+	_check(
+		bool(correction_state.get("valid", false))
+		and pivot_variant is Vector3
+		and (pivot_variant as Vector3).is_finite()
+		and StringName(state.get(
+			"seat_correction_grip_local_origin_id",
+			StringName()
+		)) == CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		and StringName(state.get("grip_pivot_local_origin_id", StringName()))
+			== CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		"lifecycle_%s_weapon_seat_local_result_valid" % label,
+		"%s exposed an invalid or unproven grip-local correction/C0 pivot" % label
+	)
+	_check(
+		station_c0_variant is Vector3
+		and pivot_variant is Vector3
+		and (pivot_variant as Vector3).distance_to(
+			station_c0_variant as Vector3
+		) <= WEAPON_SEAT_POSITION_EPSILON_METERS,
+		"lifecycle_%s_weapon_seat_exact_c0_local_ratio" % label,
+		"%s cached C0 does not equal the exact sampled Handle-ratio station" % label
+	)
+	_check(
+		bool(composition.get("available", false))
+		and bool(composition.get("valid", false)),
+		"lifecycle_%s_weapon_seat_exact_composition" % label,
+		(
+			"%s held item does not equal B*T_local "
+			+ "after the final macro transform"
+		) % label
+	)
+	_check(
+		float(composition.get("pivot_error_meters", INF))
+			<= WEAPON_SEAT_POSITION_EPSILON_METERS,
+		"lifecycle_%s_weapon_seat_c0_composition_exact" % label,
+		"%s final visible C0 does not match the cached local correction" % label
+	)
+	_check(
+		float(composition.get("c0_axial_displacement_meters", INF))
+			<= WEAPON_SEAT_AXIAL_DISPLACEMENT_EPSILON_METERS,
+		"lifecycle_%s_weapon_seat_no_axial_translation" % label,
+		"%s correction translated C0 along the Handle endcap axis" % label
+	)
+	_check(
+		float(composition.get("axial_twist_radians", INF))
+			<= WEAPON_SEAT_AXIAL_TWIST_EPSILON_RADIANS,
+		"lifecycle_%s_weapon_seat_no_independent_roll" % label,
+		"%s correction introduced independent Handle-axis roll" % label
+	)
+	_check(
+		not bool(composition.get("authored_segment_base_expected", false))
+		or (
+			float(composition.get(
+				"recorded_base_vs_macro_origin_error_meters",
+				INF
+			)) <= WEAPON_SEAT_POSITION_EPSILON_METERS
+			and float(composition.get(
+				"recorded_base_vs_macro_basis_error",
+				INF
+			)) <= WEAPON_SEAT_BASIS_EPSILON
+			and float(composition.get("macro_tip_error_meters", INF))
+				<= WEAPON_SEAT_POSITION_EPSILON_METERS
+			and float(composition.get("macro_pommel_error_meters", INF))
+				<= WEAPON_SEAT_POSITION_EPSILON_METERS
+		),
+		"lifecycle_%s_weapon_seat_macro_endpoint_authority" % label,
+		"%s macro base no longer resolves from authored tip/pommel SOURCE data" % label
+	)
+	return _weapon_surface_seat_contract_ready(state)
+
+
+func _check_weapon_surface_seat_unchanged(
+	label: String,
+	state: Dictionary,
+	expected_state: Dictionary
+) -> void:
+	_check_weapon_surface_seat_contract(label, state)
+	var current_correction: Dictionary = _coerce_weapon_seat_correction_transform(
+		state.get("seat_correction_grip_local", null)
+	)
+	var expected_correction: Dictionary = _coerce_weapon_seat_correction_transform(
+		expected_state.get("seat_correction_grip_local", null)
+	)
+	var corrections_match: bool = (
+		bool(current_correction.get("valid", false))
+		and bool(expected_correction.get("valid", false))
+		and _basis_max_axis_error(
+			(current_correction.get(
+				"transform",
+				Transform3D.IDENTITY
+			) as Transform3D).basis,
+			(expected_correction.get(
+				"transform",
+				Transform3D.IDENTITY
+			) as Transform3D).basis
+		) <= WEAPON_SEAT_BASIS_EPSILON
+		and (current_correction.get(
+			"transform",
+			Transform3D.IDENTITY
+		) as Transform3D).origin.distance_to(
+			(expected_correction.get(
+				"transform",
+				Transform3D.IDENTITY
+			) as Transform3D).origin
+		) <= WEAPON_SEAT_POSITION_EPSILON_METERS
+	)
+	var current_pivot_variant: Variant = state.get("grip_pivot_local", null)
+	var expected_pivot_variant: Variant = expected_state.get("grip_pivot_local", null)
+	var pivots_match: bool = (
+		current_pivot_variant is Vector3
+		and expected_pivot_variant is Vector3
+		and (current_pivot_variant as Vector3).distance_to(
+			expected_pivot_variant as Vector3
+		) <= WEAPON_SEAT_POSITION_EPSILON_METERS
+	)
+	_check(
+		int(state.get("weapon_seat_solve_count", -1))
+			== int(expected_state.get("weapon_seat_solve_count", -2)),
+		"lifecycle_%s_weapon_seat_does_not_resolve" % label,
+		"%s unnecessarily incremented the weapon-seat solve counter" % label
+	)
+	_check(
+		int(state.get("weapon_seat_surface_geometry_load_count", -1))
+			== int(expected_state.get(
+				"weapon_seat_surface_geometry_load_count",
+				-2
+			)),
+		"lifecycle_%s_weapon_seat_does_not_reload_surface_geometry" % label,
+		"%s unnecessarily reloaded protected Handle surface geometry" % label
+	)
+	_check(
+		String(state.get("weapon_seat_context_key", ""))
+			== String(expected_state.get("weapon_seat_context_key", "__missing__")),
+		"lifecycle_%s_weapon_seat_context_stable" % label,
+		"%s changed the cached weapon-seat context" % label
+	)
+	_check(
+		String(state.get("seat_signature", ""))
+			== String(expected_state.get("seat_signature", "__missing__")),
+		"lifecycle_%s_weapon_seat_signature_stable" % label,
+		"%s changed the cached weapon-seat result signature" % label
+	)
+	_check(
+		corrections_match and pivots_match,
+		"lifecycle_%s_weapon_seat_local_result_stable" % label,
+		"%s changed cached grip-local T or C0 instead of recomposing it" % label
+	)
+
+
+func _check_motion_source_transition(
+	label: String,
+	before_state: Dictionary,
+	after_state: Dictionary,
+	expected_updates: Dictionary = {}
+) -> void:
+	var available: bool = (
+		bool(before_state.get("available", false))
+		and bool(after_state.get("available", false))
+	)
+	_check(
+		available,
+		"lifecycle_%s_motion_source_available" % label,
+		"%s could not read the authoritative motion-node SOURCE fields" % label
+	)
+	if not available:
+		return
+	var all_fields_match := true
+	var mismatched_fields := PackedStringArray()
+	for field_name: String in WEAPON_SEAT_MOTION_SOURCE_FIELDS:
+		var expected_value: Variant = expected_updates.get(
+			field_name,
+			before_state.get(field_name, null)
+		)
+		var actual_value: Variant = after_state.get(field_name, null)
+		if not _weapon_seat_source_values_match(actual_value, expected_value):
+			all_fields_match = false
+			mismatched_fields.append(field_name)
+	_check(
+		all_fields_match,
+		"lifecycle_%s_motion_source_transition_exact" % label,
+		"%s rewrote unexpected motion SOURCE fields: %s" % [
+			label,
+			", ".join(mismatched_fields),
+		]
+	)
+
+
+func _weapon_seat_source_values_match(actual: Variant, expected: Variant) -> bool:
+	if actual is Vector3 and expected is Vector3:
+		return (actual as Vector3).distance_to(expected as Vector3) <= (
+			WEAPON_SEAT_SOURCE_EPSILON
+		)
+	if actual is float or actual is int:
+		if expected is float or expected is int:
+			return absf(float(actual) - float(expected)) <= WEAPON_SEAT_SOURCE_EPSILON
+	return actual == expected
+
+
+func _verify_cached_weapon_surface_seat_resolve_is_hand_read_only(
+	ui: Node,
+	slot_id: StringName,
+	label: String,
+	expected_state: Dictionary
+) -> void:
+	var preview_subviewport: SubViewport = ui.get("preview_subviewport") as SubViewport
+	var preview_root: Node3D = preview_subviewport.get_node_or_null(
+		"CombatAnimationPreviewRoot3D"
+	) as Node3D if preview_subviewport != null else null
+	var actor: Node3D = preview_root.get_node_or_null(
+		"PreviewActorPivot/PreviewActor"
+	) as Node3D if preview_root != null else null
+	var skeleton: Skeleton3D = actor.get_node_or_null(
+		"JosieModel/Josie/Skeleton3D"
+	) as Skeleton3D if actor != null else null
+	var graph_ready: bool = (
+		actor != null
+		and skeleton != null
+		and actor.has_method("resolve_exact_surface_weapon_seat")
+	)
+	_check(
+		graph_ready,
+		"lifecycle_%s_hand_read_only_graph_available" % label,
+		"%s could not access the actor/skeleton weapon-seat resolver graph" % label
+	)
+	if not graph_ready:
+		return
+	var before_pose: Dictionary = _capture_right_hand_local_pose_state(skeleton)
+	var resolve_state: Dictionary = actor.call(
+		"resolve_exact_surface_weapon_seat",
+		slot_id,
+		false
+	) as Dictionary
+	var after_pose: Dictionary = _capture_right_hand_local_pose_state(skeleton)
+	_check(
+		before_pose.size() == RIGHT_FINGER_BONES.size() + 1
+		and _hand_local_pose_states_match_exactly(before_pose, after_pose),
+		"lifecycle_%s_fixed_hand_pose_bitwise_stable" % label,
+		"%s cached weapon-seat resolution mutated the wrist or a digit bone" % label
+	)
+	_check(
+		bool(resolve_state.get("valid", false))
+		and int(resolve_state.get("solve_count", -1))
+			== int(expected_state.get("weapon_seat_solve_count", -2))
+		and int(resolve_state.get("surface_geometry_load_count", -1))
+			== int(expected_state.get(
+				"weapon_seat_surface_geometry_load_count",
+				-2
+			)),
+		"lifecycle_%s_cached_resolve_reuses_weapon_seat" % label,
+		"%s cached read-only resolver call re-solved or reloaded the Handle" % label
+	)
+
+
+func _capture_right_hand_local_pose_state(skeleton: Skeleton3D) -> Dictionary:
+	var result := {}
+	if skeleton == null:
+		return result
+	var bone_names: Array[String] = ["CC_Base_R_Hand"]
+	bone_names.append_array(RIGHT_FINGER_BONES)
+	for bone_name: String in bone_names:
+		var bone_index: int = skeleton.find_bone(bone_name)
+		if bone_index < 0:
+			continue
+		result[bone_name] = {
+			"position": skeleton.get_bone_pose_position(bone_index),
+			"rotation": skeleton.get_bone_pose_rotation(bone_index),
+			"scale": skeleton.get_bone_pose_scale(bone_index),
+		}
+	return result
+
+
+func _hand_local_pose_states_match_exactly(
+	first: Dictionary,
+	second: Dictionary
+) -> bool:
+	if first.size() != second.size():
+		return false
+	for bone_name: Variant in first.keys():
+		if not second.has(bone_name):
+			return false
+		var first_pose: Dictionary = first.get(bone_name, {}) as Dictionary
+		var second_pose: Dictionary = second.get(bone_name, {}) as Dictionary
+		if (
+			first_pose.get("position", Vector3.INF)
+				!= second_pose.get("position", Vector3.INF)
+			or first_pose.get("rotation", Quaternion())
+				!= second_pose.get("rotation", Quaternion())
+			or first_pose.get("scale", Vector3.INF)
+				!= second_pose.get("scale", Vector3.INF)
+		):
+			return false
+	return true
+
+
+func _check_surface_grasp_lifecycle_unchanged(
+	label: String,
+	state: Dictionary,
+	expected_solve_count: int,
+	expected_surface_geometry_load_count: int,
+	expected_context_key: String,
+	expected_cached_rotations: Dictionary,
+	expected_live_rotations: Dictionary,
+	expected_weapon_seat_state: Dictionary = {}
+) -> void:
+	_check(
+		bool(state.get("valid", false)),
+		"lifecycle_%s_grip_valid" % label,
+		"%s refresh lost the cached exact grip" % label
+	)
+	_check(
+		int(state.get("solve_count", -1)) == expected_solve_count,
+		"lifecycle_%s_does_not_resolve" % label,
+		"%s refresh incremented exact-surface solve_count" % label
+	)
+	_check(
+		int(state.get("surface_geometry_load_count", -1))
+			== expected_surface_geometry_load_count,
+		"lifecycle_%s_does_not_reload_surface_geometry" % label,
+		"%s refresh reloaded exact Handle surface geometry" % label
+	)
+	_check(
+		String(state.get("context_key", "")) == expected_context_key,
+		"lifecycle_%s_context_stable" % label,
+		"%s refresh changed the stable exact-grip context" % label
+	)
+	_check(
+		_surface_grasp_lifecycle_rotations_match(
+			state.get("cached_rotations", {}) as Dictionary,
+			expected_cached_rotations
+		),
+		"lifecycle_%s_cached_rotations_stable" % label,
+		"%s refresh altered the cached 15 local digit rotations" % label
+	)
+	# Live skeleton rotations are separately covered by the preview/debugger
+	# verifier. Record them here as evidence without conflating animation-player
+	# writes with the exact-grip cache lifecycle contract.
+	result_lines.append("lifecycle_%s_live_rotations_observed_stable=%s" % [
+		label,
+		str(_surface_grasp_lifecycle_rotations_match(
+			state.get("live_rotations", {}) as Dictionary,
+			expected_live_rotations
+		)),
+	])
+	if not expected_weapon_seat_state.is_empty():
+		_check_weapon_surface_seat_unchanged(
+			label,
+			state,
+			expected_weapon_seat_state
+		)
+
+
+func _surface_grasp_lifecycle_rotations_match(
+	current: Dictionary,
+	expected: Dictionary
+) -> bool:
+	if current.size() != 15 or expected.size() != 15:
+		return false
+	for bone_name_text: String in RIGHT_FINGER_BONES:
+		var bone_name := StringName(bone_name_text)
+		var current_key: Variant = (
+			bone_name if current.has(bone_name) else bone_name_text
+		)
+		var expected_key: Variant = (
+			bone_name if expected.has(bone_name) else bone_name_text
+		)
+		if not current.has(current_key) or not expected.has(expected_key):
+			return false
+		var current_rotation: Quaternion = current[current_key] as Quaternion
+		var expected_rotation: Quaternion = expected[expected_key] as Quaternion
+		var same_sign_match: bool = (
+			absf(current_rotation.x - expected_rotation.x) <= 0.0000001
+			and absf(current_rotation.y - expected_rotation.y) <= 0.0000001
+			and absf(current_rotation.z - expected_rotation.z) <= 0.0000001
+			and absf(current_rotation.w - expected_rotation.w) <= 0.0000001
+		)
+		var opposite_sign_match: bool = (
+			absf(current_rotation.x + expected_rotation.x) <= 0.0000001
+			and absf(current_rotation.y + expected_rotation.y) <= 0.0000001
+			and absf(current_rotation.z + expected_rotation.z) <= 0.0000001
+			and absf(current_rotation.w + expected_rotation.w) <= 0.0000001
+		)
+		if not same_sign_match and not opposite_sign_match:
+			return false
+	return true
+
+
+func _attach_fixture_surface_observations(
+	snapshot: Dictionary,
+	fixture: Dictionary
+) -> void:
+	if fixture.is_empty() or not bool(snapshot.get("valid", false)):
+		return
+	var grip_center: Node3D = snapshot.get("_grip_center") as Node3D
+	var grip_area: Area3D = snapshot.get("_grip_area") as Area3D
+	var secondary_grip_area: Area3D = snapshot.get(
+		"_secondary_grip_area"
+	) as Area3D
+	var exact_shape_node: CollisionShape3D = snapshot.get(
+		"_exact_shape_node"
+	) as CollisionShape3D
+	var held_item: Node3D = snapshot.get("_held_item") as Node3D
+	var mesh_instance: MeshInstance3D = snapshot.get(
+		"_mesh_instance"
+	) as MeshInstance3D
+	var protected_vertices := fixture.get(
+		"protected_handle_vertices_meters",
+		PackedVector3Array()
+	) as PackedVector3Array
+	var protected_indices := fixture.get(
+		"protected_handle_indices",
+		PackedInt32Array()
+	) as PackedInt32Array
+	var expected_faces_grip_local := PackedVector3Array()
+	var expected_faces_held_local := PackedVector3Array()
+	if grip_center != null and held_item != null and mesh_instance != null:
+		for source_index: int in protected_indices:
+			if source_index < 0 or source_index >= protected_vertices.size():
+				continue
+			var source_world := mesh_instance.to_global(
+				protected_vertices[source_index] / CELL_SIZE_METERS
+			)
+			expected_faces_grip_local.append(grip_center.to_local(source_world))
+			expected_faces_held_local.append(held_item.to_local(source_world))
+	snapshot["expected_protected_faces_grip_local"] = expected_faces_grip_local
+	snapshot["expected_protected_faces_held_local"] = expected_faces_held_local
+	snapshot["ray_probe"] = _probe_exact_grip_surface(
+		grip_area,
+		exact_shape_node,
+		snapshot.get(
+			"exact_faces_grip_local",
+			PackedVector3Array()
+		) as PackedVector3Array,
+		secondary_grip_area
+	)
+	var decoy_face := fixture.get(
+		"non_handle_decoy_face_item_meters",
+		PackedVector3Array()
+	) as PackedVector3Array
+	if not decoy_face.is_empty():
+		snapshot["non_handle_decoy_probe"] = _probe_non_handle_decoy_face(
+			[grip_area, secondary_grip_area],
+			held_item,
+			mesh_instance,
+			decoy_face
+		)
+
+
+func _capture_exact_surface_seat_move_sample(
+	ui: Node,
+	fixture: Dictionary,
+	requested_slide: float,
+	move_ok: bool
+) -> Dictionary:
+	var sample := {
+		"requested_slide": requested_slide,
+		"move_ok": move_ok,
+		"valid": false,
+	}
+	if ui == null or ui.get("preview_subviewport") == null:
+		sample["error"] = "Skill Crafter preview viewport is missing"
+		return sample
+	var preview_subviewport: SubViewport = ui.get("preview_subviewport") as SubViewport
+	var preview_root: Node3D = preview_subviewport.get_node_or_null(
+		"CombatAnimationPreviewRoot3D"
+	) as Node3D
+	var held_item: Node3D = preview_root.get_meta(
+		"preview_held_item",
+		null
+	) as Node3D if preview_root != null else null
+	var grip_guide: Node3D = held_item.get_node_or_null(
+		"PrimaryGripGuide"
+	) as Node3D if held_item != null else null
+	var grip_center: Node3D = grip_guide.get_node_or_null(
+		"GripShellCenter"
+	) as Node3D if grip_guide != null else null
+	var grip_area: Area3D = grip_center.get_node_or_null(
+		"GripContactArea"
+	) as Area3D if grip_center != null else null
+	var support_area: Area3D = held_item.get_node_or_null(
+		"SecondaryGripGuide/GripShellCenter/GripContactArea"
+	) as Area3D if held_item != null else null
+	var exact_shape_node: CollisionShape3D = grip_area.get_node_or_null(
+		"ExactProtectedHandleMeshShape"
+	) as CollisionShape3D if grip_area != null else null
+	var mesh_instance := _find_primary_visible_mesh(held_item)
+	if (
+		held_item == null
+		or grip_guide == null
+		or grip_center == null
+		or grip_area == null
+		or exact_shape_node == null
+		or exact_shape_node.shape is not ConcavePolygonShape3D
+		or mesh_instance == null
+	):
+		sample["error"] = "V2 exact Handle contact graph is incomplete after seat move"
+		return sample
+	var protected_vertices := fixture.get(
+		"protected_handle_vertices_meters",
+		PackedVector3Array()
+	) as PackedVector3Array
+	var protected_indices := fixture.get(
+		"protected_handle_indices",
+		PackedInt32Array()
+	) as PackedInt32Array
+	var exact_faces := (
+		exact_shape_node.shape as ConcavePolygonShape3D
+	).get_faces()
+	var expected_faces_world := PackedVector3Array()
+	var actual_faces_world := PackedVector3Array()
+	for source_index: int in protected_indices:
+		if source_index < 0 or source_index >= protected_vertices.size():
+			continue
+		expected_faces_world.append(mesh_instance.to_global(
+			protected_vertices[source_index] / CELL_SIZE_METERS
+		))
+	for face_vertex: Vector3 in exact_faces:
+		actual_faces_world.append(exact_shape_node.to_global(face_vertex))
+	var base_guide_position: Vector3 = grip_area.get_meta(
+		"grip_contact_base_guide_position_local",
+		Vector3.ZERO
+	) as Vector3
+	var reseat_offset: Vector3 = exact_shape_node.get_meta(
+		"grip_contact_reseat_offset_local",
+		Vector3.ZERO
+	) as Vector3
+	var expected_reseat_offset := base_guide_position - grip_guide.position
+	var ray_probe := _probe_exact_grip_surface(
+		grip_area,
+		exact_shape_node,
+		exact_faces,
+		support_area
+	)
+	var decoy_probe := {}
+	var decoy_face := fixture.get(
+		"non_handle_decoy_face_item_meters",
+		PackedVector3Array()
+	) as PackedVector3Array
+	if not decoy_face.is_empty():
+		decoy_probe = _probe_non_handle_decoy_face(
+			[grip_area, support_area],
+			held_item,
+			mesh_instance,
+			decoy_face
+		)
+	sample.merge({
+		"valid": true,
+		"guide_position_held_local": grip_guide.position,
+		"base_guide_position_local": base_guide_position,
+		"base_guide_position_origin_id": StringName(grip_area.get_meta(
+			"grip_contact_base_guide_position_origin_id",
+			StringName()
+		)),
+		"shape_reseat_offset_local": reseat_offset,
+		"shape_reseat_offset_origin_id": StringName(exact_shape_node.get_meta(
+			"grip_contact_reseat_offset_origin_id",
+			StringName()
+		)),
+		"shape_reseat_transform_error_meters": maxf(
+			exact_shape_node.position.distance_to(expected_reseat_offset),
+			reseat_offset.distance_to(expected_reseat_offset)
+		),
+		"visible_global_alignment_error_meters": _maximum_ordered_vector3_error(
+			actual_faces_world,
+			expected_faces_world
+		),
+		"ray_probe": ray_probe,
+		"non_handle_decoy_probe": decoy_probe,
+	}, true)
+	return sample
 
 
 func _read_skill_crafter_snapshot(ui: Node, label: String) -> Dictionary:
@@ -531,6 +3781,12 @@ func _read_skill_crafter_snapshot(ui: Node, label: String) -> Dictionary:
 	var grip_area: Area3D = grip_center.get_node_or_null(
 		"GripContactArea"
 	) as Area3D if grip_center != null else null
+	var secondary_grip_center: Node3D = held_item.get_node_or_null(
+		"SecondaryGripGuide/GripShellCenter"
+	) as Node3D if held_item != null else null
+	var secondary_grip_area: Area3D = secondary_grip_center.get_node_or_null(
+		"GripContactArea"
+	) as Area3D if secondary_grip_center != null else null
 	var mesh_instance := _find_primary_visible_mesh(held_item)
 	var basis_anchor: Node3D = held_item.get_node_or_null(
 		"PrimaryGripAnchor/PrimaryGripBasisAnchor"
@@ -554,15 +3810,72 @@ func _read_skill_crafter_snapshot(ui: Node, label: String) -> Dictionary:
 	var proxy_centers := PackedVector3Array()
 	var proxy_centers_held_local := PackedVector3Array()
 	var proxy_sizes := PackedVector3Array()
+	var collision_shape_count := 0
+	var box_shape_count := 0
+	var concave_shape_count := 0
+	var exact_faces_grip_local := PackedVector3Array()
+	var exact_faces_contact_surface_local := PackedVector3Array()
+	var exact_faces_held_local := PackedVector3Array()
+	var exact_shape_local_transform := Transform3D.IDENTITY
+	var exact_shape_metadata := {}
+	var exact_shape_node: CollisionShape3D = null
 	for child_node: Node in grip_area.get_children():
 		var collision_shape := child_node as CollisionShape3D
-		if collision_shape == null or collision_shape.shape is not BoxShape3D:
+		if collision_shape == null or collision_shape.shape == null:
 			continue
-		proxy_centers.append(collision_shape.position)
-		proxy_centers_held_local.append(
-			held_item.to_local(collision_shape.to_global(Vector3.ZERO))
-		)
-		proxy_sizes.append((collision_shape.shape as BoxShape3D).size)
+		collision_shape_count += 1
+		if collision_shape.shape is BoxShape3D:
+			box_shape_count += 1
+			proxy_centers.append(collision_shape.position)
+			proxy_centers_held_local.append(
+				held_item.to_local(collision_shape.to_global(Vector3.ZERO))
+			)
+			proxy_sizes.append((collision_shape.shape as BoxShape3D).size)
+		elif collision_shape.shape is ConcavePolygonShape3D:
+			concave_shape_count += 1
+			if exact_faces_grip_local.is_empty():
+				exact_shape_node = collision_shape
+				exact_faces_grip_local = (
+					collision_shape.shape as ConcavePolygonShape3D
+				).get_faces()
+				exact_shape_local_transform = collision_shape.transform
+				for face_vertex: Vector3 in exact_faces_grip_local:
+					exact_faces_contact_surface_local.append(
+						grip_center.to_local(collision_shape.to_global(face_vertex))
+					)
+					exact_faces_held_local.append(
+						held_item.to_local(collision_shape.to_global(face_vertex))
+					)
+				exact_shape_metadata = {
+					"surface_authority": StringName(collision_shape.get_meta(
+						"grip_contact_surface_authority",
+						StringName()
+					)),
+					"body_signature": String(collision_shape.get_meta(
+						"grip_contact_handle_body_signature",
+						""
+					)),
+					"source_vertices_origin_id": StringName(collision_shape.get_meta(
+						"grip_contact_source_vertices_origin_id",
+						StringName()
+					)),
+					"grip_center_origin_id": StringName(collision_shape.get_meta(
+						"grip_contact_grip_center_origin_id",
+						StringName()
+					)),
+					"faces_local_origin_id": StringName(collision_shape.get_meta(
+						"grip_contact_faces_local_origin_id",
+						StringName()
+					)),
+					"reseat_offset_local": collision_shape.get_meta(
+						"grip_contact_reseat_offset_local",
+						Vector3.ZERO
+					) as Vector3,
+					"reseat_offset_origin_id": StringName(collision_shape.get_meta(
+						"grip_contact_reseat_offset_origin_id",
+						StringName()
+					)),
+				}
 	var published_profile_offsets := PackedVector2Array()
 	var published_offsets_array: Array = grip_center.get_meta(
 		"grip_shell_profile_offsets_minor",
@@ -682,6 +3995,63 @@ func _read_skill_crafter_snapshot(ui: Node, label: String) -> Dictionary:
 		"proxy_centers": proxy_centers,
 		"proxy_centers_held_local": proxy_centers_held_local,
 		"proxy_sizes": proxy_sizes,
+		"collision_shape_count": collision_shape_count,
+		"box_shape_count": box_shape_count,
+		"concave_shape_count": concave_shape_count,
+		"exact_faces_grip_local": exact_faces_grip_local,
+		"exact_faces_contact_surface_local": exact_faces_contact_surface_local,
+		"exact_faces_held_local": exact_faces_held_local,
+		"exact_shape_local_transform": exact_shape_local_transform,
+		"exact_shape_metadata": exact_shape_metadata,
+		"grip_contact_surface_authority": StringName(grip_area.get_meta(
+			"grip_contact_surface_authority",
+			StringName()
+		)),
+		"grip_contact_handle_body_signature": String(grip_area.get_meta(
+			"grip_contact_handle_body_signature",
+			""
+		)),
+		"grip_contact_handle_only": bool(grip_area.get_meta(
+			"grip_contact_handle_only",
+			false
+		)),
+		"grip_contact_source_vertices_origin_id": StringName(grip_area.get_meta(
+			"grip_contact_source_vertices_origin_id",
+			StringName()
+		)),
+		"grip_contact_grip_center_origin_id": StringName(grip_area.get_meta(
+			"grip_contact_grip_center_origin_id",
+			StringName()
+		)),
+		"grip_contact_faces_local_origin_id": StringName(grip_area.get_meta(
+			"grip_contact_faces_local_origin_id",
+			StringName()
+		)),
+		"grip_contact_base_guide_position_local": grip_area.get_meta(
+			"grip_contact_base_guide_position_local",
+			Vector3.ZERO
+		) as Vector3,
+		"grip_contact_base_guide_position_origin_id": StringName(grip_area.get_meta(
+			"grip_contact_base_guide_position_origin_id",
+			StringName()
+		)),
+		"grip_guide_position_held_local": held_item.to_local(grip_center.global_position),
+		"grip_shell_exact_surface": bool(grip_center.get_meta(
+			"grip_shell_exact_surface",
+			false
+		)),
+		"grip_shell_surface_authority": StringName(grip_center.get_meta(
+			"grip_shell_surface_authority",
+			StringName()
+		)),
+		"grip_shell_handle_body_signature": String(grip_center.get_meta(
+			"grip_shell_handle_body_signature",
+			""
+		)),
+		"grip_shell_surface_local_origin_id": StringName(grip_center.get_meta(
+			"grip_shell_surface_local_origin_id",
+			StringName()
+		)),
 		"published_profile_offsets_minor": published_profile_offsets,
 		"grip_center_held_local": held_item.to_local(grip_center.global_position),
 		"mesh_vertices_grip_local": mesh_vertices_grip_local,
@@ -712,6 +4082,10 @@ func _read_skill_crafter_snapshot(ui: Node, label: String) -> Dictionary:
 		),
 		"_grip_center": grip_center,
 		"_grip_area": grip_area,
+		"_secondary_grip_area": secondary_grip_area,
+		"_exact_shape_node": exact_shape_node,
+		"_held_item": held_item,
+		"_mesh_instance": mesh_instance,
 	}, true)
 	return snapshot
 
@@ -728,13 +4102,6 @@ func _evaluate_baseline_parity(v1: Dictionary, v2: Dictionary) -> void:
 	if not snapshots_valid:
 		_check(false, "baseline_skill_crafter_snapshots_valid", "V1/V2 Skill Crafter snapshot failed")
 		return
-	var v1_centers: PackedVector3Array = v1.get("proxy_centers", PackedVector3Array())
-	var v2_centers: PackedVector3Array = v2.get("proxy_centers", PackedVector3Array())
-	var shell_centers_match := _unordered_vector3_sets_match(
-		v1_centers,
-		v2_centers,
-		POSITION_EPSILON_METERS
-	)
 	var v1_aabb: AABB = v1.get("mesh_aabb_grip_local", AABB()) as AABB
 	var v2_aabb: AABB = v2.get("mesh_aabb_grip_local", AABB()) as AABB
 	var visual_bounds_match := (
@@ -748,16 +4115,37 @@ func _evaluate_baseline_parity(v1: Dictionary, v2: Dictionary) -> void:
 		float(v1.get("cell_world_size", 0.0))
 		- float(v2.get("cell_world_size", 0.0))
 	) <= 0.000001
-	result_lines.append("baseline_shell_centers_match=%s" % str(shell_centers_match))
+	var v1_legacy_boxes_valid := (
+		int(v1.get("collision_shape_count", 0)) > 0
+		and int(v1.get("collision_shape_count", 0)) == int(v1.get(
+			"box_shape_count",
+			0
+		))
+		and int(v1.get("concave_shape_count", 0)) == 0
+	)
+	var v2_exact_surface_valid := (
+		int(v2.get("collision_shape_count", 0)) == 1
+		and int(v2.get("box_shape_count", 0)) == 0
+		and int(v2.get("concave_shape_count", 0)) == 1
+	)
+	result_lines.append("baseline_v1_legacy_boxes_valid=%s" % str(
+		v1_legacy_boxes_valid
+	))
+	result_lines.append("baseline_v2_exact_surface_valid=%s" % str(
+		v2_exact_surface_valid
+	))
 	result_lines.append("baseline_visual_bounds_match=%s" % str(visual_bounds_match))
 	result_lines.append("baseline_cell_size_match=%s" % str(cell_size_match))
 	result_lines.append("baseline_axial_origin_delta_meters=%.6f" % absf(
 		v1_aabb.position.x - v2_aabb.position.x
 	))
 	_check(
-		shell_centers_match and visual_bounds_match and cell_size_match,
-		"baseline_v1_v2_geometry_and_collision_parity",
-		"equivalent V1/V2 handles do not expose the same visible bounds and grip cells"
+		visual_bounds_match
+		and cell_size_match
+		and v1_legacy_boxes_valid
+		and v2_exact_surface_valid,
+		"baseline_v1_legacy_v2_exact_geometry_contract",
+		"equivalent handles lost visual parity or published the wrong V1/V2 contact shape authority"
 	)
 
 	var all_runtime_evidence_present := true
@@ -996,10 +4384,6 @@ func _evaluate_asymmetric_surface_alignment(
 		"absolute_final_polygon",
 		PackedVector2Array()
 	)
-	var absolute_expected_centers: PackedVector2Array = fixture.get(
-		"absolute_profile_centers_2d",
-		PackedVector2Array()
-	)
 	var mesh_vertices: PackedVector3Array = snapshot.get(
 		"mesh_vertices_grip_local",
 		PackedVector3Array()
@@ -1018,11 +4402,6 @@ func _evaluate_asymmetric_surface_alignment(
 	var actual_proxy_centers_2d := PackedVector2Array()
 	for center: Vector3 in snapshot.get("proxy_centers", PackedVector3Array()) as PackedVector3Array:
 		actual_proxy_centers_2d.append(Vector2(center.dot(axis_x), center.dot(axis_y)))
-	var proxy_centers_match := _unordered_vector2_sets_match(
-		actual_proxy_centers_2d,
-		expected_centers,
-		POSITION_EPSILON_METERS
-	)
 	var visible_centroid := _calculate_polygon_centroid(actual_ring)
 	var expected_centroid := _calculate_polygon_centroid(final_polygon)
 	var proxy_centroid := _average_vector2(actual_proxy_centers_2d)
@@ -1039,10 +4418,6 @@ func _evaluate_asymmetric_surface_alignment(
 	var contract_offset_mean := _average_vector2(contract_offsets)
 	var visible_center_error := visible_centroid.distance_to(expected_centroid)
 	var proxy_center_error := proxy_centroid.distance_to(expected_proxy_centroid)
-	var proxy_nearest_error := _max_nearest_vector2_distance(
-		actual_proxy_centers_2d,
-		expected_centers
-	)
 	var offset_mean_centered := (
 		not published_offsets.is_empty()
 		and published_offsets.size() == expected_centers.size()
@@ -1072,27 +4447,19 @@ func _evaluate_asymmetric_surface_alignment(
 		actual_ring,
 		contract_grip_center_2d
 	)
-	var reconstructed_absolute_proxy_centers := _translate_vector2_array(
-		actual_proxy_centers_2d,
-		contract_grip_center_2d
-	)
 	var absolute_visible_match := _unordered_vector2_sets_match(
 		reconstructed_absolute_ring,
 		absolute_final_polygon,
 		POSITION_EPSILON_METERS
 	)
-	var absolute_proxy_match := _unordered_vector2_sets_match(
-		reconstructed_absolute_proxy_centers,
-		absolute_expected_centers,
-		POSITION_EPSILON_METERS
-	)
 	var absolute_alignment_ok := (
 		grip_center_contract_error <= POSITION_EPSILON_METERS
 		and absolute_visible_match
-		and absolute_proxy_match
 	)
 	result_lines.append("asymmetric_visible_vertices_match=%s" % str(visible_vertices_match))
-	result_lines.append("asymmetric_proxy_centers_match=%s" % str(proxy_centers_match))
+	result_lines.append("asymmetric_legacy_proxy_absent=%s" % str(
+		actual_proxy_centers_2d.is_empty()
+	))
 	result_lines.append("asymmetric_visible_profile_vertex_count=%d" % actual_ring.size())
 	result_lines.append("asymmetric_expected_profile_vertex_count=%d" % final_polygon.size())
 	result_lines.append("asymmetric_proxy_cell_count=%d" % actual_proxy_centers_2d.size())
@@ -1111,7 +4478,6 @@ func _evaluate_asymmetric_surface_alignment(
 	))
 	result_lines.append("asymmetric_visible_center_error_meters=%.6f" % visible_center_error)
 	result_lines.append("asymmetric_proxy_center_error_meters=%.6f" % proxy_center_error)
-	result_lines.append("asymmetric_proxy_max_nearest_error_meters=%.6f" % proxy_nearest_error)
 	result_lines.append("asymmetric_proxy_centers_2d=%s" % str(actual_proxy_centers_2d))
 	result_lines.append("asymmetric_expected_centers_2d=%s" % str(expected_centers))
 	result_lines.append("asymmetric_profile_sample_center_2d=%s" % str(
@@ -1129,8 +4495,8 @@ func _evaluate_asymmetric_surface_alignment(
 	result_lines.append("asymmetric_absolute_visible_vertices_match=%s" % str(
 		absolute_visible_match
 	))
-	result_lines.append("asymmetric_absolute_proxy_centers_match=%s" % str(
-		absolute_proxy_match
+	result_lines.append("asymmetric_protected_profile_center_preserved=%s" % str(
+		absolute_alignment_ok
 	))
 	_check(
 		offset_mean_centered,
@@ -1139,13 +4505,12 @@ func _evaluate_asymmetric_surface_alignment(
 	)
 	_check(
 		visible_vertices_match
-		and proxy_centers_match
 		and visible_center_error <= POSITION_EPSILON_METERS
-		and proxy_center_error <= POSITION_EPSILON_METERS
 		and offset_mean_centered
+		and actual_proxy_centers_2d.is_empty()
 		and absolute_alignment_ok,
 		"geometric_slice_center_ok",
-		"V2 off-center/asymmetric slice is not centered locally and preserved in the source item frame"
+		"V2 off-center/asymmetric visible slice or exact-surface center is not preserved"
 	)
 
 	var ray_probe: Dictionary = snapshot.get("ray_probe", {}) as Dictionary
@@ -1157,27 +4522,512 @@ func _evaluate_asymmetric_surface_alignment(
 	result_lines.append("asymmetric_ray_probe_grip_area_hit_count=%d" % ray_hit_count)
 	result_lines.append("asymmetric_ray_probe_aligned_hit_count=%d" % ray_aligned_count)
 	result_lines.append("asymmetric_ray_probe_max_error_meters=%s" % str(ray_max_error))
-	result_lines.append("legacy_identity_box_surface_tolerance_meters=%s" % str(
-		RAY_HIT_EPSILON_METERS
+	result_lines.append("exact_triangle_surface_tolerance_meters=%s" % str(
+		EXACT_RAY_HIT_EPSILON_METERS
 	))
+	var exact_face_count := int((snapshot.get(
+		"exact_faces_grip_local",
+		PackedVector3Array()
+	) as PackedVector3Array).size() / 3)
 	_check(
 		visible_vertices_match
-		and proxy_centers_match
 		and absolute_alignment_ok
-		and ray_attempt_count == 14
-		and ray_hit_count == 14
-		and ray_aligned_count == 14
-		and ray_max_error <= RAY_HIT_EPSILON_METERS,
-		"grip_contact_ray_visible_surface_alignment_ok",
-		"GripContactArea did not preserve absolute visible/proxy alignment and the 14/14 boundary-ray gate"
+		and exact_face_count > 0
+		and ray_attempt_count == exact_face_count
+		and ray_hit_count == exact_face_count
+		and ray_aligned_count == exact_face_count
+		and ray_max_error <= EXACT_RAY_HIT_EPSILON_METERS,
+		"grip_contact_exact_ray_visible_surface_alignment_ok",
+		"exact GripContactArea triangles did not align with visible Handle geometry and their expected Area"
 	)
 
 
-func _probe_expected_grip_surface(
-	grip_center: Node3D,
+func _evaluate_v2_exact_surface_contract(
+	fixture: Dictionary,
+	snapshot: Dictionary,
+	label: String,
+	require_non_handle_decoy: bool
+) -> void:
+	if not bool(snapshot.get("valid", false)):
+		_check(
+			false,
+			"%s_exact_surface_snapshot_valid" % label,
+			"V2 Skill Crafter snapshot is unavailable"
+		)
+		return
+	var expected_source := PrimaryGripHandleMeshPacketScript.SOURCE
+	var expected_signature := String(fixture.get(
+		"protected_handle_body_signature",
+		""
+	))
+	var expected_origin := PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+	var shape_metadata := snapshot.get("exact_shape_metadata", {}) as Dictionary
+	var exact_faces := snapshot.get(
+		"exact_faces_grip_local",
+		PackedVector3Array()
+	) as PackedVector3Array
+	var exact_faces_contact_surface_local := snapshot.get(
+		"exact_faces_contact_surface_local",
+		PackedVector3Array()
+	) as PackedVector3Array
+	var exact_faces_held := snapshot.get(
+		"exact_faces_held_local",
+		PackedVector3Array()
+	) as PackedVector3Array
+	var expected_faces := snapshot.get(
+		"expected_protected_faces_grip_local",
+		PackedVector3Array()
+	) as PackedVector3Array
+	var expected_faces_held := snapshot.get(
+		"expected_protected_faces_held_local",
+		PackedVector3Array()
+	) as PackedVector3Array
+	var expected_indices := fixture.get(
+		"protected_handle_indices",
+		PackedInt32Array()
+	) as PackedInt32Array
+	var shape_count_ok := (
+		int(snapshot.get("collision_shape_count", 0)) == 1
+		and int(snapshot.get("box_shape_count", 0)) == 0
+		and int(snapshot.get("concave_shape_count", 0)) == 1
+		and exact_faces.size() == expected_indices.size()
+	)
+	var authority_ok := (
+		StringName(snapshot.get(
+			"grip_contact_surface_authority",
+			StringName()
+		)) == expected_source
+		and StringName(snapshot.get(
+			"grip_shell_surface_authority",
+			StringName()
+		)) == expected_source
+		and StringName(shape_metadata.get(
+			"surface_authority",
+			StringName()
+		)) == expected_source
+		and bool(snapshot.get("grip_contact_handle_only", false))
+		and bool(snapshot.get("grip_shell_exact_surface", false))
+	)
+	var signature_ok := (
+		not expected_signature.is_empty()
+		and String(snapshot.get(
+			"grip_contact_handle_body_signature",
+			""
+		)) == expected_signature
+		and String(snapshot.get(
+			"grip_shell_handle_body_signature",
+			""
+		)) == expected_signature
+		and String(shape_metadata.get("body_signature", "")) == expected_signature
+	)
+	var origin_ok := (
+		StringName(fixture.get(
+			"protected_handle_vertices_origin_id",
+			StringName()
+		)) == expected_origin
+		and StringName(snapshot.get(
+			"grip_contact_source_vertices_origin_id",
+			StringName()
+		)) == expected_origin
+		and StringName(snapshot.get(
+			"grip_contact_grip_center_origin_id",
+			StringName()
+		)) == expected_origin
+		and StringName(snapshot.get(
+			"grip_contact_faces_local_origin_id",
+			StringName()
+		)) == CombatOriginRecordScript.ORIGIN_PRIMARY_GRIP_CONTACT_SURFACE
+		and StringName(snapshot.get(
+			"grip_shell_surface_local_origin_id",
+			StringName()
+		)) == CombatOriginRecordScript.ORIGIN_PRIMARY_GRIP_CONTACT_SURFACE
+		and StringName(shape_metadata.get(
+			"source_vertices_origin_id",
+			StringName()
+		)) == expected_origin
+		and StringName(shape_metadata.get(
+			"grip_center_origin_id",
+			StringName()
+		)) == expected_origin
+		and StringName(shape_metadata.get(
+			"faces_local_origin_id",
+			StringName()
+		)) == CombatOriginRecordScript.ORIGIN_PRIMARY_GRIP_CONTACT_SURFACE
+		and StringName(snapshot.get(
+			"grip_contact_base_guide_position_origin_id",
+			StringName()
+		)) == expected_origin
+		and StringName(shape_metadata.get(
+			"reseat_offset_origin_id",
+			StringName()
+		)) == expected_origin
+	)
+	var local_transform := snapshot.get(
+		"exact_shape_local_transform",
+		Transform3D.IDENTITY
+	) as Transform3D
+	var base_guide_position := snapshot.get(
+		"grip_contact_base_guide_position_local",
+		Vector3.ZERO
+	) as Vector3
+	var current_guide_position := snapshot.get(
+		"grip_guide_position_held_local",
+		Vector3.ZERO
+	) as Vector3
+	var expected_reseat_offset := base_guide_position - current_guide_position
+	var stored_reseat_offset := shape_metadata.get(
+		"reseat_offset_local",
+		Vector3.ZERO
+	) as Vector3
+	var shape_reseat_transform_error := maxf(
+		maxf(
+			local_transform.origin.distance_to(expected_reseat_offset),
+			stored_reseat_offset.distance_to(expected_reseat_offset)
+		),
+		_basis_max_axis_error(local_transform.basis, Basis.IDENTITY)
+	)
+	var source_alignment_error := _maximum_ordered_vector3_error(
+		exact_faces_contact_surface_local,
+		expected_faces
+	)
+	var visible_global_alignment_error := _maximum_ordered_vector3_error(
+		exact_faces_held,
+		expected_faces_held
+	)
+	var ray_probe := snapshot.get("ray_probe", {}) as Dictionary
+	var ray_attempt_count := int(ray_probe.get("attempt_count", 0))
+	var ray_hit_count := int(ray_probe.get("grip_area_hit_count", 0))
+	var ray_aligned_count := int(ray_probe.get("aligned_hit_count", 0))
+	var ray_max_error := float(ray_probe.get(
+		"max_alignment_error_meters",
+		INF
+	))
+	var expected_face_count := int(expected_indices.size() / 3)
+	var ray_ok := (
+		expected_face_count > 0
+		and ray_attempt_count == expected_face_count
+		and ray_hit_count == expected_face_count
+		and ray_aligned_count == expected_face_count
+		and ray_max_error <= EXACT_RAY_HIT_EPSILON_METERS
+	)
+	var decoy_probe := snapshot.get(
+		"non_handle_decoy_probe",
+		{}
+	) as Dictionary
+	var decoy_ok := (
+		not require_non_handle_decoy
+		or (
+			bool(fixture.get("includes_non_handle_decoy", false))
+			and bool(decoy_probe.get("attempted", false))
+			and not bool(decoy_probe.get("hit_grip_area", true))
+		)
+	)
+	result_lines.append("%s_exact_collision_shape_count=%d" % [
+		label,
+		int(snapshot.get("collision_shape_count", 0)),
+	])
+	result_lines.append("%s_exact_box_shape_count=%d" % [
+		label,
+		int(snapshot.get("box_shape_count", 0)),
+	])
+	result_lines.append("%s_exact_concave_shape_count=%d" % [
+		label,
+		int(snapshot.get("concave_shape_count", 0)),
+	])
+	result_lines.append("%s_exact_triangle_count=%d" % [
+		label,
+		int(exact_faces.size() / 3),
+	])
+	result_lines.append("%s_exact_authority_ok=%s" % [label, str(authority_ok)])
+	result_lines.append("%s_exact_signature_ok=%s" % [label, str(signature_ok)])
+	result_lines.append("%s_exact_origin_ok=%s" % [label, str(origin_ok)])
+	result_lines.append("%s_exact_area_source_vertices_origin=%s" % [
+		label,
+		String(snapshot.get("grip_contact_source_vertices_origin_id", StringName())),
+	])
+	result_lines.append("%s_exact_area_grip_center_origin=%s" % [
+		label,
+		String(snapshot.get("grip_contact_grip_center_origin_id", StringName())),
+	])
+	result_lines.append("%s_exact_area_faces_local_origin=%s" % [
+		label,
+		String(snapshot.get("grip_contact_faces_local_origin_id", StringName())),
+	])
+	result_lines.append("%s_exact_shell_faces_local_origin=%s" % [
+		label,
+		String(snapshot.get("grip_shell_surface_local_origin_id", StringName())),
+	])
+	result_lines.append("%s_exact_shape_source_vertices_origin=%s" % [
+		label,
+		String(shape_metadata.get("source_vertices_origin_id", StringName())),
+	])
+	result_lines.append("%s_exact_shape_grip_center_origin=%s" % [
+		label,
+		String(shape_metadata.get("grip_center_origin_id", StringName())),
+	])
+	result_lines.append("%s_exact_shape_faces_local_origin=%s" % [
+		label,
+		String(shape_metadata.get("faces_local_origin_id", StringName())),
+	])
+	if not exact_faces.is_empty() and not expected_faces.is_empty():
+		result_lines.append("%s_exact_first_actual_grip_local=%s" % [
+			label,
+			str(exact_faces[0]),
+		])
+		result_lines.append("%s_exact_first_expected_grip_local=%s" % [
+			label,
+			str(expected_faces[0]),
+		])
+	result_lines.append("%s_exact_base_guide_position_local=%s" % [
+		label,
+		str(base_guide_position),
+	])
+	result_lines.append("%s_exact_current_guide_position_local=%s" % [
+		label,
+		str(current_guide_position),
+	])
+	result_lines.append("%s_exact_expected_reseat_offset_local=%s" % [
+		label,
+		str(expected_reseat_offset),
+	])
+	result_lines.append("%s_exact_shape_reseat_transform_error=%s" % [
+		label,
+		str(shape_reseat_transform_error),
+	])
+	result_lines.append("%s_exact_source_alignment_error_meters=%s" % [
+		label,
+		str(source_alignment_error),
+	])
+	result_lines.append("%s_exact_visible_global_alignment_error_meters=%s" % [
+		label,
+		str(visible_global_alignment_error),
+	])
+	result_lines.append("%s_exact_ray_attempt_count=%d" % [label, ray_attempt_count])
+	result_lines.append("%s_exact_ray_hit_count=%d" % [label, ray_hit_count])
+	result_lines.append("%s_exact_ray_aligned_count=%d" % [
+		label,
+		ray_aligned_count,
+	])
+	result_lines.append("%s_exact_ray_max_error_meters=%s" % [
+		label,
+		str(ray_max_error),
+	])
+	result_lines.append("%s_non_handle_decoy_excluded=%s" % [
+		label,
+		str(decoy_ok),
+	])
+	_check(
+		shape_count_ok,
+		"%s_v2_uses_single_exact_concave_surface" % label,
+		"V2 GripContactArea retained boxes or does not exactly match protected Handle triangle count"
+	)
+	_check(
+		authority_ok and signature_ok and origin_ok,
+		"%s_v2_exact_handle_metadata_contract" % label,
+		"V2 exact Handle source, body signature, Handle-only flag, or contact-surface origin is wrong"
+	)
+	_check(
+		shape_reseat_transform_error <= EXACT_VERTEX_EPSILON_METERS
+		and source_alignment_error <= EXACT_VERTEX_EPSILON_METERS
+		and visible_global_alignment_error <= EXACT_VERTEX_EPSILON_METERS,
+		"%s_v2_exact_surface_visible_global_alignment" % label,
+		"V2 protected Handle collision triangles do not align with the visible equipped mesh"
+	)
+	_check(
+		ray_ok,
+		"%s_v2_exact_surface_expected_area_rays" % label,
+		"exact triangle rays missed their expected GripContactArea or exceeded 0.08 mm"
+	)
+	if require_non_handle_decoy:
+		_check(
+			decoy_ok,
+			"%s_v2_non_handle_geometry_excluded" % label,
+			"non-Handle final-mesh geometry leaked into GripContactArea"
+		)
+	_evaluate_exact_surface_seat_move_samples(
+		fixture,
+		snapshot,
+		label,
+		require_non_handle_decoy
+	)
+
+
+func _evaluate_exact_surface_seat_move_samples(
+	fixture: Dictionary,
+	snapshot: Dictionary,
+	label: String,
+	require_non_handle_decoy: bool
+) -> void:
+	var samples := snapshot.get(
+		"exact_surface_seat_move_samples",
+		[]
+	) as Array
+	var expected_face_count := int((fixture.get(
+		"protected_handle_indices",
+		PackedInt32Array()
+	) as PackedInt32Array).size() / 3)
+	var all_samples_ok := samples.size() == V2_GRIP_SEAT_MOVE_VALUES.size()
+	var distinct_guide_positions := PackedVector3Array()
+	for sample_index: int in range(samples.size()):
+		var sample := samples[sample_index] as Dictionary
+		var ray_probe := sample.get("ray_probe", {}) as Dictionary
+		var ray_attempt_count := int(ray_probe.get("attempt_count", 0))
+		var ray_hit_count := int(ray_probe.get("grip_area_hit_count", 0))
+		var ray_aligned_count := int(ray_probe.get("aligned_hit_count", 0))
+		var ray_max_error := float(ray_probe.get(
+			"max_alignment_error_meters",
+			INF
+		))
+		var visible_error := float(sample.get(
+			"visible_global_alignment_error_meters",
+			INF
+		))
+		var reseat_error := float(sample.get(
+			"shape_reseat_transform_error_meters",
+			INF
+		))
+		var guide_position := sample.get(
+			"guide_position_held_local",
+			Vector3.ZERO
+		) as Vector3
+		if not _vector3_set_has_point(
+			distinct_guide_positions,
+			guide_position,
+			EXACT_VERTEX_EPSILON_METERS
+		):
+			distinct_guide_positions.append(guide_position)
+		var decoy_probe := sample.get("non_handle_decoy_probe", {}) as Dictionary
+		var sample_decoy_ok := (
+			not require_non_handle_decoy
+			or (
+				bool(decoy_probe.get("attempted", false))
+				and not bool(decoy_probe.get("hit_grip_area", true))
+			)
+		)
+		var sample_ok := (
+			bool(sample.get("valid", false))
+			and bool(sample.get("move_ok", false))
+			and StringName(sample.get(
+				"base_guide_position_origin_id",
+				StringName()
+			)) == PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+			and StringName(sample.get(
+				"shape_reseat_offset_origin_id",
+				StringName()
+			)) == PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+			and reseat_error <= EXACT_VERTEX_EPSILON_METERS
+			and visible_error <= EXACT_VERTEX_EPSILON_METERS
+			and expected_face_count > 0
+			and ray_attempt_count == expected_face_count
+			and ray_hit_count == expected_face_count
+			and ray_aligned_count == expected_face_count
+			and ray_max_error <= EXACT_RAY_HIT_EPSILON_METERS
+			and sample_decoy_ok
+		)
+		all_samples_ok = all_samples_ok and sample_ok
+		result_lines.append("%s_seat_move_%d_requested_slide=%s" % [
+			label,
+			sample_index,
+			str(float(sample.get("requested_slide", 0.0))),
+		])
+		result_lines.append("%s_seat_move_%d_valid=%s" % [
+			label,
+			sample_index,
+			str(bool(sample.get("valid", false))),
+		])
+		result_lines.append("%s_seat_move_%d_public_action_ok=%s" % [
+			label,
+			sample_index,
+			str(bool(sample.get("move_ok", false))),
+		])
+		result_lines.append("%s_seat_move_%d_base_origin=%s" % [
+			label,
+			sample_index,
+			String(sample.get("base_guide_position_origin_id", StringName())),
+		])
+		result_lines.append("%s_seat_move_%d_reseat_origin=%s" % [
+			label,
+			sample_index,
+			String(sample.get("shape_reseat_offset_origin_id", StringName())),
+		])
+		result_lines.append("%s_seat_move_%d_guide_position=%s" % [
+			label,
+			sample_index,
+			str(guide_position),
+		])
+		result_lines.append("%s_seat_move_%d_reseat_error_meters=%s" % [
+			label,
+			sample_index,
+			str(reseat_error),
+		])
+		result_lines.append("%s_seat_move_%d_visible_alignment_error_meters=%s" % [
+			label,
+			sample_index,
+			str(visible_error),
+		])
+		result_lines.append("%s_seat_move_%d_ray_hits=%d/%d" % [
+			label,
+			sample_index,
+			ray_hit_count,
+			ray_attempt_count,
+		])
+		result_lines.append("%s_seat_move_%d_ray_aligned_count=%d" % [
+			label,
+			sample_index,
+			ray_aligned_count,
+		])
+		result_lines.append("%s_seat_move_%d_ray_max_error_meters=%s" % [
+			label,
+			sample_index,
+			str(ray_max_error),
+		])
+		result_lines.append("%s_seat_move_%d_ok=%s" % [
+			label,
+			sample_index,
+			str(sample_ok),
+		])
+	all_samples_ok = all_samples_ok and distinct_guide_positions.size() == samples.size()
+	result_lines.append("%s_seat_move_distinct_guide_position_count=%d" % [
+		label,
+		distinct_guide_positions.size(),
+	])
+	_check(
+		all_samples_ok,
+		"%s_v2_exact_surface_multiple_seat_moves" % label,
+		"V2 exact Handle collision did not remain rebased, visible-aligned, ray-hittable, and Handle-only through every grip-seat move"
+	)
+
+
+func _maximum_ordered_vector3_error(
+	actual: PackedVector3Array,
+	expected: PackedVector3Array
+) -> float:
+	if actual.size() != expected.size():
+		return INF
+	var maximum_error := 0.0
+	for value_index: int in range(actual.size()):
+		maximum_error = maxf(
+			maximum_error,
+			actual[value_index].distance_to(expected[value_index])
+		)
+	return maximum_error
+
+
+func _basis_max_axis_error(actual: Basis, expected: Basis) -> float:
+	return maxf(
+		actual.x.distance_to(expected.x),
+		maxf(
+			actual.y.distance_to(expected.y),
+			actual.z.distance_to(expected.z)
+		)
+	)
+
+
+func _probe_exact_grip_surface(
 	grip_area: Area3D,
-	expected_centers_2d: PackedVector2Array,
-	frame: Dictionary
+	exact_shape_node: CollisionShape3D,
+	exact_faces_local: PackedVector3Array,
+	excluded_overlap_area: Area3D = null
 ) -> Dictionary:
 	var result := {
 		"attempt_count": 0,
@@ -1185,53 +5035,106 @@ func _probe_expected_grip_surface(
 		"aligned_hit_count": 0,
 		"max_alignment_error_meters": 0.0,
 	}
-	if grip_center == null or grip_area == null or expected_centers_2d.is_empty():
+	if (
+		grip_area == null
+		or exact_shape_node == null
+		or exact_faces_local.is_empty()
+		or exact_faces_local.size() % 3 != 0
+	):
 		return result
-	var axis_x: Vector3 = frame.get("axis_x", Vector3.UP) as Vector3
-	var axis_y: Vector3 = frame.get("axis_y", Vector3.FORWARD) as Vector3
-	var collision_mask := int(grip_center.get_meta("grip_shell_collision_layer", 0))
+	var collision_mask := grip_area.collision_layer
 	if collision_mask <= 0:
 		return result
-	var directions := [Vector2.RIGHT, Vector2.LEFT, Vector2.UP, Vector2.DOWN]
-	var world_3d := grip_center.get_world_3d()
+	var world_3d := exact_shape_node.get_world_3d()
 	if world_3d == null:
 		return result
-	for center_2d: Vector2 in expected_centers_2d:
-		for direction_2d: Vector2 in directions:
-			if _vector2_set_has_point(
-				expected_centers_2d,
-				center_2d + direction_2d * CELL_SIZE_METERS,
-				POSITION_EPSILON_METERS
-			):
-				continue
-			var center_local := axis_x * center_2d.x + axis_y * center_2d.y
-			var direction_local := (
-				axis_x * direction_2d.x + axis_y * direction_2d.y
-			).normalized()
-			var from_local := center_local + direction_local * CELL_SIZE_METERS * 0.75
-			var expected_hit_local := center_local + direction_local * CELL_SIZE_METERS * 0.5
-			var query := PhysicsRayQueryParameters3D.create(
-				grip_center.to_global(from_local),
-				grip_center.to_global(center_local),
-				collision_mask
+	for face_offset: int in range(0, exact_faces_local.size(), 3):
+		var point_a := exact_faces_local[face_offset]
+		var point_b := exact_faces_local[face_offset + 1]
+		var point_c := exact_faces_local[face_offset + 2]
+		var face_normal := (point_b - point_a).cross(point_c - point_a).normalized()
+		if face_normal.length_squared() <= 0.5:
+			continue
+		var centroid := (point_a + point_b + point_c) / 3.0
+		var query := PhysicsRayQueryParameters3D.create(
+			exact_shape_node.to_global(centroid + face_normal * 0.020),
+			exact_shape_node.to_global(centroid - face_normal * 0.004),
+			collision_mask
+		)
+		query.collide_with_areas = true
+		query.collide_with_bodies = false
+		query.hit_from_inside = false
+		if excluded_overlap_area != null:
+			query.exclude = [excluded_overlap_area.get_rid()]
+		var hit: Dictionary = world_3d.direct_space_state.intersect_ray(query)
+		result["attempt_count"] = int(result["attempt_count"]) + 1
+		if hit.is_empty() or hit.get("collider", null) != grip_area:
+			continue
+		result["grip_area_hit_count"] = int(result["grip_area_hit_count"]) + 1
+		var alignment_error := (
+			(hit.get("position", Vector3.INF) as Vector3).distance_to(
+				exact_shape_node.to_global(centroid)
 			)
-			query.collide_with_areas = true
-			query.collide_with_bodies = false
-			query.hit_from_inside = false
-			var hit: Dictionary = world_3d.direct_space_state.intersect_ray(query)
-			result["attempt_count"] = int(result["attempt_count"]) + 1
-			if hit.is_empty() or hit.get("collider", null) != grip_area:
-				continue
-			result["grip_area_hit_count"] = int(result["grip_area_hit_count"]) + 1
-			var hit_local := grip_center.to_local(hit.get("position", Vector3.ZERO) as Vector3)
-			var alignment_error := hit_local.distance_to(expected_hit_local)
-			result["max_alignment_error_meters"] = maxf(
-				float(result["max_alignment_error_meters"]),
-				alignment_error
-			)
-			if alignment_error <= RAY_HIT_EPSILON_METERS:
-				result["aligned_hit_count"] = int(result["aligned_hit_count"]) + 1
+		)
+		result["max_alignment_error_meters"] = maxf(
+			float(result["max_alignment_error_meters"]),
+			alignment_error
+		)
+		if alignment_error <= EXACT_RAY_HIT_EPSILON_METERS:
+			result["aligned_hit_count"] = int(result["aligned_hit_count"]) + 1
 	return result
+
+
+func _probe_non_handle_decoy_face(
+	grip_areas: Array,
+	held_item: Node3D,
+	mesh_instance: MeshInstance3D,
+	decoy_face_item_meters: PackedVector3Array
+) -> Dictionary:
+	if (
+		held_item == null
+		or mesh_instance == null
+		or decoy_face_item_meters.size() != 3
+	):
+		return {"attempted": false, "hit_grip_area": true}
+	var a := decoy_face_item_meters[0]
+	var b := decoy_face_item_meters[1]
+	var c := decoy_face_item_meters[2]
+	var normal_item := (b - a).cross(c - a).normalized()
+	var centroid_item := (a + b + c) / 3.0
+	var centroid_world := mesh_instance.to_global(
+		centroid_item / CELL_SIZE_METERS
+	)
+	var normal_world := (
+		mesh_instance.global_basis * (normal_item / CELL_SIZE_METERS)
+	).normalized()
+	var collision_mask := 0
+	for area_variant: Variant in grip_areas:
+		var area := area_variant as Area3D
+		if area != null:
+			collision_mask |= area.collision_layer
+	if collision_mask <= 0:
+		return {"attempted": false, "hit_grip_area": true}
+	var query := PhysicsRayQueryParameters3D.create(
+		centroid_world + normal_world * 0.020,
+		centroid_world - normal_world * 0.004,
+		collision_mask
+	)
+	query.collide_with_areas = true
+	query.collide_with_bodies = false
+	query.hit_from_inside = false
+	var hit := held_item.get_world_3d().direct_space_state.intersect_ray(query)
+	var hit_grip_area := false
+	for area_variant: Variant in grip_areas:
+		var area := area_variant as Area3D
+		if area != null and hit.get("collider", null) == area:
+			hit_grip_area = true
+			break
+	return {
+		"attempted": true,
+		"hit_grip_area": hit_grip_area,
+		"raw_hit": hit,
+	}
 
 
 func _resolve_authored_handle_frame(handle_body: Resource) -> Dictionary:
@@ -1336,6 +5239,42 @@ func _append_oriented_triangle(
 		indices.append_array(PackedInt32Array([a, b, c]))
 	else:
 		indices.append_array(PackedInt32Array([a, c, b]))
+
+
+func _append_non_handle_decoy_tetrahedron(
+	protected_vertices: PackedVector3Array,
+	protected_indices: PackedInt32Array,
+	frame: Dictionary
+) -> Dictionary:
+	var vertices := PackedVector3Array(protected_vertices)
+	var indices := PackedInt32Array(protected_indices)
+	var tangent := (frame.get("tangent", Vector3.RIGHT) as Vector3).normalized()
+	var axis_x := (frame.get("axis_x", Vector3.UP) as Vector3).normalized()
+	var axis_y := (frame.get("axis_y", Vector3.FORWARD) as Vector3).normalized()
+	var shared := protected_vertices[int(protected_vertices.size() / 2)]
+	var base_index := vertices.size()
+	# The duplicate shared point keeps the complete saved-item mesh one welded
+	# component. These faces are deliberately absent from the protected Handle
+	# packet and must therefore never enter GripContactArea.
+	vertices.append(shared)
+	vertices.append(shared + tangent * 0.16 + axis_x * 0.09)
+	vertices.append(shared + tangent * 0.18 - axis_x * 0.08 + axis_y * 0.07)
+	vertices.append(shared + tangent * 0.20 - axis_y * 0.09)
+	indices.append_array(PackedInt32Array([
+		base_index, base_index + 2, base_index + 1,
+		base_index, base_index + 1, base_index + 3,
+		base_index, base_index + 3, base_index + 2,
+		base_index + 1, base_index + 2, base_index + 3,
+	]))
+	return {
+		"vertices": vertices,
+		"indices": indices,
+		"decoy_face": PackedVector3Array([
+			vertices[base_index + 1],
+			vertices[base_index + 2],
+			vertices[base_index + 3],
+		]),
+	}
 
 
 func _build_mask_boundary_polygon(rows: Array[String]) -> PackedVector2Array:
@@ -1694,6 +5633,17 @@ func _vector2_set_has_point(
 	return false
 
 
+func _vector3_set_has_point(
+	points: PackedVector3Array,
+	target: Vector3,
+	tolerance: float
+) -> bool:
+	for point: Vector3 in points:
+		if point.distance_to(target) <= tolerance:
+			return true
+	return false
+
+
 func _basis_delta_degrees(first: Basis, second: Basis) -> float:
 	return maxf(
 		_axis_delta_degrees(first.x, second.x),
@@ -1746,6 +5696,18 @@ func _append_snapshot_summary(prefix: String, snapshot: Dictionary) -> void:
 	result_lines.append("%s_proxy_cell_count=%d" % [
 		prefix,
 		(snapshot.get("proxy_centers", PackedVector3Array()) as PackedVector3Array).size(),
+	])
+	result_lines.append("%s_collision_shape_count=%d" % [
+		prefix,
+		int(snapshot.get("collision_shape_count", 0)),
+	])
+	result_lines.append("%s_box_shape_count=%d" % [
+		prefix,
+		int(snapshot.get("box_shape_count", 0)),
+	])
+	result_lines.append("%s_concave_shape_count=%d" % [
+		prefix,
+		int(snapshot.get("concave_shape_count", 0)),
 	])
 	result_lines.append("%s_mesh_aabb_grip_local=%s" % [
 		prefix,
@@ -1822,7 +5784,7 @@ func _finish() -> void:
 
 
 func _write_results() -> void:
-	var file := FileAccess.open(RESULT_PATH, FileAccess.WRITE)
+	var file := FileAccess.open(result_output_path, FileAccess.WRITE)
 	if file != null:
 		file.store_string("\n".join(result_lines) + "\n")
 		file.close()

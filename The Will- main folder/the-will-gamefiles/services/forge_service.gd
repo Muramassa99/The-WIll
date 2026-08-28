@@ -358,11 +358,28 @@ func _build_forge_v2_runtime_mesh_packet(wip: CraftedItemWIP) -> Dictionary:
 	var primary_grip_handle_body_signature := String(stage2_item_state.get(
 		"primary_grip_handle_body_signature"
 	))
+	var primary_grip_handle_mesh_origin_id := StringName(stage2_item_state.get(
+		"primary_grip_handle_mesh_origin_id"
+	))
+	if (
+		primary_grip_handle_mesh_origin_id == StringName()
+		and primary_grip_handle_mesh_source
+		== PrimaryGripHandleMeshPacketScript.SOURCE
+	):
+		primary_grip_handle_mesh_origin_id = (
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+		)
+		stage2_item_state.set(
+			"primary_grip_handle_mesh_origin_id",
+			primary_grip_handle_mesh_origin_id
+		)
 	if (
 		primary_grip_handle_mesh_state != null
 		and primary_grip_handle_mesh_source
 		== PrimaryGripHandleMeshPacketScript.SOURCE
 		and not primary_grip_handle_body_signature.is_empty()
+		and primary_grip_handle_mesh_origin_id
+		== PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
 		and primary_grip_handle_mesh_state.has_method("has_surface_arrays")
 		and bool(primary_grip_handle_mesh_state.call("has_surface_arrays"))
 		and int(primary_grip_handle_mesh_state.get("primitive_type"))
@@ -414,6 +431,11 @@ func _build_forge_v2_runtime_mesh_packet(wip: CraftedItemWIP) -> Dictionary:
 					"primary_grip_handle_body_signature"
 				] = (
 					primary_grip_handle_body_signature
+				)
+				runtime_mesh_packet[
+					"primary_grip_handle_vertices_origin_id"
+				] = (
+					primary_grip_handle_mesh_origin_id
 				)
 	return runtime_mesh_packet
 

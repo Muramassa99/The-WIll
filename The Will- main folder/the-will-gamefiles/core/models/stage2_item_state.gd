@@ -23,6 +23,7 @@ const EDGE_V_MAX: StringName = &"edge_v_max"
 @export var primary_grip_handle_mesh_state: Resource
 @export var primary_grip_handle_mesh_source: StringName = &""
 @export var primary_grip_handle_body_signature: String = ""
+@export var primary_grip_handle_mesh_origin_id: StringName = &""
 @export var baseline_shell_mesh_state: Resource
 @export var current_shell_mesh_state: Resource
 @export var patch_states: Array[Resource] = []

@@ -54,6 +54,7 @@ const GENERATED_TRANSITION_LABELS := {
 const WORKFLOW_STEP_WEAPON_SELECT: StringName = &"workflow_weapon_select"
 const WORKFLOW_STEP_SKILL_SELECT: StringName = &"workflow_skill_select"
 const WORKFLOW_STEP_EDITOR: StringName = &"workflow_editor"
+const PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION: StringName = &"handle_position_changed"
 
 const ACTION_PREV_NODE: StringName = &"skill_crafter_prev_motion_node"
 const ACTION_NEXT_NODE: StringName = &"skill_crafter_next_motion_node"
@@ -3164,7 +3165,7 @@ func _build_guardrail_debug_view_state(preview_debug_state: Dictionary) -> Dicti
 		),
 		"min_clearance_boundary_available": int(preview_debug_state.get("collision_path_sample_count", 0)) > 0,
 		"anatomical_self_collision_available": int(preview_debug_state.get("body_self_collision_checked_pair_count", 0)) > 0,
-		"joint_range_plane_available": int(preview_debug_state.get("joint_range_debug_visual_count", 0)) > 0,
+		"joint_range_plane_available": int(preview_debug_state.get("digit_range_debug_visual_count", 0)) == 30,
 		"normalized_pivot_path_available": _active_draft_has_retarget_nodes(),
 		"speed_state_coloring_available": int(preview_debug_state.get("speed_state_sample_count", 0)) > 0,
 	}
@@ -3332,10 +3333,16 @@ func _refresh_summary(status_message: String = "") -> void:
 		footer_status_label.text = status_message
 	summary_label.text = "\n".join(lines)
 
-func _refresh_preview_scene() -> void:
+func _refresh_preview_scene(
+	grip_resolve_reason: StringName = StringName()
+) -> void:
 	_ensure_current_focus_available()
 	var baked_profile: BakedProfile = _get_active_baked_profile()
 	var playback_state: Dictionary = _build_preview_playback_state()
+	if grip_resolve_reason != StringName():
+		# This cause belongs to this synchronous refresh only. It must never survive
+		# into a later debug, endpoint, focus, or unrelated authoring refresh.
+		playback_state["grip_resolve_reason"] = grip_resolve_reason
 	if motion_node_editor.is_dragging() and preview_drag_override_node != null:
 		playback_state["authoring_drag_active"] = true
 		playback_state["authoring_drag_lightweight"] = false
@@ -5046,7 +5053,10 @@ func _build_runtime_clip_cache_signature(draft: Resource) -> String:
 	if draft == null:
 		return ""
 	var parts := PackedStringArray()
-	parts.append("runtime_cache_v3_grip_slice_center")
+	# V4 invalidates replay poses baked before exact Handle grasp lifecycle
+	# became destination-driven. WIP geometry remains valid; only the derived
+	# Skill Crafter runtime track must be rebuilt once.
+	parts.append("runtime_cache_v4_destination_grip_lifecycle")
 	parts.append(String(active_wip.wip_id) if active_wip != null else "")
 	parts.append(String(draft.get("draft_id")))
 	parts.append(String(draft.get("draft_kind")))
@@ -5075,10 +5085,16 @@ func _build_active_primary_grip_path_cache_signature() -> String:
 	var profile: BakedProfile = active_wip.latest_baked_profile_snapshot
 	var ratios := profile.primary_grip_slice_axis_ratios_from_span_start
 	var centers := profile.primary_grip_slice_centers
-	if ratios.size() < 2 or ratios.size() != centers.size():
+	var centers_origin_id := profile.primary_grip_slice_centers_origin_id
+	if (
+		ratios.size() < 2
+		or ratios.size() != centers.size()
+		or centers_origin_id == StringName()
+	):
 		return "grip_slice:invalid"
-	return "grip_slice:v1:%s" % var_to_bytes([
+	return "grip_slice:v2:%s" % var_to_bytes([
 		profile.primary_grip_source_body_id,
+		centers_origin_id,
 		profile.primary_grip_span_start,
 		profile.primary_grip_span_end,
 		profile.primary_grip_slide_axis,
@@ -5186,7 +5202,8 @@ func _apply_motion_node_change(
 	refresh_list: bool = true,
 	refresh_fields: bool = true,
 	refresh_preview: bool = true,
-	refresh_summary: bool = true
+	refresh_summary: bool = true,
+	preview_grip_resolve_reason: StringName = StringName()
 ) -> void:
 	if persist_change:
 		_stage_active_wip_edit(status_message)
@@ -5197,7 +5214,7 @@ func _apply_motion_node_change(
 	if refresh_fields:
 		_refresh_editor_fields()
 	if refresh_preview:
-		_refresh_preview_scene()
+		_refresh_preview_scene(preview_grip_resolve_reason)
 	if refresh_summary:
 		_refresh_summary(status_message)
 
@@ -6697,8 +6714,17 @@ func set_selected_motion_node_axial_reposition(
 		return false
 	if is_equal_approx(motion_node.axial_reposition_offset, reposition_value):
 		return false
+	# The static preview actor does not receive a fresh animation base every frame.
+	# Start this intentional Handle-position solve from the established authoring
+	# baseline so repeated A -> B -> A requests cannot accumulate prior IK output.
+	preview_presenter.reset_preview_actor_to_mount_seed_baseline(
+		preview_subviewport,
+		motion_node
+	)
 	motion_node.axial_reposition_offset = reposition_value
-	_reseat_motion_node_grip_to_occupied_contact(motion_node)
+	# The Handle-position control selects a new weapon-local contact slice. The
+	# resulting grip may move the hand/IK relationship, but it must not feed back
+	# into the macro tip/pommel authority and accumulate endpoint displacement.
 	motion_node.normalize()
 	_apply_motion_node_change(
 		"Axial reposition updated.",
@@ -6706,7 +6732,8 @@ func set_selected_motion_node_axial_reposition(
 		refresh_list,
 		refresh_fields,
 		refresh_preview,
-		refresh_summary
+		refresh_summary,
+		PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION
 	)
 	return true
 
@@ -6837,11 +6864,10 @@ func _on_manual_save_pressed() -> void:
 func _on_debugger_view_toggled(enabled: bool) -> void:
 	debugger_view_enabled = enabled
 	_refresh_debugger_view_button()
-	if debugger_view_enabled:
-		_refresh_preview_scene()
-	else:
-		preview_presenter.set_debugger_view_enabled(preview_subviewport, false)
-		_refresh_preview_scene()
+	preview_presenter.set_debugger_view_enabled(
+		preview_subviewport,
+		debugger_view_enabled
+	)
 
 func _on_preview_gui_input(event: InputEvent) -> void:
 	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()

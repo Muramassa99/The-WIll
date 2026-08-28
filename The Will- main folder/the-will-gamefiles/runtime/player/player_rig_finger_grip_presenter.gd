@@ -3,6 +3,19 @@ class_name PlayerRigFingerGripPresenter
 
 const JosieRigScene = preload("res://Josie/josie.tscn")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+const PlayerDigitHingeRulesScript = preload("res://runtime/player/player_digit_hinge_rules.gd")
+const PlayerFingerSurfaceGripSolverScript = preload(
+	"res://runtime/player/player_finger_surface_grip_solver.gd"
+)
+const PlayerHandSurfaceSeatSolverScript = preload(
+	"res://runtime/player/player_hand_surface_seat_solver.gd"
+)
+const PrimaryGripHandleMeshPacketScript = preload(
+	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
+)
+const PrimaryGripSeatResolverScript = preload(
+	"res://core/resolvers/primary_grip_seat_resolver.gd"
+)
 const SLOT_RIGHT: StringName = &"hand_right"
 const SLOT_LEFT: StringName = &"hand_left"
 const FINGER_IDS: Array[StringName] = [&"thumb", &"index", &"middle", &"ring", &"pinky"]
@@ -12,11 +25,19 @@ const GRIP_BASELINE_ANIMATION_NAMES: Array[StringName] = [&"SlowRun", &"Run"]
 const GRIP_BASELINE_SAMPLE_RATIOS: Array[float] = [0.2, 0.5, 0.8]
 const CURL_TRAJECTORY_SAMPLE_STEPS: int = 18
 const PINKY_MAX_CURL_T: float = 0.58
-const CONTACT_GROUP_MAX_CURL_DEGREES: float = 90.0
 const CONTACT_READINESS_META := "finger_grip_contact_readiness"
 const CONTACT_DISTANCE_META := "finger_grip_contact_distance_meters"
 const CONTACT_RAY_DEBUG_META := "finger_grip_contact_ray_debug"
 const CONTACT_RAY_DEBUG_LIMIT: int = 96
+const CONTACT_RAY_UNEXPECTED_COLLIDER_LIMIT: int = 16
+const SURFACE_GRASP_DIAGNOSTICS_META := "finger_surface_grasp_diagnostics"
+const SURFACE_GRASP_CONTEXT_META := "finger_surface_grasp_context_key"
+const HAND_SURFACE_SEAT_DIAGNOSTICS_META := "hand_surface_seat_diagnostics"
+const HAND_SURFACE_SEAT_CONTEXT_META := "hand_surface_seat_context_key"
+const PREVIEW_PRIMARY_GRIP_SEAT_RATIO_META := "preview_primary_grip_seat_axis_ratio_from_span_start"
+const PREVIEW_PRIMARY_GRIP_SEAT_RATIO_ORIGIN_META := "preview_primary_grip_seat_axis_ratio_origin_id"
+const SURFACE_GRASP_POSITION_SIGNATURE_STEP_METERS: float = 0.0001
+const SURFACE_GRASP_BAND_RADIUS_METERS: float = 0.18
 const CONTACT_FULL_SEAT_MIN_METERS: float = 0.055
 const CONTACT_FADE_OUT_MIN_METERS: float = 0.18
 const CONTACT_FULL_SEAT_CELL_MULTIPLIER: float = 4.0
@@ -157,6 +178,11 @@ const PALM_TRIANGULATION_BONES := {
 var animation_grip_baseline_cache: Dictionary = {}
 var animation_idle_baseline_cache: Dictionary = {}
 var animation_grip_baseline_initialized: bool = false
+var surface_grasp_solver = PlayerFingerSurfaceGripSolverScript.new()
+var surface_grasp_state_lookup: Dictionary = {}
+var hand_surface_seat_solver = PlayerHandSurfaceSeatSolverScript.new()
+var weapon_surface_seat_state_lookup: Dictionary = {}
+var weapon_surface_seat_prepared_attempt_lookup: Dictionary = {}
 
 func ensure_finger_target_nodes(targets_root: Node3D) -> Dictionary:
 	var target_lookup: Dictionary = {}
@@ -206,7 +232,8 @@ func update_finger_grip_targets(
 	finger_target_lookup: Dictionary,
 	get_bone_world_position_callable: Callable,
 	smoothing_speed: float,
-	delta: float
+	delta: float,
+	allow_exact_surface_solve: bool = true
 ) -> void:
 	if skeleton == null:
 		return
@@ -216,14 +243,23 @@ func update_finger_grip_targets(
 		var grip_guide: Node3D = source_lookup.get(slot_id) as Node3D
 		if grip_guide == null or not is_instance_valid(grip_guide):
 			continue
-		_apply_animation_contact_open_pose(skeleton, slot_id)
 		var grip_center_node: Node3D = _resolve_grip_center_node(grip_guide)
-		_clear_contact_ray_debug(grip_center_node)
+		if (
+			grip_center_node == null
+			or not bool(grip_center_node.get_meta("grip_shell_valid", false))
+		):
+			_clear_contact_ray_debug(grip_center_node)
+			_apply_animation_contact_open_pose(skeleton, slot_id)
+			continue
 		var profile_offsets: Array = grip_center_node.get_meta("grip_shell_profile_offsets_minor", []) as Array
 		if profile_offsets.is_empty():
+			_clear_contact_ray_debug(grip_center_node)
+			_apply_animation_contact_open_pose(skeleton, slot_id)
 			continue
 		var cell_world_size: float = float(grip_center_node.get_meta("grip_shell_cell_world_size", 0.0))
 		if cell_world_size <= 0.0:
+			_clear_contact_ray_debug(grip_center_node)
+			_apply_animation_contact_open_pose(skeleton, slot_id)
 			continue
 		var major_axis_local: Vector3 = _resolve_grip_shell_axis_local(
 			grip_center_node,
@@ -271,6 +307,21 @@ func update_finger_grip_targets(
 		var contact_distance_meters: float = contact_group_center_world.distance_to(center_world)
 		var contact_readiness: float = _resolve_grip_contact_readiness(contact_distance_meters, cell_world_size)
 		_set_source_contact_readiness(grip_guide, grip_center_node, contact_readiness, contact_distance_meters)
+		if bool(grip_center_node.get_meta("grip_shell_exact_surface", false)):
+			_update_exact_surface_serial_grasp(
+				skeleton,
+				slot_id,
+				grip_guide,
+				grip_center_node,
+				contact_readiness,
+				allow_exact_surface_solve
+			)
+			_sync_finger_targets_to_current_pose(skeleton, slot_id, side_targets)
+			# Exact Forge V2 Handles have one authority: the serial local-hinge
+			# solver above. Never fall through to the legacy Bezier/max-curl path.
+			continue
+		_clear_contact_ray_debug(grip_center_node)
+		_apply_animation_contact_open_pose(skeleton, slot_id)
 		for finger_id: StringName in FINGER_IDS:
 			var target_node: Node3D = side_targets.get(finger_id) as Node3D
 			var chain_def: Dictionary = side_chains.get(finger_id, {})
@@ -310,6 +361,1268 @@ func update_finger_grip_targets(
 						get_bone_world_position_callable
 					)
 			_move_target_toward(target_node, desired_position, smoothing_speed, delta)
+
+
+func note_grip_source_assigned(slot_id: StringName, guide_node: Node3D) -> void:
+	var source_instance_id: int = (
+		guide_node.get_instance_id()
+		if guide_node != null and is_instance_valid(guide_node)
+		else 0
+	)
+	var state: Dictionary = surface_grasp_state_lookup.get(slot_id, {}) as Dictionary
+	if int(state.get("source_instance_id", 0)) != source_instance_id:
+		surface_grasp_state_lookup.erase(slot_id)
+	var seat_state: Dictionary = weapon_surface_seat_state_lookup.get(
+		slot_id,
+		{}
+	) as Dictionary
+	if int(seat_state.get("source_instance_id", 0)) != source_instance_id:
+		weapon_surface_seat_state_lookup.erase(slot_id)
+		weapon_surface_seat_prepared_attempt_lookup.erase(slot_id)
+
+
+func note_grip_source_cleared(slot_id: StringName) -> void:
+	surface_grasp_state_lookup.erase(slot_id)
+	weapon_surface_seat_state_lookup.erase(slot_id)
+	weapon_surface_seat_prepared_attempt_lookup.erase(slot_id)
+
+
+func invalidate_cached_surface_grasp(slot_id: StringName = StringName()) -> void:
+	if slot_id == StringName():
+		surface_grasp_state_lookup.clear()
+	else:
+		surface_grasp_state_lookup.erase(slot_id)
+
+
+func invalidate_cached_weapon_surface_seat(slot_id: StringName = StringName()) -> void:
+	if slot_id == StringName():
+		weapon_surface_seat_state_lookup.clear()
+		weapon_surface_seat_prepared_attempt_lookup.clear()
+	else:
+		weapon_surface_seat_state_lookup.erase(slot_id)
+		weapon_surface_seat_prepared_attempt_lookup.erase(slot_id)
+
+
+func get_surface_grasp_debug_state(slot_id: StringName) -> Dictionary:
+	return (surface_grasp_state_lookup.get(slot_id, {}) as Dictionary).duplicate(true)
+
+
+func resolve_exact_surface_hand_seat_context_key(
+	slot_id: StringName,
+	grip_guide: Node3D
+) -> String:
+	return resolve_exact_surface_weapon_seat_context_key(slot_id, grip_guide)
+
+
+func resolve_exact_surface_weapon_seat_context_key(
+	slot_id: StringName,
+	grip_guide: Node3D
+) -> String:
+	if grip_guide == null or not is_instance_valid(grip_guide):
+		return ""
+	var grip_center_node: Node3D = _resolve_grip_center_node(grip_guide)
+	var exact_surface_identity: Dictionary = _resolve_exact_handle_surface_identity_state(
+		grip_center_node
+	)
+	if not bool(exact_surface_identity.get("valid", false)):
+		return ""
+	var base_context_key: String = _build_surface_grasp_context_key(
+		slot_id,
+		grip_guide,
+		grip_center_node,
+		exact_surface_identity
+	)
+	var held_item: Node3D = grip_guide.get_parent() as Node3D
+	if held_item == null or base_context_key.is_empty():
+		return ""
+	var ratio_origin_id: StringName = StringName(held_item.get_meta(
+		PREVIEW_PRIMARY_GRIP_SEAT_RATIO_ORIGIN_META,
+		StringName()
+	))
+	var seat_ratio: float = float(held_item.get_meta(
+		PREVIEW_PRIMARY_GRIP_SEAT_RATIO_META,
+		INF
+	))
+	if ratio_origin_id == StringName() or not is_finite(seat_ratio):
+		return ""
+	return str(hash([
+		base_context_key,
+		hand_surface_seat_solver.get_revision(),
+		String(ratio_origin_id),
+		roundi(seat_ratio * 1000000.0),
+	]))
+
+
+func resolve_exact_surface_weapon_seat(
+	_skeleton: Skeleton3D,
+	slot_id: StringName,
+	grip_guide: Node3D,
+	anatomy_state: Dictionary,
+	allow_surface_solve: bool
+) -> Dictionary:
+	var invalid := {
+		"valid": false,
+		"status": &"weapon_surface_seat_input_invalid",
+		"context_key": "",
+	}
+	if grip_guide == null or not is_instance_valid(grip_guide):
+		return invalid
+	var held_item: Node3D = grip_guide.get_parent() as Node3D
+	var grip_center_node: Node3D = _resolve_grip_center_node(grip_guide)
+	var exact_surface_identity: Dictionary = _resolve_exact_handle_surface_identity_state(
+		grip_center_node
+	)
+	if held_item == null or not bool(exact_surface_identity.get("valid", false)):
+		invalid["status"] = exact_surface_identity.get(
+			"status",
+			&"invalid_exact_handle_surface"
+		)
+		return invalid
+	var context_key: String = resolve_exact_surface_weapon_seat_context_key(
+		slot_id,
+		grip_guide
+	)
+	invalid["context_key"] = context_key
+	if context_key.is_empty() or not bool(anatomy_state.get("valid", false)):
+		invalid["status"] = &"weapon_surface_seat_context_invalid"
+		return invalid
+	var state: Dictionary = weapon_surface_seat_state_lookup.get(
+		slot_id,
+		{}
+	) as Dictionary
+	if (
+		String(state.get("context_key", "")) == context_key
+		and bool(state.get("terminal", false))
+	):
+		state["cache_hit_count"] = int(state.get("cache_hit_count", 0)) + 1
+		weapon_surface_seat_state_lookup[slot_id] = state
+		_publish_hand_surface_seat_diagnostics(grip_guide, grip_center_node, state)
+		return state.duplicate(true)
+	if not allow_surface_solve:
+		invalid["status"] = &"weapon_surface_seat_deferred"
+		invalid["source_instance_id"] = grip_guide.get_instance_id()
+		return invalid
+	var cumulative_solve_count: int = int(state.get("solve_count", 0)) + 1
+	var cumulative_geometry_load_count: int = int(
+		state.get("surface_geometry_load_count", 0)
+	) + 1
+	var stations: Dictionary = _resolve_weapon_surface_seat_stations(
+		held_item,
+		grip_guide,
+		anatomy_state
+	)
+	if not bool(stations.get("valid", false)):
+		return _cache_weapon_surface_seat_failure(
+			slot_id,
+			grip_guide,
+			grip_center_node,
+			context_key,
+			cumulative_solve_count,
+			int(state.get("surface_geometry_load_count", 0)),
+			stations.get("status", &"weapon_surface_seat_stations_invalid") as StringName,
+			stations
+		)
+	var exact_surface: Dictionary = _resolve_exact_handle_surface_faces(
+		exact_surface_identity
+	)
+	if not bool(exact_surface.get("valid", false)):
+		return _cache_weapon_surface_seat_failure(
+			slot_id,
+			grip_guide,
+			grip_center_node,
+			context_key,
+			cumulative_solve_count,
+			cumulative_geometry_load_count,
+			exact_surface.get("status", &"exact_surface_faces_missing") as StringName,
+			exact_surface
+		)
+	var exact_faces: PackedVector3Array = exact_surface.get(
+		"faces_local",
+		PackedVector3Array()
+	) as PackedVector3Array
+	var exact_mesh: ArrayMesh = _build_exact_surface_array_mesh(exact_faces)
+	var collision_shape: CollisionShape3D = exact_surface.get(
+		"collision_shape"
+	) as CollisionShape3D
+	if exact_mesh == null or collision_shape == null:
+		return _cache_weapon_surface_seat_failure(
+			slot_id,
+			grip_guide,
+			grip_center_node,
+			context_key,
+			cumulative_solve_count,
+			cumulative_geometry_load_count,
+			&"weapon_surface_seat_mesh_missing",
+			{"status": &"weapon_surface_seat_mesh_missing"}
+		)
+	var contact_surface_origin_id: StringName = exact_surface.get(
+		"contact_surface_origin_id",
+		StringName()
+	) as StringName
+	var prepared_surface: Dictionary = surface_grasp_solver.call(
+		"prepare_surface",
+		exact_mesh,
+		collision_shape.global_transform,
+		{
+			"surface_source_origin_id": contact_surface_origin_id,
+			"resolved_world_origin_id": PlayerDigitHingeRulesScript.ROOT_ORIGIN_ID,
+			"grip_filter_signature": [
+				PrimaryGripHandleMeshPacketScript.SOURCE,
+				exact_surface.get("body_signature", ""),
+				contact_surface_origin_id,
+				hash(exact_faces),
+			],
+		}
+	) as Dictionary
+	if not bool(prepared_surface.get("valid", false)):
+		return _cache_weapon_surface_seat_failure(
+			slot_id,
+			grip_guide,
+			grip_center_node,
+			context_key,
+			cumulative_solve_count,
+			cumulative_geometry_load_count,
+			prepared_surface.get("status", &"surface_prepare_failed") as StringName,
+			prepared_surface
+		)
+	var solve_started_usec: int = Time.get_ticks_usec()
+	var solve_result: Dictionary = hand_surface_seat_solver.call(
+		"solve_prepared",
+		prepared_surface,
+		anatomy_state,
+		stations.get("grip_pivot_c0_world", Vector3.ZERO) as Vector3,
+		stations.get("index_slice_center_ci_world", Vector3.ZERO) as Vector3,
+		stations.get("pinky_slice_center_cp_world", Vector3.ZERO) as Vector3,
+		stations.get("endcap_axis_world", Vector3.ZERO) as Vector3,
+		contact_surface_origin_id,
+		PlayerDigitHingeRulesScript.ROOT_ORIGIN_ID
+	) as Dictionary
+	var diagnostics: Dictionary = (
+		solve_result.get("diagnostics", {}) as Dictionary
+	).duplicate(true)
+	diagnostics["solve_time_msec"] = float(
+		Time.get_ticks_usec() - solve_started_usec
+	) / 1000.0
+	diagnostics["context_key"] = context_key
+	diagnostics["surface_authority"] = PrimaryGripHandleMeshPacketScript.SOURCE
+	diagnostics["surface_origin_id"] = contact_surface_origin_id
+	diagnostics["bone_root_origin_id"] = PlayerDigitHingeRulesScript.ROOT_ORIGIN_ID
+	diagnostics["solve_order"] = &"c0_ci_cp_weapon_pivot_then_digits"
+	diagnostics["stations"] = stations.duplicate(true)
+	state = {
+		"valid": bool(solve_result.get("valid", false)),
+		"terminal": true,
+		"status": solve_result.get("status", &"weapon_surface_seat_unsolved"),
+		"context_key": context_key,
+		"source_instance_id": grip_guide.get_instance_id(),
+		"solve_count": cumulative_solve_count,
+		"surface_geometry_load_count": cumulative_geometry_load_count,
+		"cache_hit_count": 0,
+		"diagnostics": diagnostics,
+	}
+	if bool(state.get("valid", false)):
+		var correction_world: Transform3D = solve_result.get(
+			"candidate_weapon_correction_about_grip_world",
+			Transform3D.IDENTITY
+		) as Transform3D
+		var base_weapon_transform_world: Transform3D = held_item.global_transform
+		var seat_correction_grip_local: Transform3D = (
+			base_weapon_transform_world.affine_inverse()
+			* correction_world
+			* base_weapon_transform_world
+		)
+		var grip_pivot_local: Vector3 = stations.get(
+			"grip_pivot_c0_local",
+			Vector3.ZERO
+		) as Vector3
+		if (
+			not _transform_is_finite(seat_correction_grip_local)
+			or not grip_pivot_local.is_finite()
+		):
+			state["valid"] = false
+			state["status"] = &"weapon_surface_seat_result_invalid"
+		else:
+			state["seat_correction_grip_local"] = seat_correction_grip_local
+			state["seat_correction_grip_local_origin_id"] = (
+				CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+			)
+			# Keep the rotational component visible to diagnostics, but the complete
+			# Transform3D above is the only composition authority.  Its origin also
+			# carries the required Handle-to-fixed-hand radial displacement.
+			state["seat_rotation_grip_local"] = (
+				seat_correction_grip_local.basis.orthonormalized()
+			)
+			state["seat_rotation_grip_local_origin_id"] = (
+				CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+			)
+			state["grip_pivot_local"] = grip_pivot_local
+			state["grip_pivot_local_origin_id"] = (
+				CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+			)
+			state["grip_axis_ratio_from_span_start"] = float(stations.get(
+				"grip_axis_ratio_from_span_start",
+				0.0
+			))
+			state["index_station_ratio_from_span_start"] = float(stations.get(
+				"index_station_ratio_from_span_start",
+				0.0
+			))
+			state["pinky_station_ratio_from_span_start"] = float(stations.get(
+				"pinky_station_ratio_from_span_start",
+				0.0
+			))
+			state["index_radial_error_meters"] = float(solve_result.get(
+				"index_radial_error_meters",
+				INF
+			))
+			state["pinky_radial_error_meters"] = float(solve_result.get(
+				"pinky_radial_error_meters",
+				INF
+			))
+			state["seat_signature"] = String(solve_result.get(
+				"seat_signature",
+				""
+			))
+	weapon_surface_seat_state_lookup[slot_id] = state
+	weapon_surface_seat_prepared_attempt_lookup[slot_id] = {
+		"context_key": context_key,
+		"collision_transform_hash": hash(collision_shape.global_transform),
+		"exact_surface": exact_surface,
+		"prepared_surface": prepared_surface,
+	}
+	_publish_hand_surface_seat_diagnostics(grip_guide, grip_center_node, state)
+	return state.duplicate(true)
+
+
+func _resolve_weapon_surface_seat_stations(
+	held_item: Node3D,
+	grip_guide: Node3D,
+	anatomy_state: Dictionary
+) -> Dictionary:
+	var invalid := {
+		"valid": false,
+		"status": &"weapon_surface_seat_station_data_missing",
+	}
+	if held_item == null or grip_guide == null:
+		return invalid
+	var path_origin_id: StringName = StringName(held_item.get_meta(
+		"primary_grip_slice_center_path_origin_id",
+		StringName()
+	))
+	var ratio_origin_id: StringName = StringName(held_item.get_meta(
+		PREVIEW_PRIMARY_GRIP_SEAT_RATIO_ORIGIN_META,
+		StringName()
+	))
+	var span_start_origin_id: StringName = StringName(held_item.get_meta(
+		"primary_grip_span_start_origin_id",
+		StringName()
+	))
+	var span_end_origin_id: StringName = StringName(held_item.get_meta(
+		"primary_grip_span_end_origin_id",
+		StringName()
+	))
+	if (
+		path_origin_id != CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		or ratio_origin_id != path_origin_id
+		or span_start_origin_id != path_origin_id
+		or span_end_origin_id != path_origin_id
+	):
+		invalid["status"] = &"weapon_surface_seat_station_origin_mismatch"
+		return invalid
+	var ratios_variant: Variant = held_item.get_meta(
+		"primary_grip_slice_axis_ratios_from_span_start",
+		null
+	)
+	var centers_variant: Variant = held_item.get_meta(
+		"primary_grip_slice_centers_local",
+		null
+	)
+	var span_start_variant: Variant = held_item.get_meta(
+		"primary_grip_span_start_local",
+		null
+	)
+	var span_end_variant: Variant = held_item.get_meta(
+		"primary_grip_span_end_local",
+		null
+	)
+	if (
+		not ratios_variant is PackedFloat32Array
+		or not centers_variant is PackedVector3Array
+		or not span_start_variant is Vector3
+		or not span_end_variant is Vector3
+	):
+		return invalid
+	var ratios: PackedFloat32Array = ratios_variant as PackedFloat32Array
+	var centers: PackedVector3Array = centers_variant as PackedVector3Array
+	if not PrimaryGripSeatResolverScript.sampled_path_is_valid(ratios, centers):
+		invalid["status"] = &"weapon_surface_seat_path_invalid"
+		return invalid
+	var c0_ratio: float = float(held_item.get_meta(
+		PREVIEW_PRIMARY_GRIP_SEAT_RATIO_META,
+		INF
+	))
+	if not is_finite(c0_ratio) or c0_ratio < 0.0 or c0_ratio > 1.0:
+		invalid["status"] = &"weapon_surface_seat_ratio_missing"
+		return invalid
+	var c0_state: Dictionary = PrimaryGripSeatResolverScript.resolve_sampled_seat(
+		ratios,
+		centers,
+		path_origin_id,
+		c0_ratio
+	)
+	if not bool(c0_state.get("valid", false)):
+		invalid["status"] = &"weapon_surface_seat_c0_missing"
+		return invalid
+	var c0_local: Vector3 = c0_state.get("position", Vector3.ZERO) as Vector3
+	if c0_local.distance_to(grip_guide.position) > 0.0005:
+		invalid["status"] = &"weapon_surface_seat_guide_path_mismatch"
+		invalid["guide_path_error_meters"] = c0_local.distance_to(
+			grip_guide.position
+		)
+		return invalid
+	var span_start_local: Vector3 = span_start_variant as Vector3
+	var span_end_local: Vector3 = span_end_variant as Vector3
+	var span_start_world: Vector3 = held_item.to_global(span_start_local)
+	var span_end_world: Vector3 = held_item.to_global(span_end_local)
+	var endcap_vector_world: Vector3 = span_end_world - span_start_world
+	var span_length_meters: float = endcap_vector_world.length()
+	if span_length_meters <= 0.000001:
+		invalid["status"] = &"weapon_surface_seat_endcap_axis_missing"
+		return invalid
+	var endcap_axis_world: Vector3 = endcap_vector_world / span_length_meters
+	var c0_world: Vector3 = held_item.to_global(c0_local)
+	var index_world: Vector3 = anatomy_state.get(
+		"index_point_world",
+		Vector3.ZERO
+	) as Vector3
+	var pinky_world: Vector3 = anatomy_state.get(
+		"pinky_point_world",
+		Vector3.ZERO
+	) as Vector3
+	var index_signed_offset_meters: float = (
+		index_world - c0_world
+	).dot(endcap_axis_world)
+	var pinky_signed_offset_meters: float = (
+		pinky_world - c0_world
+	).dot(endcap_axis_world)
+	var index_ratio: float = c0_ratio + (
+		index_signed_offset_meters / span_length_meters
+	)
+	var pinky_ratio: float = c0_ratio + (
+		pinky_signed_offset_meters / span_length_meters
+	)
+	if (
+		index_ratio < 0.0
+		or index_ratio > 1.0
+		or pinky_ratio < 0.0
+		or pinky_ratio > 1.0
+	):
+		invalid["status"] = &"weapon_surface_seat_digit_station_outside_handle"
+		invalid["index_station_ratio_from_span_start"] = index_ratio
+		invalid["pinky_station_ratio_from_span_start"] = pinky_ratio
+		return invalid
+	var index_state: Dictionary = PrimaryGripSeatResolverScript.resolve_sampled_seat(
+		ratios,
+		centers,
+		path_origin_id,
+		index_ratio
+	)
+	var pinky_state: Dictionary = PrimaryGripSeatResolverScript.resolve_sampled_seat(
+		ratios,
+		centers,
+		path_origin_id,
+		pinky_ratio
+	)
+	if (
+		not bool(index_state.get("valid", false))
+		or not bool(pinky_state.get("valid", false))
+	):
+		invalid["status"] = &"weapon_surface_seat_digit_slice_missing"
+		return invalid
+	var index_local: Vector3 = index_state.get("position", Vector3.ZERO) as Vector3
+	var pinky_local: Vector3 = pinky_state.get("position", Vector3.ZERO) as Vector3
+	return {
+		"valid": true,
+		"status": &"weapon_surface_seat_stations_ready",
+		"grip_pivot_c0_local": c0_local,
+		"grip_pivot_c0_local_origin_id": path_origin_id,
+		"grip_pivot_c0_world": c0_world,
+		"grip_pivot_c0_world_origin_id": PlayerDigitHingeRulesScript.ROOT_ORIGIN_ID,
+		"index_slice_center_ci_local": index_local,
+		"index_slice_center_ci_local_origin_id": path_origin_id,
+		"index_slice_center_ci_world": held_item.to_global(index_local),
+		"index_slice_center_ci_world_origin_id": PlayerDigitHingeRulesScript.ROOT_ORIGIN_ID,
+		"pinky_slice_center_cp_local": pinky_local,
+		"pinky_slice_center_cp_local_origin_id": path_origin_id,
+		"pinky_slice_center_cp_world": held_item.to_global(pinky_local),
+		"pinky_slice_center_cp_world_origin_id": PlayerDigitHingeRulesScript.ROOT_ORIGIN_ID,
+		"endcap_axis_world": endcap_axis_world,
+		"endcap_axis_world_origin_id": PlayerDigitHingeRulesScript.ROOT_ORIGIN_ID,
+		"grip_axis_ratio_from_span_start": c0_ratio,
+		"index_station_ratio_from_span_start": index_ratio,
+		"pinky_station_ratio_from_span_start": pinky_ratio,
+		"index_signed_offset_from_grip_meters": index_signed_offset_meters,
+		"pinky_signed_offset_from_grip_meters": pinky_signed_offset_meters,
+		"span_length_meters": span_length_meters,
+	}
+
+
+func _cache_weapon_surface_seat_failure(
+	slot_id: StringName,
+	grip_guide: Node3D,
+	grip_center_node: Node3D,
+	context_key: String,
+	solve_count: int,
+	geometry_load_count: int,
+	status: StringName,
+	diagnostics: Dictionary
+) -> Dictionary:
+	var state := {
+		"valid": false,
+		"terminal": true,
+		"status": status,
+		"context_key": context_key,
+		"source_instance_id": grip_guide.get_instance_id(),
+		"solve_count": solve_count,
+		"surface_geometry_load_count": geometry_load_count,
+		"cache_hit_count": 0,
+		"diagnostics": diagnostics.duplicate(true),
+	}
+	weapon_surface_seat_state_lookup[slot_id] = state
+	_publish_hand_surface_seat_diagnostics(grip_guide, grip_center_node, state)
+	return state.duplicate(true)
+
+
+func get_hand_surface_seat_debug_state(slot_id: StringName) -> Dictionary:
+	return (weapon_surface_seat_state_lookup.get(slot_id, {}) as Dictionary).duplicate(true)
+
+
+func _publish_hand_surface_seat_diagnostics(
+	grip_guide: Node3D,
+	grip_center_node: Node3D,
+	state: Dictionary
+) -> void:
+	for target_node: Node3D in [grip_guide, grip_center_node]:
+		if target_node == null or not is_instance_valid(target_node):
+			continue
+		target_node.set_meta(
+			HAND_SURFACE_SEAT_DIAGNOSTICS_META,
+			(state.get("diagnostics", {}) as Dictionary).duplicate(true)
+		)
+		target_node.set_meta(
+			HAND_SURFACE_SEAT_CONTEXT_META,
+			String(state.get("context_key", ""))
+		)
+
+
+func _update_exact_surface_serial_grasp(
+	skeleton: Skeleton3D,
+	slot_id: StringName,
+	grip_guide: Node3D,
+	grip_center_node: Node3D,
+	contact_readiness: float,
+	allow_surface_solve: bool
+) -> void:
+	# Surface identity is intentionally cheap and stable. A cached grasp must not
+	# copy/hash the complete Handle triangle packet merely to prove that the hand
+	# is still sitting at the same weapon-local Handle station.
+	var exact_surface_identity: Dictionary = _resolve_exact_handle_surface_identity_state(
+		grip_center_node
+	)
+	var state: Dictionary = surface_grasp_state_lookup.get(slot_id, {}) as Dictionary
+	state["source_instance_id"] = grip_guide.get_instance_id()
+	if not bool(exact_surface_identity.get("valid", false)):
+		state["valid"] = false
+		state["status"] = exact_surface_identity.get("status", &"invalid_exact_handle_surface")
+		state["diagnostics"] = exact_surface_identity.duplicate(true)
+		surface_grasp_state_lookup[slot_id] = state
+		_publish_surface_grasp_diagnostics(grip_guide, grip_center_node, state)
+		return
+	var expected_bone_count: int = PlayerDigitHingeRulesScript.get_finger_bone_names(
+		slot_id
+	).size()
+	var context_key: String = _build_surface_grasp_context_key(
+		slot_id,
+		grip_guide,
+		grip_center_node,
+		exact_surface_identity
+	)
+	if context_key.is_empty():
+		state["valid"] = false
+		state["status"] = &"missing_stable_grip_context"
+		state["diagnostics"] = {
+			"status": &"missing_stable_grip_context",
+			"required_origin": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		}
+		surface_grasp_state_lookup[slot_id] = state
+		_publish_surface_grasp_diagnostics(grip_guide, grip_center_node, state)
+		return
+	var cached_rotations: Dictionary = state.get("rotations", {}) as Dictionary
+	var has_committed_grasp: bool = (
+		bool(state.get("valid", false))
+		and not String(state.get("context_key", "")).is_empty()
+		and cached_rotations.size() == expected_bone_count
+	)
+	if (
+		has_committed_grasp
+		and String(state.get("context_key", "")) == context_key
+	):
+		_apply_surface_grasp_rotations(skeleton, slot_id, cached_rotations)
+		state["cache_hit_count"] = int(state.get("cache_hit_count", 0)) + 1
+		state["last_contact_readiness"] = contact_readiness
+		surface_grasp_state_lookup[slot_id] = state
+		_publish_surface_grasp_diagnostics(grip_guide, grip_center_node, state)
+		return
+	if not allow_surface_solve:
+		if has_committed_grasp:
+			_apply_surface_grasp_rotations(skeleton, slot_id, cached_rotations)
+		state["pending_context_key"] = context_key
+		state["deferred_surface_solve_count"] = int(
+			state.get("deferred_surface_solve_count", 0)
+		) + 1
+		state["last_contact_readiness"] = contact_readiness
+		surface_grasp_state_lookup[slot_id] = state
+		_publish_surface_grasp_diagnostics(grip_guide, grip_center_node, state)
+		return
+	if String(state.get("last_attempt_context_key", "")) == context_key:
+		# A rejected candidate must never expose the temporary open pose used by
+		# the solver. Reassert the last committed local grasp while suppressing an
+		# identical terminal attempt.
+		if has_committed_grasp:
+			_apply_surface_grasp_rotations(skeleton, slot_id, cached_rotations)
+		state["suppressed_repeat_attempt_count"] = int(
+			state.get("suppressed_repeat_attempt_count", 0)
+		) + 1
+		state["last_contact_readiness"] = contact_readiness
+		surface_grasp_state_lookup[slot_id] = state
+		_publish_surface_grasp_diagnostics(grip_guide, grip_center_node, state)
+		return
+	if contact_readiness <= 0.001:
+		state["pending_context_key"] = context_key
+		state["last_contact_readiness"] = contact_readiness
+		var waiting_diagnostics := {
+			"status": &"waiting_for_macro_hand_seat",
+			"contact_readiness": contact_readiness,
+		}
+		state["last_request_context_key"] = context_key
+		state["last_request_status"] = &"waiting_for_macro_hand_seat"
+		state["last_request_diagnostics"] = waiting_diagnostics
+		if has_committed_grasp:
+			_apply_surface_grasp_rotations(skeleton, slot_id, cached_rotations)
+		else:
+			state["valid"] = false
+			state["status"] = &"waiting_for_macro_hand_seat"
+			state["diagnostics"] = waiting_diagnostics
+		surface_grasp_state_lookup[slot_id] = state
+		_publish_surface_grasp_diagnostics(grip_guide, grip_center_node, state)
+		return
+	if not _surface_solver_rules_have_valid_origins(skeleton, slot_id):
+		var invalid_origin_diagnostics := {
+			"status": &"invalid_digit_origin_chain",
+			"bone_root_origin_id": PlayerDigitHingeRulesScript.ROOT_ORIGIN_ID,
+		}
+		state["last_request_context_key"] = context_key
+		state["last_request_status"] = &"invalid_digit_origin_chain"
+		state["last_request_diagnostics"] = invalid_origin_diagnostics
+		if has_committed_grasp:
+			_apply_surface_grasp_rotations(skeleton, slot_id, cached_rotations)
+		else:
+			state["valid"] = false
+			state["status"] = &"invalid_digit_origin_chain"
+			state["diagnostics"] = invalid_origin_diagnostics
+		surface_grasp_state_lookup[slot_id] = state
+		_publish_surface_grasp_diagnostics(grip_guide, grip_center_node, state)
+		return
+	# Waiting for the macro seat is not a failed exact solve. Record the terminal
+	# attempt only after the hand has actually reached a solve-ready relationship,
+	# otherwise the same semantic grip would be suppressed forever once it seats.
+	state["last_attempt_context_key"] = context_key
+	var pre_attempt_live_rotations: Dictionary = _capture_surface_grasp_base_rotations(
+		skeleton,
+		slot_id
+	)
+	var rejected_attempt_restore_rotations: Dictionary = (
+		cached_rotations.duplicate(true)
+		if has_committed_grasp
+		else pre_attempt_live_rotations.duplicate(true)
+	)
+	state["surface_geometry_load_count"] = int(
+		state.get("surface_geometry_load_count", 0)
+	) + 1
+	var exact_surface: Dictionary = _resolve_exact_handle_surface_faces(
+		exact_surface_identity
+	)
+	if not bool(exact_surface.get("valid", false)):
+		state = _record_failed_surface_grasp_candidate(
+			skeleton,
+			slot_id,
+			state,
+			context_key,
+			exact_surface.get("status", &"invalid_exact_handle_surface") as StringName,
+			exact_surface.duplicate(true),
+			rejected_attempt_restore_rotations,
+			expected_bone_count,
+			has_committed_grasp
+		)
+		surface_grasp_state_lookup[slot_id] = state
+		_publish_surface_grasp_diagnostics(grip_guide, grip_center_node, state)
+		return
+	_clear_contact_ray_debug(grip_center_node)
+	_apply_animation_contact_open_pose(skeleton, slot_id)
+	var base_pose_rotations: Dictionary = _capture_surface_grasp_base_rotations(
+		skeleton,
+		slot_id
+	)
+	if base_pose_rotations.size() != expected_bone_count:
+		var incomplete_snapshot_diagnostics := {
+			"status": &"incomplete_open_pose_snapshot",
+			"expected_bone_count": expected_bone_count,
+			"captured_bone_count": base_pose_rotations.size(),
+		}
+		state = _record_failed_surface_grasp_candidate(
+			skeleton,
+			slot_id,
+			state,
+			context_key,
+			&"incomplete_open_pose_snapshot",
+			incomplete_snapshot_diagnostics,
+			rejected_attempt_restore_rotations,
+			expected_bone_count,
+			has_committed_grasp
+		)
+		surface_grasp_state_lookup[slot_id] = state
+		_publish_surface_grasp_diagnostics(grip_guide, grip_center_node, state)
+		return
+	var exact_faces: PackedVector3Array = exact_surface.get(
+		"faces_local",
+		PackedVector3Array()
+	) as PackedVector3Array
+	var exact_mesh: ArrayMesh = _build_exact_surface_array_mesh(exact_faces)
+	if exact_mesh == null or exact_mesh.get_surface_count() != 1:
+		state = _record_failed_surface_grasp_candidate(
+			skeleton,
+			slot_id,
+			state,
+			context_key,
+			&"exact_surface_mesh_build_failed",
+			{"status": &"exact_surface_mesh_build_failed"},
+			rejected_attempt_restore_rotations,
+			expected_bone_count,
+			has_committed_grasp
+		)
+		surface_grasp_state_lookup[slot_id] = state
+		_publish_surface_grasp_diagnostics(grip_guide, grip_center_node, state)
+		return
+	var collision_shape: CollisionShape3D = exact_surface.get("collision_shape") as CollisionShape3D
+	var grip_center_world: Vector3 = grip_center_node.global_position
+	var contact_surface_origin_id: StringName = exact_surface.get(
+		"contact_surface_origin_id",
+		StringName()
+	) as StringName
+	var solver_options := {
+		"max_overlap_meters": PlayerDigitHingeRulesScript.MAX_CONTACT_OVERLAP_METERS,
+		"preferred_overlap_meters": PlayerDigitHingeRulesScript.PREFERRED_CONTACT_OVERLAP_METERS,
+		"grip_center_world": grip_center_world,
+		"grip_center_world_origin_id": contact_surface_origin_id,
+		"fallback_ray_target_world": grip_center_world,
+		"fallback_ray_target_world_origin_id": contact_surface_origin_id,
+		# Keep the exact protected Handle closed. Cropping its triangles around the
+		# active grip station introduces artificial boundary edges and invalidates
+		# the inside/outside authority needed by capsule contact.
+		"surface_source_origin_id": contact_surface_origin_id,
+		"resolved_world_origin_id": PlayerDigitHingeRulesScript.ROOT_ORIGIN_ID,
+		"grip_filter_signature": [
+			PrimaryGripHandleMeshPacketScript.SOURCE,
+			exact_surface.get("body_signature", ""),
+			contact_surface_origin_id,
+			hash(exact_faces),
+		],
+		"cache_context_signature": context_key,
+		"base_pose_rotations": base_pose_rotations.duplicate(true),
+		"max_fallback_ray_distance_meters": SURFACE_GRASP_BAND_RADIUS_METERS,
+		"require_transient_path_safety": false,
+	}
+	var prepared_surface: Dictionary = surface_grasp_solver.call(
+		"prepare_surface",
+		exact_mesh,
+		collision_shape.global_transform,
+		solver_options
+	) as Dictionary
+	if not bool(prepared_surface.get("valid", false)):
+		state = _record_failed_surface_grasp_candidate(
+			skeleton,
+			slot_id,
+			state,
+			context_key,
+			prepared_surface.get("status", &"surface_prepare_failed") as StringName,
+			prepared_surface.duplicate(true),
+			rejected_attempt_restore_rotations,
+			expected_bone_count,
+			has_committed_grasp
+		)
+		surface_grasp_state_lookup[slot_id] = state
+		_publish_surface_grasp_diagnostics(grip_guide, grip_center_node, state)
+		return
+	var side_rules: Dictionary = PlayerDigitHingeRulesScript.get_surface_solver_side_rules(
+		slot_id
+	)
+	var solve_started_usec: int = Time.get_ticks_usec()
+	var solve_result: Dictionary = surface_grasp_solver.call(
+		"solve_prepared",
+		skeleton,
+		prepared_surface,
+		slot_id,
+		side_rules,
+		solver_options
+	) as Dictionary
+	var solve_elapsed_msec: float = float(
+		Time.get_ticks_usec() - solve_started_usec
+	) / 1000.0
+	var diagnostics: Dictionary = (
+		solve_result.get("diagnostics", {}) as Dictionary
+	).duplicate(true)
+	diagnostics["solve_time_msec"] = solve_elapsed_msec
+	diagnostics["context_key"] = context_key
+	diagnostics["contact_readiness"] = contact_readiness
+	diagnostics["surface_authority"] = PrimaryGripHandleMeshPacketScript.SOURCE
+	diagnostics["surface_origin_id"] = exact_surface.get(
+		"contact_surface_origin_id",
+		StringName()
+	)
+	diagnostics["grip_center_world"] = grip_center_world
+	diagnostics["grip_guide_world_at_solve"] = grip_guide.global_position
+	diagnostics["grip_guide_local_at_solve"] = grip_guide.position
+	diagnostics["exact_surface_transform_origin_world"] = collision_shape.global_position
+	diagnostics["bone_root_origin_id"] = PlayerDigitHingeRulesScript.ROOT_ORIGIN_ID
+	var solved_rotations: Dictionary = _sanitize_surface_grasp_rotations(
+		slot_id,
+		solve_result.get("rotations", {}) as Dictionary
+	)
+	var safe_to_apply: bool = (
+		bool(solve_result.get("valid", false))
+		and bool(solve_result.get("safe_to_apply", false))
+		and bool(diagnostics.get("overlap_limit_respected", false))
+		and solved_rotations.size() == expected_bone_count
+		and float(diagnostics.get("max_penetration_meters", INF))
+			<= PlayerDigitHingeRulesScript.MAX_CONTACT_OVERLAP_METERS + 0.00000005
+	)
+	state["solve_count"] = int(state.get("solve_count", 0)) + 1
+	state["cache_miss_count"] = int(state.get("cache_miss_count", 0)) + 1
+	state["last_contact_readiness"] = contact_readiness
+	if safe_to_apply:
+		state["context_key"] = context_key
+		state["pending_context_key"] = ""
+		state["diagnostics"] = diagnostics
+		state["valid"] = true
+		state["status"] = diagnostics.get("status", &"solved")
+		state["rotations"] = solved_rotations
+		state["last_attempt_status"] = state["status"]
+		state["last_attempt_diagnostics"] = diagnostics.duplicate(true)
+		state["last_attempt_safe_to_apply"] = true
+		_apply_surface_grasp_rotations(skeleton, slot_id, solved_rotations)
+	else:
+		state = _record_failed_surface_grasp_candidate(
+			skeleton,
+			slot_id,
+			state,
+			context_key,
+			&"surface_solve_rejected",
+			diagnostics,
+			rejected_attempt_restore_rotations,
+			expected_bone_count,
+			has_committed_grasp
+		)
+	surface_grasp_state_lookup[slot_id] = state
+	_publish_surface_grasp_diagnostics(grip_guide, grip_center_node, state)
+
+
+func _resolve_exact_handle_surface_identity_state(
+	grip_center_node: Node3D
+) -> Dictionary:
+	var invalid := {
+		"valid": false,
+		"status": &"invalid_exact_handle_surface",
+	}
+	if grip_center_node == null or not is_instance_valid(grip_center_node):
+		invalid["status"] = &"missing_grip_center"
+		return invalid
+	if (
+		not bool(grip_center_node.get_meta("grip_shell_exact_surface", false))
+		or StringName(grip_center_node.get_meta(
+			"grip_shell_surface_authority",
+			StringName()
+		)) != PrimaryGripHandleMeshPacketScript.SOURCE
+	):
+		invalid["status"] = &"exact_surface_authority_missing"
+		return invalid
+	var guide_node: Node = grip_center_node.get_parent()
+	var expected_surface_origin_id: StringName = (
+		CombatOriginRecordScript.ORIGIN_SUPPORT_GRIP_CONTACT_SURFACE
+		if guide_node != null and String(guide_node.name) == "SecondaryGripGuide"
+		else CombatOriginRecordScript.ORIGIN_PRIMARY_GRIP_CONTACT_SURFACE
+	)
+	var center_body_signature: String = String(grip_center_node.get_meta(
+		"grip_shell_handle_body_signature",
+		""
+	))
+	if (
+		center_body_signature.is_empty()
+		or StringName(grip_center_node.get_meta(
+			"grip_shell_surface_local_origin_id",
+			StringName()
+		)) != expected_surface_origin_id
+	):
+		invalid["status"] = &"exact_surface_center_contract_invalid"
+		return invalid
+	var grip_area: Area3D = grip_center_node.get_node_or_null(
+		"GripContactArea"
+	) as Area3D
+	if grip_area == null or not is_instance_valid(grip_area):
+		invalid["status"] = &"exact_surface_area_missing"
+		return invalid
+	var source_vertices_origin_id: StringName = StringName(grip_area.get_meta(
+		"grip_contact_source_vertices_origin_id",
+		StringName()
+	))
+	var grip_center_origin_id: StringName = StringName(grip_area.get_meta(
+		"grip_contact_grip_center_origin_id",
+		StringName()
+	))
+	if (
+		StringName(grip_area.get_meta(
+			"grip_contact_surface_authority",
+			StringName()
+		)) != PrimaryGripHandleMeshPacketScript.SOURCE
+		or String(grip_area.get_meta("grip_contact_handle_body_signature", ""))
+			!= center_body_signature
+		or not bool(grip_area.get_meta("grip_contact_handle_only", false))
+		or source_vertices_origin_id != PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+		or grip_center_origin_id != source_vertices_origin_id
+		or StringName(grip_area.get_meta(
+			"grip_contact_faces_local_origin_id",
+			StringName()
+		)) != expected_surface_origin_id
+	):
+		invalid["status"] = &"exact_surface_area_contract_invalid"
+		return invalid
+	var collision_shapes: Array[CollisionShape3D] = []
+	for child_node: Node in grip_area.get_children():
+		var candidate_shape: CollisionShape3D = child_node as CollisionShape3D
+		if candidate_shape != null:
+			collision_shapes.append(candidate_shape)
+	if collision_shapes.size() != 1:
+		invalid["status"] = &"exact_surface_shape_count_invalid"
+		invalid["shape_count"] = collision_shapes.size()
+		return invalid
+	var collision_shape: CollisionShape3D = collision_shapes[0]
+	var exact_shape: ConcavePolygonShape3D = collision_shape.shape as ConcavePolygonShape3D
+	if (
+		String(collision_shape.name) != "ExactProtectedHandleMeshShape"
+		or exact_shape == null
+		or StringName(collision_shape.get_meta(
+			"grip_contact_surface_authority",
+			StringName()
+		)) != PrimaryGripHandleMeshPacketScript.SOURCE
+		or String(collision_shape.get_meta(
+			"grip_contact_handle_body_signature",
+			""
+		)) != center_body_signature
+		or StringName(collision_shape.get_meta(
+			"grip_contact_source_vertices_origin_id",
+			StringName()
+		)) != source_vertices_origin_id
+		or StringName(collision_shape.get_meta(
+			"grip_contact_grip_center_origin_id",
+			StringName()
+		)) != grip_center_origin_id
+		or StringName(collision_shape.get_meta(
+			"grip_contact_faces_local_origin_id",
+			StringName()
+		)) != expected_surface_origin_id
+	):
+		invalid["status"] = &"exact_surface_shape_contract_invalid"
+		return invalid
+	return {
+		"valid": true,
+		"status": &"exact_handle_surface_identity_ready",
+		"area": grip_area,
+		"collision_shape": collision_shape,
+		"shape_resource": exact_shape,
+		"shape_resource_instance_id": exact_shape.get_instance_id(),
+		"body_signature": center_body_signature,
+		"source_vertices_origin_id": source_vertices_origin_id,
+		"grip_center_origin_id": grip_center_origin_id,
+		"contact_surface_origin_id": expected_surface_origin_id,
+	}
+
+
+func _resolve_exact_handle_surface_faces(
+	exact_surface_identity: Dictionary
+) -> Dictionary:
+	if not bool(exact_surface_identity.get("valid", false)):
+		return exact_surface_identity.duplicate(true)
+	var exact_shape: ConcavePolygonShape3D = exact_surface_identity.get(
+		"shape_resource",
+		null
+	) as ConcavePolygonShape3D
+	if exact_shape == null or not is_instance_valid(exact_shape):
+		return {
+			"valid": false,
+			"status": &"exact_surface_shape_resource_missing",
+		}
+	var faces_local: PackedVector3Array = exact_shape.get_faces()
+	if faces_local.size() < 3 or faces_local.size() % 3 != 0:
+		return {
+			"valid": false,
+			"status": &"exact_surface_faces_missing",
+		}
+	var resolved: Dictionary = exact_surface_identity.duplicate(false)
+	resolved.erase("shape_resource")
+	resolved["status"] = &"exact_handle_surface_ready"
+	resolved["faces_local"] = faces_local
+	return resolved
+
+
+func _build_exact_surface_array_mesh(
+	faces_local: PackedVector3Array
+) -> ArrayMesh:
+	if faces_local.size() < 3 or faces_local.size() % 3 != 0:
+		return null
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = faces_local
+	var exact_mesh := ArrayMesh.new()
+	exact_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return exact_mesh
+
+
+func _surface_solver_rules_have_valid_origins(
+	skeleton: Skeleton3D,
+	slot_id: StringName
+) -> bool:
+	for digit_id: StringName in FINGER_IDS:
+		var chain_rules: Array[Dictionary] = PlayerDigitHingeRulesScript.get_chain_rules(
+			slot_id,
+			digit_id
+		)
+		if chain_rules.size() != 3:
+			return false
+		for rule: Dictionary in chain_rules:
+			if not PlayerDigitHingeRulesScript.rule_has_valid_origin_chain(
+				rule,
+				skeleton
+			):
+				return false
+	return true
+
+
+func _capture_surface_grasp_base_rotations(
+	skeleton: Skeleton3D,
+	slot_id: StringName
+) -> Dictionary:
+	var rotations: Dictionary = {}
+	for bone_name: StringName in PlayerDigitHingeRulesScript.get_finger_bone_names(
+		slot_id
+	):
+		var bone_index: int = skeleton.find_bone(String(bone_name))
+		if bone_index >= 0:
+			rotations[bone_name] = skeleton.get_bone_pose_rotation(
+				bone_index
+			).normalized()
+	return rotations
+
+
+func _sanitize_surface_grasp_rotations(
+	slot_id: StringName,
+	rotations: Dictionary
+) -> Dictionary:
+	var sanitized: Dictionary = {}
+	for bone_name: StringName in PlayerDigitHingeRulesScript.get_finger_bone_names(
+		slot_id
+	):
+		var rotation_variant: Variant = rotations.get(bone_name, null)
+		if rotation_variant is Quaternion:
+			sanitized[bone_name] = (rotation_variant as Quaternion).normalized()
+	return sanitized
+
+
+func _apply_surface_grasp_rotations(
+	skeleton: Skeleton3D,
+	slot_id: StringName,
+	rotations: Dictionary
+) -> bool:
+	var wrote_pose := false
+	for bone_name: StringName in PlayerDigitHingeRulesScript.get_finger_bone_names(
+		slot_id
+	):
+		var rotation_variant: Variant = rotations.get(bone_name, null)
+		if not rotation_variant is Quaternion:
+			continue
+		var bone_index: int = skeleton.find_bone(String(bone_name))
+		if bone_index < 0:
+			continue
+		skeleton.set_bone_pose_rotation(
+			bone_index,
+			(rotation_variant as Quaternion).normalized()
+		)
+		wrote_pose = true
+	if wrote_pose:
+		skeleton.force_update_all_bone_transforms()
+	return wrote_pose
+
+
+func _record_failed_surface_grasp_candidate(
+	skeleton: Skeleton3D,
+	slot_id: StringName,
+	state: Dictionary,
+	context_key: String,
+	attempt_status: StringName,
+	attempt_diagnostics: Dictionary,
+	restore_rotations: Dictionary,
+	expected_bone_count: int,
+	preserve_committed_grasp: bool
+) -> Dictionary:
+	var recorded_diagnostics: Dictionary = attempt_diagnostics.duplicate(true)
+	recorded_diagnostics["context_key"] = context_key
+	recorded_diagnostics["candidate_status"] = attempt_status
+	state["last_attempt_context_key"] = context_key
+	state["last_attempt_status"] = attempt_status
+	state["last_attempt_diagnostics"] = recorded_diagnostics
+	state["last_attempt_safe_to_apply"] = false
+	state["last_rejected_context_key"] = context_key
+	state["last_rejected_status"] = attempt_status
+	state["last_rejected_diagnostics"] = recorded_diagnostics.duplicate(true)
+	state["pending_context_key"] = ""
+	if restore_rotations.size() == expected_bone_count:
+		_apply_surface_grasp_rotations(skeleton, slot_id, restore_rotations)
+	if preserve_committed_grasp:
+		# The active cache is a committed local hand/Handle relationship. Candidate
+		# work is allowed to replace it only after all safety gates accept the new
+		# 15-bone result.
+		state["retained_committed_after_rejection_count"] = int(
+			state.get("retained_committed_after_rejection_count", 0)
+		) + 1
+		return state
+	state["valid"] = false
+	state["status"] = attempt_status
+	state["context_key"] = context_key
+	state["diagnostics"] = recorded_diagnostics
+	state["rotations"] = {}
+	return state
+
+
+func _build_surface_grasp_context_key(
+	slot_id: StringName,
+	grip_guide: Node3D,
+	grip_center_node: Node3D,
+	exact_surface: Dictionary
+) -> String:
+	if grip_guide == null or grip_center_node == null:
+		return ""
+	var held_item: Node3D = grip_guide.get_parent() as Node3D
+	if held_item == null:
+		return ""
+	var guide_position_origin_id: StringName = StringName(grip_guide.get_meta(
+		"grip_guide_position_origin_id",
+		grip_guide.get_meta(
+			"dominant_hand_position_origin_id",
+			grip_guide.get_meta(
+				"support_hand_position_origin_id",
+				CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+			)
+		)
+	))
+	if guide_position_origin_id == StringName():
+		return ""
+	var guide_position_variant: Variant = grip_guide.get_meta(
+		"grip_guide_position_local",
+		grip_guide.position
+	)
+	if not guide_position_variant is Vector3:
+		return ""
+	var guide_position_local: Vector3 = guide_position_variant as Vector3
+	var guide_role: StringName = StringName(grip_guide.name)
+	if guide_role != &"PrimaryGripGuide" and guide_role != &"SecondaryGripGuide":
+		return ""
+	var source_wip_id: StringName = StringName(held_item.get_meta(
+		"source_wip_id",
+		StringName()
+	))
+	var grip_style_mode: StringName = StringName(held_item.get_meta(
+		"grip_style_mode",
+		StringName()
+	))
+	var dominant_slot_id: StringName = StringName(held_item.get_meta(
+		"dominant_contact_slot_id",
+		StringName()
+	))
+	return str(hash([
+		PlayerDigitHingeRulesScript.get_revision(),
+		String(slot_id),
+		String(guide_role),
+		String(source_wip_id),
+		exact_surface.get("body_signature", ""),
+		exact_surface.get("contact_surface_origin_id", StringName()),
+		int(exact_surface.get("shape_resource_instance_id", 0)),
+		String(guide_position_origin_id),
+		_quantize_surface_grasp_vector(guide_position_local),
+		String(grip_style_mode),
+		String(dominant_slot_id),
+	]))
+
+
+func _quantize_surface_grasp_vector(
+	value: Vector3,
+	step: float = SURFACE_GRASP_POSITION_SIGNATURE_STEP_METERS
+) -> PackedInt64Array:
+	var resolved_step: float = maxf(step, 0.0000001)
+	return PackedInt64Array([
+		roundi(value.x / resolved_step),
+		roundi(value.y / resolved_step),
+		roundi(value.z / resolved_step),
+	])
+
+
+func _basis_is_finite(value: Basis) -> bool:
+	return value.x.is_finite() and value.y.is_finite() and value.z.is_finite()
+
+
+func _transform_is_finite(value: Transform3D) -> bool:
+	return _basis_is_finite(value.basis) and value.origin.is_finite()
+
+
+func _sync_finger_targets_to_current_pose(
+	skeleton: Skeleton3D,
+	slot_id: StringName,
+	side_targets: Dictionary
+) -> void:
+	var side_chains: Dictionary = FINGER_CHAINS.get(slot_id, {}) as Dictionary
+	for finger_id: StringName in FINGER_IDS:
+		var target_node: Node3D = side_targets.get(finger_id) as Node3D
+		if target_node == null:
+			continue
+		target_node.global_position = _get_current_chain_end_world_position(
+			skeleton,
+			side_chains.get(finger_id, {}) as Dictionary
+		)
+
+
+func _publish_surface_grasp_diagnostics(
+	grip_guide: Node3D,
+	grip_center_node: Node3D,
+	state: Dictionary
+) -> void:
+	for target_node: Node3D in [grip_guide, grip_center_node]:
+		if target_node == null or not is_instance_valid(target_node):
+			continue
+		target_node.set_meta(
+			SURFACE_GRASP_DIAGNOSTICS_META,
+			(state.get("diagnostics", {}) as Dictionary).duplicate(true)
+		)
+		target_node.set_meta(
+			SURFACE_GRASP_CONTEXT_META,
+			String(state.get("context_key", state.get("pending_context_key", "")))
+		)
 
 func _resolve_roll_decoupled_contact_axes(
 	skeleton: Skeleton3D,
@@ -821,7 +2134,11 @@ func _resolve_contact_target_world_position(
 	ray_query.collide_with_areas = true
 	ray_query.collide_with_bodies = false
 	ray_query.hit_from_inside = true
-	var hit: Dictionary = world_3d.direct_space_state.intersect_ray(ray_query)
+	var hit: Dictionary = _intersect_expected_contact_area_ray(
+		world_3d,
+		grip_center_node,
+		ray_query
+	)
 	_record_contact_ray_debug(
 		grip_center_node,
 		slot_id,
@@ -830,7 +2147,8 @@ func _resolve_contact_target_world_position(
 		cast_from_world,
 		ray_to_world,
 		collision_mask,
-		hit
+		hit,
+		"" if not hit.is_empty() else "expected_contact_area_not_hit"
 	)
 	if hit.is_empty():
 		return predicted_target_world
@@ -1526,14 +2844,8 @@ func _apply_plane_curl_pose(
 	curl_t: float
 ) -> void:
 	var slot_idle_cache: Dictionary = animation_idle_baseline_cache.get(slot_id, {})
-	var slot_grip_cache: Dictionary = animation_grip_baseline_cache.get(slot_id, {})
-	if slot_idle_cache.is_empty() or slot_grip_cache.is_empty():
+	if slot_idle_cache.is_empty():
 		return
-	var hand_name: StringName = (PALM_TRIANGULATION_BONES.get(slot_id, {}) as Dictionary).get("hand", StringName())
-	var hand_index: int = skeleton.find_bone(String(hand_name))
-	if hand_index < 0:
-		return
-	var hand_pose: Transform3D = skeleton.get_bone_global_pose(hand_index)
 	var plane_bones: Array[StringName] = _resolve_ordered_finger_bones(slot_id, finger_id)
 	for bone_name: StringName in plane_bones:
 		if bone_name == StringName():
@@ -1541,30 +2853,14 @@ func _apply_plane_curl_pose(
 		var bone_index: int = skeleton.find_bone(String(bone_name))
 		if bone_index < 0:
 			continue
-		var parent_index: int = skeleton.get_bone_parent(bone_index)
-		if parent_index < 0:
-			continue
-		var parent_pose: Transform3D = skeleton.get_bone_global_pose(parent_index)
-		var open_rotation: Quaternion = ((slot_idle_cache.get("rotations", {}) as Dictionary).get(
+		var open_local_rotation: Quaternion = skeleton.get_bone_pose_rotation(bone_index).normalized()
+		var desired_local_rotation: Quaternion = _resolve_planar_contact_group_rotation(
+			skeleton,
 			bone_name,
-			Quaternion.IDENTITY
-		) as Quaternion).normalized()
-		var closed_rotation: Quaternion = ((slot_grip_cache.get("rotations", {}) as Dictionary).get(
-			bone_name,
-			open_rotation
-		) as Quaternion).normalized()
-		var desired_hand_relative_rotation: Quaternion = _resolve_planar_contact_group_rotation(
-			slot_id,
-			open_rotation,
-			closed_rotation,
+			open_local_rotation,
 			curl_t
 		)
-		var desired_global_basis: Basis = hand_pose.basis * Basis(desired_hand_relative_rotation)
-		var desired_local_basis: Basis = parent_pose.basis.inverse() * desired_global_basis
-		skeleton.set_bone_pose_rotation(
-			bone_index,
-			desired_local_basis.get_rotation_quaternion().normalized()
-		)
+		skeleton.set_bone_pose_rotation(bone_index, desired_local_rotation)
 
 func _resolve_ordered_finger_bones(slot_id: StringName, finger_id: StringName) -> Array[StringName]:
 	var chain_def: Dictionary = (FINGER_CHAINS.get(slot_id, {}) as Dictionary).get(finger_id, {})
@@ -1577,21 +2873,33 @@ func _resolve_ordered_finger_bones(slot_id: StringName, finger_id: StringName) -
 	return ordered_bones
 
 func _resolve_planar_contact_group_rotation(
-	slot_id: StringName,
+	skeleton: Skeleton3D,
+	bone_name: StringName,
 	open_rotation: Quaternion,
-	_closed_rotation: Quaternion,
 	curl_t: float
 ) -> Quaternion:
-	var open_basis: Basis = Basis(open_rotation.normalized()).orthonormalized()
-	var axis_hand: Vector3 = open_basis.z.normalized()
-	if axis_hand.length_squared() <= 0.000001:
+	var rule: Dictionary = PlayerDigitHingeRulesScript.get_rule_for_bone(bone_name)
+	if not PlayerDigitHingeRulesScript.rule_has_valid_origin_chain(rule, skeleton):
 		return open_rotation.normalized()
-	var hand_direction: float = -1.0 if slot_id == SLOT_LEFT else 1.0
+	var hinge_axis_local: Vector3 = rule.get(
+		"hinge_axis_local",
+		Vector3.ZERO
+	) as Vector3
+	var hinge_axis_origin_id: StringName = rule.get(
+		"hinge_axis_origin_id",
+		StringName()
+	) as StringName
+	if hinge_axis_origin_id != bone_name:
+		return open_rotation.normalized()
+	hinge_axis_local = hinge_axis_local.normalized()
+	if hinge_axis_local.length_squared() <= 0.000001:
+		return open_rotation.normalized()
 	var tween_t: float = _smooth_contact_group_tween_t(curl_t)
-	var max_closed_angle: float = deg_to_rad(CONTACT_GROUP_MAX_CURL_DEGREES)
-	var resolved_angle: float = hand_direction * max_closed_angle * tween_t
-	var resolved_basis: Basis = (Basis(axis_hand, resolved_angle) * open_basis).orthonormalized()
-	return resolved_basis.get_rotation_quaternion().normalized()
+	var closed_degrees: float = PlayerDigitHingeRulesScript.get_closed_degrees_for_bone(bone_name)
+	var resolved_angle: float = deg_to_rad(closed_degrees) * tween_t
+	return (
+		open_rotation.normalized() * Quaternion(hinge_axis_local, resolved_angle)
+	).normalized()
 
 func _smooth_contact_group_tween_t(raw_t: float) -> float:
 	var resolved_t: float = clampf(raw_t, 0.0, 1.0)
@@ -1685,7 +2993,11 @@ func _resolve_contact_hit_on_segment(
 	ray_query.collide_with_areas = true
 	ray_query.collide_with_bodies = false
 	ray_query.hit_from_inside = true
-	var hit: Dictionary = world_3d.direct_space_state.intersect_ray(ray_query)
+	var hit: Dictionary = _intersect_expected_contact_area_ray(
+		world_3d,
+		grip_center_node,
+		ray_query
+	)
 	_record_contact_ray_debug(
 		grip_center_node,
 		slot_id,
@@ -1697,6 +3009,57 @@ func _resolve_contact_hit_on_segment(
 		hit
 	)
 	return hit
+
+func _intersect_expected_contact_area_ray(
+	world_3d: World3D,
+	grip_center_node: Node3D,
+	ray_query: PhysicsRayQueryParameters3D
+) -> Dictionary:
+	if world_3d == null or grip_center_node == null or ray_query == null:
+		return {}
+	var expected_area: Area3D = grip_center_node.get_node_or_null(
+		"GripContactArea"
+	) as Area3D
+	if expected_area == null or not is_instance_valid(expected_area):
+		return {}
+	var surface_authority := StringName(expected_area.get_meta(
+		"grip_contact_surface_authority",
+		StringName()
+	))
+	if surface_authority == PrimaryGripHandleMeshPacketScript.SOURCE:
+		var guide_node: Node = grip_center_node.get_parent()
+		var expected_surface_origin_id := (
+			CombatOriginRecordScript.ORIGIN_SUPPORT_GRIP_CONTACT_SURFACE
+			if guide_node != null and String(guide_node.name) == "SecondaryGripGuide"
+			else CombatOriginRecordScript.ORIGIN_PRIMARY_GRIP_CONTACT_SURFACE
+		)
+		if (
+			StringName(expected_area.get_meta(
+				"grip_contact_faces_local_origin_id",
+				StringName()
+			)) != expected_surface_origin_id
+			or not bool(expected_area.get_meta("grip_contact_handle_only", false))
+			or String(expected_area.get_meta(
+				"grip_contact_handle_body_signature",
+				""
+			)).is_empty()
+		):
+			return {}
+	var excluded_rids: Array[RID] = []
+	for _attempt_index: int in range(CONTACT_RAY_UNEXPECTED_COLLIDER_LIMIT):
+		ray_query.exclude = excluded_rids
+		var candidate_hit: Dictionary = world_3d.direct_space_state.intersect_ray(
+			ray_query
+		)
+		if candidate_hit.is_empty():
+			return {}
+		var candidate_collider := candidate_hit.get("collider") as CollisionObject3D
+		if candidate_collider == expected_area:
+			return candidate_hit
+		if candidate_collider == null or not is_instance_valid(candidate_collider):
+			return {}
+		excluded_rids.append(candidate_collider.get_rid())
+	return {}
 
 func _resolve_baseline_contact_target_world_position(
 	grip_center_node: Node3D,

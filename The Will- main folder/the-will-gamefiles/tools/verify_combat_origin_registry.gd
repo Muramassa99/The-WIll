@@ -13,12 +13,20 @@ func _run_verification() -> void:
 	registry.register_default_combat_origins(&"verify_combat_origin_registry")
 	var validation: Dictionary = registry.validate_all()
 	var weapon_chain: Array = registry.resolve_chain(CombatOriginRecordScript.ORIGIN_PRIMARY_GRIP_ANCHOR)
+	var primary_contact_surface_chain: Array = registry.resolve_chain(
+		CombatOriginRecordScript.ORIGIN_PRIMARY_GRIP_CONTACT_SURFACE
+	)
+	var support_contact_surface_chain: Array = registry.resolve_chain(
+		CombatOriginRecordScript.ORIGIN_SUPPORT_GRIP_CONTACT_SURFACE
+	)
 	var bridge_chain: Array = registry.resolve_chain(CombatOriginRecordScript.ORIGIN_BRIDGE_TARGET)
 	var stow_chain: Array = registry.resolve_chain(CombatOriginRecordScript.ORIGIN_STOW_ANCHOR)
 	var all_checks_passed: bool = (
 		bool(validation.get("ok", false))
-		and registry.get_origin_count() >= 15
+		and registry.get_origin_count() >= 17
 		and _chain_ends_at_machine(weapon_chain)
+		and _chain_ends_at_machine(primary_contact_surface_chain)
+		and _chain_ends_at_machine(support_contact_surface_chain)
 		and _chain_ends_at_machine(bridge_chain)
 		and _chain_ends_at_machine(stow_chain)
 		and _origin_has_parent(registry, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT, CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE)
@@ -28,6 +36,8 @@ func _run_verification() -> void:
 	lines.append("origin_count=%d" % registry.get_origin_count())
 	lines.append("all_chains_ok=%s" % str(bool(validation.get("ok", false))))
 	lines.append("primary_grip_chain=%s" % _chain_to_text(weapon_chain))
+	lines.append("primary_contact_surface_chain=%s" % _chain_to_text(primary_contact_surface_chain))
+	lines.append("support_contact_surface_chain=%s" % _chain_to_text(support_contact_surface_chain))
 	lines.append("bridge_target_chain=%s" % _chain_to_text(bridge_chain))
 	lines.append("stow_anchor_chain=%s" % _chain_to_text(stow_chain))
 	lines.append("weapon_root_parent_ok=%s" % str(_origin_has_parent(registry, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT, CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE)))

@@ -1,7 +1,11 @@
 extends RefCounted
 class_name PrimaryGripHandleMeshPacket
 
+const CombatOriginRecordScript = preload(
+	"res://core/models/combat_origin_record.gd"
+)
 const SOURCE := &"forge_v2_protected_handle_exact_csg_v1"
+const VERTICES_ORIGIN_ID: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 const METER_SIGNATURE_STEP := 0.0000001
 const UNIT_SIGNATURE_STEP := 0.0000001
 const DEGREE_SIGNATURE_STEP := 0.000001
@@ -121,6 +125,7 @@ static func build(
 		"primary_grip_handle_indices": PackedInt32Array(indices),
 		"primary_grip_handle_mesh_source": SOURCE,
 		"primary_grip_handle_body_signature": body_signature,
+		"primary_grip_handle_vertices_origin_id": VERTICES_ORIGIN_ID,
 	}
 
 
@@ -136,6 +141,19 @@ static func validate(packet: Dictionary) -> Dictionary:
 	))
 	if body_signature.is_empty():
 		return {"valid": false, "error": "handle_mesh_signature_missing"}
+	var vertices_origin_id := StringName(packet.get(
+		"primary_grip_handle_vertices_origin_id",
+		StringName()
+	))
+	var vertices_origin_migrated := false
+	if vertices_origin_id == StringName():
+		# SOURCE v1 has always authored these vertices in WeaponRootOrigin. Older
+		# saved packets predate the explicit field, so migrate from the versioned
+		# source contract instead of treating the vectors as anonymous.
+		vertices_origin_id = VERTICES_ORIGIN_ID
+		vertices_origin_migrated = true
+	if vertices_origin_id != VERTICES_ORIGIN_ID:
+		return {"valid": false, "error": "handle_mesh_vertices_origin_invalid"}
 	var vertices_variant: Variant = packet.get(
 		"primary_grip_handle_vertices",
 		null
@@ -164,4 +182,6 @@ static func validate(packet: Dictionary) -> Dictionary:
 		"indices": indices,
 		"source": SOURCE,
 		"body_signature": body_signature,
+		"vertices_origin_id": vertices_origin_id,
+		"vertices_origin_migrated": vertices_origin_migrated,
 	}

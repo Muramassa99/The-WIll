@@ -9,11 +9,19 @@ const SLICE_AREA_EPSILON_SQUARED_METERS := 0.000000000001
 
 static func build_axis_ratios_from_centers(
 	centers: PackedVector3Array,
+	centers_origin_id: StringName,
 	span_start: Vector3,
-	span_end: Vector3
+	span_start_origin_id: StringName,
+	span_end: Vector3,
+	span_end_origin_id: StringName
 ) -> PackedFloat32Array:
 	var ratios := PackedFloat32Array()
-	if centers.size() < 2:
+	if (
+		centers.size() < 2
+		or centers_origin_id == StringName()
+		or centers_origin_id != span_start_origin_id
+		or centers_origin_id != span_end_origin_id
+	):
 		return ratios
 	var span_vector := span_end - span_start
 	var span_length_squared := span_vector.length_squared()
@@ -38,7 +46,7 @@ static func profile_has_authoritative_path(profile: BakedProfile) -> bool:
 	return sampled_path_is_valid(
 		profile.primary_grip_slice_axis_ratios_from_span_start,
 		profile.primary_grip_slice_centers
-	)
+	) and profile.primary_grip_slice_centers_origin_id != StringName()
 
 
 static func sampled_path_is_valid(
@@ -76,6 +84,7 @@ static func resolve_profile_seat(
 	return resolve_sampled_seat(
 		profile.primary_grip_slice_axis_ratios_from_span_start,
 		profile.primary_grip_slice_centers,
+		profile.primary_grip_slice_centers_origin_id,
 		target_ratio
 	)
 
@@ -83,15 +92,17 @@ static func resolve_profile_seat(
 static func resolve_sampled_seat(
 	ratios: PackedFloat32Array,
 	centers: PackedVector3Array,
+	centers_origin_id: StringName,
 	target_ratio: float
 ) -> Dictionary:
-	if not sampled_path_is_valid(ratios, centers):
+	if centers_origin_id == StringName() or not sampled_path_is_valid(ratios, centers):
 		return {"valid": false}
 	var clamped_ratio := clampf(target_ratio, 0.0, 1.0)
 	if clamped_ratio <= float(ratios[0]) + RATIO_EPSILON:
 		return {
 			"valid": true,
 			"position": centers[0],
+			"position_origin_id": centers_origin_id,
 			"ratio": 0.0,
 			"segment_index": 0,
 			"segment_ratio": 0.0,
@@ -107,6 +118,7 @@ static func resolve_sampled_seat(
 				return {
 					"valid": true,
 					"position": centers[sample_index],
+					"position_origin_id": centers_origin_id,
 					"ratio": clamped_ratio,
 					"segment_index": sample_index,
 					"segment_ratio": 0.0,
@@ -123,6 +135,7 @@ static func resolve_sampled_seat(
 				centers[sample_index + 1],
 				interval_ratio
 			),
+			"position_origin_id": centers_origin_id,
 			"ratio": clamped_ratio,
 			"segment_index": sample_index,
 			"segment_ratio": interval_ratio,
@@ -130,6 +143,7 @@ static func resolve_sampled_seat(
 	return {
 		"valid": true,
 		"position": centers[centers.size() - 1],
+		"position_origin_id": centers_origin_id,
 		"ratio": 1.0,
 		"segment_index": centers.size() - 2,
 		"segment_ratio": 1.0,

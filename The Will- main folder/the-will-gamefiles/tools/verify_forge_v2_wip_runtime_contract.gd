@@ -413,6 +413,9 @@ func _build_watertight_box_packet() -> Dictionary:
 		"indices": indices,
 		"primary_grip_handle_vertices": PackedVector3Array(vertices),
 		"primary_grip_handle_indices": PackedInt32Array(indices),
+		"primary_grip_handle_vertices_origin_id": (
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+		),
 		"primary_grip_handle_mesh_source": (
 			PrimaryGripHandleMeshPacketScript.SOURCE
 		),
@@ -457,6 +460,9 @@ func _build_oriented_handle_box_packet(handle_body: Resource) -> Dictionary:
 		"indices": _build_box_triangle_indices(),
 		"primary_grip_handle_vertices": PackedVector3Array(vertices),
 		"primary_grip_handle_indices": _build_box_triangle_indices(),
+		"primary_grip_handle_vertices_origin_id": (
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+		),
 		"primary_grip_handle_mesh_source": (
 			PrimaryGripHandleMeshPacketScript.SOURCE
 		),
@@ -501,6 +507,9 @@ func _build_disconnected_two_box_packet() -> Dictionary:
 			"primary_grip_handle_indices",
 			PackedInt32Array()
 		)),
+		"primary_grip_handle_vertices_origin_id": (
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+		),
 		"primary_grip_handle_mesh_source": (
 			PrimaryGripHandleMeshPacketScript.SOURCE
 		),
@@ -545,6 +554,9 @@ func _build_face_duplicated_single_box_packet() -> Dictionary:
 		"indices": duplicated_indices,
 		"primary_grip_handle_vertices": PackedVector3Array(source_vertices),
 		"primary_grip_handle_indices": PackedInt32Array(source_indices),
+		"primary_grip_handle_vertices_origin_id": (
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+		),
 		"primary_grip_handle_mesh_source": (
 			PrimaryGripHandleMeshPacketScript.SOURCE
 		),
@@ -576,6 +588,9 @@ func _authorize_primary_grip_handle_packet(
 	var result := mesh_packet.duplicate(true)
 	result["primary_grip_handle_mesh_source"] = (
 		PrimaryGripHandleMeshPacketScript.SOURCE
+	)
+	result["primary_grip_handle_vertices_origin_id"] = (
+		PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
 	)
 	result["primary_grip_handle_body_signature"] = (
 		PrimaryGripHandleMeshPacketScript.build_body_signature(handle_body)

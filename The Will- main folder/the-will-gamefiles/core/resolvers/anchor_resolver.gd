@@ -52,11 +52,15 @@ func build_primary_grip_anchor(segment: SegmentAtom, grip_span: Dictionary = {})
 		"slice_centers",
 		PackedVector3Array()
 	) as PackedVector3Array
+	anchor.span_slice_center_positions_origin_id = AnchorAtom.DEFAULT_ANCHOR_ORIGIN_ID
 	anchor.span_slice_axis_ratios_from_start = (
 		PrimaryGripSeatResolverScript.build_axis_ratios_from_centers(
 			anchor.span_slice_center_local_positions,
+			anchor.span_slice_center_positions_origin_id,
 			anchor.span_start_local_position,
-			anchor.span_end_local_position
+			anchor.span_start_position_origin_id,
+			anchor.span_end_local_position,
+			anchor.span_end_position_origin_id
 		)
 	)
 	anchor.span_anchor_material_ratio = float(grip_span.get("anchor_material_ratio", segment.anchor_material_ratio))
@@ -82,6 +86,7 @@ func resolve_primary_grip_contact_state(
 	return PrimaryGripSeatResolverScript.resolve_sampled_seat(
 		anchor.span_slice_axis_ratios_from_start,
 		anchor.span_slice_center_local_positions,
+		anchor.span_slice_center_positions_origin_id,
 		projected_ratio
 	)
 

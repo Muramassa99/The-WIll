@@ -92,6 +92,7 @@ static func build_runtime_contract(
 	var protected_handle_indices := PackedInt32Array()
 	var protected_handle_mesh_source := StringName()
 	var protected_handle_body_signature := ""
+	var protected_handle_mesh_origin_id := StringName()
 	if bool(protected_handle_mesh_validation.get("valid", false)):
 		protected_handle_vertices_meters = (
 			protected_handle_mesh_validation.get(
@@ -109,6 +110,12 @@ static func build_runtime_contract(
 		protected_handle_body_signature = String(
 			protected_handle_mesh_validation.get("body_signature", "")
 		)
+		protected_handle_mesh_origin_id = StringName(
+			protected_handle_mesh_validation.get(
+				"vertices_origin_id",
+				StringName()
+			)
+		)
 	else:
 		protected_handle_vertices_meters = PackedVector3Array()
 		protected_handle_indices = PackedInt32Array()
@@ -122,7 +129,8 @@ static func build_runtime_contract(
 		protected_handle_vertices_meters,
 		protected_handle_indices,
 		protected_handle_mesh_source,
-		protected_handle_body_signature
+		protected_handle_body_signature,
+		protected_handle_mesh_origin_id
 	)
 	_populate_profile_mesh_metrics(profile, mesh_metrics, resolved_cell_size)
 	var mesh_component_count := _count_indexed_triangle_components(
@@ -539,6 +547,16 @@ static func _resolve_valid_handle_body(authoring_state: Resource) -> Dictionary:
 	}
 
 
+static func resolve_valid_handle_body(authoring_state: Resource) -> Dictionary:
+	if authoring_state == null:
+		return {
+			"valid": false,
+			"error": "forge_v2_authoring_state_missing",
+			"body": null,
+		}
+	return _resolve_valid_handle_body(authoring_state)
+
+
 static func _validate_profile_polygon(polygon: PackedVector2Array) -> String:
 	if polygon.size() < 3:
 		return "forge_v2_primary_handle_profile_requires_three_points"
@@ -611,7 +629,8 @@ static func _build_stage2_item_state(
 	protected_handle_vertices_meters: PackedVector3Array = PackedVector3Array(),
 	protected_handle_indices: PackedInt32Array = PackedInt32Array(),
 	protected_handle_mesh_source: StringName = StringName(),
-	protected_handle_body_signature: String = ""
+	protected_handle_body_signature: String = "",
+	protected_handle_mesh_origin_id: StringName = StringName()
 ) -> Resource:
 	var vertices_cells := PackedVector3Array()
 	for vertex: Vector3 in vertices_meters:
@@ -723,6 +742,10 @@ static func _build_stage2_item_state(
 		stage2_item_state.set(
 			"primary_grip_handle_body_signature",
 			protected_handle_body_signature
+		)
+		stage2_item_state.set(
+			"primary_grip_handle_mesh_origin_id",
+			protected_handle_mesh_origin_id
 		)
 	return stage2_item_state
 
@@ -940,6 +963,9 @@ static func _populate_primary_grip_profile(
 			resolved_slice_centers_meters[sample_index] / cell_size_meters
 		)
 	profile.primary_grip_slice_centers = slice_centers_cells
+	profile.primary_grip_slice_centers_origin_id = (
+		PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+	)
 	profile.primary_grip_offset = center_of_mass_cells - contact_cells
 	profile.set("primary_grip_minor_axis_a", minor_axis_a.normalized())
 	profile.set("primary_grip_minor_axis_b", minor_axis_b.normalized())
@@ -1227,6 +1253,7 @@ static func _resolve_handle_grip_geometry(
 		PrimaryGripSeatResolverScript.resolve_sampled_seat(
 			chronological_ratios,
 			slice_centers,
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID,
 			desired_contact_ratio
 		)
 	)
@@ -1273,8 +1300,11 @@ static func _resolve_handle_grip_geometry(
 	var construction_ratios := (
 		PrimaryGripSeatResolverScript.build_axis_ratios_from_centers(
 			construction_centers,
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID,
 			chronological_span_start,
-			chronological_span_end
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID,
+			chronological_span_end,
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
 		)
 	)
 	if not PrimaryGripSeatResolverScript.sampled_path_is_valid(
@@ -1286,6 +1316,7 @@ static func _resolve_handle_grip_geometry(
 		PrimaryGripSeatResolverScript.resolve_sampled_seat(
 			construction_ratios,
 			construction_centers,
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID,
 			desired_contact_ratio
 		)
 	)
@@ -1342,8 +1373,11 @@ static func _resolve_handle_grip_geometry(
 	var slice_axis_ratios := (
 		PrimaryGripSeatResolverScript.build_axis_ratios_from_centers(
 			slice_centers,
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID,
 			span_start,
-			span_end
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID,
+			span_end,
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
 		)
 	)
 	if not PrimaryGripSeatResolverScript.sampled_path_is_valid(
@@ -1359,6 +1393,7 @@ static func _resolve_handle_grip_geometry(
 	var contact_seat_state := PrimaryGripSeatResolverScript.resolve_sampled_seat(
 		slice_axis_ratios,
 		slice_centers,
+		PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID,
 		contact_ratio
 	)
 	if not bool(contact_seat_state.get("valid", false)):

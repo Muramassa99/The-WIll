@@ -154,6 +154,7 @@ func _verify_resolver_fail_closed() -> void:
 		PrimaryGripSeatResolverScript.resolve_sampled_seat(
 			PackedFloat32Array([0.0, 0.5, 1.0]),
 			PackedVector3Array([Vector3.ZERO, Vector3.RIGHT]),
+			CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
 			0.5
 		)
 	)
@@ -630,6 +631,7 @@ func _verify_held_item_skill_crafter_path(fixture: Dictionary) -> void:
 	var initial_seat := PrimaryGripSeatResolverScript.resolve_sampled_seat(
 		held_ratios,
 		held_centers,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
 		base_ratio
 	)
 	var initial_seat_valid := bool(initial_seat.get("valid", false))
@@ -658,6 +660,7 @@ func _verify_held_item_skill_crafter_path(fixture: Dictionary) -> void:
 		var expected_seat := PrimaryGripSeatResolverScript.resolve_sampled_seat(
 			held_ratios,
 			held_centers,
+			CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
 			target_ratio
 		)
 		preview_presenter.call(

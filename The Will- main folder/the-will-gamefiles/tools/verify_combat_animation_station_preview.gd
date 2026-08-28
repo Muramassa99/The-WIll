@@ -5,12 +5,16 @@ const PlayerForgeWipLibraryStateScript = preload("res://core/models/player_forge
 const CombatAnimationStationUIScene = preload("res://scenes/ui/combat_animation_station_ui.tscn")
 const CombatAnimationMotionNodeEditorScript = preload("res://runtime/combat/combat_animation_motion_node_editor.gd")
 const CombatAnimationSessionStateScript = preload("res://core/models/combat_animation_session_state.gd")
+const PlayerDigitHingeRulesScript = preload("res://runtime/player/player_digit_hinge_rules.gd")
 const LayerAtomScript = preload("res://core/atoms/layer_atom.gd")
 const CellAtomScript = preload("res://core/atoms/cell_atom.gd")
 
 const RESULT_FILE_PATH := "C:/WORKSPACE/combat_animation_station_preview_results.txt"
 const TEMP_SAVE_FILE_PATH := "C:/WORKSPACE/test_artifacts/verify_combat_animation_station_preview_library.tres"
 const WOOD_MATERIAL_ID := &"mat_wood_gray"
+const DEBUG_POSE_POSITION_EPSILON_METERS: float = 0.000001
+const DEBUG_POSE_BASIS_EPSILON: float = 0.000001
+const DEBUG_POSE_ROTATION_EPSILON_RADIANS: float = 0.001
 
 class FakePlayer:
 	extends Node
@@ -547,12 +551,252 @@ func _run_verification() -> void:
 	lines.append("left_primary_contact_basis_update_ok=%s" % str(left_primary_update_ok))
 	lines.append("left_primary_contact_basis_active=%s" % str(bool(left_primary_contact_state.get("left_authoring_contact_basis_active", false))))
 	lines.append("right_support_contact_basis_active_after_left_primary=%s" % str(bool(left_primary_contact_state.get("right_authoring_contact_basis_active", false))))
+	var debugger_button: Button = ui.get("debugger_view_button") as Button
+	var debugger_signal_available: bool = debugger_button != null
+	var digit_debug_pose_before: Dictionary = _capture_debug_toggle_pose_snapshot(ui)
+	var digit_debug_on_immediate_pose: Dictionary = {}
+	if debugger_button != null:
+		debugger_button.set_pressed_no_signal(true)
+		debugger_button.emit_signal("toggled", true)
+		digit_debug_on_immediate_pose = _capture_debug_toggle_pose_snapshot(ui)
+	var digit_debug_on_immediate_mismatches: PackedStringArray = (
+		_debug_toggle_pose_mismatches(
+			digit_debug_pose_before,
+			digit_debug_on_immediate_pose
+		)
+	)
+	await process_frame
+	await process_frame
+	var digit_debug_on_settled_pose: Dictionary = _capture_debug_toggle_pose_snapshot(ui)
+	var digit_debug_on_settled_mismatches: PackedStringArray = (
+		_debug_toggle_pose_mismatches(
+			digit_debug_pose_before,
+			digit_debug_on_settled_pose
+		)
+	)
+	var digit_debug_on_state: Dictionary = ui.get_preview_debug_state()
+	var digit_debug_joint_state: Dictionary = digit_debug_on_state.get("joint_range_debug_state", {}) as Dictionary
+	var digit_debug_on_guardrails: Dictionary = ui.call(
+		"_build_guardrail_debug_view_state",
+		digit_debug_on_state
+	) as Dictionary
+	var digit_debug_on_ok: bool = debugger_button != null \
+		and bool(ui.get("debugger_view_enabled")) \
+		and debugger_button.button_pressed \
+		and debugger_button.text == "Debug View: ON" \
+		and bool(digit_debug_on_state.get("joint_range_debug_visible", false)) \
+		and int(digit_debug_on_state.get("digit_range_debug_visual_count", 0)) == 30 \
+		and int(digit_debug_on_state.get("joint_range_debug_visual_count", 0)) >= 42 \
+		and int(digit_debug_joint_state.get("digit_visual_count", 0)) == 30 \
+		and (digit_debug_joint_state.get("digit_bones", {}) as Dictionary).size() == 30 \
+		and bool(digit_debug_on_guardrails.get("joint_range_plane_available", false))
+	var digit_debug_off_immediate_pose: Dictionary = {}
+	if debugger_button != null:
+		debugger_button.set_pressed_no_signal(false)
+		debugger_button.emit_signal("toggled", false)
+		digit_debug_off_immediate_pose = _capture_debug_toggle_pose_snapshot(ui)
+	var digit_debug_off_immediate_mismatches: PackedStringArray = (
+		_debug_toggle_pose_mismatches(
+			digit_debug_pose_before,
+			digit_debug_off_immediate_pose
+		)
+	)
+	await process_frame
+	await process_frame
+	var digit_debug_off_settled_pose: Dictionary = _capture_debug_toggle_pose_snapshot(ui)
+	var digit_debug_off_settled_mismatches: PackedStringArray = (
+		_debug_toggle_pose_mismatches(
+			digit_debug_pose_before,
+			digit_debug_off_settled_pose
+		)
+	)
+	var digit_debug_off_state: Dictionary = ui.get_preview_debug_state()
+	var digit_debug_off_joint_state: Dictionary = digit_debug_off_state.get(
+		"joint_range_debug_state",
+		{}
+	) as Dictionary
+	var digit_debug_off_guardrails: Dictionary = ui.call(
+		"_build_guardrail_debug_view_state",
+		digit_debug_off_state
+	) as Dictionary
+	var digit_debug_off_ok: bool = debugger_button != null \
+		and not bool(ui.get("debugger_view_enabled")) \
+		and not debugger_button.button_pressed \
+		and debugger_button.text == "Debug View: OFF" \
+		and not bool(digit_debug_off_state.get("joint_range_debug_visible", true)) \
+		and int(digit_debug_off_state.get("digit_range_debug_visual_count", -1)) == 30 \
+		and int(digit_debug_off_state.get("joint_range_debug_visual_count", -1)) >= 42 \
+		and int(digit_debug_off_joint_state.get("digit_visual_count", 0)) == 30 \
+		and (digit_debug_off_joint_state.get("digit_bones", {}) as Dictionary).size() == 30 \
+		and bool(digit_debug_off_guardrails.get("joint_range_plane_available", false))
+	var digit_debug_pose_preserved: bool = (
+		bool(digit_debug_pose_before.get("valid", false))
+		and digit_debug_on_immediate_mismatches.is_empty()
+		and digit_debug_on_settled_mismatches.is_empty()
+		and digit_debug_off_immediate_mismatches.is_empty()
+		and digit_debug_off_settled_mismatches.is_empty()
+	)
+	var digit_debug_toggle_ok: bool = (
+		debugger_signal_available
+		and digit_debug_on_ok
+		and digit_debug_off_ok
+		and digit_debug_pose_preserved
+	)
+	lines.append("digit_debugger_signal_available=%s" % str(debugger_signal_available))
+	lines.append("digit_debugger_on_visual_count=%d" % int(digit_debug_on_state.get("digit_range_debug_visual_count", 0)))
+	lines.append("digit_debugger_on_total_range_count=%d" % int(digit_debug_on_state.get("joint_range_debug_visual_count", 0)))
+	lines.append("digit_debugger_on_ok=%s" % str(digit_debug_on_ok))
+	lines.append("digit_debugger_off_visual_count=%d" % int(digit_debug_off_state.get("digit_range_debug_visual_count", -1)))
+	lines.append("digit_debugger_off_ok=%s" % str(digit_debug_off_ok))
+	lines.append("digit_debugger_on_immediate_pose_mismatches=%s" % str(digit_debug_on_immediate_mismatches))
+	lines.append("digit_debugger_on_settled_pose_mismatches=%s" % str(digit_debug_on_settled_mismatches))
+	lines.append("digit_debugger_off_immediate_pose_mismatches=%s" % str(digit_debug_off_immediate_mismatches))
+	lines.append("digit_debugger_off_settled_pose_mismatches=%s" % str(digit_debug_off_settled_mismatches))
+	lines.append("digit_debugger_pose_preserved=%s" % str(digit_debug_pose_preserved))
+	lines.append("digit_debugger_toggle_ok=%s" % str(digit_debug_toggle_ok))
 
 	var file: FileAccess = FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)
 	if file != null:
 		file.store_string("\n".join(lines))
 		file.close()
-	quit()
+	quit(0 if digit_debug_toggle_ok else 1)
+
+func _capture_debug_toggle_pose_snapshot(ui: Node) -> Dictionary:
+	var snapshot: Dictionary = {"valid": false}
+	if ui == null:
+		return snapshot
+	var preview_subviewport: SubViewport = ui.get("preview_subviewport") as SubViewport
+	if preview_subviewport == null:
+		return snapshot
+	var preview_root: Node3D = preview_subviewport.get_node_or_null(
+		"CombatAnimationPreviewRoot3D"
+	) as Node3D
+	var actor: Node3D = preview_root.get_node_or_null(
+		"PreviewActorPivot/PreviewActor"
+	) as Node3D if preview_root != null else null
+	var held_item: Node3D = preview_root.get_meta(
+		"preview_held_item",
+		null
+	) as Node3D if preview_root != null else null
+	var skeleton: Skeleton3D = actor.get_node_or_null(
+		"JosieModel/Josie/Skeleton3D"
+	) as Skeleton3D if actor != null else null
+	if preview_root == null or actor == null or held_item == null or skeleton == null:
+		return snapshot
+	var finger_rotations: Dictionary = {}
+	var per_slot_counts: Dictionary = {}
+	for slot_id: StringName in [&"hand_right", &"hand_left"]:
+		var slot_count: int = 0
+		for bone_name: StringName in PlayerDigitHingeRulesScript.get_finger_bone_names(
+			slot_id
+		):
+			var bone_index: int = skeleton.find_bone(String(bone_name))
+			if bone_index < 0:
+				continue
+			finger_rotations[bone_name] = skeleton.get_bone_pose_rotation(
+				bone_index
+			).normalized()
+			slot_count += 1
+		per_slot_counts[slot_id] = slot_count
+	snapshot = {
+		"valid": (
+			int(per_slot_counts.get(&"hand_right", 0)) == 15
+			and int(per_slot_counts.get(&"hand_left", 0)) == 15
+		),
+		"preview_root_instance_id": preview_root.get_instance_id(),
+		"actor_instance_id": actor.get_instance_id(),
+		"held_item_instance_id": held_item.get_instance_id(),
+		"skeleton_instance_id": skeleton.get_instance_id(),
+		"actor_global_transform": actor.global_transform,
+		"held_item_global_transform": held_item.global_transform,
+		"finger_rotations": finger_rotations,
+		"per_slot_counts": per_slot_counts,
+	}
+	return snapshot
+
+func _debug_toggle_pose_mismatches(
+	expected: Dictionary,
+	actual: Dictionary
+) -> PackedStringArray:
+	var mismatches: PackedStringArray = []
+	if not bool(expected.get("valid", false)):
+		mismatches.append("expected_snapshot_invalid")
+		return mismatches
+	if not bool(actual.get("valid", false)):
+		mismatches.append("actual_snapshot_invalid")
+		return mismatches
+	for instance_key: StringName in [
+		&"preview_root_instance_id",
+		&"actor_instance_id",
+		&"held_item_instance_id",
+		&"skeleton_instance_id",
+	]:
+		if int(expected.get(instance_key, 0)) != int(actual.get(instance_key, -1)):
+			mismatches.append("%s_changed" % String(instance_key))
+	for transform_key: StringName in [
+		&"actor_global_transform",
+		&"held_item_global_transform",
+	]:
+		var expected_transform: Transform3D = expected.get(
+			transform_key,
+			Transform3D.IDENTITY
+		) as Transform3D
+		var actual_transform: Transform3D = actual.get(
+			transform_key,
+			Transform3D.IDENTITY
+		) as Transform3D
+		if not _debug_pose_transforms_match(expected_transform, actual_transform):
+			mismatches.append("%s_changed" % String(transform_key))
+	var expected_rotations: Dictionary = expected.get("finger_rotations", {}) as Dictionary
+	var actual_rotations: Dictionary = actual.get("finger_rotations", {}) as Dictionary
+	if expected_rotations.size() != actual_rotations.size():
+		mismatches.append(
+			"finger_rotation_count:%d->%d" % [
+				expected_rotations.size(),
+				actual_rotations.size(),
+			]
+		)
+	for bone_name_variant: Variant in expected_rotations.keys():
+		var bone_name: StringName = bone_name_variant as StringName
+		if not actual_rotations.has(bone_name):
+			mismatches.append("finger_missing:%s" % String(bone_name))
+			continue
+		var expected_rotation: Quaternion = expected_rotations.get(
+			bone_name,
+			Quaternion.IDENTITY
+		) as Quaternion
+		var actual_rotation: Quaternion = actual_rotations.get(
+			bone_name,
+			Quaternion.IDENTITY
+		) as Quaternion
+		var rotation_distance: float = _debug_pose_quaternion_distance(
+			expected_rotation,
+			actual_rotation
+		)
+		if rotation_distance > DEBUG_POSE_ROTATION_EPSILON_RADIANS:
+			mismatches.append(
+				"finger_rotation:%s:%.9f" % [
+					String(bone_name),
+					rotation_distance,
+				]
+			)
+	return mismatches
+
+func _debug_pose_transforms_match(first: Transform3D, second: Transform3D) -> bool:
+	return (
+		first.origin.distance_to(second.origin) <= DEBUG_POSE_POSITION_EPSILON_METERS
+		and first.basis.x.distance_to(second.basis.x) <= DEBUG_POSE_BASIS_EPSILON
+		and first.basis.y.distance_to(second.basis.y) <= DEBUG_POSE_BASIS_EPSILON
+		and first.basis.z.distance_to(second.basis.z) <= DEBUG_POSE_BASIS_EPSILON
+	)
+
+func _debug_pose_quaternion_distance(first: Quaternion, second: Quaternion) -> float:
+	var absolute_dot: float = clampf(
+		absf(first.normalized().dot(second.normalized())),
+		0.0,
+		1.0
+	)
+	return 2.0 * acos(absolute_dot)
 
 func _append_contact_ray_debug_lines(lines: PackedStringArray, prefix: String, ray_entries: Array) -> void:
 	lines.append("%s_contact_ray_count=%d" % [prefix, ray_entries.size()])

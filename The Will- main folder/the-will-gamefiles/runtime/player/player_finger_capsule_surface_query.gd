@@ -10,11 +10,16 @@ class_name PlayerFingerCapsuleSurfaceQuery
 ## space named by `resolved_world_origin_id`. Source origin IDs are separate
 ## provenance and are deliberately not required to match that coordinate origin.
 
-const QUERY_REVISION: StringName = &"finger_capsule_exact_triangle_query_v1"
+const QUERY_REVISION: StringName = &"finger_capsule_exact_triangle_query_v2"
 const GEOMETRY_EPSILON_METERS: float = 0.0000001
 const DISTANCE_EPSILON_SQUARED: float = (
 	GEOMETRY_EPSILON_METERS * GEOMETRY_EPSILON_METERS
 )
+# A triangle cross product has square-meter units, so its squared magnitude is
+# measured in m^4.  Do not compare it with the positional m^2 epsilon above:
+# doing so discarded valid narrow CSG cap faces and opened an otherwise exact
+# closed Handle surface before the grip solve.
+const TRIANGLE_AREA_EPSILON_SQUARED_M4: float = 0.0000000000000001
 const RELATIVE_PARALLEL_EPSILON: float = 0.000000001
 const ABSOLUTE_DETERMINANT_EPSILON: float = 0.000000000000000001
 const BARYCENTRIC_EDGE_EPSILON: float = 0.000001
@@ -58,7 +63,10 @@ func analyze_prepared_surface_topology(prepared_surface: Dictionary) -> Dictiona
 		var a: Vector3 = triangles[vertex_offset]
 		var b: Vector3 = triangles[vertex_offset + 1]
 		var c: Vector3 = triangles[vertex_offset + 2]
-		if (b - a).cross(c - a).length_squared() <= DISTANCE_EPSILON_SQUARED:
+		if (
+			(b - a).cross(c - a).length_squared()
+			<= TRIANGLE_AREA_EPSILON_SQUARED_M4
+		):
 			result["degenerate_triangle_count"] = int(
 				result.get("degenerate_triangle_count", 0)
 			) + 1
@@ -704,7 +712,7 @@ func _segment_triangle_intersection(
 func _closest_point_on_triangle(point: Vector3, a: Vector3, b: Vector3, c: Vector3) -> Dictionary:
 	var ab: Vector3 = b - a
 	var ac: Vector3 = c - a
-	if ab.cross(ac).length_squared() <= DISTANCE_EPSILON_SQUARED:
+	if ab.cross(ac).length_squared() <= TRIANGLE_AREA_EPSILON_SQUARED_M4:
 		return _closest_point_on_degenerate_triangle(point, a, b, c)
 	var ap: Vector3 = point - a
 	var d1: float = ab.dot(ap)
@@ -749,7 +757,7 @@ func _closest_point_on_triangle(point: Vector3, a: Vector3, b: Vector3, c: Vecto
 		}
 
 	var denominator: float = va + vb + vc
-	if absf(denominator) <= DISTANCE_EPSILON_SQUARED:
+	if absf(denominator) <= TRIANGLE_AREA_EPSILON_SQUARED_M4:
 		return _closest_point_on_degenerate_triangle(point, a, b, c)
 	var inverse_denominator: float = 1.0 / denominator
 	var face_v: float = vb * inverse_denominator

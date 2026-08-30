@@ -12,6 +12,8 @@ const RESULT_FILE_PATH := "C:/WORKSPACE/player_hand_surface_seat_solver_results.
 const ROOT_ORIGIN: StringName = CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
 const SURFACE_ORIGIN: StringName = CombatOriginRecordScript.ORIGIN_PRIMARY_GRIP_CONTACT_SURFACE
 const INDEX_PROBE_ORIGIN: StringName = &"CC_Base_R_Index1"
+const MIDDLE_PROBE_ORIGIN: StringName = &"CC_Base_R_Mid1"
+const RING_PROBE_ORIGIN: StringName = &"CC_Base_R_Ring1"
 const PINKY_PROBE_ORIGIN: StringName = &"CC_Base_R_Pinky1"
 const INDEX_RADIUS_SOURCE: StringName = &"PlayerDigitHingeRules.index.section1.capsule_radius"
 const PINKY_RADIUS_SOURCE: StringName = &"PlayerDigitHingeRules.pinky.section1.capsule_radius"
@@ -420,6 +422,72 @@ func _verify_explicit_failures() -> void:
 
 
 func _build_anatomy_state(index_world: Vector3, pinky_world: Vector3) -> Dictionary:
+	var index_to_pinky: Vector3 = pinky_world - index_world
+	var along_chord: Vector3 = (
+		index_to_pinky.normalized()
+		if index_to_pinky.length_squared() > 0.000000000001
+		else Vector3.RIGHT
+	)
+	var proximal_capsules: Array[Dictionary] = []
+	for capsule_record: Dictionary in [
+		{
+			"digit_id": &"index",
+			"start": index_world,
+			"end": index_world + along_chord * 0.001,
+			"start_source": INDEX_PROBE_ORIGIN,
+			"end_source": &"CC_Base_R_Index2",
+			"radius": INDEX_SKIN_RADIUS_METERS,
+			"radius_source": INDEX_RADIUS_SOURCE,
+		},
+		{
+			"digit_id": &"middle",
+			"start": index_world,
+			"end": index_world + along_chord * 0.001,
+			"start_source": MIDDLE_PROBE_ORIGIN,
+			"end_source": &"CC_Base_R_Mid2",
+			"radius": INDEX_SKIN_RADIUS_METERS,
+			"radius_source": &"PlayerDigitHingeRules.middle.section1.capsule_radius",
+		},
+		{
+			"digit_id": &"ring",
+			"start": pinky_world,
+			"end": pinky_world - along_chord * 0.001,
+			"start_source": RING_PROBE_ORIGIN,
+			"end_source": &"CC_Base_R_Ring2",
+			"radius": PINKY_SKIN_RADIUS_METERS,
+			"radius_source": &"PlayerDigitHingeRules.ring.section1.capsule_radius",
+		},
+		{
+			"digit_id": &"pinky",
+			"start": pinky_world,
+			"end": pinky_world - along_chord * 0.001,
+			"start_source": PINKY_PROBE_ORIGIN,
+			"end_source": &"CC_Base_R_Pinky2",
+			"radius": PINKY_SKIN_RADIUS_METERS,
+			"radius_source": PINKY_RADIUS_SOURCE,
+		},
+	]:
+		proximal_capsules.append({
+			"digit_id": capsule_record.get("digit_id", StringName()),
+			"section_index": 0,
+			"segment_start_world": capsule_record.get("start", Vector3.ZERO),
+			"segment_start_world_origin_id": ROOT_ORIGIN,
+			"segment_start_source_origin_id": capsule_record.get(
+				"start_source",
+				StringName()
+			),
+			"segment_end_world": capsule_record.get("end", Vector3.ZERO),
+			"segment_end_world_origin_id": ROOT_ORIGIN,
+			"segment_end_source_origin_id": capsule_record.get(
+				"end_source",
+				StringName()
+			),
+			"radius_meters": float(capsule_record.get("radius", 0.0)),
+			"radius_source_id": capsule_record.get(
+				"radius_source",
+				StringName()
+			),
+		})
 	return {
 		"valid": true,
 		"index_point_world": index_world,
@@ -433,6 +501,9 @@ func _build_anatomy_state(index_world: Vector3, pinky_world: Vector3) -> Diction
 		"pinky_skin_to_bone_radius_meters": PINKY_SKIN_RADIUS_METERS,
 		"pinky_skin_to_bone_radius_source_id": PINKY_RADIUS_SOURCE,
 		"skin_radius_calibration_revision": CALIBRATION_REVISION,
+		"ordinary_proximal_capsules": proximal_capsules,
+		"ordinary_proximal_capsules_origin_id": ROOT_ORIGIN,
+		"enforce_ordinary_proximal_safety": true,
 	}
 
 

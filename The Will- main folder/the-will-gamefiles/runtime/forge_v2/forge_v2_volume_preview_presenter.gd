@@ -413,6 +413,13 @@ func _sync_spline_preview_mesh(authoring_state: Resource) -> void:
 		_apply_detailing_spline_preview_meshes(detail_meshes)
 		return
 	_clear_detailing_spline_preview_metadata()
+	var handle_uses_linear_path := (
+		StringName(authoring_state.get("active_tool_id")) == HANDLE_TOOL_ID
+		and authoring_state.has_method("get_active_handle_path_shape_kind")
+		and StringName(authoring_state.call(
+			"get_active_handle_path_shape_kind"
+		)) == ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
+	)
 	var handle_span_invalid := _is_handle_span_preview_invalid(
 		authoring_state,
 		spline_points
@@ -424,7 +431,8 @@ func _sync_spline_preview_mesh(authoring_state: Resource) -> void:
 			spline_finished,
 			false,
 			true,
-			false
+			false,
+			handle_uses_linear_path
 		)
 		var invalid_line_mesh: ArrayMesh = _build_spline_preview_mesh(
 			spline_points,
@@ -432,7 +440,8 @@ func _sync_spline_preview_mesh(authoring_state: Resource) -> void:
 			spline_finished,
 			true,
 			false,
-			true
+			true,
+			handle_uses_linear_path
 		)
 		spline_preview_mesh_instance.mesh = point_marker_mesh
 		spline_preview_mesh_instance.material_override = (
@@ -453,7 +462,15 @@ func _sync_spline_preview_mesh(authoring_state: Resource) -> void:
 		return
 	spline_invalid_preview_mesh_instance.visible = false
 	spline_invalid_preview_mesh_instance.mesh = null
-	var spline_mesh: ArrayMesh = _build_spline_preview_mesh(spline_points, selected_point_index, spline_finished)
+	var spline_mesh: ArrayMesh = _build_spline_preview_mesh(
+		spline_points,
+		selected_point_index,
+		spline_finished,
+		true,
+		true,
+		false,
+		handle_uses_linear_path
+	)
 	if spline_mesh == null or spline_mesh.get_surface_count() <= 0:
 		spline_preview_mesh_instance.visible = false
 		spline_preview_mesh_instance.mesh = null
@@ -466,10 +483,20 @@ func _is_handle_span_preview_invalid(
 	authoring_state: Resource,
 	spline_points: PackedVector3Array
 ) -> bool:
+	var required_point_count := 3
+	if (
+		authoring_state != null
+		and authoring_state.has_method(
+			"get_active_handle_required_point_count"
+		)
+	):
+		required_point_count = int(authoring_state.call(
+			"get_active_handle_required_point_count"
+		))
 	if (
 		authoring_state == null
 		or StringName(authoring_state.get("active_tool_id")) != HANDLE_TOOL_ID
-		or spline_points.size() != 3
+		or spline_points.size() != required_point_count
 		or not authoring_state.has_method(
 			"can_generate_profile_extrusion_from_spline"
 		)
@@ -1608,17 +1635,32 @@ func _accept_bounded_native_result(
 	native_static_active_vertices = output_vertices
 	native_static_active_indices = output_indices
 	if bool(transition.get("requires_native_ack", false)):
+		var acknowledged := false
 		if (
-			authoring_state == null
-			or not authoring_state.has_method(
+			active_stage_controller != null
+			and active_stage_controller.has_method(
+				"acknowledge_bounded_history_promotion"
+			)
+		):
+			acknowledged = bool(active_stage_controller.call(
+				"acknowledge_bounded_history_promotion",
+				authoring_state,
+				transition,
+				native_result
+			))
+		elif (
+			authoring_state != null
+			and authoring_state.has_method(
 				"acknowledge_bounded_history_transition"
 			)
-			or not bool(authoring_state.call(
+		):
+			# Stand-alone presenter verifiers have no action journal to prune.
+			acknowledged = bool(authoring_state.call(
 				"acknowledge_bounded_history_transition",
 				int(transition.get("revision", -1)),
 				native_result
 			))
-		):
+		if not acknowledged:
 			return _reject_bounded_native_fast_lane(
 				authoring_state,
 				transition,
@@ -7533,6 +7575,12 @@ func _sync_pending_material_body_previews(
 		var body := preview_bodies[body_index] as Resource
 		if body == null:
 			continue
+		if ForgeV2MaterialCompositionPolicyScript.is_protected_handle_entry(body):
+			if not _is_material_body_already_published(
+				StringName(body.get("body_id"))
+			):
+				_append_pending_handle_csg_preview(body, body_index)
+			continue
 		var pending_mesh := _build_active_material_body_sweep_mesh(body)
 		if pending_mesh == null or pending_mesh.get_surface_count() <= 0:
 			continue
@@ -7557,6 +7605,89 @@ func _sync_pending_material_body_previews(
 		)
 		csg_active_body_root.add_child(mesh_instance)
 	csg_active_body_root.visible = csg_active_body_root.get_child_count() > 0
+
+func _append_pending_handle_csg_preview(
+	body: Resource,
+	body_index: int
+) -> bool:
+	if csg_active_body_root == null or body == null:
+		return false
+	var preview_root := CSGCombiner3D.new()
+	preview_root.name = "PendingHandlePreview_%03d" % body_index
+	preview_root.operation = CSGShape3D.OPERATION_UNION
+	preview_root.calculate_tangents = false
+	preview_root.use_collision = false
+	preview_root.collision_layer = 0
+	preview_root.collision_mask = 0
+	preview_root.set_meta(
+		"forge_v2_non_authoritative_pending_preview",
+		true
+	)
+	preview_root.set_meta(
+		"forge_v2_pending_body_id",
+		StringName(body.get("body_id"))
+	)
+	csg_active_body_root.add_child(preview_root)
+	if _append_csg_body_shape(
+		preview_root,
+		body,
+		StringName(body.get("material_variant_id")),
+		_is_remove_material_body(body),
+		body_index
+	):
+		return true
+	csg_active_body_root.remove_child(preview_root)
+	preview_root.free()
+	return false
+
+func _is_material_body_already_published(body_id: StringName) -> bool:
+	if body_id == StringName():
+		return false
+	if (
+		native_static_published_node != null
+		and is_instance_valid(native_static_published_node)
+		and native_static_published_node.visible
+		and StringName(native_static_published_node.get_meta(
+			"forge_v2_body_id",
+			StringName()
+		)) == body_id
+		and not bool(native_static_published_node.get_meta(
+			"forge_v2_publication_pending",
+			true
+		))
+	):
+		return true
+	return _node_tree_has_published_material_body(
+		csg_static_body_root,
+		body_id,
+		true
+	)
+
+func _node_tree_has_published_material_body(
+	node: Node,
+	body_id: StringName,
+	ancestors_visible: bool
+) -> bool:
+	if node == null or not is_instance_valid(node) or not ancestors_visible:
+		return false
+	var node_visible := true
+	if node is Node3D:
+		node_visible = (node as Node3D).visible
+	if not node_visible:
+		return false
+	if (
+		StringName(node.get_meta("forge_v2_body_id", StringName())) == body_id
+		and not bool(node.get_meta("forge_v2_publication_pending", false))
+	):
+		return true
+	for child: Node in node.get_children():
+		if _node_tree_has_published_material_body(
+			child,
+			body_id,
+			node_visible
+		):
+			return true
+	return false
 
 func _clear_active_material_body_preview_metadata() -> void:
 	if active_material_body_preview_mesh_instance == null:
@@ -8695,7 +8826,8 @@ func _build_spline_preview_mesh(
 	spline_finished: bool,
 	draw_line: bool = true,
 	draw_points: bool = true,
-	invalid_line: bool = false
+	invalid_line: bool = false,
+	use_linear_path: bool = false
 ) -> ArrayMesh:
 	if spline_points.is_empty():
 		return ArrayMesh.new()
@@ -8712,7 +8844,17 @@ func _build_spline_preview_mesh(
 	var point_color := Color(0.76, 0.9, 1.0, 1.0)
 	var selected_color := Color(1.0, 0.88, 0.22, 1.0)
 	if draw_line and spline_points.size() >= 2:
-		var spline_curve: Curve3D = _build_spline_curve(spline_points, SPLINE_PREVIEW_BAKE_INTERVAL_METERS)
+		var spline_curve: Curve3D = (
+			_build_linear_csg_curve(
+				spline_points,
+				SPLINE_PREVIEW_BAKE_INTERVAL_METERS
+			)
+			if use_linear_path
+			else _build_spline_curve(
+				spline_points,
+				SPLINE_PREVIEW_BAKE_INTERVAL_METERS
+			)
+		)
 		var baked_points: PackedVector3Array = spline_curve.get_baked_points()
 		if baked_points.size() < 2:
 			baked_points = _deduplicate_spline_points(spline_points)

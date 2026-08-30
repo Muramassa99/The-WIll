@@ -67,8 +67,14 @@ func build_primary_grip_anchor(segment: SegmentAtom, grip_span: Dictionary = {})
 	anchor.normalize()
 	return anchor
 
-func calculate_primary_grip_offset(center_of_mass: Vector3, grip_position: Vector3) -> Vector3:
-	return center_of_mass - grip_position
+func calculate_primary_grip_offset(
+	weapon_intrinsic_center_of_mass_weapon_root_cells: Vector3,
+	grip_position_weapon_root_cells: Vector3
+) -> Vector3:
+	return (
+		weapon_intrinsic_center_of_mass_weapon_root_cells
+		- grip_position_weapon_root_cells
+	)
 
 func resolve_primary_grip_contact_state(
 	anchor: AnchorAtom,

@@ -268,7 +268,11 @@ func project_target_to_legal_grip_space(
 			desired_world,
 			query_exclusions
 		)
-	result["point_illegal"] = _point_inside_body_restriction(body_restriction_root, desired_world)
+	result["point_illegal"] = _point_inside_body_restriction(
+		body_restriction_root,
+		desired_world,
+		query_exclusions
+	)
 	var target_offset: Vector3 = desired_world - chest_origin_world
 	var chest_forward: Vector3 = chest_forward_world.normalized()
 	if chest_forward.length_squared() <= 0.000001:
@@ -302,8 +306,16 @@ func project_target_to_legal_grip_space(
 	result["corrected_target"] = desired_world + chest_forward * front_offset
 	return result
 
-func point_inside_body_restriction(body_restriction_root: Node3D, point_world: Vector3) -> bool:
-	return _point_inside_body_restriction(body_restriction_root, point_world)
+func point_inside_body_restriction(
+	body_restriction_root: Node3D,
+	point_world: Vector3,
+	query_exclusions: Array = []
+) -> bool:
+	return _point_inside_body_restriction(
+		body_restriction_root,
+		point_world,
+		query_exclusions
+	)
 
 func segment_hits_body_restriction(
 	body_restriction_root: Node3D,
@@ -933,7 +945,11 @@ func _segment_hits_body_restriction(
 	var hit: Dictionary = world_3d.direct_space_state.intersect_ray(query)
 	return not hit.is_empty()
 
-func _point_inside_body_restriction(body_restriction_root: Node3D, point_world: Vector3) -> bool:
+func _point_inside_body_restriction(
+	body_restriction_root: Node3D,
+	point_world: Vector3,
+	query_exclusions: Array = []
+) -> bool:
 	if body_restriction_root == null:
 		return false
 	for attachment_node: Node in body_restriction_root.get_children():
@@ -942,6 +958,8 @@ func _point_inside_body_restriction(body_restriction_root: Node3D, point_world: 
 			continue
 		var area: Area3D = attachment.get_node_or_null("RestrictionArea") as Area3D
 		if area == null:
+			continue
+		if query_exclusions.has(area.get_rid()):
 			continue
 		var collision_shape: CollisionShape3D = area.get_node_or_null("RestrictionShape") as CollisionShape3D
 		if collision_shape == null:
@@ -1085,7 +1103,11 @@ func _resolve_best_orbit_candidate(
 				+ chest_forward_world * vertical_bias
 			)
 			var candidate: Vector3 = desired_world + orbit_offset
-			if _point_inside_body_restriction(body_restriction_root, candidate):
+			if _point_inside_body_restriction(
+				body_restriction_root,
+				candidate,
+				query_exclusions
+			):
 				continue
 			if _segment_hits_body_restriction(body_restriction_root, source_world, candidate, query_exclusions):
 				continue

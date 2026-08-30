@@ -89,6 +89,163 @@ static func resolve_profile_seat(
 	)
 
 
+static func resolve_handle_coordinate_axis_ratio(
+	handle_coordinate_normalized: float,
+	tip_side_axis_ratio_from_span_start: float
+) -> float:
+	# Runtime and saved Handle positions are always normalized Pommel-to-Tip
+	# coordinates in 0..1. The sampled path also remains 0..1, but its authored
+	# span-start direction may oppose semantic Tip direction, so convert once.
+	var tip_ratio := clampf(tip_side_axis_ratio_from_span_start, 0.0, 1.0)
+	var pommel_ratio := 1.0 - tip_ratio
+	return clampf(
+		lerpf(
+			pommel_ratio,
+			tip_ratio,
+			clampf(handle_coordinate_normalized, 0.0, 1.0)
+		),
+		0.0,
+		1.0
+	)
+
+
+static func resolve_profile_handle_coordinate_mode(
+	profile: BakedProfile
+) -> StringName:
+	if profile == null:
+		return BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_DIRECTIONAL_POMMEL_TO_TIP
+	if profile.primary_grip_handle_coordinate_mode in [
+		BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_BALANCED_SIGNED,
+		BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_DIRECTIONAL_POMMEL_TO_TIP,
+	]:
+		return profile.primary_grip_handle_coordinate_mode
+	# Compatibility for V1/cached profiles created before explicit mode metadata:
+	# reuse their intrinsic-COM midpoint verdict, never an active hand position.
+	if profile.primary_grip_center_balance_valid:
+		return BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_BALANCED_SIGNED
+	return BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_DIRECTIONAL_POMMEL_TO_TIP
+
+
+static func resolve_profile_handle_tip_side_axis_ratio_from_span_start(
+	profile: BakedProfile
+) -> float:
+	if profile == null:
+		return 1.0
+	if profile.primary_grip_handle_coordinate_mode in [
+		BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_BALANCED_SIGNED,
+		BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_DIRECTIONAL_POMMEL_TO_TIP,
+	]:
+		return (
+			1.0
+			if profile.primary_grip_handle_tip_side_axis_ratio_from_span_start >= 0.5
+			else 0.0
+		)
+	var span_vector := (
+		profile.primary_grip_span_end - profile.primary_grip_span_start
+	)
+	var span_length_squared := span_vector.length_squared()
+	if span_length_squared <= RATIO_EPSILON * RATIO_EPSILON:
+		return 1.0
+	var legacy_tip_projection := (
+		(profile.weapon_tip_point - profile.primary_grip_span_start).dot(
+			span_vector
+		)
+		/ span_length_squared
+	)
+	return 1.0 if legacy_tip_projection >= 0.5 else 0.0
+
+
+static func resolve_profile_handle_zero_axis_ratio_from_span_start(
+	profile: BakedProfile
+) -> float:
+	var coordinate_mode := resolve_profile_handle_coordinate_mode(profile)
+	if (
+		coordinate_mode
+		== BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_BALANCED_SIGNED
+	):
+		return 0.5
+	return 1.0 - resolve_profile_handle_tip_side_axis_ratio_from_span_start(
+		profile
+	)
+
+
+static func handle_coordinate_to_display_value(
+	handle_coordinate_normalized: float,
+	coordinate_mode: StringName
+) -> float:
+	var normalized_coordinate := clampf(
+		handle_coordinate_normalized,
+		0.0,
+		1.0
+	)
+	if (
+		coordinate_mode
+		== BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_BALANCED_SIGNED
+	):
+		return normalized_coordinate * 2.0 - 1.0
+	return normalized_coordinate
+
+
+static func display_value_to_handle_coordinate(
+	display_value: float,
+	coordinate_mode: StringName
+) -> float:
+	if (
+		coordinate_mode
+		== BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_BALANCED_SIGNED
+	):
+		return (clampf(display_value, -1.0, 1.0) + 1.0) * 0.5
+	return clampf(display_value, 0.0, 1.0)
+
+
+static func get_handle_coordinate_display_minimum(
+	coordinate_mode: StringName
+) -> float:
+	if (
+		coordinate_mode
+		== BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_BALANCED_SIGNED
+	):
+		return -1.0
+	return 0.0
+
+
+static func migrate_legacy_display_coordinates(
+	motion_node: CombatAnimationMotionNode,
+	coordinate_mode: StringName
+) -> bool:
+	if motion_node == null:
+		return false
+	if (
+		motion_node.grip_seat_coordinate_schema_version
+		>= CombatAnimationMotionNode
+		.GRIP_SEAT_COORDINATE_SCHEMA_NORMALIZED_HANDLE
+	):
+		return false
+	# Version-3 fields persisted the Skill Crafter control values. Convert those
+	# authored values through the intended UI lens. Do not preserve the old
+	# runtime's per-hand hidden-base displacement: that execution path is the
+	# coordinate defect this schema migration removes.
+	motion_node.grip_seat_slide_offset = display_value_to_handle_coordinate(
+		motion_node.grip_seat_slide_offset,
+		coordinate_mode
+	)
+	motion_node.secondary_grip_seat_slide_offset = (
+		display_value_to_handle_coordinate(
+			motion_node.secondary_grip_seat_slide_offset,
+			coordinate_mode
+		)
+	)
+	# Retarget nodes and runtime clips are derived projections of the authored
+	# motion node. A legacy retarget snapshot still carries the old coordinate
+	# semantics and would overwrite the migrated values when next applied.
+	motion_node.retarget_node = null
+	motion_node.grip_seat_coordinate_schema_version = (
+		CombatAnimationMotionNode.GRIP_SEAT_COORDINATE_SCHEMA_NORMALIZED_HANDLE
+	)
+	motion_node.normalize()
+	return true
+
+
 static func resolve_sampled_seat(
 	ratios: PackedFloat32Array,
 	centers: PackedVector3Array,

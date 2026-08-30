@@ -42,7 +42,29 @@ const LIFECYCLE_RESULT_PATH := (
 	"C:/WORKSPACE/godot_runs/"
 	+ "verify_forge_v2_skill_crafter_grip_lifecycle_2026-08-26.txt"
 )
+const TWO_HAND_SUPPORT_RESULT_PATH := (
+	"C:/WORKSPACE/godot_runs/"
+	+ "verify_forge_v2_two_hand_support_grasp_2026-08-29.txt"
+)
+const REAL_TWO_HAND_SUPPORT_RESULT_PATH := (
+	"C:/WORKSPACE/godot_runs/"
+	+ "diagnose_real_forge_v2_two_hand_support_grasp_2026-08-30.txt"
+)
+const REAL_TWO_HAND_SUPPORT_LEFT_PRIMARY_RESULT_PATH := (
+	"C:/WORKSPACE/godot_runs/"
+	+ "diagnose_real_forge_v2_right_support_grasp_2026-08-30.txt"
+)
 const LIFECYCLE_ONLY_ARGUMENT := "--surface-grasp-lifecycle-only"
+const TWO_HAND_SUPPORT_ONLY_ARGUMENT := "--two-hand-support-grasp-only"
+const REAL_TWO_HAND_SUPPORT_ONLY_ARGUMENT := "--real-two-hand-support-grasp-only"
+const REAL_TWO_HAND_SUPPORT_LEFT_PRIMARY_ONLY_ARGUMENT := (
+	"--real-two-hand-support-left-primary-grasp-only"
+)
+const REAL_WIP_LIBRARY_PATH := (
+	"C:/Users/ixro1/AppData/Roaming/Godot/app_userdata/"
+	+ "The Will-Gamefiles/forge/player_wip_library_state.tres"
+)
+const REAL_TWO_HAND_SUPPORT_WIP_ID := &"player_wip_1787711204.079_1"
 const TEMP_LIBRARY_PATH := (
 	"user://verification/verify_forge_v2_skill_crafter_grip_parity_library.tres"
 )
@@ -52,12 +74,15 @@ const POSITION_EPSILON_METERS := 0.00025
 const LEGACY_AXIAL_QUANTIZATION_EPSILON_METERS := CELL_SIZE_METERS * 0.11
 const EXACT_RAY_HIT_EPSILON_METERS := 0.00008
 const EXACT_VERTEX_EPSILON_METERS := 0.000001
-const V2_GRIP_SEAT_MOVE_VALUES: Array[float] = [-0.65, 0.45, -0.20]
+# Public setters consume the canonical normalized Pommel-to-Tip coordinate.
+# Keep three distinct interior samples without passing the old signed UI lens.
+const V2_GRIP_SEAT_MOVE_VALUES: Array[float] = [0.175, 0.725, 0.4]
 const WEAPON_SEAT_POSITION_EPSILON_METERS := 0.00001
 const WEAPON_SEAT_BASIS_EPSILON := 0.00001
 const WEAPON_SEAT_SOURCE_EPSILON := 0.0000001
 const WEAPON_SEAT_AXIAL_DISPLACEMENT_EPSILON_METERS := 0.00001
 const WEAPON_SEAT_AXIAL_TWIST_EPSILON_RADIANS := 0.0001
+const REAL_SUPPORT_ALIGNMENT_EPSILON_METERS := 0.0005
 const PREVIEW_PRIMARY_GRIP_SEAT_RATIO_META := (
 	&"preview_primary_grip_seat_axis_ratio_from_span_start"
 )
@@ -143,6 +168,7 @@ class FakePlayer:
 var result_lines: PackedStringArray = []
 var failures: PackedStringArray = []
 var result_output_path: String = RESULT_PATH
+var real_two_hand_primary_slot_id: StringName = &"hand_right"
 
 
 func _init() -> void:
@@ -152,6 +178,18 @@ func _init() -> void:
 func _run_verification() -> void:
 	DirAccess.make_dir_recursive_absolute(RESULT_PATH.get_base_dir())
 	_cleanup_temp_library()
+	if OS.get_cmdline_user_args().has(
+		REAL_TWO_HAND_SUPPORT_LEFT_PRIMARY_ONLY_ARGUMENT
+	):
+		real_two_hand_primary_slot_id = &"hand_left"
+		await _run_real_two_hand_support_grasp_only()
+		return
+	if OS.get_cmdline_user_args().has(REAL_TWO_HAND_SUPPORT_ONLY_ARGUMENT):
+		await _run_real_two_hand_support_grasp_only()
+		return
+	if OS.get_cmdline_user_args().has(TWO_HAND_SUPPORT_ONLY_ARGUMENT):
+		await _run_two_hand_support_grasp_only()
+		return
 	if OS.get_cmdline_user_args().has(LIFECYCLE_ONLY_ARGUMENT):
 		await _run_surface_grasp_lifecycle_only()
 		return
@@ -306,6 +344,387 @@ func _run_surface_grasp_lifecycle_only() -> void:
 		saved_wip.wip_id
 	)
 	_finish()
+
+
+func _run_two_hand_support_grasp_only() -> void:
+	result_output_path = TWO_HAND_SUPPORT_RESULT_PATH
+	result_lines.clear()
+	failures.clear()
+	result_lines.append("scope=forge_v2_two_hand_support_exact_surface_grasp")
+	result_lines.append("primary_authority=equipment_hand_right_unchanged")
+	result_lines.append("support_position=authoritative_handle_slice_center_path")
+	var fixture: Dictionary = _build_v2_fixture(
+		BASELINE_AUTHORED_ROWS,
+		Vector2.ZERO,
+		&"verify_v2_two_hand_support_grasp",
+		"Forge V2 Two Hand Support Grasp"
+	)
+	if not _fixture_is_valid(fixture, "two-hand support V2"):
+		_finish()
+		return
+	var library: PlayerForgeWipLibraryState = PlayerForgeWipLibraryStateScript.new()
+	library.save_file_path = TEMP_LIBRARY_PATH
+	library.saved_wips.clear()
+	library.selected_wip_id = StringName()
+	var saved_wip: CraftedItemWIP = library.save_wip(
+		fixture.get("wip") as CraftedItemWIP
+	)
+	if saved_wip == null:
+		_record_failure("temporary WIP library rejected the two-hand support fixture")
+		_finish()
+		return
+	await _verify_two_hand_support_grasp(library, saved_wip.wip_id)
+	_finish()
+
+
+func _run_real_two_hand_support_grasp_only() -> void:
+	result_output_path = (
+		REAL_TWO_HAND_SUPPORT_LEFT_PRIMARY_RESULT_PATH
+		if real_two_hand_primary_slot_id == &"hand_left"
+		else REAL_TWO_HAND_SUPPORT_RESULT_PATH
+	)
+	result_lines.clear()
+	failures.clear()
+	result_lines.append("scope=real_saved_forge_v2_two_hand_support_exact_surface_grasp")
+	result_lines.append("source_library=%s" % REAL_WIP_LIBRARY_PATH)
+	result_lines.append("source_wip_id=%s" % String(REAL_TWO_HAND_SUPPORT_WIP_ID))
+	result_lines.append("primary_slot_id=%s" % String(real_two_hand_primary_slot_id))
+	result_lines.append("source_library_write_authorized=false")
+	var source_library: PlayerForgeWipLibraryState = ResourceLoader.load(
+		REAL_WIP_LIBRARY_PATH,
+		"",
+		ResourceLoader.CACHE_MODE_IGNORE
+	) as PlayerForgeWipLibraryState
+	if source_library == null:
+		_record_failure("real WIP library could not be loaded read-only")
+		_finish()
+		return
+	var source_wip: CraftedItemWIP = source_library.get_saved_wip(
+		REAL_TWO_HAND_SUPPORT_WIP_ID
+	)
+	if source_wip == null:
+		_record_failure("Star_Handle_Testing is absent from the real WIP library")
+		_finish()
+		return
+	var isolated_wip: CraftedItemWIP = source_wip.duplicate(true) as CraftedItemWIP
+	if isolated_wip == null:
+		_record_failure("Star_Handle_Testing could not be duplicated for read-only diagnosis")
+		_finish()
+		return
+	var isolated_library: PlayerForgeWipLibraryState = PlayerForgeWipLibraryStateScript.new()
+	# This diagnostic may trigger station-schema migration while opening the UI.
+	# Keep every resulting persist isolated from the live player WIP library.
+	isolated_library.save_file_path = TEMP_LIBRARY_PATH
+	isolated_library.saved_wips = [isolated_wip]
+	isolated_library.selected_wip_id = isolated_wip.wip_id
+	await _diagnose_real_two_hand_support_grasp(
+		isolated_library,
+		isolated_wip.wip_id
+	)
+	_finish()
+
+
+func _diagnose_real_two_hand_support_grasp(
+	library: PlayerForgeWipLibraryState,
+	wip_id: StringName
+) -> void:
+	var fake_player := FakePlayer.new()
+	fake_player.forge_wip_library_state = library
+	root.add_child(fake_player)
+	var ui = CombatAnimationStationUIScene.instantiate()
+	ui.set_meta("verification_skip_persistence", true)
+	root.add_child(ui)
+	await _wait_process_frames(3)
+	ui.open_for(fake_player, "Real Saved Two Hand Support Grip Diagnostic")
+	await _wait_process_frames(5)
+	var open_ok: bool = ui.open_saved_wip_with_hand_setup(
+		wip_id,
+		real_two_hand_primary_slot_id,
+		false,
+		true
+	)
+	await _wait_process_frames(8)
+	var slot_ok: bool = ui.select_skill_slot(&"skill_slot_1", true)
+	await _wait_process_frames(8)
+	await _wait_physics_frames(2)
+	result_lines.append("real_two_hand_open_ok=%s" % str(open_ok))
+	result_lines.append("real_two_hand_slot_ok=%s" % str(slot_ok))
+	var one_hand_changed: bool = ui.set_selected_motion_node_two_hand_state(
+		CombatAnimationMotionNode.TWO_HAND_STATE_ONE_HAND,
+		false,
+		false,
+		false,
+		true,
+		false
+	)
+	await _wait_process_frames(2)
+	await _wait_physics_frames(1)
+	result_lines.append("real_two_hand_one_hand_normalized=%s" % str(one_hand_changed))
+	var primary_seat_changed: bool = ui.set_selected_motion_node_grip_seat_slide(
+		0.4,
+		false,
+		false,
+		false,
+		true,
+		false
+	)
+	await _wait_process_frames(2)
+	await _wait_physics_frames(1)
+	result_lines.append("real_two_hand_primary_canonical_ratio_changed=%s" % str(
+		primary_seat_changed
+	))
+	var support_slot_id: StringName = (
+		&"hand_right"
+		if real_two_hand_primary_slot_id == &"hand_left"
+		else &"hand_left"
+	)
+	var primary_before: Dictionary = _read_surface_grasp_lifecycle_state(
+		ui,
+		real_two_hand_primary_slot_id
+	)
+	_append_surface_grasp_lifecycle_sample(
+		"real_two_hand_primary_before",
+		primary_before,
+		0.0
+	)
+	var support_before: Dictionary = _read_surface_grasp_lifecycle_state(
+		ui,
+		support_slot_id
+	)
+	_append_surface_grasp_lifecycle_sample(
+		"real_two_hand_support_before",
+		support_before,
+		0.0
+	)
+	var support_slide_changed: bool = ui.set_selected_motion_node_secondary_grip_seat_slide(
+		0.2,
+		false,
+		false,
+		false,
+		true,
+		false
+	)
+	result_lines.append("real_two_hand_support_canonical_ratio_changed=%s" % str(
+		support_slide_changed
+	))
+	var action_started_usec: int = Time.get_ticks_usec()
+	var two_hand_changed: bool = ui.set_selected_motion_node_two_hand_state(
+		CombatAnimationMotionNode.TWO_HAND_STATE_TWO_HAND,
+		false,
+		false,
+		false,
+		true,
+		false
+	)
+	result_lines.append("real_two_hand_transition_changed=%s" % str(two_hand_changed))
+	var support_after := await _read_surface_grasp_lifecycle_state_after_action(
+		ui,
+		support_slot_id,
+		"real_two_hand_support_after",
+		action_started_usec
+	)
+	var primary_after: Dictionary = _read_surface_grasp_lifecycle_state(
+		ui,
+		real_two_hand_primary_slot_id
+	)
+	_append_surface_grasp_lifecycle_sample(
+		"real_two_hand_primary_after",
+		primary_after,
+		0.0
+	)
+	result_lines.append("real_two_hand_support_committed=%s" % str(
+		bool(support_after.get("valid", false))
+		and int(support_after.get("rotation_count", 0)) == 15
+	))
+	var support_alignment_world: Vector3 = support_after.get(
+		"hand_grip_alignment_world",
+		Vector3.INF
+	) as Vector3
+	var support_anchor_world: Transform3D = support_after.get(
+		"support_anchor_world",
+		Transform3D.IDENTITY
+	) as Transform3D
+	var support_alignment_error_meters: float = (
+		support_alignment_world.distance_to(support_anchor_world.origin)
+		if support_alignment_world.is_finite()
+		else INF
+	)
+	result_lines.append("real_two_hand_support_alignment_error_meters=%.9f" % (
+		support_alignment_error_meters
+	))
+	result_lines.append("real_two_hand_primary_recomputed=%s" % str(
+		int(primary_after.get("solve_count", -1))
+		!= int(primary_before.get("solve_count", -2))
+	))
+	_check(
+		open_ok and slot_ok,
+		"real_two_hand_support_editor_ready",
+		"real saved WIP or skill slot could not be opened"
+	)
+	_check(
+		bool(support_after.get("valid", false))
+		and int(support_after.get("solve_count", -1)) == 1
+		and int(support_after.get("surface_geometry_load_count", -1)) == 1
+		and int(support_after.get("rotation_count", 0)) == 15,
+		"real_two_hand_support_exact_grasp_committed",
+		"real saved support hand did not commit one complete exact-surface grasp"
+	)
+	_check(
+		support_alignment_error_meters
+		<= REAL_SUPPORT_ALIGNMENT_EPSILON_METERS,
+		"real_two_hand_support_macro_alignment_converged",
+		"support anatomy did not reach its corrected support anchor"
+	)
+	_check(
+		int(primary_after.get("solve_count", -1))
+		== int(primary_before.get("solve_count", -2)),
+		"real_two_hand_support_preserves_primary_solve",
+		"support activation reran the primary exact-surface solve"
+	)
+	ui.free()
+	fake_player.free()
+	await process_frame
+
+
+func _verify_two_hand_support_grasp(
+	library: PlayerForgeWipLibraryState,
+	wip_id: StringName
+) -> void:
+	var fake_player := FakePlayer.new()
+	fake_player.forge_wip_library_state = library
+	root.add_child(fake_player)
+	var ui = CombatAnimationStationUIScene.instantiate()
+	root.add_child(ui)
+	await _wait_process_frames(3)
+	ui.open_for(fake_player, "Two Hand Support Exact Surface Grip")
+	await _wait_process_frames(5)
+	var open_ok: bool = ui.open_saved_wip_with_hand_setup(
+		wip_id,
+		&"hand_right",
+		false,
+		true
+	)
+	await _wait_process_frames(8)
+	var slot_ok: bool = ui.select_skill_slot(&"skill_slot_1", true)
+	await _wait_process_frames(8)
+	await _wait_physics_frames(2)
+	_check(open_ok, "two_hand_support_open_ok", "Skill Crafter rejected the fixture")
+	_check(slot_ok, "two_hand_support_slot_ok", "Skill Crafter rejected skill slot 1")
+
+	var initial_support_state := _read_surface_grasp_lifecycle_state(
+		ui,
+		&"hand_left"
+	)
+	_check(
+		int(initial_support_state.get("solve_count", 0)) == 0
+		and int(initial_support_state.get("surface_geometry_load_count", 0)) == 0,
+		"two_hand_support_inactive_has_no_solve",
+		"inactive support hand performed an exact-surface solve"
+	)
+
+	var primary_seat_changed: bool = ui.set_selected_motion_node_grip_seat_slide(
+		0.4,
+		false,
+		false,
+		false,
+		true,
+		false
+	)
+	await _wait_process_frames(2)
+	await _wait_physics_frames(1)
+	var primary_before := _read_surface_grasp_lifecycle_state(ui, &"hand_right")
+	_check(
+		primary_seat_changed
+		and bool(primary_before.get("valid", false))
+		and int(primary_before.get("rotation_count", 0)) == 15,
+		"two_hand_support_primary_baseline_ready",
+		"right-hand primary exact grip did not establish the safe baseline"
+	)
+	var support_slide_changed: bool = (
+		ui.set_selected_motion_node_secondary_grip_seat_slide(
+			0.2,
+			false,
+			false,
+			false,
+			true,
+			false
+		)
+	)
+	_check(
+		support_slide_changed,
+		"two_hand_support_diagnostic_slide_changed",
+		"support diagnostic slide could not be authored"
+	)
+
+	var two_hand_changed: bool = ui.set_selected_motion_node_two_hand_state(
+		CombatAnimationMotionNode.TWO_HAND_STATE_TWO_HAND,
+		false,
+		false,
+		false,
+		true,
+		false
+	)
+	var support_first := await _read_surface_grasp_lifecycle_state_after_action(
+		ui,
+		&"hand_left",
+		"two_hand_support_first_solve",
+		Time.get_ticks_usec()
+	)
+	var primary_after := _read_surface_grasp_lifecycle_state(ui, &"hand_right")
+	var support_context: String = String(support_first.get("context_key", ""))
+	var support_cached_rotations: Dictionary = (
+		support_first.get("cached_rotations", {}) as Dictionary
+	).duplicate(true)
+	_check(
+		two_hand_changed,
+		"two_hand_support_transition_changed",
+		"one-hand to two-hand transition was not applied"
+	)
+	_check(
+		bool(support_first.get("available", false))
+		and bool(support_first.get("exact_surface", false))
+		and bool(support_first.get("valid", false))
+		and int(support_first.get("solve_count", -1)) == 1
+		and int(support_first.get("surface_geometry_load_count", -1)) == 1
+		and int(support_first.get("rotation_count", 0)) == 15
+		and not support_context.is_empty(),
+		"two_hand_support_first_exact_grasp_committed",
+		"support hand did not commit exactly one complete exact-surface grasp"
+	)
+	_check(
+		int(primary_after.get("solve_count", -1))
+		== int(primary_before.get("solve_count", -2))
+		and int(primary_after.get("surface_geometry_load_count", -1))
+		== int(primary_before.get("surface_geometry_load_count", -2)),
+		"two_hand_support_does_not_resolve_primary",
+		"support activation reran the primary exact-surface solve"
+	)
+	var support_solve_count := int(support_first.get("solve_count", -1))
+	var support_load_count := int(support_first.get(
+		"surface_geometry_load_count",
+		-1
+	))
+	var support_cache_hits := int(support_first.get("cache_hit_count", 0))
+	ui.call("_refresh_preview_scene")
+	var support_refresh := await _read_surface_grasp_lifecycle_state_after_action(
+		ui,
+		&"hand_left",
+		"two_hand_support_same_context_refresh",
+		Time.get_ticks_usec()
+	)
+	_check(
+		int(support_refresh.get("solve_count", -2)) == support_solve_count
+		and int(support_refresh.get("surface_geometry_load_count", -2))
+		== support_load_count
+		and String(support_refresh.get("context_key", "")) == support_context
+		and support_refresh.get("cached_rotations", {}) == support_cached_rotations
+		and int(support_refresh.get("cache_hit_count", 0)) > support_cache_hits,
+		"two_hand_support_same_context_reuses_cache",
+		"same-context refresh reran or altered the support exact-surface grasp"
+	)
+	ui.free()
+	fake_player.free()
+	await process_frame
 
 
 func _fixture_is_valid(fixture: Dictionary, label: String) -> bool:
@@ -1924,6 +2343,18 @@ func _read_surface_grasp_lifecycle_state(
 		"grasp_diagnostics": {},
 		"last_attempt_diagnostics": {},
 		"motion_source_state": {},
+		"grip_contact_debug_state": {},
+		"arm_guidance_target_world": Vector3.INF,
+		"hand_grip_alignment_world": Vector3.INF,
+		"grip_guide_world": Vector3.INF,
+		"support_anchor_local": Transform3D.IDENTITY,
+		"support_anchor_world": Transform3D.IDENTITY,
+		"held_item_world": Transform3D.IDENTITY,
+		"primary_guide_world": Transform3D.IDENTITY,
+		"primary_anchor_world": Transform3D.IDENTITY,
+		"trajectory_root_world": Transform3D.IDENTITY,
+		"arm_guidance_target_path": NodePath(),
+		"preview_debug_state": {},
 	}
 	if ui == null or ui.get("preview_subviewport") == null:
 		result["error"] = "preview viewport missing"
@@ -1939,8 +2370,12 @@ func _read_surface_grasp_lifecycle_state(
 		"preview_held_item",
 		null
 	) as Node3D if preview_root != null else null
+	var dominant_slot_id: StringName = StringName(held_item.get_meta(
+		"dominant_contact_slot_id",
+		&"hand_right"
+	)) if held_item != null else &"hand_right"
 	var guide_name: String = (
-		"SecondaryGripGuide" if slot_id == &"hand_left" else "PrimaryGripGuide"
+		"PrimaryGripGuide" if slot_id == dominant_slot_id else "SecondaryGripGuide"
 	)
 	var grip_guide: Node3D = held_item.get_node_or_null(
 		guide_name
@@ -2041,6 +2476,49 @@ func _read_surface_grasp_lifecycle_state(
 		)
 	)
 	var motion_source_state: Dictionary = _capture_active_motion_source_state(ui)
+	var grip_contact_debug_state: Dictionary = {}
+	if actor.has_method("get_grip_contact_debug_state"):
+		grip_contact_debug_state = actor.call(
+			"get_grip_contact_debug_state"
+		) as Dictionary
+	var arm_guidance_target_world: Vector3 = Vector3.INF
+	var arm_guidance_target_path: NodePath = NodePath()
+	if actor.has_method("get_arm_guidance_target"):
+		var arm_guidance_target: Node3D = actor.call(
+			"get_arm_guidance_target",
+			slot_id
+		) as Node3D
+		if arm_guidance_target != null:
+			arm_guidance_target_world = arm_guidance_target.global_position
+			arm_guidance_target_path = arm_guidance_target.get_path()
+	var hand_grip_alignment_world: Vector3 = Vector3.INF
+	if actor.has_method("resolve_hand_grip_alignment_world_position"):
+		hand_grip_alignment_world = actor.call(
+			"resolve_hand_grip_alignment_world_position",
+			slot_id
+		) as Vector3
+	var support_anchor_local: Transform3D = Transform3D.IDENTITY
+	var support_anchor_world: Transform3D = Transform3D.IDENTITY
+	var support_anchor: Node3D = held_item.get_node_or_null(
+		"SupportGripAnchor"
+	) as Node3D
+	if support_anchor != null:
+		support_anchor_local = support_anchor.transform
+		support_anchor_world = support_anchor.global_transform
+	var primary_guide: Node3D = held_item.get_node_or_null(
+		"PrimaryGripGuide"
+	) as Node3D
+	var primary_anchor: Node3D = held_item.get_node_or_null(
+		"PrimaryGripAnchor"
+	) as Node3D
+	var trajectory_root: Node3D = preview_root.find_child(
+		"TrajectoryRoot",
+		true,
+		false
+	) as Node3D
+	var preview_debug_state: Dictionary = {}
+	if ui.has_method("get_preview_debug_state"):
+		preview_debug_state = ui.call("get_preview_debug_state") as Dictionary
 	result.merge({
 		"available": true,
 		"valid": bool(grasp_state.get("valid", false)),
@@ -2149,6 +2627,30 @@ func _read_surface_grasp_lifecycle_state(
 		"weapon_seat_applied_state": weapon_seat_applied_state,
 		"weapon_seat_composition": weapon_seat_composition,
 		"motion_source_state": motion_source_state,
+		"grip_contact_debug_state": grip_contact_debug_state.duplicate(true),
+		"arm_guidance_target_world": arm_guidance_target_world,
+		"hand_grip_alignment_world": hand_grip_alignment_world,
+		"grip_guide_world": grip_guide.global_position,
+		"support_anchor_local": support_anchor_local,
+		"support_anchor_world": support_anchor_world,
+		"held_item_world": held_item.global_transform,
+		"primary_guide_world": (
+			primary_guide.global_transform
+			if primary_guide != null
+			else Transform3D.IDENTITY
+		),
+		"primary_anchor_world": (
+			primary_anchor.global_transform
+			if primary_anchor != null
+			else Transform3D.IDENTITY
+		),
+		"trajectory_root_world": (
+			trajectory_root.global_transform
+			if trajectory_root != null
+			else Transform3D.IDENTITY
+		),
+		"arm_guidance_target_path": arm_guidance_target_path,
+		"preview_debug_state": preview_debug_state.duplicate(true),
 	}, true)
 	return result
 
@@ -2821,6 +3323,91 @@ func _append_surface_grasp_lifecycle_sample(
 		label,
 		str(source_state.get("weapon_roll_degrees", INF)),
 	])
+	var grip_contact_debug: Dictionary = state.get(
+		"grip_contact_debug_state",
+		{}
+	) as Dictionary
+	result_lines.append("lifecycle_%s_support_hand_world=%s" % [
+		label,
+		str(grip_contact_debug.get("left_hand_world", Vector3.INF)),
+	])
+	result_lines.append("lifecycle_%s_support_hand_ik_target_world=%s" % [
+		label,
+		str(grip_contact_debug.get("left_hand_ik_target_world", Vector3.INF)),
+	])
+	result_lines.append("lifecycle_%s_support_arm_guidance_target_world=%s" % [
+		label,
+		str(state.get("arm_guidance_target_world", Vector3.INF)),
+	])
+	result_lines.append("lifecycle_%s_support_hand_alignment_world=%s" % [
+		label,
+		str(state.get("hand_grip_alignment_world", Vector3.INF)),
+	])
+	result_lines.append("lifecycle_%s_support_grip_guide_world=%s" % [
+		label,
+		str(state.get("grip_guide_world", Vector3.INF)),
+	])
+	result_lines.append("lifecycle_%s_support_anchor_local=%s" % [
+		label,
+		str(state.get("support_anchor_local", Transform3D.IDENTITY)),
+	])
+	result_lines.append("lifecycle_%s_support_anchor_world=%s" % [
+		label,
+		str(state.get("support_anchor_world", Transform3D.IDENTITY)),
+	])
+	result_lines.append("lifecycle_%s_held_item_world=%s" % [
+		label,
+		str(state.get("held_item_world", Transform3D.IDENTITY)),
+	])
+	result_lines.append("lifecycle_%s_primary_guide_world=%s" % [
+		label,
+		str(state.get("primary_guide_world", Transform3D.IDENTITY)),
+	])
+	result_lines.append("lifecycle_%s_primary_anchor_world=%s" % [
+		label,
+		str(state.get("primary_anchor_world", Transform3D.IDENTITY)),
+	])
+	result_lines.append("lifecycle_%s_trajectory_root_world=%s" % [
+		label,
+		str(state.get("trajectory_root_world", Transform3D.IDENTITY)),
+	])
+	result_lines.append("lifecycle_%s_support_arm_guidance_target_path=%s" % [
+		label,
+		str(state.get("arm_guidance_target_path", NodePath())),
+	])
+	var preview_debug_state: Dictionary = state.get(
+		"preview_debug_state",
+		{}
+	) as Dictionary
+	result_lines.append("lifecycle_%s_authoring_endpoint_legality=%s" % [
+		label,
+		str(preview_debug_state.get("authoring_endpoint_legality_result", {})),
+	])
+	result_lines.append("lifecycle_%s_contact_coupling_metrics=%s" % [
+		label,
+		str(preview_debug_state.get("contact_coupling_metrics", {})),
+	])
+	result_lines.append("lifecycle_%s_collision_pose=%s" % [
+		label,
+		str({
+			"legal": preview_debug_state.get("collision_pose_legal", true),
+			"illegal_sample_count": preview_debug_state.get(
+				"collision_pose_illegal_sample_count",
+				0
+			),
+			"region": preview_debug_state.get("collision_pose_region", ""),
+			"attachment": preview_debug_state.get("collision_pose_attachment", ""),
+			"sample": preview_debug_state.get("collision_pose_sample", ""),
+			"clearance_meters": preview_debug_state.get(
+				"collision_pose_clearance_meters",
+				-1.0
+			),
+		}),
+	])
+	result_lines.append("lifecycle_%s_two_hand_solve=%s" % [
+		label,
+		str(grip_contact_debug.get("last_two_hand_solve_result", {})),
+	])
 	_append_surface_grasp_digit_diagnostic_sample(label, state)
 	_append_weapon_surface_seat_diagnostic_sample(label, state)
 
@@ -2941,6 +3528,7 @@ func _append_weapon_surface_seat_diagnostic_sample(
 		{}
 	) as Dictionary
 	var best_overall: Dictionary = diagnostics.get("best_overall", {}) as Dictionary
+	var best_accepted: Dictionary = diagnostics.get("best_accepted", {}) as Dictionary
 	var stations: Dictionary = state.get("weapon_seat_stations", {}) as Dictionary
 	var anatomy: Dictionary = state.get(
 		"weapon_seat_anatomy_state",
@@ -2977,6 +3565,26 @@ func _append_weapon_surface_seat_diagnostic_sample(
 	result_lines.append("lifecycle_%s_weapon_seat_best_accepted=%s" % [
 		label,
 		str(bool(best_overall.get("accepted", false))),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_proximal_safety_enforced=%s" % [
+		label,
+		str(bool(diagnostics.get("ordinary_proximal_safety_enforced", false))),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_accepted_proximal_safe=%s" % [
+		label,
+		str(bool(best_accepted.get("ordinary_proximal_capsules_safe", false))),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_accepted_proximal_worst_digit=%s" % [
+		label,
+		String(best_accepted.get("ordinary_proximal_worst_digit_id", StringName())),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_accepted_proximal_worst_penetration_meters=%.9f" % [
+		label,
+		float(best_accepted.get("ordinary_proximal_worst_penetration_meters", INF)),
+	])
+	result_lines.append("lifecycle_%s_weapon_seat_accepted_proximal_capsules=%s" % [
+		label,
+		str(best_accepted.get("ordinary_proximal_capsule_states", [])),
 	])
 	for metric_name: String in [
 		"index_radial_error_meters",

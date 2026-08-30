@@ -42,7 +42,11 @@ const BRUSH_RADIUS_MAX_METERS := 0.375
 const BRUSH_RADIUS_STEP_METERS := 0.0125
 const DEFAULT_POINT_PLACEMENT_RADIUS_METERS := 0.025
 const DEFAULT_AMOUNT_RATIO := 1.0
-const HANDLE_REQUIRED_POINT_COUNT := 3
+const HANDLE_PATH_MODE_THREE_POINT_SPLINE := &"handle_path_3_point_spline"
+const HANDLE_PATH_MODE_THREE_POINT_LINEAR := &"handle_path_3_point_linear"
+const HANDLE_PATH_MODE_TWO_POINT_LINEAR := &"handle_path_2_point_linear"
+const HANDLE_THREE_POINT_COUNT := 3
+const HANDLE_TWO_POINT_COUNT := 2
 const HANDLE_MIN_AXIAL_SPAN_METERS := (
 	ForgeV2ProfileShapeLibraryScript.DEFAULT_CELL_WORLD_SIZE_METERS * 20.0
 )
@@ -61,6 +65,13 @@ const BOUNDED_HISTORY_TRANSITION_RESTORE := &"restore"
 const BOUNDED_HISTORY_TRANSITION_FALLBACK := &"fallback_full_refresh"
 const BOUNDED_HISTORY_TRANSITION_PROTECTED_CHANGED := &"protected_changed"
 const BOUNDED_HISTORY_SUSPENDED_NONE := &"none"
+const EDITOR_TRANSIENT_SNAPSHOT_SCHEMA_ID := (
+	&"forge_v2_editor_transient_snapshot_v1"
+)
+const PENDING_BODY_BUNDLE_SCHEMA_ID := &"forge_v2_pending_body_bundle_v1"
+const PROTECTED_HANDLE_SNAPSHOT_SCHEMA_ID := (
+	&"forge_v2_protected_handle_snapshot_v1"
+)
 
 @export var schema_version: int = SCHEMA_VERSION
 @export var schema_id: StringName = SCHEMA_ID
@@ -93,6 +104,10 @@ const BOUNDED_HISTORY_SUSPENDED_NONE := &"none"
 @export var active_handle_corner_radius_meters: float = ForgeV2ProfileShapeLibraryScript.HANDLE_DEFAULT_CORNER_RADIUS_METERS
 @export var active_handle_control_points_2d_meters: PackedVector2Array = PackedVector2Array()
 @export var active_handle_grid_snapping_enabled: bool = false
+@export var active_handle_source_profile_id: StringName = StringName()
+@export var active_handle_path_mode_id: StringName = (
+	HANDLE_PATH_MODE_THREE_POINT_SPLINE
+)
 @export var active_basic_control_points_2d_meters: PackedVector2Array = PackedVector2Array()
 @export var active_basic_corner_metadata: Array[Dictionary] = []
 @export var active_basic_next_corner_serial: int = 1
@@ -143,6 +158,13 @@ var _bounded_history_pending_promotion: Dictionary = {}
 var _bounded_history_checkpoint_export_provider: Callable = Callable()
 var _runtime_contract_mesh_export_provider: Callable = Callable()
 var _bounded_history_normalized_once: bool = false
+var _handle_change_original_body: Resource = null
+var _handle_change_original_body_index: int = -1
+var _handle_change_original_protected_layer: Resource = null
+var _handle_change_original_protected_layer_index: int = -1
+var _handle_change_initial_profile_signature: String = ""
+var _handle_change_source_profile_id: StringName = StringName()
+var _handle_change_last_reason: StringName = &"none"
 
 func reset_new_draft(next_project_name: String = "Stage 1 V2 Draft") -> void:
 	_reset_committed_volume_cache(&"new_draft")
@@ -177,6 +199,8 @@ func reset_new_draft(next_project_name: String = "Stage 1 V2 Draft") -> void:
 	active_handle_corner_radius_meters = ForgeV2ProfileShapeLibraryScript.HANDLE_DEFAULT_CORNER_RADIUS_METERS
 	active_handle_control_points_2d_meters = PackedVector2Array()
 	active_handle_grid_snapping_enabled = false
+	active_handle_source_profile_id = StringName()
+	active_handle_path_mode_id = HANDLE_PATH_MODE_THREE_POINT_SPLINE
 	active_basic_control_points_2d_meters = PackedVector2Array()
 	active_basic_corner_metadata = []
 	active_basic_next_corner_serial = 1
@@ -208,6 +232,7 @@ func reset_new_draft(next_project_name: String = "Stage 1 V2 Draft") -> void:
 	_bounded_history_transition = {}
 	_bounded_history_pending_promotion = {}
 	_bounded_history_normalized_once = false
+	_clear_handle_change_transaction()
 	_mark_material_usage_summary_dirty()
 	normalize()
 
@@ -235,6 +260,9 @@ func normalize() -> void:
 		authoring_space_id = AUTHORING_SPACE_WORLD_3D
 	if not _is_valid_tool_id(active_tool_id):
 		active_tool_id = TOOL_VOLUME_STROKE
+	active_handle_path_mode_id = _normalize_handle_path_mode_id(
+		active_handle_path_mode_id
+	)
 	active_primitive_id = ForgeV2PrimitiveCatalogScript.normalize_primitive_id(active_primitive_id)
 	_normalize_active_basic_shape_authority()
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.normalize_profile_id(active_profile_id, _get_active_profile_family())
@@ -248,6 +276,7 @@ func normalize() -> void:
 	active_amount_ratio = _normalize_amount_ratio(active_amount_ratio)
 	_migrate_legacy_surface_contact_authority(loaded_schema_version)
 	_normalize_material_bodies()
+	_normalize_active_handle_path_mode_from_body()
 	_ensure_platform_seed_bodies()
 	_normalize_volume_strokes()
 	_normalize_spline_line()
@@ -267,6 +296,444 @@ func normalize() -> void:
 	):
 		_rebuild_material_ledger()
 	_normalize_selected_material_body_id()
+
+func capture_editor_transient_snapshot() -> Dictionary:
+	# This is deliberately not an authoring-state duplicate. Undoing a point or
+	# profile edit must never retain the CSG body stack, layers, ledger, or baked
+	# checkpoint through an otherwise lightweight editor action.
+	return {
+		"schema_id": EDITOR_TRANSIENT_SNAPSHOT_SCHEMA_ID,
+		"schema_version": 1,
+		"active_tool_id": active_tool_id,
+		"active_basic_shape_source_id": active_basic_shape_source_id,
+		"active_saved_basic_profile_id": active_saved_basic_profile_id,
+		"active_saved_basic_profile_data": (
+			active_saved_basic_profile_data.duplicate(true)
+		),
+		"active_profile_id": active_profile_id,
+		"active_profile_width_meters": active_profile_width_meters,
+		"active_profile_height_meters": active_profile_height_meters,
+		"active_profile_anchor_x_meters": active_profile_anchor_x_meters,
+		"active_profile_anchor_y_meters": active_profile_anchor_y_meters,
+		"active_profile_rotation_degrees": active_profile_rotation_degrees,
+		"active_profile_display_name": active_profile_display_name,
+		"active_handle_face_count": active_handle_face_count,
+		"active_handle_rounding_enabled": active_handle_rounding_enabled,
+		"active_handle_corner_radius_meters": (
+			active_handle_corner_radius_meters
+		),
+		"active_handle_control_points_2d_meters": (
+			active_handle_control_points_2d_meters.duplicate()
+		),
+		"active_handle_grid_snapping_enabled": (
+			active_handle_grid_snapping_enabled
+		),
+		"active_handle_source_profile_id": active_handle_source_profile_id,
+		"active_handle_path_mode_id": active_handle_path_mode_id,
+		"active_basic_control_points_2d_meters": (
+			active_basic_control_points_2d_meters.duplicate()
+		),
+		"active_basic_corner_metadata": _duplicate_basic_corner_metadata(),
+		"active_basic_next_corner_serial": active_basic_next_corner_serial,
+		"active_basic_grid_snapping_enabled": (
+			active_basic_grid_snapping_enabled
+		),
+		"spline_line_points": spline_line_points.duplicate(),
+		"spline_line_surface_normals": (
+			spline_line_surface_normals.duplicate()
+		),
+		"spline_line_finished": spline_line_finished,
+		"selected_spline_point_index": selected_spline_point_index,
+		"spline_line_csg_noodle_enabled": spline_line_csg_noodle_enabled,
+		"detailing_surface_target_kind": detailing_surface_target_kind,
+		"detailing_surface_target_id": detailing_surface_target_id,
+		"detailing_control_contact_directions": (
+			detailing_control_contact_directions.duplicate()
+		),
+		"detailing_resolved_path_points": (
+			detailing_resolved_path_points.duplicate()
+		),
+		"detailing_resolved_surface_normals": (
+			detailing_resolved_surface_normals.duplicate()
+		),
+		"detailing_resolved_contact_directions": (
+			detailing_resolved_contact_directions.duplicate()
+		),
+		"detailing_span_offsets": detailing_span_offsets.duplicate(),
+		"detailing_span_validity": detailing_span_validity.duplicate(),
+		"detailing_span_reasons": detailing_span_reasons.duplicate(),
+		"detailing_solution_valid": detailing_solution_valid,
+		"detailing_solution_reason": detailing_solution_reason,
+	}
+
+func restore_editor_transient_snapshot(snapshot: Dictionary) -> bool:
+	if (
+		StringName(snapshot.get("schema_id", StringName()))
+		!= EDITOR_TRANSIENT_SNAPSHOT_SCHEMA_ID
+		or int(snapshot.get("schema_version", 0)) != 1
+	):
+		return false
+	var restored_basic_corner_metadata: Array[Dictionary] = []
+	for metadata_variant: Variant in snapshot.get(
+		"active_basic_corner_metadata",
+		[]
+	) as Array:
+		if not metadata_variant is Dictionary:
+			return false
+		restored_basic_corner_metadata.append(
+			(metadata_variant as Dictionary).duplicate(true)
+		)
+	var restored_span_validity: Array[bool] = []
+	for validity_variant: Variant in snapshot.get(
+		"detailing_span_validity",
+		[]
+	) as Array:
+		restored_span_validity.append(bool(validity_variant))
+	var restored_span_reasons: Array[StringName] = []
+	for reason_variant: Variant in snapshot.get(
+		"detailing_span_reasons",
+		[]
+	) as Array:
+		restored_span_reasons.append(StringName(reason_variant))
+
+	# Assign directly so restoring editor data cannot cancel a Handle-change
+	# transaction or publish a material-history transition through a setter.
+	active_tool_id = StringName(snapshot.get("active_tool_id", TOOL_VOLUME_STROKE))
+	if not _is_valid_tool_id(active_tool_id):
+		active_tool_id = TOOL_VOLUME_STROKE
+	active_basic_shape_source_id = StringName(snapshot.get(
+		"active_basic_shape_source_id",
+		BASIC_SHAPE_SOURCE_PRIMITIVE
+	))
+	active_saved_basic_profile_id = StringName(snapshot.get(
+		"active_saved_basic_profile_id",
+		StringName()
+	))
+	active_saved_basic_profile_data = (
+		(snapshot.get("active_saved_basic_profile_data", {}) as Dictionary)
+		.duplicate(true)
+	)
+	active_profile_id = StringName(snapshot.get(
+		"active_profile_id",
+		StringName()
+	))
+	active_profile_width_meters = float(snapshot.get(
+		"active_profile_width_meters",
+		0.0
+	))
+	active_profile_height_meters = float(snapshot.get(
+		"active_profile_height_meters",
+		0.0
+	))
+	active_profile_anchor_x_meters = float(snapshot.get(
+		"active_profile_anchor_x_meters",
+		0.0
+	))
+	active_profile_anchor_y_meters = float(snapshot.get(
+		"active_profile_anchor_y_meters",
+		0.0
+	))
+	active_profile_rotation_degrees = float(snapshot.get(
+		"active_profile_rotation_degrees",
+		0.0
+	))
+	active_profile_display_name = String(snapshot.get(
+		"active_profile_display_name",
+		""
+	))
+	active_handle_face_count = int(snapshot.get(
+		"active_handle_face_count",
+		ForgeV2ProfileShapeLibraryScript.HANDLE_FACE_COUNT_RECTANGLE
+	))
+	active_handle_rounding_enabled = bool(snapshot.get(
+		"active_handle_rounding_enabled",
+		true
+	))
+	active_handle_corner_radius_meters = float(snapshot.get(
+		"active_handle_corner_radius_meters",
+		ForgeV2ProfileShapeLibraryScript.HANDLE_DEFAULT_CORNER_RADIUS_METERS
+	))
+	active_handle_control_points_2d_meters = (
+		(snapshot.get(
+			"active_handle_control_points_2d_meters",
+			PackedVector2Array()
+		) as PackedVector2Array).duplicate()
+	)
+	active_handle_grid_snapping_enabled = bool(snapshot.get(
+		"active_handle_grid_snapping_enabled",
+		false
+	))
+	active_handle_source_profile_id = StringName(snapshot.get(
+		"active_handle_source_profile_id",
+		StringName()
+	))
+	active_handle_path_mode_id = _normalize_handle_path_mode_id(StringName(
+		snapshot.get(
+			"active_handle_path_mode_id",
+			HANDLE_PATH_MODE_THREE_POINT_SPLINE
+		)
+	))
+	active_basic_control_points_2d_meters = (
+		(snapshot.get(
+			"active_basic_control_points_2d_meters",
+			PackedVector2Array()
+		) as PackedVector2Array).duplicate()
+	)
+	active_basic_corner_metadata = restored_basic_corner_metadata
+	active_basic_next_corner_serial = int(snapshot.get(
+		"active_basic_next_corner_serial",
+		1
+	))
+	active_basic_grid_snapping_enabled = bool(snapshot.get(
+		"active_basic_grid_snapping_enabled",
+		false
+	))
+	spline_line_points = (
+		(snapshot.get("spline_line_points", PackedVector3Array())
+		as PackedVector3Array).duplicate()
+	)
+	spline_line_surface_normals = (
+		(snapshot.get("spline_line_surface_normals", PackedVector3Array())
+		as PackedVector3Array).duplicate()
+	)
+	spline_line_finished = bool(snapshot.get("spline_line_finished", false))
+	selected_spline_point_index = int(snapshot.get(
+		"selected_spline_point_index",
+		-1
+	))
+	spline_line_csg_noodle_enabled = bool(snapshot.get(
+		"spline_line_csg_noodle_enabled",
+		false
+	))
+	detailing_surface_target_kind = StringName(snapshot.get(
+		"detailing_surface_target_kind",
+		StringName()
+	))
+	detailing_surface_target_id = StringName(snapshot.get(
+		"detailing_surface_target_id",
+		StringName()
+	))
+	detailing_control_contact_directions = (
+		(snapshot.get(
+			"detailing_control_contact_directions",
+			PackedVector3Array()
+		) as PackedVector3Array).duplicate()
+	)
+	detailing_resolved_path_points = (
+		(snapshot.get(
+			"detailing_resolved_path_points",
+			PackedVector3Array()
+		) as PackedVector3Array).duplicate()
+	)
+	detailing_resolved_surface_normals = (
+		(snapshot.get(
+			"detailing_resolved_surface_normals",
+			PackedVector3Array()
+		) as PackedVector3Array).duplicate()
+	)
+	detailing_resolved_contact_directions = (
+		(snapshot.get(
+			"detailing_resolved_contact_directions",
+			PackedVector3Array()
+		) as PackedVector3Array).duplicate()
+	)
+	detailing_span_offsets = (
+		(snapshot.get("detailing_span_offsets", PackedInt32Array())
+		as PackedInt32Array).duplicate()
+	)
+	detailing_span_validity = restored_span_validity
+	detailing_span_reasons = restored_span_reasons
+	detailing_solution_valid = bool(snapshot.get(
+		"detailing_solution_valid",
+		false
+	))
+	detailing_solution_reason = StringName(snapshot.get(
+		"detailing_solution_reason",
+		DETAIL_SOLUTION_REASON_NOT_READY
+	))
+
+	_normalize_active_basic_shape_authority()
+	active_profile_id = ForgeV2ProfileShapeLibraryScript.normalize_profile_id(
+		active_profile_id,
+		_get_active_profile_family()
+	)
+	_normalize_active_profile_settings()
+	_normalize_spline_line()
+	mark_updated()
+	return true
+
+
+## Fast replay lane for the high-frequency spline point actions. It accepts
+## only append/remove-last or replace-in-place Vector3 splices plus the selected
+## point scalar. Broader editor deltas continue through the complete snapshot
+## restorer so this optimization cannot mutate unrelated authoring authority.
+func apply_spline_path_action_delta(
+	delta: Dictionary,
+	use_after: bool
+) -> bool:
+	var changes := delta.get("changes", {}) as Dictionary
+	if changes.is_empty():
+		return false
+	for key_variant: Variant in changes.keys():
+		if String(key_variant) not in [
+			"spline_line_points",
+			"spline_line_surface_normals",
+			"selected_spline_point_index",
+		]:
+			return false
+	var point_change := changes.get("spline_line_points", {}) as Dictionary
+	var normal_change := changes.get(
+		"spline_line_surface_normals",
+		{}
+	) as Dictionary
+	var selection_change := changes.get(
+		"selected_spline_point_index",
+		{}
+	) as Dictionary
+	if (
+		not point_change.is_empty()
+		and not _simple_path_splice_is_valid(
+			spline_line_points,
+			point_change,
+			use_after
+		)
+	):
+		return false
+	if (
+		not normal_change.is_empty()
+		and not _simple_path_splice_is_valid(
+			spline_line_surface_normals,
+			normal_change,
+			use_after
+		)
+	):
+		return false
+	if not selection_change.is_empty():
+		if StringName(selection_change.get("mode", StringName())) != &"replace":
+			return false
+		var source_selection := int(selection_change.get(
+			"before" if use_after else "after",
+			-2
+		))
+		if selected_spline_point_index != source_selection:
+			return false
+	var next_point_count := (
+		int(point_change.get(
+			"after_size" if use_after else "before_size",
+			spline_line_points.size()
+		))
+		if not point_change.is_empty()
+		else spline_line_points.size()
+	)
+	var next_normal_count := (
+		int(normal_change.get(
+			"after_size" if use_after else "before_size",
+			spline_line_surface_normals.size()
+		))
+		if not normal_change.is_empty()
+		else spline_line_surface_normals.size()
+	)
+	if next_point_count != next_normal_count:
+		return false
+	if not point_change.is_empty():
+		_apply_simple_path_splice_to_points(point_change, use_after)
+	if not normal_change.is_empty():
+		_apply_simple_path_splice_to_normals(normal_change, use_after)
+	if not selection_change.is_empty():
+		selected_spline_point_index = int(selection_change.get(
+			"after" if use_after else "before",
+			-1
+		))
+	if spline_line_points.size() != spline_line_surface_normals.size():
+		return false
+	mark_updated()
+	return true
+
+
+func _simple_path_splice_is_valid(
+	current: PackedVector3Array,
+	change: Dictionary,
+	use_after: bool
+) -> bool:
+	if (
+		StringName(change.get("mode", StringName())) != &"splice"
+		or int(change.get("sequence_type", TYPE_NIL))
+		!= TYPE_PACKED_VECTOR3_ARRAY
+	):
+		return false
+	var prefix_count := int(change.get("prefix_count", -1))
+	var suffix_count := int(change.get("suffix_count", -1))
+	var source_middle := change.get(
+		"before_middle" if use_after else "after_middle",
+		[]
+	) as Array
+	var target_middle := change.get(
+		"after_middle" if use_after else "before_middle",
+		[]
+	) as Array
+	var expected_size := int(change.get(
+		"before_size" if use_after else "after_size",
+		-1
+	))
+	if (
+		prefix_count < 0
+		or suffix_count < 0
+		or current.size() != expected_size
+		or prefix_count + suffix_count + source_middle.size()
+		!= current.size()
+		or source_middle.size() > 1
+		or target_middle.size() > 1
+	):
+		return false
+	for middle_index in range(source_middle.size()):
+		if current[prefix_count + middle_index] != source_middle[middle_index]:
+			return false
+	var target_size := prefix_count + suffix_count + target_middle.size()
+	if target_size == current.size():
+		return source_middle.size() == 1 and target_middle.size() == 1
+	return suffix_count == 0 and abs(target_size - current.size()) == 1
+
+
+func _apply_simple_path_splice_to_points(
+	change: Dictionary,
+	use_after: bool
+) -> void:
+	var prefix_count := int(change.get("prefix_count", 0))
+	var target_middle := change.get(
+		"after_middle" if use_after else "before_middle",
+		[]
+	) as Array
+	var target_size := int(change.get(
+		"after_size" if use_after else "before_size",
+		0
+	))
+	if target_size < spline_line_points.size():
+		spline_line_points.resize(target_size)
+	elif target_size > spline_line_points.size():
+		spline_line_points.append(target_middle[0] as Vector3)
+	else:
+		spline_line_points[prefix_count] = target_middle[0] as Vector3
+
+
+func _apply_simple_path_splice_to_normals(
+	change: Dictionary,
+	use_after: bool
+) -> void:
+	var prefix_count := int(change.get("prefix_count", 0))
+	var target_middle := change.get(
+		"after_middle" if use_after else "before_middle",
+		[]
+	) as Array
+	var target_size := int(change.get(
+		"after_size" if use_after else "before_size",
+		0
+	))
+	if target_size < spline_line_surface_normals.size():
+		spline_line_surface_normals.resize(target_size)
+	elif target_size > spline_line_surface_normals.size():
+		spline_line_surface_normals.append(target_middle[0] as Vector3)
+	else:
+		spline_line_surface_normals[prefix_count] = target_middle[0] as Vector3
 
 func set_builder_path(next_builder_path_id: StringName, next_builder_component_id: StringName = StringName()) -> void:
 	builder_path_id = CraftedItemWIPScript.normalize_builder_path_id(next_builder_path_id)
@@ -344,9 +811,62 @@ func set_active_tool_id(next_tool_id: StringName) -> void:
 	_normalize_spline_line()
 	mark_updated()
 
+func set_active_handle_path_mode_id(next_mode_id: StringName) -> bool:
+	_normalize_spline_line()
+	var resolved_mode_id := _normalize_handle_path_mode_id(next_mode_id)
+	if active_handle_path_mode_id == resolved_mode_id:
+		return false
+	var previous_required_point_count := get_active_handle_required_point_count()
+	active_handle_path_mode_id = resolved_mode_id
+	_convert_handle_path_point_count(
+		previous_required_point_count,
+		get_active_handle_required_point_count()
+	)
+	_normalize_spline_line()
+	mark_updated()
+	return true
+
+func get_handle_path_mode_options() -> Array[Dictionary]:
+	return [
+		{
+			"id": HANDLE_PATH_MODE_THREE_POINT_SPLINE,
+			"label": "3 point spline",
+		},
+		{
+			"id": HANDLE_PATH_MODE_THREE_POINT_LINEAR,
+			"label": "3 point linear",
+		},
+		{
+			"id": HANDLE_PATH_MODE_TWO_POINT_LINEAR,
+			"label": "2 point linear",
+		},
+	]
+
+func get_active_handle_path_mode_label() -> String:
+	for option: Dictionary in get_handle_path_mode_options():
+		if StringName(option.get("id", StringName())) == active_handle_path_mode_id:
+			return String(option.get("label", "3 point spline"))
+	return "3 point spline"
+
+func get_active_handle_required_point_count() -> int:
+	return (
+		HANDLE_TWO_POINT_COUNT
+		if active_handle_path_mode_id == HANDLE_PATH_MODE_TWO_POINT_LINEAR
+		else HANDLE_THREE_POINT_COUNT
+	)
+
+func get_active_handle_path_shape_kind() -> StringName:
+	return (
+		ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
+		if active_handle_path_mode_id == HANDLE_PATH_MODE_THREE_POINT_SPLINE
+		else ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
+	)
+
 func set_active_profile_id(next_profile_id: StringName) -> void:
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.normalize_profile_id(next_profile_id, _get_active_profile_family())
 	active_profile_display_name = ""
+	if active_tool_id == TOOL_HANDLES:
+		active_handle_source_profile_id = StringName()
 	_reset_active_profile_dimensions_to_natural()
 	_normalize_active_profile_settings()
 	mark_updated()
@@ -359,6 +879,7 @@ func reset_active_handle_profile_builder() -> void:
 	_assign_active_tool_id(TOOL_HANDLES)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_HANDLE_BUILDER
 	active_profile_display_name = ""
+	active_handle_source_profile_id = StringName()
 	active_profile_width_meters = ForgeV2ProfileShapeLibraryScript.HANDLE_DEFAULT_WIDTH_METERS
 	active_profile_height_meters = ForgeV2ProfileShapeLibraryScript.HANDLE_DEFAULT_HEIGHT_METERS
 	active_profile_anchor_x_meters = 0.0
@@ -723,6 +1244,10 @@ func apply_tool_profile_preset(profile_data: Dictionary) -> bool:
 		ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_HANDLE:
 			_assign_active_tool_id(TOOL_HANDLES)
 			active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_HANDLE_BUILDER
+			active_handle_source_profile_id = StringName(profile_data.get(
+				"profile_id",
+				profile_data.get("id", StringName())
+			))
 			active_profile_display_name = String(profile_data.get("label", ""))
 			active_handle_face_count = ForgeV2ProfileShapeLibraryScript.normalize_handle_face_count(int(profile_data.get("face_count", active_handle_face_count)))
 			active_handle_rounding_enabled = bool(profile_data.get("rounded_enabled", active_handle_rounding_enabled))
@@ -1096,12 +1621,620 @@ func clear_volume_strokes() -> void:
 	clear_pending_material_bodies()
 
 func clear_pending_material_bodies() -> void:
+	var cancelled_handle_change := false
+	if is_handle_change_active():
+		cancelled_handle_change = cancel_handle_change()
 	_remove_pending_user_material_bodies()
 	volume_strokes = []
 	selected_material_body_id = StringName()
 	spline_line_csg_noodle_enabled = false
 	_mark_material_usage_summary_dirty()
+	if cancelled_handle_change:
+		_publish_bounded_history_transition(
+			BOUNDED_HISTORY_TRANSITION_PROTECTED_CHANGED,
+			null,
+			[]
+		)
 	mark_updated()
+
+func capture_pending_body_bundle(body_id: StringName) -> Dictionary:
+	var body := _find_material_body_by_id(body_id)
+	if not _is_pending_user_material_body(body):
+		return {
+			"ok": false,
+			"reason": &"pending_body_missing_or_not_editable",
+		}
+	var body_copy := body.duplicate(true) as Resource
+	if body_copy == null:
+		return {
+			"ok": false,
+			"reason": &"pending_body_duplicate_failed",
+		}
+	var source_record_id := StringName(body.get("source_record_id"))
+	var source_stroke: Resource = null
+	var source_stroke_index := -1
+	if source_record_id != StringName():
+		for stroke_index in range(volume_strokes.size()):
+			var candidate_stroke: Resource = volume_strokes[stroke_index]
+			if (
+				candidate_stroke != null
+				and StringName(candidate_stroke.get("stroke_id"))
+				== source_record_id
+			):
+				source_stroke = candidate_stroke
+				source_stroke_index = stroke_index
+				break
+	var source_stroke_copy: Resource = null
+	if source_stroke != null:
+		source_stroke_copy = source_stroke.duplicate(true) as Resource
+		if source_stroke_copy == null:
+			return {
+				"ok": false,
+				"reason": &"pending_source_stroke_duplicate_failed",
+			}
+	return {
+		"ok": true,
+		"reason": &"captured",
+		"schema_id": PENDING_BODY_BUNDLE_SCHEMA_ID,
+		"schema_version": 1,
+		"body_id": body_id,
+		"body": body_copy,
+		"body_index": material_bodies.find(body),
+		"source_stroke": source_stroke_copy,
+		"source_stroke_index": source_stroke_index,
+		"was_selected": selected_material_body_id == body_id,
+	}
+
+func remove_pending_body_bundle(body_id: StringName) -> bool:
+	var body := _find_material_body_by_id(body_id)
+	if not _is_pending_user_material_body(body):
+		return false
+	var body_index := material_bodies.find(body)
+	if body_index < 0:
+		return false
+	var source_record_id := StringName(body.get("source_record_id"))
+	var source_stroke := _find_volume_stroke_by_id(source_record_id)
+	var source_stroke_index := (
+		volume_strokes.find(source_stroke) if source_stroke != null else -1
+	)
+	var was_selected := selected_material_body_id == body_id
+	material_bodies.remove_at(body_index)
+	if source_stroke_index >= 0:
+		volume_strokes.remove_at(source_stroke_index)
+	if was_selected:
+		selected_material_body_id = StringName()
+		select_last_user_material_body()
+	else:
+		_normalize_selected_material_body_id()
+	_reset_committed_volume_cache(&"pending_body_bundle_removed")
+	_mark_material_usage_summary_dirty()
+	mark_updated()
+	return true
+
+func restore_pending_body_bundle(bundle: Dictionary) -> bool:
+	if (
+		StringName(bundle.get("schema_id", StringName()))
+		!= PENDING_BODY_BUNDLE_SCHEMA_ID
+		or int(bundle.get("schema_version", 0)) != 1
+		or not bool(bundle.get("ok", false))
+	):
+		return false
+	var captured_body := bundle.get("body", null) as Resource
+	if captured_body == null:
+		return false
+	var body := captured_body.duplicate(true) as Resource
+	if body == null or not _is_pending_user_material_body(body):
+		return false
+	var body_id := StringName(body.get("body_id"))
+	if (
+		body_id == StringName()
+		or body_id != StringName(bundle.get("body_id", StringName()))
+		or _find_material_body_by_id(body_id) != null
+	):
+		return false
+	if (
+		_is_user_handle_material_body(body)
+		and (
+			has_handle_material_body()
+			or is_handle_change_active()
+		)
+	):
+		return false
+	var captured_stroke := bundle.get("source_stroke", null) as Resource
+	var source_stroke: Resource = null
+	if captured_stroke != null:
+		source_stroke = captured_stroke.duplicate(true) as Resource
+		if source_stroke == null:
+			return false
+		var stroke_id := StringName(source_stroke.get("stroke_id"))
+		if (
+			stroke_id == StringName()
+			or stroke_id != StringName(body.get("source_record_id"))
+			or _find_volume_stroke_by_id(stroke_id) != null
+		):
+			return false
+	if body.has_method("normalize"):
+		body.call("normalize")
+	if not _is_pending_user_material_body(body):
+		return false
+	if source_stroke != null and source_stroke.has_method("normalize"):
+		source_stroke.call("normalize")
+	var body_insert_index := clampi(
+		int(bundle.get("body_index", material_bodies.size())),
+		0,
+		material_bodies.size()
+	)
+	material_bodies.insert(body_insert_index, body)
+	if source_stroke != null:
+		var stroke_insert_index := clampi(
+			int(bundle.get("source_stroke_index", volume_strokes.size())),
+			0,
+			volume_strokes.size()
+		)
+		volume_strokes.insert(stroke_insert_index, source_stroke)
+	if bool(bundle.get("was_selected", false)):
+		selected_material_body_id = body_id
+	else:
+		_normalize_selected_material_body_id()
+	_reset_committed_volume_cache(&"pending_body_bundle_restored")
+	_mark_material_usage_summary_dirty()
+	mark_updated()
+	return true
+
+func get_handle_material_body_count() -> int:
+	var handle_count := _collect_live_handle_material_bodies().size()
+	if is_handle_change_active():
+		handle_count += 1
+	return handle_count
+
+func has_handle_material_body() -> bool:
+	return get_handle_material_body_count() > 0
+
+func is_handle_change_active() -> bool:
+	return (
+		_handle_change_original_body != null
+		and is_instance_valid(_handle_change_original_body)
+	)
+
+func get_handle_change_source_profile_id() -> StringName:
+	return (
+		_handle_change_source_profile_id
+		if is_handle_change_active()
+		else active_handle_source_profile_id
+	)
+
+func begin_handle_change() -> Dictionary:
+	if is_handle_change_active():
+		return {
+			"ok": true,
+			"reason": &"already_editing_handle",
+			"handle_change_active": true,
+			"handle_source_profile_id": get_handle_change_source_profile_id(),
+		}
+	var handles := _collect_live_handle_material_bodies()
+	if handles.is_empty():
+		_handle_change_last_reason = &"handle_missing"
+		return {
+			"ok": false,
+			"reason": _handle_change_last_reason,
+			"handle_change_active": false,
+			"handle_source_profile_id": StringName(),
+		}
+	if handles.size() != 1:
+		_handle_change_last_reason = &"multiple_handles_require_manual_recovery"
+		return {
+			"ok": false,
+			"reason": _handle_change_last_reason,
+			"handle_change_active": false,
+			"handle_source_profile_id": StringName(),
+		}
+	var original_body: Resource = handles[0]
+	var original_body_index := material_bodies.find(original_body)
+	if original_body_index < 0:
+		_handle_change_last_reason = &"handle_body_not_in_material_stack"
+		return {
+			"ok": false,
+			"reason": _handle_change_last_reason,
+			"handle_change_active": false,
+			"handle_source_profile_id": StringName(),
+		}
+	var original_layer: Resource = null
+	var original_layer_index := -1
+	if _is_material_body_committed(original_body):
+		var original_body_id := StringName(original_body.get("body_id"))
+		for layer_index in range(protected_forge_layers.size()):
+			var candidate_layer: Resource = protected_forge_layers[layer_index]
+			if candidate_layer == null:
+				continue
+			var candidate_body_ids: Array = candidate_layer.get("body_ids") as Array
+			if candidate_body_ids.has(original_body_id):
+				original_layer = candidate_layer
+				original_layer_index = layer_index
+				break
+		if original_layer == null:
+			_handle_change_last_reason = &"committed_handle_layer_missing"
+			return {
+				"ok": false,
+				"reason": _handle_change_last_reason,
+				"handle_change_active": false,
+				"handle_source_profile_id": StringName(),
+			}
+		var original_layer_body_ids: Array = original_layer.get("body_ids") as Array
+		if original_layer_body_ids.size() != 1:
+			_handle_change_last_reason = &"committed_handle_layer_not_unique"
+			return {
+				"ok": false,
+				"reason": _handle_change_last_reason,
+				"handle_change_active": false,
+				"handle_source_profile_id": StringName(),
+			}
+	_handle_change_original_body = original_body
+	_handle_change_original_body_index = original_body_index
+	_handle_change_original_protected_layer = original_layer
+	_handle_change_original_protected_layer_index = original_layer_index
+	_clear_spline_transient_state()
+	_seed_handle_editor_from_body(original_body)
+	_handle_change_initial_profile_signature = _build_active_handle_profile_signature()
+	_handle_change_source_profile_id = active_handle_source_profile_id
+	material_bodies.remove_at(original_body_index)
+	if original_layer_index >= 0:
+		protected_forge_layers.remove_at(original_layer_index)
+		_rebuild_material_ledger()
+	else:
+		_reset_committed_volume_cache(&"pending_handle_change_started")
+	selected_material_body_id = StringName()
+	_mark_material_usage_summary_dirty()
+	_handle_change_last_reason = &"editing_handle"
+	_publish_bounded_history_transition(
+		BOUNDED_HISTORY_TRANSITION_PROTECTED_CHANGED,
+		null,
+		[]
+	)
+	mark_updated()
+	return {
+		"ok": true,
+		"reason": _handle_change_last_reason,
+		"handle_change_active": true,
+		"handle_source_profile_id": _handle_change_source_profile_id,
+	}
+
+func apply_handle_change() -> Dictionary:
+	if not is_handle_change_active():
+		_handle_change_last_reason = &"handle_change_not_active"
+		return {
+			"ok": false,
+			"reason": _handle_change_last_reason,
+			"handle_change_active": false,
+		}
+	_normalize_spline_line()
+	var required_point_count := get_active_handle_required_point_count()
+	if spline_line_points.size() != required_point_count:
+		_handle_change_last_reason = &"handle_path_point_count_incomplete"
+		return {
+			"ok": false,
+			"reason": _handle_change_last_reason,
+			"handle_change_active": true,
+		}
+	if not _handle_endpoint_span_meets_minimum(spline_line_points):
+		_handle_change_last_reason = &"handle_endpoint_span_below_minimum"
+		return {
+			"ok": false,
+			"reason": _handle_change_last_reason,
+			"handle_change_active": true,
+		}
+	var compiled_handle_profile := build_active_tool_profile_preset_data(
+		_resolve_handle_profile_snapshot_name()
+	)
+	var handle_runtime := compiled_handle_profile.get(
+		"compiled_profile",
+		{}
+	) as Dictionary
+	if not bool(handle_runtime.get("valid", false)):
+		_handle_change_last_reason = &"handle_profile_invalid"
+		return {
+			"ok": false,
+			"reason": _handle_change_last_reason,
+			"handle_change_active": true,
+		}
+	var original_body := _handle_change_original_body
+	var profile_unchanged := (
+		_build_active_handle_profile_signature()
+		== _handle_change_initial_profile_signature
+	)
+	var replacement_body: Resource = null
+	if profile_unchanged:
+		replacement_body = original_body.duplicate(true) as Resource
+		if replacement_body != null:
+			replacement_body.set("body_id", StringName())
+			replacement_body.set(
+				"source_record_id",
+				StringName("v2_handle_change_%s" % str(Time.get_ticks_usec()))
+			)
+			replacement_body.set("committed_layer_id", StringName())
+			replacement_body.set("layer_active", true)
+			replacement_body.set(
+				"shape_kind",
+				get_active_handle_path_shape_kind()
+			)
+			replacement_body.set("path_points", spline_line_points)
+			replacement_body.set(
+				"path_surface_normals",
+				spline_line_surface_normals
+			)
+			replacement_body.set("material_variant_id", active_material_variant_id)
+			replacement_body.set("builder_path_id", builder_path_id)
+			replacement_body.set("builder_component_id", builder_component_id)
+			replacement_body.set("forge_intent", forge_intent)
+			replacement_body.set("equipment_context", equipment_context)
+			replacement_body.set("profile_display_name", active_profile_display_name)
+			replacement_body.set(
+				"handle_profile_authoring_snapshot",
+				_build_handle_profile_authoring_snapshot(true)
+			)
+			replacement_body.set("created_timestamp", Time.get_unix_time_from_system())
+			replacement_body.set("updated_timestamp", Time.get_unix_time_from_system())
+			if replacement_body.has_method("normalize"):
+				replacement_body.call("normalize")
+			material_bodies.append(replacement_body)
+	else:
+		replacement_body = _append_profile_extrusion_material_body(true)
+	if replacement_body == null:
+		_handle_change_last_reason = &"handle_replacement_build_failed"
+		return {
+			"ok": false,
+			"reason": _handle_change_last_reason,
+			"handle_change_active": true,
+		}
+	selected_material_body_id = StringName(replacement_body.get("body_id"))
+	_clear_spline_transient_state()
+	_clear_handle_change_transaction()
+	_reset_committed_volume_cache(&"handle_change_applied_pending")
+	_mark_material_usage_summary_dirty()
+	_handle_change_last_reason = &"handle_change_applied_pending"
+	_publish_bounded_history_transition(
+		BOUNDED_HISTORY_TRANSITION_PROTECTED_CHANGED,
+		null,
+		[replacement_body]
+	)
+	mark_updated()
+	return {
+		"ok": true,
+		"reason": _handle_change_last_reason,
+		"handle_change_active": false,
+		"replacement_body_id": selected_material_body_id,
+	}
+
+func cancel_handle_change() -> bool:
+	if not is_handle_change_active():
+		return false
+	var original_body := _handle_change_original_body
+	var original_layer := _handle_change_original_protected_layer
+	var body_insert_index := clampi(
+		_handle_change_original_body_index,
+		0,
+		material_bodies.size()
+	)
+	material_bodies.insert(body_insert_index, original_body)
+	if original_layer != null:
+		var layer_insert_index := clampi(
+			_handle_change_original_protected_layer_index,
+			0,
+			protected_forge_layers.size()
+		)
+		protected_forge_layers.insert(layer_insert_index, original_layer)
+	selected_material_body_id = StringName(original_body.get("body_id"))
+	active_handle_path_mode_id = _resolve_handle_path_mode_id_from_body(
+		original_body
+	)
+	_clear_spline_transient_state()
+	_clear_handle_change_transaction()
+	_rebuild_material_ledger()
+	_mark_material_usage_summary_dirty()
+	_handle_change_last_reason = &"handle_change_cancelled"
+	_publish_bounded_history_transition(
+		BOUNDED_HISTORY_TRANSITION_PROTECTED_CHANGED,
+		original_layer,
+		[original_body]
+	)
+	mark_updated()
+	return true
+
+func capture_protected_handle_snapshot() -> Dictionary:
+	var slot := _resolve_current_protected_handle_slot()
+	if not bool(slot.get("ok", false)):
+		return {
+			"ok": false,
+			"reason": StringName(slot.get(
+				"reason",
+				&"protected_handle_slot_invalid"
+			)),
+		}
+	if bool(slot.get("empty", true)):
+		return {
+			"ok": true,
+			"reason": &"captured_empty",
+			"schema_id": PROTECTED_HANDLE_SNAPSHOT_SCHEMA_ID,
+			"schema_version": 1,
+			"empty": true,
+			"body_id": StringName(),
+			"layer_id": StringName(),
+			"body": null,
+			"layer": null,
+			"body_index": -1,
+			"layer_index": -1,
+			"was_selected": false,
+		}
+	var body := slot.get("body", null) as Resource
+	var layer := slot.get("layer", null) as Resource
+	if body == null or layer == null:
+		return {
+			"ok": false,
+			"reason": &"protected_handle_slot_missing_resources",
+		}
+	var body_copy := body.duplicate(true) as Resource
+	var layer_copy := layer.duplicate(true) as Resource
+	if body_copy == null or layer_copy == null:
+		return {
+			"ok": false,
+			"reason": &"protected_handle_slot_duplicate_failed",
+		}
+	var body_id := StringName(body.get("body_id"))
+	return {
+		"ok": true,
+		"reason": &"captured",
+		"schema_id": PROTECTED_HANDLE_SNAPSHOT_SCHEMA_ID,
+		"schema_version": 1,
+		"empty": false,
+		"body_id": body_id,
+		"layer_id": StringName(layer.get("layer_id")),
+		"body": body_copy,
+		"layer": layer_copy,
+		"body_index": int(slot.get("body_index", -1)),
+		"layer_index": int(slot.get("layer_index", -1)),
+		"was_selected": selected_material_body_id == body_id,
+	}
+
+func restore_protected_handle_snapshot(snapshot: Dictionary) -> bool:
+	if (
+		has_pending_bounded_history_promotion()
+		or is_handle_change_active()
+		or StringName(snapshot.get("schema_id", StringName()))
+		!= PROTECTED_HANDLE_SNAPSHOT_SCHEMA_ID
+		or int(snapshot.get("schema_version", 0)) != 1
+		or not bool(snapshot.get("ok", false))
+	):
+		return false
+	var current_slot := _resolve_current_protected_handle_slot()
+	if not bool(current_slot.get("ok", false)):
+		return false
+	var current_body := current_slot.get("body", null) as Resource
+	var current_layer := current_slot.get("layer", null) as Resource
+	var current_body_index := int(current_slot.get("body_index", -1))
+	var current_layer_index := int(current_slot.get("layer_index", -1))
+	if (
+		(current_body == null) != (current_layer == null)
+		or (
+			current_body != null
+			and (
+				current_body_index < 0
+				or current_body_index >= material_bodies.size()
+				or material_bodies[current_body_index] != current_body
+				or current_layer_index < 0
+				or current_layer_index >= protected_forge_layers.size()
+				or protected_forge_layers[current_layer_index]
+				!= current_layer
+			)
+		)
+	):
+		return false
+	var target_is_empty := bool(snapshot.get("empty", false))
+	var target_body: Resource = null
+	var target_layer: Resource = null
+	var target_body_id := StringName()
+	var target_layer_id := StringName()
+	if not target_is_empty:
+		var captured_body := snapshot.get("body", null) as Resource
+		var captured_layer := snapshot.get("layer", null) as Resource
+		if captured_body == null or captured_layer == null:
+			return false
+		target_body = captured_body.duplicate(true) as Resource
+		target_layer = captured_layer.duplicate(true) as Resource
+		if target_body == null or target_layer == null:
+			return false
+		if target_body.has_method("normalize"):
+			target_body.call("normalize")
+		if target_layer.has_method("normalize"):
+			target_layer.call("normalize")
+		target_body_id = StringName(target_body.get("body_id"))
+		target_layer_id = StringName(target_layer.get("layer_id"))
+		var target_layer_body_ids := target_layer.get("body_ids") as Array
+		if (
+			target_body_id == StringName()
+			or target_layer_id == StringName()
+			or target_body_id
+			!= StringName(snapshot.get("body_id", StringName()))
+			or target_layer_id
+			!= StringName(snapshot.get("layer_id", StringName()))
+			or not _is_user_handle_material_body(target_body)
+			or not _is_material_body_committed(target_body)
+			or not _is_material_body_active(target_body)
+			or StringName(target_body.get("committed_layer_id"))
+			!= target_layer_id
+			or not _is_protected_history_layer(target_layer)
+			or target_layer_body_ids.size() != 1
+			or StringName(target_layer_body_ids[0]) != target_body_id
+		):
+			return false
+
+	var other_live_handles: Array[Resource] = []
+	for candidate_body: Resource in _collect_live_handle_material_bodies():
+		if candidate_body != current_body:
+			other_live_handles.append(candidate_body)
+	if (
+		(not target_is_empty and not other_live_handles.is_empty())
+		or (target_is_empty and other_live_handles.size() > 1)
+	):
+		return false
+	if target_body != null:
+		for candidate_body: Resource in material_bodies:
+			if candidate_body == null or candidate_body == current_body:
+				continue
+			if StringName(candidate_body.get("body_id")) == target_body_id:
+				return false
+		for layer_group: Array[Resource] in [
+			forge_layers,
+			undone_forge_layers,
+			protected_forge_layers,
+		]:
+			for candidate_layer: Resource in layer_group:
+				if candidate_layer == null or candidate_layer == current_layer:
+					continue
+				if StringName(candidate_layer.get("layer_id")) == target_layer_id:
+					return false
+
+	var previous_selected_body_id := selected_material_body_id
+	var removed_selected_body := (
+		current_body != null
+		and previous_selected_body_id
+		== StringName(current_body.get("body_id"))
+	)
+	if current_body != null:
+		material_bodies.remove_at(current_body_index)
+	if current_layer != null:
+		protected_forge_layers.remove_at(current_layer_index)
+	if target_body != null and target_layer != null:
+		var target_body_index := clampi(
+			int(snapshot.get("body_index", material_bodies.size())),
+			0,
+			material_bodies.size()
+		)
+		var target_layer_index := clampi(
+			int(snapshot.get(
+				"layer_index",
+				protected_forge_layers.size()
+			)),
+			0,
+			protected_forge_layers.size()
+		)
+		material_bodies.insert(target_body_index, target_body)
+		protected_forge_layers.insert(target_layer_index, target_layer)
+		if bool(snapshot.get("was_selected", false)) or removed_selected_body:
+			selected_material_body_id = target_body_id
+	else:
+		_normalize_selected_material_body_id()
+	if removed_selected_body and selected_material_body_id == StringName():
+		select_last_user_material_body()
+	else:
+		_normalize_selected_material_body_id()
+	_rebuild_material_ledger()
+	_mark_material_usage_summary_dirty()
+	_publish_bounded_history_transition(
+		BOUNDED_HISTORY_TRANSITION_PROTECTED_CHANGED,
+		target_layer,
+		[target_body] if target_body != null else []
+	)
+	mark_updated()
+	return true
 
 func replace_detailing_brush_path_solution(
 	control_points: PackedVector3Array,
@@ -1199,16 +2332,21 @@ func append_spline_line_point(
 	_normalize_spline_line()
 	if spline_line_finished:
 		return -1
-	if active_tool_id == TOOL_HANDLES and spline_line_points.size() >= HANDLE_REQUIRED_POINT_COUNT:
+	if (
+		active_tool_id == TOOL_HANDLES
+		and has_handle_material_body()
+		and not is_handle_change_active()
+	):
 		return -1
-	var next_points: PackedVector3Array = spline_line_points
-	next_points.append(local_position)
-	spline_line_points = next_points
-	var next_surface_normals: PackedVector3Array = spline_line_surface_normals
-	next_surface_normals.append(
+	if (
+		active_tool_id == TOOL_HANDLES
+		and spline_line_points.size() >= get_active_handle_required_point_count()
+	):
+		return -1
+	spline_line_points.append(local_position)
+	spline_line_surface_normals.append(
 		_normalize_path_surface_normal(local_surface_normal)
 	)
-	spline_line_surface_normals = next_surface_normals
 	selected_spline_point_index = spline_line_points.size() - 1
 	mark_updated()
 	return selected_spline_point_index
@@ -1219,9 +2357,7 @@ func set_spline_line_point(point_index: int, local_position: Vector3) -> bool:
 	_normalize_spline_line()
 	if point_index < 0 or point_index >= spline_line_points.size():
 		return false
-	var next_points: PackedVector3Array = spline_line_points
-	next_points[point_index] = local_position
-	spline_line_points = next_points
+	spline_line_points[point_index] = local_position
 	selected_spline_point_index = point_index
 	mark_updated()
 	return true
@@ -1252,6 +2388,11 @@ func finish_spline_line() -> bool:
 	_normalize_spline_line()
 	if active_tool_id == TOOL_DETAILING_BRUSH and not can_generate_detailing_brush():
 		return false
+	if (
+		active_tool_id == TOOL_HANDLES
+		and spline_line_points.size() != get_active_handle_required_point_count()
+	):
+		return false
 	if spline_line_points.size() < 2 or spline_line_finished:
 		return false
 	spline_line_finished = true
@@ -1260,6 +2401,8 @@ func finish_spline_line() -> bool:
 	return true
 
 func cancel_spline_line() -> bool:
+	if is_handle_change_active():
+		return cancel_handle_change()
 	_normalize_spline_line()
 	if not _has_spline_transient_state():
 		return false
@@ -1280,7 +2423,9 @@ func can_generate_profile_extrusion_from_spline() -> bool:
 	_normalize_spline_line()
 	if active_tool_id != TOOL_HANDLES:
 		return false
-	if spline_line_points.size() != HANDLE_REQUIRED_POINT_COUNT:
+	if has_handle_material_body() and not is_handle_change_active():
+		return false
+	if spline_line_points.size() != get_active_handle_required_point_count():
 		return false
 	if not _handle_endpoint_span_meets_minimum(spline_line_points):
 		return false
@@ -1385,6 +2530,10 @@ func generate_detailing_brush() -> bool:
 
 func generate_profile_extrusion_from_spline() -> bool:
 	_normalize_spline_line()
+	if is_handle_change_active():
+		return bool(apply_handle_change().get("ok", false))
+	if has_handle_material_body():
+		return false
 	if not can_generate_profile_extrusion_from_spline():
 		return false
 	var body: Resource = _append_profile_extrusion_material_body(true)
@@ -1440,9 +2589,10 @@ func get_profile_extrusion_status_label() -> String:
 	if active_tool_id != TOOL_HANDLES:
 		return "Profile extrusion: select Handles"
 	var point_count := spline_line_points.size()
-	if point_count < HANDLE_REQUIRED_POINT_COUNT:
-		return "Handle: needs %d points" % HANDLE_REQUIRED_POINT_COUNT
-	if point_count > HANDLE_REQUIRED_POINT_COUNT:
+	var required_point_count := get_active_handle_required_point_count()
+	if point_count < required_point_count:
+		return "Handle: needs %d points" % required_point_count
+	if point_count > required_point_count:
 		return "Handle: too many points"
 	var endpoint_span := _calculate_handle_endpoint_span(spline_line_points)
 	if not _handle_endpoint_span_meets_minimum(spline_line_points):
@@ -1541,11 +2691,24 @@ func get_spline_line_summary() -> Dictionary:
 		"csg_noodle_radius_meters": get_active_deposition_envelope_radius_meters(),
 		"can_generate_profile_extrusion": can_generate_profile_extrusion_from_spline(),
 		"profile_extrusion_status_label": get_profile_extrusion_status_label(),
+		"handle_path_mode_id": active_handle_path_mode_id,
+		"handle_path_mode_label": get_active_handle_path_mode_label(),
+		"handle_required_point_count": get_active_handle_required_point_count(),
 		"detailing_brush": get_detailing_brush_summary(),
 	}
 
 func commit_pending_material_bodies_as_layer() -> Resource:
 	var pending_bodies: Array[Resource] = _collect_pending_user_material_bodies()
+	var pending_handle_bodies: Array[Resource] = []
+	for pending_body: Resource in pending_bodies:
+		if _is_user_handle_material_body(pending_body):
+			pending_handle_bodies.append(pending_body)
+	if pending_handle_bodies.size() > 1:
+		return null
+	# A Handle owns a protected layer, so commit it independently from ordinary
+	# pending deposition. The save loop will commit the remaining bodies next.
+	if pending_handle_bodies.size() == 1:
+		return _commit_material_bodies_as_layer(pending_handle_bodies)
 	return _commit_material_bodies_as_layer(pending_bodies)
 
 func commit_material_body_as_layer(body_id: StringName) -> Resource:
@@ -1553,6 +2716,34 @@ func commit_material_body_as_layer(body_id: StringName) -> Resource:
 	if body == null or not _is_material_body_commit_ready(body):
 		return null
 	return _commit_material_bodies_as_layer([body])
+
+func commit_material_body_ids_as_layer(
+	body_ids: Array[StringName]
+) -> Resource:
+	if body_ids.is_empty():
+		return null
+	var resolved_bodies: Array[Resource] = []
+	var resolved_body_ids: Array[StringName] = []
+	var seen_body_ids: Dictionary = {}
+	for body_id: StringName in body_ids:
+		if body_id == StringName() or seen_body_ids.has(body_id):
+			return null
+		var body: Resource = _find_material_body_by_id(body_id)
+		if (
+			body == null
+			or _find_editable_material_body(body_id) != body
+			or not _is_material_body_commit_ready(body)
+		):
+			return null
+		var resolved_body_id := StringName(body.get("body_id"))
+		if resolved_body_id != body_id:
+			return null
+		seen_body_ids[body_id] = true
+		resolved_bodies.append(body)
+		resolved_body_ids.append(resolved_body_id)
+	if resolved_body_ids != body_ids:
+		return null
+	return _commit_material_bodies_as_layer(resolved_bodies)
 
 func is_material_body_commit_ready(body_id: StringName) -> bool:
 	return _is_material_body_commit_ready(
@@ -1568,6 +2759,24 @@ func _commit_material_bodies_as_layer(pending_bodies: Array[Resource]) -> Resour
 			commit_ready_bodies.append(body)
 	if commit_ready_bodies.is_empty():
 		return null
+	var committing_handle: Resource = null
+	for commit_ready_body: Resource in commit_ready_bodies:
+		if not _is_user_handle_material_body(commit_ready_body):
+			continue
+		if committing_handle != null:
+			return null
+		committing_handle = commit_ready_body
+	if committing_handle != null:
+		if commit_ready_bodies.size() != 1:
+			return null
+		var committing_handle_id := StringName(committing_handle.get("body_id"))
+		for existing_handle: Resource in _collect_live_handle_material_bodies():
+			if existing_handle == committing_handle:
+				continue
+			if (
+				StringName(existing_handle.get("body_id")) != committing_handle_id
+			):
+				return null
 	if _must_reject_unsupported_bounded_commit(commit_ready_bodies):
 		return null
 	var stages_bounded_promotion := _will_stage_bounded_history_promotion(
@@ -1698,6 +2907,34 @@ func _commit_material_bodies_as_layer(pending_bodies: Array[Resource]) -> Resour
 		)
 	mark_updated()
 	return layer
+
+func peek_latest_undo_layer_id() -> StringName:
+	if has_pending_bounded_history_promotion():
+		return StringName()
+	for layer_index in range(forge_layers.size() - 1, -1, -1):
+		var layer: Resource = forge_layers[layer_index]
+		if layer != null:
+			return StringName(layer.get("layer_id"))
+	return StringName()
+
+func peek_latest_redo_layer_id() -> StringName:
+	if has_pending_bounded_history_promotion():
+		return StringName()
+	for layer_index in range(undone_forge_layers.size() - 1, -1, -1):
+		var layer: Resource = undone_forge_layers[layer_index]
+		if layer != null:
+			return StringName(layer.get("layer_id"))
+	return StringName()
+
+func discard_abandoned_layer_redo() -> bool:
+	if (
+		undone_forge_layers.is_empty()
+		or has_pending_bounded_history_promotion()
+	):
+		return false
+	_discard_abandoned_redo_layers()
+	mark_updated()
+	return true
 
 func undo_latest_layer() -> bool:
 	if forge_layers.is_empty() or has_pending_bounded_history_promotion():
@@ -2277,7 +3514,7 @@ func get_active_tool_label() -> String:
 		TOOL_SPLINE_LINE:
 			return "Spline Line"
 		TOOL_HANDLES:
-			return "Handles"
+			return "Change Handle" if has_handle_material_body() else "Handles"
 		TOOL_DETAILING_BRUSH:
 			return "Detailing Brush"
 		_:
@@ -2295,7 +3532,11 @@ func get_tool_options() -> Array[Dictionary]:
 		},
 		{
 			"id": TOOL_HANDLES,
-			"label": "Handles",
+			"label": (
+				"Change Handle"
+				if has_handle_material_body()
+				else "Handles"
+			),
 		},
 		{
 			"id": TOOL_DETAILING_BRUSH,
@@ -2603,6 +3844,40 @@ func get_material_usage_summary() -> Dictionary:
 	material_usage_summary_cache_dirty = false
 	return material_usage_summary_cache.duplicate(true)
 
+
+func get_material_spatial_usage_summary() -> Dictionary:
+	if has_pending_bounded_history_promotion():
+		return {
+			"ok": false,
+			"reason": &"spatial_usage_bounded_promotion_pending",
+		}
+	var committed_bodies := _collect_committed_active_user_material_bodies()
+	var spatial_resolver := ForgeV2MaterialVolumeResolverScript.new()
+	if _has_bounded_history_checkpoint():
+		var restore_result := spatial_resolver.call(
+			"restore_incremental_committed_cache_from_checkpoint",
+			_get_bounded_history_checkpoint_token(),
+			committed_bodies
+		) as Dictionary
+		if not bool(restore_result.get("ok", false)):
+			return {
+				"ok": false,
+				"reason": StringName(restore_result.get(
+					"reason",
+					&"spatial_usage_checkpoint_restore_failed"
+				)),
+			}
+		return spatial_resolver.call(
+			"build_cached_spatial_usage_summary"
+		) as Dictionary
+	# Pre-checkpoint and legacy-unbounded WIPs are reconstructed once here at
+	# save/bake. Current bounded projects take the checkpoint + retained-tail
+	# path above; this compatibility path never enters the per-stroke hot loop.
+	return spatial_resolver.call(
+		"build_spatial_usage_summary",
+		committed_bodies
+	) as Dictionary
+
 func get_material_usage_label() -> String:
 	return _build_material_usage_label(get_material_usage_summary())
 
@@ -2666,6 +3941,15 @@ func get_status_summary(include_material_usage: bool = true) -> Dictionary:
 		"active_profile": active_profile_id,
 		"active_profile_label": get_active_profile_label(),
 		"active_profile_settings": get_active_profile_settings_summary(),
+		"has_handle_body": has_handle_material_body(),
+		"handle_body_count": get_handle_material_body_count(),
+		"handle_change_active": is_handle_change_active(),
+		"handle_source_profile_id": get_handle_change_source_profile_id(),
+		"handle_change_reason": _handle_change_last_reason,
+		"active_handle_path_mode_id": active_handle_path_mode_id,
+		"active_handle_path_mode_label": get_active_handle_path_mode_label(),
+		"active_handle_required_point_count": get_active_handle_required_point_count(),
+		"handle_path_mode_options": get_handle_path_mode_options(),
 		"profile_options": get_profile_options(),
 		"profile_extrusion_status_label": get_profile_extrusion_status_label(),
 		"can_generate_profile_extrusion": can_generate_profile_extrusion_from_spline(),
@@ -2771,6 +4055,8 @@ func build_authoring_export_snapshot() -> Dictionary:
 		"active_handle_corner_radius_meters": active_handle_corner_radius_meters,
 		"active_handle_control_points_2d_meters": active_handle_control_points_2d_meters,
 		"active_handle_grid_snapping_enabled": active_handle_grid_snapping_enabled,
+		"active_handle_source_profile_id": active_handle_source_profile_id,
+		"active_handle_path_mode_id": active_handle_path_mode_id,
 		"active_basic_control_points_2d_meters": active_basic_control_points_2d_meters,
 		"active_basic_corner_metadata": _duplicate_basic_corner_metadata(),
 		"active_basic_next_corner_serial": active_basic_next_corner_serial,
@@ -3077,14 +4363,18 @@ func _append_profile_extrusion_material_body(is_handle_profile: bool) -> Resourc
 		if is_handle_profile
 		else StringName(profile_record.get("role", ForgeV2ProfileShapeLibraryScript.PROFILE_ROLE_NONE))
 	)
-	return _append_material_body_record(
+	var body := _append_material_body_record(
 		spline_line_points,
 		maxf(
 			active_brush_radius_meters,
 			ForgeV2ProfileShapeLibraryScript.calculate_polygon_max_radius_meters(profile_polygon)
 		),
 		DEFAULT_AMOUNT_RATIO,
-		ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH,
+		(
+			get_active_handle_path_shape_kind()
+			if is_handle_profile
+			else ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
+		),
 		"v2_handle_profile" if is_handle_profile else "v2_profile_extrusion",
 		body_kind,
 		resolved_profile_id,
@@ -3099,6 +4389,13 @@ func _append_profile_extrusion_material_body(is_handle_profile: bool) -> Resourc
 		profile_runtime_schema_version,
 		profile_rotation_bias_degrees
 	)
+	if body != null and is_handle_profile:
+		body.set("profile_display_name", active_profile_display_name)
+		body.set(
+			"handle_profile_authoring_snapshot",
+			_build_handle_profile_authoring_snapshot(false)
+		)
+	return body
 
 func _find_material_body_by_id(body_id: StringName) -> Resource:
 	if body_id == StringName():
@@ -3278,6 +4575,9 @@ func _build_material_body_export_snapshot(body: Resource) -> Dictionary:
 			"profile_rotation_bias_degrees"
 		)),
 		"profile_twist_degrees_per_meter": float(body.get("profile_twist_degrees_per_meter")),
+		"handle_profile_authoring_snapshot": (
+			body.get("handle_profile_authoring_snapshot") as Dictionary
+		).duplicate(true),
 		"amount_ratio": float(body.get("amount_ratio")),
 		"rough_volume_cell_equivalents": float(body.get("rough_volume_cell_equivalents")),
 		"rough_material_centi_units": int(body.get("rough_material_centi_units")),
@@ -3352,6 +4652,26 @@ func _is_material_body_active(body: Resource) -> bool:
 	var layer_active_value: Variant = body.get("layer_active")
 	return not (layer_active_value is bool) or bool(layer_active_value)
 
+func _is_handle_body_path_configuration_valid(body: Resource) -> bool:
+	if body == null:
+		return false
+	var shape_kind := StringName(body.get("shape_kind"))
+	var path_points: PackedVector3Array = body.get("path_points")
+	return (
+		(
+			shape_kind
+			== ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
+			and path_points.size() == HANDLE_THREE_POINT_COUNT
+		)
+		or (
+			shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
+			and path_points.size() in [
+				HANDLE_TWO_POINT_COUNT,
+				HANDLE_THREE_POINT_COUNT,
+			]
+		)
+	)
+
 func _is_material_body_commit_ready(body: Resource) -> bool:
 	if body == null:
 		return false
@@ -3360,7 +4680,7 @@ func _is_material_body_commit_ready(body: Resource) -> bool:
 		StringName(body.get("body_kind"))
 		== ForgeV2MaterialBodyScript.BODY_KIND_HANDLE_PROFILE
 		and (
-			path_points.size() != HANDLE_REQUIRED_POINT_COUNT
+			not _is_handle_body_path_configuration_valid(body)
 			or not _handle_endpoint_span_meets_minimum(path_points)
 		)
 	):
@@ -3392,6 +4712,173 @@ func _is_material_body_commit_ready(body: Resource) -> bool:
 
 func _is_material_body_committed(body: Resource) -> bool:
 	return body != null and StringName(body.get("committed_layer_id")) != StringName()
+
+func _is_pending_user_material_body(body: Resource) -> bool:
+	return (
+		body != null
+		and not _is_material_body_committed(body)
+		and _is_material_body_active(body)
+		and not (
+			body.has_method("is_platform_seed")
+			and bool(body.call("is_platform_seed"))
+		)
+	)
+
+func _is_user_handle_material_body(body: Resource) -> bool:
+	return (
+		body != null
+		and StringName(body.get("body_kind"))
+		== ForgeV2MaterialBodyScript.BODY_KIND_HANDLE_PROFILE
+		and not (
+			body.has_method("is_platform_seed")
+			and bool(body.call("is_platform_seed"))
+		)
+	)
+
+func _collect_live_handle_material_bodies() -> Array[Resource]:
+	var handles: Array[Resource] = []
+	for body: Resource in material_bodies:
+		if (
+			_is_user_handle_material_body(body)
+			and _is_material_body_active(body)
+		):
+			handles.append(body)
+	return handles
+
+func _resolve_handle_profile_snapshot_name() -> String:
+	var resolved_name := active_profile_display_name.strip_edges()
+	if resolved_name.is_empty():
+		resolved_name = "Handle Profile"
+	return resolved_name
+
+func _build_handle_profile_authoring_snapshot(
+	preserved_compiled_geometry: bool
+) -> Dictionary:
+	var snapshot := build_active_tool_profile_preset_data(
+		_resolve_handle_profile_snapshot_name()
+	)
+	snapshot["authoring_snapshot_schema_id"] = &"forge_v2_handle_profile_authoring_v1"
+	snapshot["source_profile_id"] = active_handle_source_profile_id
+	if active_handle_source_profile_id != StringName():
+		snapshot["profile_id"] = active_handle_source_profile_id
+		snapshot["id"] = active_handle_source_profile_id
+	snapshot["profile_id_source"] = active_profile_id
+	snapshot["compiled_geometry_preserved"] = preserved_compiled_geometry
+	return snapshot.duplicate(true)
+
+func _build_active_handle_profile_signature() -> String:
+	return var_to_str({
+		"profile_id_source": active_profile_id,
+		"source_profile_id": active_handle_source_profile_id,
+		"display_name": active_profile_display_name,
+		"width_meters": active_profile_width_meters,
+		"height_meters": active_profile_height_meters,
+		"anchor_x_meters": active_profile_anchor_x_meters,
+		"anchor_y_meters": active_profile_anchor_y_meters,
+		"rotation_degrees": active_profile_rotation_degrees,
+		"face_count": active_handle_face_count,
+		"rounded_enabled": active_handle_rounding_enabled,
+		"corner_radius_meters": active_handle_corner_radius_meters,
+		"control_points_2d_meters": active_handle_control_points_2d_meters,
+		"grid_snapping_enabled": active_handle_grid_snapping_enabled,
+	})
+
+func _seed_handle_editor_from_body(body: Resource) -> void:
+	_assign_active_tool_id(TOOL_HANDLES)
+	active_handle_path_mode_id = _resolve_handle_path_mode_id_from_body(body)
+	active_material_variant_id = StringName(body.get("material_variant_id"))
+	var snapshot := (
+		body.get("handle_profile_authoring_snapshot") as Dictionary
+	).duplicate(true)
+	var snapshot_family := StringName(snapshot.get(
+		"family",
+		StringName()
+	))
+	var snapshot_points: PackedVector2Array = snapshot.get(
+		"control_points_2d_meters",
+		PackedVector2Array()
+	) as PackedVector2Array
+	var has_editable_snapshot := (
+		not snapshot.is_empty()
+		and snapshot_family
+		== ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_HANDLE
+		and snapshot_points.size() in [
+			ForgeV2ProfileShapeLibraryScript.HANDLE_FACE_COUNT_RECTANGLE,
+			ForgeV2ProfileShapeLibraryScript.HANDLE_FACE_COUNT_OCTAGON,
+		]
+	)
+	if has_editable_snapshot:
+		apply_tool_profile_preset(snapshot)
+		active_handle_source_profile_id = StringName(snapshot.get(
+			"source_profile_id",
+			snapshot.get("profile_id", StringName())
+		))
+	else:
+		active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_HANDLE_BUILDER
+		active_profile_display_name = String(body.get("profile_display_name"))
+		active_handle_source_profile_id = StringName(body.get("profile_id"))
+		if (
+			active_handle_source_profile_id
+			== ForgeV2ProfileShapeLibraryScript.PROFILE_HANDLE_BUILDER
+		):
+			active_handle_source_profile_id = StringName()
+		var legacy_polygon: PackedVector2Array = body.get(
+			"profile_polygon_2d_meters"
+		) as PackedVector2Array
+		var legacy_bounds := (
+			ForgeV2ProfileShapeLibraryScript.calculate_polygon_bounds(
+				legacy_polygon
+			)
+		)
+		active_profile_width_meters = maxf(
+			legacy_bounds.size.x,
+			ForgeV2ProfileShapeLibraryScript.HANDLE_DEFAULT_WIDTH_METERS
+		)
+		active_profile_height_meters = maxf(
+			legacy_bounds.size.y,
+			ForgeV2ProfileShapeLibraryScript.HANDLE_DEFAULT_HEIGHT_METERS
+		)
+		active_profile_anchor_x_meters = 0.0
+		active_profile_anchor_y_meters = 0.0
+		active_profile_rotation_degrees = 0.0
+		active_handle_face_count = (
+			ForgeV2ProfileShapeLibraryScript.HANDLE_FACE_COUNT_OCTAGON
+			if legacy_polygon.size()
+			== ForgeV2ProfileShapeLibraryScript.HANDLE_FACE_COUNT_OCTAGON
+			else ForgeV2ProfileShapeLibraryScript.HANDLE_FACE_COUNT_RECTANGLE
+		)
+		active_handle_rounding_enabled = (
+			legacy_polygon.size() > active_handle_face_count
+		)
+		active_handle_corner_radius_meters = (
+			ForgeV2ProfileShapeLibraryScript.HANDLE_DEFAULT_CORNER_RADIUS_METERS
+		)
+		active_handle_control_points_2d_meters = (
+			ForgeV2ProfileShapeLibraryScript.build_default_handle_control_points(
+				active_handle_face_count,
+				active_profile_width_meters,
+				active_profile_height_meters
+			)
+		)
+		_normalize_active_profile_settings()
+	spline_line_points = (
+		body.get("path_points") as PackedVector3Array
+	).duplicate()
+	spline_line_surface_normals = (
+		body.get("path_surface_normals") as PackedVector3Array
+	).duplicate()
+	_normalize_spline_line()
+	spline_line_finished = false
+	selected_spline_point_index = -1
+	spline_line_csg_noodle_enabled = false
+
+func _clear_handle_change_transaction() -> void:
+	_handle_change_original_body = null
+	_handle_change_original_body_index = -1
+	_handle_change_original_protected_layer = null
+	_handle_change_original_protected_layer_index = -1
+	_handle_change_initial_profile_signature = ""
+	_handle_change_source_profile_id = StringName()
 
 func _collect_pending_user_material_bodies() -> Array[Resource]:
 	var pending_bodies: Array[Resource] = []
@@ -3645,6 +5132,73 @@ func _is_protected_history_layer(layer: Resource) -> bool:
 		)) != ForgeV2MaterialBodyScript.BODY_KIND_HANDLE_PROFILE:
 			return false
 	return true
+
+func _resolve_current_protected_handle_slot() -> Dictionary:
+	if is_handle_change_active():
+		return {
+			"ok": false,
+			"reason": &"handle_change_transaction_active",
+		}
+	var live_handles := _collect_live_handle_material_bodies()
+	if live_handles.size() > 1:
+		return {
+			"ok": false,
+			"reason": &"multiple_live_handles",
+		}
+	var handle_layers: Array[Resource] = []
+	for layer: Resource in protected_forge_layers:
+		if _is_protected_history_layer(layer):
+			handle_layers.append(layer)
+	if handle_layers.size() > 1:
+		return {
+			"ok": false,
+			"reason": &"multiple_protected_handle_layers",
+		}
+	var committed_handles: Array[Resource] = []
+	for body: Resource in live_handles:
+		if _is_material_body_committed(body):
+			committed_handles.append(body)
+	if handle_layers.is_empty() and committed_handles.is_empty():
+		return {
+			"ok": true,
+			"reason": &"empty",
+			"empty": true,
+			"body": null,
+			"layer": null,
+			"body_index": -1,
+			"layer_index": -1,
+		}
+	if handle_layers.size() != 1 or committed_handles.size() != 1:
+		return {
+			"ok": false,
+			"reason": &"protected_handle_body_layer_mismatch",
+		}
+	var body := committed_handles[0]
+	var layer := handle_layers[0]
+	var body_id := StringName(body.get("body_id"))
+	var layer_id := StringName(layer.get("layer_id"))
+	var layer_body_ids := layer.get("body_ids") as Array
+	if (
+		body_id == StringName()
+		or layer_id == StringName()
+		or layer_body_ids.size() != 1
+		or StringName(layer_body_ids[0]) != body_id
+		or StringName(body.get("committed_layer_id")) != layer_id
+		or not _is_material_body_active(body)
+	):
+		return {
+			"ok": false,
+			"reason": &"protected_handle_link_invalid",
+		}
+	return {
+		"ok": true,
+		"reason": &"resolved",
+		"empty": false,
+		"body": body,
+		"layer": layer,
+		"body_index": material_bodies.find(body),
+		"layer_index": protected_forge_layers.find(layer),
+	}
 
 func _must_reject_unsupported_bounded_commit(
 	commit_ready_bodies: Array[Resource]
@@ -4398,6 +5952,12 @@ func _assign_active_tool_id(next_tool_id: StringName) -> void:
 		if _is_valid_tool_id(next_tool_id)
 		else TOOL_VOLUME_STROKE
 	)
+	if (
+		active_tool_id != resolved_tool_id
+		and is_handle_change_active()
+		and resolved_tool_id != TOOL_HANDLES
+	):
+		cancel_handle_change()
 	if (
 		active_tool_id != resolved_tool_id
 		and (
@@ -5291,11 +6851,98 @@ func _normalize_volume_strokes() -> void:
 	if migrated_any:
 		_mark_material_usage_summary_dirty()
 
+func _normalize_handle_path_mode_id(next_mode_id: StringName) -> StringName:
+	match next_mode_id:
+		HANDLE_PATH_MODE_THREE_POINT_LINEAR, HANDLE_PATH_MODE_TWO_POINT_LINEAR:
+			return next_mode_id
+		_:
+			return HANDLE_PATH_MODE_THREE_POINT_SPLINE
+
+func _resolve_handle_path_mode_id_from_body(body: Resource) -> StringName:
+	if body == null:
+		return HANDLE_PATH_MODE_THREE_POINT_SPLINE
+	var shape_kind := StringName(body.get("shape_kind"))
+	var path_points: PackedVector3Array = body.get("path_points")
+	if shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH:
+		return (
+			HANDLE_PATH_MODE_TWO_POINT_LINEAR
+			if path_points.size() == HANDLE_TWO_POINT_COUNT
+			else HANDLE_PATH_MODE_THREE_POINT_LINEAR
+		)
+	return HANDLE_PATH_MODE_THREE_POINT_SPLINE
+
+func _normalize_active_handle_path_mode_from_body() -> void:
+	if is_handle_change_active():
+		return
+	var handles := _collect_live_handle_material_bodies()
+	if handles.size() != 1:
+		return
+	active_handle_path_mode_id = _resolve_handle_path_mode_id_from_body(
+		handles[0]
+	)
+
+func _convert_handle_path_point_count(
+	previous_required_point_count: int,
+	next_required_point_count: int
+) -> void:
+	if previous_required_point_count == next_required_point_count:
+		return
+	if (
+		previous_required_point_count == HANDLE_THREE_POINT_COUNT
+		and next_required_point_count == HANDLE_TWO_POINT_COUNT
+		and spline_line_points.size() >= HANDLE_THREE_POINT_COUNT
+	):
+		var reduced_points := PackedVector3Array([
+			spline_line_points[0],
+			spline_line_points[spline_line_points.size() - 1],
+		])
+		var reduced_normals := PackedVector3Array([
+			_resolve_spline_line_surface_normal(0),
+			_resolve_spline_line_surface_normal(
+				spline_line_points.size() - 1
+			),
+		])
+		spline_line_points = reduced_points
+		spline_line_surface_normals = reduced_normals
+		selected_spline_point_index = -1
+		return
+	if (
+		previous_required_point_count == HANDLE_TWO_POINT_COUNT
+		and next_required_point_count == HANDLE_THREE_POINT_COUNT
+		and spline_line_points.size() == HANDLE_TWO_POINT_COUNT
+	):
+		var start_point := spline_line_points[0]
+		var end_point := spline_line_points[1]
+		var start_normal := _resolve_spline_line_surface_normal(0)
+		var end_normal := _resolve_spline_line_surface_normal(1)
+		spline_line_points = PackedVector3Array([
+			start_point,
+			start_point.lerp(end_point, 0.5),
+			end_point,
+		])
+		spline_line_surface_normals = PackedVector3Array([
+			start_normal,
+			_normalize_path_surface_normal(start_normal.lerp(end_normal, 0.5)),
+			end_normal,
+		])
+		selected_spline_point_index = -1
+
+func _resolve_spline_line_surface_normal(point_index: int) -> Vector3:
+	if point_index < 0 or point_index >= spline_line_surface_normals.size():
+		return Vector3.FORWARD
+	return _normalize_path_surface_normal(
+		spline_line_surface_normals[point_index]
+	)
+
 func _normalize_spline_line() -> void:
-	if active_tool_id == TOOL_HANDLES and spline_line_points.size() > HANDLE_REQUIRED_POINT_COUNT:
+	var required_handle_point_count := get_active_handle_required_point_count()
+	if (
+		active_tool_id == TOOL_HANDLES
+		and spline_line_points.size() > required_handle_point_count
+	):
 		var capped_points := PackedVector3Array()
 		var capped_normals := PackedVector3Array()
-		for point_index in range(HANDLE_REQUIRED_POINT_COUNT):
+		for point_index in range(required_handle_point_count):
 			capped_points.append(spline_line_points[point_index])
 			var point_normal := Vector3.FORWARD
 			if point_index < spline_line_surface_normals.size():

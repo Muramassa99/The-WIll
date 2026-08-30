@@ -276,7 +276,8 @@ func _bake_forge_v2_wip(
 		ForgeV2WipCompatibilityAdapterScript.build_runtime_contract(
 			wip,
 			runtime_mesh_packet,
-			runtime_cell_size_meters
+			runtime_cell_size_meters,
+			material_lookup
 		)
 	)
 	var profile := runtime_contract.get("baked_profile", null) as BakedProfile
@@ -466,7 +467,10 @@ func _enrich_forge_v2_profile_material_data(
 			)
 			* volume_cell_equivalents
 		)
-	if total_mass > 0.0 or profile.total_mass <= 0.0:
+	if (
+		not profile.weapon_intrinsic_center_of_mass_spatial_material_valid
+		and (total_mass > 0.0 or profile.total_mass <= 0.0)
+	):
 		profile.total_mass = total_mass
 	profile.resolved_material_stat_lines = (
 		_collect_aggregated_material_lines_from_volume_mix(

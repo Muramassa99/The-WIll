@@ -362,6 +362,40 @@ Return Scroll eligibility uses related but stricter calm gates and should not be
 
 The bridge layer may reuse the same runtime chain/player logic where possible, but it must not mutate saved authored data.
 
+### Idle State Authority Bookkeeping - 2026-08-30 Audit
+
+Keep these meanings and authorities separate:
+
+- `Idle` and `2 Hand Idle` are exact imported Blender locomotion/base-pose clip names. A clip name is not combat-state, draw-state, equipment, or hand-role authority.
+- `idle_combat` is the weapon-owned Skill Crafter context for the drawn-weapon baseline.
+- `idle_noncombat` is the weapon-owned Skill Crafter context for the stowed/noncombat presentation. A weapon may remain equipped while it is stowed and the player is out of combat.
+- `offhand_free` is a WIP-relative authored hand role. It is not an idle state and must not be called `idle` or `unused`.
+- Armed/unarmed, drawn/stowed, and combat/out-of-combat are independent state axes. Do not infer one from another.
+
+Current executable behavior is compositional rather than one exclusive idle state:
+
+- Grounded locomotion selects the imported `Idle` or `2 Hand Idle` base clip from movement speed and two-hand-support status, not from combat state. A stationary character with a drawn one-handed or dual-wield setup may therefore still use `Idle` beneath the weapon/upper-body presentation.
+- With weapons drawn and no skill playback active, `idle_combat` is applied as the weapon/upper-body baseline over locomotion. It can remain relevant while the character walks, runs, or jumps; its name does not mean the whole body must be physically motionless.
+- `idle_noncombat` currently contributes the authored stow anchor/weapon transform and hands-off presentation. The runtime does not currently apply its motion node as a full authored body pose.
+- With no equipped WIP, there is no weapon-owned station idle draft to resolve, so the locomotion/base animation path remains authoritative.
+
+Preserve two distinct 15-second concepts:
+
+- Combat-idle presentation expiry starts after action recovery has entered `idle_combat`, then requests the stow bridge into `idle_noncombat`.
+- `t_last_combat_action` updates when an action tagged `in_combat_when_used` is used and participates in the broader combat/calm eligibility rules. A long action means this timestamp and the later combat-idle expiry start are not necessarily the same moment.
+
+Open runtime authority work found by comparing the source design with the current executable path:
+
+- Current successful Skill Crafter playback calls `mark_combat_action_used()` unconditionally. Route this through the intended `in_combat_when_used` action-tag authority when the broader combat-state pass is implemented.
+- `weapons_drawn` currently selects `idle_combat` versus `idle_noncombat` and therefore acts as the practical presentation switch. It is not a replacement for the planned combat-state authority covering hostile damage, intentional combat actions, and qualifying forced-displacement events.
+- Draw/stow hidden-bridge state currently records transition metadata/timing, but the controller reparents the weapon to the hand or stow anchor immediately. Add real transition authority later if the visible draw/stow motion is expected to consume those bridge durations instead of snapping.
+- The draw bridge is currently replaced by the following skill-entry bridge rather than governing the complete visible draw-to-skill transition. Preserve both chronological phases when bridge playback becomes authoritative.
+- Combat-idle expiry currently advances only while an authored `idle_combat` draft and weapon visual resolve successfully. Decouple the broader combat/calm state from optional presentation success so missing or invalid authored visuals cannot trap the player indefinitely in the drawn/combat state.
+- Connect `t_last_hostile_damage`, `t_last_combat_action`, and qualifying forced-displacement events to that broader combat-state authority without collapsing them into the animation-expiry timer.
+- The original design also routes a stun interruption into in-combat idle for its control-lock duration. No current player-runtime integration was found during this audit; preserve it as later combat-state/interrupt work.
+
+These are state-model and runtime-bridge tasks, not finger-grip solver tasks. Do not mix them into the current grip stabilization pass.
+
 ## Important Correction To Older TODOs
 
 Older files correctly say that tip and pommel are authoring handles for the rigid weapon body.
@@ -838,3 +872,115 @@ Required behavior:
 Test target:
 
 - Use `Test sword for animations`, `skill_slot_1`, and the real runtime/editor path after the 2026-05-03 edited animation pass.
+
+## Parked Per-WIP Hand-Role Architecture - 2026-08-30
+
+This is future state-model work. The current implementation slice remains limited to stabilizing melee primary-plus-support gripping.
+
+### Terminology and authority
+
+- Primary and support are roles relative to a specific WIP, not aliases for anatomical right and left hands.
+- The current explicit execution paths are `right_primary`, `left_primary`, `right_support`, and `left_support`. They may share genuinely identical low-level geometry/contact primitives, but each role-and-side path keeps explicit routing and independently tunable policy.
+- Future dual wielding means two simultaneous primary relationships: the left hand is primary for one WIP while the right hand is primary for another WIP. Neither weapon's primary hand is reinterpreted as support for the other.
+- Bare `idle` is ambiguous and must always be qualified. Use exact clip names (`Idle`, `2 Hand Idle`), station contexts (`idle_combat`, `idle_noncombat`), or another explicit state name as appropriate. Never use `idle`, `unused`, or equivalent wording as a hand-role synonym.
+- Use `offhand_free` when the hand is not attached to the primary WIP. It remains an active Skill Crafter participant with authored position and per-digit analog placement; it is not doing its own autonomous idle behavior.
+- Use `offhand_support` after that hand is recruited onto the primary WIP. It remains subordinate to the primary hand/WIP relationship.
+- Ranged physical is the deliberate exception to both free/support offhand roles. Its second hand is `offhand_loading_and_shooting`: an active archetype-owned load/fire relationship rather than `offhand_free` or `offhand_support`.
+- Within Skill Crafter/combat authoring, the `offhand_free` digit-authoring contract should be reusable whether the other hand holds a WIP or the authored action is empty-handed. Preserve it for later empty-hand skills, gauntlet-type weapons, and RP/custom hand-pose authoring. No weapon plus noncombat may use the imported Blender `Idle` clip as its base presentation, but that usage does not define or reserve every meaning of idle.
+
+### Intended archetype combinations
+
+- Ranged physical: one hand owns the weapon while `offhand_loading_and_shooting` performs the dedicated two-point load/fire motion. Either anatomical hand may own the weapon. This branch never uses `offhand_free` or `offhand_support`; its skill-use motion is substantially predetermined, making bows the most out-of-the-box-ready archetype for Skill Crafter animation authoring.
+- Melee: `offhand_free`, one-handed, one-handed plus `offhand_support`, two-handed, and dual wield with different WIPs.
+- Ranged magic/staff: one-handed, one-handed plus `offhand_support`, two-handed, and dual-wield configurations, using the staff/Handle rules where applicable.
+- Shield: the shield-bearing hand is a primary WIP role. The stated target excludes the ordinary one-handed stance while allowing two-handed and dual-wield configurations; preserve this as parked design law until the shield branch is implemented.
+
+## Parked Future WIP Handling And Damage-Economy Hypothesis - 2026-08-29
+
+This is a future balance hypothesis, not current implementation law. Do not fold it into the current Forge V2 COM, Tip/Pommel, Handle-zero, or grip-placement work.
+
+### Locked mass-property and grip-state authority boundary
+
+- A weapon has one immutable, density-weighted physical COM for a given baked
+  geometry/material snapshot: `weapon_intrinsic_center_of_mass_*`.
+- Handle coordinate mode, Handle zero, Tip, and Pommel derive from that
+  intrinsic weapon state only. Repositioning or adding/removing a hand cannot
+  mutate the intrinsic COM or reselect the Handle mode.
+- A hand change creates a new grip relationship, not a second COM. Store future
+  runtime inputs as `active_grip_*` (including each separate hand contact) and
+  derived motion ceilings/results as `handling_*`.
+- The one-way dependency is: weapon intrinsic mass properties -> Tip/Pommel and
+  Handle coordinate mode -> active grip seats -> handling state -> compiled
+  speed/inertia limits. No downstream state writes upstream.
+- Current `WeaponRootOrigin` usage spans both baked geometry coordinates and a
+  runtime dominant-grip rebase. Preserve that compatibility now. At the later
+  V2-only cleanup boundary, split the vocabulary into immutable
+  `WeaponGeometryOrigin` and runtime `WeaponEquipRootOrigin` or
+  `PrimaryGripMountOrigin`; COM remains a point inside the geometry frame.
+- Keep the serialized `BakedProfile.center_of_mass` name while V1 saves remain
+  supported. Do not create a second exported COM field. V1 is compatibility
+  code, not a target for new handling features, and can be trimmed at the
+  existing ForgeService V1/V2 bake branch once V2 is authoritative.
+
+- Authored transition duration is the stable requested timing. The future WIP-driven handling solve provides the fastest legal execution time: deliberately slower authored motion remains allowed, while faster requests are capped automatically.
+- The handling ceiling is expected to derive from total mass, true density-weighted center of mass, total weapon length, Tip/Pommel lever arms, active grip contact position or positions, and the leverage benefit or penalty created by one- or two-handed placement.
+- Good hand placement near a useful balance point, or meaningful separation between two contacts, may raise the permitted acceleration, deceleration, directional-change rate, and maximum motion speed. Poor leverage may lower them.
+- Possible later damage-economy direction: slower/heavier weapons may receive higher critical-strike chance or impact reward, while faster/nimbler weapons gain attack frequency and hit count, with the balance target being comparably rewarding overall DPS rather than identical per-hit output.
+- The critical-strike, damage, attack-speed, and DPS relationship is explicitly undecided. Treat it as a design experiment requiring a later balance pass, not as an inverse-speed formula or automatic implementation requirement.
+
+### Narrative Gameplay Example / Design Choice - 2026-08-29
+
+When a hand position changes through repositioning, adding a gripping hand, or removing a gripping hand, recalculate the handling and speed values for the node that registers the change and every node that follows it.
+
+For example, if geometry and the authored skill permit it, one hand could grip Handle position `0` near a theoretical hilt while the other grips the opposite extreme at Handle position `1`. The maximum meaningful distance between the hands should provide the highest potential speed benefit through improved leverage. A positioning swing performed in this two-handed state still carries its normal damage data, but its higher velocity should provide a lower critical-strike modifier.
+
+The skill could then release the hand at position `1`, leaving only a Pommel-focused grip. This deliberately poor leverage should provide the worst speed modifier but the strongest critical-strike modifier. The following hit would normally execute more slowly, but a successful critical roll could receive a larger damage bonus.
+
+Acceleration and deceleration must remain persistent across the grip-state change. If the transition from the two-handed swing to the one-handed swing does not introduce a significant directional alteration, the weapon should retain part of the velocity generated by the two-handed motion while receiving the critical modifier associated with the new poor-leverage grip. This permits a deliberately constructed wind-up and slam-dunk pattern that can produce very high damage while remaining reasonably nimble through good animation design.
+
+Creative, complex, and fluid authored skills should therefore have meaningful mechanical value. A two-hand-to-one-hand transition may also provide extra reach through arm extension while producing a more visually dynamic action. The combined rule makes both a well-built weapon and a well-built skill relevant to the final result: grip position and COM relationship influence permitted velocity, while the resulting speed/grip state influences critical-strike potential and eventual damage output.
+
+## Shared Editor Undo/Redo Contract - Parked For Skill Crafter
+
+Forge V2 is the first implementation target, but normal action-level Undo/Redo
+is required across every player-facing authoring stage, including the Skill
+Crafter.
+
+- `Ctrl+Z` reverses the latest authored action in the currently focused editor.
+- `Ctrl+Y` reapplies the latest action undone in that editor.
+- Each editor owns an isolated chronological action timeline. An action in the
+  Skill Crafter must never consume or mutate Forge V2 history, and vice versa.
+- A drag or other continuous gesture is one action from press to release, not
+  one history entry per sampled frame.
+- A new authored action after Undo clears that editor's redo branch.
+- Navigation, selection, camera movement, debug visibility, and opening menus
+  are not authored actions unless they deliberately mutate saved work.
+- Within one existing Skill Crafter control node, Undo/Redo must cover authored
+  control-point positioning, pose, hand-role, grip-position, timing, and other
+  in-node animation changes.
+- Undo/Redo must not create or remove Skill Crafter control nodes. The existing
+  `R`-key control-node workflow remains a separate explicit function and must
+  not be replaced, removed, or consumed by the Undo journal.
+- Exact command payloads belong to the later Skill Crafter implementation pass.
+- Route the shortcuts by active editor/focus ownership so only one action
+  journal responds to a keypress.
+
+This is recorded future Skill Crafter work. Do not broaden the current Forge V2
+Undo/Redo implementation into Skill Crafter code.
+
+## WIP Library Persistence Safety - 2026-08-30
+
+The missing legacy WIPs investigated on 2026-08-30 were physically absent from the active library rather than hidden by a catalog or UI connection failure. Historical archives remain historical reference only and must not be merged into live state automatically.
+
+Proven cause and completed containment:
+
+- The real-WIP grip diagnostic cloned one selected WIP into an isolated `PlayerForgeWipLibraryState` but initially left that isolated resource on the default live `user://forge/player_wip_library_state.tres` save path.
+- Opening Skill Crafter triggered station-schema migration, which persisted that one-entry isolated library over the live catalog.
+- `verify_forge_v2_skill_crafter_grip_parity.gd` now routes the isolated clone to its verification-only library path and marks its UI persistence-disabled.
+- Any future diagnostic that reads live player data must treat it as immutable source data and must assign every clone/library/state object an explicit non-live output path before it can enter code that may migrate or persist.
+
+Future production hardening, separate from the contained diagnostic bug:
+
+- `PersistentResourceStateIO.load_or_create()` currently creates a fresh empty state when an existing resource fails to load. A subsequent legitimate save can then overwrite the unreadable original.
+- Add explicit load-failure reporting and a non-destructive quarantine/backup rule before allowing a fresh replacement to persist at the same live path.
+- Do not make this guard restore or merge old WIP archives automatically. Its purpose is preventing silent overwrite and exposing the failure clearly.

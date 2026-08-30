@@ -269,6 +269,9 @@ func _append_body_record(body: Resource) -> void:
 			"profile_rotation_bias_degrees"
 		)),
 		"profile_twist_degrees_per_meter": float(body.get("profile_twist_degrees_per_meter")),
+		"handle_profile_authoring_snapshot": (
+			body.get("handle_profile_authoring_snapshot") as Dictionary
+		).duplicate(true),
 		"amount_ratio": float(body.get("amount_ratio")),
 		"rough_volume_cell_equivalents": float(body.get("rough_volume_cell_equivalents")),
 		"rough_material_centi_units": int(body.get("rough_material_centi_units")),

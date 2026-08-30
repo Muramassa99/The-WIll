@@ -14,16 +14,20 @@ const ROOT_ORIGIN_ID: StringName = CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
 const HINGE_AXIS_LOCAL: Vector3 = Vector3(0.0, 0.0, 1.0)
 const ZERO_DIRECTION_LOCAL: Vector3 = Vector3.UP
 const THUMB_PREOPEN_STEP_DEGREES: float = 20.0
-const THUMB1_BIDIRECTIONAL_LIMIT_DEGREES: float = 45.0
+const RIGHT_THUMB1_OPEN_DEGREES: float = 70.0
+const RIGHT_THUMB1_CLOSED_DEGREES: float = -30.0
+const LEFT_THUMB1_OPEN_DEGREES: float = -70.0
+const LEFT_THUMB1_CLOSED_DEGREES: float = 30.0
 const RIGHT_FINGER_CLOSED_DEGREES: float = 90.0
 const RIGHT_THUMB_CLOSED_DEGREES: float = -90.0
 const LEFT_FINGER_CLOSED_DEGREES: float = -90.0
 const LEFT_THUMB_CLOSED_DEGREES: float = 90.0
-const SURFACE_SOLVER_RULE_REVISION: StringName = &"player_digit_local_z_surface_rules_v1"
+const SURFACE_SOLVER_RULE_REVISION: StringName = &"player_digit_local_z_surface_rules_v3"
 const MAX_CONTACT_OVERLAP_METERS: float = 0.0005
 const PREFERRED_CONTACT_OVERLAP_METERS: float = 0.00025
 const CONTACT_OVERLAP_TOLERANCE_METERS: float = 0.00008
 const SECTION_TARGET_OVERLAPS_METERS: Array[float] = [0.0005, 0.0004, 0.0003]
+const THUMB_SECTION_TARGET_OVERLAPS_METERS: Array[float] = [0.0005, 0.001, 0.0003]
 const DIGIT_IDS: Array[StringName] = [&"thumb", &"index", &"middle", &"ring", &"pinky"]
 
 # These are Josie's independently measured phalanx skin radii and terminal
@@ -195,6 +199,11 @@ static func get_surface_solver_side_rules(slot_id: StringName) -> Dictionary:
 			preferred_angles_rad.append(deg_to_rad(float(rule.get("closed_degrees", 0.0))))
 		var terminal_length_m: float = float(geometry.get("terminal_length_m", 0.0))
 		var is_thumb: bool = digit_id == &"thumb"
+		var thumb1_open_degrees: float = (
+			RIGHT_THUMB1_OPEN_DEGREES
+			if slot_id == SLOT_RIGHT
+			else LEFT_THUMB1_OPEN_DEGREES
+		)
 		digits.append({
 			"digit_id": digit_id,
 			"bone_names": bone_names,
@@ -218,18 +227,22 @@ static func get_surface_solver_side_rules(slot_id: StringName) -> Dictionary:
 			"tip_offset_root_origin_id": ROOT_ORIGIN_ID,
 			"is_thumb": is_thumb,
 			"contact_strategy": &"opposition_then_wrap" if is_thumb else &"serial_wrap",
-			"section_target_overlaps_meters": SECTION_TARGET_OVERLAPS_METERS.duplicate(),
+			"section_target_overlaps_meters": (
+				THUMB_SECTION_TARGET_OVERLAPS_METERS.duplicate()
+				if is_thumb
+				else SECTION_TARGET_OVERLAPS_METERS.duplicate()
+			),
 			# Pre-open is deliberately opposite the approved closing direction:
-			# right +45 -> -45, left -45 -> +45.
+			# right +70 -> -30, left -70 -> +30.
 			"thumb_clearance_open_sign": (
-				1.0 if slot_id == SLOT_RIGHT else -1.0
+				signf(thumb1_open_degrees)
 			) if is_thumb else 0.0,
 			"thumb_clearance_step_degrees": THUMB_PREOPEN_STEP_DEGREES if is_thumb else 0.0,
-			"thumb_clearance_max_degrees": THUMB1_BIDIRECTIONAL_LIMIT_DEGREES if is_thumb else 0.0,
+			"thumb_clearance_max_degrees": absf(thumb1_open_degrees) if is_thumb else 0.0,
 		})
 	return {
 		"calibration_revision": SURFACE_SOLVER_RULE_REVISION,
-		"solver_compatibility_revision": 4,
+		"solver_compatibility_revision": 6,
 		"independent_source_id": (
 			&"josie_right_hand_local_z_direct_rules_v1"
 			if slot_id == SLOT_RIGHT
@@ -257,10 +270,27 @@ static func get_closed_degrees_for_joint(
 	digit_id: StringName,
 	section_index: int
 ) -> float:
-	var group_closed_degrees: float = get_closed_degrees_for_group(slot_id, digit_id)
 	if digit_id == &"thumb" and section_index == 1:
-		return signf(group_closed_degrees) * THUMB1_BIDIRECTIONAL_LIMIT_DEGREES
-	return group_closed_degrees
+		return (
+			RIGHT_THUMB1_CLOSED_DEGREES
+			if slot_id == SLOT_RIGHT
+			else LEFT_THUMB1_CLOSED_DEGREES
+		)
+	return get_closed_degrees_for_group(slot_id, digit_id)
+
+
+static func get_open_degrees_for_joint(
+	slot_id: StringName,
+	digit_id: StringName,
+	section_index: int
+) -> float:
+	if digit_id == &"thumb" and section_index == 1:
+		return (
+			RIGHT_THUMB1_OPEN_DEGREES
+			if slot_id == SLOT_RIGHT
+			else LEFT_THUMB1_OPEN_DEGREES
+		)
+	return 0.0
 
 static func _append_expanded_rules(
 	target: Array[Dictionary],
@@ -273,6 +303,11 @@ static func _append_expanded_rules(
 		var digit_id: StringName = expanded_rule.get("digit", StringName()) as StringName
 		var section_index: int = int(expanded_rule.get("section", 0))
 		var is_thumb: bool = digit_id == &"thumb"
+		var open_degrees: float = get_open_degrees_for_joint(
+			slot_id,
+			digit_id,
+			section_index
+		)
 		var closed_degrees: float = get_closed_degrees_for_joint(slot_id, digit_id, section_index)
 		var is_bidirectional_thumb_root: bool = is_thumb and section_index == 1
 		expanded_rule["slot_id"] = slot_id
@@ -281,18 +316,10 @@ static func _append_expanded_rules(
 		expanded_rule["zero_direction_local"] = ZERO_DIRECTION_LOCAL
 		expanded_rule["zero_direction_origin_id"] = bone_name
 		expanded_rule["bone_root_origin_id"] = ROOT_ORIGIN_ID
-		expanded_rule["open_degrees"] = 0.0
+		expanded_rule["open_degrees"] = open_degrees
 		expanded_rule["closed_degrees"] = closed_degrees
-		expanded_rule["min_degrees"] = (
-			-THUMB1_BIDIRECTIONAL_LIMIT_DEGREES
-			if is_bidirectional_thumb_root
-			else minf(0.0, closed_degrees)
-		)
-		expanded_rule["max_degrees"] = (
-			THUMB1_BIDIRECTIONAL_LIMIT_DEGREES
-			if is_bidirectional_thumb_root
-			else maxf(0.0, closed_degrees)
-		)
+		expanded_rule["min_degrees"] = minf(open_degrees, closed_degrees)
+		expanded_rule["max_degrees"] = maxf(open_degrees, closed_degrees)
 		expanded_rule["bidirectional_about_zero"] = is_bidirectional_thumb_root
 		expanded_rule["motion_direction_sign"] = 1.0 if closed_degrees > 0.0 else -1.0
 		expanded_rule["solve_order"] = int(expanded_rule.get("section", 0))

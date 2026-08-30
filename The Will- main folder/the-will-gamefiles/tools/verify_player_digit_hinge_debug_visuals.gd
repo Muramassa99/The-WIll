@@ -3,6 +3,9 @@ extends SceneTree
 const PlayerHumanoidRigScene: PackedScene = preload("res://scenes/player/player_humanoid_rig.tscn")
 const PlayerDigitHingeRulesScript = preload("res://runtime/player/player_digit_hinge_rules.gd")
 const PlayerRigFingerGripPresenterScript = preload("res://runtime/player/player_rig_finger_grip_presenter.gd")
+const PlayerFingerSurfaceGripSolverScript = preload(
+	"res://runtime/player/player_finger_surface_grip_solver.gd"
+)
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
 const RESULT_FILE_PATH := "C:/WORKSPACE/player_digit_hinge_debug_visuals_results.txt"
@@ -92,16 +95,24 @@ func _run_verification() -> void:
 		_check(not state.is_empty(), "state_missing_%s" % String(bone_name))
 		_check(bool(state.get("visible", false)), "state_hidden_%s" % String(bone_name))
 		_check(int(state.get("section", 0)) == section_index, "section_mismatch_%s" % String(bone_name))
-		var expected_open_degrees: float = 0.0
+		var expected_open_degrees: float = _expected_open_degrees(
+			slot_id,
+			digit_id,
+			section_index
+		)
 		var expected_closed_degrees: float = _expected_closed_degrees(slot_id, digit_id, section_index)
 		var is_bidirectional_thumb_root: bool = digit_id == &"thumb" and section_index == 1
-		var expected_min_degrees: float = -45.0 if is_bidirectional_thumb_root else minf(expected_open_degrees, expected_closed_degrees)
-		var expected_max_degrees: float = 45.0 if is_bidirectional_thumb_root else maxf(expected_open_degrees, expected_closed_degrees)
+		var expected_min_degrees: float = minf(expected_open_degrees, expected_closed_degrees)
+		var expected_max_degrees: float = maxf(expected_open_degrees, expected_closed_degrees)
 		_check(absf(float(state.get("open_angle_degrees", -999.0)) - expected_open_degrees) <= 0.0001, "open_angle_mismatch_%s" % String(bone_name))
 		_check(absf(float(state.get("closed_angle_degrees", -999.0)) - expected_closed_degrees) <= 0.0001, "closed_angle_mismatch_%s" % String(bone_name))
 		_check(absf(float(state.get("min_angle_degrees", -999.0)) - expected_min_degrees) <= 0.0001, "min_angle_mismatch_%s" % String(bone_name))
 		_check(absf(float(state.get("max_angle_degrees", -999.0)) - expected_max_degrees) <= 0.0001, "max_angle_mismatch_%s" % String(bone_name))
-		_check(absf(float(state.get("allowed_sweep_degrees", -999.0)) - 90.0) <= 0.0001, "sweep_not_90_%s" % String(bone_name))
+		var expected_sweep_degrees: float = 100.0 if is_bidirectional_thumb_root else 90.0
+		_check(
+			absf(float(state.get("allowed_sweep_degrees", -999.0)) - expected_sweep_degrees) <= 0.0001,
+			"sweep_mismatch_%s" % String(bone_name)
+		)
 		var hinge_axis_local: Vector3 = state.get("hinge_axis_local", Vector3.ZERO) as Vector3
 		var hinge_axis_origin_id: StringName = state.get("hinge_axis_origin_id", StringName()) as StringName
 		var zero_direction_local: Vector3 = state.get("zero_direction_local", Vector3.ZERO) as Vector3
@@ -153,6 +164,7 @@ func _run_verification() -> void:
 				state,
 				expected_min_degrees,
 				expected_max_degrees,
+				expected_open_degrees,
 				expected_closed_degrees
 			),
 			"directional_label_mismatch_%s" % String(bone_name)
@@ -210,6 +222,9 @@ func _run_verification() -> void:
 		var section_lookup: Dictionary = per_digit_sections.get(chain_key, {}) as Dictionary
 		_check(section_lookup.size() == 3, "chain_does_not_have_three_sections_%s" % chain_key)
 		_check(section_lookup.has(1) and section_lookup.has(2) and section_lookup.has(3), "chain_sequence_invalid_%s" % chain_key)
+	var thumb_proximal_policy_metrics: Dictionary = (
+		_verify_thumb_proximal_penetration_policy()
+	)
 	var live_solver_authority_probe_count: int = 0
 	var grip_presenter: RefCounted = PlayerRigFingerGripPresenterScript.new()
 	for rule: Dictionary in rules:
@@ -549,6 +564,19 @@ func _run_verification() -> void:
 		"digit_chain_count": per_digit_sections.size(),
 		"digit_bone_root_chain_count": digit_bone_root_chain_count,
 		"digit_origin_pair_count": digit_origin_pair_count,
+		"thumb_proximal_policy_side_count": int(thumb_proximal_policy_metrics.get(
+			"side_count",
+			0
+		)),
+		"thumb_proximal_policy_section_cap_probe_count": int(
+			thumb_proximal_policy_metrics.get("section_cap_probe_count", 0)
+		),
+		"thumb_proximal_policy_blocker_probe_count": int(
+			thumb_proximal_policy_metrics.get("blocker_probe_count", 0)
+		),
+		"thumb_proximal_policy_summary_probe_count": int(
+			thumb_proximal_policy_metrics.get("summary_probe_count", 0)
+		),
 		"live_solver_authority_probe_count": live_solver_authority_probe_count,
 		"live_solver_chain_joint_probe_count": live_solver_chain_joint_probe_count,
 		"configured_hinge_probe_count": configured_hinge_probe_count,
@@ -562,6 +590,206 @@ func _run_verification() -> void:
 		"reenabled_node_mismatches": reenabled_node_mismatches,
 		"reenabled_rotation_mismatches": reenabled_rotation_mismatches,
 	})
+
+func _verify_thumb_proximal_penetration_policy() -> Dictionary:
+	var solver: RefCounted = PlayerFingerSurfaceGripSolverScript.new()
+	var finger_targets: Array[float] = []
+	for target_variant: Variant in PlayerDigitHingeRulesScript.SECTION_TARGET_OVERLAPS_METERS:
+		finger_targets.append(float(target_variant))
+	var thumb_targets: Array[float] = []
+	for target_variant: Variant in PlayerDigitHingeRulesScript.THUMB_SECTION_TARGET_OVERLAPS_METERS:
+		thumb_targets.append(float(target_variant))
+	var global_max_overlap: float = PlayerDigitHingeRulesScript.MAX_CONTACT_OVERLAP_METERS
+	var thumb_serial_max_overlap: float = (
+		thumb_targets[1] + PlayerDigitHingeRulesScript.CONTACT_OVERLAP_TOLERANCE_METERS
+	)
+	var expected_finger_caps: Array[float] = [0.0005, 0.00048, 0.00038]
+	var expected_thumb_caps: Array[float] = [0.005, 0.00108, 0.00038]
+	var side_count := 0
+	var section_cap_probe_count := 0
+	_check(
+		not PlayerFingerSurfaceGripSolverScript.THUMB_PROXIMAL_CONTACT_TARGET_REQUIRED,
+		"thumb_proximal_contact_target_not_bypassed"
+	)
+	_check(
+		absf(
+			PlayerFingerSurfaceGripSolverScript.THUMB_PROXIMAL_MAX_ALLOWED_OVERLAP_METERS
+			- 0.005
+		) <= 0.000000001,
+		"thumb_proximal_hard_cap_not_5mm"
+	)
+	for slot_id: StringName in [&"hand_right", &"hand_left"]:
+		var side_rules: Dictionary = PlayerDigitHingeRulesScript.get_surface_solver_side_rules(
+			slot_id
+		)
+		var thumb_snapshot: Dictionary = _find_surface_digit_rule(side_rules, &"thumb")
+		var index_snapshot: Dictionary = _find_surface_digit_rule(side_rules, &"index")
+		_check(not thumb_snapshot.is_empty(), "thumb_surface_rule_missing_%s" % String(slot_id))
+		_check(not index_snapshot.is_empty(), "index_surface_rule_missing_%s" % String(slot_id))
+		if thumb_snapshot.is_empty() or index_snapshot.is_empty():
+			continue
+		side_count += 1
+		_check(
+			thumb_snapshot.get("section_target_overlaps_meters", []) == thumb_targets,
+			"thumb_section_targets_mismatch_%s" % String(slot_id)
+		)
+		_check(
+			index_snapshot.get("section_target_overlaps_meters", []) == finger_targets,
+			"index_section_targets_changed_%s" % String(slot_id)
+		)
+		for section_index: int in range(3):
+			var thumb_cap: float = float(solver.call(
+				"_resolve_serial_section_max_allowed_overlap",
+				thumb_snapshot,
+				section_index,
+				thumb_targets[section_index],
+				thumb_serial_max_overlap
+			))
+			_check(
+				absf(thumb_cap - expected_thumb_caps[section_index]) <= 0.000000001,
+				"thumb_section_%d_cap_mismatch_%s" % [section_index + 1, String(slot_id)]
+			)
+			section_cap_probe_count += 1
+			var index_cap: float = float(solver.call(
+				"_resolve_serial_section_max_allowed_overlap",
+				index_snapshot,
+				section_index,
+				finger_targets[section_index],
+				global_max_overlap
+			))
+			_check(
+				absf(index_cap - expected_finger_caps[section_index]) <= 0.000000001,
+				"index_section_%d_cap_changed_%s" % [section_index + 1, String(slot_id)]
+			)
+			section_cap_probe_count += 1
+	_check(side_count == 2, "thumb_proximal_policy_side_count_not_2")
+	_check(section_cap_probe_count == 12, "thumb_proximal_section_cap_probe_count_not_12")
+
+	var section_2_blocked_states: Array[Dictionary] = [
+		_make_serial_policy_state(0, 0.0049, 0.005, thumb_targets[0]),
+		_make_serial_policy_state(1, 0.001081, 0.00108, thumb_targets[1]),
+		_make_serial_policy_state(2, 0.0003, 0.00038, thumb_targets[2]),
+	]
+	var section_3_blocked_states: Array[Dictionary] = [
+		_make_serial_policy_state(0, 0.0049, 0.005, thumb_targets[0]),
+		_make_serial_policy_state(1, 0.001, 0.00108, thumb_targets[1]),
+		_make_serial_policy_state(2, 0.000381, 0.00038, thumb_targets[2]),
+	]
+	var proximal_cap_blocked_states: Array[Dictionary] = [
+		_make_serial_policy_state(0, 0.005001, 0.005, thumb_targets[0]),
+		_make_serial_policy_state(1, 0.001, 0.00108, thumb_targets[1]),
+		_make_serial_policy_state(2, 0.0003, 0.00038, thumb_targets[2]),
+	]
+	var section_2_blocker: int = int(solver.call(
+		"_resolve_downstream_limit_blocker",
+		{"section_states": section_2_blocked_states},
+		0,
+		thumb_targets,
+		thumb_serial_max_overlap
+	))
+	var section_3_blocker: int = int(solver.call(
+		"_resolve_downstream_limit_blocker",
+		{"section_states": section_3_blocked_states},
+		0,
+		thumb_targets,
+		thumb_serial_max_overlap
+	))
+	var proximal_cap_blocker: int = int(solver.call(
+		"_resolve_downstream_limit_blocker",
+		{"section_states": proximal_cap_blocked_states},
+		0,
+		thumb_targets,
+		thumb_serial_max_overlap
+	))
+	_check(section_2_blocker == 1, "thumb_proximal_not_stopped_by_section_2_cap")
+	_check(section_3_blocker == 2, "thumb_proximal_not_stopped_by_section_3_cap")
+	_check(proximal_cap_blocker == 0, "thumb_proximal_5mm_emergency_cap_not_enforced")
+	var blocker_probe_count := 3
+
+	var safe_summary: Dictionary = solver.call(
+		"_summarize_serial_section_states",
+		[
+			_make_serial_policy_state(0, 0.0049, 0.005, thumb_targets[0]),
+			_make_serial_policy_state(1, 0.001, 0.00108, thumb_targets[1]),
+			_make_serial_policy_state(2, 0.0003, 0.00038, thumb_targets[2]),
+		],
+		thumb_targets,
+		thumb_serial_max_overlap,
+		0.0015
+	) as Dictionary
+	var thumb_cap_exceeded_summary: Dictionary = solver.call(
+		"_summarize_serial_section_states",
+		[
+			_make_serial_policy_state(0, 0.005001, 0.005, thumb_targets[0]),
+			_make_serial_policy_state(1, 0.001, 0.00108, thumb_targets[1]),
+			_make_serial_policy_state(2, 0.0003, 0.00038, thumb_targets[2]),
+		],
+		thumb_targets,
+		thumb_serial_max_overlap,
+		0.0015
+	) as Dictionary
+	var index_cap_exceeded_summary: Dictionary = solver.call(
+		"_summarize_serial_section_states",
+		[
+			_make_serial_policy_state(0, 0.000501, 0.0005, finger_targets[0]),
+			_make_serial_policy_state(1, 0.0004, 0.00048, finger_targets[1]),
+			_make_serial_policy_state(2, 0.0003, 0.00038, finger_targets[2]),
+		],
+		finger_targets,
+		global_max_overlap,
+		0.0015
+	) as Dictionary
+	_check(
+		bool(safe_summary.get("overlap_limit_respected", false)),
+		"thumb_proximal_4_9mm_rejected_by_final_safety"
+	)
+	_check(
+		int(safe_summary.get("feasible_section_count", -1)) == 2,
+		"thumb_proximal_bypass_falsely_reported_target_reached"
+	)
+	_check(
+		not bool(thumb_cap_exceeded_summary.get("overlap_limit_respected", true)),
+		"thumb_proximal_above_5mm_accepted_by_final_safety"
+	)
+	_check(
+		not bool(index_cap_exceeded_summary.get("overlap_limit_respected", true)),
+		"non_thumb_above_0_5mm_accepted_by_final_safety"
+	)
+	var summary_probe_count := 4
+	return {
+		"side_count": side_count,
+		"section_cap_probe_count": section_cap_probe_count,
+		"blocker_probe_count": blocker_probe_count,
+		"summary_probe_count": summary_probe_count,
+	}
+
+func _find_surface_digit_rule(side_rules: Dictionary, digit_id: StringName) -> Dictionary:
+	for digit_variant: Variant in side_rules.get("digits", []):
+		var digit_rule: Dictionary = digit_variant as Dictionary
+		if StringName(digit_rule.get("digit_id", StringName())) == digit_id:
+			return digit_rule
+	return {}
+
+func _make_serial_policy_state(
+	section_index: int,
+	penetration_meters: float,
+	section_cap_meters: float,
+	target_meters: float
+) -> Dictionary:
+	return {
+		"section_index": section_index,
+		"surface_query_hit": true,
+		"inside_classification_valid": true,
+		"ray_hit": true,
+		"inside_solid": false,
+		"inside_solid_sample_count": 0,
+		"within_overlap_limit": true,
+		"in_contact": true,
+		"signed_overlap_meters": penetration_meters,
+		"penetration_meters": penetration_meters,
+		"contact_error_meters": absf(penetration_meters - target_meters),
+		"section_max_allowed_overlap_meters": section_cap_meters,
+	}
 
 func _bone_chain_reaches_root(
 	skeleton: Skeleton3D,
@@ -608,6 +836,7 @@ func _visual_state_has_directional_label(
 	state: Dictionary,
 	expected_min_degrees: float,
 	expected_max_degrees: float,
+	expected_open_degrees: float,
 	expected_closed_degrees: float
 ) -> bool:
 	var visual_path: String = String(state.get("visual_node_path", ""))
@@ -619,7 +848,19 @@ func _visual_state_has_directional_label(
 	var label: Label3D = visual_root.get_node_or_null("AngleLabel") as Label3D if visual_root != null else null
 	return label != null and label.visible \
 		and label.text.contains("ROM %.0f..%.0f" % [expected_min_degrees, expected_max_degrees]) \
-		and label.text.contains("close 0->%.0f" % expected_closed_degrees)
+		and label.text.contains(
+			"close %.0f->%.0f" % [expected_open_degrees, expected_closed_degrees]
+		)
+
+
+func _expected_open_degrees(
+	slot_id: StringName,
+	digit_id: StringName,
+	section_index: int
+) -> float:
+	if digit_id != &"thumb" or section_index != 1:
+		return 0.0
+	return 70.0 if slot_id == &"hand_right" else -70.0
 
 func _expected_closed_degrees(
 	slot_id: StringName,
@@ -628,10 +869,10 @@ func _expected_closed_degrees(
 ) -> float:
 	if slot_id == &"hand_right":
 		if digit_id == &"thumb":
-			return -45.0 if section_index == 1 else -90.0
+			return -30.0 if section_index == 1 else -90.0
 		return 90.0
 	if digit_id == &"thumb":
-		return 45.0 if section_index == 1 else 90.0
+		return 30.0 if section_index == 1 else 90.0
 	return -90.0
 
 func _expected_local_direction_for_degrees(angle_degrees: float) -> Vector3:

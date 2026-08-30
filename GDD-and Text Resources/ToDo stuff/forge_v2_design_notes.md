@@ -74,6 +74,22 @@ Freehand stabilizer implementation added and integrated 2026-08-10:
 - Live drawing uses a collisionless swept `ArrayMesh` instead of rebuilding active CSG for each accepted sample. The final committed CSG/collision result remains authoritative and can still have a measurable release-time cost.
 - Honest boundary: stabilizing the cursor path does not by itself guarantee exact wrapping over rapidly changing 3D surfaces. Target sampling and final committed CSG orientation remain separate responsibilities that require interactive evidence.
 
+## Deferred QoL: User-Defined Profile Catalogs
+
+This is parked Profile Creator and saved-profile library work, not part of the
+current Forge V2 implementation pass.
+
+- Add a folder-equivalent organization feature so users can catalogue their
+  own saved brush profiles instead of navigating one flat list that may grow
+  beyond 200 profiles.
+- The user must be able to define the organizational groups. The final UI,
+  naming, nesting behavior, and storage representation remain deliberately
+  undecided until this feature is designed.
+- Catalog organization is presentation and bookkeeping metadata. It must not
+  alter profile geometry, material behavior, profile identity, saved-WIP
+  references, or downstream resolver results.
+- Existing profiles must remain valid when the catalog feature is introduced.
+
 ## Forge V2 Local Keybindings V1
 
 Current code foundation:
@@ -84,7 +100,8 @@ Current code foundation:
 - Forge V2 key capture currently blocks Enter, keypad Enter, Backspace, NumLock, and function keys F1-F12. The normal letter `F` remains valid.
 - Bindings persist to `user://settings/forge_v2_keybindings.json`.
 - The Forge V2 Settings popup opens a dedicated keybindings popup with action names on the left and editable binding boxes on the right.
-- Clicking a binding box enters capture mode and shows `Press keys to bind`.
+- Clicking a binding box enters capture mode and shows
+  `Press key / mouse button`.
 - A key press can become a key-only binding on release, can be combined with a second real key, or can be held while clicking a mouse button to form a chord.
 - Forge V2 bindings are unique inside Forge V2. If a user gives action B the same binding as action A, action B steals that binding and action A becomes explicitly `Unbound`.
 - Explicit unbound overrides persist, so stealing a default binding does not silently restore the old default after reload.
@@ -95,8 +112,12 @@ Current default examples:
 - `RMB` orbits the view.
 - `MMB` pans the view.
 - `C + RMB` pans the view as an alternate binding.
+- `Ctrl+Z` performs action-level Undo.
+- `Ctrl+Y` performs action-level Redo.
 - `L` selects the Spline Line tool.
 - `B` selects the Volume Stroke tool.
+- Mouse 4 and Mouse 5 are valid configurable inputs for any Forge V2 action,
+  including Undo and Redo.
 
 Why this matters:
 - Forge V2 needs editor-grade controls before tool complexity grows.
@@ -109,6 +130,12 @@ Open followups:
 - Add categories or grouping once the keybinding list grows.
 - Add visible binding hints in tooltips/status only after the command surface stabilizes.
 - Consider promoting this chord-capable binding model to global settings later.
+
+Action-level history is unbounded by user-action count inside the active native
+material window. It is pruned by acknowledged CSG checkpoint promotion while
+the native `checkpoint + five ordinary tail CSGs + protected Handle` structure
+remains unchanged. The authoritative behavior and lifecycle contract is documented in
+`Forge V2 Action Undo Redo Work Scope 2026-08-30.md`.
 
 ## Spline Line Tool V1
 
@@ -269,3 +296,56 @@ Not the current target:
 Later polish idea:
 - Add a lazy-susan style presentation mode where the project slowly rotates and gently oscillates up/down as if floating.
 - This is not a current implementation target; the important foundation is the transparent authoring box and world-space binding.
+
+## Parked Handle Sweep Transforms: Three-Shape Family And Twist
+
+This is a future Forge V2 Handle-authoring feature. It is recorded now, but it
+must not be mixed into the current mass/center-of-mass or Skill Crafter grip
+passes.
+
+Intended longitudinal shape family:
+- `0` preserves the original/cylindrical authored profile size along the Handle.
+- One signed-slider direction produces a symmetric concave Handle: narrower at
+  the longitudinal middle and wider toward both endcaps.
+- The opposite direction produces a symmetric Jian-style convex Handle: wider
+  at the longitudinal middle and narrower toward both endcaps.
+- The slider sign mapping and safe maximum/minimum scale or endcap-area limits
+  remain deliberately undecided until implementation.
+- Scale each perpendicular sweep slice about its own geometric center. Preserve
+  the authored three-dot path rather than moving it to create the silhouette.
+
+Reference boundary:
+- From `Straight-Handles.jpg`, only Cylinder, the symmetric Neotech Concave, and
+  the symmetric Jian-style form are intended.
+- Finger grooves, asymmetric waists, compound decorative shapes, bevelled cut
+  ends, and the other reference silhouettes are explicitly outside scope.
+
+Separate axial-twist transform:
+- Rotate the authored profile deterministically around the local Handle-path
+  tangent as the sweep advances.
+- Final controls may use total twist or twist per path distance; the unit and
+  range remain undecided until the user elaborates the thread/spiral behavior.
+- Preview, committed geometry, collision, save/reload, Change Handle, runtime
+  surface targeting, and the final exported mesh must agree.
+- Keep endcaps closed, retain one semantic Handle, and persist the transform
+  parameters with the existing Handle authoring snapshot.
+
+The detailed active/continuation boundary lives in
+`Forge V2 Physical Truth And Handle Transform Work Scope 2026-08-29.md`.
+
+## Weapon Intrinsic COM And Runtime Grip Boundary
+
+- Forge V2 calculates one density-weighted weapon-intrinsic COM from spatial
+  material truth. Grip changes do not move that COM.
+- Existing serialized `BakedProfile.center_of_mass` remains compatibility
+  storage in WeaponRoot cell units; fresh code reaches it through the explicit
+  `weapon_intrinsic_center_of_mass_*` API.
+- Baked Tip/Pommel, Handle coordinate mode, and Handle zero read intrinsic mass
+  properties only. Future `active_grip_*` relationships feed future
+  `handling_*` outputs one way and never write back.
+- `WeaponRootOrigin` currently covers both forge/geometry-local data and the
+  grip-rebased held-item root. Preserve that working contract now. When V1 is
+  removed, the clean V2-only origin model should distinguish immutable
+  `WeaponGeometryOrigin` from runtime `WeaponEquipRootOrigin` or
+  `PrimaryGripMountOrigin`. COM is not either root; an optional physics-COM
+  pivot would be a derived child frame.

@@ -12,8 +12,10 @@ const PlayerFingerCapsuleSurfaceQueryScript = preload(
 ## serial one-axis hinges per digit, and returns local pose rotations for the caller
 ## to cache/apply at an explicit lifecycle boundary.
 
-const SOLVER_REVISION: StringName = &"serial_hinge_capsule_surface_v4"
+const SOLVER_REVISION: StringName = &"serial_hinge_capsule_surface_v7"
 const MAX_ALLOWED_OVERLAP_METERS := 0.0005
+const THUMB_PROXIMAL_CONTACT_TARGET_REQUIRED := false
+const THUMB_PROXIMAL_MAX_ALLOWED_OVERLAP_METERS := 0.005
 const DEFAULT_PREFERRED_OVERLAP_METERS := 0.00025
 const DEFAULT_SWEEP_STEPS := 20
 const DEFAULT_BACKSOLVE_PASSES := 10
@@ -126,7 +128,10 @@ func prepare_surface(
 			var world_b: Vector3 = mesh_global_transform * local_b
 			var world_c: Vector3 = mesh_global_transform * local_c
 			var cross: Vector3 = (world_b - world_a).cross(world_c - world_a)
-			if cross.length_squared() <= RAY_EPSILON * RAY_EPSILON:
+			if (
+				cross.length_squared()
+				<= PlayerFingerCapsuleSurfaceQueryScript.TRIANGLE_AREA_EPSILON_SQUARED_M4
+			):
 				continue
 			if not _triangle_passes_grip_filter(
 				local_a,
@@ -414,6 +419,22 @@ func _solve_digit(
 		"section_target_overlaps_meters",
 		[preferred_overlap, preferred_overlap, preferred_overlap]
 	) as Array
+	if (
+		has_grip_center
+		and bool(snapshot.get("is_thumb", false))
+		and configured_targets.size() > 1
+	):
+		# The ordinary 0.5 mm cap remains the default for every finger section.
+		# Thumb section 2 owns a larger authored target, so only this thumb digit's
+		# serial target/cap calculations need the extra tolerance headroom.
+		max_overlap = clampf(
+			maxf(
+				max_overlap,
+				float(configured_targets[1]) + SECTION_TARGET_TOLERANCE_METERS
+			),
+			0.0,
+			THUMB_PROXIMAL_MAX_ALLOWED_OVERLAP_METERS
+		)
 	var section_targets: Array[float] = []
 	for section_index: int in range(3):
 		section_targets.append(clampf(
@@ -423,13 +444,27 @@ func _solve_digit(
 		))
 	diagnostic["section_target_overlaps_meters"] = section_targets.duplicate()
 	var section_target_bounds: Array[Dictionary] = []
-	for section_target: float in section_targets:
+	var section_max_allowed_overlaps: Array[float] = []
+	for section_index: int in range(section_targets.size()):
+		var section_target: float = section_targets[section_index]
 		section_target_bounds.append(_resolve_section_target_overlap_bounds(
+			section_target,
+			max_overlap
+		))
+		section_max_allowed_overlaps.append(_resolve_serial_section_max_allowed_overlap(
+			snapshot,
+			section_index,
 			section_target,
 			max_overlap
 		))
 	diagnostic["section_target_overlap_tolerance_meters"] = SECTION_TARGET_TOLERANCE_METERS
 	diagnostic["section_target_overlap_bounds_meters"] = section_target_bounds
+	diagnostic["section_max_allowed_overlaps_meters"] = section_max_allowed_overlaps
+	diagnostic["thumb_proximal_contact_target_required"] = (
+		THUMB_PROXIMAL_CONTACT_TARGET_REQUIRED
+		if bool(snapshot.get("is_thumb", false))
+		else true
+	)
 	var grip_center_world: Vector3 = _resolve_fallback_ray_target(options)
 	if not has_grip_center:
 		return _solve_digit_motion_sweep_fallback(
@@ -560,22 +595,47 @@ func _solve_digit(
 			})
 			all_serial_targets_reached = false
 			continue
-		var stage: Dictionary = _solve_serial_hinge_contact_stage(
-			snapshot,
-			surface,
-			solved_angles,
-			joint_index,
-			closed_angles[joint_index],
-			maxf(float(radii[joint_index]), 0.0),
-			grip_center_world,
-			maximum_ray_distance,
-			section_targets[joint_index],
-			section_targets,
-			max_overlap,
-			options,
-			ray_stats
+		var thumb_proximal_contact_target_bypassed: bool = (
+			bool(snapshot.get("is_thumb", false))
+			and joint_index == 0
+			and not THUMB_PROXIMAL_CONTACT_TARGET_REQUIRED
 		)
-		if not bool(stage.get("stage_accepted", false)) and joint_index == 0:
+		var stage: Dictionary
+		if thumb_proximal_contact_target_bypassed:
+			stage = _try_accept_proximal_downstream_limit(
+				snapshot,
+				surface,
+				solved_angles,
+				joint_index,
+				closed_angles[joint_index],
+				grip_center_world,
+				maximum_ray_distance,
+				section_targets,
+				max_overlap,
+				options,
+				ray_stats
+			)
+		else:
+			stage = _solve_serial_hinge_contact_stage(
+				snapshot,
+				surface,
+				solved_angles,
+				joint_index,
+				closed_angles[joint_index],
+				maxf(float(radii[joint_index]), 0.0),
+				grip_center_world,
+				maximum_ray_distance,
+				section_targets[joint_index],
+				section_targets,
+				max_overlap,
+				options,
+				ray_stats
+			)
+		if (
+			not thumb_proximal_contact_target_bypassed
+			and not bool(stage.get("stage_accepted", false))
+			and joint_index == 0
+		):
 			var constrained_proximal_stage: Dictionary = (
 				_try_accept_proximal_downstream_limit(
 					snapshot,
@@ -1198,6 +1258,10 @@ func _try_accept_proximal_downstream_limit(
 	}
 	if joint_index != 0 or locked_angles.size() != 3 or section_targets.size() != 3:
 		return rejected
+	var thumb_proximal_contact_target_bypassed: bool = (
+		not THUMB_PROXIMAL_CONTACT_TARGET_REQUIRED
+		and bool(snapshot.get("is_thumb", false))
+	)
 	var start_safety: Dictionary = _query_downstream_section_safety(
 		snapshot,
 		surface,
@@ -1253,6 +1317,15 @@ func _try_accept_proximal_downstream_limit(
 			section_targets,
 			max_overlap
 		)
+		if blocking_section_index < 0 and thumb_proximal_contact_target_bypassed:
+			# Thumb section 1 is not a contact stop, but its enlarged 5 mm hard cap
+			# remains an emergency boundary if sections 2/3 do not stop it first.
+			blocking_section_index = _resolve_downstream_limit_blocker(
+				sample_safety,
+				0,
+				section_targets,
+				max_overlap
+			)
 		if blocking_section_index < 0:
 			(rejected.get("diagnostics", {}) as Dictionary)["status"] = (
 				&"proximal_limit_preceded_downstream_limit"
@@ -1263,6 +1336,66 @@ func _try_accept_proximal_downstream_limit(
 		unsafe_high_safety = sample_safety
 		break
 	if unsafe_high_fraction < 0.0:
+		if thumb_proximal_contact_target_bypassed:
+			var accepted_angles: Array[float] = locked_angles.duplicate()
+			accepted_angles[joint_index] = closed_angle
+			var phase_path_safety: Dictionary = {
+				"safe": true,
+				"skipped": true,
+				"reason": &"direct_final_pose",
+			}
+			if bool(options.get("require_transient_path_safety", false)):
+				phase_path_safety = _query_serial_phase_path_safety(
+					snapshot,
+					surface,
+					locked_angles,
+					accepted_angles,
+					0,
+					grip_center_world,
+					maximum_ray_distance,
+					section_targets,
+					max_overlap,
+					options,
+					ray_stats
+				)
+			if not bool(phase_path_safety.get("safe", false)):
+				(rejected.get("diagnostics", {}) as Dictionary)["status"] = (
+					&"thumb_proximal_unsafe_phase_path"
+				)
+				(rejected.get("diagnostics", {}) as Dictionary)["phase_path_safety"] = (
+					phase_path_safety
+				)
+				return rejected
+			var accepted_states: Array = safe_low_safety.get("section_states", []) as Array
+			var proximal_state: Dictionary = (
+				accepted_states[0] as Dictionary
+				if not accepted_states.is_empty()
+				else {}
+			)
+			return {
+				"has_safe_angle": true,
+				"target_reached": false,
+				"stage_accepted": true,
+				"angle_rad": closed_angle,
+				"refinement_step_count": 0,
+				"diagnostics": {
+					"section_index": joint_index,
+					"status": &"thumb_proximal_angle_limit_downstream_safe",
+					"angle_rad": closed_angle,
+					"open_angle_rad": start_angle,
+					"closed_angle_rad": closed_angle,
+					"target_overlap_meters": section_targets[joint_index],
+					"target_reached": false,
+					"stage_accepted": true,
+					"contact_target_bypassed": true,
+					"max_allowed_overlap_meters": THUMB_PROXIMAL_MAX_ALLOWED_OVERLAP_METERS,
+					"downstream_endpoint_safe": true,
+					"phase_path_safe": true,
+					"endpoint_safety": safe_low_safety,
+					"phase_path_safety": phase_path_safety,
+					"surface_state": proximal_state,
+				},
+			}
 		(rejected.get("diagnostics", {}) as Dictionary)["status"] = (
 			&"proximal_downstream_upper_limit_not_reached"
 		)
@@ -1294,6 +1427,13 @@ func _try_accept_proximal_downstream_limit(
 			section_targets,
 			max_overlap
 		)
+		if middle_blocker < 0 and thumb_proximal_contact_target_bypassed:
+			middle_blocker = _resolve_downstream_limit_blocker(
+				middle_safety,
+				0,
+				section_targets,
+				max_overlap
+			)
 		if middle_blocker < 0:
 			(rejected.get("diagnostics", {}) as Dictionary)["status"] = (
 				&"proximal_limit_during_downstream_refinement"
@@ -1332,10 +1472,13 @@ func _try_accept_proximal_downstream_limit(
 	var proximal_safe_state: Dictionary = safe_states[0] as Dictionary
 	var blocker_safe_state: Dictionary = safe_states[blocking_section_index] as Dictionary
 	var blocker_unsafe_state: Dictionary = unsafe_states[blocking_section_index] as Dictionary
-	if not _serial_surface_state_reaches_target(
-		blocker_safe_state,
-		section_targets[blocking_section_index],
-		max_overlap
+	if (
+		blocking_section_index != 0
+		and not _serial_surface_state_reaches_target(
+			blocker_safe_state,
+			section_targets[blocking_section_index],
+			max_overlap
+		)
 	):
 		(rejected.get("diagnostics", {}) as Dictionary)["status"] = (
 			&"proximal_downstream_safe_boundary_not_in_target_band"
@@ -1379,14 +1522,30 @@ func _try_accept_proximal_downstream_limit(
 		"refinement_step_count": performed_refinements,
 		"diagnostics": {
 			"section_index": joint_index,
-			"status": &"accepted_proximal_gap_downstream_upper_limit",
+			"status": (
+				&"accepted_thumb_proximal_downstream_upper_limit"
+				if thumb_proximal_contact_target_bypassed
+				else &"accepted_proximal_gap_downstream_upper_limit"
+			),
 			"angle_rad": accepted_angle,
 			"open_angle_rad": start_angle,
 			"closed_angle_rad": closed_angle,
 			"target_overlap_meters": section_targets[joint_index],
 			"target_reached": false,
 			"stage_accepted": true,
-			"accepted_safe_gap": true,
+			"accepted_safe_gap": float(proximal_safe_state.get(
+				"signed_overlap_meters",
+				-INF
+			)) < 0.0,
+			"contact_target_bypassed": thumb_proximal_contact_target_bypassed,
+			"max_allowed_overlap_meters": (
+				THUMB_PROXIMAL_MAX_ALLOWED_OVERLAP_METERS
+				if thumb_proximal_contact_target_bypassed
+				else _resolve_section_max_allowed_overlap(
+					section_targets[joint_index],
+					max_overlap
+				)
+			),
 			"surface_gap_meters": float(proximal_safe_state.get(
 				"surface_gap_meters",
 				0.0
@@ -1399,7 +1558,9 @@ func _try_accept_proximal_downstream_limit(
 				blocker_safe_state.get("penetration_meters", 0.0)
 			),
 			"downstream_max_allowed_overlap_meters": (
-				_resolve_section_max_allowed_overlap(
+				_resolve_serial_section_max_allowed_overlap(
+					snapshot,
+					blocking_section_index,
 					section_targets[blocking_section_index],
 					max_overlap
 				)
@@ -1745,6 +1906,10 @@ func _downstream_safety_exceeds_section_upper(
 		var state: Dictionary = state_variant as Dictionary
 		if int(state.get("section_index", -1)) != section_index:
 			continue
+		section_limit = float(state.get(
+			"section_max_allowed_overlap_meters",
+			section_limit
+		))
 		if (
 			not bool(state.get("surface_query_hit", false))
 			or not bool(state.get("inside_classification_valid", false))
@@ -2236,6 +2401,21 @@ func _resolve_section_max_allowed_overlap(
 	).get("upper_meters", max_overlap))
 
 
+func _resolve_serial_section_max_allowed_overlap(
+	snapshot: Dictionary,
+	section_index: int,
+	target_overlap: float,
+	max_overlap: float
+) -> float:
+	if (
+		not THUMB_PROXIMAL_CONTACT_TARGET_REQUIRED
+		and bool(snapshot.get("is_thumb", false))
+		and section_index == 0
+	):
+		return THUMB_PROXIMAL_MAX_ALLOWED_OVERLAP_METERS
+	return _resolve_section_max_allowed_overlap(target_overlap, max_overlap)
+
+
 func _serial_surface_state_reaches_target(
 	state: Dictionary,
 	target_overlap: float,
@@ -2279,7 +2459,9 @@ func _query_downstream_section_safety(
 			if section_index < section_targets.size()
 			else DEFAULT_PREFERRED_OVERLAP_METERS
 		)
-		var section_max_overlap: float = _resolve_section_max_allowed_overlap(
+		var section_max_overlap: float = _resolve_serial_section_max_allowed_overlap(
+			snapshot,
+			section_index,
 			section_target,
 			max_overlap
 		)
@@ -2809,7 +2991,9 @@ func _evaluate_serial_pose_safety(
 			if section_index < section_targets.size()
 			else DEFAULT_PREFERRED_OVERLAP_METERS
 		)
-		var section_max_overlap: float = _resolve_section_max_allowed_overlap(
+		var section_max_overlap: float = _resolve_serial_section_max_allowed_overlap(
+			snapshot,
+			section_index,
 			section_target,
 			max_overlap
 		)
@@ -2859,15 +3043,14 @@ func _summarize_serial_section_states(
 			if section_index < section_targets.size()
 			else DEFAULT_PREFERRED_OVERLAP_METERS
 		)
-		var section_max_overlap: float = _resolve_section_max_allowed_overlap(
-			section_target,
-			max_overlap
-		)
+		var section_max_overlap: float = float(state.get(
+			"section_max_allowed_overlap_meters",
+			_resolve_section_max_allowed_overlap(section_target, max_overlap)
+		))
 		state["section_max_allowed_overlap_meters"] = section_max_overlap
 		var section_within_limit: bool = (
 			bool(state.get("within_overlap_limit", false))
 			and penetration <= section_max_overlap + OVERLAP_NUMERIC_EPSILON_METERS
-			and penetration <= max_overlap + OVERLAP_NUMERIC_EPSILON_METERS
 		)
 		if not section_within_limit:
 			overlap_limit_respected = false

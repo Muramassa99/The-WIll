@@ -66,7 +66,11 @@ func _run_verification() -> void:
 			persisted_station_state.skill_drafts.append(dirty_draft)
 		persisted_station_state.selected_skill_id = &"skill_slot_1"
 		persisted_station_state.default_skill_package_initialized = true
-		persisted_station_state.station_version = CombatAnimationStationStateScript.SKILL_BASELINE_SCHEMA_VERSION - 1
+		persisted_station_state.station_version = (
+			CombatAnimationStationStateScript
+			.SKILL_BASELINE_DESTRUCTIVE_RESET_VERSION
+			- 1
+		)
 	if persisted_wip != null:
 		persisted_wip.latest_baked_profile_snapshot = _build_test_baked_profile()
 	library_state.persist()

@@ -2,15 +2,26 @@ extends Resource
 class_name CombatAnimationStationState
 
 const CombatAnimationDraftScript = preload("res://core/models/combat_animation_draft.gd")
+const CombatAnimationMotionNodeScript = preload(
+	"res://core/models/combat_animation_motion_node.gd"
+)
+const PrimaryGripSeatResolverScript = preload(
+	"res://core/resolvers/primary_grip_seat_resolver.gd"
+)
 const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_state.gd")
 
 const AUTHORING_MODE_IDLE: StringName = &"author_idle"
 const AUTHORING_MODE_SKILL: StringName = &"author_skill"
 const IDLE_CONTEXT_COMBAT: StringName = &"idle_combat"
 const IDLE_CONTEXT_NONCOMBAT: StringName = &"idle_noncombat"
-const SKILL_BASELINE_SCHEMA_VERSION := 3
+const SKILL_BASELINE_DESTRUCTIVE_RESET_VERSION := 3
+const SKILL_BASELINE_SCHEMA_VERSION := 4
 
-@export var station_version: int = SKILL_BASELINE_SCHEMA_VERSION
+# Keep the serialized default at the last shipped value. Existing version-3
+# .tres files commonly omitted this default-valued property; loading them must
+# still enter the version-4 coordinate migration. normalize() stamps 4, so all
+# subsequently saved/current stations serialize the new value explicitly.
+@export var station_version: int = SKILL_BASELINE_DESTRUCTIVE_RESET_VERSION
 @export var station_schema_id: StringName = &"combat_animation_creator_v1"
 @export var selected_authoring_mode: StringName = AUTHORING_MODE_SKILL
 @export var selected_skill_id: StringName = &""
@@ -41,7 +52,12 @@ static func get_authoring_skill_slot_ids() -> Array[StringName]:
 	return slot_ids
 
 func normalize() -> void:
-	var requires_skill_baseline_reset: bool = station_version < SKILL_BASELINE_SCHEMA_VERSION
+	var loaded_station_version := station_version
+	var requires_skill_baseline_reset: bool = (
+		loaded_station_version < SKILL_BASELINE_DESTRUCTIVE_RESET_VERSION
+	)
+	if loaded_station_version < SKILL_BASELINE_SCHEMA_VERSION:
+		_mark_existing_grip_positions_as_legacy_display_values()
 	station_version = SKILL_BASELINE_SCHEMA_VERSION
 	if requires_skill_baseline_reset:
 		_clear_skill_drafts_for_baseline_migration()
@@ -55,6 +71,68 @@ func normalize() -> void:
 		selected_skill_id = StringName()
 	if selected_skill_id == StringName() and not skill_drafts.is_empty():
 		selected_skill_id = StringName(skill_drafts[0].get("owning_skill_id"))
+
+
+func _mark_existing_grip_positions_as_legacy_display_values() -> void:
+	_mark_draft_array_grip_positions_as_legacy_display_values(idle_drafts)
+	_mark_draft_array_grip_positions_as_legacy_display_values(skill_drafts)
+
+
+func _mark_draft_array_grip_positions_as_legacy_display_values(
+	drafts: Array[Resource]
+) -> void:
+	for draft: Resource in drafts:
+		if draft == null:
+			continue
+		var motion_node_chain: Array = draft.get("motion_node_chain") as Array
+		for motion_node: Resource in motion_node_chain:
+			if motion_node == null:
+				continue
+			motion_node.set(
+				"grip_seat_coordinate_schema_version",
+				CombatAnimationMotionNodeScript
+				.GRIP_SEAT_COORDINATE_SCHEMA_LEGACY_DISPLAY_VALUE
+			)
+
+
+func migrate_legacy_grip_coordinates(coordinate_mode: StringName) -> int:
+	var migrated_count := 0
+	migrated_count += _migrate_draft_array_legacy_grip_coordinates(
+		idle_drafts,
+		coordinate_mode
+	)
+	migrated_count += _migrate_draft_array_legacy_grip_coordinates(
+		skill_drafts,
+		coordinate_mode
+	)
+	return migrated_count
+
+
+func _migrate_draft_array_legacy_grip_coordinates(
+	drafts: Array[Resource],
+	coordinate_mode: StringName
+) -> int:
+	var migrated_count := 0
+	for draft: Resource in drafts:
+		if draft == null:
+			continue
+		var draft_migrated := false
+		var motion_node_chain: Array = draft.get("motion_node_chain") as Array
+		for motion_node: Resource in motion_node_chain:
+			if (
+				motion_node != null
+				and PrimaryGripSeatResolverScript
+				.migrate_legacy_display_coordinates(
+					motion_node as CombatAnimationMotionNode,
+					coordinate_mode
+				)
+			):
+				migrated_count += 1
+				draft_migrated = true
+		if draft_migrated:
+			draft.set("baked_runtime_clip", null)
+			draft.set("runtime_cache_signature", "")
+	return migrated_count
 
 func _clear_skill_drafts_for_baseline_migration() -> void:
 	skill_drafts.clear()

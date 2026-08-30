@@ -731,8 +731,20 @@ func build_equipped_item_node(
 	var weapon_tip_local: Vector3 = (test_print.baked_profile.weapon_tip_point - dominant_grip_center_local) * cell_world_size
 	var weapon_pommel_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var weapon_pommel_local: Vector3 = (test_print.baked_profile.weapon_pommel_point - dominant_grip_center_local) * cell_world_size
-	var weapon_center_of_mass_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
-	var weapon_center_of_mass_local: Vector3 = (test_print.baked_profile.center_of_mass - dominant_grip_center_local) * cell_world_size
+	# This is the immutable weapon COM re-expressed relative to the equip-time
+	# dominant-grip frame. It is a cached debug representation, not the future
+	# active-grip leverage state, and is not recomputed for later seat changes.
+	var weapon_intrinsic_center_of_mass_equip_frame_local_origin_id: StringName = (
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var weapon_intrinsic_center_of_mass_equip_frame_local_meters: Vector3 = (
+		(
+			test_print.baked_profile
+			.get_weapon_intrinsic_center_of_mass_weapon_root_cells()
+			- dominant_grip_center_local
+		)
+		* cell_world_size
+	)
 	var primary_grip_contact_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var primary_grip_contact_local: Vector3 = (test_print.baked_profile.primary_grip_contact_position - dominant_grip_center_local) * cell_world_size
 	var primary_grip_span_start_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
@@ -761,6 +773,23 @@ func build_equipped_item_node(
 			)
 	var primary_grip_slide_axis_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var primary_grip_slide_axis_local: Vector3 = test_print.baked_profile.primary_grip_slide_axis.normalized()
+	var primary_grip_handle_coordinate_mode := (
+		PrimaryGripSeatResolverScript.resolve_profile_handle_coordinate_mode(
+			test_print.baked_profile
+		)
+	)
+	var primary_grip_handle_tip_side_axis_ratio := (
+		PrimaryGripSeatResolverScript
+		.resolve_profile_handle_tip_side_axis_ratio_from_span_start(
+			test_print.baked_profile
+		)
+	)
+	var primary_grip_handle_zero_axis_ratio := (
+		PrimaryGripSeatResolverScript
+		.resolve_profile_handle_zero_axis_ratio_from_span_start(
+			test_print.baked_profile
+		)
+	)
 	held_root.set_meta("dominant_grip_center_weapon_origin_id", dominant_grip_center_weapon_origin_id)
 	held_root.set_meta("weapon_tip_origin_id", weapon_tip_origin_id)
 	held_root.set_meta("primary_grip_contact_origin_id", primary_grip_contact_origin_id)
@@ -786,7 +815,13 @@ func build_equipped_item_node(
 	_set_origin_tracked_vector3_meta(held_root, "hand_alignment_offset_local", "hand_alignment_offset_origin_id", hand_alignment_offset_local, hand_alignment_offset_origin_id)
 	_set_origin_tracked_vector3_meta(held_root, "weapon_tip_local", "weapon_tip_origin_id", weapon_tip_local, weapon_tip_origin_id)
 	_set_origin_tracked_vector3_meta(held_root, "weapon_pommel_local", "weapon_pommel_origin_id", weapon_pommel_local, weapon_pommel_origin_id)
-	_set_origin_tracked_vector3_meta(held_root, "weapon_center_of_mass_local", "weapon_center_of_mass_origin_id", weapon_center_of_mass_local, weapon_center_of_mass_origin_id)
+	_set_origin_tracked_vector3_meta(
+		held_root,
+		"weapon_intrinsic_center_of_mass_equip_frame_local_meters",
+		"weapon_intrinsic_center_of_mass_equip_frame_local_origin_id",
+		weapon_intrinsic_center_of_mass_equip_frame_local_meters,
+		weapon_intrinsic_center_of_mass_equip_frame_local_origin_id
+	)
 	held_root.set_meta("weapon_total_length_meters", float(test_print.baked_profile.weapon_total_length_meters))
 	_set_origin_tracked_vector3_meta(held_root, "primary_grip_contact_local", "primary_grip_contact_origin_id", primary_grip_contact_local, primary_grip_contact_origin_id)
 	held_root.set_meta("primary_grip_span_start_local", primary_grip_span_start_local)
@@ -808,6 +843,18 @@ func build_equipped_item_node(
 		primary_grip_slice_centers_origin_id
 	)
 	held_root.set_meta("primary_grip_axis_ratio_from_span_start", float(test_print.baked_profile.primary_grip_axis_ratio_from_span_start))
+	held_root.set_meta(
+		"primary_grip_handle_coordinate_mode",
+		primary_grip_handle_coordinate_mode
+	)
+	held_root.set_meta(
+		"primary_grip_handle_tip_side_axis_ratio_from_span_start",
+		primary_grip_handle_tip_side_axis_ratio
+	)
+	held_root.set_meta(
+		"primary_grip_handle_zero_axis_ratio_from_span_start",
+		primary_grip_handle_zero_axis_ratio
+	)
 	held_root.set_meta("primary_grip_slide_axis_local", primary_grip_slide_axis_local)
 	held_root.set_meta("primary_grip_slide_axis_origin_id", primary_grip_slide_axis_origin_id)
 	if secondary_grip_guide != null:
@@ -2445,11 +2492,36 @@ func _resolve_slot_contact_anchor_basis_world(
 func _resolve_slot_contact_hand_basis_world(
 	humanoid_rig: Node3D,
 	held_item: Node3D,
-	_slot_id: StringName,
+	slot_id: StringName,
 	finger_guide_node: Node3D
 ) -> Basis:
 	if held_item == null:
 		return Basis.IDENTITY
+	if (
+		slot_id == &"hand_right"
+		and finger_guide_node != null
+		and StringName(finger_guide_node.name) == &"SecondaryGripGuide"
+	):
+		return _resolve_right_support_contact_hand_basis_world(
+			humanoid_rig,
+			held_item,
+			slot_id,
+			finger_guide_node
+		)
+	return _resolve_standard_slot_contact_hand_basis_world(
+		humanoid_rig,
+		held_item,
+		slot_id,
+		finger_guide_node
+	)
+
+
+func _resolve_standard_slot_contact_hand_basis_world(
+	humanoid_rig: Node3D,
+	held_item: Node3D,
+	slot_id: StringName,
+	finger_guide_node: Node3D
+) -> Basis:
 	var grip_axis_world: Vector3 = _resolve_weapon_tip_axis_world(held_item, finger_guide_node)
 	if grip_axis_world.length_squared() <= 0.000001:
 		return held_item.global_basis.orthonormalized()
@@ -2462,7 +2534,114 @@ func _resolve_slot_contact_hand_basis_world(
 		finger_guide_node,
 		desired_contact_axis_world
 	)
-	var contact_axis_state: Dictionary = _resolve_slot_contact_axis_state(humanoid_rig, _slot_id)
+	return _build_slot_contact_hand_basis_world(
+		humanoid_rig,
+		slot_id,
+		desired_contact_axis_world,
+		desired_hand_y_world
+	)
+
+
+func _resolve_right_support_contact_hand_basis_world(
+	humanoid_rig: Node3D,
+	held_item: Node3D,
+	slot_id: StringName,
+	finger_guide_node: Node3D
+) -> Basis:
+	var support_basis_anchor: Node3D = (
+		weapon_grip_anchor_provider.get_support_grip_basis_anchor(held_item)
+	)
+	if (
+		support_basis_anchor == null
+		or not is_instance_valid(support_basis_anchor)
+		or not bool(support_basis_anchor.get_meta("grip_basis_valid", false))
+	):
+		return _resolve_standard_slot_contact_hand_basis_world(
+			humanoid_rig,
+			held_item,
+			slot_id,
+			finger_guide_node
+		)
+	var corrected_grip_axis_source_origin_id: StringName = _resolve_origin_meta_value(
+		support_basis_anchor,
+		"grip_basis_major_axis_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var corrected_grip_axis_world_origin_id: StringName = (
+		CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+	)
+	var corrected_grip_axis_world_state := {
+		"corrected_grip_axis_world": support_basis_anchor.global_basis.z.normalized(),
+		"corrected_grip_axis_world_origin_id": corrected_grip_axis_world_origin_id,
+		"corrected_grip_axis_source_origin_id": corrected_grip_axis_source_origin_id,
+	}
+	var corrected_grip_axis_world: Vector3 = _get_origin_tracked_vector3_state(
+		corrected_grip_axis_world_state,
+		"corrected_grip_axis_world",
+		"corrected_grip_axis_world_origin_id",
+		Vector3.ZERO,
+		corrected_grip_axis_world_origin_id
+	)
+	var corrected_up_source_origin_id: StringName = _resolve_origin_meta_value(
+		support_basis_anchor,
+		"grip_basis_minor_axis_b_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var corrected_up_world_origin_id: StringName = CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+	var corrected_up_world_state := {
+		"corrected_up_world": support_basis_anchor.global_basis.y.normalized(),
+		"corrected_up_world_origin_id": corrected_up_world_origin_id,
+		"corrected_up_source_origin_id": corrected_up_source_origin_id,
+	}
+	var corrected_up_world: Vector3 = _get_origin_tracked_vector3_state(
+		corrected_up_world_state,
+		"corrected_up_world",
+		"corrected_up_world_origin_id",
+		Vector3.ZERO,
+		corrected_up_world_origin_id
+	)
+	if (
+		corrected_grip_axis_world.length_squared() <= 0.000001
+		or corrected_up_world.length_squared() <= 0.000001
+	):
+		return _resolve_standard_slot_contact_hand_basis_world(
+			humanoid_rig,
+			held_item,
+			slot_id,
+			finger_guide_node
+		)
+	# The corrected support anchor owns orientation here. The weapon Tip axis is
+	# consulted only for polarity, so the accepted seat rotation is not discarded.
+	var weapon_tip_axis_world: Vector3 = _resolve_weapon_tip_axis_world(
+		held_item,
+		finger_guide_node
+	)
+	if (
+		weapon_tip_axis_world.length_squared() > 0.000001
+		and corrected_grip_axis_world.dot(weapon_tip_axis_world) < 0.0
+	):
+		corrected_grip_axis_world = -corrected_grip_axis_world
+	var grip_style_mode: StringName = held_item.get_meta(
+		"grip_style_mode",
+		CraftedItemWIP.GRIP_NORMAL
+	) as StringName
+	if grip_style_mode != CraftedItemWIP.GRIP_NORMAL:
+		corrected_grip_axis_world = -corrected_grip_axis_world
+	return _build_slot_contact_hand_basis_world(
+		humanoid_rig,
+		slot_id,
+		corrected_grip_axis_world,
+		corrected_up_world
+	)
+
+
+func _build_slot_contact_hand_basis_world(
+	humanoid_rig: Node3D,
+	slot_id: StringName,
+	desired_contact_axis_world: Vector3,
+	desired_hand_y_world: Vector3
+) -> Basis:
+	var contact_axis_state: Dictionary = _resolve_slot_contact_axis_state(humanoid_rig, slot_id)
 	var contact_axis_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
 		contact_axis_state,
 		"contact_axis_origin_id",

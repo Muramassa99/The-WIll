@@ -7,6 +7,7 @@ const ForgeV2MaterialCompositionPolicyScript = preload(
 )
 const ForgeV2ProfileShapeLibraryScript = preload("res://runtime/forge_v2/forge_v2_profile_shape_library.gd")
 const ForgeV2VolumeStrokeScript = preload("res://runtime/forge_v2/forge_v2_volume_stroke.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
 const REFERENCE_CELL_WORLD_SIZE_METERS := ForgeV2MaterialBodyScript.REFERENCE_CELL_WORLD_SIZE_METERS
 const CELL_EQUIVALENTS_PER_MATERIAL_UNIT := ForgeV2MaterialBodyScript.CELL_EQUIVALENTS_PER_MATERIAL_UNIT
@@ -73,6 +74,29 @@ func build_usage_summary(active_bodies: Array) -> Dictionary:
 		sample_cell_size_meters
 	)
 	return _build_usage_summary_from_cell_materials(cell_materials, sample_volume_cell_equivalents)
+
+
+func build_spatial_usage_summary(active_bodies: Array) -> Dictionary:
+	if active_bodies.is_empty():
+		return {
+			"ok": false,
+			"reason": &"spatial_usage_bodies_empty",
+		}
+	_normalize_body_entries(active_bodies)
+	var sample_cell_size_meters := _resolve_group_sample_cell_size(active_bodies)
+	var cell_materials: Dictionary = {}
+	var protected_handle_cells: Dictionary = {}
+	_apply_body_entries_to_occupancy(
+		cell_materials,
+		protected_handle_cells,
+		active_bodies,
+		sample_cell_size_meters
+	)
+	return _build_spatial_usage_summary_from_cell_materials(
+		cell_materials,
+		sample_cell_size_meters,
+		&"forge_v2_active_body_occupancy_rebuild"
+	)
 
 func build_incremental_committed_usage_summary(
 	existing_committed_bodies: Array,
@@ -247,6 +271,32 @@ func get_incremental_committed_cache_diagnostics() -> Dictionary:
 		_incremental_cache_cell_materials.size()
 	)
 	return diagnostics
+
+
+func build_cached_spatial_usage_summary() -> Dictionary:
+	if not _incremental_cache_candidate_transaction.is_empty():
+		return {
+			"ok": false,
+			"reason": &"spatial_usage_cache_candidate_pending",
+		}
+	if (
+		not _incremental_cache_valid
+		or _incremental_cache_sample_cell_size_meters <= 0.0
+	):
+		return {
+			"ok": false,
+			"reason": &"spatial_usage_cache_invalid",
+		}
+	if _incremental_cache_cell_materials.size() > MAX_INCREMENTAL_CACHE_CELL_COUNT:
+		return {
+			"ok": false,
+			"reason": &"spatial_usage_cache_capacity_exceeded",
+		}
+	return _build_spatial_usage_summary_from_cell_materials(
+		_incremental_cache_cell_materials,
+		_incremental_cache_sample_cell_size_meters,
+		&"forge_v2_checkpoint_tail_occupancy_cache"
+	)
 
 func has_pending_incremental_committed_cache_candidate() -> bool:
 	return not _incremental_cache_candidate_transaction.is_empty()
@@ -729,30 +779,26 @@ func restore_incremental_committed_cache_from_checkpoint(
 	)
 	if normalized_checkpoint_token.is_empty() or sample_cell_size_meters <= 0.0:
 		return {"ok": false, "reason": &"checkpoint_token_invalid"}
+	var occupancy_validation := _validate_checkpoint_occupancy_token(
+		checkpoint_token
+	)
+	if not bool(occupancy_validation.get("ok", false)):
+		return {
+			"ok": false,
+			"reason": occupancy_validation.get(
+				"reason",
+				&"checkpoint_occupancy_invalid"
+			),
+		}
 	_incremental_cache_cell_materials = (
-		checkpoint_token.get("checkpoint_cell_materials", {}) as Dictionary
+		occupancy_validation.get("cell_materials", {}) as Dictionary
 	).duplicate()
 	_incremental_cache_protected_handle_cells = (
-		checkpoint_token.get(
-			"checkpoint_protected_handle_cells",
-			{}
-		) as Dictionary
+		occupancy_validation.get("protected_handle_cells", {}) as Dictionary
 	).duplicate()
 	_incremental_cache_material_cell_counts = (
-		checkpoint_token.get(
-			"checkpoint_material_cell_counts",
-			{}
-		) as Dictionary
+		occupancy_validation.get("material_cell_counts", {}) as Dictionary
 	).duplicate()
-	if (
-		not _incremental_cache_cell_materials.is_empty()
-		and _incremental_cache_material_cell_counts.is_empty()
-	):
-		for cell_key: Variant in _incremental_cache_cell_materials.keys():
-			_increment_material_cell_count(
-				_incremental_cache_material_cell_counts,
-				StringName(_incremental_cache_cell_materials[cell_key])
-			)
 	var apply_diagnostics := _apply_body_entries_to_occupancy(
 		_incremental_cache_cell_materials,
 		_incremental_cache_protected_handle_cells,
@@ -798,6 +844,73 @@ func restore_incremental_committed_cache_from_checkpoint(
 			sample_volume_cell_equivalents
 		),
 		"diagnostics": _last_incremental_cache_diagnostics.duplicate(true),
+	}
+
+
+func _validate_checkpoint_occupancy_token(
+	checkpoint_token: Dictionary
+) -> Dictionary:
+	var cell_materials_variant: Variant = checkpoint_token.get(
+		"checkpoint_cell_materials",
+		{}
+	)
+	var protected_cells_variant: Variant = checkpoint_token.get(
+		"checkpoint_protected_handle_cells",
+		{}
+	)
+	var material_counts_variant: Variant = checkpoint_token.get(
+		"checkpoint_material_cell_counts",
+		{}
+	)
+	if (
+		cell_materials_variant is not Dictionary
+		or protected_cells_variant is not Dictionary
+		or material_counts_variant is not Dictionary
+	):
+		return {"ok": false, "reason": &"checkpoint_occupancy_type_invalid"}
+	var cell_materials := cell_materials_variant as Dictionary
+	var protected_cells := protected_cells_variant as Dictionary
+	var stored_material_counts := material_counts_variant as Dictionary
+	if (
+		int(checkpoint_token.get("checkpoint_operation_count", 0)) > 0
+		and cell_materials.is_empty()
+	):
+		return {"ok": false, "reason": &"checkpoint_prefix_occupancy_missing"}
+
+	var computed_material_counts: Dictionary = {}
+	for cell_key: Variant in cell_materials.keys():
+		if cell_key is not Vector3i:
+			return {"ok": false, "reason": &"checkpoint_cell_key_invalid"}
+		var material_id := StringName(cell_materials[cell_key])
+		if material_id == StringName():
+			return {"ok": false, "reason": &"checkpoint_cell_material_missing"}
+		_increment_material_cell_count(computed_material_counts, material_id)
+	for cell_key: Variant in protected_cells.keys():
+		if cell_key is not Vector3i or not cell_materials.has(cell_key):
+			return {"ok": false, "reason": &"checkpoint_protected_cell_invalid"}
+
+	if stored_material_counts.is_empty():
+		stored_material_counts = computed_material_counts
+	else:
+		var stored_total := 0
+		for material_key: Variant in stored_material_counts.keys():
+			var material_id := StringName(material_key)
+			var stored_count := int(stored_material_counts[material_key])
+			if material_id == StringName() or stored_count <= 0:
+				return {"ok": false, "reason": &"checkpoint_material_count_invalid"}
+			stored_total += stored_count
+			if stored_count != int(computed_material_counts.get(material_id, -1)):
+				return {"ok": false, "reason": &"checkpoint_material_count_stale"}
+		if (
+			stored_total != cell_materials.size()
+			or stored_material_counts.size() != computed_material_counts.size()
+		):
+			return {"ok": false, "reason": &"checkpoint_material_count_mismatch"}
+	return {
+		"ok": true,
+		"cell_materials": cell_materials,
+		"protected_handle_cells": protected_cells,
+		"material_cell_counts": stored_material_counts,
 	}
 
 func _apply_body_entries_to_occupancy(
@@ -1112,6 +1225,91 @@ func _build_usage_summary_from_cell_materials(
 		"total_rough_volume_cell_equivalents": total_volume_cell_equivalents,
 		"total_rough_material_centi_units": total_centi_units,
 		"total_rough_material_units": float(total_centi_units) / float(MATERIAL_UNIT_SCALE),
+		"materials": material_entries,
+	}
+
+
+func _build_spatial_usage_summary_from_cell_materials(
+	cell_materials: Dictionary,
+	sample_cell_size_meters: float,
+	authority_source: StringName
+) -> Dictionary:
+	if sample_cell_size_meters <= 0.0 or cell_materials.is_empty():
+		return {
+			"ok": false,
+			"reason": &"spatial_usage_occupancy_empty",
+		}
+	var sample_volume_cell_equivalents := pow(
+		sample_cell_size_meters / REFERENCE_CELL_WORLD_SIZE_METERS,
+		3.0
+	)
+	var material_entries: Dictionary = {}
+	var occupied_cell_count := 0
+	for cell_key_variant: Variant in cell_materials.keys():
+		if cell_key_variant is not Vector3i:
+			continue
+		var cell_key := cell_key_variant as Vector3i
+		var material_variant_id := StringName(cell_materials.get(
+			cell_key,
+			StringName()
+		))
+		if material_variant_id == StringName():
+			continue
+		var cell_center_meters := _sample_center_from_index(
+			cell_key.x,
+			cell_key.y,
+			cell_key.z,
+			sample_cell_size_meters
+		)
+		var material_entry: Dictionary = material_entries.get(
+			material_variant_id,
+			{
+				"material_variant_id": material_variant_id,
+				"rough_spatial_sample_count": 0,
+				"rough_volume_cell_equivalents": 0.0,
+				"rough_spatial_position_sum_meters": Vector3.ZERO,
+				"rough_spatial_centroid_meters": Vector3.ZERO,
+				"rough_spatial_position_origin_id": (
+					CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+				),
+			}
+		) as Dictionary
+		var next_sample_count := int(material_entry.get(
+			"rough_spatial_sample_count",
+			0
+		)) + 1
+		var next_position_sum := (
+			material_entry.get(
+				"rough_spatial_position_sum_meters",
+				Vector3.ZERO
+			) as Vector3
+		) + cell_center_meters
+		material_entry["rough_spatial_sample_count"] = next_sample_count
+		material_entry["rough_volume_cell_equivalents"] = (
+			float(next_sample_count) * sample_volume_cell_equivalents
+		)
+		material_entry["rough_spatial_position_sum_meters"] = next_position_sum
+		material_entry["rough_spatial_centroid_meters"] = (
+			next_position_sum / float(next_sample_count)
+		)
+		material_entries[material_variant_id] = material_entry
+		occupied_cell_count += 1
+	if material_entries.is_empty() or occupied_cell_count <= 0:
+		return {
+			"ok": false,
+			"reason": &"spatial_usage_materials_empty",
+		}
+	return {
+		"ok": true,
+		"reason": &"none",
+		"spatial_material_positions_valid": true,
+		"spatial_authority_source": authority_source,
+		"spatial_positions_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		"resolver_sample_cell_size_meters": sample_cell_size_meters,
+		"spatial_occupied_cell_count": occupied_cell_count,
+		"total_rough_volume_cell_equivalents": (
+			float(occupied_cell_count) * sample_volume_cell_equivalents
+		),
 		"materials": material_entries,
 	}
 

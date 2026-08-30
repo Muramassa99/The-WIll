@@ -18,8 +18,10 @@ class ProfileBuilderPreviewControl:
 	extends Control
 
 	signal control_point_dragged(point_index: int, point_position_meters: Vector2)
+	signal control_point_drag_started(point_index: int)
 	signal control_point_drag_finished(point_index: int)
 	signal anchor_point_dragged(anchor_position_meters: Vector2)
+	signal anchor_point_drag_started()
 	signal anchor_point_drag_finished()
 	signal anchor_point_reset_requested()
 	signal canvas_context_requested(
@@ -117,6 +119,15 @@ class ProfileBuilderPreviewControl:
 		rounded_enabled = next_rounded_enabled
 		anchor_position = _constrain_anchor_position(next_anchor_position)
 		queue_redraw()
+
+	func reset_active_drag_state() -> void:
+		active_control_point_index = -1
+		is_dragging_control_point = false
+		is_dragging_anchor_point = false
+		queue_redraw()
+
+	func has_active_drag_state() -> bool:
+		return is_dragging_control_point or is_dragging_anchor_point
 
 	func configure_canvas_context(next_enabled: bool) -> void:
 		canvas_context_enabled = next_enabled
@@ -470,6 +481,7 @@ class ProfileBuilderPreviewControl:
 				canvas_context_dismiss_requested.emit()
 				if _is_near_anchor_point(mouse_button.position):
 					is_dragging_anchor_point = true
+					anchor_point_drag_started.emit()
 					accept_event()
 					queue_redraw()
 					return
@@ -478,6 +490,7 @@ class ProfileBuilderPreviewControl:
 					return
 				active_control_point_index = nearest_index
 				is_dragging_control_point = true
+				control_point_drag_started.emit(nearest_index)
 				accept_event()
 				queue_redraw()
 			else:
@@ -831,8 +844,8 @@ class ProfileBuilderPreviewControl:
 @onready var radius_increase_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/RadiusRow/RadiusIncreaseButton
 @onready var add_empty_stroke_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/StrokeButtonRow/AddEmptyStrokeButton
 @onready var commit_pending_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/StrokeButtonRow/CommitPendingButton
-@onready var undo_layer_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/StrokeButtonRow/UndoLayerButton
-@onready var redo_layer_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/StrokeButtonRow/RedoLayerButton
+@onready var undo_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/StrokeButtonRow/UndoLayerButton
+@onready var redo_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/StrokeButtonRow/RedoLayerButton
 @onready var body_stack_option: OptionButton = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/BodyStackRow/BodyStackOption
 @onready var delete_selected_body_button: Button = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/BodyStackRow/DeleteSelectedBodyButton
 @onready var platform_contract_label: Label = $Panel/MarginContainer/RootVBox/BodyPanel/BodyMargin/BodyScroll/BodyVBox/PlatformContractLabel
@@ -873,6 +886,11 @@ const V2_WIP_DELETE_POPUP_SIZE := Vector2i(520, 150)
 const V2_WIP_NAME_MAX_LENGTH := 96
 const PROFILE_BUILDER_SIZE_MIN_METERS := ForgeV2ProfileShapeLibraryScript.DEFAULT_CELL_WORLD_SIZE_METERS
 const PROFILE_BUILDER_SIZE_MAX_METERS := 4.0
+const ACTION_HISTORY_HOLD_INITIAL_DELAY_SECONDS := 0.38
+const ACTION_HISTORY_HOLD_INITIAL_INTERVAL_SECONDS := 0.14
+const ACTION_HISTORY_HOLD_MIN_INTERVAL_SECONDS := 0.035
+const ACTION_HISTORY_HOLD_ACCELERATION_FACTOR := 0.82
+const ACTION_HISTORY_HOLD_MAX_STEPS_PER_FRAME := 8
 
 var active_player = null
 var active_stage_controller: Node = null
@@ -917,6 +935,7 @@ var profile_builder_preview: Control = null
 var profile_metric_scale_ruler: Control = null
 var profile_builder_metric_pan_active := false
 var profile_builder_metric_pan_mouse_button := MOUSE_BUTTON_NONE
+var profile_builder_action_transaction_active := false
 var profile_width_spin_box: SpinBox = null
 var profile_height_spin_box: SpinBox = null
 var profile_anchor_x_spin_box: SpinBox = null
@@ -984,9 +1003,16 @@ var workspace_brush_locked_target_kind := StringName()
 var workspace_brush_previous_accumulated_input := true
 var workspace_brush_owns_accumulated_input := false
 var workspace_spline_point_drag_active := false
+var workspace_action_transaction_active := false
 var workspace_spline_drag_point_index := -1
 var workspace_spline_drag_plane_origin_local: Vector3 = Vector3.ZERO
 var workspace_spline_drag_plane_normal_local: Vector3 = Vector3.FORWARD
+var action_history_hold_action := StringName()
+var action_history_hold_binding: Dictionary = {}
+var action_history_hold_elapsed_seconds := 0.0
+var action_history_hold_next_repeat_seconds := 0.0
+var action_history_hold_interval_seconds := 0.0
+var action_history_hold_owns_undo_batch := false
 
 func _ready() -> void:
 	visible = false
@@ -1009,8 +1035,8 @@ func _ready() -> void:
 	radius_increase_button.pressed.connect(_on_radius_increase_pressed)
 	add_empty_stroke_button.pressed.connect(_on_add_empty_stroke_pressed)
 	commit_pending_button.pressed.connect(_on_commit_pending_pressed)
-	undo_layer_button.pressed.connect(_on_undo_layer_pressed)
-	redo_layer_button.pressed.connect(_on_redo_layer_pressed)
+	undo_button.pressed.connect(_on_undo_pressed)
+	redo_button.pressed.connect(_on_redo_pressed)
 	body_stack_option.item_selected.connect(_on_body_stack_selected)
 	delete_selected_body_button.pressed.connect(_on_delete_selected_body_pressed)
 	workspace_view_container.gui_input.connect(_on_workspace_view_gui_input)
@@ -1051,7 +1077,8 @@ func open_for(player, stage_controller: Node, bench_name: String, placement_spac
 	if active_player != null and active_player.has_method("set_ui_mode_enabled"):
 		active_player.call("set_ui_mode_enabled", true)
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_advance_action_history_hold(delta)
 	if (
 		not workspace_brush_stroke_active
 		or workspace_brush_input_stabilizer == null
@@ -1069,9 +1096,20 @@ func _process(_delta: float) -> void:
 func _notification(what: int) -> void:
 	if (
 		what == NOTIFICATION_APPLICATION_FOCUS_OUT
+		and action_history_hold_action != StringName()
+	):
+		_end_action_history_hold()
+	if (
+		what == NOTIFICATION_APPLICATION_FOCUS_OUT
 		and (
 			workspace_brush_stroke_active
 			or workspace_spline_point_drag_active
+			or profile_builder_action_transaction_active
+			or (
+				profile_builder_preview != null
+				and profile_builder_preview.has_method("has_active_drag_state")
+				and bool(profile_builder_preview.call("has_active_drag_state"))
+			)
 		)
 	):
 		call_deferred("_finish_workspace_input_after_focus_loss")
@@ -1080,8 +1118,10 @@ func _finish_workspace_input_after_focus_loss() -> void:
 	if workspace_brush_stroke_active:
 		_finish_workspace_brush_stroke(Vector2.ZERO, false)
 	_finish_workspace_spline_point_drag()
+	_settle_profile_builder_edit_gesture()
 
 func close_ui() -> void:
+	_end_action_history_hold()
 	if not is_open():
 		return
 	if workspace_brush_stroke_active:
@@ -1109,7 +1149,9 @@ func close_ui() -> void:
 	workspace_brush_stroke_active = false
 	_reset_workspace_brush_input_stabilizer()
 	workspace_spline_point_drag_active = false
+	workspace_action_transaction_active = false
 	workspace_spline_drag_point_index = -1
+	profile_builder_action_transaction_active = false
 	active_player = null
 	active_stage_controller = null
 	active_placement_space = null
@@ -1705,8 +1747,14 @@ func _ensure_profile_builder_popup() -> void:
 	profile_builder_preview.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	profile_builder_preview.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	profile_builder_preview.control_point_dragged.connect(_on_profile_control_point_dragged)
+	profile_builder_preview.control_point_drag_started.connect(
+		_on_profile_control_point_drag_started
+	)
 	profile_builder_preview.control_point_drag_finished.connect(_on_profile_control_point_drag_finished)
 	profile_builder_preview.anchor_point_dragged.connect(_on_profile_anchor_point_dragged)
+	profile_builder_preview.anchor_point_drag_started.connect(
+		_on_profile_anchor_point_drag_started
+	)
 	profile_builder_preview.anchor_point_drag_finished.connect(_on_profile_anchor_point_drag_finished)
 	profile_builder_preview.anchor_point_reset_requested.connect(_on_profile_anchor_point_reset_requested)
 	profile_builder_preview.canvas_context_requested.connect(
@@ -1991,6 +2039,12 @@ func _add_profile_handle_builder_adjusters(parent: VBoxContainer) -> void:
 	profile_handle_corner_radius_slider.step = 0.0001
 	profile_handle_corner_radius_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	profile_handle_corner_radius_slider.value_changed.connect(_on_profile_handle_corner_radius_slider_value_changed)
+	profile_handle_corner_radius_slider.drag_started.connect(
+		_on_profile_corner_radius_slider_drag_started
+	)
+	profile_handle_corner_radius_slider.drag_ended.connect(
+		_on_profile_slider_drag_ended
+	)
 	radius_section.add_child(profile_handle_corner_radius_slider)
 
 func _add_profile_rotation_adjuster(parent: VBoxContainer) -> void:
@@ -2034,6 +2088,10 @@ func _add_profile_rotation_adjuster(parent: VBoxContainer) -> void:
 	profile_rotation_slider.ticks_on_borders = true
 	profile_rotation_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	profile_rotation_slider.value_changed.connect(_on_profile_rotation_slider_value_changed)
+	profile_rotation_slider.drag_started.connect(
+		_on_profile_rotation_slider_drag_started
+	)
+	profile_rotation_slider.drag_ended.connect(_on_profile_slider_drag_ended)
 	section.add_child(profile_rotation_slider)
 
 func _ensure_keybindings_popup() -> void:
@@ -2119,6 +2177,7 @@ func _open_profile_builder_popup() -> void:
 	profile_builder_popup.popup_centered(PROFILE_BUILDER_POPUP_SIZE)
 
 func _close_profile_builder_popup() -> void:
+	_settle_profile_builder_edit_gesture()
 	_cancel_profile_builder_metric_pan()
 	_close_profile_name_popup(false)
 	_close_profile_fillet_popup(false)
@@ -2128,6 +2187,7 @@ func _close_profile_builder_popup() -> void:
 		profile_builder_popup.hide()
 
 func _on_profile_builder_popup_hidden() -> void:
+	_settle_profile_builder_edit_gesture()
 	_cancel_profile_builder_metric_pan()
 	_hide_profile_canvas_context_menu()
 	if profile_fillet_pending_corner_id == StringName():
@@ -3683,6 +3743,10 @@ func _on_profile_rotation_spin_value_changed(value: float) -> void:
 func _on_profile_rotation_slider_value_changed(value: float) -> void:
 	_call_profile_builder_float_setter(&"set_active_profile_rotation_degrees", value)
 
+
+func _on_profile_rotation_slider_drag_started() -> void:
+	_begin_profile_builder_action_transaction("Rotate Profile")
+
 func _on_profile_handle_face_count_selected(index: int) -> void:
 	if is_refreshing_profile_builder_ui:
 		return
@@ -3708,12 +3772,53 @@ func _on_profile_handle_corner_radius_spin_value_changed(value: float) -> void:
 func _on_profile_handle_corner_radius_slider_value_changed(value: float) -> void:
 	_call_profile_builder_float_setter(&"set_active_handle_corner_radius_meters", value)
 
+
+func _on_profile_corner_radius_slider_drag_started() -> void:
+	_begin_profile_builder_action_transaction("Change Handle Corner Radius")
+
+
+func _on_profile_slider_drag_ended(_value_changed: bool) -> void:
+	_finish_profile_builder_action_transaction()
+
+
+func _begin_profile_builder_action_transaction(label: String) -> void:
+	if profile_builder_action_transaction_active:
+		return
+	if (
+		active_stage_controller != null
+		and active_stage_controller.has_method("begin_editor_action_transaction")
+	):
+		profile_builder_action_transaction_active = bool(
+			active_stage_controller.call("begin_editor_action_transaction", label)
+		)
+
+
+func _finish_profile_builder_action_transaction() -> void:
+	if not profile_builder_action_transaction_active:
+		return
+	profile_builder_action_transaction_active = false
+	if (
+		active_stage_controller != null
+		and active_stage_controller.has_method("finish_editor_action_transaction")
+	):
+		active_stage_controller.call("finish_editor_action_transaction")
+
+
+func _settle_profile_builder_edit_gesture() -> void:
+	if (
+		profile_builder_preview != null
+		and profile_builder_preview.has_method("reset_active_drag_state")
+	):
+		profile_builder_preview.call("reset_active_drag_state")
+	_finish_profile_builder_action_transaction()
+
 func _on_profile_handles_button_pressed() -> void:
 	_select_profile_builder_handle_builder()
 
 func _select_profile_builder_basic_builder() -> void:
 	if active_stage_controller == null:
 		return
+	_settle_profile_builder_edit_gesture()
 	editor_loaded_saved_profile_id = StringName()
 	if active_stage_controller.has_method("reset_active_basic_profile_builder"):
 		active_stage_controller.call("reset_active_basic_profile_builder")
@@ -3737,7 +3842,13 @@ func _on_profile_control_point_dragged(point_index: int, point_position_meters: 
 		return
 	active_stage_controller.call(method_name, point_index, point_position_meters)
 
+
+func _on_profile_control_point_drag_started(_point_index: int) -> void:
+	_begin_profile_builder_action_transaction("Move Profile Point")
+
+
 func _on_profile_control_point_drag_finished(_point_index: int) -> void:
+	_finish_profile_builder_action_transaction()
 	_refresh_profile_builder_popup()
 
 func _on_profile_anchor_point_dragged(anchor_position_meters: Vector2) -> void:
@@ -3757,7 +3868,13 @@ func _on_profile_anchor_point_dragged(anchor_position_meters: Vector2) -> void:
 		profile_anchor_y_spin_box.set_value_no_signal(clamped_position.y)
 	is_refreshing_profile_builder_ui = false
 
+
+func _on_profile_anchor_point_drag_started() -> void:
+	_begin_profile_builder_action_transaction("Move Profile Anchor")
+
+
 func _on_profile_anchor_point_drag_finished() -> void:
+	_finish_profile_builder_action_transaction()
 	_refresh_profile_builder_popup()
 
 func _on_profile_anchor_point_reset_requested() -> void:
@@ -3769,6 +3886,7 @@ func _on_profile_anchor_point_reset_requested() -> void:
 func _select_profile_builder_handle_builder() -> void:
 	if active_stage_controller == null:
 		return
+	_settle_profile_builder_edit_gesture()
 	editor_loaded_saved_profile_id = StringName()
 	if active_stage_controller.has_method("reset_active_handle_profile_builder"):
 		active_stage_controller.call("reset_active_handle_profile_builder")
@@ -3785,6 +3903,7 @@ func _load_saved_tool_profile_into_editor(profile_id: StringName) -> bool:
 		return false
 	if active_stage_controller == null or not active_stage_controller.has_method("apply_tool_profile_preset"):
 		return false
+	_settle_profile_builder_edit_gesture()
 	var profile_library: Resource = _ensure_tool_profile_library_state()
 	if profile_library == null or not profile_library.has_method("get_saved_profile"):
 		return false
@@ -3921,12 +4040,13 @@ func _rebuild_keybindings_list() -> void:
 		keybinding_buttons_by_action[action_name] = binding_button
 
 func _begin_keybinding_capture(action_name: StringName, binding_button: Button) -> void:
+	_end_action_history_hold()
 	_cancel_keybinding_capture()
 	keybinding_capture_action = action_name
 	keybinding_capture_button = binding_button
 	keybinding_capture_keyboard_data = {}
 	if keybinding_capture_button != null:
-		keybinding_capture_button.text = "Press keys to bind"
+		keybinding_capture_button.text = "Press key / mouse button"
 		keybinding_capture_button.modulate = Color(1.0, 1.0, 1.0, 0.5)
 
 func _cancel_keybinding_capture() -> void:
@@ -4128,6 +4248,64 @@ func _get_v2_controller_options(method_name: StringName) -> Array:
 		return []
 	return active_stage_controller.call(method_name) as Array
 
+func _populate_v2_tool_submenu(
+	tool_submenu: PopupMenu,
+	summary: Dictionary
+) -> void:
+	var tool_options := _get_v2_controller_options(&"get_tool_options")
+	if tool_options.is_empty():
+		_add_v2_disabled_line(tool_submenu, "No tools")
+		return
+	var active_tool_id := StringName(summary.get(
+		"active_tool",
+		StringName()
+	))
+	for option_variant: Variant in tool_options:
+		var option := option_variant as Dictionary
+		var tool_id := StringName(option.get("id", StringName()))
+		if tool_id == &"tool_handles":
+			var handle_mode_submenu := _prepare_v2_submenu(
+				tool_submenu,
+				"HandlePathModeSubmenu"
+			)
+			_configure_v2_increment_popup(handle_mode_submenu)
+			var handle_path_mode_options: Array = summary.get(
+				"handle_path_mode_options",
+				[]
+			) as Array
+			if handle_path_mode_options.is_empty():
+				handle_path_mode_options = _get_v2_controller_options(
+					&"get_handle_path_mode_options"
+				)
+			_add_v2_option_items(
+				handle_mode_submenu,
+				handle_path_mode_options,
+				&"handle_path_mode",
+				summary.get("active_handle_path_mode_id", StringName())
+			)
+			tool_submenu.add_submenu_item(
+				"Handles",
+				String(handle_mode_submenu.name)
+			)
+			continue
+		var label := String(option.get("label", String(tool_id)))
+		tool_submenu.add_radio_check_item(
+			label,
+			_register_v2_menu_action(&"tool", tool_id)
+		)
+		tool_submenu.set_item_checked(
+			tool_submenu.get_item_count() - 1,
+			tool_id == active_tool_id
+		)
+
+func _resolve_v2_active_tool_label(summary: Dictionary) -> String:
+	if (
+		StringName(summary.get("active_tool", StringName())) == &"tool_handles"
+		and bool(summary.get("has_handle_body", false))
+	):
+		return "Change Handle"
+	return String(summary.get("active_tool_label", "No tool"))
+
 func _get_player_forge_wip_library_state() -> PlayerForgeWipLibraryState:
 	if active_player == null or not active_player.has_method("get_forge_wip_library_state"):
 		return null
@@ -4267,14 +4445,9 @@ func _rebuild_v2_material_menu(summary: Dictionary) -> void:
 func _rebuild_v2_shape_menu(summary: Dictionary) -> void:
 	var popup: PopupMenu = shape_menu_button.get_popup()
 	popup.clear()
-	_add_v2_disabled_line(popup, "Tool: %s" % String(summary.get("active_tool_label", "None")))
+	_add_v2_disabled_line(popup, "Tool: %s" % _resolve_v2_active_tool_label(summary))
 	var tool_submenu: PopupMenu = _prepare_v2_submenu(popup, "ToolSubmenu")
-	_add_v2_option_items(
-		tool_submenu,
-		_get_v2_controller_options(&"get_tool_options"),
-		&"tool",
-		summary.get("active_tool", StringName())
-	)
+	_populate_v2_tool_submenu(tool_submenu, summary)
 	popup.add_submenu_item("Tool", String(tool_submenu.name))
 	popup.add_separator()
 	var active_tool_id := StringName(summary.get("active_tool", StringName()))
@@ -4296,7 +4469,11 @@ func _rebuild_v2_shape_menu(summary: Dictionary) -> void:
 		_add_v2_disabled_line(popup, String(summary.get("profile_extrusion_status_label", "Handle: needs 3 points")))
 		_add_v2_menu_action(
 			popup,
-			"Generate Handle",
+			(
+				"Apply Handle Change"
+				if bool(summary.get("handle_change_active", false))
+				else "Generate Handle"
+			),
 			&"profile_generate_extrusion",
 			null,
 			active_stage_controller == null or not bool(summary.get("can_generate_profile_extrusion", false))
@@ -4365,6 +4542,14 @@ func _rebuild_v2_shape_menu(summary: Dictionary) -> void:
 		or spline_point_count < 2
 		or spline_finished
 	)
+	if active_tool_id == &"tool_handles":
+		finish_spline_disabled = (
+			finish_spline_disabled
+			or spline_point_count != int(summary.get(
+				"active_handle_required_point_count",
+				3
+			))
+		)
 	if detailing_brush_active:
 		finish_spline_disabled = (
 			finish_spline_disabled
@@ -4382,11 +4567,21 @@ func _rebuild_v2_shape_menu(summary: Dictionary) -> void:
 		(
 			"Cancel Detailing Brush"
 			if detailing_brush_active
-			else "Cancel Spline Line"
+			else (
+				"Cancel Handle Change"
+				if bool(summary.get("handle_change_active", false))
+				else "Cancel Spline Line"
+			)
 		),
 		&"spline_cancel",
 		null,
-		active_stage_controller == null or spline_point_count <= 0
+		(
+			active_stage_controller == null
+			or (
+				not bool(summary.get("handle_change_active", false))
+				and spline_point_count <= 0
+			)
+		)
 	)
 	if detailing_brush_active:
 		_add_v2_menu_action(
@@ -4479,17 +4674,17 @@ func _rebuild_v2_layers_menu(summary: Dictionary) -> void:
 	)
 	_add_v2_menu_action(
 		popup,
-		"Undo Layer",
-		&"undo_layer",
+		"Undo",
+		&"undo",
 		null,
-		not has_draft or int(summary.get("committed_layer_count", 0)) <= 0
+		not _can_undo_v2_action(summary)
 	)
 	_add_v2_menu_action(
 		popup,
-		"Redo Layer",
-		&"redo_layer",
+		"Redo",
+		&"redo",
 		null,
-		not has_draft or int(summary.get("undone_layer_count", 0)) <= 0
+		not _can_redo_v2_action(summary)
 	)
 	popup.add_separator()
 	var body_submenu: PopupMenu = _prepare_v2_submenu(popup, "BodyStackSubmenu")
@@ -4554,7 +4749,7 @@ func _sync_v2_action_status(summary: Dictionary) -> void:
 		return
 	action_status_label.text = "%s | %s | %s | %s" % [
 		String(summary.get("builder_scope", "No draft")),
-		String(summary.get("active_tool_label", "No tool")),
+		_resolve_v2_active_tool_label(summary),
 		String(summary.get("active_material_label", "No material")),
 		_resolve_v2_shape_size_label(summary),
 	]
@@ -4563,6 +4758,8 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 	var menu_entry: Dictionary = menu_action_lookup.get(menu_id, {}) as Dictionary
 	if menu_entry.is_empty():
 		return
+	_finish_workspace_spline_point_drag()
+	_settle_profile_builder_edit_gesture()
 	var action_id := StringName(menu_entry.get("action", StringName()))
 	var action_value: Variant = menu_entry.get("value", null)
 	if (
@@ -4609,10 +4806,11 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 		&"tool":
 			var next_tool_id := StringName(action_value)
 			if next_tool_id == &"tool_handles":
-				_select_profile_builder_handle_builder()
-			elif active_stage_controller != null:
-				editor_loaded_saved_profile_id = StringName()
-				active_stage_controller.set_active_tool_id(next_tool_id)
+				_activate_handle_authoring_tool()
+			else:
+				_set_active_v2_tool(next_tool_id)
+		&"handle_path_mode":
+			_activate_handle_authoring_tool(StringName(action_value))
 		&"basic_saved_profile":
 			if _select_saved_basic_profile_for_shape(StringName(action_value)):
 				_hide_v2_popup_tree(shape_menu_button.get_popup())
@@ -4639,10 +4837,10 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 			_on_add_empty_stroke_pressed()
 		&"commit_layer":
 			_on_commit_pending_pressed()
-		&"undo_layer":
-			_on_undo_layer_pressed()
-		&"redo_layer":
-			_on_redo_layer_pressed()
+		&"undo":
+			_on_undo_pressed()
+		&"redo":
+			_on_redo_pressed()
 		&"select_body":
 			if active_stage_controller != null:
 				active_stage_controller.select_material_body_id(StringName(action_value))
@@ -4669,6 +4867,7 @@ func _on_profile_builder_menu_id_pressed(menu_id: int) -> void:
 	var action_value: Variant = menu_entry.get("value", null)
 	if active_stage_controller == null:
 		return
+	_settle_profile_builder_edit_gesture()
 	match action_id:
 		&"profile_basic":
 			if StringName(action_value) == ForgeV2ProfileShapeLibraryScript.PROFILE_2D_BUILDER:
@@ -4697,6 +4896,7 @@ func _is_v2_shape_repeat_action(action_id: StringName) -> bool:
 	return (
 		action_id == &"radius_down"
 		or action_id == &"radius_up"
+		or action_id == &"handle_path_mode"
 	)
 
 func _restore_v2_workspace_input_after_top_menu() -> void:
@@ -4734,16 +4934,53 @@ func _call_workspace_preview_action(method_name: StringName, argument: Variant =
 		workspace_preview.call(method_name, argument)
 
 func _set_active_v2_tool(tool_id: StringName) -> void:
-	if active_stage_controller == null or not active_stage_controller.has_method("set_active_tool_id"):
+	if active_stage_controller == null:
 		return
+	if tool_id == &"tool_handles":
+		_activate_handle_authoring_tool()
+		return
+	if not active_stage_controller.has_method("set_active_tool_id"):
+		return
+	_settle_profile_builder_edit_gesture()
 	if workspace_brush_stroke_active:
 		_finish_workspace_brush_stroke(Vector2.ZERO, false)
 	_finish_workspace_spline_point_drag()
-	if tool_id == &"tool_handles":
+	editor_loaded_saved_profile_id = StringName()
+	active_stage_controller.call("set_active_tool_id", tool_id)
+
+func _activate_handle_authoring_tool(
+	handle_path_mode_id: StringName = StringName()
+) -> void:
+	if active_stage_controller == null:
+		return
+	if not active_stage_controller.has_method("activate_handle_tool"):
 		_select_profile_builder_handle_builder()
+		return
+	_settle_profile_builder_edit_gesture()
+	if workspace_brush_stroke_active:
+		_finish_workspace_brush_stroke(Vector2.ZERO, false)
+	_finish_workspace_spline_point_drag()
+	var activation: Dictionary = (
+		active_stage_controller.call("activate_handle_tool") as Dictionary
+		if handle_path_mode_id == StringName()
+		else active_stage_controller.call(
+			"activate_handle_tool",
+			handle_path_mode_id
+		) as Dictionary
+	)
+	if not bool(activation.get("ok", false)):
+		var reason := String(activation.get("reason", "Handle tool unavailable"))
+		_set_v2_action_status_text("Handle tool unavailable: %s" % reason)
+		return
+	if bool(activation.get("handle_change_active", false)):
+		editor_loaded_saved_profile_id = StringName(activation.get(
+			"handle_source_profile_id",
+			StringName()
+		))
 	else:
 		editor_loaded_saved_profile_id = StringName()
-		active_stage_controller.call("set_active_tool_id", tool_id)
+	_refresh_from_controller()
+	_refresh_profile_builder_popup()
 
 func _finish_active_spline_line() -> void:
 	if active_stage_controller == null or not active_stage_controller.has_method("finish_spline_line"):
@@ -4784,10 +5021,16 @@ func _generate_active_detailing_brush() -> void:
 func _generate_active_profile_extrusion() -> void:
 	if active_stage_controller == null or not active_stage_controller.has_method("generate_profile_extrusion_from_spline"):
 		return
+	var summary: Dictionary = active_stage_controller.call("get_status_summary") as Dictionary
+	var applying_handle_change := bool(summary.get("handle_change_active", false))
 	_finish_workspace_spline_point_drag()
 	if bool(active_stage_controller.call("generate_profile_extrusion_from_spline")):
 		_set_v2_action_status_text(
-			"Handle generated and kept pending; use Commit Layer when ready."
+			(
+				"Handle change applied and kept pending; use Commit Layer when ready."
+				if applying_handle_change
+				else "Handle generated and kept pending; use Commit Layer when ready."
+			)
 		)
 
 func _clear_active_spline_csg_noodle() -> void:
@@ -5158,6 +5401,12 @@ func _input(event: InputEvent) -> void:
 			or not keybindings_popup.visible
 		):
 			_cancel_keybinding_capture()
+	if (
+		(event is InputEventMouseButton or event is InputEventKey)
+		and _try_handle_action_history_binding(event)
+	):
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and not _is_text_entry_focused() and _handle_profile_builder_metric_view_input(
 		event,
 		profile_builder_preview.get_local_mouse_position() if profile_builder_preview != null else Vector2.ZERO
@@ -5166,7 +5415,18 @@ func _input(event: InputEvent) -> void:
 
 func _is_text_entry_focused() -> bool:
 	var focus_owner := get_viewport().gui_get_focus_owner()
-	return focus_owner is LineEdit or focus_owner is TextEdit
+	if focus_owner is LineEdit or focus_owner is TextEdit:
+		return true
+	# PopupPanel is also a Viewport. Profile Builder SpinBoxes and owned rename
+	# dialogs therefore do not appear in the root viewport's focus query.
+	for node: Node in find_children("*", "Window", true, false):
+		var window := node as Window
+		if window == null or not window.visible:
+			continue
+		var window_focus_owner := window.gui_get_focus_owner()
+		if window_focus_owner is LineEdit or window_focus_owner is TextEdit:
+			return true
+	return false
 
 func _handle_profile_builder_metric_view_input(event: InputEvent, local_pointer: Vector2) -> bool:
 	if (
@@ -5333,6 +5593,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if _has_focused_window_layer():
+		if _try_handle_action_history_binding(event):
+			get_viewport().set_input_as_handled()
+		return
+	if _is_text_entry_focused():
+		return
+	if _try_handle_action_history_binding(event):
+		get_viewport().set_input_as_handled()
 		return
 	if _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_SAVE_DRAFT, event):
 		_save_current_v2_draft()
@@ -5476,6 +5743,177 @@ func _has_focused_window_layer() -> bool:
 			return true
 	return false
 
+
+func _try_handle_action_history_binding(event: InputEvent) -> bool:
+	if (
+		action_history_hold_action != StringName()
+		and keybinding_state != null
+		and bool(keybinding_state.call(
+			"event_releases_action",
+			action_history_hold_action,
+			event
+		))
+	):
+		_end_action_history_hold()
+		return true
+	var undo_requested := _v2_event_matches_binding(
+		ForgeV2KeybindingStateScript.ACTION_UNDO,
+		event
+	)
+	var redo_requested := _v2_event_matches_binding(
+		ForgeV2KeybindingStateScript.ACTION_REDO,
+		event
+	)
+	if not undo_requested and not redo_requested:
+		return false
+	if (
+		v2_save_in_progress
+		or _is_keybinding_capture_active()
+		or _is_text_entry_focused()
+		or _has_focused_action_history_blocker()
+	):
+		_end_action_history_hold()
+		return false
+	if undo_requested:
+		_begin_action_history_hold(ForgeV2KeybindingStateScript.ACTION_UNDO)
+		return true
+	if redo_requested:
+		_begin_action_history_hold(ForgeV2KeybindingStateScript.ACTION_REDO)
+		return true
+	return false
+
+
+func _begin_action_history_hold(action_name: StringName) -> void:
+	if action_name == StringName():
+		return
+	if action_history_hold_action == action_name:
+		return
+	_end_action_history_hold()
+	_ensure_keybinding_state()
+	action_history_hold_action = action_name
+	action_history_hold_binding = (
+		keybinding_state.call("get_binding_data", action_name) as Dictionary
+	).duplicate(true)
+	action_history_hold_elapsed_seconds = 0.0
+	action_history_hold_next_repeat_seconds = (
+		ACTION_HISTORY_HOLD_INITIAL_DELAY_SECONDS
+	)
+	action_history_hold_interval_seconds = (
+		ACTION_HISTORY_HOLD_INITIAL_INTERVAL_SECONDS
+	)
+	action_history_hold_owns_undo_batch = false
+	if (
+		action_name == ForgeV2KeybindingStateScript.ACTION_UNDO
+		and active_stage_controller != null
+		and active_stage_controller.has_method(
+			"begin_action_history_undo_batch"
+		)
+	):
+		action_history_hold_owns_undo_batch = bool(
+			active_stage_controller.call("begin_action_history_undo_batch")
+		)
+	_execute_action_history_hold_step()
+	var mouse_button := int(action_history_hold_binding.get(
+		"mouse_button",
+		MOUSE_BUTTON_NONE
+	))
+	if mouse_button in [
+		MOUSE_BUTTON_WHEEL_UP,
+		MOUSE_BUTTON_WHEEL_DOWN,
+		MOUSE_BUTTON_WHEEL_LEFT,
+		MOUSE_BUTTON_WHEEL_RIGHT,
+	]:
+		_end_action_history_hold()
+
+
+func _advance_action_history_hold(
+	delta: float,
+	require_physical_input: bool = true
+) -> void:
+	if action_history_hold_action == StringName():
+		return
+	if (
+		not is_open()
+		or v2_save_in_progress
+		or _is_keybinding_capture_active()
+		or _is_text_entry_focused()
+		or _has_focused_action_history_blocker()
+		or (
+			require_physical_input
+			and (
+				keybinding_state == null
+				or not bool(keybinding_state.call(
+					"is_action_binding_pressed",
+					action_history_hold_action
+				))
+			)
+		)
+	):
+		_end_action_history_hold()
+		return
+	action_history_hold_elapsed_seconds += maxf(delta, 0.0)
+	var step_count := 0
+	while (
+		action_history_hold_elapsed_seconds
+		>= action_history_hold_next_repeat_seconds
+		and step_count < ACTION_HISTORY_HOLD_MAX_STEPS_PER_FRAME
+	):
+		_execute_action_history_hold_step()
+		step_count += 1
+		action_history_hold_interval_seconds = maxf(
+			action_history_hold_interval_seconds
+		* ACTION_HISTORY_HOLD_ACCELERATION_FACTOR,
+			ACTION_HISTORY_HOLD_MIN_INTERVAL_SECONDS
+		)
+		action_history_hold_next_repeat_seconds += (
+			action_history_hold_interval_seconds
+		)
+
+
+func _execute_action_history_hold_step() -> void:
+	if action_history_hold_action == ForgeV2KeybindingStateScript.ACTION_UNDO:
+		_on_undo_pressed()
+	elif action_history_hold_action == ForgeV2KeybindingStateScript.ACTION_REDO:
+		_on_redo_pressed()
+
+
+func _end_action_history_hold() -> void:
+	if (
+		action_history_hold_owns_undo_batch
+		and active_stage_controller != null
+		and active_stage_controller.has_method("end_action_history_undo_batch")
+	):
+		active_stage_controller.call("end_action_history_undo_batch")
+	action_history_hold_action = StringName()
+	action_history_hold_binding = {}
+	action_history_hold_elapsed_seconds = 0.0
+	action_history_hold_next_repeat_seconds = 0.0
+	action_history_hold_interval_seconds = 0.0
+	action_history_hold_owns_undo_batch = false
+
+
+func _has_focused_action_history_blocker() -> bool:
+	if _has_visible_popup_menu():
+		return true
+	if not _has_focused_window_layer():
+		return false
+	# The Profile Builder is an editing workspace whose changes participate in
+	# Forge action history. Its owned dialogs and all other focused windows keep
+	# input ownership and therefore remain blockers.
+	return not (
+		is_instance_valid(profile_builder_popup)
+		and profile_builder_popup.visible
+		and profile_builder_popup.has_focus()
+	)
+
+
+func _has_visible_popup_menu() -> bool:
+	for node: Node in find_children("*", "PopupMenu", true, false):
+		var popup_menu := node as PopupMenu
+		if popup_menu != null and popup_menu.visible:
+			return true
+	return false
+
 func _connect_stage_controller() -> void:
 	if active_stage_controller == null:
 		return
@@ -5548,8 +5986,8 @@ func _refresh_from_controller() -> void:
 		or bool(selected_body_summary.get("is_committed", false))
 	)
 	commit_pending_button.disabled = int(summary.get("pending_material_body_count", 0)) <= 0
-	undo_layer_button.disabled = int(summary.get("committed_layer_count", 0)) <= 0
-	redo_layer_button.disabled = int(summary.get("undone_layer_count", 0)) <= 0
+	undo_button.disabled = not _can_undo_v2_action(summary)
+	redo_button.disabled = not _can_redo_v2_action(summary)
 	status_label.text = "%s | %s | %s" % [
 		String(summary.get("builder_scope", "")),
 		String(summary.get("operation_label", "")),
@@ -5561,7 +5999,7 @@ func _refresh_from_controller() -> void:
 	))
 	radius_decrease_button.disabled = not primitive_size_controls_enabled
 	radius_increase_button.disabled = not primitive_size_controls_enabled
-	var workspace_status_parts: Array[String] = [String(summary.get("active_tool_label", ""))]
+	var workspace_status_parts: Array[String] = [_resolve_v2_active_tool_label(summary)]
 	if active_tool_id == &"tool_spline_line":
 		workspace_status_parts.append(String(summary.get("spline_line_status_label", "Spline: no points")))
 		workspace_status_parts.append(String(summary.get(
@@ -5624,7 +6062,7 @@ func _refresh_from_controller() -> void:
 	)
 	summary_label.text = "Draft: %s\nTool: %s\nPrimitive: %s\nShape: %s\nActive material: %s\nCSG bodies: %s user + %s seed, %s pending\n%s\n%s\n%s\nLayers: %s committed, %s redo\nSelected: %s\n%s\n%s\n%s\n%s" % [
 		String(summary.get("project_name", "")),
-		String(summary.get("active_tool_label", "")),
+		_resolve_v2_active_tool_label(summary),
 		String(summary.get("active_primitive_label", "")),
 		displayed_shape_label,
 		String(summary.get("active_material_label", summary.get("active_material", ""))),
@@ -5862,6 +6300,17 @@ func _on_add_empty_stroke_pressed() -> void:
 func _on_commit_pending_pressed() -> void:
 	if active_stage_controller == null:
 		return
+	if active_stage_controller.has_method(
+		"commit_all_pending_material_bodies_as_layers"
+	):
+		var commit_result := await active_stage_controller.call(
+			"commit_all_pending_material_bodies_as_layers"
+		) as Dictionary
+		if bool(commit_result.get("ok", false)):
+			_set_v2_action_status_text("Committed pending material.")
+			return
+		_show_last_material_body_finish_feedback()
+		return
 	var committed_layer: Resource = (
 		active_stage_controller.commit_pending_material_bodies_as_layer()
 		as Resource
@@ -5871,15 +6320,35 @@ func _on_commit_pending_pressed() -> void:
 		return
 	_show_last_material_body_finish_feedback()
 
-func _on_undo_layer_pressed() -> void:
+func _can_undo_v2_action(summary: Dictionary) -> bool:
 	if active_stage_controller == null:
-		return
-	active_stage_controller.undo_latest_layer()
+		return false
+	if active_stage_controller.has_method("can_undo_action"):
+		return bool(active_stage_controller.call("can_undo_action"))
+	return int(summary.get("action_undo_count", 0)) > 0
 
-func _on_redo_layer_pressed() -> void:
+func _can_redo_v2_action(summary: Dictionary) -> bool:
 	if active_stage_controller == null:
+		return false
+	if active_stage_controller.has_method("can_redo_action"):
+		return bool(active_stage_controller.call("can_redo_action"))
+	return int(summary.get("action_redo_count", 0)) > 0
+
+func _on_undo_pressed() -> void:
+	if (
+		active_stage_controller == null
+		or not active_stage_controller.has_method("undo_latest_action")
+	):
 		return
-	active_stage_controller.redo_latest_layer()
+	active_stage_controller.call("undo_latest_action")
+
+func _on_redo_pressed() -> void:
+	if (
+		active_stage_controller == null
+		or not active_stage_controller.has_method("redo_latest_action")
+	):
+		return
+	active_stage_controller.call("redo_latest_action")
 
 func _on_body_stack_selected(index: int) -> void:
 	if is_refreshing_ui or active_stage_controller == null:
@@ -6040,9 +6509,20 @@ func _begin_workspace_detailing_brush_input(
 	_apply_detailing_brush_control_candidate(screen_position, -1)
 
 func _begin_workspace_spline_point_drag(point_index: int, fallback_local_position: Vector3) -> void:
+	_settle_profile_builder_edit_gesture()
+	if workspace_action_transaction_active:
+		_finish_workspace_spline_point_drag()
 	if _is_v2_detailing_brush_active():
 		workspace_spline_point_drag_active = true
 		workspace_spline_drag_point_index = point_index
+		if (
+			active_stage_controller != null
+			and active_stage_controller.has_method("begin_editor_action_transaction")
+		):
+			workspace_action_transaction_active = bool(active_stage_controller.call(
+				"begin_editor_action_transaction",
+				"Move Detailing Path Point"
+			))
 		return
 	if workspace_preview == null or not workspace_preview.has_method("build_camera_facing_drag_plane"):
 		return
@@ -6054,6 +6534,14 @@ func _begin_workspace_spline_point_drag(point_index: int, fallback_local_positio
 	workspace_spline_drag_point_index = point_index
 	workspace_spline_drag_plane_origin_local = drag_plane.get("origin_local", point_origin) as Vector3
 	workspace_spline_drag_plane_normal_local = drag_plane.get("normal_local", Vector3.FORWARD) as Vector3
+	if (
+		active_stage_controller != null
+		and active_stage_controller.has_method("begin_editor_action_transaction")
+	):
+		workspace_action_transaction_active = bool(active_stage_controller.call(
+			"begin_editor_action_transaction",
+			"Move Path Point"
+		))
 	if active_stage_controller != null and active_stage_controller.has_method("select_spline_line_point"):
 		active_stage_controller.call("select_spline_line_point", point_index)
 
@@ -6085,6 +6573,14 @@ func _finish_workspace_spline_point_drag() -> void:
 	workspace_spline_drag_point_index = -1
 	workspace_spline_drag_plane_origin_local = Vector3.ZERO
 	workspace_spline_drag_plane_normal_local = Vector3.FORWARD
+	var owns_action_transaction := workspace_action_transaction_active
+	workspace_action_transaction_active = false
+	if (
+		owns_action_transaction
+		and active_stage_controller != null
+		and active_stage_controller.has_method("finish_editor_action_transaction")
+	):
+		active_stage_controller.call("finish_editor_action_transaction")
 
 func _find_nearest_spline_point_at_screen(screen_position: Vector2) -> int:
 	if workspace_preview == null or not workspace_preview.has_method("find_nearest_local_point_by_screen"):

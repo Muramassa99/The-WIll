@@ -8,6 +8,7 @@ const CombatOriginRecordScript = preload("res://core/models/combat_origin_record
 const DIAG_TWO_HAND_DEGRADED: StringName = &"two_hand_degraded_to_one_hand"
 const DIAG_AUTO_TWO_HAND_RESOLVED_ONE_HAND: StringName = &"auto_two_hand_resolved_one_hand"
 const DIAG_PRIMARY_HAND_SWAP_BRIDGE: StringName = &"primary_hand_swap_bridge_inserted"
+const DIAG_EQUIPMENT_PRIMARY_HAND_AUTHORITY: StringName = &"equipment_primary_hand_authority_applied"
 const HAND_SWAP_BRIDGE_DURATION_SECONDS := 0.18
 
 var retarget_resolver = CombatAnimationRetargetResolverScript.new()
@@ -71,8 +72,14 @@ func _compile_motion_chain(
 	)
 	result["retarget_seeded_count"] = int(retarget_result.get("seeded_count", 0))
 	result["retargeted_count"] = int(retarget_result.get("retargeted_count", 0))
+	var equipment_primary_authority_applied: bool = _apply_equipment_primary_hand_authority(
+		effective_chain,
+		equipment_context,
+		result
+	)
 	_apply_equipment_legality(effective_chain, equipment_context, result)
-	effective_chain = _insert_primary_hand_swap_bridges(effective_chain, equipment_context, result)
+	if not equipment_primary_authority_applied:
+		effective_chain = _insert_primary_hand_swap_bridges(effective_chain, equipment_context, result)
 	for node_index: int in range(effective_chain.size()):
 		var motion_node = effective_chain[node_index]
 		if motion_node == null:
@@ -96,11 +103,42 @@ func _build_base_compile_result(source_node_count: int) -> Dictionary:
 		"retargeted_count": 0,
 		"degraded_node_count": 0,
 		"hand_swap_bridge_count": 0,
+		"equipment_primary_hand_override_count": 0,
 		"saved_authoring_mutated": false,
 		"trajectory_volume_origin_id": CombatOriginRecordScript.ORIGIN_PRIMARY_SHOULDER,
 		"trajectory_volume_parent_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
 		"trajectory_volume_origin_local_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
 	}
+
+func _apply_equipment_primary_hand_authority(
+	effective_chain: Array,
+	equipment_context: Dictionary,
+	result: Dictionary
+) -> bool:
+	var dominant_slot_id: StringName = CombatAnimationMotionNodeScript.normalize_primary_hand_slot(
+		StringName(equipment_context.get("dominant_slot_id", StringName()))
+	)
+	if (
+		dominant_slot_id != CombatAnimationMotionNodeScript.PRIMARY_HAND_LEFT
+		and dominant_slot_id != CombatAnimationMotionNodeScript.PRIMARY_HAND_RIGHT
+	):
+		return false
+	var override_count: int = 0
+	for node_index: int in range(effective_chain.size()):
+		var motion_node = effective_chain[node_index]
+		if motion_node == null or motion_node.primary_hand_slot == dominant_slot_id:
+			continue
+		motion_node.primary_hand_slot = dominant_slot_id
+		override_count += 1
+	result["equipment_primary_hand_override_count"] = override_count
+	if override_count > 0:
+		result["diagnostics"].append(_make_diagnostic(
+			&"info",
+			DIAG_EQUIPMENT_PRIMARY_HAND_AUTHORITY,
+			-1,
+			"Normalized authored primary-hand values to the equipped weapon slot."
+		))
+	return true
 
 func _duplicate_motion_node_chain(authored_motion_node_chain: Array) -> Array:
 	var duplicated_chain: Array = []

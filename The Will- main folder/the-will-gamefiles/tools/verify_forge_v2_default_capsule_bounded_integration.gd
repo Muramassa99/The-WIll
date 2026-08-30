@@ -107,6 +107,13 @@ func _run() -> void:
 		_deposit_rows.append(row)
 
 	var n20 := _capture_contract_snapshot()
+	var n20_controller_summary := _controller.call(
+		"get_status_summary"
+	) as Dictionary
+	var n20_action_history := n20_controller_summary.get(
+		"action_history",
+		{}
+	) as Dictionary
 	_expect(
 		int(n20.get("lifetime_operation_count", -1)) == ADD_STROKE_COUNT,
 		"n20_lifetime_operation_count_mismatch"
@@ -133,6 +140,16 @@ func _run() -> void:
 		"n20_redo_tail_not_empty"
 	)
 	_expect(
+		int(n20_controller_summary.get("action_undo_count", -1))
+		== TAIL_CAPACITY,
+		"action_history_did_not_stop_at_acknowledged_checkpoint_floor"
+	)
+	_expect(
+		int(n20_action_history.get("checkpoint_prune_count", -1))
+		== EXPECTED_CHECKPOINT_AT_N20,
+		"action_history_checkpoint_prune_count_mismatch"
+	)
+	_expect(
 		int(n20.get("capsule_operand_request_count", -1))
 		== ADD_STROKE_COUNT,
 		"n20_capsule_request_count_mismatch"
@@ -143,6 +160,97 @@ func _run() -> void:
 		"n20_capsule_bake_count_mismatch"
 	)
 	_assert_steady_native_contract(n20, "n20")
+
+	# A held Undo gesture may cross several committed CSG records. Its single
+	# Redo batch must advance the logical and native cursors once per record,
+	# rather than publishing only the final overwritten transition.
+	var batch_diagnostics_before := _native_diagnostics()
+	var batch_prior_revision := int(batch_diagnostics_before.get(
+		"published_revision",
+		0
+	))
+	_expect(
+		bool(_controller.call("begin_action_history_undo_batch")),
+		"action_batch_begin_failed"
+	)
+	_expect(
+		bool(_controller.call("undo_latest_action")),
+		"action_batch_first_undo_failed"
+	)
+	_expect(
+		bool(_controller.call("undo_latest_action")),
+		"action_batch_second_undo_failed"
+	)
+	_expect(
+		bool(_controller.call("end_action_history_undo_batch")),
+		"action_batch_end_failed"
+	)
+	var batch_undo_ready := await _await_native_transition(
+		"undo",
+		batch_prior_revision,
+		StringName()
+	)
+	var batch_undo_snapshot := _capture_contract_snapshot()
+	var batch_undo_summary := _controller.call("get_status_summary") as Dictionary
+	var batch_diagnostics_after_undo := _native_diagnostics()
+	_expect(bool(batch_undo_ready.get("ok", false)), "action_batch_undo_not_ready")
+	_expect(
+		int(batch_undo_snapshot.get("active_tail_layer_count", -1))
+		== TAIL_CAPACITY - 2,
+		"action_batch_undo_tail_count_mismatch"
+	)
+	_expect(
+		int(batch_undo_summary.get("action_undo_count", -1))
+		== TAIL_CAPACITY - 2,
+		"action_batch_undo_journal_count_mismatch"
+	)
+	_expect(
+		int(batch_undo_summary.get("action_redo_count", -1)) == 1,
+		"held_undo_was_not_one_redo_batch"
+	)
+	_expect(
+		int(batch_diagnostics_after_undo.get("undo_count", -1))
+		== int(batch_diagnostics_before.get("undo_count", 0)) + 2,
+		"held_undo_did_not_move_native_cursor_twice"
+	)
+
+	var batch_redo_prior_revision := int(batch_diagnostics_after_undo.get(
+		"published_revision",
+		0
+	))
+	_expect(
+		bool(_controller.call("redo_latest_action")),
+		"action_batch_redo_failed"
+	)
+	var batch_redo_ready := await _await_native_transition(
+		"redo",
+		batch_redo_prior_revision,
+		StringName()
+	)
+	var batch_redo_snapshot := _capture_contract_snapshot()
+	var batch_redo_summary := _controller.call("get_status_summary") as Dictionary
+	var batch_diagnostics_after_redo := _native_diagnostics()
+	_expect(bool(batch_redo_ready.get("ok", false)), "action_batch_redo_not_ready")
+	_expect(
+		int(batch_redo_snapshot.get("active_tail_layer_count", -1))
+		== TAIL_CAPACITY,
+		"action_batch_redo_tail_count_mismatch"
+	)
+	_expect(
+		int(batch_redo_snapshot.get("redo_tail_layer_count", -1)) == 0,
+		"action_batch_redo_stack_not_empty"
+	)
+	_expect(
+		int(batch_redo_summary.get("action_undo_count", -1)) == TAIL_CAPACITY
+		and int(batch_redo_summary.get("action_redo_count", -1)) == 0,
+		"action_batch_redo_journal_not_restored"
+	)
+	_expect(
+		int(batch_diagnostics_after_redo.get("redo_count_total", -1))
+		== int(batch_diagnostics_after_undo.get("redo_count_total", 0)) + 2,
+		"batched_redo_did_not_move_native_cursor_twice"
+	)
+	_assert_steady_native_contract(batch_redo_snapshot, "action_batch_redo")
 
 	for undo_index in range(TAIL_CAPACITY):
 		var prior_revision := int(_native_diagnostics().get(

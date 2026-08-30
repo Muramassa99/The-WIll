@@ -138,6 +138,14 @@ const AUTHORING_ARM_SPLINE_RESEAT_ITERATIONS: int = 2
 const AUTHORING_DRAG_DIRECT_ARM_SOLVE_ITERATIONS: int = AUTHORING_DIRECT_ARM_SOLVE_ITERATIONS
 const AUTHORING_DRAG_ARM_SPLINE_RESEAT_ITERATIONS: int = AUTHORING_ARM_SPLINE_RESEAT_ITERATIONS
 const AUTHORING_DRAG_CONTACT_ALIGNMENT_PASSES: int = 1
+# The upper-body authoring presenter deliberately blends toward its solved pose.
+# Finish that inexpensive blend before an exact support-hand surface solve so
+# cached digit angles are attached to the final macro hand frame.
+const AUTHORING_GRIP_RELATIONSHIP_MACRO_SETTLE_PASSES: int = 5
+const AUTHORING_GRIP_RELATIONSHIP_CONTACT_SETTLE_PASSES: int = 3
+const AUTHORING_GRIP_RELATIONSHIP_PRECISE_SETTLE_PASSES: int = 6
+const AUTHORING_GRIP_RELATIONSHIP_PRECISE_SOLVE_ITERATIONS: int = 24
+const AUTHORING_GRIP_RELATIONSHIP_ALIGNMENT_EPSILON_METERS: float = 0.0005
 const AUTHORING_ARM_SPLINE_CONTACT_AXIS_BIAS: float = 0.0
 const AUTHORING_LIMB_TWIST_FOREARM_SHARE: float = 0.78
 const AUTHORING_LIMB_TWIST_UPPERARM_SHARE: float = 0.22
@@ -570,6 +578,60 @@ func resolve_hand_surface_seat_anatomy_state(slot_id: StringName) -> Dictionary:
 	if index_skin_radius_meters <= 0.0 or pinky_skin_radius_meters <= 0.0:
 		invalid["status"] = &"hand_surface_seat_skin_calibration_missing"
 		return invalid
+	var ordinary_proximal_capsules: Array[Dictionary] = []
+	for digit_id: StringName in [&"index", &"middle", &"ring", &"pinky"]:
+		var chain_rules: Array[Dictionary] = (
+			PlayerDigitHingeRulesScript.get_chain_rules(slot_id, digit_id)
+		)
+		if chain_rules.size() != 3:
+			invalid["status"] = &"hand_surface_seat_proximal_rules_missing"
+			return invalid
+		var proximal_rule: Dictionary = chain_rules[0]
+		var start_bone: StringName = proximal_rule.get(
+			"bone",
+			StringName()
+		) as StringName
+		var end_bone: StringName = proximal_rule.get(
+			"next_bone",
+			StringName()
+		) as StringName
+		var start_index: int = skeleton.find_bone(String(start_bone))
+		var end_index: int = skeleton.find_bone(String(end_bone))
+		var radius_meters: float = (
+			PlayerDigitHingeRulesScript.get_contact_capsule_radius_meters(
+				slot_id,
+				digit_id,
+				1
+			)
+		)
+		if start_index < 0 or end_index < 0 or radius_meters <= 0.0:
+			invalid["status"] = &"hand_surface_seat_proximal_anatomy_missing"
+			return invalid
+		var start_world: Vector3 = skeleton.to_global(
+			skeleton.get_bone_global_pose(start_index).origin
+		)
+		var end_world: Vector3 = skeleton.to_global(
+			skeleton.get_bone_global_pose(end_index).origin
+		)
+		if (
+			not start_world.is_finite()
+			or not end_world.is_finite()
+			or start_world.distance_squared_to(end_world) <= 0.000001
+		):
+			invalid["status"] = &"hand_surface_seat_proximal_anatomy_degenerate"
+			return invalid
+		ordinary_proximal_capsules.append({
+			"digit_id": digit_id,
+			"section_index": 0,
+			"segment_start_world": start_world,
+			"segment_start_world_origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
+			"segment_start_source_origin_id": start_bone,
+			"segment_end_world": end_world,
+			"segment_end_world_origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
+			"segment_end_source_origin_id": end_bone,
+			"radius_meters": radius_meters,
+			"radius_source_id": PlayerDigitHingeRulesScript.get_revision(),
+		})
 	return {
 		"valid": true,
 		"status": &"hand_surface_seat_anatomy_ready",
@@ -587,6 +649,8 @@ func resolve_hand_surface_seat_anatomy_state(slot_id: StringName) -> Dictionary:
 		"pinky_skin_to_bone_radius_meters": pinky_skin_radius_meters,
 		"pinky_skin_to_bone_radius_source_id": PlayerDigitHingeRulesScript.get_revision(),
 		"skin_radius_calibration_revision": PlayerDigitHingeRulesScript.get_revision(),
+		"ordinary_proximal_capsules": ordinary_proximal_capsules,
+		"ordinary_proximal_capsules_origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
 	}
 
 func _resolve_hand_index_pinky_contact_center_world(slot_id: StringName) -> Vector3:
@@ -1494,7 +1558,7 @@ func reset_authoring_preview_baseline_pose(baseline_animation_name: StringName =
 		guidance_state_presenter.clear_arm_guidance_target(slot_id)
 		guidance_state_presenter.clear_arm_guidance_active(slot_id)
 		guidance_state_presenter.set_support_hand_active(slot_id, false)
-		finger_grip_source_lookup.erase(slot_id)
+		clear_finger_grip_target(slot_id)
 	_apply_authoring_preview_baseline_pose(baseline_animation_name)
 	_snap_support_arm_ik_targets_to_current_pose()
 	_refresh_support_arm_ik_influences()
@@ -3268,13 +3332,17 @@ func _apply_ccd_arm_reach_pose(
 	forearm_weight: float = AUTHORING_DIRECT_ARM_FOREARM_WEIGHT,
 	upperarm_weight: float = AUTHORING_DIRECT_ARM_UPPERARM_WEIGHT,
 	clavicle_bone: StringName = StringName(),
-	clavicle_weight: float = AUTHORING_DIRECT_ARM_CLAVICLE_WEIGHT
+	clavicle_weight: float = AUTHORING_DIRECT_ARM_CLAVICLE_WEIGHT,
+	solve_epsilon_meters: float = AUTHORING_DIRECT_ARM_SOLVE_EPSILON_METERS
 ) -> void:
 	if skeleton == null:
 		return
 	var target_local: Vector3 = skeleton.to_local(target_world)
 	for _iteration_index: int in range(maxi(solve_iterations, 0)):
-		if _resolve_bone_local_position(hand_bone).distance_to(target_local) <= AUTHORING_DIRECT_ARM_SOLVE_EPSILON_METERS:
+		if (
+			_resolve_bone_local_position(hand_bone).distance_to(target_local)
+			<= maxf(solve_epsilon_meters, 0.0)
+		):
 			return
 		_rotate_bone_toward_end_target(
 			forearm_bone,
@@ -3838,9 +3906,7 @@ func resolve_exact_surface_weapon_seat(
 	slot_id: StringName,
 	allow_surface_solve: bool = true
 ) -> Dictionary:
-	if skeleton == null or not finger_grip_presenter.has_method(
-		"resolve_exact_surface_weapon_seat"
-	):
+	if skeleton == null:
 		return {
 			"valid": false,
 			"status": &"weapon_surface_seat_unavailable",
@@ -3851,13 +3917,129 @@ func resolve_exact_surface_weapon_seat(
 			"valid": false,
 			"status": &"weapon_surface_seat_guide_missing",
 		}
-	var anatomy_state: Dictionary = resolve_hand_surface_seat_anatomy_state(slot_id)
+	var guide_role: StringName = StringName(grip_guide.name)
+	if slot_id == &"hand_right":
+		if guide_role == &"PrimaryGripGuide":
+			return _resolve_right_primary_exact_surface_weapon_seat(
+				grip_guide,
+				allow_surface_solve
+			)
+		if guide_role == &"SecondaryGripGuide":
+			return _resolve_right_support_exact_surface_weapon_seat(
+				grip_guide,
+				allow_surface_solve
+			)
+	elif slot_id == &"hand_left":
+		if guide_role == &"PrimaryGripGuide":
+			return _resolve_left_primary_exact_surface_weapon_seat(
+				grip_guide,
+				allow_surface_solve
+			)
+		if guide_role == &"SecondaryGripGuide":
+			return _resolve_left_support_exact_surface_weapon_seat(
+				grip_guide,
+				allow_surface_solve
+			)
+	return {
+		"valid": false,
+		"status": &"weapon_surface_seat_execution_path_unavailable",
+	}
+
+
+func _resolve_right_primary_exact_surface_weapon_seat(
+	grip_guide: Node3D,
+	allow_surface_solve: bool
+) -> Dictionary:
+	if not finger_grip_presenter.has_method(
+		"resolve_right_primary_exact_surface_weapon_seat"
+	):
+		return {
+			"valid": false,
+			"status": &"right_primary_surface_seat_unavailable",
+		}
+	var anatomy_state: Dictionary = resolve_hand_surface_seat_anatomy_state(
+		&"hand_right"
+	)
 	if not bool(anatomy_state.get("valid", false)):
 		return anatomy_state
 	return finger_grip_presenter.call(
-		"resolve_exact_surface_weapon_seat",
+		"resolve_right_primary_exact_surface_weapon_seat",
 		skeleton,
-		slot_id,
+		grip_guide,
+		anatomy_state,
+		allow_surface_solve
+	) as Dictionary
+
+
+func _resolve_left_primary_exact_surface_weapon_seat(
+	grip_guide: Node3D,
+	allow_surface_solve: bool
+) -> Dictionary:
+	if not finger_grip_presenter.has_method(
+		"resolve_left_primary_exact_surface_weapon_seat"
+	):
+		return {
+			"valid": false,
+			"status": &"left_primary_surface_seat_unavailable",
+		}
+	var anatomy_state: Dictionary = resolve_hand_surface_seat_anatomy_state(
+		&"hand_left"
+	)
+	if not bool(anatomy_state.get("valid", false)):
+		return anatomy_state
+	return finger_grip_presenter.call(
+		"resolve_left_primary_exact_surface_weapon_seat",
+		skeleton,
+		grip_guide,
+		anatomy_state,
+		allow_surface_solve
+	) as Dictionary
+
+
+func _resolve_right_support_exact_surface_weapon_seat(
+	grip_guide: Node3D,
+	allow_surface_solve: bool
+) -> Dictionary:
+	if not finger_grip_presenter.has_method(
+		"resolve_right_support_exact_surface_weapon_seat"
+	):
+		return {
+			"valid": false,
+			"status": &"right_support_surface_seat_unavailable",
+		}
+	var anatomy_state: Dictionary = resolve_hand_surface_seat_anatomy_state(
+		&"hand_right"
+	)
+	if not bool(anatomy_state.get("valid", false)):
+		return anatomy_state
+	return finger_grip_presenter.call(
+		"resolve_right_support_exact_surface_weapon_seat",
+		skeleton,
+		grip_guide,
+		anatomy_state,
+		allow_surface_solve
+	) as Dictionary
+
+
+func _resolve_left_support_exact_surface_weapon_seat(
+	grip_guide: Node3D,
+	allow_surface_solve: bool
+) -> Dictionary:
+	if not finger_grip_presenter.has_method(
+		"resolve_left_support_exact_surface_weapon_seat"
+	):
+		return {
+			"valid": false,
+			"status": &"left_support_surface_seat_unavailable",
+		}
+	var anatomy_state: Dictionary = resolve_hand_surface_seat_anatomy_state(
+		&"hand_left"
+	)
+	if not bool(anatomy_state.get("valid", false)):
+		return anatomy_state
+	return finger_grip_presenter.call(
+		"resolve_left_support_exact_surface_weapon_seat",
+		skeleton,
 		grip_guide,
 		anatomy_state,
 		allow_surface_solve
@@ -3877,6 +4059,138 @@ func apply_authoring_digit_grip_now(
 		allow_exact_surface_solve
 	)
 	_refresh_finger_grip_ik_influences()
+	skeleton.force_update_all_bone_transforms()
+
+
+func invalidate_authoring_surface_grasp(slot_id: StringName) -> void:
+	if finger_grip_presenter.has_method("invalidate_cached_surface_grasp"):
+		finger_grip_presenter.call(
+			"invalidate_cached_surface_grasp",
+			slot_id
+		)
+
+
+func settle_authoring_grip_relationship_macro_pose_now() -> void:
+	if skeleton == null:
+		return
+	# One ordinary preview frame has already been applied by the caller. Five
+	# more upper-body blend passes leave less than 0.04% of the two-hand blend
+	# outstanding, without rerunning the expensive exact digit/surface query.
+	for _pass_index: int in range(
+		AUTHORING_GRIP_RELATIONSHIP_MACRO_SETTLE_PASSES
+	):
+		_apply_upper_body_authoring_pose()
+	_refresh_support_arm_ik_influences()
+	var support_snap_delta: float = 1.0 / maxf(
+		support_arm_ik_target_smoothing_speed,
+		0.001
+	)
+	# Spend the existing three contact-alignment passes as a converging sequence.
+	# Recompute the hand-bone target after each wrist/arm solve so the anatomical
+	# index-pinky alignment point actually arrives at the newly published grip
+	# anchor. Repeating one stale target three times leaves the palm offset even
+	# though the arm itself reached that obsolete target.
+	for _pass_index: int in range(
+		AUTHORING_GRIP_RELATIONSHIP_CONTACT_SETTLE_PASSES
+	):
+		_update_support_arm_ik_targets(support_snap_delta)
+		_apply_authoring_contact_alignment_pose(1)
+		skeleton.force_update_all_bone_transforms()
+	var support_slot_id: StringName = (
+		&"hand_right"
+		if dominant_grip_slot_id == &"hand_left"
+		else &"hand_left"
+	)
+	if is_support_hand_active(support_slot_id):
+		# The ordinary authoring pass intentionally accepts a coarse arm-arrival
+		# tolerance for interactive editing. A relationship-changing support grip
+		# needs millimetre-scale agreement before the transactional digit solver can
+		# apply its 0.5 mm contact law. Reuse the existing arm and wrist operators in
+		# a bounded, support-only final convergence pass; the weapon and dominant hand
+		# remain untouched.
+		for _pass_index: int in range(
+			AUTHORING_GRIP_RELATIONSHIP_PRECISE_SETTLE_PASSES
+		):
+			_update_support_arm_ik_targets(support_snap_delta)
+			_apply_authoring_precise_contact_alignment_for_slot(support_slot_id)
+			skeleton.force_update_all_bone_transforms()
+			var guidance_target: Node3D = get_arm_guidance_target(support_slot_id)
+			if guidance_target == null or not is_instance_valid(guidance_target):
+				break
+			var alignment_world: Vector3 = (
+				resolve_hand_grip_alignment_world_position(support_slot_id)
+			)
+			if (
+				alignment_world.distance_to(guidance_target.global_position)
+				<= AUTHORING_GRIP_RELATIONSHIP_ALIGNMENT_EPSILON_METERS
+			):
+				break
+	_refresh_finger_grip_ik_influences()
+	skeleton.force_update_all_bone_transforms()
+
+
+func _apply_authoring_precise_contact_alignment_for_slot(
+	slot_id: StringName
+) -> void:
+	if skeleton == null or not is_arm_guidance_active(slot_id):
+		return
+	var hand_target: Node3D = (
+		left_hand_ik_target
+		if slot_id == &"hand_left"
+		else right_hand_ik_target
+	)
+	if hand_target == null or not is_instance_valid(hand_target):
+		return
+	var upperarm_bone: StringName = (
+		LEFT_UPPERARM_BONE
+		if slot_id == &"hand_left"
+		else RIGHT_UPPERARM_BONE
+	)
+	var forearm_bone: StringName = (
+		LEFT_FOREARM_BONE
+		if slot_id == &"hand_left"
+		else RIGHT_FOREARM_BONE
+	)
+	var hand_bone: StringName = (
+		LEFT_HAND_BONE
+		if slot_id == &"hand_left"
+		else RIGHT_HAND_BONE
+	)
+	var clavicle_bone: StringName = (
+		LEFT_CLAVICLE_BONE
+		if slot_id == &"hand_left"
+		else RIGHT_CLAVICLE_BONE
+	)
+	var hand_anchor: Node3D = (
+		get_left_hand_item_anchor()
+		if slot_id == &"hand_left"
+		else get_right_hand_item_anchor()
+	)
+	var requested_target_world: Vector3 = hand_target.global_position
+	var target_world: Vector3 = _resolve_usable_arm_target_world(
+		slot_id,
+		requested_target_world
+	).get("target_world", requested_target_world) as Vector3
+	_apply_ccd_arm_reach_pose(
+		upperarm_bone,
+		forearm_bone,
+		hand_bone,
+		target_world,
+		AUTHORING_GRIP_RELATIONSHIP_PRECISE_SOLVE_ITERATIONS,
+		AUTHORING_DIRECT_ARM_FOREARM_WEIGHT,
+		AUTHORING_DIRECT_ARM_UPPERARM_WEIGHT,
+		clavicle_bone,
+		AUTHORING_DIRECT_ARM_CLAVICLE_WEIGHT,
+		AUTHORING_GRIP_RELATIONSHIP_ALIGNMENT_EPSILON_METERS
+	)
+	if enable_authoring_contact_wrist_basis:
+		_apply_authoring_contact_wrist_basis_for_slot(
+			slot_id,
+			hand_bone,
+			forearm_bone,
+			hand_anchor,
+			clampf(authoring_contact_wrist_basis_strength, 0.0, 1.0)
+		)
 	skeleton.force_update_all_bone_transforms()
 
 func get_weapon_surface_seat_debug_state(slot_id: StringName) -> Dictionary:

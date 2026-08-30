@@ -15,14 +15,17 @@ func apply_primary_grip_profile(
 	profile: BakedProfile,
 	cells: Array[CellAtom],
 	anchors: Array[AnchorAtom],
-	center_of_mass: Vector3,
+	weapon_intrinsic_center_of_mass_weapon_root_cells: Vector3,
 	forge_intent: StringName,
 	equipment_context: StringName
 ) -> void:
 	if profile == null:
 		return
 
-	var primary_grip: AnchorAtom = _find_primary_grip_anchor(anchors, center_of_mass)
+	var primary_grip: AnchorAtom = _find_primary_grip_anchor(
+		anchors,
+		weapon_intrinsic_center_of_mass_weapon_root_cells
+	)
 	profile.primary_grip_valid = primary_grip != null
 	if primary_grip == null:
 		if profile.validation_error.is_empty():
@@ -44,7 +47,7 @@ func apply_primary_grip_profile(
 		return
 	var grip_contact_state: Dictionary = anchor_resolver.resolve_primary_grip_contact_state(
 		primary_grip,
-		center_of_mass
+		weapon_intrinsic_center_of_mass_weapon_root_cells
 	)
 	if not bool(grip_contact_state.get("valid", false)):
 		profile.primary_grip_valid = false
@@ -63,12 +66,12 @@ func apply_primary_grip_profile(
 	_apply_primary_grip_occupancy_metadata(
 		profile,
 		primary_grip,
-		center_of_mass,
+		weapon_intrinsic_center_of_mass_weapon_root_cells,
 		forge_intent,
 		equipment_context
 	)
 	profile.primary_grip_offset = anchor_resolver.calculate_primary_grip_offset(
-		center_of_mass,
+		weapon_intrinsic_center_of_mass_weapon_root_cells,
 		grip_contact_position
 	)
 	profile.reach = _calculate_reach(cells, grip_contact_position)
@@ -80,7 +83,10 @@ func apply_primary_grip_profile(
 	profile.balance_score = _calculate_balance_score(profile.primary_grip_offset, profile.reach)
 	_apply_weapon_total_length(profile, cells, forward_axis, primary_grip.span_start_local_position, grip_contact_position)
 
-func _find_primary_grip_anchor(anchors: Array[AnchorAtom], center_of_mass: Vector3 = Vector3.ZERO) -> AnchorAtom:
+func _find_primary_grip_anchor(
+	anchors: Array[AnchorAtom],
+	weapon_intrinsic_center_of_mass_weapon_root_cells: Vector3 = Vector3.ZERO
+) -> AnchorAtom:
 	var best_anchor: AnchorAtom = null
 	var best_distance_squared: float = INF
 	var best_span_length: int = -1
@@ -91,7 +97,7 @@ func _find_primary_grip_anchor(anchors: Array[AnchorAtom], center_of_mass: Vecto
 			continue
 		var candidate_state: Dictionary = anchor_resolver.resolve_primary_grip_contact_state(
 			anchor,
-			center_of_mass
+			weapon_intrinsic_center_of_mass_weapon_root_cells
 		)
 		if not bool(candidate_state.get("valid", false)):
 			continue
@@ -99,7 +105,9 @@ func _find_primary_grip_anchor(anchors: Array[AnchorAtom], center_of_mass: Vecto
 			"position",
 			Vector3.ZERO
 		) as Vector3
-		var distance_squared: float = candidate_position.distance_squared_to(center_of_mass)
+		var distance_squared: float = candidate_position.distance_squared_to(
+			weapon_intrinsic_center_of_mass_weapon_root_cells
+		)
 		var candidate_span_length: int = maxi(anchor.span_length, 0)
 		if best_anchor == null or distance_squared < best_distance_squared - 0.00001:
 			best_anchor = anchor
@@ -144,14 +152,17 @@ func _calculate_balance_score(primary_grip_offset: Vector3, reach: float) -> flo
 func _apply_primary_grip_occupancy_metadata(
 	profile: BakedProfile,
 	primary_grip: AnchorAtom,
-	center_of_mass: Vector3,
+	weapon_intrinsic_center_of_mass_weapon_root_cells: Vector3,
 	forge_intent: StringName,
 	equipment_context: StringName
 ) -> void:
 	if profile == null or primary_grip == null:
 		return
 
-	var span_projection: Dictionary = _resolve_primary_grip_span_projection(primary_grip, center_of_mass)
+	var span_projection: Dictionary = _resolve_primary_grip_span_projection(
+		primary_grip,
+		weapon_intrinsic_center_of_mass_weapon_root_cells
+	)
 	var clamped_ratio: float = float(span_projection.get("clamped_ratio", 0.0))
 	var unclamped_ratio: float = float(span_projection.get("unclamped_ratio", 0.0))
 	var span_start_is_com_side: bool = bool(span_projection.get("span_start_is_com_side", true))

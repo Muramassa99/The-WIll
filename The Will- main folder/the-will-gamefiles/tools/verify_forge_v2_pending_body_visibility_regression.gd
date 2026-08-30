@@ -81,10 +81,10 @@ func _verify_generated_handle_stays_visible() -> void:
 	var body_id := (
 		StringName(body.get("body_id")) if body != null else StringName()
 	)
-	var first_evidence := _pending_preview_evidence(presenter, body_id)
+	var first_evidence := _handle_visibility_evidence(presenter, body_id)
 	controller.call("adjust_brush_radius_steps", 1)
 	await _settle()
-	var stable_evidence := _pending_preview_evidence(presenter, body_id)
+	var stable_evidence := _handle_visibility_evidence(presenter, body_id)
 	var ok: bool = (
 		generated
 		and body != null
@@ -427,6 +427,10 @@ func _pending_preview_evidence(
 			evidence["mesh_surface_count"] = (
 				mesh.get_surface_count() if mesh != null else 0
 			)
+		elif child is CSGShape3D:
+			evidence["mesh_surface_count"] = (
+				_count_generated_csg_surfaces(child as CSGShape3D)
+			)
 		evidence["visible"] = (
 			bool(evidence["root_visible"])
 			and bool(evidence["node_visible"])
@@ -435,6 +439,40 @@ func _pending_preview_evidence(
 		)
 		break
 	return evidence
+
+
+func _handle_visibility_evidence(
+	presenter: Node3D,
+	body_id: StringName
+) -> Dictionary:
+	var pending_evidence := _pending_preview_evidence(presenter, body_id)
+	var published := (
+		bool(presenter.call(
+			"_is_material_body_already_published",
+			body_id
+		))
+		if (
+			presenter != null
+			and presenter.has_method("_is_material_body_already_published")
+		)
+		else false
+	)
+	return {
+		"found": bool(pending_evidence.get("found", false)) or published,
+		"visible": bool(pending_evidence.get("visible", false)) or published,
+		"pending_preview": pending_evidence,
+		"published_authority": published,
+	}
+
+
+func _count_generated_csg_surfaces(shape: CSGShape3D) -> int:
+	if shape == null or not is_instance_valid(shape):
+		return 0
+	var surface_count := 0
+	for value: Variant in shape.get_meshes():
+		if value is Mesh:
+			surface_count += (value as Mesh).get_surface_count()
+	return surface_count
 
 
 func _build_fixed_basic_profile() -> Dictionary:

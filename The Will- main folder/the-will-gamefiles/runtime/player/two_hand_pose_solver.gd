@@ -100,7 +100,8 @@ func solve_arm_targets(
 		if not slot_is_dominant and _weapon_body_proxy_intersects_body(
 			body_restriction_root,
 			guidance_target,
-			constraint_solver
+			constraint_solver,
+			query_exclusions
 		):
 			var forward_push: float = maxf(
 				float(settings.get("front_bias_amount", 0.18)) * 0.35,
@@ -180,7 +181,8 @@ func _resolve_pole_target(
 func _weapon_body_proxy_intersects_body(
 	body_restriction_root: Node3D,
 	guidance_target: Node3D,
-	constraint_solver
+	constraint_solver,
+	query_exclusions: Array = []
 ) -> bool:
 	if body_restriction_root == null or guidance_target == null or constraint_solver == null:
 		return false
@@ -190,7 +192,8 @@ func _weapon_body_proxy_intersects_body(
 		var inside_variant: Variant = constraint_solver.call(
 			"point_inside_body_restriction",
 			body_restriction_root,
-			sample_world
+			sample_world,
+			query_exclusions
 		)
 		if inside_variant is bool and bool(inside_variant):
 			return true

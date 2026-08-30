@@ -56,6 +56,7 @@ const MATERIAL_UNIT_SCALE := 100
 @export var profile_runtime_schema_version: int = 0
 @export var profile_rotation_bias_degrees: float = 0.0
 @export var profile_twist_degrees_per_meter: float = 0.0
+@export var handle_profile_authoring_snapshot: Dictionary = {}
 @export var amount_ratio: float = 1.0
 @export var rough_volume_cell_equivalents: float = 0.0
 @export var rough_material_units: float = 0.0

@@ -21,13 +21,17 @@ const PrimaryGripSeatResolverScript = preload(
 const PrimaryGripHandleMeshPacketScript = preload(
 	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
 )
+const MaterialMassResolverScript = preload(
+	"res://core/resolvers/material_mass_resolver.gd"
+)
 
 const DEFAULT_MATERIAL_CATALOG: Resource = preload(
 	"res://core/defs/forge/forge_material_catalog_default.tres"
 )
 
 const HANDLE_MIN_SPAN_METERS := 0.25
-const HANDLE_REQUIRED_POINT_COUNT := 3
+const HANDLE_TWO_POINT_COUNT := 2
+const HANDLE_THREE_POINT_COUNT := 3
 const TWO_HAND_MIN_SPAN_CELLS := 26
 const CENTER_BALANCE_TOLERANCE_RATIO := 0.07
 const TWO_HAND_MAX_SPAN_USAGE_RATIO := 0.80
@@ -35,6 +39,9 @@ const MAX_PROFILE_OFFSET_SAMPLES := 256
 const GEOMETRY_EPSILON := 0.000001
 const VOLUME_EPSILON := 0.000000000001
 const GRIP_AUTHORITY_SOURCE := &"forge_v2_handle_body_kind"
+const WEAPON_INTRINSIC_CENTER_OF_MASS_AUTHORITY_SOURCE := (
+	&"forge_v2_spatial_material_occupancy_density"
+)
 const HANDLE_GRIP_CURVE_BAKE_INTERVAL_METERS := 0.001
 # Handle bodies still use CSGPolygon3D's legacy path sweep. Its final profile
 # mapping mirrors authored X while preserving authored Y. Keep this conversion
@@ -46,9 +53,13 @@ const HANDLE_FINAL_PROFILE_AXIS_X_SIGN := -1.0
 static func build_runtime_contract(
 	wip: CraftedItemWIP,
 	final_mesh_packet: Dictionary,
-	cell_size_meters: float = 0.0125
+	cell_size_meters: float = 0.0125,
+	material_lookup: Dictionary = {}
 ) -> Dictionary:
 	var resolved_cell_size := maxf(cell_size_meters, 0.0001)
+	var resolved_material_lookup := _build_runtime_material_lookup(
+		material_lookup
+	)
 	var profile: BakedProfile = BakedProfileScript.new()
 	profile.profile_id = _build_profile_id(wip)
 	if final_mesh_packet.has("ok") and not bool(final_mesh_packet.get(
@@ -168,13 +179,6 @@ static func build_runtime_contract(
 			StringName(handle_body.get("body_id"))
 		)
 	if not bool(handle_validation.get("valid", false)):
-		_populate_profile_material_usage(
-			profile,
-			authoring_state,
-			handle_body,
-			float(mesh_metrics.get("volume_m3", 0.0)),
-			resolved_cell_size
-		)
 		return _build_invalid_result(
 			profile,
 			stage2_item_state,
@@ -198,6 +202,23 @@ static func build_runtime_contract(
 			stage2_item_state,
 			"forge_v2_primary_handle_exact_mesh_signature_mismatch"
 		)
+	var material_resolution := _populate_profile_material_usage(
+		profile,
+		authoring_state,
+		float(mesh_metrics.get("volume_m3", 0.0)),
+		mesh_metrics.get("centroid_meters", Vector3.ZERO) as Vector3,
+		resolved_cell_size,
+		resolved_material_lookup
+	)
+	if not bool(material_resolution.get("ok", false)):
+		return _build_invalid_result(
+			profile,
+			stage2_item_state,
+			String(material_resolution.get(
+				"error",
+				"forge_v2_spatial_material_mass_unresolved"
+			))
+		)
 
 	var handle_path: PackedVector3Array = handle_validation.get(
 		"path_points",
@@ -217,8 +238,8 @@ static func build_runtime_contract(
 		handle_body,
 		handle_path,
 		profile_offsets,
-		mesh_metrics.get("centroid_meters", Vector3.ZERO) as Vector3,
-		vertices_meters,
+		profile.get_weapon_intrinsic_center_of_mass_weapon_root_cells()
+		* resolved_cell_size,
 		protected_handle_vertices_meters,
 		protected_handle_indices
 	)
@@ -254,13 +275,6 @@ static func build_runtime_contract(
 		profile_offsets
 	) as PackedVector2Array
 
-	_populate_profile_material_usage(
-		profile,
-		authoring_state,
-		handle_body,
-		float(mesh_metrics.get("volume_m3", 0.0)),
-		resolved_cell_size
-	)
 	_populate_primary_grip_profile(
 		profile,
 		wip,
@@ -271,7 +285,6 @@ static func build_runtime_contract(
 		minor_axis_b,
 		profile_offsets,
 		vertices_meters,
-		mesh_metrics,
 		resolved_cell_size,
 		float(grip_geometry.get("contact_ratio", 0.5)),
 		float(grip_geometry.get("span_length_meters", -1.0)),
@@ -507,10 +520,14 @@ static func _resolve_valid_handle_body(authoring_state: Resource) -> Dictionary:
 			"body": handle_body,
 		}
 	var path_points: PackedVector3Array = handle_body.get("path_points")
-	if path_points.size() != HANDLE_REQUIRED_POINT_COUNT:
+	var path_configuration_error := _validate_handle_path_configuration(
+		StringName(handle_body.get("shape_kind")),
+		path_points.size()
+	)
+	if not path_configuration_error.is_empty():
 		return {
 			"valid": false,
-			"error": "forge_v2_primary_handle_requires_exactly_three_points",
+			"error": path_configuration_error,
 			"body": handle_body,
 		}
 	for point: Vector3 in path_points:
@@ -520,7 +537,10 @@ static func _resolve_valid_handle_body(authoring_state: Resource) -> Dictionary:
 				"error": "forge_v2_primary_handle_point_not_finite",
 				"body": handle_body,
 			}
-	var endpoint_span_meters := path_points[0].distance_to(path_points[2])
+	var endpoint_index := path_points.size() - 1
+	var endpoint_span_meters := path_points[0].distance_to(
+		path_points[endpoint_index]
+	)
 	if endpoint_span_meters + GEOMETRY_EPSILON < HANDLE_MIN_SPAN_METERS:
 		return {
 			"valid": false,
@@ -543,8 +563,23 @@ static func _resolve_valid_handle_body(authoring_state: Resource) -> Dictionary:
 		"body": handle_body,
 		"path_points": path_points,
 		"profile_polygon": profile_polygon,
-		"axis": (path_points[2] - path_points[0]).normalized(),
+		"axis": (path_points[endpoint_index] - path_points[0]).normalized(),
 	}
+
+
+static func _validate_handle_path_configuration(
+	shape_kind: StringName,
+	point_count: int
+) -> String:
+	if shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH:
+		if point_count == HANDLE_THREE_POINT_COUNT:
+			return ""
+		return "forge_v2_primary_handle_spline_requires_exactly_three_points"
+	if shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH:
+		if point_count in [HANDLE_TWO_POINT_COUNT, HANDLE_THREE_POINT_COUNT]:
+			return ""
+		return "forge_v2_primary_handle_linear_requires_two_or_three_points"
+	return "forge_v2_primary_handle_path_shape_unsupported"
 
 
 static func resolve_valid_handle_body(authoring_state: Resource) -> Dictionary:
@@ -784,29 +819,71 @@ static func _populate_profile_mesh_metrics(
 ) -> void:
 	var volume_m3 := maxf(float(mesh_metrics.get("volume_m3", 0.0)), 0.0)
 	profile.total_volume_cell_equivalents = volume_m3 / pow(cell_size_meters, 3.0)
-	profile.center_of_mass = (
-		mesh_metrics.get("centroid_meters", Vector3.ZERO) as Vector3
-	) / cell_size_meters
 
 
 static func _populate_profile_material_usage(
 	profile: BakedProfile,
 	authoring_state: Resource,
-	handle_body: Resource,
 	mesh_volume_m3: float,
-	cell_size_meters: float
-) -> void:
-	var usage_summary: Dictionary = {}
+	mesh_centroid_meters: Vector3,
+	cell_size_meters: float,
+	material_lookup: Dictionary
+) -> Dictionary:
+	profile.weapon_intrinsic_center_of_mass_spatial_material_valid = false
+	profile.weapon_intrinsic_center_of_mass_authority_source = StringName()
 	if (
-		authoring_state != null
-		and authoring_state.has_method("get_material_usage_summary")
+		authoring_state == null
+		or not authoring_state.has_method(
+			"get_material_spatial_usage_summary"
+		)
 	):
-		usage_summary = authoring_state.call(
-			"get_material_usage_summary"
-		) as Dictionary
-	var raw_material_volumes: Dictionary = {}
+		return {
+			"ok": false,
+			"error": "forge_v2_spatial_material_usage_provider_missing",
+		}
+	var usage_summary := authoring_state.call(
+		"get_material_spatial_usage_summary"
+	) as Dictionary
+	if not bool(usage_summary.get("ok", false)):
+		return {
+			"ok": false,
+			"error": "forge_v2_spatial_material_usage_%s" % String(
+				usage_summary.get("reason", &"unresolved")
+			),
+		}
+	if not bool(usage_summary.get(
+		"spatial_material_positions_valid",
+		false
+	)):
+		return {
+			"ok": false,
+			"error": "forge_v2_spatial_material_positions_invalid",
+		}
+	var spatial_origin_id := StringName(usage_summary.get(
+		"spatial_positions_origin_id",
+		StringName()
+	))
+	if spatial_origin_id != PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID:
+		return {
+			"ok": false,
+			"error": "forge_v2_spatial_material_origin_invalid",
+		}
+	var exact_cell_volume := (
+		maxf(mesh_volume_m3, 0.0) / pow(cell_size_meters, 3.0)
+	)
+	if exact_cell_volume <= VOLUME_EPSILON:
+		return {
+			"ok": false,
+			"error": "forge_v2_exact_material_volume_empty",
+		}
+	var material_entries := usage_summary.get("materials", {}) as Dictionary
+	var raw_material_data: Dictionary = {}
 	var raw_total_volume := 0.0
-	var material_entries: Dictionary = usage_summary.get("materials", {}) as Dictionary
+	var raw_position_sum_meters := Vector3.ZERO
+	# Forge V2 occupancy is analogous to V1 CellAtoms, but it is not the same
+	# representation. Keep V2's winning-material spatial samples and reuse the
+	# existing cell-equivalent mass authority for the density -> mass step.
+	var material_mass_resolver := MaterialMassResolverScript.new()
 	for material_key: Variant in material_entries.keys():
 		var material_id := StringName(material_key)
 		var entry_variant: Variant = material_entries[material_key]
@@ -817,34 +894,111 @@ static func _populate_profile_material_usage(
 			float(entry.get("rough_volume_cell_equivalents", 0.0)),
 			0.0
 		)
-		if rough_volume <= GEOMETRY_EPSILON:
+		var sample_count := maxi(int(entry.get(
+			"rough_spatial_sample_count",
+			0
+		)), 0)
+		var centroid_meters: Vector3 = entry.get(
+			"rough_spatial_centroid_meters",
+			Vector3.ZERO
+		) as Vector3
+		var entry_origin_id := StringName(entry.get(
+			"rough_spatial_position_origin_id",
+			StringName()
+		))
+		if (
+			rough_volume <= VOLUME_EPSILON
+			or sample_count <= 0
+			or not _vector3_is_finite(centroid_meters)
+			or entry_origin_id != spatial_origin_id
+		):
 			continue
-		raw_material_volumes[material_id] = rough_volume
+		var mass_per_cell_equivalent := float(material_mass_resolver.call(
+			"resolve_mass_for_cell_equivalent_volume",
+			material_id,
+			material_lookup,
+			1.0,
+			0.0
+		))
+		if mass_per_cell_equivalent <= VOLUME_EPSILON:
+			return {
+				"ok": false,
+				"error": "forge_v2_material_density_unresolved_%s" % String(
+					material_id
+				),
+			}
+		raw_material_data[material_id] = {
+			"rough_volume": rough_volume,
+			"centroid_meters": centroid_meters,
+			"mass_per_cell_equivalent": mass_per_cell_equivalent,
+		}
 		raw_total_volume += rough_volume
-	var exact_cell_volume := maxf(mesh_volume_m3, 0.0) / pow(cell_size_meters, 3.0)
-	if raw_material_volumes.is_empty() and handle_body != null:
-		var handle_material_id := StringName(handle_body.get("material_variant_id"))
-		if handle_material_id != StringName() and exact_cell_volume > 0.0:
-			raw_material_volumes[handle_material_id] = exact_cell_volume
-			raw_total_volume = exact_cell_volume
+		raw_position_sum_meters += centroid_meters * rough_volume
+	if raw_material_data.is_empty() or raw_total_volume <= VOLUME_EPSILON:
+		return {
+			"ok": false,
+			"error": "forge_v2_spatial_material_entries_empty",
+		}
 
+	var occupancy_centroid_meters := raw_position_sum_meters / raw_total_volume
+	var occupancy_center_correction_meters := (
+		mesh_centroid_meters - occupancy_centroid_meters
+	)
 	var material_volume_mix: Dictionary = {}
 	var material_variant_mix: Dictionary = {}
 	var total_mass := 0.0
-	for material_key: Variant in raw_material_volumes.keys():
+	var weighted_position_sum_meters := Vector3.ZERO
+	for material_key: Variant in raw_material_data.keys():
 		var material_id := StringName(material_key)
-		var raw_volume := float(raw_material_volumes[material_key])
+		var material_data := raw_material_data[material_key] as Dictionary
 		var scaled_volume := (
-			exact_cell_volume * raw_volume / raw_total_volume
-			if raw_total_volume > GEOMETRY_EPSILON
-			else raw_volume
+			exact_cell_volume
+			* float(material_data.get("rough_volume", 0.0))
+			/ raw_total_volume
 		)
+		var material_mass := float(material_mass_resolver.call(
+			"resolve_mass_for_cell_equivalent_volume",
+			material_id,
+			material_lookup,
+			scaled_volume,
+			0.0
+		))
 		material_volume_mix[material_id] = scaled_volume
 		material_variant_mix[material_id] = maxi(int(round(scaled_volume)), 1)
-		total_mass += scaled_volume * _resolve_density_per_cell(material_id)
+		total_mass += material_mass
+		var corrected_centroid_meters := (
+			material_data.get("centroid_meters", Vector3.ZERO) as Vector3
+		) + occupancy_center_correction_meters
+		weighted_position_sum_meters += corrected_centroid_meters * material_mass
+	if total_mass <= VOLUME_EPSILON:
+		return {
+			"ok": false,
+			"error": "forge_v2_spatial_material_mass_empty",
+		}
+	var weapon_intrinsic_center_of_mass_meters := (
+		weighted_position_sum_meters / total_mass
+	)
+	if not _vector3_is_finite(weapon_intrinsic_center_of_mass_meters):
+		return {
+			"ok": false,
+			"error": "forge_v2_spatial_material_center_not_finite",
+		}
 	profile.material_volume_mix = material_volume_mix
 	profile.material_variant_mix = material_variant_mix
-	profile.total_mass = maxf(total_mass, 0.0)
+	profile.total_mass = total_mass
+	profile.set_weapon_intrinsic_center_of_mass_weapon_root_cells(
+		weapon_intrinsic_center_of_mass_meters / cell_size_meters,
+		WEAPON_INTRINSIC_CENTER_OF_MASS_AUTHORITY_SOURCE,
+		true
+	)
+	return {
+		"ok": true,
+		"error": "",
+		"weapon_intrinsic_center_of_mass_meters": (
+			weapon_intrinsic_center_of_mass_meters
+		),
+		"total_mass": total_mass,
+	}
 
 
 static func _resolve_handle_profile_frame(
@@ -918,7 +1072,6 @@ static func _populate_primary_grip_profile(
 	minor_axis_b: Vector3,
 	profile_offsets: PackedVector2Array,
 	mesh_vertices_meters: PackedVector3Array,
-	mesh_metrics: Dictionary,
 	cell_size_meters: float,
 	resolved_contact_ratio: float = -1.0,
 	resolved_span_length_meters: float = -1.0,
@@ -928,14 +1081,16 @@ static func _populate_primary_grip_profile(
 	var span_start_meters := handle_path_meters[0]
 	var contact_meters := handle_path_meters[1]
 	var span_end_meters := handle_path_meters[2]
-	var center_of_mass_meters: Vector3 = mesh_metrics.get(
-		"centroid_meters",
-		Vector3.ZERO
+	var weapon_intrinsic_center_of_mass_meters := (
+		profile.get_weapon_intrinsic_center_of_mass_weapon_root_cells()
+		* cell_size_meters
 	)
 	var span_start_cells := span_start_meters / cell_size_meters
 	var contact_cells := contact_meters / cell_size_meters
 	var span_end_cells := span_end_meters / cell_size_meters
-	var center_of_mass_cells := center_of_mass_meters / cell_size_meters
+	var weapon_intrinsic_center_of_mass_cells := (
+		weapon_intrinsic_center_of_mass_meters / cell_size_meters
+	)
 
 	profile.primary_grip_valid = true
 	profile.validation_error = ""
@@ -966,7 +1121,9 @@ static func _populate_primary_grip_profile(
 	profile.primary_grip_slice_centers_origin_id = (
 		PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
 	)
-	profile.primary_grip_offset = center_of_mass_cells - contact_cells
+	profile.primary_grip_offset = (
+		weapon_intrinsic_center_of_mass_cells - contact_cells
+	)
 	profile.set("primary_grip_minor_axis_a", minor_axis_a.normalized())
 	profile.set("primary_grip_minor_axis_b", minor_axis_b.normalized())
 	profile.set(
@@ -991,40 +1148,104 @@ static func _populate_primary_grip_profile(
 			1.0
 		)
 	)
-	var center_ratio_unclamped := (
-		contact_ratio
-		if resolved_contact_ratio >= 0.0
-		else (
-			(center_of_mass_meters - span_start_meters).dot(span_vector_meters)
-			/ span_length_squared
+	var weapon_intrinsic_com_handle_ratio_unclamped := (
+		(weapon_intrinsic_center_of_mass_meters - span_start_meters).dot(
+			span_vector_meters
 		)
+		/ span_length_squared
 	)
-	var center_ratio := clampf(center_ratio_unclamped, 0.0, 1.0)
+	var weapon_intrinsic_com_handle_ratio_clamped := clampf(
+		weapon_intrinsic_com_handle_ratio_unclamped,
+		0.0,
+		1.0
+	)
 	profile.primary_grip_axis_ratio_from_span_start = contact_ratio
-	var span_start_is_com_side := (
-		center_of_mass_meters.distance_squared_to(span_start_meters)
-		<= center_of_mass_meters.distance_squared_to(span_end_meters)
+	profile.weapon_intrinsic_center_of_mass_handle_axis_ratio_from_span_start_unclamped = (
+		weapon_intrinsic_com_handle_ratio_unclamped
 	)
+	var tip_side_ratio := 1.0
+	if weapon_intrinsic_com_handle_ratio_unclamped < 0.5 - GEOMETRY_EPSILON:
+		tip_side_ratio = 0.0
+	var tip_side_direction := (
+		handle_axis if tip_side_ratio > 0.5 else -handle_axis
+	)
+	profile.primary_grip_handle_tip_side_axis_ratio_from_span_start = (
+		tip_side_ratio
+	)
+	profile.primary_grip_handle_tip_side_direction = tip_side_direction
+	profile.primary_grip_handle_tip_side_direction_origin_id = (
+		PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+	)
+	var sampled_span_start_meters := _resolve_handle_slice_center_at_ratio(
+		resolved_slice_axis_ratios,
+		resolved_slice_centers_meters,
+		0.0,
+		span_start_meters
+	)
+	var sampled_midpoint_meters := _resolve_handle_slice_center_at_ratio(
+		resolved_slice_axis_ratios,
+		resolved_slice_centers_meters,
+		0.5,
+		span_start_meters.lerp(span_end_meters, 0.5)
+	)
+	var sampled_span_end_meters := _resolve_handle_slice_center_at_ratio(
+		resolved_slice_axis_ratios,
+		resolved_slice_centers_meters,
+		1.0,
+		span_end_meters
+	)
+	var span_start_is_tip_side := tip_side_ratio < 0.5
 	profile.primary_grip_com_side_position = (
-		span_start_cells if span_start_is_com_side else span_end_cells
+		sampled_span_start_meters / cell_size_meters
+		if span_start_is_tip_side
+		else sampled_span_end_meters / cell_size_meters
 	)
 	profile.primary_grip_far_side_position = (
-		span_end_cells if span_start_is_com_side else span_start_cells
+		sampled_span_end_meters / cell_size_meters
+		if span_start_is_tip_side
+		else sampled_span_start_meters / cell_size_meters
 	)
 	profile.primary_grip_contact_percent = (
-		1.0 - contact_ratio if span_start_is_com_side else contact_ratio
+		1.0 - contact_ratio if span_start_is_tip_side else contact_ratio
 	)
 	profile.primary_grip_center_balance_offset_percent = absf(
-		center_ratio_unclamped - 0.5
+		weapon_intrinsic_com_handle_ratio_unclamped - 0.5
 	)
 	profile.primary_grip_center_balance_valid = (
-		center_ratio_unclamped >= 0.0
-		and center_ratio_unclamped <= 1.0
+		weapon_intrinsic_com_handle_ratio_unclamped >= 0.0
+		and weapon_intrinsic_com_handle_ratio_unclamped <= 1.0
 		and profile.primary_grip_center_balance_offset_percent
 		<= CENTER_BALANCE_TOLERANCE_RATIO
 	)
+	profile.primary_grip_handle_coordinate_mode = (
+		BakedProfileScript.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_BALANCED_SIGNED
+		if profile.primary_grip_center_balance_valid
+		else BakedProfileScript.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_DIRECTIONAL_POMMEL_TO_TIP
+	)
+	profile.primary_grip_handle_coordinate_mode_authority_source = (
+		BakedProfileScript
+		.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_AUTHORITY_WEAPON_INTRINSIC_COM
+	)
+	profile.primary_grip_handle_zero_axis_ratio_from_span_start = (
+		0.5
+		if profile.primary_grip_center_balance_valid
+		else 1.0 - tip_side_ratio
+	)
+	profile.primary_grip_handle_zero_position = (
+		sampled_midpoint_meters / cell_size_meters
+		if profile.primary_grip_center_balance_valid
+		else profile.primary_grip_far_side_position
+	)
+	profile.primary_grip_handle_zero_position_origin_id = (
+		PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+	)
 	if profile.primary_grip_center_balance_valid:
-		profile.primary_grip_center_balance_origin = contact_cells
+		profile.primary_grip_center_balance_origin = (
+			sampled_midpoint_meters / cell_size_meters
+		)
+		profile.primary_grip_center_balance_origin_id = (
+			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+		)
 
 	var two_hand_branch := (
 		(
@@ -1045,18 +1266,19 @@ static func _populate_primary_grip_profile(
 		and profile.primary_grip_center_balance_valid
 	):
 		profile.primary_grip_two_hand_negative_limit = -minf(
-			center_ratio / 0.5,
+			weapon_intrinsic_com_handle_ratio_clamped / 0.5,
 			TWO_HAND_MAX_SPAN_USAGE_RATIO
 		)
 		profile.primary_grip_two_hand_positive_limit = minf(
-			(1.0 - center_ratio) / 0.5,
+			(1.0 - weapon_intrinsic_com_handle_ratio_clamped) / 0.5,
 			TWO_HAND_MAX_SPAN_USAGE_RATIO
 		)
 
 	var extremities := _resolve_weapon_extremities(
 		mesh_vertices_meters,
 		contact_meters,
-		handle_axis
+		handle_axis,
+		tip_side_ratio
 	)
 	profile.weapon_tip_point = (
 		extremities.get("tip_meters", contact_meters) as Vector3
@@ -1080,7 +1302,7 @@ static func _populate_primary_grip_profile(
 	profile.reach = reach_meters / cell_size_meters
 	var safe_reach_cells := maxf(profile.reach, GEOMETRY_EPSILON)
 	profile.front_heavy_score = clampf(
-		profile.primary_grip_offset.dot(handle_axis) / safe_reach_cells,
+		profile.primary_grip_offset.dot(tip_side_direction) / safe_reach_cells,
 		-1.0,
 		1.0
 	)
@@ -1094,7 +1316,8 @@ static func _populate_primary_grip_profile(
 static func _resolve_weapon_extremities(
 	vertices_meters: PackedVector3Array,
 	contact_meters: Vector3,
-	handle_axis: Vector3
+	handle_axis: Vector3,
+	tip_side_axis_ratio_from_span_start: float
 ) -> Dictionary:
 	var min_projection := INF
 	var max_projection := -INF
@@ -1106,10 +1329,7 @@ static func _resolve_weapon_extremities(
 	var max_point := contact_meters + handle_axis * max_projection
 	var min_distance := absf(min_projection)
 	var max_distance := absf(max_projection)
-	# An exactly centered Handle is a legitimate tie. Keep that tie on the
-	# already-resolved positive Handle axis instead of letting float noise swap
-	# tip and pommel when the three authored Handle points are reversed.
-	var max_is_tip := max_distance + GEOMETRY_EPSILON >= min_distance
+	var max_is_tip := tip_side_axis_ratio_from_span_start >= 0.5
 	return {
 		"tip_meters": max_point if max_is_tip else min_point,
 		"pommel_meters": min_point if max_is_tip else max_point,
@@ -1117,6 +1337,26 @@ static func _resolve_weapon_extremities(
 		"pommel_distance_meters": min_distance if max_is_tip else max_distance,
 		"total_length_meters": maxf(max_projection - min_projection, 0.0),
 	}
+
+
+static func _resolve_handle_slice_center_at_ratio(
+	slice_axis_ratios: PackedFloat32Array,
+	slice_centers_meters: PackedVector3Array,
+	axis_ratio: float,
+	fallback_position_meters: Vector3
+) -> Vector3:
+	var seat_state := PrimaryGripSeatResolverScript.resolve_sampled_seat(
+		slice_axis_ratios,
+		slice_centers_meters,
+		PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID,
+		clampf(axis_ratio, 0.0, 1.0)
+	)
+	if not bool(seat_state.get("valid", false)):
+		return fallback_position_meters
+	return seat_state.get(
+		"position",
+		fallback_position_meters
+	) as Vector3
 
 
 static func _build_profile_offset_samples(
@@ -1197,7 +1437,6 @@ static func _resolve_handle_grip_geometry(
 	handle_path: PackedVector3Array,
 	final_samples: PackedVector2Array,
 	desired_contact_meters: Vector3,
-	mesh_vertices_meters: PackedVector3Array,
 	protected_handle_vertices_meters: PackedVector3Array,
 	protected_handle_indices: PackedInt32Array
 ) -> Dictionary:
@@ -1341,8 +1580,6 @@ static func _resolve_handle_grip_geometry(
 		Vector3.FORWARD
 	)
 	var ordering_axis := _resolve_order_independent_major_axis(
-		mesh_vertices_meters,
-		contact_center,
 		chronological_axis
 	)
 	var direction_sign := (
@@ -1583,28 +1820,9 @@ static func _resolve_closest_centerline_state(
 
 
 static func _resolve_order_independent_major_axis(
-	mesh_vertices_meters: PackedVector3Array,
-	contact_meters: Vector3,
 	chronological_axis: Vector3
 ) -> Vector3:
-	var fallback_axis := _canonicalize_axis(chronological_axis)
-	if mesh_vertices_meters.is_empty():
-		return fallback_axis
-	var extremities := _resolve_weapon_extremities(
-		mesh_vertices_meters,
-		contact_meters,
-		fallback_axis
-	)
-	var tip_point: Vector3 = extremities.get(
-		"tip_meters",
-		contact_meters + fallback_axis
-	)
-	var tip_direction := tip_point - contact_meters
-	return (
-		tip_direction.normalized()
-		if tip_direction.length_squared() > GEOMETRY_EPSILON * GEOMETRY_EPSILON
-		else fallback_axis
-	)
+	return _canonicalize_axis(chronological_axis)
 
 
 static func _canonicalize_axis(axis: Vector3) -> Vector3:
@@ -1741,36 +1959,33 @@ static func _calculate_signed_polygon_area(
 	return signed_area_times_two * 0.5
 
 
-static func _resolve_density_per_cell(material_variant_id: StringName) -> float:
+static func _build_runtime_material_lookup(
+	material_lookup: Dictionary
+) -> Dictionary:
+	var resolved_lookup := material_lookup.duplicate()
 	if DEFAULT_MATERIAL_CATALOG == null:
-		return 0.0
-	var requested_ids: Array[StringName] = [material_variant_id]
-	var material_text := String(material_variant_id)
-	for tier_suffix: String in [
-		"_green",
-		"_blue",
-		"_purple",
-		"_orange",
-	]:
-		if material_text.ends_with(tier_suffix):
-			requested_ids.append(
-				StringName(material_text.trim_suffix(tier_suffix) + "_gray")
-			)
-			break
+		return resolved_lookup
 	var entries: Array = DEFAULT_MATERIAL_CATALOG.get("entries") as Array
-	for requested_id: StringName in requested_ids:
-		for entry_variant: Variant in entries:
-			var entry: Resource = entry_variant as Resource
-			if (
-				entry == null
-				or StringName(entry.get("material_id")) != requested_id
-			):
-				continue
-			var material_def: Resource = entry.get("material_def") as Resource
-			if material_def == null:
-				return 0.0
-			return maxf(float(material_def.get("density_per_cell")), 0.0)
-	return 0.0
+	for entry_variant: Variant in entries:
+		var entry := entry_variant as Resource
+		if entry == null:
+			continue
+		var material_def := entry.get("material_def") as Resource
+		if material_def == null:
+			continue
+		var catalog_material_id := StringName(entry.get("material_id"))
+		var base_material_id := StringName(material_def.get("base_material_id"))
+		if (
+			base_material_id != StringName()
+			and not resolved_lookup.has(base_material_id)
+		):
+			resolved_lookup[base_material_id] = material_def
+		if (
+			catalog_material_id != StringName()
+			and not resolved_lookup.has(catalog_material_id)
+		):
+			resolved_lookup[catalog_material_id] = material_def
+	return resolved_lookup
 
 
 static func _resolve_profile_frame_fallback_normal(axis: Vector3) -> Vector3:

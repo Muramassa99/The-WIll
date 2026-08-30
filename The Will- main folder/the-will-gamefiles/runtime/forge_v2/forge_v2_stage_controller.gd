@@ -6,7 +6,13 @@ signal material_body_preview_changed(state)
 signal placement_cursor_changed(local_position: Vector3, is_valid: bool, radius_meters: float)
 
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
+const ForgeV2ActionHistoryScript = preload(
+	"res://runtime/forge_v2/forge_v2_action_history.gd"
+)
 const ForgeV2AuthoringStateScript = preload("res://runtime/forge_v2/forge_v2_authoring_state.gd")
+const ForgeV2MaterialBodyScript = preload(
+	"res://runtime/forge_v2/forge_v2_material_body.gd"
+)
 const ForgeV2WorkspaceContractScript = preload("res://runtime/forge_v2/forge_v2_workspace_contract.gd")
 const ForgeV2WipCompatibilityAdapterScript = preload(
 	"res://runtime/forge_v2/forge_v2_wip_compatibility_adapter.gd"
@@ -17,6 +23,15 @@ const ForgeV2WipCompatibilityAdapterScript = preload(
 # treating a pending history promotion as genuinely unhandled.
 const BOUNDED_PROMOTION_ACK_GRACE_PROCESS_FRAMES := 4
 const SAVE_PREPARATION_TIMEOUT_MSEC := 30000
+const ACTION_HISTORY_UNBOUNDED := 0
+const ACTION_KIND_TRANSIENT := &"transient_state"
+const ACTION_KIND_DOCUMENT := &"document_state"
+const ACTION_KIND_PENDING_BODY := &"pending_body"
+const ACTION_KIND_MATERIAL_LAYER := &"material_layer"
+const ACTION_KIND_PROTECTED_HANDLE := &"protected_handle"
+const ACTION_DOCUMENT_SNAPSHOT_SCHEMA_ID := &"forge_v2_action_document_snapshot"
+const ACTION_HANDLE_SNAPSHOT_SCHEMA_ID := &"forge_v2_action_handle_snapshot"
+const ACTION_TRANSIENT_DELTA_SCHEMA_ID := &"forge_v2_action_transient_delta"
 
 @export var default_project_name: String = "Stage 1 V2 Draft"
 
@@ -33,6 +48,18 @@ var _deferred_material_body_commit_queue: Array[StringName] = []
 var _deferred_material_body_commit_state_instance_id := 0
 var _deferred_material_body_commit_drain_running := false
 var _deferred_material_body_commit_generation := 0
+var _action_history = ForgeV2ActionHistoryScript.new(ACTION_HISTORY_UNBOUNDED)
+var _handle_edit_action_history = ForgeV2ActionHistoryScript.new(
+	ACTION_HISTORY_UNBOUNDED
+)
+var _active_undo_batch_history = null
+var _action_history_checkpoint_prune_count := 0
+var _last_action_history_checkpoint_layer_id := StringName()
+var _handle_change_before_document_snapshot: Dictionary = {}
+var _handle_change_pending_global_action := false
+var _active_editor_action_transaction: Dictionary = {}
+var _action_replay_active := false
+var _material_action_context_by_body_id: Dictionary = {}
 var last_material_body_finish_result: Dictionary = {
 	"status": &"none",
 	"body_id": StringName(),
@@ -86,6 +113,7 @@ func start_new_draft(project_name: String = "") -> Resource:
 	active_placement_body_id = StringName()
 	active_saved_wip_id = StringName()
 	_clear_deferred_material_body_commit_queue()
+	_clear_action_session()
 	active_authoring_state = ForgeV2AuthoringStateScript.new()
 	active_authoring_state.reset_new_draft(_resolve_project_name(project_name))
 	_emit_state_changed()
@@ -117,6 +145,52 @@ func prepare_pending_work_for_save(
 			"ok": false,
 			"reason": &"scene_tree_missing",
 		}
+	var precommit_deadline_msec := Time.get_ticks_msec() + maxi(timeout_msec, 1)
+	while (
+		not _deferred_material_body_commit_queue.is_empty()
+		or (
+			state.has_method("has_pending_bounded_history_promotion")
+			and bool(state.call("has_pending_bounded_history_promotion"))
+		)
+	):
+		if Time.get_ticks_msec() > precommit_deadline_msec:
+			return {
+				"ok": false,
+				"reason": &"pending_commit_timeout",
+			}
+		if active_authoring_state != state or not is_instance_valid(state):
+			return {
+				"ok": false,
+				"reason": &"authoring_state_changed",
+			}
+		await scene_tree.process_frame
+	if (
+		state.has_method("is_handle_change_active")
+		and bool(state.call("is_handle_change_active"))
+	):
+		var handle_action_before := _handle_change_before_document_snapshot
+		var handle_apply_result := state.call("apply_handle_change") as Dictionary
+		if not bool(handle_apply_result.get("ok", false)):
+			return {
+				"ok": false,
+				"reason": &"handle_change_apply_failed",
+				"handle_change_reason": StringName(handle_apply_result.get(
+					"reason",
+					&"handle_replacement_build_failed"
+				)),
+			}
+		if not handle_action_before.is_empty():
+			_handle_edit_action_history.call("clear")
+			_handle_change_pending_global_action = true
+			_record_document_action(
+				"Change Handle",
+				handle_action_before,
+				_action_history,
+				{"handle_action": true}
+			)
+			_handle_change_before_document_snapshot = {}
+		_emit_state_changed()
+		await scene_tree.process_frame
 	var state_instance_id := int(state.get_instance_id())
 	var deadline_msec := Time.get_ticks_msec() + maxi(timeout_msec, 1)
 	var committed_pending_work := false
@@ -343,7 +417,7 @@ func save_current_wip(
 	if saved_wip == null:
 		return null
 	_stamp_saved_wip_id_into_v2_state(wip_library, saved_wip)
-	load_saved_wip(saved_wip)
+	load_saved_wip(saved_wip, true)
 	return saved_wip
 
 func save_current_wip_as(
@@ -388,7 +462,7 @@ func save_current_wip_as(
 	if saved_wip == null:
 		return null
 	_stamp_saved_wip_id_into_v2_state(wip_library, saved_wip)
-	load_saved_wip(saved_wip)
+	load_saved_wip(saved_wip, true)
 	return saved_wip
 
 func _get_active_saved_wip_authoring_clone(wip_library) -> CraftedItemWIP:
@@ -454,6 +528,7 @@ func discard_deleted_active_saved_wip(saved_wip_id: StringName) -> bool:
 	active_placement_body_id = StringName()
 	active_saved_wip_id = StringName()
 	_clear_deferred_material_body_commit_queue()
+	_clear_action_session()
 	active_authoring_state = ForgeV2AuthoringStateScript.new()
 	active_authoring_state.reset_new_draft(
 		_resolve_project_name(default_project_name)
@@ -461,7 +536,10 @@ func discard_deleted_active_saved_wip(saved_wip_id: StringName) -> bool:
 	_emit_state_changed()
 	return true
 
-func load_saved_wip(saved_wip: CraftedItemWIP) -> bool:
+func load_saved_wip(
+	saved_wip: CraftedItemWIP,
+	preserve_action_history: bool = false
+) -> bool:
 	if saved_wip == null or saved_wip.forge_v2_authoring_state == null:
 		return false
 	var loaded_state: Resource = saved_wip.forge_v2_authoring_state.duplicate(true) as Resource
@@ -485,6 +563,8 @@ func load_saved_wip(saved_wip: CraftedItemWIP) -> bool:
 	active_placement_body_id = StringName()
 	active_saved_wip_id = saved_wip.wip_id
 	_clear_deferred_material_body_commit_queue()
+	if not preserve_action_history:
+		_clear_action_session()
 	active_authoring_state = loaded_state
 	_emit_state_changed()
 	return true
@@ -586,6 +666,90 @@ func set_active_tool_id(tool_id: StringName) -> void:
 	_emit_state_changed()
 	_emit_placement_cursor_changed()
 
+func activate_handle_tool(
+	handle_path_mode_id: StringName = StringName()
+) -> Dictionary:
+	if _is_material_or_async_action_busy():
+		return {
+			"ok": false,
+			"reason": &"material_or_async_action_busy",
+			"handle_change_active": false,
+			"handle_source_profile_id": StringName(),
+		}
+	active_placement_body_id = StringName()
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var was_handle_change_active := (
+		state.has_method("is_handle_change_active")
+		and bool(state.call("is_handle_change_active"))
+	)
+	var handle_change_before := {}
+	if (
+		not was_handle_change_active
+		and state.has_method("has_handle_material_body")
+		and bool(state.call("has_handle_material_body"))
+	):
+		handle_change_before = _capture_handle_action_snapshot()
+	var result: Dictionary = {}
+	if (
+		state.has_method("has_handle_material_body")
+		and bool(state.call("has_handle_material_body"))
+	):
+		result = state.call("begin_handle_change") as Dictionary
+	else:
+		if (
+			StringName(state.get("active_tool_id"))
+			!= ForgeV2AuthoringStateScript.TOOL_HANDLES
+		):
+			state.call("reset_active_handle_profile_builder")
+		result = {
+			"ok": true,
+			"reason": &"creating_handle",
+			"handle_change_active": false,
+			"handle_source_profile_id": StringName(),
+		}
+	var began_handle_change := (
+		bool(result.get("ok", false))
+		and bool(result.get("handle_change_active", false))
+		and not was_handle_change_active
+	)
+	if began_handle_change:
+		_handle_change_before_document_snapshot = handle_change_before
+		_handle_edit_action_history.call("clear")
+		_handle_change_pending_global_action = false
+	if (
+		bool(result.get("ok", false))
+		and handle_path_mode_id != StringName()
+		and state.has_method("set_active_handle_path_mode_id")
+	):
+		var mode_before := _capture_editor_transient_snapshot()
+		if bool(state.call("set_active_handle_path_mode_id", handle_path_mode_id)):
+			_record_transient_action("Change Handle Path Mode", mode_before)
+	result["handle_path_mode_id"] = StringName(state.get(
+		"active_handle_path_mode_id"
+	))
+	if state.has_method("get_active_handle_path_mode_label"):
+		result["handle_path_mode_label"] = String(state.call(
+			"get_active_handle_path_mode_label"
+		))
+	_emit_state_changed()
+	_emit_placement_cursor_changed()
+	return result
+
+func set_active_handle_path_mode_id(handle_path_mode_id: StringName) -> bool:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	if not state.has_method("set_active_handle_path_mode_id"):
+		return false
+	var action_before := _capture_editor_transient_snapshot()
+	var changed := bool(state.call(
+		"set_active_handle_path_mode_id",
+		handle_path_mode_id
+	))
+	if changed:
+		_record_transient_action("Change Handle Path Mode", action_before)
+		_emit_state_changed()
+		_emit_placement_cursor_changed()
+	return changed
+
 func set_active_profile_id(profile_id: StringName) -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.set_active_profile_id(profile_id)
@@ -593,73 +757,101 @@ func set_active_profile_id(profile_id: StringName) -> void:
 
 func set_active_profile_display_name(display_name: String) -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	state.call("set_active_profile_display_name", display_name)
+	_record_transient_action("Rename Active Profile", action_before)
 	_emit_state_changed()
 
 func reset_active_handle_profile_builder() -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	state.call("reset_active_handle_profile_builder")
+	_record_transient_action("Reset Handle Profile", action_before)
 	_emit_state_changed()
 
 func reset_active_basic_profile_builder() -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	state.call("reset_active_basic_profile_builder")
+	_record_transient_action("Reset Basic Profile", action_before)
 	_emit_state_changed()
 
 func set_active_profile_width_meters(width_meters: float) -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_profile_width_meters(width_meters)
+	_record_transient_action("Resize Profile Width", action_before)
 	_emit_state_changed()
 
 func set_active_profile_height_meters(height_meters: float) -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_profile_height_meters(height_meters)
+	_record_transient_action("Resize Profile Height", action_before)
 	_emit_state_changed()
 
 func set_active_profile_anchor_x_meters(anchor_x_meters: float) -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_profile_anchor_x_meters(anchor_x_meters)
+	_record_transient_action("Move Profile Anchor", action_before)
 	_emit_state_changed()
 
 func set_active_profile_anchor_y_meters(anchor_y_meters: float) -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_profile_anchor_y_meters(anchor_y_meters)
+	_record_transient_action("Move Profile Anchor", action_before)
 	_emit_state_changed()
 
 func set_active_profile_anchor_2d_meters(anchor_position_meters: Vector2) -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	state.call("set_active_profile_anchor_2d_meters", anchor_position_meters)
+	_record_transient_action("Move Profile Anchor", action_before)
 	_emit_state_changed()
 
 func reset_active_profile_anchor_to_center() -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	state.call("reset_active_profile_anchor_to_center")
+	_record_transient_action("Center Profile Anchor", action_before)
 	_emit_state_changed()
 
 func set_active_profile_rotation_degrees(rotation_degrees: float) -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_profile_rotation_degrees(rotation_degrees)
+	_record_transient_action("Rotate Profile", action_before)
 	_emit_state_changed()
 
 func set_active_handle_face_count(face_count: int) -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_handle_face_count(face_count)
+	_record_transient_action("Change Handle Face Count", action_before)
 	_emit_state_changed()
 
 func set_active_handle_rounding_enabled(is_enabled: bool) -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_handle_rounding_enabled(is_enabled)
+	_record_transient_action("Toggle Handle Rounding", action_before)
 	_emit_state_changed()
 
 func set_active_handle_corner_radius_meters(corner_radius_meters: float) -> void:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_handle_corner_radius_meters(corner_radius_meters)
+	_record_transient_action("Change Handle Corner Radius", action_before)
 	_emit_state_changed()
 
 func set_active_handle_control_point_2d_meters(point_index: int, point_position_meters: Vector2) -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call("set_active_handle_control_point_2d_meters", point_index, point_position_meters))
 	if changed:
+		_record_transient_action("Move Handle Profile Point", action_before)
 		_emit_state_changed()
 	return changed
 
@@ -670,8 +862,10 @@ func set_active_handle_grid_snapping_enabled(is_enabled: bool) -> void:
 
 func set_active_basic_control_point_2d_meters(point_index: int, point_position_meters: Vector2) -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call("set_active_basic_control_point_2d_meters", point_index, point_position_meters))
 	if changed:
+		_record_transient_action("Move Basic Profile Point", action_before)
 		_emit_state_changed()
 	return changed
 
@@ -680,26 +874,32 @@ func insert_active_basic_control_point_on_segment(
 	preview_position_meters: Vector2
 ) -> StringName:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	var new_corner_id := StringName(state.call(
 		"insert_active_basic_control_point_on_segment",
 		segment_start_corner_id,
 		preview_position_meters
 	))
 	if new_corner_id != StringName():
+		_record_transient_action("Insert Profile Point", action_before)
 		_emit_state_changed()
 	return new_corner_id
 
 func remove_active_basic_control_point(corner_id: StringName) -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call("remove_active_basic_control_point", corner_id))
 	if changed:
+		_record_transient_action("Remove Profile Point", action_before)
 		_emit_state_changed()
 	return changed
 
 func add_active_basic_corner_fillet(corner_id: StringName) -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call("add_active_basic_corner_fillet", corner_id))
 	if changed:
+		_record_transient_action("Add Profile Fillet", action_before)
 		_emit_state_changed()
 	return changed
 
@@ -708,19 +908,23 @@ func set_active_basic_corner_fillet_radius(
 	radius_meters: float
 ) -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call(
 		"set_active_basic_corner_fillet_radius",
 		corner_id,
 		radius_meters
 	))
 	if changed:
+		_record_transient_action("Resize Profile Fillet", action_before)
 		_emit_state_changed()
 	return changed
 
 func remove_active_basic_corner_fillet(corner_id: StringName) -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call("remove_active_basic_corner_fillet", corner_id))
 	if changed:
+		_record_transient_action("Remove Profile Fillet", action_before)
 		_emit_state_changed()
 	return changed
 
@@ -738,8 +942,10 @@ func set_active_basic_grid_snapping_enabled(is_enabled: bool) -> void:
 
 func apply_tool_profile_preset(profile_data: Dictionary) -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call("apply_tool_profile_preset", profile_data))
 	if changed:
+		_record_transient_action("Load Profile Into Editor", action_before)
 		_emit_state_changed()
 		_emit_placement_cursor_changed()
 	return changed
@@ -769,7 +975,10 @@ func append_empty_volume_stroke() -> Resource:
 
 func append_empty_material_body() -> Resource:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_document_action_snapshot()
 	var body: Resource = state.append_empty_material_body()
+	if body != null:
+		_record_document_action("Add Empty Material Body", action_before)
 	_emit_state_changed()
 	return body
 
@@ -778,13 +987,19 @@ func append_sample_volume_stroke() -> Resource:
 
 func append_sample_material_body() -> Resource:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_document_action_snapshot()
 	var body: Resource = state.append_sample_material_body()
+	if body != null:
+		_record_document_action("Add Sample Material Body", action_before)
 	_emit_state_changed()
 	return body
 
 func append_active_primitive_deposit() -> Array[Resource]:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_document_action_snapshot()
 	var bodies: Array[Resource] = state.append_active_primitive_deposit()
+	if not bodies.is_empty():
+		_record_document_action("Place Material Primitive", action_before)
 	_emit_state_changed()
 	return bodies
 
@@ -805,6 +1020,7 @@ func append_point_material_body(
 	local_contact_direction: Vector3 = Vector3.ZERO
 ) -> Resource:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_document_action_snapshot()
 	var body: Resource = state.append_point_material_body(
 		local_position,
 		-1.0,
@@ -814,6 +1030,8 @@ func append_point_material_body(
 	)
 	placement_cursor_local_position = local_position
 	placement_cursor_valid = true
+	if body != null:
+		_record_document_action("Place Material Point", action_before)
 	_emit_state_changed()
 	_emit_placement_cursor_changed()
 	return body
@@ -835,6 +1053,7 @@ func begin_material_body_path(
 	local_contact_direction: Vector3 = Vector3.ZERO
 ) -> StringName:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	var body: Resource = state.append_point_material_body(
 		local_position,
 		-1.0,
@@ -843,6 +1062,11 @@ func begin_material_body_path(
 		local_contact_direction
 	)
 	active_placement_body_id = StringName(body.get("body_id")) if body != null else StringName()
+	if active_placement_body_id != StringName():
+		_material_action_context_by_body_id[active_placement_body_id] = {
+			"before_transient": action_before,
+			"label": _get_material_action_label(state),
+		}
 	last_material_body_finish_result = {
 		"status": &"in_progress" if body != null else &"begin_rejected",
 		"body_id": active_placement_body_id,
@@ -994,6 +1218,10 @@ func finish_material_body_path(
 				"is_material_body_commit_ready",
 				completed_body_id
 			))
+		# Reserve the user action at gesture completion, before any synchronous
+		# or deferred structural commit can reorder it behind later edits.
+		if commit_ready:
+			_record_pending_material_body_action(state, completed_body_id)
 		if (
 			commit_ready
 			and state.has_method("commit_material_body_as_layer")
@@ -1056,6 +1284,10 @@ func finish_material_body_path(
 			and not committed
 		),
 	}
+	if committed:
+		_finalize_latest_committed_layer_action(state, completed_body_id)
+	elif removed:
+		_material_action_context_by_body_id.erase(completed_body_id)
 	if changed or had_active_body or committed:
 		_emit_state_changed()
 	_emit_placement_cursor_changed()
@@ -1159,6 +1391,10 @@ func _drain_deferred_material_body_commits(drain_generation: int) -> void:
 			last_material_body_finish_result["pending"] = (
 				committed_layer == null
 			)
+		if committed_layer != null:
+			_finalize_committed_layer_action(committed_layer, body_id)
+		else:
+			_record_pending_material_body_action(state, body_id)
 		_emit_state_changed()
 		await get_tree().process_frame
 	if drain_generation == _deferred_material_body_commit_generation:
@@ -1193,6 +1429,13 @@ func append_spline_line_point(
 ) -> int:
 	active_placement_body_id = StringName()
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var before_point_count := (
+		state.get("spline_line_points") as PackedVector3Array
+	).size()
+	var before_normal_count := (
+		state.get("spline_line_surface_normals") as PackedVector3Array
+	).size()
+	var before_selected_index := int(state.get("selected_spline_point_index"))
 	var point_index: int = int(state.call(
 		"append_spline_line_point",
 		local_position,
@@ -1201,6 +1444,39 @@ func append_spline_line_point(
 	placement_cursor_local_position = local_position
 	placement_cursor_valid = true
 	if point_index >= 0:
+		if _active_editor_action_transaction.is_empty():
+			var after_points := state.get("spline_line_points") as PackedVector3Array
+			var after_normals := state.get(
+				"spline_line_surface_normals"
+			) as PackedVector3Array
+			var changes := {
+				"spline_line_points": _build_known_action_sequence_splice(
+					TYPE_PACKED_VECTOR3_ARRAY,
+					before_point_count,
+					after_points.size(),
+					before_point_count,
+					0,
+					[],
+					[after_points[point_index]]
+				),
+				"spline_line_surface_normals": (
+					_build_known_action_sequence_splice(
+						TYPE_PACKED_VECTOR3_ARRAY,
+						before_normal_count,
+						after_normals.size(),
+						before_normal_count,
+						0,
+						[],
+						[after_normals[point_index]]
+					)
+				),
+				"selected_spline_point_index": {
+					"mode": &"replace",
+					"before": before_selected_index,
+					"after": point_index,
+				},
+			}
+			_record_known_transient_delta("Place Path Point", changes)
 		_emit_state_changed()
 	_emit_placement_cursor_changed()
 	return point_index
@@ -1223,6 +1499,7 @@ func replace_detailing_brush_path_solution(
 ) -> bool:
 	active_placement_body_id = StringName()
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call(
 		"replace_detailing_brush_path_solution",
 		control_points,
@@ -1241,15 +1518,44 @@ func replace_detailing_brush_path_solution(
 		resolved_contact_directions
 	))
 	if changed:
+		_record_transient_action("Edit Detailing Path", action_before)
 		_emit_state_changed()
 	return changed
 
 func set_spline_line_point(point_index: int, local_position: Vector3) -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var before_points := state.get("spline_line_points") as PackedVector3Array
+	var before_point_count := before_points.size()
+	var before_selected_index := int(state.get("selected_spline_point_index"))
+	var before_point := (
+		before_points[point_index]
+		if point_index >= 0 and point_index < before_points.size()
+		else Vector3.ZERO
+	)
+	before_points = PackedVector3Array()
 	var changed: bool = bool(state.call("set_spline_line_point", point_index, local_position))
 	placement_cursor_local_position = local_position
 	placement_cursor_valid = true
 	if changed:
+		if _active_editor_action_transaction.is_empty():
+			var after_points := state.get("spline_line_points") as PackedVector3Array
+			var changes := {
+				"spline_line_points": _build_known_action_sequence_splice(
+					TYPE_PACKED_VECTOR3_ARRAY,
+					before_point_count,
+					after_points.size(),
+					point_index,
+					before_point_count - point_index - 1,
+					[before_point],
+					[after_points[point_index]]
+				),
+				"selected_spline_point_index": {
+					"mode": &"replace",
+					"before": before_selected_index,
+					"after": point_index,
+				},
+			}
+			_record_known_transient_delta("Move Path Point", changes)
 		_emit_state_changed()
 	_emit_placement_cursor_changed()
 	return changed
@@ -1271,43 +1577,88 @@ func get_spline_point_selection_radius_meters() -> float:
 
 func finish_spline_line() -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
 	var changed: bool = bool(state.call("finish_spline_line"))
 	if changed:
+		_record_transient_action("Finish Path", action_before)
 		_emit_state_changed()
 	return changed
 
 func cancel_spline_line() -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var cancelling_handle_change := (
+		state.has_method("is_handle_change_active")
+		and bool(state.call("is_handle_change_active"))
+	)
+	var action_before := _capture_editor_transient_snapshot()
 	var changed: bool = bool(state.call("cancel_spline_line"))
 	if changed:
+		if cancelling_handle_change:
+			_handle_edit_action_history.call("clear")
+			_handle_change_before_document_snapshot = {}
+			_handle_change_pending_global_action = false
+		else:
+			_record_transient_action("Cancel Path", action_before)
 		_emit_state_changed()
 	return changed
 
 func generate_spline_line_csg_noodle() -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_document_action_snapshot()
 	var changed: bool = bool(state.call("generate_spline_line_csg_noodle"))
 	if changed:
+		_record_generated_path_action("Generate CSG Noodle", action_before)
 		_emit_state_changed()
 	return changed
 
 func generate_detailing_brush() -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_document_action_snapshot()
 	var changed := bool(state.call("generate_detailing_brush"))
 	if changed:
+		_record_generated_path_action("Generate Detailing Brush", action_before)
 		_emit_state_changed()
 	return changed
 
 func generate_profile_extrusion_from_spline() -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var applying_handle_change := (
+		state.has_method("is_handle_change_active")
+		and bool(state.call("is_handle_change_active"))
+	)
+	var action_before := (
+		_handle_change_before_document_snapshot
+		if applying_handle_change
+		else _capture_document_action_snapshot()
+	)
 	var changed: bool = bool(state.call("generate_profile_extrusion_from_spline"))
 	if changed:
+		if applying_handle_change:
+			_handle_edit_action_history.call("clear")
+			_handle_change_pending_global_action = true
+			_record_document_action(
+				"Change Handle",
+				action_before,
+				_action_history,
+				{"handle_action": true}
+			)
+			_handle_change_before_document_snapshot = {}
+		else:
+			_record_generated_path_action(
+				"Generate Handle",
+				action_before,
+				null,
+				{"protected_handle_action": true}
+			)
 		_emit_state_changed()
 	return changed
 
 func clear_spline_line_csg_noodle() -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_document_action_snapshot()
 	var changed: bool = bool(state.call("clear_spline_line_csg_noodle"))
 	if changed:
+		_record_document_action("Clear Generated Path Body", action_before)
 		_emit_state_changed()
 	return changed
 
@@ -1318,12 +1669,30 @@ func clear_pending_material_bodies() -> void:
 	active_placement_body_id = StringName()
 	_clear_deferred_material_body_commit_queue()
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_document_action_snapshot()
+	var pending_count_before := int(state.call("get_pending_material_body_count"))
+	var handle_change_before := (
+		state.has_method("is_handle_change_active")
+		and bool(state.call("is_handle_change_active"))
+	)
 	state.clear_pending_material_bodies()
+	_material_action_context_by_body_id.clear()
+	if handle_change_before:
+		_handle_edit_action_history.call("clear")
+		_handle_change_before_document_snapshot = {}
+		_handle_change_pending_global_action = false
+	elif pending_count_before > 0 and not action_before.is_empty():
+		_record_document_action("Clear Pending Work", action_before)
 	_emit_state_changed()
 
 func commit_pending_material_bodies_as_layer() -> Resource:
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var pending_count := int(state.call("get_pending_material_body_count"))
+	var pending_body_ids := _get_pending_material_body_ids(state)
+	var commit_body_ids := _resolve_next_pending_action_commit_body_ids(
+		state,
+		pending_body_ids
+	)
 	var commit_is_temporarily_blocked := (
 		not _deferred_material_body_commit_queue.is_empty()
 		or (
@@ -1334,7 +1703,10 @@ func commit_pending_material_bodies_as_layer() -> Resource:
 	var layer: Resource = (
 		null
 		if commit_is_temporarily_blocked
-		else state.commit_pending_material_bodies_as_layer()
+		else state.call(
+			"commit_material_body_ids_as_layer",
+			commit_body_ids
+		) as Resource
 	)
 	last_material_body_finish_result = {
 		"status": (
@@ -1346,35 +1718,1648 @@ func commit_pending_material_bodies_as_layer() -> Resource:
 			if pending_count > 0
 			else &"no_pending_bodies"
 		),
-		"body_id": StringName(),
+		"body_id": (
+			commit_body_ids[0]
+			if not commit_body_ids.is_empty()
+			else StringName()
+		),
 		"had_active_body": false,
-		"commit_ready": pending_count > 0,
+		"commit_ready": not commit_body_ids.is_empty(),
 		"committed": layer != null,
 		"deferred": false,
 		"removed": false,
 		"pending": pending_count > 0 and layer == null,
 	}
 	if layer != null:
+		_finalize_committed_layer_action(
+			layer,
+			commit_body_ids[0] if not commit_body_ids.is_empty() else StringName()
+		)
 		_emit_state_changed()
 	return layer
 
+
+func _resolve_next_pending_action_commit_body_ids(
+	state: Resource,
+	pending_body_ids: Array[StringName]
+) -> Array[StringName]:
+	var commit_ready_ids: Array[StringName] = []
+	for body_id: StringName in pending_body_ids:
+		if bool(state.call("is_material_body_commit_ready", body_id)):
+			commit_ready_ids.append(body_id)
+	if commit_ready_ids.is_empty():
+		return []
+	var first_ready_id := commit_ready_ids[0]
+	for record: Dictionary in _action_history.call(
+		"get_undo_records"
+	) as Array[Dictionary]:
+		var action_body_ids := _get_action_record_body_ids(record)
+		if not action_body_ids.has(first_ready_id):
+			continue
+		for action_body_id: StringName in action_body_ids:
+			if not commit_ready_ids.has(action_body_id):
+				return [first_ready_id]
+		return action_body_ids
+	# A legacy or externally restored pending body may have no live-session
+	# action record. Commit the oldest ready body without inventing chronology.
+	return [first_ready_id]
+
+
+func commit_all_pending_material_bodies_as_layers(
+	timeout_msec: int = SAVE_PREPARATION_TIMEOUT_MSEC
+) -> Dictionary:
+	var state := ensure_authoring_state(default_project_name)
+	if state == null:
+		return {"ok": false, "reason": &"authoring_state_missing"}
+	var scene_tree := get_tree()
+	if scene_tree == null:
+		return {"ok": false, "reason": &"scene_tree_missing"}
+	var state_instance_id := int(state.get_instance_id())
+	var deadline_msec := Time.get_ticks_msec() + maxi(timeout_msec, 1)
+	var committed_layer_count := 0
+	while Time.get_ticks_msec() <= deadline_msec:
+		if (
+			active_authoring_state != state
+			or not is_instance_valid(state)
+			or int(state.get_instance_id()) != state_instance_id
+		):
+			return {
+				"ok": false,
+				"reason": &"authoring_state_changed",
+				"committed_layer_count": committed_layer_count,
+			}
+		if (
+			not _deferred_material_body_commit_queue.is_empty()
+			or bool(state.call("has_pending_bounded_history_promotion"))
+		):
+			await scene_tree.process_frame
+			continue
+		var pending_count := int(state.call("get_pending_material_body_count"))
+		if pending_count <= 0:
+			return {
+				"ok": true,
+				"reason": &"committed_all_pending_work",
+				"committed_layer_count": committed_layer_count,
+			}
+		var committed_layer := commit_pending_material_bodies_as_layer()
+		if committed_layer == null:
+			return {
+				"ok": false,
+				"reason": &"pending_layer_commit_rejected",
+				"pending_material_body_count": pending_count,
+				"committed_layer_count": committed_layer_count,
+				"finish_status": StringName(last_material_body_finish_result.get(
+					"status",
+					StringName()
+				)),
+			}
+		committed_layer_count += 1
+		await scene_tree.process_frame
+	return {
+		"ok": false,
+		"reason": &"pending_commit_timeout",
+		"committed_layer_count": committed_layer_count,
+		"pending_material_body_count": int(state.call(
+			"get_pending_material_body_count"
+		)),
+	}
+
+func can_undo_action() -> bool:
+	if _is_action_replay_blocked():
+		return false
+	return bool(_get_action_replay_history().call("can_undo"))
+
+
+func can_redo_action() -> bool:
+	if _is_action_replay_blocked() or _active_undo_batch_history != null:
+		return false
+	return bool(_get_active_action_history().call("can_redo"))
+
+
+func begin_action_history_undo_batch() -> bool:
+	if _active_undo_batch_history != null or _is_action_replay_blocked():
+		return false
+	var history = _get_active_action_history()
+	if history == null or not bool(history.call("begin_undo_batch")):
+		return false
+	_active_undo_batch_history = history
+	return true
+
+
+func end_action_history_undo_batch() -> bool:
+	if _active_undo_batch_history == null:
+		return false
+	var history = _active_undo_batch_history
+	_active_undo_batch_history = null
+	var ended := bool(history.call("end_undo_batch"))
+	if ended:
+		# Undo steps refresh while the batch is intentionally not redoable. Once
+		# release seals the gesture, notify the UI so Redo becomes visible/enabled.
+		_emit_state_changed()
+	return ended
+
+
+func undo_latest_action() -> bool:
+	if not can_undo_action():
+		return false
+	var history = _get_action_replay_history()
+	var record := history.call("peek_undo") as Dictionary
+	if record.is_empty():
+		return false
+	_action_replay_active = true
+	var changed := _replay_action_record(record, false)
+	_action_replay_active = false
+	if not changed:
+		history.call("cancel_pending_confirmation")
+		return false
+	if not bool(history.call("confirm_undo")):
+		return false
+	_emit_state_changed()
+	_emit_placement_cursor_changed()
+	return true
+
+
+func redo_latest_action() -> bool:
+	if not can_redo_action():
+		return false
+	var history = _get_active_action_history()
+	var records := history.call("peek_redo_batch") as Array[Dictionary]
+	if records.is_empty():
+		return false
+	_action_replay_active = true
+	var replayed_records: Array[Dictionary] = []
+	var changed := true
+	var rollback_succeeded := true
+	for record: Dictionary in records:
+		if not _replay_batched_action_record(record, true):
+			changed = false
+			break
+		replayed_records.append(record)
+	if not changed:
+		rollback_succeeded = _rollback_batched_action_records(replayed_records)
+	elif not bool(history.call("confirm_redo_batch")):
+		changed = false
+		rollback_succeeded = _rollback_batched_action_records(replayed_records)
+	_action_replay_active = false
+	if not changed:
+		history.call("cancel_pending_confirmation")
+		if not rollback_succeeded:
+			# Never leave an apparently valid journal pointing at a partially
+			# recovered document. This is a corruption/failure containment path;
+			# normal inverse replay is covered for every action kind.
+			_clear_action_session()
+		# Intermediate structural publications occurred while replay was blocked.
+		# Publish once more after clearing that guard so UI/presenter state cannot
+		# remain visually disabled or stale following an atomic rollback.
+		_emit_state_changed()
+		_emit_placement_cursor_changed()
+		return false
+	_emit_state_changed()
+	_emit_placement_cursor_changed()
+	return true
+
+
+## A held Undo is one user gesture, so Redo replays its records as one batch.
+## Point/transient records stay cheap and publish only at the end. Structural
+## records can advance the bounded native transition, however; publish each of
+## those transitions before replaying the next record so native history cannot
+## lag several cursor positions behind the logical document.
+func _replay_batched_action_record(record: Dictionary, use_after: bool) -> bool:
+	var state := ensure_authoring_state(default_project_name)
+	var transition_revision_before := int(state.get(
+		"bounded_history_transition_revision"
+	))
+	if not _replay_action_record(record, use_after):
+		return false
+	var transition_revision_after := int(state.get(
+		"bounded_history_transition_revision"
+	))
+	if transition_revision_after != transition_revision_before:
+		_emit_state_changed()
+	return true
+
+
+func _rollback_batched_action_records(records: Array[Dictionary]) -> bool:
+	var rollback_succeeded := true
+	for replay_index in range(records.size() - 1, -1, -1):
+		if not _replay_batched_action_record(records[replay_index], false):
+			rollback_succeeded = false
+	return rollback_succeeded
+
+
+# Native layer-history compatibility API retained for diagnostics and focused
+# bounded-history verification. Player-facing Undo/Redo exclusively call the
+# action API above. A successful native mutation invalidates the action journal
+# so the two histories can never silently disagree about what is latest.
 func undo_latest_layer() -> bool:
 	if not _deferred_material_body_commit_queue.is_empty():
 		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
-	var changed: bool = bool(state.undo_latest_layer())
+	var changed: bool = bool(state.call("undo_latest_layer"))
 	if changed:
+		_clear_action_session()
 		_emit_state_changed()
 	return changed
+
 
 func redo_latest_layer() -> bool:
 	if not _deferred_material_body_commit_queue.is_empty():
 		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
-	var changed: bool = bool(state.redo_latest_layer())
+	var changed: bool = bool(state.call("redo_latest_layer"))
 	if changed:
+		_clear_action_session()
 		_emit_state_changed()
 	return changed
+
+
+## The presenter routes the native promotion acknowledgement through this
+## controller so the structural checkpoint and the user-action floor advance
+## atomically from the application's point of view.
+func acknowledge_bounded_history_promotion(
+	authoring_state: Resource,
+	transition: Dictionary,
+	native_history_result: Dictionary
+) -> bool:
+	if (
+		authoring_state == null
+		or not is_instance_valid(authoring_state)
+		or authoring_state != active_authoring_state
+		or StringName(transition.get("kind", StringName()))
+		!= &"promotion_append"
+		or not bool(transition.get("requires_native_ack", false))
+		or not authoring_state.has_method(
+			"acknowledge_bounded_history_transition"
+		)
+	):
+		return false
+	var transition_revision := int(transition.get("revision", -1))
+	var current_transition := authoring_state.call(
+		"get_bounded_history_transition"
+	) as Dictionary
+	if (
+		transition_revision < 0
+		or int(current_transition.get("revision", -1))
+		!= transition_revision
+		or StringName(current_transition.get(
+			"promoted_layer_id",
+			StringName()
+		)) != StringName(transition.get(
+			"promoted_layer_id",
+			StringName()
+		))
+	):
+		return false
+	if not bool(authoring_state.call(
+		"acknowledge_bounded_history_transition",
+		transition_revision,
+		native_history_result
+	)):
+		return false
+	_advance_action_history_checkpoint_floor(transition)
+	return true
+
+
+func _advance_action_history_checkpoint_floor(transition: Dictionary) -> void:
+	var promoted_layer_id := StringName(transition.get(
+		"promoted_layer_id",
+		StringName()
+	))
+	if promoted_layer_id == StringName():
+		return
+	_last_action_history_checkpoint_layer_id = promoted_layer_id
+	var undo_records := _action_history.call(
+		"get_undo_records"
+	) as Array[Dictionary]
+	for record_index in range(undo_records.size()):
+		var record := undo_records[record_index] as Dictionary
+		if StringName(record.get("kind", StringName())) != ACTION_KIND_MATERIAL_LAYER:
+			continue
+		var payload := record.get("payload", {}) as Dictionary
+		if StringName(payload.get("layer_id", StringName())) != promoted_layer_id:
+			continue
+		if bool(_action_history.call(
+			"discard_undo_prefix_through",
+			record_index,
+			true
+		)):
+			_action_history_checkpoint_prune_count += record_index + 1
+		return
+	# A loaded project can promote a pre-session layer whose authored actions
+	# were intentionally not restored. In that valid case there is no journal
+	# prefix to discard; every live record is already newer than the checkpoint.
+
+
+func begin_editor_action_transaction(
+	label: String,
+	include_document_state: bool = false
+) -> bool:
+	if (
+		_action_replay_active
+		or not _active_editor_action_transaction.is_empty()
+		or _is_material_or_async_action_busy()
+	):
+		return false
+	var before_snapshot := (
+		_capture_document_action_snapshot()
+		if include_document_state
+		else _capture_editor_transient_snapshot()
+	)
+	if before_snapshot.is_empty():
+		return false
+	_active_editor_action_transaction = {
+		"label": label,
+		"include_document_state": include_document_state,
+		"before": before_snapshot,
+		"history": _get_active_action_history(),
+	}
+	return true
+
+
+func finish_editor_action_transaction() -> bool:
+	if _active_editor_action_transaction.is_empty():
+		return false
+	var transaction := _active_editor_action_transaction
+	_active_editor_action_transaction = {}
+	var include_document_state := bool(transaction.get(
+		"include_document_state",
+		false
+	))
+	var after_snapshot := (
+		_capture_document_action_snapshot()
+		if include_document_state
+		else _capture_editor_transient_snapshot()
+	)
+	var before_snapshot := transaction.get("before", {}) as Dictionary
+	if after_snapshot.is_empty() or before_snapshot == after_snapshot:
+		return false
+	var history = transaction.get("history", null)
+	if history == null:
+		return false
+	var payload: Dictionary = {}
+	if include_document_state:
+		payload = {
+			"before": before_snapshot,
+			"after": after_snapshot,
+		}
+		payload["action_body_ids"] = _derive_action_body_ids(
+			before_snapshot,
+			after_snapshot
+		)
+	else:
+		var transient_delta := _build_transient_action_delta(
+			before_snapshot,
+			after_snapshot
+		)
+		if transient_delta.is_empty():
+			return false
+		payload = {"delta": transient_delta}
+	var record := {
+		"kind": (
+			ACTION_KIND_DOCUMENT
+			if include_document_state
+			else ACTION_KIND_TRANSIENT
+		),
+		"label": String(transaction.get("label", "Edit")),
+		"payload": payload,
+	}
+	var recorded := _push_action_record_to(history, record)
+	if recorded:
+		_emit_state_changed()
+	return recorded
+
+
+func cancel_editor_action_transaction() -> void:
+	_active_editor_action_transaction = {}
+
+
+func get_action_history_summary() -> Dictionary:
+	var active_history = _get_active_action_history()
+	var summary := active_history.call("get_status_summary") as Dictionary
+	summary["scope"] = (
+		&"handle_edit"
+		if active_history == _handle_edit_action_history
+		else &"forge_session"
+	)
+	summary["blocked"] = _is_action_replay_blocked()
+	summary["undo_batch_active"] = _active_undo_batch_history != null
+	summary["checkpoint_prune_count"] = _action_history_checkpoint_prune_count
+	summary["checkpoint_layer_id"] = _last_action_history_checkpoint_layer_id
+	return summary
+
+
+func _clear_action_session() -> void:
+	if _active_undo_batch_history != null:
+		_active_undo_batch_history.call("end_undo_batch")
+	_active_undo_batch_history = null
+	_action_history.call("clear")
+	_handle_edit_action_history.call("clear")
+	_handle_change_before_document_snapshot = {}
+	_handle_change_pending_global_action = false
+	_active_editor_action_transaction = {}
+	_material_action_context_by_body_id.clear()
+	_action_replay_active = false
+	_action_history_checkpoint_prune_count = 0
+	_last_action_history_checkpoint_layer_id = StringName()
+
+
+func _get_active_action_history():
+	var state := active_authoring_state
+	if (
+		state != null
+		and state.has_method("is_handle_change_active")
+		and bool(state.call("is_handle_change_active"))
+	):
+		return _handle_edit_action_history
+	return _action_history
+
+
+func _get_action_replay_history():
+	if _active_undo_batch_history != null:
+		return _active_undo_batch_history
+	return _get_active_action_history()
+
+
+func _is_material_or_async_action_busy() -> bool:
+	if active_placement_body_id != StringName():
+		return true
+	if not _deferred_material_body_commit_queue.is_empty():
+		return true
+	var state := active_authoring_state
+	return (
+		state != null
+		and state.has_method("has_pending_bounded_history_promotion")
+		and bool(state.call("has_pending_bounded_history_promotion"))
+	)
+
+
+func _is_action_replay_blocked() -> bool:
+	return (
+		_action_replay_active
+		or not _active_editor_action_transaction.is_empty()
+		or _is_material_or_async_action_busy()
+	)
+
+
+func _capture_editor_transient_snapshot() -> Dictionary:
+	var state := ensure_authoring_state(default_project_name)
+	if state == null or not state.has_method("capture_editor_transient_snapshot"):
+		return {}
+	return state.call("capture_editor_transient_snapshot") as Dictionary
+
+
+func _capture_document_action_snapshot() -> Dictionary:
+	var state := ensure_authoring_state(default_project_name)
+	if state == null:
+		return {}
+	var transient := _capture_editor_transient_snapshot()
+	if transient.is_empty():
+		return {}
+	var pending_bundles: Array[Dictionary] = []
+	for body_variant: Variant in state.get("material_bodies") as Array:
+		var body := body_variant as Resource
+		if body == null:
+			continue
+		var body_id := StringName(body.get("body_id"))
+		if body_id == StringName():
+			continue
+		var bundle := state.call("capture_pending_body_bundle", body_id) as Dictionary
+		if bool(bundle.get("ok", false)):
+			pending_bundles.append(bundle)
+	var protected_snapshot: Dictionary = {}
+	if state.has_method("capture_protected_handle_snapshot"):
+		var candidate := state.call("capture_protected_handle_snapshot") as Dictionary
+		if bool(candidate.get("ok", false)):
+			protected_snapshot = candidate
+	return {
+		"schema_id": ACTION_DOCUMENT_SNAPSHOT_SCHEMA_ID,
+		"schema_version": 1,
+		"transient": transient,
+		"pending_bodies": pending_bundles,
+		"protected_handle": protected_snapshot,
+	}
+
+
+func _capture_handle_action_snapshot() -> Dictionary:
+	var state := ensure_authoring_state(default_project_name)
+	if state == null:
+		return {}
+	var transient := _capture_editor_transient_snapshot()
+	if transient.is_empty():
+		return {}
+	var pending_handle_bundles: Array[Dictionary] = []
+	for body_variant: Variant in state.get("material_bodies") as Array:
+		var body := body_variant as Resource
+		if (
+			body == null
+			or StringName(body.get("body_kind"))
+			!= ForgeV2MaterialBodyScript.BODY_KIND_HANDLE_PROFILE
+		):
+			continue
+		var body_id := StringName(body.get("body_id"))
+		if body_id == StringName():
+			continue
+		var bundle := state.call("capture_pending_body_bundle", body_id) as Dictionary
+		if bool(bundle.get("ok", false)):
+			pending_handle_bundles.append(bundle)
+	var protected_snapshot := state.call(
+		"capture_protected_handle_snapshot"
+	) as Dictionary
+	if not bool(protected_snapshot.get("ok", false)):
+		return {}
+	return {
+		"schema_id": ACTION_HANDLE_SNAPSHOT_SCHEMA_ID,
+		"schema_version": 1,
+		"transient": transient,
+		"pending_handle_bodies": pending_handle_bundles,
+		"protected_handle": protected_snapshot,
+	}
+
+
+func _normalize_handle_action_snapshot(snapshot: Dictionary) -> Dictionary:
+	var schema_id := StringName(snapshot.get("schema_id", StringName()))
+	if schema_id == ACTION_HANDLE_SNAPSHOT_SCHEMA_ID:
+		return snapshot.duplicate(true)
+	if schema_id != ACTION_DOCUMENT_SNAPSHOT_SCHEMA_ID:
+		return {}
+	var pending_handle_bundles: Array[Dictionary] = []
+	for bundle_variant: Variant in snapshot.get("pending_bodies", []) as Array:
+		if not bundle_variant is Dictionary:
+			continue
+		var bundle := bundle_variant as Dictionary
+		if _is_pending_handle_bundle(bundle):
+			pending_handle_bundles.append(bundle)
+	return {
+		"schema_id": ACTION_HANDLE_SNAPSHOT_SCHEMA_ID,
+		"schema_version": 1,
+		"transient": (snapshot.get("transient", {}) as Dictionary).duplicate(true),
+		"pending_handle_bodies": pending_handle_bundles,
+		"protected_handle": (
+			snapshot.get("protected_handle", {}) as Dictionary
+		).duplicate(true),
+	}
+
+
+func _is_pending_handle_bundle(bundle: Dictionary) -> bool:
+	var body := bundle.get("body", null) as Resource
+	return (
+		bool(bundle.get("ok", false))
+		and body != null
+		and StringName(body.get("body_kind"))
+		== ForgeV2MaterialBodyScript.BODY_KIND_HANDLE_PROFILE
+	)
+
+
+func _restore_handle_action_snapshot(snapshot: Dictionary) -> bool:
+	var normalized_snapshot := _normalize_handle_action_snapshot(snapshot)
+	if normalized_snapshot.is_empty():
+		return false
+	var rollback := _capture_handle_action_snapshot()
+	if rollback.is_empty():
+		return false
+	if _apply_handle_action_snapshot(normalized_snapshot):
+		return true
+	_apply_handle_action_snapshot(rollback)
+	return false
+
+
+func _apply_handle_action_snapshot(snapshot: Dictionary) -> bool:
+	if (
+		StringName(snapshot.get("schema_id", StringName()))
+		!= ACTION_HANDLE_SNAPSHOT_SCHEMA_ID
+		or int(snapshot.get("schema_version", 0)) != 1
+	):
+		return false
+	var state := ensure_authoring_state(default_project_name)
+	if state == null:
+		return false
+	var target_pending := snapshot.get("pending_handle_bodies", []) as Array
+	if target_pending.size() > 1:
+		return false
+	var current_pending_handle_ids: Array[StringName] = []
+	for body_variant: Variant in state.get("material_bodies") as Array:
+		var body := body_variant as Resource
+		if (
+			body == null
+			or StringName(body.get("body_kind"))
+			!= ForgeV2MaterialBodyScript.BODY_KIND_HANDLE_PROFILE
+		):
+			continue
+		var body_id := StringName(body.get("body_id"))
+		var bundle := state.call("capture_pending_body_bundle", body_id) as Dictionary
+		if bool(bundle.get("ok", false)):
+			current_pending_handle_ids.append(body_id)
+	for body_id: StringName in current_pending_handle_ids:
+		if not bool(state.call("remove_pending_body_bundle", body_id)):
+			return false
+	var protected_snapshot := snapshot.get("protected_handle", {}) as Dictionary
+	if (
+		protected_snapshot.is_empty()
+		or not bool(state.call(
+			"restore_protected_handle_snapshot",
+			protected_snapshot
+		))
+	):
+		return false
+	for bundle_variant: Variant in target_pending:
+		if (
+			not bundle_variant is Dictionary
+			or not _is_pending_handle_bundle(bundle_variant as Dictionary)
+			or not bool(state.call(
+				"restore_pending_body_bundle",
+				bundle_variant as Dictionary
+			))
+		):
+			return false
+	var transient := snapshot.get("transient", {}) as Dictionary
+	return bool(state.call("restore_editor_transient_snapshot", transient))
+
+
+func _restore_document_action_snapshot(snapshot: Dictionary) -> bool:
+	if (
+		StringName(snapshot.get("schema_id", StringName()))
+		!= ACTION_DOCUMENT_SNAPSHOT_SCHEMA_ID
+		or int(snapshot.get("schema_version", 0)) != 1
+	):
+		return false
+	var rollback := _capture_document_action_snapshot()
+	if rollback.is_empty():
+		return false
+	if _apply_document_action_snapshot(snapshot):
+		return true
+	_apply_document_action_snapshot(rollback)
+	return false
+
+
+func _apply_document_action_snapshot(snapshot: Dictionary) -> bool:
+	var state := ensure_authoring_state(default_project_name)
+	if state == null:
+		return false
+	var pending_ids: Array[StringName] = []
+	for body_variant: Variant in state.get("material_bodies") as Array:
+		var body := body_variant as Resource
+		if body == null:
+			continue
+		var body_id := StringName(body.get("body_id"))
+		var bundle := state.call("capture_pending_body_bundle", body_id) as Dictionary
+		if bool(bundle.get("ok", false)):
+			pending_ids.append(body_id)
+	for body_id: StringName in pending_ids:
+		if not bool(state.call("remove_pending_body_bundle", body_id)):
+			return false
+	var protected_snapshot := snapshot.get("protected_handle", {}) as Dictionary
+	if (
+		not protected_snapshot.is_empty()
+		and not bool(state.call(
+			"restore_protected_handle_snapshot",
+			protected_snapshot
+		))
+	):
+		return false
+	for bundle_variant: Variant in snapshot.get("pending_bodies", []) as Array:
+		if not bundle_variant is Dictionary:
+			return false
+		if not bool(state.call(
+			"restore_pending_body_bundle",
+			bundle_variant as Dictionary
+		)):
+			return false
+	var transient := snapshot.get("transient", {}) as Dictionary
+	return bool(state.call("restore_editor_transient_snapshot", transient))
+
+
+func _push_action_record_to(history, record: Dictionary) -> bool:
+	if _action_replay_active or history == null or record.is_empty():
+		return false
+	_discard_abandoned_native_redo_for_action_history(history)
+	return bool(history.call("push_record", record))
+
+
+func _discard_abandoned_native_redo_for_action_history(history) -> void:
+	if history != _action_history:
+		return
+	var state := ensure_authoring_state(default_project_name)
+	if state != null and state.has_method("discard_abandoned_layer_redo"):
+		state.call("discard_abandoned_layer_redo")
+
+
+func _get_snapshot_pending_body_ids(snapshot: Dictionary) -> Array[StringName]:
+	var pending_key := (
+		"pending_handle_bodies"
+		if StringName(snapshot.get("schema_id", StringName()))
+		== ACTION_HANDLE_SNAPSHOT_SCHEMA_ID
+		else "pending_bodies"
+	)
+	var body_ids: Array[StringName] = []
+	for bundle_variant: Variant in snapshot.get(pending_key, []) as Array:
+		if not bundle_variant is Dictionary:
+			continue
+		var body_id := StringName((bundle_variant as Dictionary).get(
+			"body_id",
+			StringName()
+		))
+		if body_id != StringName() and not body_ids.has(body_id):
+			body_ids.append(body_id)
+	return body_ids
+
+
+func _derive_action_body_ids(
+	before: Dictionary,
+	after: Dictionary
+) -> Array[StringName]:
+	var before_ids := _get_snapshot_pending_body_ids(before)
+	var action_body_ids: Array[StringName] = []
+	for body_id: StringName in _get_snapshot_pending_body_ids(after):
+		if not before_ids.has(body_id):
+			action_body_ids.append(body_id)
+	return action_body_ids
+
+
+func _record_transient_action(label: String, before: Dictionary) -> bool:
+	if _action_replay_active or before.is_empty():
+		return false
+	if not _active_editor_action_transaction.is_empty():
+		return true
+	var after := _capture_editor_transient_snapshot()
+	if after.is_empty() or before == after:
+		return false
+	var transient_delta := _build_transient_action_delta(before, after)
+	if transient_delta.is_empty():
+		return false
+	return _push_action_record_to(_get_active_action_history(), {
+		"kind": ACTION_KIND_TRANSIENT,
+		"label": label,
+		"payload": {"delta": transient_delta},
+	})
+
+
+func _build_transient_action_delta(
+	before: Dictionary,
+	after: Dictionary
+) -> Dictionary:
+	if (
+		before.is_empty()
+		or after.is_empty()
+		or StringName(before.get("schema_id", StringName()))
+		!= StringName(after.get("schema_id", StringName()))
+		or int(before.get("schema_version", 0))
+		!= int(after.get("schema_version", 0))
+	):
+		return {}
+	var changes: Dictionary = {}
+	for key_variant: Variant in after.keys():
+		if not before.has(key_variant):
+			return {}
+		var before_value: Variant = before.get(key_variant)
+		var after_value: Variant = after.get(key_variant)
+		if before_value == after_value:
+			continue
+		if _action_delta_sequences_are_compatible(before_value, after_value):
+			changes[key_variant] = _build_action_sequence_splice(
+				before_value,
+				after_value
+			)
+		else:
+			changes[key_variant] = {
+				"mode": &"replace",
+				"before": _duplicate_action_value(before_value),
+				"after": _duplicate_action_value(after_value),
+			}
+	if changes.is_empty():
+		return {}
+	return _make_transient_action_delta(changes)
+
+
+func _record_known_transient_delta(
+	label: String,
+	changes: Dictionary
+) -> bool:
+	if _action_replay_active or changes.is_empty():
+		return false
+	var meaningful_changes: Dictionary = {}
+	for key_variant: Variant in changes.keys():
+		var change := changes.get(key_variant, {}) as Dictionary
+		var mode := StringName(change.get("mode", StringName()))
+		if (
+			mode == &"replace"
+			and change.get("before") == change.get("after")
+		):
+			continue
+		if (
+			mode == &"splice"
+			and int(change.get("before_size", -1))
+			== int(change.get("after_size", -1))
+			and change.get("before_middle", [])
+			== change.get("after_middle", [])
+		):
+			continue
+		meaningful_changes[key_variant] = change
+	if meaningful_changes.is_empty():
+		return false
+	return _push_action_record_to(_get_active_action_history(), {
+		"kind": ACTION_KIND_TRANSIENT,
+		"label": label,
+		"payload": {
+			"delta": _make_transient_action_delta(meaningful_changes),
+		},
+	})
+
+
+func _make_transient_action_delta(changes: Dictionary) -> Dictionary:
+	if changes.is_empty():
+		return {}
+	return {
+		"schema_id": ACTION_TRANSIENT_DELTA_SCHEMA_ID,
+		"schema_version": 1,
+		"snapshot_schema_id": (
+			ForgeV2AuthoringStateScript.EDITOR_TRANSIENT_SNAPSHOT_SCHEMA_ID
+		),
+		"snapshot_schema_version": 1,
+		"changes": changes,
+	}
+
+
+func _build_known_action_sequence_splice(
+	sequence_type: int,
+	before_size: int,
+	after_size: int,
+	prefix_count: int,
+	suffix_count: int,
+	before_middle: Array,
+	after_middle: Array
+) -> Dictionary:
+	return {
+		"mode": &"splice",
+		"sequence_type": sequence_type,
+		"prefix_count": prefix_count,
+		"suffix_count": suffix_count,
+		"before_size": before_size,
+		"after_size": after_size,
+		"before_middle": before_middle.duplicate(true),
+		"after_middle": after_middle.duplicate(true),
+	}
+
+
+func _build_action_sequence_splice(
+	before_sequence: Variant,
+	after_sequence: Variant
+) -> Dictionary:
+	var before_size := _action_sequence_size(before_sequence)
+	var after_size := _action_sequence_size(after_sequence)
+	var shared_size := mini(before_size, after_size)
+	var prefix_count := 0
+	while (
+		prefix_count < shared_size
+		and _action_sequence_value(before_sequence, prefix_count)
+		== _action_sequence_value(after_sequence, prefix_count)
+	):
+		prefix_count += 1
+	var suffix_count := 0
+	while (
+		suffix_count < shared_size - prefix_count
+		and _action_sequence_value(
+			before_sequence,
+			before_size - suffix_count - 1
+		) == _action_sequence_value(
+			after_sequence,
+			after_size - suffix_count - 1
+		)
+	):
+		suffix_count += 1
+	return {
+		"mode": &"splice",
+		"sequence_type": typeof(before_sequence),
+		"prefix_count": prefix_count,
+		"suffix_count": suffix_count,
+		"before_size": before_size,
+		"after_size": after_size,
+		"before_middle": _copy_action_sequence_range(
+			before_sequence,
+			prefix_count,
+			before_size - suffix_count
+		),
+		"after_middle": _copy_action_sequence_range(
+			after_sequence,
+			prefix_count,
+			after_size - suffix_count
+		),
+	}
+
+
+func _replay_transient_action_delta(delta: Dictionary, use_after: bool) -> bool:
+	var state := ensure_authoring_state(default_project_name)
+	if state == null:
+		return false
+	if (
+		state.has_method("apply_spline_path_action_delta")
+		and bool(state.call(
+			"apply_spline_path_action_delta",
+			delta,
+			use_after
+		))
+	):
+		return true
+	var patched := _patch_transient_snapshot_with_delta(
+		_capture_editor_transient_snapshot(),
+		delta,
+		use_after
+	)
+	if not bool(patched.get("ok", false)):
+		return false
+	return bool(state.call(
+		"restore_editor_transient_snapshot",
+		patched.get("snapshot", {}) as Dictionary
+	))
+
+
+func _patch_transient_snapshot_with_delta(
+	current_snapshot: Dictionary,
+	delta: Dictionary,
+	use_after: bool
+) -> Dictionary:
+	if (
+		current_snapshot.is_empty()
+		or StringName(delta.get("schema_id", StringName()))
+		!= ACTION_TRANSIENT_DELTA_SCHEMA_ID
+		or int(delta.get("schema_version", 0)) != 1
+		or StringName(current_snapshot.get("schema_id", StringName()))
+		!= StringName(delta.get("snapshot_schema_id", StringName()))
+		or int(current_snapshot.get("schema_version", 0))
+		!= int(delta.get("snapshot_schema_version", 0))
+	):
+		return {"ok": false}
+	var patched := current_snapshot.duplicate(true)
+	var changes := delta.get("changes", {}) as Dictionary
+	if changes.is_empty():
+		return {"ok": false}
+	for key_variant: Variant in changes.keys():
+		if not patched.has(key_variant):
+			return {"ok": false}
+		var change := changes.get(key_variant, {}) as Dictionary
+		var mode := StringName(change.get("mode", StringName()))
+		if mode == &"replace":
+			var source_value: Variant = change.get(
+				"before" if use_after else "after"
+			)
+			if patched.get(key_variant) != source_value:
+				return {"ok": false}
+			patched[key_variant] = _duplicate_action_value(change.get(
+				"after" if use_after else "before"
+			))
+			continue
+		if mode != &"splice":
+			return {"ok": false}
+		var current_sequence: Variant = patched.get(key_variant)
+		var sequence_type := int(change.get("sequence_type", TYPE_NIL))
+		if typeof(current_sequence) != sequence_type:
+			return {"ok": false}
+		var prefix_count := int(change.get("prefix_count", -1))
+		var suffix_count := int(change.get("suffix_count", -1))
+		var source_middle := change.get(
+			"before_middle" if use_after else "after_middle",
+			[]
+		) as Array
+		var target_middle := change.get(
+			"after_middle" if use_after else "before_middle",
+			[]
+		) as Array
+		var expected_source_size := int(change.get(
+			"before_size" if use_after else "after_size",
+			-1
+		))
+		var current_size := _action_sequence_size(current_sequence)
+		if (
+			prefix_count < 0
+			or suffix_count < 0
+			or current_size != expected_source_size
+			or prefix_count + suffix_count + source_middle.size()
+			!= current_size
+			or not _action_sequence_range_matches(
+				current_sequence,
+				prefix_count,
+				source_middle
+			)
+		):
+			return {"ok": false}
+		var next_values := _copy_action_sequence_range(
+			current_sequence,
+			0,
+			prefix_count
+		)
+		for target_value: Variant in target_middle:
+			next_values.append(_duplicate_action_value(target_value))
+		var suffix_start := current_size - suffix_count
+		for suffix_index in range(suffix_start, current_size):
+			next_values.append(_duplicate_action_value(
+				_action_sequence_value(current_sequence, suffix_index)
+			))
+		var rebuilt_sequence: Variant = _build_action_sequence_value(
+			sequence_type,
+			next_values
+		)
+		if typeof(rebuilt_sequence) != sequence_type:
+			return {"ok": false}
+		patched[key_variant] = rebuilt_sequence
+	return {
+		"ok": true,
+		"snapshot": patched,
+	}
+
+
+func _action_delta_sequences_are_compatible(
+	before_value: Variant,
+	after_value: Variant
+) -> bool:
+	if typeof(before_value) != typeof(after_value):
+		return false
+	return typeof(before_value) in [
+		TYPE_ARRAY,
+		TYPE_PACKED_VECTOR2_ARRAY,
+		TYPE_PACKED_VECTOR3_ARRAY,
+		TYPE_PACKED_INT32_ARRAY,
+	]
+
+
+func _action_sequence_size(sequence: Variant) -> int:
+	match typeof(sequence):
+		TYPE_ARRAY:
+			return (sequence as Array).size()
+		TYPE_PACKED_VECTOR2_ARRAY:
+			return (sequence as PackedVector2Array).size()
+		TYPE_PACKED_VECTOR3_ARRAY:
+			return (sequence as PackedVector3Array).size()
+		TYPE_PACKED_INT32_ARRAY:
+			return (sequence as PackedInt32Array).size()
+	return -1
+
+
+func _action_sequence_value(sequence: Variant, index: int) -> Variant:
+	match typeof(sequence):
+		TYPE_ARRAY:
+			return (sequence as Array)[index]
+		TYPE_PACKED_VECTOR2_ARRAY:
+			return (sequence as PackedVector2Array)[index]
+		TYPE_PACKED_VECTOR3_ARRAY:
+			return (sequence as PackedVector3Array)[index]
+		TYPE_PACKED_INT32_ARRAY:
+			return (sequence as PackedInt32Array)[index]
+	return null
+
+
+func _copy_action_sequence_range(
+	sequence: Variant,
+	begin_index: int,
+	end_index: int
+) -> Array:
+	var copied: Array = []
+	for index in range(begin_index, end_index):
+		copied.append(_duplicate_action_value(
+			_action_sequence_value(sequence, index)
+		))
+	return copied
+
+
+func _action_sequence_range_matches(
+	sequence: Variant,
+	begin_index: int,
+	expected_values: Array
+) -> bool:
+	if begin_index < 0 or begin_index + expected_values.size() > _action_sequence_size(
+		sequence
+	):
+		return false
+	for offset in range(expected_values.size()):
+		if (
+			_action_sequence_value(sequence, begin_index + offset)
+			!= expected_values[offset]
+		):
+			return false
+	return true
+
+
+func _build_action_sequence_value(
+	sequence_type: int,
+	values: Array
+) -> Variant:
+	match sequence_type:
+		TYPE_ARRAY:
+			return values.duplicate(true)
+		TYPE_PACKED_VECTOR2_ARRAY:
+			var vector2_values := PackedVector2Array()
+			for value: Variant in values:
+				vector2_values.append(value as Vector2)
+			return vector2_values
+		TYPE_PACKED_VECTOR3_ARRAY:
+			var vector3_values := PackedVector3Array()
+			for value: Variant in values:
+				vector3_values.append(value as Vector3)
+			return vector3_values
+		TYPE_PACKED_INT32_ARRAY:
+			var int_values := PackedInt32Array()
+			for value: Variant in values:
+				int_values.append(int(value))
+			return int_values
+	return null
+
+
+func _duplicate_action_value(value: Variant) -> Variant:
+	match typeof(value):
+		TYPE_DICTIONARY:
+			return (value as Dictionary).duplicate(true)
+		TYPE_ARRAY:
+			return (value as Array).duplicate(true)
+		TYPE_PACKED_VECTOR2_ARRAY:
+			return (value as PackedVector2Array).duplicate()
+		TYPE_PACKED_VECTOR3_ARRAY:
+			return (value as PackedVector3Array).duplicate()
+		TYPE_PACKED_INT32_ARRAY:
+			return (value as PackedInt32Array).duplicate()
+	return value
+
+
+func _record_document_action(
+	label: String,
+	before: Dictionary,
+	history_override = null,
+	extra_payload: Dictionary = {}
+) -> bool:
+	if _action_replay_active or before.is_empty():
+		return false
+	var protected_handle_action := (
+		bool(extra_payload.get("protected_handle_action", false))
+		or bool(extra_payload.get("handle_action", false))
+	)
+	if protected_handle_action:
+		before = _normalize_handle_action_snapshot(before)
+	var after := (
+		_capture_handle_action_snapshot()
+		if protected_handle_action
+		else _capture_document_action_snapshot()
+	)
+	if after.is_empty():
+		return false
+	var payload := {
+		"before": before,
+		"after": after,
+		"action_body_ids": _derive_action_body_ids(before, after),
+	}
+	for payload_key: Variant in extra_payload.keys():
+		payload[payload_key] = extra_payload[payload_key]
+	return _push_action_record_to(
+		history_override if history_override != null else _get_active_action_history(),
+		{
+			"kind": (
+				ACTION_KIND_PROTECTED_HANDLE
+				if protected_handle_action
+				else ACTION_KIND_DOCUMENT
+			),
+			"label": label,
+			"payload": payload,
+		}
+	)
+
+
+func _record_generated_path_action(
+	label: String,
+	before: Dictionary,
+	history_override = null,
+	extra_payload: Dictionary = {}
+) -> bool:
+	var history = (
+		history_override
+		if history_override != null
+		else _get_active_action_history()
+	)
+	var collapse_index := -1
+	var records := history.call("get_undo_records") as Array[Dictionary]
+	if not records.is_empty():
+		var previous := records.back() as Dictionary
+		if (
+			StringName(previous.get("kind", StringName()))
+			== ACTION_KIND_TRANSIENT
+			and String(previous.get("label", "")) == "Finish Path"
+		):
+			var previous_payload := previous.get("payload", {}) as Dictionary
+			before = before.duplicate(true)
+			var previous_before := previous_payload.get("before", {}) as Dictionary
+			if previous_before.is_empty():
+				var collapsed_transient := _patch_transient_snapshot_with_delta(
+					before.get("transient", {}) as Dictionary,
+					previous_payload.get("delta", {}) as Dictionary,
+					false
+				)
+				if not bool(collapsed_transient.get("ok", false)):
+					return false
+				previous_before = collapsed_transient.get(
+					"snapshot",
+					{}
+				) as Dictionary
+			before["transient"] = previous_before
+			collapse_index = records.size() - 1
+	var protected_handle_action := (
+		bool(extra_payload.get("protected_handle_action", false))
+		or bool(extra_payload.get("handle_action", false))
+	)
+	if protected_handle_action:
+		before = _normalize_handle_action_snapshot(before)
+	var after := (
+		_capture_handle_action_snapshot()
+		if protected_handle_action
+		else _capture_document_action_snapshot()
+	)
+	if before.is_empty() or after.is_empty():
+		return false
+	var payload := {
+		"before": before,
+		"after": after,
+		"action_body_ids": _derive_action_body_ids(before, after),
+	}
+	for payload_key: Variant in extra_payload.keys():
+		payload[payload_key] = extra_payload[payload_key]
+	var record := {
+		"kind": (
+			ACTION_KIND_PROTECTED_HANDLE
+			if protected_handle_action
+			else ACTION_KIND_DOCUMENT
+		),
+		"label": label,
+		"payload": payload,
+	}
+	if collapse_index >= 0:
+		_discard_abandoned_native_redo_for_action_history(history)
+		return bool(history.call("collapse_undo_since", collapse_index, record))
+	return _push_action_record_to(history, record)
+
+
+func _replay_action_record(record: Dictionary, use_after: bool) -> bool:
+	var kind := StringName(record.get("kind", StringName()))
+	var payload := record.get("payload", {}) as Dictionary
+	var target_key := "after" if use_after else "before"
+	match kind:
+		ACTION_KIND_TRANSIENT:
+			var delta := payload.get("delta", {}) as Dictionary
+			if not delta.is_empty():
+				return _replay_transient_action_delta(delta, use_after)
+			return bool(ensure_authoring_state(default_project_name).call(
+				"restore_editor_transient_snapshot",
+				payload.get(target_key, {}) as Dictionary
+			))
+		ACTION_KIND_DOCUMENT:
+			var changed := _restore_document_action_snapshot(
+				payload.get(target_key, {}) as Dictionary
+			)
+			return changed
+		ACTION_KIND_PROTECTED_HANDLE:
+			var target_snapshot := payload.get(target_key, {}) as Dictionary
+			var changed := _restore_handle_action_snapshot(target_snapshot)
+			if changed:
+				_handle_change_pending_global_action = (
+					use_after
+					and bool(payload.get("handle_action", false))
+					and not _get_snapshot_pending_body_ids(target_snapshot).is_empty()
+				)
+			return changed
+		ACTION_KIND_PENDING_BODY:
+			return _replay_pending_body_action(payload, use_after)
+		ACTION_KIND_MATERIAL_LAYER:
+			return _replay_material_layer_action(payload, use_after)
+	return false
+
+
+func _replay_pending_body_action(payload: Dictionary, use_after: bool) -> bool:
+	var state := ensure_authoring_state(default_project_name)
+	var bundle := payload.get("bundle", {}) as Dictionary
+	var body_id := StringName(bundle.get("body_id", StringName()))
+	if body_id == StringName():
+		return false
+	var rollback_transient := _capture_editor_transient_snapshot()
+	if use_after:
+		if not bool(state.call("restore_pending_body_bundle", bundle)):
+			return false
+		if bool(state.call(
+			"restore_editor_transient_snapshot",
+			payload.get("after_transient", {}) as Dictionary
+		)):
+			return true
+		state.call("remove_pending_body_bundle", body_id)
+		state.call("restore_editor_transient_snapshot", rollback_transient)
+		return false
+	if not bool(state.call("remove_pending_body_bundle", body_id)):
+		return false
+	if bool(state.call(
+		"restore_editor_transient_snapshot",
+		payload.get("before_transient", {}) as Dictionary
+	)):
+		return true
+	state.call("restore_pending_body_bundle", bundle)
+	state.call("restore_editor_transient_snapshot", rollback_transient)
+	return false
+
+
+func _replay_material_layer_action(payload: Dictionary, use_after: bool) -> bool:
+	var state := ensure_authoring_state(default_project_name)
+	var layer_id := StringName(payload.get("layer_id", StringName()))
+	if layer_id == StringName():
+		return false
+	var expected_layer_id := StringName(state.call(
+		"peek_latest_redo_layer_id" if use_after else "peek_latest_undo_layer_id"
+	))
+	if expected_layer_id != layer_id:
+		return false
+	var rollback_transient := _capture_editor_transient_snapshot()
+	var layer_changed := bool(state.call(
+		"redo_latest_layer" if use_after else "undo_latest_layer"
+	))
+	if not layer_changed:
+		return false
+	var target_transient := payload.get(
+		"after_transient" if use_after else "before_transient",
+		{}
+	) as Dictionary
+	if (
+		target_transient.is_empty()
+		or bool(state.call(
+			"restore_editor_transient_snapshot",
+			target_transient
+		))
+	):
+		return true
+	state.call("undo_latest_layer" if use_after else "redo_latest_layer")
+	state.call("restore_editor_transient_snapshot", rollback_transient)
+	return false
+
+
+func _get_material_action_label(state: Resource) -> String:
+	if (
+		state != null
+		and StringName(state.get("active_operation_mode"))
+		== ForgeV2AuthoringStateScript.OPERATION_REMOVE_MATERIAL
+	):
+		return "Remove Material Stroke"
+	return "Add Material Stroke"
+
+
+func _get_layer_action_label(layer: Resource) -> String:
+	if layer == null:
+		return "Material Stroke"
+	match StringName(layer.get("operation_type")):
+		&"layer_operation_subtract_void":
+			return "Remove Material Stroke"
+		&"layer_operation_mixed_volume":
+			return "Edit Material"
+	return "Add Material Stroke"
+
+
+func _get_pending_material_body_ids(state: Resource) -> Array[StringName]:
+	var pending_ids: Array[StringName] = []
+	if state == null or not state.has_method("capture_pending_body_bundle"):
+		return pending_ids
+	for body_variant: Variant in state.get("material_bodies") as Array:
+		var body := body_variant as Resource
+		if body == null:
+			continue
+		var body_id := StringName(body.get("body_id"))
+		if body_id == StringName():
+			continue
+		var bundle := state.call("capture_pending_body_bundle", body_id) as Dictionary
+		if bool(bundle.get("ok", false)):
+			pending_ids.append(body_id)
+	return pending_ids
+
+
+func _record_pending_material_body_action(
+	state: Resource,
+	body_id: StringName
+) -> bool:
+	if state == null or body_id == StringName():
+		return false
+	for existing_record: Dictionary in _action_history.call(
+		"get_undo_records"
+	) as Array[Dictionary]:
+		if _action_record_pending_ids_cover(existing_record, [body_id]):
+			return true
+	var bundle := state.call("capture_pending_body_bundle", body_id) as Dictionary
+	if not bool(bundle.get("ok", false)):
+		return false
+	var context := _material_action_context_by_body_id.get(body_id, {}) as Dictionary
+	var before_transient := context.get(
+		"before_transient",
+		_capture_editor_transient_snapshot()
+	) as Dictionary
+	var record := {
+		"kind": ACTION_KIND_PENDING_BODY,
+		"label": String(context.get("label", _get_material_action_label(state))),
+		"payload": {
+			"bundle": bundle,
+			"action_body_ids": [body_id],
+			"before_transient": before_transient,
+			"after_transient": _capture_editor_transient_snapshot(),
+		},
+	}
+	var recorded := _push_action_record_to(_action_history, record)
+	if recorded:
+		_material_action_context_by_body_id.erase(body_id)
+	return recorded
+
+
+func _finalize_latest_committed_layer_action(
+	state: Resource,
+	body_id: StringName
+) -> bool:
+	if state == null or body_id == StringName():
+		return false
+	for layer_group_name: String in ["protected_forge_layers", "forge_layers"]:
+		for layer_variant: Variant in state.get(layer_group_name) as Array:
+			var layer := layer_variant as Resource
+			if layer == null:
+				continue
+			var body_ids := layer.get("body_ids") as Array
+			if body_ids.has(body_id):
+				return _finalize_committed_layer_action(layer, body_id)
+	return false
+
+
+func _finalize_committed_layer_action(
+	layer: Resource,
+	primary_body_id: StringName = StringName()
+) -> bool:
+	if layer == null:
+		return false
+	var state := ensure_authoring_state(default_project_name)
+	var layer_id := StringName(layer.get("layer_id"))
+	if layer_id == StringName():
+		return false
+	var layer_body_ids: Array[StringName] = []
+	for body_id_variant: Variant in layer.get("body_ids") as Array:
+		layer_body_ids.append(StringName(body_id_variant))
+	var undo_records := _action_history.call("get_undo_records") as Array[Dictionary]
+	var matched_record: Dictionary = {}
+	var matched_index := -1
+	for record_index in range(undo_records.size() - 1, -1, -1):
+		var candidate := undo_records[record_index] as Dictionary
+		if _action_record_pending_ids_cover(candidate, layer_body_ids):
+			matched_record = candidate
+			matched_index = record_index
+			break
+	var protected_commit := (state.get("protected_forge_layers") as Array).has(layer)
+	var replacement: Dictionary = {}
+	if protected_commit:
+		var before_document := {}
+		var after_document := {}
+		var label := "Create Handle"
+		var handle_action := _handle_change_pending_global_action
+		if not matched_record.is_empty():
+			var matched_payload := matched_record.get("payload", {}) as Dictionary
+			before_document = _normalize_handle_action_snapshot(
+				matched_payload.get("before", {}) as Dictionary
+			)
+			after_document = _normalize_handle_action_snapshot(
+				matched_payload.get("after", {}) as Dictionary
+			)
+			label = String(matched_record.get("label", label))
+			handle_action = (
+				handle_action
+				or bool(matched_payload.get("handle_action", false))
+			)
+		if before_document.is_empty():
+			return false
+		var committed_handle_snapshot := _capture_handle_action_snapshot()
+		if committed_handle_snapshot.is_empty():
+			return false
+		if after_document.is_empty():
+			after_document = committed_handle_snapshot
+		else:
+			after_document["pending_handle_bodies"] = []
+			after_document["protected_handle"] = (
+				committed_handle_snapshot.get("protected_handle", {}) as Dictionary
+			).duplicate(true)
+		replacement = {
+			"kind": ACTION_KIND_PROTECTED_HANDLE,
+			"label": label,
+			"payload": {
+				"before": before_document,
+				"after": after_document,
+				"action_body_ids": layer_body_ids,
+				"handle_action": handle_action,
+			},
+		}
+		_handle_change_pending_global_action = false
+	else:
+		var before_transient := {}
+		var after_transient := {}
+		var label := _get_layer_action_label(layer)
+		if not matched_record.is_empty():
+			var kind := StringName(matched_record.get("kind", StringName()))
+			var matched_payload := matched_record.get("payload", {}) as Dictionary
+			label = String(matched_record.get("label", label))
+			if kind == ACTION_KIND_DOCUMENT:
+				var before_document := matched_payload.get("before", {}) as Dictionary
+				var after_document := matched_payload.get("after", {}) as Dictionary
+				before_transient = before_document.get("transient", {}) as Dictionary
+				after_transient = after_document.get("transient", {}) as Dictionary
+			elif kind == ACTION_KIND_PENDING_BODY:
+				before_transient = matched_payload.get(
+					"before_transient",
+					{}
+				) as Dictionary
+				after_transient = matched_payload.get(
+					"after_transient",
+					{}
+				) as Dictionary
+		var context_body_id := primary_body_id
+		if context_body_id == StringName() and not layer_body_ids.is_empty():
+			context_body_id = layer_body_ids[0]
+		if before_transient.is_empty():
+			var context := _material_action_context_by_body_id.get(
+				context_body_id,
+				{}
+			) as Dictionary
+			before_transient = context.get(
+				"before_transient",
+				_capture_editor_transient_snapshot()
+			) as Dictionary
+			label = String(context.get("label", label))
+		replacement = {
+			"kind": ACTION_KIND_MATERIAL_LAYER,
+			"label": label,
+			"payload": {
+				"layer_id": layer_id,
+				"body_ids": layer_body_ids,
+				"action_body_ids": layer_body_ids,
+				"before_transient": before_transient,
+				"after_transient": (
+					after_transient
+					if not after_transient.is_empty()
+					else _capture_editor_transient_snapshot()
+				),
+			},
+		}
+	if matched_index >= 0:
+		var replaced := bool(_action_history.call(
+			"replace_undo_record_at",
+			matched_index,
+			replacement
+		))
+		if replaced:
+			for body_id: StringName in layer_body_ids:
+				_material_action_context_by_body_id.erase(body_id)
+		return replaced
+	# A synchronous stroke normally reserves its record before commit. Retain a
+	# narrow fallback only if that reservation failed while its live context is
+	# still present. A legacy/restored pending body with no session record must
+	# not reappear as the latest action merely because Save commits it later.
+	var has_live_context := false
+	for body_id: StringName in layer_body_ids:
+		if _material_action_context_by_body_id.has(body_id):
+			has_live_context = true
+			break
+	var pushed := has_live_context and _push_action_record_to(
+		_action_history,
+		replacement
+	)
+	for body_id: StringName in layer_body_ids:
+		_material_action_context_by_body_id.erase(body_id)
+	return pushed
+
+
+func _action_record_pending_ids_cover(
+	record: Dictionary,
+	expected_body_ids: Array[StringName]
+) -> bool:
+	if record.is_empty() or expected_body_ids.is_empty():
+		return false
+	var record_ids := _get_action_record_body_ids(record)
+	if record_ids.size() != expected_body_ids.size():
+		return false
+	for body_id: StringName in expected_body_ids:
+		if body_id == StringName() or not record_ids.has(body_id):
+			return false
+	return true
+
+
+func _get_action_record_body_ids(record: Dictionary) -> Array[StringName]:
+	var record_ids: Array[StringName] = []
+	if record.is_empty():
+		return record_ids
+	var kind := StringName(record.get("kind", StringName()))
+	var payload := record.get("payload", {}) as Dictionary
+	for body_id_variant: Variant in payload.get("action_body_ids", []) as Array:
+		var body_id := StringName(body_id_variant)
+		if body_id != StringName() and not record_ids.has(body_id):
+			record_ids.append(body_id)
+	if record_ids.is_empty() and kind == ACTION_KIND_PENDING_BODY:
+		var bundle := payload.get("bundle", {}) as Dictionary
+		record_ids.append(StringName(bundle.get("body_id", StringName())))
+	elif record_ids.is_empty() and (
+		kind == ACTION_KIND_DOCUMENT
+		or kind == ACTION_KIND_PROTECTED_HANDLE
+	):
+		var before_document := payload.get("before", {}) as Dictionary
+		var after_document := payload.get("after", {}) as Dictionary
+		record_ids = _derive_action_body_ids(before_document, after_document)
+	elif record_ids.is_empty():
+		return []
+	return record_ids
 
 func select_material_body_id(body_id: StringName) -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
@@ -1392,8 +3377,12 @@ func select_next_material_body(step_count: int = 1) -> bool:
 
 func remove_selected_material_body() -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
+	var selected_body_id := StringName(state.get("selected_material_body_id"))
+	var action_before := _capture_document_action_snapshot()
 	var changed: bool = bool(state.remove_selected_material_body())
 	if changed:
+		_material_action_context_by_body_id.erase(selected_body_id)
+		_record_document_action("Delete Pending Material Body", action_before)
 		_emit_state_changed()
 	return changed
 
@@ -1415,7 +3404,19 @@ func get_placement_cursor_state() -> Dictionary:
 
 func get_status_summary() -> Dictionary:
 	var include_material_usage := active_placement_body_id == StringName()
-	return ensure_authoring_state(default_project_name).get_status_summary(include_material_usage)
+	var summary := ensure_authoring_state(default_project_name).get_status_summary(
+		include_material_usage
+	) as Dictionary
+	var action_summary := get_action_history_summary()
+	summary["action_history"] = action_summary
+	summary["action_history_capacity"] = int(action_summary.get("capacity", 0))
+	summary["action_undo_count"] = int(action_summary.get("undo_count", 0))
+	summary["action_redo_count"] = int(action_summary.get("redo_count", 0))
+	summary["action_undo_label"] = String(action_summary.get("undo_label", ""))
+	summary["action_redo_label"] = String(action_summary.get("redo_label", ""))
+	summary["can_undo_action"] = can_undo_action()
+	summary["can_redo_action"] = can_redo_action()
+	return summary
 
 func get_builder_path_options() -> Array[Dictionary]:
 	var options: Array[Dictionary] = []
@@ -1444,6 +3445,12 @@ func get_primitive_options() -> Array[Dictionary]:
 func get_tool_options() -> Array[Dictionary]:
 	var state: Resource = ensure_authoring_state(default_project_name)
 	return state.get_tool_options()
+
+func get_handle_path_mode_options() -> Array[Dictionary]:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	if not state.has_method("get_handle_path_mode_options"):
+		return []
+	return state.call("get_handle_path_mode_options") as Array[Dictionary]
 
 func get_profile_options() -> Array[Dictionary]:
 	var state: Resource = ensure_authoring_state(default_project_name)
@@ -1665,11 +3672,54 @@ func _requeue_rolled_back_promotion_body(
 		))
 	):
 		return
+	_restore_rolled_back_action_reservation(authoring_state, body_id)
 	_enqueue_deferred_material_body_commit(
 		authoring_state,
 		body_id,
 		true
 	)
+
+
+func _restore_rolled_back_action_reservation(
+	authoring_state: Resource,
+	body_id: StringName
+) -> bool:
+	var bundle := authoring_state.call(
+		"capture_pending_body_bundle",
+		body_id
+	) as Dictionary
+	if not bool(bundle.get("ok", false)):
+		return false
+	var undo_records := _action_history.call("get_undo_records") as Array[Dictionary]
+	for record_index in range(undo_records.size() - 1, -1, -1):
+		var record := undo_records[record_index] as Dictionary
+		if StringName(record.get("kind", StringName())) != ACTION_KIND_MATERIAL_LAYER:
+			continue
+		var payload := record.get("payload", {}) as Dictionary
+		var action_body_ids := _get_action_record_body_ids(record)
+		if action_body_ids.size() != 1 or action_body_ids[0] != body_id:
+			continue
+		return bool(_action_history.call(
+			"replace_undo_record_at",
+			record_index,
+			{
+				"kind": ACTION_KIND_PENDING_BODY,
+				"label": String(record.get("label", "Material Stroke")),
+				"payload": {
+					"bundle": bundle,
+					"action_body_ids": action_body_ids,
+					"before_transient": payload.get(
+						"before_transient",
+						{}
+					) as Dictionary,
+					"after_transient": payload.get(
+						"after_transient",
+						_capture_editor_transient_snapshot()
+					) as Dictionary,
+				},
+			}
+		))
+	return false
 
 func _emit_material_body_preview_changed() -> void:
 	material_body_preview_changed.emit(active_authoring_state)

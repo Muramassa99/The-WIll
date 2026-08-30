@@ -16,7 +16,7 @@ const PlayerFingerCapsuleSurfaceQueryScript = preload(
 ## transform. The solver never writes scene, Skeleton3D, weapon, guide, or authored
 ## endpoint state.
 
-const SOLVER_REVISION: StringName = &"hand_surface_three_slice_weapon_exact_tangent_seat_v3"
+const SOLVER_REVISION: StringName = &"hand_surface_three_slice_weapon_exact_tangent_seat_v4"
 const MAX_ITERATIONS: int = 8
 const ACCEPTED_RADIAL_ERROR_METERS: float = 0.001
 const MAX_AUTHORITY_PROXIMAL_PENETRATION_METERS: float = 0.0005
@@ -110,6 +110,14 @@ func solve_prepared(
 		"pinky_skin_to_bone_radius_meters",
 		0.0
 	))
+	var ordinary_proximal_capsules: Array = input_state.get(
+		"ordinary_proximal_capsules",
+		[]
+	) as Array
+	var enforce_ordinary_proximal_safety: bool = bool(input_state.get(
+		"enforce_ordinary_proximal_safety",
+		false
+	))
 	var candidate_rotation := Basis.IDENTITY
 	var candidate_radial_translation_world := Vector3.ZERO
 	var best_overall: Dictionary = {}
@@ -120,6 +128,7 @@ func solve_prepared(
 	var triangle_test_count: int = 0
 	var exact_surface_query_count: int = 0
 	var exact_surface_inside_ray_count: int = 0
+	var proximal_capsule_query_count: int = 0
 	var terminal_status: StringName = &"iteration_limit"
 
 	# MAX_ITERATIONS is the number of weapon-side rigid corrections. The ninth
@@ -138,6 +147,8 @@ func solve_prepared(
 			pinky_bone_world,
 			index_skin_radius,
 			pinky_skin_radius,
+			ordinary_proximal_capsules,
+			enforce_ordinary_proximal_safety,
 			StringName(input_state.get("index_point_source_origin_id")),
 			StringName(input_state.get("pinky_point_source_origin_id")),
 			surface_source_origin_id,
@@ -150,6 +161,10 @@ func solve_prepared(
 		exact_surface_query_count += int(sample.get("exact_surface_query_count", 0))
 		exact_surface_inside_ray_count += int(sample.get(
 			"exact_surface_inside_ray_count",
+			0
+		))
+		proximal_capsule_query_count += int(sample.get(
+			"proximal_capsule_query_count",
 			0
 		))
 		if not bool(sample.get("valid", false)):
@@ -221,6 +236,11 @@ func solve_prepared(
 			+ target_midpoint_world
 			- rotated_source_midpoint_world
 		)
+		if not bool(sample.get("ordinary_proximal_capsules_safe", false)):
+			proposed_translation_world += sample.get(
+				"ordinary_proximal_surface_escape_translation_world",
+				Vector3.ZERO
+			) as Vector3
 		# Re-project the complete accumulated C0 displacement into the original C0
 		# station plane after every iteration. The axial_reposition_offset authority
 		# owns movement along this input endcap axis; this solver owns only the radial
@@ -245,11 +265,13 @@ func solve_prepared(
 		"radial_triangle_test_count": triangle_test_count,
 		"exact_surface_query_count": exact_surface_query_count,
 		"exact_surface_inside_ray_count": exact_surface_inside_ray_count,
+		"proximal_capsule_query_count": proximal_capsule_query_count,
 		"accepted_radial_error_min_meters": -ACCEPTED_RADIAL_ERROR_METERS,
 		"accepted_radial_error_max_meters": ACCEPTED_RADIAL_ERROR_METERS,
 		"authority_proximal_max_penetration_meters": (
 			MAX_AUTHORITY_PROXIMAL_PENETRATION_METERS
 		),
+		"ordinary_proximal_safety_enforced": enforce_ordinary_proximal_safety,
 		"correction_authority": (
 			&"weapon_shortest_arc_plus_c0_radial_translation_no_axial_slide"
 		),
@@ -315,6 +337,8 @@ func solve_prepared(
 		pinky_bone_world,
 		index_skin_radius,
 		pinky_skin_radius,
+		ordinary_proximal_capsules,
+		enforce_ordinary_proximal_safety,
 		StringName(input_state.get("skin_radius_calibration_revision")),
 		surface_source_origin_id,
 		resolved_world_origin_id
@@ -443,6 +467,27 @@ func solve_prepared(
 		"skin_radius_calibration_revision",
 		StringName()
 	)
+	result["ordinary_proximal_capsules_safe"] = bool(best_accepted.get(
+		"ordinary_proximal_capsules_safe",
+		false
+	))
+	result["ordinary_proximal_safety_enforced"] = enforce_ordinary_proximal_safety
+	result["ordinary_proximal_capsule_states"] = (
+		best_accepted.get("ordinary_proximal_capsule_states", []) as Array
+	).duplicate(true)
+	result["ordinary_proximal_worst_digit_id"] = best_accepted.get(
+		"ordinary_proximal_worst_digit_id",
+		StringName()
+	)
+	result["ordinary_proximal_worst_penetration_meters"] = float(
+		best_accepted.get("ordinary_proximal_worst_penetration_meters", INF)
+	)
+	result["ordinary_proximal_worst_excess_penetration_meters"] = float(
+		best_accepted.get(
+			"ordinary_proximal_worst_excess_penetration_meters",
+			INF
+		)
+	)
 	result["diagnostics"] = diagnostics
 	return result
 
@@ -531,6 +576,82 @@ func _validate_input(prepared_surface: Dictionary, input_state: Dictionary) -> S
 		return &"index_skin_to_bone_radius_invalid"
 	if not is_finite(pinky_radius) or pinky_radius < 0.0:
 		return &"pinky_skin_to_bone_radius_invalid"
+	if not bool(input_state.get("enforce_ordinary_proximal_safety", false)):
+		return &"ready"
+	var ordinary_capsules_origin_id: StringName = input_state.get(
+		"ordinary_proximal_capsules_origin_id",
+		StringName()
+	) as StringName
+	if ordinary_capsules_origin_id == StringName():
+		return &"ordinary_proximal_capsules_origin_id_missing"
+	if ordinary_capsules_origin_id != resolved_world_origin_id:
+		return &"ordinary_proximal_capsules_origin_id_mismatch"
+	var ordinary_proximal_capsules_variant: Variant = input_state.get(
+		"ordinary_proximal_capsules",
+		null
+	)
+	if not ordinary_proximal_capsules_variant is Array:
+		return &"ordinary_proximal_capsules_missing"
+	var ordinary_proximal_capsules: Array = ordinary_proximal_capsules_variant as Array
+	if ordinary_proximal_capsules.size() != 4:
+		return &"ordinary_proximal_capsule_count_invalid"
+	var expected_digit_ids: Array[StringName] = [
+		&"index",
+		&"middle",
+		&"ring",
+		&"pinky",
+	]
+	var seen_digit_ids: Dictionary = {}
+	for capsule_variant: Variant in ordinary_proximal_capsules:
+		if not capsule_variant is Dictionary:
+			return &"ordinary_proximal_capsule_record_invalid"
+		var capsule: Dictionary = capsule_variant as Dictionary
+		var digit_id: StringName = capsule.get(
+			"digit_id",
+			StringName()
+		) as StringName
+		if not expected_digit_ids.has(digit_id) or seen_digit_ids.has(digit_id):
+			return &"ordinary_proximal_capsule_digit_invalid"
+		seen_digit_ids[digit_id] = true
+		if int(capsule.get("section_index", -1)) != 0:
+			return &"ordinary_proximal_capsule_section_invalid"
+		for vector_key: String in ["segment_start_world", "segment_end_world"]:
+			var vector_variant: Variant = capsule.get(vector_key, null)
+			if (
+				not vector_variant is Vector3
+				or not (vector_variant as Vector3).is_finite()
+			):
+				return StringName("ordinary_proximal_%s_invalid" % vector_key)
+		for source_origin_key: String in [
+			"segment_start_source_origin_id",
+			"segment_end_source_origin_id",
+			"radius_source_id",
+		]:
+			if StringName(capsule.get(source_origin_key, StringName())) == StringName():
+				return StringName("ordinary_proximal_%s_missing" % source_origin_key)
+		for world_origin_key: String in [
+			"segment_start_world_origin_id",
+			"segment_end_world_origin_id",
+		]:
+			if (
+				StringName(capsule.get(world_origin_key, StringName()))
+				!= resolved_world_origin_id
+			):
+				return StringName("ordinary_proximal_%s_mismatch" % world_origin_key)
+		var segment_start_world: Vector3 = capsule.get(
+			"segment_start_world"
+		) as Vector3
+		var segment_end_world: Vector3 = capsule.get(
+			"segment_end_world"
+		) as Vector3
+		if (
+			segment_start_world.distance_squared_to(segment_end_world)
+			<= GEOMETRY_EPSILON_METERS * GEOMETRY_EPSILON_METERS
+		):
+			return &"ordinary_proximal_capsule_segment_degenerate"
+		var radius_meters: float = float(capsule.get("radius_meters", -1.0))
+		if not is_finite(radius_meters) or radius_meters <= 0.0:
+			return &"ordinary_proximal_capsule_radius_invalid"
 	return &"ready"
 
 
@@ -608,6 +729,8 @@ func _evaluate_candidate(
 	pinky_bone_world: Vector3,
 	index_skin_radius: float,
 	pinky_skin_radius: float,
+	ordinary_proximal_capsules: Array,
+	enforce_ordinary_proximal_safety: bool,
 	index_point_source_origin_id: StringName,
 	pinky_point_source_origin_id: StringName,
 	surface_source_origin_id: StringName,
@@ -659,6 +782,39 @@ func _evaluate_candidate(
 		"exact_surface_inside_ray_count",
 		0
 	)) + int(pinky_query.get("exact_surface_inside_ray_count", 0))
+	var proximal_state: Dictionary = {
+		"valid": true,
+		"safe": true,
+		"status": &"ordinary_proximal_safety_not_required",
+		"capsule_states": [],
+		"proximal_capsule_query_count": 0,
+		"bvh_node_test_count": 0,
+		"triangle_test_count": 0,
+		"exact_surface_inside_ray_count": 0,
+		"worst_digit_id": StringName(),
+		"worst_penetration_meters": 0.0,
+		"worst_excess_penetration_meters": 0.0,
+		"surface_escape_translation_world": Vector3.ZERO,
+	}
+	if enforce_ordinary_proximal_safety:
+		proximal_state = _query_ordinary_proximal_capsules(
+			prepared_surface,
+			inverse_correction,
+			weapon_correction_basis_world,
+			ordinary_proximal_capsules,
+			surface_source_origin_id,
+			resolved_world_origin_id
+		)
+	var proximal_capsule_query_count: int = int(proximal_state.get(
+		"proximal_capsule_query_count",
+		0
+	))
+	bvh_node_test_count += int(proximal_state.get("bvh_node_test_count", 0))
+	triangle_test_count += int(proximal_state.get("triangle_test_count", 0))
+	exact_surface_inside_ray_count += int(proximal_state.get(
+		"exact_surface_inside_ray_count",
+		0
+	))
 	if not bool(index_query.get("valid", false)):
 		return {
 			"valid": false,
@@ -678,6 +834,21 @@ func _evaluate_candidate(
 			"triangle_test_count": triangle_test_count,
 			"exact_surface_query_count": exact_surface_query_count,
 			"exact_surface_inside_ray_count": exact_surface_inside_ray_count,
+			"proximal_capsule_query_count": proximal_capsule_query_count,
+		}
+	if not bool(proximal_state.get("valid", false)):
+		return {
+			"valid": false,
+			"status": proximal_state.get(
+				"status",
+				&"ordinary_proximal_surface_query_failed"
+			),
+			"ray_count": ray_count,
+			"bvh_node_test_count": bvh_node_test_count,
+			"triangle_test_count": triangle_test_count,
+			"exact_surface_query_count": exact_surface_query_count,
+			"exact_surface_inside_ray_count": exact_surface_inside_ray_count,
+			"proximal_capsule_query_count": proximal_capsule_query_count,
 		}
 	var index_target_world: Vector3 = correction * (
 		index_query.get("target_point_prepared_world", Vector3.ZERO) as Vector3
@@ -723,6 +894,7 @@ func _evaluate_candidate(
 			and absf(pinky_error) <= ACCEPTED_RADIAL_ERROR_METERS
 			and index_authority_safe
 			and pinky_authority_safe
+			and bool(proximal_state.get("safe", false))
 		),
 		"status": &"candidate_ready",
 		"sample_index": sample_index,
@@ -731,6 +903,7 @@ func _evaluate_candidate(
 		"triangle_test_count": triangle_test_count,
 		"exact_surface_query_count": exact_surface_query_count,
 		"exact_surface_inside_ray_count": exact_surface_inside_ray_count,
+		"proximal_capsule_query_count": proximal_capsule_query_count,
 		"weapon_correction_basis_world": weapon_correction_basis_world,
 		"weapon_correction_about_grip_world": correction,
 		"weapon_radial_translation_world": weapon_radial_translation_world,
@@ -785,6 +958,30 @@ func _evaluate_candidate(
 		)),
 		"index_authority_proximal_safe": index_authority_safe,
 		"pinky_authority_proximal_safe": pinky_authority_safe,
+		"ordinary_proximal_capsules_safe": bool(proximal_state.get(
+			"safe",
+			false
+		)),
+		"ordinary_proximal_safety_enforced": enforce_ordinary_proximal_safety,
+		"ordinary_proximal_capsule_states": proximal_state.get(
+			"capsule_states",
+			[]
+		),
+		"ordinary_proximal_worst_digit_id": proximal_state.get(
+			"worst_digit_id",
+			StringName()
+		),
+		"ordinary_proximal_worst_penetration_meters": float(proximal_state.get(
+			"worst_penetration_meters",
+			INF
+		)),
+		"ordinary_proximal_worst_excess_penetration_meters": float(
+			proximal_state.get("worst_excess_penetration_meters", INF)
+		),
+		"ordinary_proximal_surface_escape_translation_world": proximal_state.get(
+			"surface_escape_translation_world",
+			Vector3.ZERO
+		),
 		"index_target_distance_meters": index_target_distance,
 		"pinky_target_distance_meters": pinky_target_distance,
 		"max_abs_radial_error_meters": max_abs_error,
@@ -800,6 +997,157 @@ func _evaluate_candidate(
 			correction_angle,
 		]),
 	}
+
+
+func _query_ordinary_proximal_capsules(
+	prepared_surface: Dictionary,
+	inverse_weapon_correction: Transform3D,
+	weapon_correction_basis_world: Basis,
+	ordinary_proximal_capsules: Array,
+	surface_source_origin_id: StringName,
+	resolved_world_origin_id: StringName
+) -> Dictionary:
+	var result: Dictionary = {
+		"valid": true,
+		"safe": true,
+		"status": &"ordinary_proximal_capsules_safe",
+		"capsule_states": [],
+		"proximal_capsule_query_count": 0,
+		"bvh_node_test_count": 0,
+		"triangle_test_count": 0,
+		"exact_surface_inside_ray_count": 0,
+		"worst_digit_id": StringName(),
+		"worst_penetration_meters": 0.0,
+		"worst_excess_penetration_meters": 0.0,
+		"surface_escape_translation_world": Vector3.ZERO,
+	}
+	var capsule_states: Array[Dictionary] = []
+	var worst_excess_penetration_meters: float = 0.0
+	var worst_escape_normal_prepared_world := Vector3.ZERO
+	for capsule_variant: Variant in ordinary_proximal_capsules:
+		var capsule: Dictionary = capsule_variant as Dictionary
+		var digit_id: StringName = capsule.get(
+			"digit_id",
+			StringName()
+		) as StringName
+		var segment_start_prepared_world: Vector3 = inverse_weapon_correction * (
+			capsule.get("segment_start_world", Vector3.ZERO) as Vector3
+		)
+		var segment_end_prepared_world: Vector3 = inverse_weapon_correction * (
+			capsule.get("segment_end_world", Vector3.ZERO) as Vector3
+		)
+		var query: Dictionary = surface_query.query_prepared_surface(
+			prepared_surface,
+			segment_start_prepared_world,
+			capsule.get(
+				"segment_start_source_origin_id",
+				StringName()
+			) as StringName,
+			segment_end_prepared_world,
+			capsule.get(
+				"segment_end_source_origin_id",
+				StringName()
+			) as StringName,
+			float(capsule.get("radius_meters", 0.0)),
+			surface_source_origin_id,
+			resolved_world_origin_id,
+			{
+				"classify_inside_solid": true,
+				"surface_topology_state": prepared_surface.get(
+					"capsule_surface_topology",
+					{}
+				),
+			}
+		)
+		result["proximal_capsule_query_count"] = int(
+			result["proximal_capsule_query_count"]
+		) + 1
+		var counts: Dictionary = query.get("counts", {}) as Dictionary
+		result["bvh_node_test_count"] = int(result["bvh_node_test_count"]) + int(
+			counts.get("bvh_node_test_count", 0)
+		) + int(counts.get("inside_ray_bvh_node_test_count", 0))
+		result["triangle_test_count"] = int(result["triangle_test_count"]) + int(
+			counts.get("triangle_test_count", 0)
+		) + int(counts.get("inside_ray_triangle_test_count", 0))
+		result["exact_surface_inside_ray_count"] = int(
+			result["exact_surface_inside_ray_count"]
+		) + int(counts.get("inside_ray_count", 0))
+		if not bool(query.get("valid", false)):
+			result["valid"] = false
+			result["safe"] = false
+			result["status"] = StringName(
+				"%s_ordinary_proximal_%s" % [
+					String(digit_id),
+					String(query.get("status", &"surface_query_failed")),
+				]
+			)
+			result["capsule_states"] = capsule_states
+			return result
+		var penetration_meters: float = float(query.get(
+			"penetration_meters",
+			INF
+		))
+		var signed_distance_valid: bool = bool(query.get(
+			"signed_distance_valid",
+			false
+		))
+		var axis_inside_solid: bool = bool(query.get(
+			"segment_axis_inside_solid",
+			false
+		))
+		var safe: bool = (
+			signed_distance_valid
+			and not axis_inside_solid
+			and penetration_meters
+				<= MAX_AUTHORITY_PROXIMAL_PENETRATION_METERS
+				+ GEOMETRY_EPSILON_METERS
+		)
+		var excess_penetration_meters: float = maxf(
+			penetration_meters - MAX_AUTHORITY_PROXIMAL_PENETRATION_METERS,
+			0.0
+		)
+		var capsule_state: Dictionary = {
+			"digit_id": digit_id,
+			"section_index": int(capsule.get("section_index", 0)),
+			"safe": safe,
+			"signed_distance_valid": signed_distance_valid,
+			"segment_axis_inside_solid": axis_inside_solid,
+			"penetration_meters": penetration_meters,
+			"excess_penetration_meters": excess_penetration_meters,
+			"contact_escape_normal_prepared_world": query.get(
+				"contact_escape_normal_world",
+				Vector3.ZERO
+			),
+			"closest_triangle_index": int(query.get("closest_triangle_index", -1)),
+		}
+		capsule_states.append(capsule_state)
+		if not safe:
+			result["safe"] = false
+			result["status"] = &"ordinary_proximal_capsules_unsafe"
+		if excess_penetration_meters > worst_excess_penetration_meters:
+			worst_excess_penetration_meters = excess_penetration_meters
+			result["worst_digit_id"] = digit_id
+			result["worst_penetration_meters"] = penetration_meters
+			result["worst_excess_penetration_meters"] = (
+				excess_penetration_meters
+			)
+			worst_escape_normal_prepared_world = query.get(
+				"contact_escape_normal_world",
+				Vector3.ZERO
+			) as Vector3
+	result["capsule_states"] = capsule_states
+	if worst_excess_penetration_meters > 0.0:
+		# The exact query returns the direction in which the fixed anatomical
+		# capsule would leave the Handle. This solver owns the opposite side of the
+		# relationship, so move the candidate Handle surface the opposite way. The
+		# support presenter later inverse-composes this correction onto the support
+		# anchor, which produces the required outward hand motion while preserving
+		# both the weapon and the primary hand.
+		result["surface_escape_translation_world"] = -(
+			weapon_correction_basis_world
+			* worst_escape_normal_prepared_world
+		) * worst_excess_penetration_meters
+	return result
 
 
 func _query_radial_target(
@@ -1515,6 +1863,29 @@ func _sample_diagnostics(sample: Dictionary) -> Dictionary:
 			"pinky_authority_proximal_safe",
 			false
 		)),
+		"ordinary_proximal_capsules_safe": bool(sample.get(
+			"ordinary_proximal_capsules_safe",
+			false
+		)),
+		"ordinary_proximal_capsule_states": (
+			sample.get("ordinary_proximal_capsule_states", []) as Array
+		).duplicate(true),
+		"ordinary_proximal_worst_digit_id": sample.get(
+			"ordinary_proximal_worst_digit_id",
+			StringName()
+		),
+		"ordinary_proximal_worst_penetration_meters": float(sample.get(
+			"ordinary_proximal_worst_penetration_meters",
+			INF
+		)),
+		"ordinary_proximal_worst_excess_penetration_meters": float(sample.get(
+			"ordinary_proximal_worst_excess_penetration_meters",
+			INF
+		)),
+		"ordinary_proximal_surface_escape_translation_world": sample.get(
+			"ordinary_proximal_surface_escape_translation_world",
+			Vector3.ZERO
+		),
 	}
 
 
@@ -1528,6 +1899,8 @@ func _build_seat_signature(
 	pinky_bone_world: Vector3,
 	index_skin_radius: float,
 	pinky_skin_radius: float,
+	ordinary_proximal_capsules: Array,
+	enforce_ordinary_proximal_safety: bool,
 	calibration_revision: StringName,
 	surface_source_origin_id: StringName,
 	resolved_world_origin_id: StringName
@@ -1538,6 +1911,7 @@ func _build_seat_signature(
 		String(surface_source_origin_id),
 		String(resolved_world_origin_id),
 		String(calibration_revision),
+		enforce_ordinary_proximal_safety,
 		_quantize_basis(correction.basis, SIGNATURE_BASIS_STEP),
 		_quantize_vector(correction.origin, SIGNATURE_POSITION_STEP_METERS),
 		_quantize_vector(grip_pivot_c0_world, SIGNATURE_POSITION_STEP_METERS),
@@ -1548,6 +1922,33 @@ func _build_seat_signature(
 		roundi(index_skin_radius / SIGNATURE_POSITION_STEP_METERS),
 		roundi(pinky_skin_radius / SIGNATURE_POSITION_STEP_METERS),
 	]
+	for capsule_variant: Variant in ordinary_proximal_capsules:
+		var capsule: Dictionary = capsule_variant as Dictionary
+		digest.append([
+			String(capsule.get("digit_id", StringName())),
+			int(capsule.get("section_index", -1)),
+			_quantize_vector(
+				capsule.get("segment_start_world", Vector3.ZERO) as Vector3,
+				SIGNATURE_POSITION_STEP_METERS
+			),
+			String(capsule.get(
+				"segment_start_source_origin_id",
+				StringName()
+			)),
+			_quantize_vector(
+				capsule.get("segment_end_world", Vector3.ZERO) as Vector3,
+				SIGNATURE_POSITION_STEP_METERS
+			),
+			String(capsule.get(
+				"segment_end_source_origin_id",
+				StringName()
+			)),
+			roundi(
+				float(capsule.get("radius_meters", 0.0))
+				/ SIGNATURE_POSITION_STEP_METERS
+			),
+			String(capsule.get("radius_source_id", StringName())),
+		])
 	return "%s:%s" % [String(SOLVER_REVISION), str(hash(digest))]
 
 

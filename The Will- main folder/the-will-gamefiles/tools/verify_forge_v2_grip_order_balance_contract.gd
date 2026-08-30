@@ -192,6 +192,12 @@ func _verify_order_invariance(
 	var reverse_tip_direction := (reverse_tip - reverse_contact).normalized()
 	var forward_pommel_direction := (forward_pommel - forward_contact).normalized()
 	var reverse_pommel_direction := (reverse_pommel - reverse_contact).normalized()
+	var forward_semantic_tip_direction := (
+		forward_profile.primary_grip_handle_tip_side_direction.normalized()
+	)
+	var reverse_semantic_tip_direction := (
+		reverse_profile.primary_grip_handle_tip_side_direction.normalized()
+	)
 	var forward_tip_axial_position := forward_tip.dot(forward_major)
 	var reverse_tip_axial_position := reverse_tip.dot(reverse_major)
 	var forward_pommel_axial_position := forward_pommel.dot(forward_major)
@@ -299,16 +305,23 @@ func _verify_order_invariance(
 	)
 	_check(
 		forward_tip_direction.distance_to(reverse_tip_direction) <= AXIS_TOLERANCE
-		and forward_tip_direction.dot(forward_major) >= 1.0 - AXIS_TOLERANCE
-		and reverse_tip_direction.dot(reverse_major) >= 1.0 - AXIS_TOLERANCE,
-		"weapon tip direction is invariant and follows the exported major axis"
+		and forward_semantic_tip_direction.distance_to(
+			reverse_semantic_tip_direction
+		) <= AXIS_TOLERANCE
+		and forward_tip_direction.dot(forward_semantic_tip_direction)
+		>= 1.0 - AXIS_TOLERANCE
+		and reverse_tip_direction.dot(reverse_semantic_tip_direction)
+		>= 1.0 - AXIS_TOLERANCE,
+		"weapon tip direction is invariant and follows the COM-selected side"
 	)
 	_check(
 		forward_pommel_direction.distance_to(reverse_pommel_direction)
 		<= AXIS_TOLERANCE
-		and forward_pommel_direction.dot(-forward_major) >= 1.0 - AXIS_TOLERANCE
-		and reverse_pommel_direction.dot(-reverse_major) >= 1.0 - AXIS_TOLERANCE,
-		"weapon pommel direction remains opposite the exported major axis"
+		and forward_pommel_direction.dot(-forward_semantic_tip_direction)
+		>= 1.0 - AXIS_TOLERANCE
+		and reverse_pommel_direction.dot(-reverse_semantic_tip_direction)
+		>= 1.0 - AXIS_TOLERANCE,
+		"weapon pommel direction remains opposite the COM-selected side"
 	)
 	_check(
 		absf(forward_tip_axial_position - reverse_tip_axial_position)
@@ -354,7 +367,10 @@ func _verify_balance_seating(
 	protected_handle_indices: PackedInt32Array
 ) -> void:
 	result_lines.append("scenario=asymmetric_blade_balance")
-	var center_of_mass := profile.center_of_mass * CELL_SIZE_METERS
+	var center_of_mass := (
+		profile.get_weapon_intrinsic_center_of_mass_weapon_root_cells()
+		* CELL_SIZE_METERS
+	)
 	var slice_oracle := _resolve_protected_mesh_slice_contact_oracle(
 		handle_points,
 		protected_handle_vertices,

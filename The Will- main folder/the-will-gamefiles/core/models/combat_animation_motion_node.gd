@@ -15,6 +15,11 @@ const TRANSITION_KIND_PRIMARY_HAND_SWAP: StringName = &"primary_hand_swap"
 const TRANSITION_KIND_TWO_HAND_STATE_SWAP: StringName = &"two_hand_state_swap"
 const DEFAULT_GRIP_SEAT_SLIDE_OFFSET: float = 0.2
 const DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET: float = 0.0
+const GRIP_SEAT_COORDINATE_SCHEMA_LEGACY_DISPLAY_VALUE := 1
+const GRIP_SEAT_COORDINATE_SCHEMA_NORMALIZED_HANDLE := 2
+const GRIP_SEAT_COORDINATE_SCHEMA_VERSION := (
+	GRIP_SEAT_COORDINATE_SCHEMA_NORMALIZED_HANDLE
+)
 
 @export var node_id: StringName = &""
 @export var node_index: int = 0
@@ -38,8 +43,13 @@ const DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET: float = 0.0
 ## Weapon Orientation - roll around grip axis (+/-120 degrees).
 @export_range(-120.0, 120.0, 1.0) var weapon_roll_degrees: float = 0.0
 
-## Grip Adjustments
+## Grip Adjustments. Grip-seat values are stored as normalized Pommel-to-Tip
+## Handle coordinates in 0..1. A balanced weapon may present these as -1..1 in
+## the Skill Crafter UI, but the signed display value is never persisted here.
 @export var axial_reposition_offset: float = 0.0
+@export var grip_seat_coordinate_schema_version: int = (
+	GRIP_SEAT_COORDINATE_SCHEMA_VERSION
+)
 @export var grip_seat_slide_offset: float = DEFAULT_GRIP_SEAT_SLIDE_OFFSET
 @export var secondary_grip_seat_slide_offset: float = DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET
 
@@ -123,8 +133,32 @@ func normalize() -> void:
 	if left_hand_proxy_pommel_position_origin_id == StringName():
 		left_hand_proxy_pommel_position_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 	axial_reposition_offset = clampf(axial_reposition_offset, -1.0, 1.0)
-	grip_seat_slide_offset = clampf(grip_seat_slide_offset, -1.0, 1.0)
-	secondary_grip_seat_slide_offset = clampf(secondary_grip_seat_slide_offset, -1.0, 1.0)
+	if (
+		grip_seat_coordinate_schema_version
+		>= GRIP_SEAT_COORDINATE_SCHEMA_NORMALIZED_HANDLE
+	):
+		grip_seat_coordinate_schema_version = (
+			GRIP_SEAT_COORDINATE_SCHEMA_NORMALIZED_HANDLE
+		)
+		grip_seat_slide_offset = clampf(grip_seat_slide_offset, 0.0, 1.0)
+		secondary_grip_seat_slide_offset = clampf(
+			secondary_grip_seat_slide_offset,
+			0.0,
+			1.0
+		)
+	else:
+		# Version-3 station saves persisted the value shown by the old signed UI.
+		# Preserve it until the owning weapon profile supplies the directional or
+		# balanced display mode needed for a lossless, deliberate conversion.
+		grip_seat_coordinate_schema_version = (
+			GRIP_SEAT_COORDINATE_SCHEMA_LEGACY_DISPLAY_VALUE
+		)
+		grip_seat_slide_offset = clampf(grip_seat_slide_offset, -1.0, 1.0)
+		secondary_grip_seat_slide_offset = clampf(
+			secondary_grip_seat_slide_offset,
+			-1.0,
+			1.0
+		)
 	weapon_roll_degrees = clampf(weapon_roll_degrees, -120.0, 120.0)
 	right_upperarm_roll_degrees = clampf(right_upperarm_roll_degrees, -180.0, 180.0)
 	left_upperarm_roll_degrees = clampf(left_upperarm_roll_degrees, -180.0, 180.0)
@@ -132,7 +166,12 @@ func normalize() -> void:
 		transition_duration_seconds = 0.0
 	if not get_generated_transition_kind_ids().has(generated_transition_kind):
 		generated_transition_kind = TRANSITION_KIND_NONE
-	if retarget_node != null and retarget_node.has_method("normalize"):
+	if (
+		grip_seat_coordinate_schema_version
+		>= GRIP_SEAT_COORDINATE_SCHEMA_NORMALIZED_HANDLE
+		and retarget_node != null
+		and retarget_node.has_method("normalize")
+	):
 		retarget_node.call("normalize")
 	if generated_transition_node:
 		locked_for_authoring = true

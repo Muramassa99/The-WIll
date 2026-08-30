@@ -651,12 +651,17 @@ func _verify_held_item_skill_crafter_path(fixture: Dictionary) -> void:
 	var anchor_basis := anchor.transform.basis.orthonormalized()
 	var contact_basis := basis_anchor.transform.basis.orthonormalized()
 	var preview_presenter = CombatAnimationStationPreviewPresenterScript.new()
-	for slide_offset: float in [-1.0, 0.0, 1.0]:
-		var target_ratio := base_ratio
-		if slide_offset < 0.0:
-			target_ratio = 0.0
-		elif slide_offset > 0.0:
-			target_ratio = 1.0
+	var tip_side_ratio := float(held_item.get_meta(
+		"primary_grip_handle_tip_side_axis_ratio_from_span_start",
+		1.0
+	))
+	for handle_coordinate: float in [0.0, 0.5, 1.0]:
+		var target_ratio := (
+			PrimaryGripSeatResolverScript.resolve_handle_coordinate_axis_ratio(
+				handle_coordinate,
+				tip_side_ratio
+			)
+		)
 		var expected_seat := PrimaryGripSeatResolverScript.resolve_sampled_seat(
 			held_ratios,
 			held_centers,
@@ -668,7 +673,7 @@ func _verify_held_item_skill_crafter_path(fixture: Dictionary) -> void:
 			held_item,
 			null,
 			{
-				"grip_seat_slide_offset": slide_offset,
+				"grip_seat_slide_offset": handle_coordinate,
 				"axial_reposition_offset": 0.0,
 				"preferred_grip_style_mode": held_item.get_meta(
 					"grip_style_mode",
@@ -681,8 +686,8 @@ func _verify_held_item_skill_crafter_path(fixture: Dictionary) -> void:
 			"position",
 			Vector3.INF
 		) as Vector3
-		var slide_label := "minus_one" if slide_offset < 0.0 else (
-			"plus_one" if slide_offset > 0.0 else "zero"
+		var slide_label := "pommel" if handle_coordinate <= 0.0 else (
+			"tip" if handle_coordinate >= 1.0 else "midpoint"
 		)
 		result_lines.append(
 			"preview_slide_%s_guide_error_meters=%.9f" % [

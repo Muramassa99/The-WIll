@@ -2,6 +2,9 @@ extends Resource
 class_name CraftedItemWIP
 
 const CombatAnimationStationStateScript = preload("res://core/models/combat_animation_station_state.gd")
+const PrimaryGripSeatResolverScript = preload(
+	"res://core/resolvers/primary_grip_seat_resolver.gd"
+)
 
 const BUILDER_PATH_MELEE := &"builder_path_melee"
 const BUILDER_PATH_RANGED_PHYSICAL := &"builder_path_ranged_physical"
@@ -458,6 +461,16 @@ func ensure_combat_animation_station_state() -> Resource:
 		grip_style_mode,
 		stow_position_mode
 	)
+	if (
+		latest_baked_profile_snapshot != null
+		and station_state.has_method("migrate_legacy_grip_coordinates")
+	):
+		station_state.call(
+			"migrate_legacy_grip_coordinates",
+			PrimaryGripSeatResolverScript.resolve_profile_handle_coordinate_mode(
+				latest_baked_profile_snapshot
+			)
+		)
 	return station_state
 
 static func get_stow_position_modes() -> Array[StringName]:

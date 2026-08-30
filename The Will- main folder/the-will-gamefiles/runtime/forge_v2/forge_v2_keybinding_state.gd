@@ -9,6 +9,8 @@ const ACTION_VIEW_PAN := &"forge_v2_view_pan"
 const ACTION_VIEW_PAN_SECONDARY := &"forge_v2_view_pan_secondary"
 const ACTION_VIEW_ZOOM_IN := &"forge_v2_view_zoom_in"
 const ACTION_VIEW_ZOOM_OUT := &"forge_v2_view_zoom_out"
+const ACTION_UNDO := &"forge_v2_undo"
+const ACTION_REDO := &"forge_v2_redo"
 const ACTION_SAVE_DRAFT := &"forge_v2_save_draft"
 const ACTION_VIEW_FIT := &"forge_v2_view_fit"
 const ACTION_VIEW_RESET := &"forge_v2_view_reset"
@@ -49,6 +51,16 @@ const ACTION_DEFINITIONS: Array[Dictionary] = [
 		"action": ACTION_VIEW_ZOOM_OUT,
 		"display_name": "Zoom Out",
 		"binding": {"mouse_button": MOUSE_BUTTON_WHEEL_DOWN},
+	},
+	{
+		"action": ACTION_UNDO,
+		"display_name": "Undo",
+		"binding": {"physical_keycode": KEY_Z, "keycode": KEY_Z, "ctrl": true},
+	},
+	{
+		"action": ACTION_REDO,
+		"display_name": "Redo",
+		"binding": {"physical_keycode": KEY_Y, "keycode": KEY_Y, "ctrl": true},
 	},
 	{
 		"action": ACTION_SAVE_DRAFT,
@@ -179,6 +191,14 @@ func get_binding_label(action_name: StringName) -> String:
 func event_matches_action(action_name: StringName, event: InputEvent) -> bool:
 	return event_matches_binding(get_binding_data(action_name), event)
 
+
+func event_releases_action(action_name: StringName, event: InputEvent) -> bool:
+	return event_releases_binding(get_binding_data(action_name), event)
+
+
+func is_action_binding_pressed(action_name: StringName) -> bool:
+	return is_binding_pressed(get_binding_data(action_name))
+
 static func get_default_binding_data(action_name: StringName) -> Dictionary:
 	var definition := _get_action_definition_static(action_name)
 	if definition.is_empty():
@@ -274,16 +294,20 @@ static func build_binding_data_from_mouse_event(mouse_event: InputEventMouseButt
 	if mouse_event == null:
 		return {}
 	var binding_data := normalize_binding_data(keyboard_data)
-	binding_data["mouse_button"] = int(mouse_event.button_index)
 	if binding_data.is_empty():
-		binding_data = normalize_binding_data({
-			"mouse_button": int(mouse_event.button_index),
+		binding_data = {
 			"ctrl": mouse_event.ctrl_pressed,
 			"shift": mouse_event.shift_pressed,
 			"alt": mouse_event.alt_pressed,
 			"meta": mouse_event.meta_pressed,
-		})
-	return binding_data
+		}
+	else:
+		binding_data["ctrl"] = bool(binding_data.get("ctrl", false)) or mouse_event.ctrl_pressed
+		binding_data["shift"] = bool(binding_data.get("shift", false)) or mouse_event.shift_pressed
+		binding_data["alt"] = bool(binding_data.get("alt", false)) or mouse_event.alt_pressed
+		binding_data["meta"] = bool(binding_data.get("meta", false)) or mouse_event.meta_pressed
+	binding_data["mouse_button"] = int(mouse_event.button_index)
+	return normalize_binding_data(binding_data)
 
 static func event_matches_binding(binding_data: Dictionary, event: InputEvent) -> bool:
 	var normalized_binding := normalize_binding_data(binding_data)
@@ -294,6 +318,107 @@ static func event_matches_binding(binding_data: Dictionary, event: InputEvent) -
 	if event is InputEventKey:
 		return _key_event_matches_binding(normalized_binding, event as InputEventKey)
 	return false
+
+
+static func event_releases_binding(
+	binding_data: Dictionary,
+	event: InputEvent
+) -> bool:
+	var normalized_binding := normalize_binding_data(binding_data)
+	if normalized_binding.is_empty() or event == null:
+		return false
+	if event is InputEventMouseButton:
+		var mouse_event := event as InputEventMouseButton
+		return (
+			not mouse_event.pressed
+			and int(normalized_binding.get(
+				"mouse_button",
+				MOUSE_BUTTON_NONE
+			)) == int(mouse_event.button_index)
+		)
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		if key_event.pressed:
+			return false
+		return (
+			_key_event_matches_key_data(
+				key_event,
+				int(normalized_binding.get("physical_keycode", KEY_NONE)),
+				int(normalized_binding.get("keycode", KEY_NONE))
+			)
+			or _key_event_matches_key_data(
+				key_event,
+				int(normalized_binding.get(
+					"secondary_physical_keycode",
+					KEY_NONE
+				)),
+				int(normalized_binding.get("secondary_keycode", KEY_NONE))
+			)
+			or (
+				bool(normalized_binding.get("ctrl", false))
+				and _key_event_is_modifier(key_event, KEY_CTRL)
+			)
+			or (
+				bool(normalized_binding.get("shift", false))
+				and _key_event_is_modifier(key_event, KEY_SHIFT)
+			)
+			or (
+				bool(normalized_binding.get("alt", false))
+				and _key_event_is_modifier(key_event, KEY_ALT)
+			)
+			or (
+				bool(normalized_binding.get("meta", false))
+				and _key_event_is_modifier(key_event, KEY_META)
+			)
+		)
+	return false
+
+
+static func is_binding_pressed(binding_data: Dictionary) -> bool:
+	var binding := normalize_binding_data(binding_data)
+	if binding.is_empty():
+		return false
+	if (
+		bool(binding.get("ctrl", false))
+		!= Input.is_key_pressed(KEY_CTRL)
+		or bool(binding.get("shift", false))
+		!= Input.is_key_pressed(KEY_SHIFT)
+		or bool(binding.get("alt", false))
+		!= Input.is_key_pressed(KEY_ALT)
+		or bool(binding.get("meta", false))
+		!= Input.is_key_pressed(KEY_META)
+	):
+		return false
+	var primary_physical := int(binding.get("physical_keycode", KEY_NONE))
+	var primary_keycode := int(binding.get("keycode", KEY_NONE))
+	if not _key_data_is_pressed(primary_physical, primary_keycode):
+		return false
+	var secondary_physical := int(binding.get(
+		"secondary_physical_keycode",
+		KEY_NONE
+	))
+	var secondary_keycode := int(binding.get("secondary_keycode", KEY_NONE))
+	if (
+		(secondary_physical != KEY_NONE or secondary_keycode != KEY_NONE)
+		and not _key_data_is_pressed(
+			secondary_physical,
+			secondary_keycode
+		)
+	):
+		return false
+	var mouse_button := int(binding.get("mouse_button", MOUSE_BUTTON_NONE))
+	if (
+		mouse_button != MOUSE_BUTTON_NONE
+		and not Input.is_mouse_button_pressed(mouse_button as MouseButton)
+	):
+		return false
+	return (
+		primary_physical != KEY_NONE
+		or primary_keycode != KEY_NONE
+		or secondary_physical != KEY_NONE
+		or secondary_keycode != KEY_NONE
+		or mouse_button != MOUSE_BUTTON_NONE
+	)
 
 static func bindings_are_equivalent(first_binding_data: Dictionary, second_binding_data: Dictionary) -> bool:
 	var first_binding := normalize_binding_data(first_binding_data)
@@ -458,6 +583,22 @@ static func _key_event_matches_key_data(key_event: InputEventKey, physical_keyco
 	if physical_keycode != KEY_NONE and int(key_event.physical_keycode) == physical_keycode:
 		return true
 	return keycode != KEY_NONE and int(key_event.keycode) == keycode
+
+
+static func _key_data_is_pressed(physical_keycode: int, keycode: int) -> bool:
+	if physical_keycode != KEY_NONE:
+		return Input.is_physical_key_pressed(physical_keycode as Key)
+	return keycode != KEY_NONE and Input.is_key_pressed(keycode as Key)
+
+
+static func _key_event_is_modifier(
+	key_event: InputEventKey,
+	modifier_keycode: Key
+) -> bool:
+	return (
+		key_event.physical_keycode == modifier_keycode
+		or key_event.keycode == modifier_keycode
+	)
 
 static func _binding_has_key(binding_data: Dictionary, physical_keycode: int, keycode: int) -> bool:
 	if physical_keycode == KEY_NONE and keycode == KEY_NONE:

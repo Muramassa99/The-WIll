@@ -7,6 +7,8 @@ const MaterialMassResolverScript = preload("res://core/resolvers/material_mass_r
 const ProfilePrimaryGripResolverScript = preload("res://core/resolvers/profile_primary_grip_resolver.gd")
 const ProfileCapabilityScoreResolverScript = preload("res://core/resolvers/profile_capability_score_resolver.gd")
 
+const WEAPON_INTRINSIC_COM_AUTHORITY := &"v1_cell_atom_density_weighted"
+
 var forge_rules: ForgeRulesDef = DEFAULT_FORGE_RULES_RESOURCE
 var shape_classifier_resolver: ShapeClassifierResolver = ShapeClassifierResolver.new()
 var material_runtime_resolver = MaterialRuntimeResolverScript.new()
@@ -36,7 +38,11 @@ func bake_profile(
 	var profile: BakedProfile = BakedProfile.new()
 	profile.total_volume_cell_equivalents = _calculate_total_volume_cell_equivalents(cells)
 	profile.total_mass = _calculate_total_mass(cells, material_lookup)
-	profile.center_of_mass = _calculate_center_of_mass(cells, material_lookup, profile.total_mass)
+	profile.set_weapon_intrinsic_center_of_mass_weapon_root_cells(
+		_calculate_center_of_mass(cells, material_lookup, profile.total_mass),
+		WEAPON_INTRINSIC_COM_AUTHORITY,
+		true
+	)
 	if not _is_connectivity_valid(cells, segments):
 		profile.validation_error = "disconnected_islands"
 
@@ -44,7 +50,7 @@ func bake_profile(
 		profile,
 		cells,
 		anchors,
-		profile.center_of_mass,
+		profile.get_weapon_intrinsic_center_of_mass_weapon_root_cells(),
 		forge_intent,
 		equipment_context
 	)

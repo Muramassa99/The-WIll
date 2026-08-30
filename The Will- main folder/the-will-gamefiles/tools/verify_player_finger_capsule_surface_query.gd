@@ -189,6 +189,51 @@ func _run_verification() -> void:
 	_check(int(cube_topology.get("boundary_edge_count", -1)) == 0, "cube_has_boundary_edges")
 	_check(int(cube_topology.get("nonmanifold_edge_count", -1)) == 0, "cube_has_nonmanifold_edges")
 
+	# Rounded CSG endcaps legitimately emit narrow, non-zero-area triangles.
+	# Their cross-product squared is between the dedicated m^4 threshold and
+	# the old (dimensionally invalid) positional m^2 threshold.  They must remain
+	# in the prepared exact surface so a watertight Handle stays watertight.
+	var skinny_tetrahedron: PackedVector3Array = _skinny_closed_tetrahedron()
+	var skinny_cross_squared: float = (
+		(skinny_tetrahedron[1] - skinny_tetrahedron[0]).cross(
+			skinny_tetrahedron[2] - skinny_tetrahedron[0]
+		).length_squared()
+	)
+	_check(
+		skinny_cross_squared
+		> CapsuleSurfaceQueryScript.TRIANGLE_AREA_EPSILON_SQUARED_M4,
+		"skinny_fixture_below_triangle_area_threshold"
+	)
+	_check(
+		skinny_cross_squared <= 0.00000000000001,
+		"skinny_fixture_does_not_expose_old_units_bug"
+	)
+	var skinny_surface: Dictionary = _prepare_surface(
+		skinny_tetrahedron,
+		"closed_skinny_tetrahedron"
+	)
+	_check(bool(skinny_surface.get("valid", false)), "skinny_surface_preparation_failed")
+	_check(
+		int(skinny_surface.get("triangle_count", 0)) == 4,
+		"skinny_surface_triangle_was_discarded"
+	)
+	var skinny_topology: Dictionary = query.analyze_prepared_surface_topology(
+		skinny_surface
+	)
+	_check(bool(skinny_topology.get("closed", false)), "skinny_surface_not_closed")
+	_check(
+		int(skinny_topology.get("boundary_edge_count", -1)) == 0,
+		"skinny_surface_has_boundary_edges"
+	)
+	_check(
+		int(skinny_topology.get("nonmanifold_edge_count", -1)) == 0,
+		"skinny_surface_has_nonmanifold_edges"
+	)
+	_check(
+		int(skinny_topology.get("degenerate_triangle_count", -1)) == 0,
+		"skinny_surface_triangle_reported_degenerate"
+	)
+
 	var inside_cube: Dictionary = _query(
 		query,
 		cube_surface,
@@ -343,6 +388,20 @@ func _cube_triangles() -> PackedVector3Array:
 		# +Z
 		Vector3(-1, -1, 1), Vector3(1, -1, 1), Vector3(1, 1, 1),
 		Vector3(-1, -1, 1), Vector3(1, 1, 1), Vector3(-1, 1, 1),
+	])
+
+
+func _skinny_closed_tetrahedron() -> PackedVector3Array:
+	var a := Vector3(0.0, 0.0, 0.0)
+	var b := Vector3(0.0012, 0.0, 0.0)
+	var c := Vector3(0.0006, 0.0000147, 0.0)
+	var d := Vector3(0.0006, 0.00000735, 0.001)
+	return PackedVector3Array([
+		# Skinny lower cap, followed by the three regular side faces.
+		a, c, b,
+		a, b, d,
+		b, c, d,
+		c, a, d,
 	])
 
 

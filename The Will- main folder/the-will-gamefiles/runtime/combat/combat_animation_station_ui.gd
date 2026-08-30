@@ -17,6 +17,7 @@ const CombatAnimationRetargetResolverScript = preload("res://core/resolvers/comb
 const CombatRuntimeClipBakerScript = preload("res://core/resolvers/combat_runtime_clip_baker.gd")
 const CombatAnimationRuntimeChainCompilerScript = preload("res://core/resolvers/combat_animation_runtime_chain_compiler.gd")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+const PrimaryGripSeatResolverScript = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
 const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_state.gd")
 const UserSettingsStateScript = preload("res://core/models/user_settings_state.gd")
 const UserSettingsRuntimeScript = preload("res://runtime/system/user_settings_runtime.gd")
@@ -202,6 +203,9 @@ var active_saved_wip_id: StringName = StringName()
 var station_display_name: String = ""
 var workflow_step: StringName = WORKFLOW_STEP_WEAPON_SELECT
 var refreshing_controls: bool = false
+var active_handle_coordinate_display_mode: StringName = (
+	BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_DIRECTIONAL_POMMEL_TO_TIP
+)
 var preview_presenter = CombatAnimationStationPreviewPresenterScript.new()
 var chain_player: CombatAnimationChainPlayer = CombatAnimationChainPlayerScript.new()
 var session_state: CombatAnimationSessionState = CombatAnimationSessionStateScript.new()
@@ -1119,6 +1123,14 @@ func set_selected_motion_node_primary_hand_slot(
 	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
 	var resolved_slot_id: StringName = CombatAnimationMotionNodeScript.normalize_primary_hand_slot(slot_id)
 	if motion_node == null:
+		return false
+	if not _is_active_unarmed_authoring_wip():
+		var equipment_authority_slot_id: StringName = _resolve_active_authoring_primary_slot_id()
+		if motion_node.primary_hand_slot != equipment_authority_slot_id:
+			motion_node.primary_hand_slot = equipment_authority_slot_id
+			motion_node.normalize()
+		_refresh_editor_fields()
+		footer_status_label.text = "Weapon primary hand is locked to its equipped/open slot."
 		return false
 	if _is_idle_draft(draft):
 		_enforce_idle_authority(draft, true)
@@ -2105,8 +2117,8 @@ func _build_right_inspector(parent: HBoxContainer) -> void:
 	weapon_rotation_z_spin_box = weapon_plane[2]
 	weapon_roll_spin_box = _build_labeled_spinbox(orientation_content, "Weapon Roll (deg)", -120.0, 120.0, 1.0)
 	axial_reposition_spin_box = _build_labeled_spinbox(orientation_content, "Axial Reposition", -1.0, 1.0, 0.01)
-	grip_seat_slide_spin_box = _build_labeled_spinbox(orientation_content, "Primary Grip Seat Slide", -1.0, 1.0, 0.01)
-	secondary_grip_seat_slide_spin_box = _build_labeled_spinbox(orientation_content, "Secondary Grip Seat Slide", -1.0, 1.0, 0.01)
+	grip_seat_slide_spin_box = _build_labeled_spinbox(orientation_content, "Primary Handle Position", 0.0, 1.0, 0.01)
+	secondary_grip_seat_slide_spin_box = _build_labeled_spinbox(orientation_content, "Support Handle Position", 0.0, 1.0, 0.01)
 	var timing_section: Dictionary = _build_foldable_section(vbox, "TIMING & BEHAVIOR", true)
 	var timing_content: VBoxContainer = timing_section.get("content", null) as VBoxContainer
 	_build_helper_text(timing_content, "Transition time is the travel time from the previous motion node into the selected node. Node 01 is the starting baseline, so its transition value is not used during preview.")
@@ -2820,6 +2832,30 @@ func _refresh_editor_fields() -> void:
 	var idle_draft_locked: bool = _is_idle_draft(draft)
 	var noncombat_idle_draft: bool = _is_noncombat_idle_draft(draft)
 	var active_slot_id: StringName = _get_active_skill_slot_id()
+	active_handle_coordinate_display_mode = (
+		_resolve_active_handle_coordinate_display_mode()
+	)
+	var migrated_grip_node_count := (
+		_migrate_active_station_grip_coordinates_if_needed(
+			active_handle_coordinate_display_mode
+		)
+	)
+	if migrated_grip_node_count > 0:
+		_stage_active_wip_edit(
+			"Migrated legacy Handle positions to normalized coordinates.",
+			PERSIST_RUNTIME_CACHE_DIRTY_ALL
+		)
+	var handle_coordinate_display_minimum := (
+		PrimaryGripSeatResolverScript.get_handle_coordinate_display_minimum(
+			active_handle_coordinate_display_mode
+		)
+	)
+	grip_seat_slide_spin_box.min_value = handle_coordinate_display_minimum
+	grip_seat_slide_spin_box.max_value = 1.0
+	secondary_grip_seat_slide_spin_box.min_value = (
+		handle_coordinate_display_minimum
+	)
+	secondary_grip_seat_slide_spin_box.max_value = 1.0
 	draft_name_edit.editable = has_draft
 	draft_name_edit.text = String(draft.get("display_name")) if has_draft else ""
 	skill_name_edit.editable = has_draft
@@ -2866,7 +2902,11 @@ func _refresh_editor_fields() -> void:
 	transition_spin_box.editable = motion_node_editable and not idle_draft_locked and get_selected_motion_node_index() > 0
 	body_support_spin_box.editable = motion_node_editable
 	two_hand_state_option_button.disabled = not motion_node_editable
-	primary_hand_option_button.disabled = not motion_node_editable or idle_draft_locked
+	primary_hand_option_button.disabled = (
+		not motion_node_editable
+		or idle_draft_locked
+		or not _is_active_unarmed_authoring_wip()
+	)
 	grip_mode_option_button.disabled = not motion_node_grip_transition_editable
 	curve_in_x_spin_box.editable = motion_node_curve_editable
 	curve_in_y_spin_box.editable = motion_node_curve_editable
@@ -2917,12 +2957,27 @@ func _refresh_editor_fields() -> void:
 		pommel_curve_out_z_spin_box.value = motion_node.pommel_curve_out_handle.z
 		weapon_roll_spin_box.value = motion_node.weapon_roll_degrees
 		axial_reposition_spin_box.value = motion_node.axial_reposition_offset
-		grip_seat_slide_spin_box.value = motion_node.grip_seat_slide_offset
-		secondary_grip_seat_slide_spin_box.value = motion_node.secondary_grip_seat_slide_offset
+		grip_seat_slide_spin_box.value = (
+			PrimaryGripSeatResolverScript.handle_coordinate_to_display_value(
+				motion_node.grip_seat_slide_offset,
+				active_handle_coordinate_display_mode
+			)
+		)
+		secondary_grip_seat_slide_spin_box.value = (
+			PrimaryGripSeatResolverScript.handle_coordinate_to_display_value(
+				motion_node.secondary_grip_seat_slide_offset,
+				active_handle_coordinate_display_mode
+			)
+		)
 		right_upperarm_roll_spin_box.value = motion_node.right_upperarm_roll_degrees
 		left_upperarm_roll_spin_box.value = motion_node.left_upperarm_roll_degrees
 		_select_option_by_metadata(two_hand_state_option_button, motion_node.two_hand_state)
-		_select_option_by_metadata(primary_hand_option_button, motion_node.primary_hand_slot)
+		_select_option_by_metadata(
+			primary_hand_option_button,
+			motion_node.primary_hand_slot
+			if _is_active_unarmed_authoring_wip()
+			else _resolve_active_authoring_primary_slot_id()
+		)
 		_select_option_by_metadata(grip_mode_option_button, motion_node.preferred_grip_style_mode)
 	else:
 		position_x_spin_box.value = 0.0
@@ -3252,9 +3307,21 @@ func _refresh_summary(status_message: String = "") -> void:
 			lines.append("Weapon Orientation: %s" % _snapped_vector3_text(motion_node.weapon_orientation_degrees, 0.01))
 			lines.append("Two-Hand State: %s" % TWO_HAND_STATE_LABELS.get(motion_node.two_hand_state, String(motion_node.two_hand_state)))
 			lines.append("Primary Hand: %s" % PRIMARY_HAND_LABELS.get(motion_node.primary_hand_slot, String(motion_node.primary_hand_slot)))
-			lines.append("Grip Seat Slide P/S: %s / %s" % [
-				str(snapped(motion_node.grip_seat_slide_offset, 0.01)),
-				str(snapped(motion_node.secondary_grip_seat_slide_offset, 0.01)),
+			lines.append("Handle Position P/S: %s / %s" % [
+				str(snapped(
+					PrimaryGripSeatResolverScript.handle_coordinate_to_display_value(
+						motion_node.grip_seat_slide_offset,
+						active_handle_coordinate_display_mode
+					),
+					0.01
+				)),
+				str(snapped(
+					PrimaryGripSeatResolverScript.handle_coordinate_to_display_value(
+						motion_node.secondary_grip_seat_slide_offset,
+						active_handle_coordinate_display_mode
+					),
+					0.01
+				)),
 			])
 			lines.append("Body Support Blend: %s" % str(snapped(motion_node.body_support_blend, 0.01)))
 			lines.append("Weapon Roll: %s deg" % str(snapped(motion_node.weapon_roll_degrees, 0.1)))
@@ -3568,6 +3635,28 @@ func _get_active_baked_profile() -> BakedProfile:
 	if active_wip == null:
 		return null
 	return preview_presenter.ensure_baked_profile_snapshot(active_wip)
+
+
+func _resolve_active_handle_coordinate_display_mode() -> StringName:
+	return PrimaryGripSeatResolverScript.resolve_profile_handle_coordinate_mode(
+		_get_active_baked_profile()
+	)
+
+
+func _migrate_active_station_grip_coordinates_if_needed(
+	coordinate_mode: StringName
+) -> int:
+	var station_state: Resource = _get_active_station_state()
+	if (
+		station_state == null
+		or not station_state.has_method("migrate_legacy_grip_coordinates")
+	):
+		return 0
+	return int(station_state.call(
+		"migrate_legacy_grip_coordinates",
+		coordinate_mode
+	))
+
 
 func _normalize_seed_origin_id(origin_id: StringName, fallback_origin_id: StringName) -> StringName:
 	if origin_id != StringName():
@@ -4043,6 +4132,10 @@ func _resolve_equipped_slot_for_wip_id(target_wip_id: StringName) -> StringName:
 	return StringName()
 
 func _resolve_active_motion_node_primary_slot_id() -> StringName:
+	# A weapon's equipped/open slot is the upstream primary-hand authority.
+	# Per-node hand selection remains meaningful only for unarmed authoring.
+	if not _is_active_unarmed_authoring_wip():
+		return _resolve_active_authoring_primary_slot_id()
 	if session_state.playback_active and chain_player.is_playing():
 		var playback_slot_id: StringName = CombatAnimationMotionNodeScript.normalize_primary_hand_slot(chain_player.current_primary_hand_slot)
 		if playback_slot_id == CombatAnimationMotionNodeScript.PRIMARY_HAND_LEFT:
@@ -4110,6 +4203,10 @@ func _normalize_weapon_open_config(open_config: Dictionary, saved_wip: CraftedIt
 	))
 	if dominant_slot_id != HAND_SLOT_LEFT:
 		dominant_slot_id = HAND_SLOT_RIGHT
+	if saved_wip != null and not CraftedItemWIPScript.is_unarmed_authoring_wip(saved_wip):
+		var equipped_slot_id: StringName = _resolve_equipped_slot_for_wip_id(saved_wip.wip_id)
+		if equipped_slot_id == HAND_SLOT_LEFT or equipped_slot_id == HAND_SLOT_RIGHT:
+			dominant_slot_id = equipped_slot_id
 	return {
 		"dominant_slot_id": dominant_slot_id,
 		"use_two_hand": bool(open_config.get(
@@ -5053,10 +5150,10 @@ func _build_runtime_clip_cache_signature(draft: Resource) -> String:
 	if draft == null:
 		return ""
 	var parts := PackedStringArray()
-	# V4 invalidates replay poses baked before exact Handle grasp lifecycle
-	# became destination-driven. WIP geometry remains valid; only the derived
-	# Skill Crafter runtime track must be rebuilt once.
-	parts.append("runtime_cache_v4_destination_grip_lifecycle")
+	# V6 invalidates replay poses that encoded grip-seat fields as signed relative
+	# offsets. Saved authoring values are normalized on load; only the derived
+	# Skill Crafter runtime track must be rebuilt with canonical 0..1 Handle data.
+	parts.append("runtime_cache_v6_normalized_handle_coordinates")
 	parts.append(String(active_wip.wip_id) if active_wip != null else "")
 	parts.append(String(draft.get("draft_id")))
 	parts.append(String(draft.get("draft_kind")))
@@ -6738,7 +6835,7 @@ func set_selected_motion_node_axial_reposition(
 	return true
 
 func set_selected_motion_node_grip_seat_slide(
-	slide_value: float,
+	handle_coordinate_normalized: float,
 	persist_change: bool = true,
 	refresh_list: bool = true,
 	refresh_fields: bool = true,
@@ -6751,9 +6848,30 @@ func set_selected_motion_node_grip_seat_slide(
 	if _is_motion_node_authoring_locked(motion_node):
 		_reject_locked_motion_node_edit()
 		return false
-	if is_equal_approx(motion_node.grip_seat_slide_offset, slide_value):
+	PrimaryGripSeatResolverScript.migrate_legacy_display_coordinates(
+		motion_node,
+		active_handle_coordinate_display_mode
+	)
+	var resolved_handle_coordinate := clampf(
+		handle_coordinate_normalized,
+		0.0,
+		1.0
+	)
+	if (
+		motion_node.grip_seat_coordinate_schema_version
+		>= CombatAnimationMotionNodeScript
+		.GRIP_SEAT_COORDINATE_SCHEMA_NORMALIZED_HANDLE
+		and is_equal_approx(
+			motion_node.grip_seat_slide_offset,
+			resolved_handle_coordinate
+		)
+	):
 		return false
-	motion_node.grip_seat_slide_offset = slide_value
+	motion_node.grip_seat_coordinate_schema_version = (
+		CombatAnimationMotionNodeScript
+		.GRIP_SEAT_COORDINATE_SCHEMA_NORMALIZED_HANDLE
+	)
+	motion_node.grip_seat_slide_offset = resolved_handle_coordinate
 	_reseat_motion_node_grip_to_occupied_contact(motion_node)
 	motion_node.normalize()
 	_apply_motion_node_change(
@@ -6767,7 +6885,7 @@ func set_selected_motion_node_grip_seat_slide(
 	return true
 
 func set_selected_motion_node_secondary_grip_seat_slide(
-	slide_value: float,
+	handle_coordinate_normalized: float,
 	persist_change: bool = true,
 	refresh_list: bool = true,
 	refresh_fields: bool = true,
@@ -6780,10 +6898,30 @@ func set_selected_motion_node_secondary_grip_seat_slide(
 	if _is_motion_node_authoring_locked(motion_node):
 		_reject_locked_motion_node_edit()
 		return false
-	var resolved_slide_value: float = clampf(slide_value, -1.0, 1.0)
-	if is_equal_approx(motion_node.secondary_grip_seat_slide_offset, resolved_slide_value):
+	PrimaryGripSeatResolverScript.migrate_legacy_display_coordinates(
+		motion_node,
+		active_handle_coordinate_display_mode
+	)
+	var resolved_handle_coordinate := clampf(
+		handle_coordinate_normalized,
+		0.0,
+		1.0
+	)
+	if (
+		motion_node.grip_seat_coordinate_schema_version
+		>= CombatAnimationMotionNodeScript
+		.GRIP_SEAT_COORDINATE_SCHEMA_NORMALIZED_HANDLE
+		and is_equal_approx(
+			motion_node.secondary_grip_seat_slide_offset,
+			resolved_handle_coordinate
+		)
+	):
 		return false
-	motion_node.secondary_grip_seat_slide_offset = resolved_slide_value
+	motion_node.grip_seat_coordinate_schema_version = (
+		CombatAnimationMotionNodeScript
+		.GRIP_SEAT_COORDINATE_SCHEMA_NORMALIZED_HANDLE
+	)
+	motion_node.secondary_grip_seat_slide_offset = resolved_handle_coordinate
 	motion_node.normalize()
 	_apply_motion_node_change(
 		"Secondary grip seat slide updated.",
@@ -6838,12 +6976,24 @@ func _on_axial_reposition_changed(value: float) -> void:
 func _on_grip_seat_slide_changed(value: float) -> void:
 	if refreshing_controls:
 		return
-	set_selected_motion_node_grip_seat_slide(value, false)
+	set_selected_motion_node_grip_seat_slide(
+		PrimaryGripSeatResolverScript.display_value_to_handle_coordinate(
+			value,
+			active_handle_coordinate_display_mode
+		),
+		false
+	)
 
 func _on_secondary_grip_seat_slide_changed(value: float) -> void:
 	if refreshing_controls:
 		return
-	set_selected_motion_node_secondary_grip_seat_slide(value, false)
+	set_selected_motion_node_secondary_grip_seat_slide(
+		PrimaryGripSeatResolverScript.display_value_to_handle_coordinate(
+			value,
+			active_handle_coordinate_display_mode
+		),
+		false
+	)
 
 func _on_right_upperarm_roll_changed(value: float) -> void:
 	if refreshing_controls:

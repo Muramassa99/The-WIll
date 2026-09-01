@@ -677,11 +677,34 @@ func select_skill_slot(slot_id: StringName, advance_workflow: bool = true) -> bo
 	session_state.current_draft_ref = draft
 	if advance_workflow:
 		_set_workflow_step(WORKFLOW_STEP_EDITOR)
-	_refresh_all("Selected %s." % display_name)
+	# Selecting a skill is an explicit command to occupy the authored Handle
+	# position, even when its stored value exactly matches the open-mount seed.
+	# Equality of data must not be mistaken for absence of that command: the
+	# open-mount shortcut clears digit guidance, whereas this one-shot reason
+	# enters the complete authored grip/contact solve at the preserved target.
+	var initial_grip_resolve_reason := StringName()
+	if (
+		advance_workflow
+		and active_wip != null
+		and not _is_active_unarmed_authoring_wip()
+	):
+		initial_grip_resolve_reason = PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION
+	var defer_initial_grip_resolve: bool = (
+		should_realign_baseline
+		and initial_grip_resolve_reason != StringName()
+	)
+	_refresh_all(
+		"Selected %s." % display_name,
+		StringName() if defer_initial_grip_resolve else initial_grip_resolve_reason
+	)
 	if should_realign_baseline and _realign_active_draft_to_preview_open_baseline(true):
 		var baseline_message: String = "Aligned %s baseline with the active hand mount." % display_name
 		_stage_active_wip_edit(baseline_message, PERSIST_RUNTIME_CACHE_DIRTY_ACTIVE)
-		_refresh_all(baseline_message)
+		_refresh_all(baseline_message, initial_grip_resolve_reason)
+	elif defer_initial_grip_resolve:
+		# The first refresh was retained only to establish the legacy baseline.
+		# Finish selection with the commanded grip solve before a rendered frame.
+		_refresh_preview_scene(initial_grip_resolve_reason)
 	if advance_workflow and footer_status_label != null:
 		footer_status_label.text = "Editing %s." % display_name
 	return true
@@ -1107,7 +1130,8 @@ func set_selected_motion_node_two_hand_state(
 		refresh_list,
 		refresh_fields,
 		refresh_preview,
-		refresh_summary
+		refresh_summary,
+		PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION
 	)
 	return true
 
@@ -2558,7 +2582,10 @@ func _resolve_initial_project_list_selection_id() -> StringName:
 		return selected_id
 	return StringName()
 
-func _refresh_all(status_message: String = "") -> void:
+func _refresh_all(
+	status_message: String = "",
+	preview_grip_resolve_reason: StringName = StringName()
+) -> void:
 	_ensure_valid_editor_motion_node_selection()
 	_enforce_active_idle_authority(true)
 	_refresh_debugger_view_button()
@@ -2578,7 +2605,7 @@ func _refresh_all(status_message: String = "") -> void:
 		return
 	_refresh_motion_node_list()
 	_refresh_editor_fields()
-	_refresh_preview_scene()
+	_refresh_preview_scene(preview_grip_resolve_reason)
 	_refresh_summary(status_message)
 	_refresh_workflow_visibility()
 	_refresh_header_state()
@@ -6880,7 +6907,8 @@ func set_selected_motion_node_grip_seat_slide(
 		refresh_list,
 		refresh_fields,
 		refresh_preview,
-		refresh_summary
+		refresh_summary,
+		PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION
 	)
 	return true
 
@@ -6929,7 +6957,8 @@ func set_selected_motion_node_secondary_grip_seat_slide(
 		refresh_list,
 		refresh_fields,
 		refresh_preview,
-		refresh_summary
+		refresh_summary,
+		PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION
 	)
 	return true
 

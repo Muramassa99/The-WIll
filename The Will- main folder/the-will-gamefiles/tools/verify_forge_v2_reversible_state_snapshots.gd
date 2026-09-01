@@ -375,6 +375,44 @@ func _verify_protected_handle_round_trip() -> void:
 	var empty_snapshot := empty_state.call(
 		"capture_protected_handle_snapshot"
 	) as Dictionary
+	var empty_noop_revision_before := int(empty_state.get(
+		"bounded_history_transition_revision"
+	))
+	var empty_noop_transition_before := empty_state.call(
+		"get_bounded_history_transition"
+	) as Dictionary
+	var empty_noop_restored := bool(empty_state.call(
+		"restore_protected_handle_snapshot",
+		empty_snapshot
+	))
+	var empty_noop_transition_after := empty_state.call(
+		"get_bounded_history_transition"
+	) as Dictionary
+	_record(
+		"protected_handle_empty_noop_restore",
+		empty_noop_restored
+		and int(empty_state.get("bounded_history_transition_revision"))
+		== empty_noop_revision_before
+		and int(empty_noop_transition_after.get("revision", -1))
+		== int(empty_noop_transition_before.get("revision", -1))
+		and (empty_state.get("protected_forge_layers") as Array).is_empty()
+		and int(empty_state.call("get_handle_material_body_count")) == 0,
+		{
+			"restored": empty_noop_restored,
+			"revision_before": empty_noop_revision_before,
+			"revision_after": int(empty_state.get(
+				"bounded_history_transition_revision"
+			)),
+			"transition_before": StringName(empty_noop_transition_before.get(
+				"kind",
+				StringName()
+			)),
+			"transition_after": StringName(empty_noop_transition_after.get(
+				"kind",
+				StringName()
+			)),
+		}
+	)
 	if handle_body != null:
 		handle_body.set("path_points", PackedVector3Array([
 			Vector3.ZERO,
@@ -497,6 +535,89 @@ func _verify_protected_handle_round_trip() -> void:
 			(state.get("protected_forge_layers") as Array).find(restored_layer)
 		),
 	})
+	var identical_snapshot := state.call(
+		"capture_protected_handle_snapshot"
+	) as Dictionary
+	var identical_body_before := restored_body
+	var identical_layer_before := restored_layer
+	var selected_ordinary := bool(state.call(
+		"select_material_body",
+		ordinary_body_id
+	))
+	var identical_revision_before := int(state.get(
+		"bounded_history_transition_revision"
+	))
+	var identical_restored := bool(state.call(
+		"restore_protected_handle_snapshot",
+		identical_snapshot
+	))
+	var identical_body_after := _find_body(
+		state,
+		StringName(identical_snapshot.get("body_id", StringName()))
+	)
+	var identical_layer_after := _find_layer(
+		state.get("protected_forge_layers") as Array,
+		StringName(identical_snapshot.get("layer_id", StringName()))
+	)
+	var selected_handle_restored := (
+		StringName(state.get("selected_material_body_id"))
+		== StringName(identical_snapshot.get("body_id", StringName()))
+	)
+	var identical_revision_after := int(state.get(
+		"bounded_history_transition_revision"
+	))
+	var selected_ordinary_again := bool(state.call(
+		"select_material_body",
+		ordinary_body_id
+	))
+	var unselected_snapshot := state.call(
+		"capture_protected_handle_snapshot"
+	) as Dictionary
+	var unselected_revision_before := int(state.get(
+		"bounded_history_transition_revision"
+	))
+	var unselected_restored := bool(state.call(
+		"restore_protected_handle_snapshot",
+		unselected_snapshot
+	))
+	var unselected_revision_after := int(state.get(
+		"bounded_history_transition_revision"
+	))
+	_record(
+		"protected_handle_identical_noop_restore",
+		bool(identical_snapshot.get("was_selected", false))
+		and selected_ordinary
+		and identical_restored
+		and identical_revision_after == identical_revision_before
+		and identical_body_after == identical_body_before
+		and identical_layer_after == identical_layer_before
+		and selected_handle_restored
+		and not bool(unselected_snapshot.get("was_selected", true))
+		and selected_ordinary_again
+		and unselected_restored
+		and unselected_revision_after == unselected_revision_before
+		and StringName(state.get("selected_material_body_id"))
+		== ordinary_body_id,
+		{
+			"selected_snapshot_was_selected": bool(identical_snapshot.get(
+				"was_selected",
+				false
+			)),
+			"selected_restore_returned": identical_restored,
+			"selected_handle_restored": selected_handle_restored,
+			"unselected_snapshot_was_selected": bool(unselected_snapshot.get(
+				"was_selected",
+				true
+			)),
+			"unselected_restore_returned": unselected_restored,
+			"selected_revision_before": identical_revision_before,
+			"selected_revision_after": identical_revision_after,
+			"unselected_revision_before": unselected_revision_before,
+			"unselected_revision_after": unselected_revision_after,
+			"body_identity_preserved": identical_body_after == identical_body_before,
+			"layer_identity_preserved": identical_layer_after == identical_layer_before,
+		}
+	)
 	if restored_body != null:
 		var duplicate_handle := restored_body.duplicate(true) as Resource
 		duplicate_handle.set("body_id", &"duplicate_handle_for_rejection")

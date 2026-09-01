@@ -97,6 +97,7 @@ func _run_verification() -> void:
 		"index_radial_direction": Vector3(0.0, 0.9, 0.4358899),
 		"pinky_radial_direction": Vector3(0.0, 0.9, 0.4358899),
 	})
+	_verify_wrong_side_branch_correction()
 	_verify_explicit_failures()
 	_finish()
 
@@ -174,7 +175,9 @@ func _run_case(case_state: Dictionary) -> void:
 	)
 	var anatomy_state: Dictionary = _build_anatomy_state(
 		desired_correction * index_target_prepared,
-		desired_correction * pinky_target_prepared
+		desired_correction * pinky_target_prepared,
+		desired_rotation * -index_radial_direction,
+		desired_rotation * -pinky_radial_direction
 	)
 	var solver = HandSurfaceSeatSolverScript.new()
 	var first: Dictionary = solver.solve_prepared(
@@ -351,6 +354,30 @@ func _run_case(case_state: Dictionary) -> void:
 			== CALIBRATION_REVISION,
 		"%s_calibration_revision_missing" % label
 	)
+	_check(
+		float(first.get("index_radial_closing_side_dot", INF))
+			< -HandSurfaceSeatSolverScript.CLOSING_SIDE_DOT_EPSILON,
+		"%s_index_closing_side_not_authoritative" % label
+	)
+	_check(
+		float(first.get("pinky_radial_closing_side_dot", INF))
+			< -HandSurfaceSeatSolverScript.CLOSING_SIDE_DOT_EPSILON,
+		"%s_pinky_closing_side_not_authoritative" % label
+	)
+	_check(
+		StringName(first.get(
+			"index_authorized_closing_direction_world_origin_id",
+			&""
+		)) == ROOT_ORIGIN,
+		"%s_index_closing_direction_origin_missing" % label
+	)
+	_check(
+		StringName(first.get(
+			"pinky_authorized_closing_direction_world_origin_id",
+			&""
+		)) == ROOT_ORIGIN,
+		"%s_pinky_closing_direction_origin_missing" % label
+	)
 	_check(not first.has("candidate_hand_basis_world"), "%s_returned_forbidden_hand_candidate" % label)
 	_check(not first.has("adjusted_alignment_point_hand_local"), "%s_returned_forbidden_hand_alignment" % label)
 	_check(
@@ -366,6 +393,82 @@ func _run_case(case_state: Dictionary) -> void:
 		"%s_correction_not_deterministic" % label
 	)
 	completed_case_count += 1
+
+
+func _verify_wrong_side_branch_correction() -> void:
+	var case_state: Dictionary = {
+		"section_x": PackedFloat32Array([-0.05, -0.02, 0.0, 0.02, 0.05]),
+		"center_y": PackedFloat32Array([0.0, 0.0, 0.0, 0.0, 0.0]),
+		"center_z": PackedFloat32Array([0.0, 0.0, 0.0, 0.0, 0.0]),
+		"half_y": PackedFloat32Array([0.01, 0.01, 0.01, 0.01, 0.01]),
+		"half_z": PackedFloat32Array([0.01, 0.01, 0.01, 0.01, 0.01]),
+	}
+	var prepared_surface: Dictionary = _prepare_surface(case_state, "wrong_side")
+	_check(bool(prepared_surface.get("valid", false)), "wrong_side_surface_not_prepared")
+	if not bool(prepared_surface.get("valid", false)):
+		return
+	var c0 := Vector3.ZERO
+	var ci := Vector3(0.02, 0.0, 0.0)
+	var cp := Vector3(-0.02, 0.0, 0.0)
+	var index_bone := Vector3(0.02, 0.0, 0.0205)
+	var pinky_bone := Vector3(-0.02, 0.0, 0.0192)
+	var authorized_closing_direction := Vector3.BACK
+	var anatomy_state: Dictionary = _build_anatomy_state(
+		index_bone,
+		pinky_bone,
+		authorized_closing_direction,
+		authorized_closing_direction
+	)
+	var solver = HandSurfaceSeatSolverScript.new()
+	var result: Dictionary = solver.solve_prepared(
+		prepared_surface,
+		anatomy_state,
+		c0,
+		ci,
+		cp,
+		Vector3.RIGHT,
+		SURFACE_ORIGIN,
+		ROOT_ORIGIN
+	)
+	_check(
+		bool(result.get("valid", false)),
+		"wrong_side_solve_invalid_%s" % String(result.get("status", "missing"))
+	)
+	if not bool(result.get("valid", false)):
+		return
+	var diagnostics: Dictionary = result.get("diagnostics", {}) as Dictionary
+	_check(
+		int(diagnostics.get("completed_iterations", 0)) > 0,
+		"wrong_side_was_accepted_without_crossing"
+	)
+	var corrected_index_center: Vector3 = result.get(
+		"corrected_index_slice_center_world",
+		Vector3.ZERO
+	) as Vector3
+	var corrected_pinky_center: Vector3 = result.get(
+		"corrected_pinky_slice_center_world",
+		Vector3.ZERO
+	) as Vector3
+	_check(
+		authorized_closing_direction.dot(corrected_index_center - index_bone) > 0.0,
+		"wrong_side_index_center_not_moved_to_curl_side"
+	)
+	_check(
+		authorized_closing_direction.dot(corrected_pinky_center - pinky_bone) > 0.0,
+		"wrong_side_pinky_center_not_moved_to_curl_side"
+	)
+	_check(
+		absf(float(result.get("index_radial_error_meters", INF)))
+			<= HandSurfaceSeatSolverScript.ACCEPTED_RADIAL_ERROR_METERS
+			+ DISTANCE_EPSILON_METERS,
+		"wrong_side_index_outside_acceptance_band"
+	)
+	_check(
+		absf(float(result.get("pinky_radial_error_meters", INF)))
+			<= HandSurfaceSeatSolverScript.ACCEPTED_RADIAL_ERROR_METERS
+			+ DISTANCE_EPSILON_METERS,
+		"wrong_side_pinky_outside_acceptance_band"
+	)
 
 
 func _verify_explicit_failures() -> void:
@@ -421,7 +524,12 @@ func _verify_explicit_failures() -> void:
 	)
 
 
-func _build_anatomy_state(index_world: Vector3, pinky_world: Vector3) -> Dictionary:
+func _build_anatomy_state(
+	index_world: Vector3,
+	pinky_world: Vector3,
+	index_authorized_closing_direction_world: Vector3 = Vector3.FORWARD,
+	pinky_authorized_closing_direction_world: Vector3 = Vector3.FORWARD
+) -> Dictionary:
 	var index_to_pinky: Vector3 = pinky_world - index_world
 	var along_chord: Vector3 = (
 		index_to_pinky.normalized()
@@ -496,6 +604,24 @@ func _build_anatomy_state(index_world: Vector3, pinky_world: Vector3) -> Diction
 		"pinky_point_world": pinky_world,
 		"pinky_point_world_origin_id": ROOT_ORIGIN,
 		"pinky_point_source_origin_id": PINKY_PROBE_ORIGIN,
+		"index_authorized_closing_direction_world": (
+			index_authorized_closing_direction_world.normalized()
+		),
+		"index_authorized_closing_direction_world_origin_id": ROOT_ORIGIN,
+		"index_authorized_closing_direction_source_origin_id": INDEX_PROBE_ORIGIN,
+		"index_authorized_closing_direction_segment_end_source_origin_id": (
+			&"CC_Base_R_Index2"
+		),
+		"index_authorized_closing_direction_rule_revision": CALIBRATION_REVISION,
+		"pinky_authorized_closing_direction_world": (
+			pinky_authorized_closing_direction_world.normalized()
+		),
+		"pinky_authorized_closing_direction_world_origin_id": ROOT_ORIGIN,
+		"pinky_authorized_closing_direction_source_origin_id": PINKY_PROBE_ORIGIN,
+		"pinky_authorized_closing_direction_segment_end_source_origin_id": (
+			&"CC_Base_R_Pinky2"
+		),
+		"pinky_authorized_closing_direction_rule_revision": CALIBRATION_REVISION,
 		"index_skin_to_bone_radius_meters": INDEX_SKIN_RADIUS_METERS,
 		"index_skin_to_bone_radius_source_id": INDEX_RADIUS_SOURCE,
 		"pinky_skin_to_bone_radius_meters": PINKY_SKIN_RADIUS_METERS,

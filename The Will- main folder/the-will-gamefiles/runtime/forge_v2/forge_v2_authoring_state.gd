@@ -2166,6 +2166,32 @@ func restore_protected_handle_snapshot(snapshot: Dictionary) -> bool:
 		):
 			return false
 
+	# Document actions also carry the protected Handle so a real Handle edit can
+	# be replayed atomically.  Most ordinary actions, however, capture the exact
+	# Handle state already installed here.  Treat that restore as a semantic
+	# no-op: publishing `protected_changed` for empty -> empty (or an identical
+	# Handle) can incorrectly make an empty native packet authoritative over the
+	# still-valid fallback CSG publication.
+	if target_is_empty and current_body == null and current_layer == null:
+		_normalize_selected_material_body_id()
+		return true
+	if (
+		not target_is_empty
+		and current_body != null
+		and current_layer != null
+		and current_body_index == int(snapshot.get("body_index", -1))
+		and current_layer_index == int(snapshot.get("layer_index", -1))
+		and _build_material_body_export_snapshot(current_body)
+		== _build_material_body_export_snapshot(target_body)
+		and _build_layer_export_snapshot(current_layer)
+		== _build_layer_export_snapshot(target_layer)
+	):
+		if bool(snapshot.get("was_selected", false)):
+			selected_material_body_id = target_body_id
+		else:
+			_normalize_selected_material_body_id()
+		return true
+
 	var other_live_handles: Array[Resource] = []
 	for candidate_body: Resource in _collect_live_handle_material_bodies():
 		if candidate_body != current_body:

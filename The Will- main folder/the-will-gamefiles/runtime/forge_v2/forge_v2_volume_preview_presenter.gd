@@ -1532,6 +1532,21 @@ func _apply_bounded_protected_handle_change(
 	transition: Dictionary,
 	presentation: Dictionary
 ) -> Dictionary:
+	# A Handle-only transition may arrive before the native lane has ever owned
+	# the ordinary checkpoint/tail.  Rebuild that prefix first; publishing an
+	# authoritative empty native packet here would hide valid fallback geometry.
+	if (
+		not native_static_state_initialized
+		and (
+			_resolve_bounded_checkpoint_operation_count(presentation) > 0
+			or not (presentation.get("active_tail_bodies", []) as Array).is_empty()
+		)
+	):
+		return _restore_bounded_native_static_lane(
+			authoring_state,
+			transition,
+			presentation
+		)
 	if native_static_state_initialized:
 		var runtime_state := _validate_native_static_runtime_state(true)
 		if not bool(runtime_state.get("ok", false)):
@@ -8414,7 +8429,13 @@ func _append_csg_body_shape(
 			operation,
 			body_shape_index,
 			0,
-			profile_polygon
+			profile_polygon,
+			(
+				shape_kind
+				== ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
+				and StringName(body.get("body_kind"))
+				!= ForgeV2MaterialBodyScript.BODY_KIND_HANDLE_PROFILE
+			)
 		)
 	if shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH:
 		return _append_csg_body_path_shape(
@@ -8473,7 +8494,8 @@ func _append_csg_body_path_shape(
 	operation: int,
 	body_shape_index: int,
 	span_index: int,
-	profile_polygon_2d_meters: PackedVector2Array = PackedVector2Array()
+	profile_polygon_2d_meters: PackedVector2Array = PackedVector2Array(),
+	preserve_authored_profile_handedness: bool = false
 ) -> bool:
 	if parent == null or curve == null or curve.point_count < 2:
 		return false
@@ -8496,11 +8518,29 @@ func _append_csg_body_path_shape(
 	polygon.path_u_distance = 0.0
 	polygon.smooth_faces = true
 	if profile_polygon_2d_meters.size() >= 3:
-		polygon.polygon = profile_polygon_2d_meters
+		polygon.polygon = (
+			_convert_authored_profile_to_csg_path_polygon(
+				profile_polygon_2d_meters
+			)
+			if preserve_authored_profile_handedness
+			else profile_polygon_2d_meters
+		)
 	else:
 		polygon.polygon = _build_circle_profile_polygon(radius_meters, SPLINE_CSG_CIRCLE_SIDES)
 	polygon.material = _build_csg_body_material(material_variant_id, is_subtraction)
 	return true
+
+
+func _convert_authored_profile_to_csg_path_polygon(
+	authored_polygon: PackedVector2Array
+) -> PackedVector2Array:
+	# CSGPolygon3D's path extrusion maps profile-local +X to the opposite side
+	# of the authored sweep frame.  Adapt only at this engine boundary so the
+	# pending ArrayMesh and committed CSG publication consume one orientation.
+	var csg_path_polygon := PackedVector2Array()
+	for authored_point: Vector2 in authored_polygon:
+		csg_path_polygon.append(Vector2(-authored_point.x, authored_point.y))
+	return csg_path_polygon
 
 func _ensure_placement_cursor_mesh_instance() -> void:
 	if placement_cursor_mesh_instance != null and is_instance_valid(placement_cursor_mesh_instance):
@@ -8532,7 +8572,15 @@ func _sync_placement_cursor(local_position: Vector3, is_valid: bool, radius_mete
 func _build_active_material_body_sweep_mesh(body: Resource) -> ArrayMesh:
 	if body == null:
 		return ArrayMesh.new()
-	var path_points: PackedVector3Array = body.get("path_points")
+	var sweep_path := _resolve_active_material_body_sweep_path(body)
+	var path_points: PackedVector3Array = sweep_path.get(
+		"path_points",
+		PackedVector3Array()
+	)
+	var path_surface_normals: PackedVector3Array = sweep_path.get(
+		"path_surface_normals",
+		PackedVector3Array()
+	)
 	if path_points.is_empty():
 		return ArrayMesh.new()
 	var profile_polygon := _resolve_active_body_sweep_polygon(body)
@@ -8563,13 +8611,69 @@ func _build_active_material_body_sweep_mesh(body: Resource) -> ArrayMesh:
 			surface_tool,
 			body,
 			profile_polygon,
-			preview_color
+			preview_color,
+			path_points,
+			path_surface_normals
 		)
 	if added_vertices <= 0:
 		return ArrayMesh.new()
 	surface_tool.index()
 	surface_tool.generate_normals()
 	return surface_tool.commit()
+
+func _resolve_active_material_body_sweep_path(body: Resource) -> Dictionary:
+	if body == null:
+		return {}
+	var authored_points: PackedVector3Array = body.get("path_points")
+	var authored_surface_normals: PackedVector3Array = body.get(
+		"path_surface_normals"
+	)
+	var shape_kind := StringName(body.get("shape_kind"))
+	if (
+		authored_points.size() < 2
+		or (
+			shape_kind
+			!= ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
+			and shape_kind
+			!= ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH
+		)
+	):
+		return {
+			"path_points": authored_points,
+			"path_surface_normals": authored_surface_normals,
+		}
+	var path_sampling_radius_meters := maxf(
+		float(body.get("radius_meters")),
+		0.001
+	)
+	if int(body.get("profile_runtime_schema_version")) > 0:
+		path_sampling_radius_meters = maxf(
+			float(body.get("profile_contact_distance_meters")),
+			ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_ANCHOR_CLEARANCE_METERS
+		)
+	var curve := _build_spline_csg_curve(
+		authored_points,
+		_resolve_spline_csg_path_interval(path_sampling_radius_meters)
+	)
+	var sampled_points := _deduplicate_spline_points(curve.get_baked_points())
+	if sampled_points.size() < 2:
+		return {
+			"path_points": authored_points,
+			"path_surface_normals": authored_surface_normals,
+		}
+	var sampled_surface_normals := PackedVector3Array()
+	for sample_point: Vector3 in sampled_points:
+		sampled_surface_normals.append(
+			ForgeV2ProfileShapeLibraryScript.resolve_path_surface_normal(
+				sample_point,
+				authored_points,
+				authored_surface_normals
+			)
+		)
+	return {
+		"path_points": sampled_points,
+		"path_surface_normals": sampled_surface_normals,
+	}
 
 func _resolve_active_body_sweep_polygon(body: Resource) -> PackedVector2Array:
 	if body == null:
@@ -8613,7 +8717,9 @@ func _append_single_profile_preview(
 		body,
 		profile_polygon,
 		0,
-		tangent
+		tangent,
+		path_points,
+		body.get("path_surface_normals") as PackedVector3Array
 	)
 	return _append_profile_sweep_caps(
 		surface_tool,
@@ -8628,9 +8734,10 @@ func _append_linear_profile_sweep_preview(
 	surface_tool: SurfaceTool,
 	body: Resource,
 	profile_polygon: PackedVector2Array,
-	color: Color
+	color: Color,
+	path_points: PackedVector3Array,
+	path_surface_normals: PackedVector3Array
 ) -> int:
-	var path_points: PackedVector3Array = body.get("path_points")
 	if path_points.size() < 2:
 		return 0
 	var rings: Array[PackedVector3Array] = []
@@ -8639,7 +8746,9 @@ func _append_linear_profile_sweep_preview(
 			body,
 			profile_polygon,
 			point_index,
-			_resolve_linear_path_point_tangent(path_points, point_index)
+			_resolve_linear_path_point_tangent(path_points, point_index),
+			path_points,
+			path_surface_normals
 		))
 	var cap_indices := Geometry2D.triangulate_polygon(profile_polygon)
 	var added_vertices := 0
@@ -8686,12 +8795,10 @@ func _build_profile_sweep_ring(
 	body: Resource,
 	profile_polygon: PackedVector2Array,
 	point_index: int,
-	path_tangent: Vector3
+	path_tangent: Vector3,
+	path_points: PackedVector3Array,
+	path_surface_normals: PackedVector3Array
 ) -> PackedVector3Array:
-	var path_points: PackedVector3Array = body.get("path_points")
-	var path_surface_normals: PackedVector3Array = body.get(
-		"path_surface_normals"
-	)
 	var surface_normal := Vector3.FORWARD
 	if point_index >= 0 and point_index < path_surface_normals.size():
 		surface_normal = path_surface_normals[point_index]

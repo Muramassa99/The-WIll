@@ -28,7 +28,7 @@ func _run() -> void:
 	root.add_child(presenter)
 	var body: Resource = ForgeV2MaterialBodyScript.new()
 	body.body_kind = ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE
-	body.shape_kind = ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
+	body.shape_kind = ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
 	body.material_variant_id = &"mat_iron_gray"
 	body.path_points = PackedVector3Array([
 		Vector3.ZERO,
@@ -134,8 +134,8 @@ func _run() -> void:
 	_require(not mapping.is_empty(), "baked CSG mapping was not classifiable")
 	var mapping_id := StringName(mapping.get("id", StringName()))
 	_require(
-		mapping_id == &"mirror_x",
-		"legacy CSG authored-handedness oracle changed from mirror_x"
+		mapping_id == &"same_xy",
+		"committed CSG did not preserve pending authored orientation"
 	)
 	var mapped_axis_x_2d := mapping.get("axis_x", Vector2.ZERO) as Vector2
 	var mapped_axis_y_2d := mapping.get("axis_y", Vector2.ZERO) as Vector2
@@ -150,8 +150,8 @@ func _run() -> void:
 	var live_handedness := live_axis_x.cross(live_axis_y).dot(tangent)
 	var final_handedness := final_axis_x.cross(final_axis_y).dot(tangent)
 	_require(
-		live_handedness > 0.999 and final_handedness < -0.999,
-		"legacy live/final handedness oracle signs changed"
+		live_handedness > 0.999 and final_handedness > 0.999,
+		"pending and committed CSG handedness did not agree"
 	)
 	var live_and_final_same := _profile_vertex_set_matches(
 		final_start_ring,

@@ -43,6 +43,7 @@ const PREVIEW_PRIMARY_GRIP_SEAT_RATIO_ORIGIN_META := "preview_primary_grip_seat_
 const PREVIEW_SUPPORT_GRIP_SEAT_RATIO_META := "preview_support_grip_seat_axis_ratio_from_span_start"
 const PREVIEW_SUPPORT_GRIP_SEAT_RATIO_ORIGIN_META := "preview_support_grip_seat_axis_ratio_origin_id"
 const SURFACE_GRASP_POSITION_SIGNATURE_STEP_METERS: float = 0.0001
+const SURFACE_GRASP_BASIS_SIGNATURE_STEP: float = 0.0001
 const SURFACE_GRASP_BAND_RADIUS_METERS: float = 0.18
 const CONTACT_FULL_SEAT_MIN_METERS: float = 0.055
 const CONTACT_FADE_OUT_MIN_METERS: float = 0.18
@@ -291,7 +292,7 @@ func update_finger_grip_targets(
 	get_bone_world_position_callable: Callable,
 	smoothing_speed: float,
 	delta: float,
-	allow_exact_surface_solve: bool = true
+	allow_exact_surface_solve: bool = false
 ) -> void:
 	if skeleton == null:
 		return
@@ -457,6 +458,27 @@ func update_finger_grip_targets(
 			_move_target_toward(target_node, desired_position, smoothing_speed, delta)
 
 
+func apply_exact_surface_open_pose_now(
+	skeleton: Skeleton3D,
+	slot_id: StringName
+) -> bool:
+	if skeleton == null or _active_grip_execution_path_id(slot_id) == StringName():
+		return false
+	_ensure_animation_grip_baseline_cache()
+	var slot_cache: Dictionary = animation_idle_baseline_cache.get(
+		slot_id,
+		{}
+	) as Dictionary
+	var cached_rotations: Dictionary = slot_cache.get("rotations", {}) as Dictionary
+	var expected_bone_count: int = PlayerDigitHingeRulesScript.get_finger_bone_names(
+		slot_id
+	).size()
+	if expected_bone_count != 15 or cached_rotations.size() != expected_bone_count:
+		return false
+	_apply_animation_contact_open_pose(skeleton, slot_id)
+	return true
+
+
 func note_grip_source_assigned(slot_id: StringName, guide_node: Node3D) -> void:
 	var execution_path_id: StringName = _resolve_grip_execution_path_id(
 		slot_id,
@@ -494,10 +516,32 @@ func note_grip_source_cleared(slot_id: StringName) -> void:
 
 func invalidate_cached_surface_grasp(slot_id: StringName = StringName()) -> void:
 	if slot_id == StringName():
-		surface_grasp_state_lookup.clear()
+		for path_variant: Variant in surface_grasp_state_lookup.keys():
+			_mark_surface_grasp_path_for_resolve(StringName(path_variant))
 	else:
 		for path_id: StringName in _grip_execution_paths_for_slot(slot_id):
-			surface_grasp_state_lookup.erase(path_id)
+			_mark_surface_grasp_path_for_resolve(path_id)
+
+
+func _mark_surface_grasp_path_for_resolve(execution_path_id: StringName) -> void:
+	var state: Dictionary = surface_grasp_state_lookup.get(
+		execution_path_id,
+		{}
+	) as Dictionary
+	if state.is_empty():
+		return
+	# Invalidation requests a replacement solve; it does not revoke the last safe
+	# 15-bone packet while those rotations are still live on the Skeleton3D. Keep
+	# rotations and their exact zero reference atomic until a new candidate commits.
+	state["force_surface_resolve"] = true
+	state["surface_resolve_invalidation_count"] = int(state.get(
+		"surface_resolve_invalidation_count",
+		0
+	)) + 1
+	state.erase("last_attempt_context_key")
+	state.erase("last_attempt_status")
+	state.erase("last_attempt_diagnostics")
+	surface_grasp_state_lookup[execution_path_id] = state
 
 
 func invalidate_cached_weapon_surface_seat(slot_id: StringName = StringName()) -> void:
@@ -518,14 +562,106 @@ func get_surface_grasp_debug_state(slot_id: StringName) -> Dictionary:
 	) as Dictionary).duplicate(true)
 
 
+func reapply_committed_surface_grasp(
+	skeleton: Skeleton3D,
+	slot_id: StringName
+) -> bool:
+	if skeleton == null:
+		return false
+	var execution_path_id: StringName = _active_grip_execution_path_id(slot_id)
+	if execution_path_id == StringName():
+		return false
+	var state: Dictionary = surface_grasp_state_lookup.get(
+		execution_path_id,
+		{}
+	) as Dictionary
+	if (
+		not bool(state.get("valid", false))
+		or String(state.get("context_key", "")).is_empty()
+	):
+		return false
+	var rotations: Dictionary = _sanitize_surface_grasp_rotations(
+		slot_id,
+		state.get("rotations", {}) as Dictionary
+	)
+	if rotations.size() != 15:
+		return false
+	return _apply_surface_grasp_rotations(skeleton, slot_id, rotations)
+
+
+func get_committed_surface_grasp_zero_packet(slot_id: StringName) -> Dictionary:
+	var invalid := {
+		"valid": false,
+		"status": &"committed_surface_grasp_zero_packet_unavailable",
+		"slot_id": slot_id,
+		"grip_execution_path_id": StringName(),
+		"context_key": "",
+		"zero_rotations": {},
+		"packet_signature": "",
+	}
+	var execution_path_id: StringName = _active_grip_execution_path_id(slot_id)
+	invalid["grip_execution_path_id"] = execution_path_id
+	if execution_path_id == StringName():
+		invalid["status"] = &"no_active_grip_execution_path"
+		return invalid
+	var state: Dictionary = surface_grasp_state_lookup.get(
+		execution_path_id,
+		{}
+	) as Dictionary
+	var context_key: String = String(state.get("context_key", ""))
+	invalid["context_key"] = context_key
+	var expected_bone_count: int = PlayerDigitHingeRulesScript.get_finger_bone_names(
+		slot_id
+	).size()
+	var committed_rotations: Dictionary = state.get("rotations", {}) as Dictionary
+	var committed_zero_rotations: Dictionary = _sanitize_surface_grasp_rotations(
+		slot_id,
+		state.get("zero_rotations", {}) as Dictionary
+	)
+	var zero_context_key: String = String(state.get(
+		"zero_rotation_context_key",
+		""
+	))
+	var packet_signature: String = String(state.get(
+		"zero_rotation_packet_signature",
+		""
+	))
+	if (
+		not bool(state.get("valid", false))
+		or context_key.is_empty()
+		or zero_context_key != context_key
+		or expected_bone_count != 15
+		or committed_rotations.size() != expected_bone_count
+		or committed_zero_rotations.size() != expected_bone_count
+		or packet_signature.is_empty()
+	):
+		invalid["status"] = &"incomplete_committed_surface_grasp_zero_packet"
+		return invalid
+	return {
+		"valid": true,
+		"status": &"committed_surface_grasp_zero_packet_ready",
+		"slot_id": slot_id,
+		"grip_execution_path_id": execution_path_id,
+		"context_key": context_key,
+		"zero_rotations": committed_zero_rotations.duplicate(true),
+		"packet_signature": packet_signature,
+	}
+
+
 func resolve_exact_surface_hand_seat_context_key(
+	skeleton: Skeleton3D,
 	slot_id: StringName,
 	grip_guide: Node3D
 ) -> String:
-	return resolve_exact_surface_weapon_seat_context_key(slot_id, grip_guide)
+	return resolve_exact_surface_weapon_seat_context_key(
+		skeleton,
+		slot_id,
+		grip_guide
+	)
 
 
 func resolve_exact_surface_weapon_seat_context_key(
+	skeleton: Skeleton3D,
 	slot_id: StringName,
 	grip_guide: Node3D
 ) -> String:
@@ -536,6 +672,7 @@ func resolve_exact_surface_weapon_seat_context_key(
 	if execution_path_id == StringName():
 		return ""
 	return _resolve_exact_surface_weapon_seat_context_key_for_path(
+		skeleton,
 		slot_id,
 		grip_guide,
 		execution_path_id
@@ -543,6 +680,7 @@ func resolve_exact_surface_weapon_seat_context_key(
 
 
 func _resolve_exact_surface_weapon_seat_context_key_for_path(
+	skeleton: Skeleton3D,
 	slot_id: StringName,
 	grip_guide: Node3D,
 	execution_path_id: StringName
@@ -559,6 +697,7 @@ func _resolve_exact_surface_weapon_seat_context_key_for_path(
 	if not bool(exact_surface_identity.get("valid", false)):
 		return ""
 	var base_context_key: String = _build_surface_grasp_context_key(
+		skeleton,
 		slot_id,
 		grip_guide,
 		grip_center_node,
@@ -704,7 +843,7 @@ func resolve_left_support_exact_surface_weapon_seat(
 
 
 func _resolve_exact_surface_weapon_seat_for_path(
-	_skeleton: Skeleton3D,
+	skeleton: Skeleton3D,
 	slot_id: StringName,
 	grip_guide: Node3D,
 	anatomy_state: Dictionary,
@@ -736,6 +875,7 @@ func _resolve_exact_surface_weapon_seat_for_path(
 		)
 		return invalid
 	var context_key: String = _resolve_exact_surface_weapon_seat_context_key_for_path(
+		skeleton,
 		slot_id,
 		grip_guide,
 		execution_path_id
@@ -1326,6 +1466,7 @@ func _update_exact_surface_serial_grasp_for_path(
 		slot_id
 	).size()
 	var context_key: String = _build_surface_grasp_context_key(
+		skeleton,
 		slot_id,
 		grip_guide,
 		grip_center_node,
@@ -1351,6 +1492,7 @@ func _update_exact_surface_serial_grasp_for_path(
 	if (
 		has_committed_grasp
 		and String(state.get("context_key", "")) == context_key
+		and not bool(state.get("force_surface_resolve", false))
 	):
 		_apply_surface_grasp_rotations(skeleton, slot_id, cached_rotations)
 		state["cache_hit_count"] = int(state.get("cache_hit_count", 0)) + 1
@@ -1584,6 +1726,11 @@ func _update_exact_surface_serial_grasp_for_path(
 		slot_id,
 		solve_result.get("rotations", {}) as Dictionary
 	)
+	var solved_zero_rotations: Dictionary = _sanitize_surface_grasp_rotations(
+		slot_id,
+		solve_result.get("zero_rotations", {}) as Dictionary
+	)
+	diagnostics["zero_rotation_count"] = solved_zero_rotations.size()
 	var safe_to_apply: bool = (
 		bool(solve_result.get("valid", false))
 		and bool(solve_result.get("safe_to_apply", false))
@@ -1600,10 +1747,30 @@ func _update_exact_surface_serial_grasp_for_path(
 	if safe_to_apply:
 		state["context_key"] = context_key
 		state["pending_context_key"] = ""
+		state["force_surface_resolve"] = false
 		state["diagnostics"] = diagnostics
 		state["valid"] = true
 		state["status"] = diagnostics.get("status", &"solved")
 		state["rotations"] = solved_rotations
+		if solved_zero_rotations.size() == expected_bone_count:
+			var zero_packet_signature: String = (
+				_build_surface_grasp_zero_rotation_packet_signature(
+					slot_id,
+					context_key,
+					solved_zero_rotations
+				)
+			)
+			if not zero_packet_signature.is_empty():
+				state["zero_rotations"] = solved_zero_rotations
+				state["zero_rotation_context_key"] = context_key
+				state["zero_rotation_packet_signature"] = zero_packet_signature
+			else:
+				_clear_surface_grasp_zero_packet(state)
+		else:
+			# Debug reference data is ancillary. Never reject an otherwise safe
+			# exact grip, but also never retain an old zero packet beside a newly
+			# committed rotation packet.
+			_clear_surface_grasp_zero_packet(state)
 		state["last_attempt_status"] = state["status"]
 		state["last_attempt_diagnostics"] = diagnostics.duplicate(true)
 		state["last_attempt_safe_to_apply"] = true
@@ -1849,6 +2016,54 @@ func _sanitize_surface_grasp_rotations(
 	return sanitized
 
 
+func _build_surface_grasp_zero_rotation_packet_signature(
+	slot_id: StringName,
+	context_key: String,
+	zero_rotations: Dictionary
+) -> String:
+	var ordered_bone_names: Array[StringName] = (
+		PlayerDigitHingeRulesScript.get_finger_bone_names(slot_id)
+	)
+	if (
+		context_key.is_empty()
+		or ordered_bone_names.size() != 15
+		or zero_rotations.size() != ordered_bone_names.size()
+	):
+		return ""
+	var ordered_packet: Array = [
+		String(PlayerFingerSurfaceGripSolverScript.SOLVER_REVISION),
+		String(PlayerDigitHingeRulesScript.get_revision()),
+		String(slot_id),
+		context_key,
+	]
+	for bone_name: StringName in ordered_bone_names:
+		var rotation_variant: Variant = zero_rotations.get(bone_name, null)
+		if not rotation_variant is Quaternion:
+			return ""
+		var rotation: Quaternion = (rotation_variant as Quaternion).normalized()
+		if (
+			not is_finite(rotation.x)
+			or not is_finite(rotation.y)
+			or not is_finite(rotation.z)
+			or not is_finite(rotation.w)
+		):
+			return ""
+		ordered_packet.append(String(bone_name))
+		ordered_packet.append([
+			rotation.x,
+			rotation.y,
+			rotation.z,
+			rotation.w,
+		])
+	return str(hash(ordered_packet))
+
+
+func _clear_surface_grasp_zero_packet(state: Dictionary) -> void:
+	state["zero_rotations"] = {}
+	state.erase("zero_rotation_context_key")
+	state.erase("zero_rotation_packet_signature")
+
+
 func _apply_surface_grasp_rotations(
 	skeleton: Skeleton3D,
 	slot_id: StringName,
@@ -1911,17 +2126,19 @@ func _record_failed_surface_grasp_candidate(
 	state["context_key"] = context_key
 	state["diagnostics"] = recorded_diagnostics
 	state["rotations"] = {}
+	_clear_surface_grasp_zero_packet(state)
 	return state
 
 
 func _build_surface_grasp_context_key(
+	skeleton: Skeleton3D,
 	slot_id: StringName,
 	grip_guide: Node3D,
 	grip_center_node: Node3D,
 	exact_surface: Dictionary,
 	execution_path_id: StringName
 ) -> String:
-	if grip_guide == null or grip_center_node == null:
+	if skeleton == null or grip_guide == null or grip_center_node == null:
 		return ""
 	if _resolve_grip_execution_path_id(slot_id, grip_guide) != execution_path_id:
 		return ""
@@ -1962,6 +2179,15 @@ func _build_surface_grasp_context_key(
 		"dominant_contact_slot_id",
 		StringName()
 	))
+	var hand_surface_relationship: Array = (
+		_resolve_surface_grasp_hand_relationship_signature(
+			skeleton,
+			slot_id,
+			exact_surface
+		)
+	)
+	if hand_surface_relationship.is_empty():
+		return ""
 	return str(hash([
 		PlayerDigitHingeRulesScript.get_revision(),
 		String(execution_path_id),
@@ -1975,7 +2201,63 @@ func _build_surface_grasp_context_key(
 		_quantize_surface_grasp_vector(guide_position_local),
 		String(grip_style_mode),
 		String(dominant_slot_id),
+		hand_surface_relationship,
 	]))
+
+
+func _resolve_surface_grasp_hand_relationship_signature(
+	skeleton: Skeleton3D,
+	slot_id: StringName,
+	exact_surface: Dictionary
+) -> Array:
+	if skeleton == null or not bool(exact_surface.get("valid", false)):
+		return []
+	var side_rules: Dictionary = PlayerDigitHingeRulesScript.get_surface_solver_side_rules(
+		slot_id
+	)
+	var hand_bone_name: StringName = side_rules.get(
+		"hand_bone_name",
+		StringName()
+	) as StringName
+	var hand_root_origin_id: StringName = side_rules.get(
+		"hand_bone_root_origin_id",
+		StringName()
+	) as StringName
+	var contact_surface_origin_id: StringName = exact_surface.get(
+		"contact_surface_origin_id",
+		StringName()
+	) as StringName
+	var collision_shape: CollisionShape3D = exact_surface.get(
+		"collision_shape",
+		null
+	) as CollisionShape3D
+	var hand_bone_index: int = skeleton.find_bone(String(hand_bone_name))
+	if (
+		hand_bone_name == StringName()
+		or hand_root_origin_id != PlayerDigitHingeRulesScript.ROOT_ORIGIN_ID
+		or contact_surface_origin_id == StringName()
+		or collision_shape == null
+		or not is_instance_valid(collision_shape)
+		or hand_bone_index < 0
+	):
+		return []
+	var hand_world: Transform3D = (
+		skeleton.global_transform * skeleton.get_bone_global_pose(hand_bone_index)
+	)
+	var hand_in_contact_surface: Transform3D = (
+		collision_shape.global_transform.affine_inverse() * hand_world
+	)
+	if not _transform_is_finite(hand_in_contact_surface):
+		return []
+	return [
+		String(hand_bone_name),
+		String(hand_root_origin_id),
+		String(contact_surface_origin_id),
+		_quantize_surface_grasp_vector(hand_in_contact_surface.origin),
+		_quantize_surface_grasp_basis(
+			hand_in_contact_surface.basis.orthonormalized()
+		),
+	]
 
 
 func _quantize_surface_grasp_vector(
@@ -1987,6 +2269,24 @@ func _quantize_surface_grasp_vector(
 		roundi(value.x / resolved_step),
 		roundi(value.y / resolved_step),
 		roundi(value.z / resolved_step),
+	])
+
+
+func _quantize_surface_grasp_basis(value: Basis) -> PackedInt64Array:
+	var resolved_step: float = maxf(
+		SURFACE_GRASP_BASIS_SIGNATURE_STEP,
+		0.0000001
+	)
+	return PackedInt64Array([
+		roundi(value.x.x / resolved_step),
+		roundi(value.x.y / resolved_step),
+		roundi(value.x.z / resolved_step),
+		roundi(value.y.x / resolved_step),
+		roundi(value.y.y / resolved_step),
+		roundi(value.y.z / resolved_step),
+		roundi(value.z.x / resolved_step),
+		roundi(value.z.y / resolved_step),
+		roundi(value.z.z / resolved_step),
 	])
 
 

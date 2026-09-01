@@ -42,6 +42,30 @@ Open followups:
 - Decide how brush stamping, capsule paths, primitive insertion, and future spline/noodle placement share the same stroke/body pipeline.
 - Add true paint-over-surface behavior once material bodies have selectable/raycastable collision or proxy surfaces.
 
+## Deferred Remove-Material Cut-Surface Aesthetic Pass
+
+This is parked visual/material-publication work. It must not fork Remove into a
+second path or Boolean solver: Add and Remove continue consuming the same
+authored geometry, with Remove differing only by depositing VOID.
+
+- When subtraction exposes a new face, resolve the material volume directly
+  adjacent to each part of that cut and apply its associated `.tres` surface
+  material/texture to the newly exposed face.
+- A cut through multiple materials must preserve those spatial boundaries. For
+  example, cutting through red, green, and blue volumes should expose red,
+  green, and blue cut regions respectively rather than one generic cut color.
+- The translucent red Remove representation remains an authoring preview only.
+  It must not become the committed, saved, reloaded, exported, or downstream
+  Skill Crafter surface material.
+- Preserve current curved-path parity, Boolean geometry, Undo/Redo, commit,
+  Save/Save As, collision, and reload behavior while adding this aesthetic
+  publication step.
+- Acceptance requires the visible cut-surface material assignment to remain
+  identical before and after commit, save/reload, and final WIP export.
+- This feature is forward-only. It does not need to migrate, rebake, repair, or
+  retroactively alter existing saved WIP projects. Testing and acceptance will
+  use newly authored WIPs created after the feature becomes live.
+
 ## Freehand Smoothing Setting V1
 
 Current code foundation:
@@ -89,6 +113,87 @@ current Forge V2 implementation pass.
   alter profile geometry, material behavior, profile identity, saved-WIP
   references, or downstream resolver results.
 - Existing profiles must remain valid when the catalog feature is introduced.
+
+## Deferred QoL: RMB Apply Popup And Alt+RMB Deposition Radial
+
+This is parked Forge V2 workflow work. It must reuse the existing tool commands,
+authoring state, profile selection, and local keybinding system rather than
+creating parallel deposition or generation paths.
+
+### RMB tap: local Apply popup
+
+- While actively authoring any point/path-derived Forge V2 operation -- Handle,
+  Spline Line, or Detailing Brush -- tapping `RMB` opens a compact two-option
+  popup at the current mouse position.
+- The top option is `Apply`. It is presented as a green rectangular button with
+  bold `Apply` text.
+- `Apply` routes to the active mode's existing generation/commit command: the
+  same semantic action currently exposed as that mode's equivalent of
+  `Generate CSG Noodle`. Do not duplicate the geometry-generation logic inside
+  the popup.
+- A Handle mode must therefore call its existing Handle apply/generate path;
+  Spline Line and Detailing Brush must call their own existing equivalents.
+- The popup must preserve the currently selected mode, operation, material,
+  profile, and authored points. It is a quick command surface, not a second tool
+  state.
+- The second popup option has not been named or assigned yet. Do not invent its
+  behavior during implementation; confirm it first.
+- Current `RMB` drag camera orbit remains valid. Tap-versus-drag gesture
+  disambiguation must prevent an orbit gesture from opening the popup and must
+  prevent a popup tap from moving the camera.
+
+### Later Alt+RMB hold: six-button deposition quick tray
+
+- Later, holding `Alt+RMB` opens a simple six-button radial selector at the
+  pointer: four outer deposition-mode buttons plus the two center operation
+  buttons.
+- Selection is directional from the radial origin: upward movement selects the
+  12-o'clock group, rightward movement selects the 3-o'clock group, with the
+  remaining two modes occupying the corresponding 6- and 9-o'clock groups.
+  Exact mode-to-direction assignment remains to be confirmed.
+- The center is divided into two operation targets: left is `Add`, right is
+  `Remove`.
+- Each of the four outer mode slots is prepared in advance through the normal
+  Forge menus. Its configured quick-slot state pulls the selected mode's chosen
+  profile and the other settings that are deliberately assigned to that slot.
+- The radial consumes those prepared settings; it is not where profiles or
+  detailed tool parameters are searched, edited, or browsed.
+- This creates a limited working set analogous to laying several chosen pens on
+  the table. The player can swap among them immediately at the pointer. Choosing
+  a different profile, thicker marker, or other non-prepared variant requires
+  opening the extended menu and replacing/configuring one of the quick slots.
+- Quick-slot activation must use the same authoritative profile, material,
+  operation, and tool-setting data used by the full menus. Do not maintain a
+  second reduced copy of geometry or deposition rules inside the radial.
+- The last selected deposition mode is sticky and remains the active default
+  until the user changes it through either the radial selector or the normal
+  menu. Opening or applying a multi-step Handle operation must not silently
+  reset that selection.
+- The radial is a fast front end over the same four existing deposition modes;
+  it must not introduce alternate authoring implementations.
+- Implement the gesture through the existing Forge V2 local keybinding/input
+  infrastructure so it does not become an untracked hardcoded input exception.
+
+The supplied radial image is a directional interaction reference only. The
+only committed visual requirements at this stage are the four directional mode
+groups and the center-left Add / center-right Remove split.
+
+### Future surface-coloring reuse
+
+- Reuse the same quick-tray principle for the later surface-coloring workflow.
+- The color palette coexists with the deposition-tool palette. It does not
+  replace, remap, or temporarily convert the tool radial into a color radial.
+- Give the tool palette and color palette separate input chords so either can be
+  summoned directly during the same authoring workflow. The exact keybind
+  combinations remain deliberately undecided until the later rested design
+  pass.
+- The full coloring menu prepares a limited color palette in advance; the
+  radial exposes those selected colors at the pointer for immediate switching.
+- The radial remains a fast selector over that prepared palette. Searching the
+  full color library, changing palette membership, and advanced color setup stay
+  in the extended menu.
+- The intended workflow is continuous authoring with the selected pens/colors
+  already at hand, avoiding repeated menu traversal during active work.
 
 ## Forge V2 Local Keybindings V1
 

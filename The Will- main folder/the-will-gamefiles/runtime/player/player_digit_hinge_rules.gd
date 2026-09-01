@@ -14,15 +14,15 @@ const ROOT_ORIGIN_ID: StringName = CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
 const HINGE_AXIS_LOCAL: Vector3 = Vector3(0.0, 0.0, 1.0)
 const ZERO_DIRECTION_LOCAL: Vector3 = Vector3.UP
 const THUMB_PREOPEN_STEP_DEGREES: float = 20.0
-const RIGHT_THUMB1_OPEN_DEGREES: float = 70.0
+const RIGHT_THUMB1_OPEN_DEGREES: float = 130.0
 const RIGHT_THUMB1_CLOSED_DEGREES: float = -30.0
-const LEFT_THUMB1_OPEN_DEGREES: float = -70.0
+const LEFT_THUMB1_OPEN_DEGREES: float = -130.0
 const LEFT_THUMB1_CLOSED_DEGREES: float = 30.0
-const RIGHT_FINGER_CLOSED_DEGREES: float = 90.0
-const RIGHT_THUMB_CLOSED_DEGREES: float = -90.0
-const LEFT_FINGER_CLOSED_DEGREES: float = -90.0
-const LEFT_THUMB_CLOSED_DEGREES: float = 90.0
-const SURFACE_SOLVER_RULE_REVISION: StringName = &"player_digit_local_z_surface_rules_v3"
+const RIGHT_FINGER_CLOSED_DEGREES: float = 130.0
+const RIGHT_THUMB_CLOSED_DEGREES: float = -130.0
+const LEFT_FINGER_CLOSED_DEGREES: float = -130.0
+const LEFT_THUMB_CLOSED_DEGREES: float = 130.0
+const SURFACE_SOLVER_RULE_REVISION: StringName = &"player_digit_local_z_surface_rules_v4"
 const MAX_CONTACT_OVERLAP_METERS: float = 0.0005
 const PREFERRED_CONTACT_OVERLAP_METERS: float = 0.00025
 const CONTACT_OVERLAP_TOLERANCE_METERS: float = 0.00008
@@ -233,7 +233,7 @@ static func get_surface_solver_side_rules(slot_id: StringName) -> Dictionary:
 				else SECTION_TARGET_OVERLAPS_METERS.duplicate()
 			),
 			# Pre-open is deliberately opposite the approved closing direction:
-			# right +70 -> -30, left -70 -> +30.
+			# right +130 -> -30, left -130 -> +30.
 			"thumb_clearance_open_sign": (
 				signf(thumb1_open_degrees)
 			) if is_thumb else 0.0,

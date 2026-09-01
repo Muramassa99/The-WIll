@@ -16,7 +16,7 @@ const PlayerFingerCapsuleSurfaceQueryScript = preload(
 ## transform. The solver never writes scene, Skeleton3D, weapon, guide, or authored
 ## endpoint state.
 
-const SOLVER_REVISION: StringName = &"hand_surface_three_slice_weapon_exact_tangent_seat_v4"
+const SOLVER_REVISION: StringName = &"hand_surface_three_slice_weapon_exact_tangent_seat_v5"
 const MAX_ITERATIONS: int = 8
 const ACCEPTED_RADIAL_ERROR_METERS: float = 0.001
 const MAX_AUTHORITY_PROXIMAL_PENETRATION_METERS: float = 0.0005
@@ -25,6 +25,7 @@ const CLEARANCE_BISECTION_STEPS: int = 18
 const CLEARANCE_BRACKET_EXPANSION_STEPS: int = 12
 const GEOMETRY_EPSILON_METERS: float = 0.0000001
 const RAY_EPSILON: float = 0.0000001
+const CLOSING_SIDE_DOT_EPSILON: float = 0.000001
 const RAY_MARGIN_METERS: float = 0.001
 const SCORE_EPSILON: float = 0.000000001
 const SIGNATURE_POSITION_STEP_METERS: float = 0.00001
@@ -102,6 +103,20 @@ func solve_prepared(
 		"pinky_point_world",
 		Vector3.ZERO
 	) as Vector3
+	var index_authorized_closing_direction_world: Vector3 = input_state.get(
+		"index_authorized_closing_direction_world",
+		Vector3.ZERO
+	) as Vector3
+	index_authorized_closing_direction_world = (
+		index_authorized_closing_direction_world.normalized()
+	)
+	var pinky_authorized_closing_direction_world: Vector3 = input_state.get(
+		"pinky_authorized_closing_direction_world",
+		Vector3.ZERO
+	) as Vector3
+	pinky_authorized_closing_direction_world = (
+		pinky_authorized_closing_direction_world.normalized()
+	)
 	var index_skin_radius: float = float(input_state.get(
 		"index_skin_to_bone_radius_meters",
 		0.0
@@ -145,6 +160,8 @@ func solve_prepared(
 			endcap_axis_world,
 			index_bone_world,
 			pinky_bone_world,
+			index_authorized_closing_direction_world,
+			pinky_authorized_closing_direction_world,
 			index_skin_radius,
 			pinky_skin_radius,
 			ordinary_proximal_capsules,
@@ -231,10 +248,29 @@ func solve_prepared(
 			current_c0_world
 			+ incremental_rotation * (source_midpoint_world - current_c0_world)
 		)
+		var radial_authority_points_inside_band: bool = (
+			absf(float(sample.get("index_radial_error_meters", INF)))
+				<= ACCEPTED_RADIAL_ERROR_METERS
+			and absf(float(sample.get("pinky_radial_error_meters", INF)))
+				<= ACCEPTED_RADIAL_ERROR_METERS
+		)
+		var midpoint_recenter_world: Vector3 = (
+			target_midpoint_world - rotated_source_midpoint_world
+		)
+		if (
+			radial_authority_points_inside_band
+			and not bool(sample.get("ordinary_proximal_capsules_safe", false))
+		):
+			# The public authority contract is a +/-1 mm radial band, not an exact
+			# zero. Preserve that available slack while escaping an unsafe ordinary
+			# proximal capsule; otherwise exact-midpoint polishing cancels the prior
+			# iteration's safety translation and creates a fixed point above the hard
+			# penetration cap. A later sample still verifies both radial points and
+			# restores recentering immediately if either one leaves the band.
+			midpoint_recenter_world = Vector3.ZERO
 		var proposed_translation_world: Vector3 = (
 			candidate_radial_translation_world
-			+ target_midpoint_world
-			- rotated_source_midpoint_world
+			+ midpoint_recenter_world
 		)
 		if not bool(sample.get("ordinary_proximal_capsules_safe", false)):
 			proposed_translation_world += sample.get(
@@ -287,6 +323,28 @@ func solve_prepared(
 			"pinky_point_source_origin_id",
 			StringName()
 		),
+		"index_authorized_closing_direction_world": (
+			index_authorized_closing_direction_world
+		),
+		"index_authorized_closing_direction_source_origin_id": input_state.get(
+			"index_authorized_closing_direction_source_origin_id",
+			StringName()
+		),
+		"index_authorized_closing_direction_rule_revision": input_state.get(
+			"index_authorized_closing_direction_rule_revision",
+			StringName()
+		),
+		"pinky_authorized_closing_direction_world": (
+			pinky_authorized_closing_direction_world
+		),
+		"pinky_authorized_closing_direction_source_origin_id": input_state.get(
+			"pinky_authorized_closing_direction_source_origin_id",
+			StringName()
+		),
+		"pinky_authorized_closing_direction_rule_revision": input_state.get(
+			"pinky_authorized_closing_direction_rule_revision",
+			StringName()
+		),
 		"index_skin_to_bone_radius_meters": index_skin_radius,
 		"index_skin_to_bone_radius_source_id": input_state.get(
 			"index_skin_to_bone_radius_source_id",
@@ -335,6 +393,8 @@ func solve_prepared(
 		pinky_slice_center_cp_world,
 		index_bone_world,
 		pinky_bone_world,
+		index_authorized_closing_direction_world,
+		pinky_authorized_closing_direction_world,
 		index_skin_radius,
 		pinky_skin_radius,
 		ordinary_proximal_capsules,
@@ -425,6 +485,22 @@ func solve_prepared(
 		"pinky_point_source_origin_id",
 		StringName()
 	)
+	for authority_id: String in ["index", "pinky"]:
+		var direction_field: String = "%s_authorized_closing_direction_world" % authority_id
+		result[direction_field] = input_state.get(direction_field, Vector3.ZERO)
+		result["%s_origin_id" % direction_field] = resolved_world_origin_id
+		result["%s_authorized_closing_direction_source_origin_id" % authority_id] = input_state.get(
+			"%s_authorized_closing_direction_source_origin_id" % authority_id,
+			StringName()
+		)
+		result["%s_authorized_closing_direction_segment_end_source_origin_id" % authority_id] = input_state.get(
+			"%s_authorized_closing_direction_segment_end_source_origin_id" % authority_id,
+			StringName()
+		)
+		result["%s_authorized_closing_direction_rule_revision" % authority_id] = input_state.get(
+			"%s_authorized_closing_direction_rule_revision" % authority_id,
+			StringName()
+		)
 	result["index_radial_error_meters"] = float(best_accepted.get(
 		"index_radial_error_meters",
 		INF
@@ -433,6 +509,19 @@ func solve_prepared(
 		"pinky_radial_error_meters",
 		INF
 	))
+	for authority_id: String in ["index", "pinky"]:
+		for metric_name: String in [
+			"radial_signed_current_radius_meters",
+			"radial_closing_side_dot",
+		]:
+			var field_name: String = "%s_%s" % [authority_id, metric_name]
+			result[field_name] = float(best_accepted.get(field_name, INF))
+		result["%s_radial_side_flipped_for_closing_authority" % authority_id] = bool(
+			best_accepted.get(
+				"%s_radial_side_flipped_for_closing_authority" % authority_id,
+				false
+			)
+		)
 	result["index_handle_boundary_radius_meters"] = float(best_accepted.get(
 		"index_handle_boundary_radius_meters",
 		0.0
@@ -530,6 +619,14 @@ func _validate_input(prepared_surface: Dictionary, input_state: Dictionary) -> S
 		"index_point_source_origin_id",
 		"pinky_point_world_origin_id",
 		"pinky_point_source_origin_id",
+		"index_authorized_closing_direction_world_origin_id",
+		"index_authorized_closing_direction_source_origin_id",
+		"index_authorized_closing_direction_segment_end_source_origin_id",
+		"index_authorized_closing_direction_rule_revision",
+		"pinky_authorized_closing_direction_world_origin_id",
+		"pinky_authorized_closing_direction_source_origin_id",
+		"pinky_authorized_closing_direction_segment_end_source_origin_id",
+		"pinky_authorized_closing_direction_rule_revision",
 		"index_skin_to_bone_radius_source_id",
 		"pinky_skin_to_bone_radius_source_id",
 		"skin_radius_calibration_revision",
@@ -543,6 +640,8 @@ func _validate_input(prepared_surface: Dictionary, input_state: Dictionary) -> S
 	for world_origin_key: String in [
 		"index_point_world_origin_id",
 		"pinky_point_world_origin_id",
+		"index_authorized_closing_direction_world_origin_id",
+		"pinky_authorized_closing_direction_world_origin_id",
 		"grip_pivot_c0_world_origin_id",
 		"index_slice_center_ci_world_origin_id",
 		"pinky_slice_center_cp_world_origin_id",
@@ -553,6 +652,8 @@ func _validate_input(prepared_surface: Dictionary, input_state: Dictionary) -> S
 	for vector_key: String in [
 		"index_point_world",
 		"pinky_point_world",
+		"index_authorized_closing_direction_world",
+		"pinky_authorized_closing_direction_world",
 		"grip_pivot_c0_world",
 		"index_slice_center_ci_world",
 		"pinky_slice_center_cp_world",
@@ -564,6 +665,52 @@ func _validate_input(prepared_surface: Dictionary, input_state: Dictionary) -> S
 	var endcap_axis: Vector3 = input_state.get("endcap_axis_world") as Vector3
 	if endcap_axis.length_squared() <= GEOMETRY_EPSILON_METERS * GEOMETRY_EPSILON_METERS:
 		return &"endcap_axis_degenerate"
+	endcap_axis = endcap_axis.normalized()
+	for authority_id: String in ["index", "pinky"]:
+		var direction_key: String = "%s_authorized_closing_direction_world" % authority_id
+		var direction_world: Vector3 = input_state.get(direction_key) as Vector3
+		if (
+			direction_world.length_squared()
+			<= GEOMETRY_EPSILON_METERS * GEOMETRY_EPSILON_METERS
+		):
+			return StringName("%s_degenerate" % direction_key)
+		var radial_direction_world: Vector3 = (
+			direction_world
+			- endcap_axis * direction_world.dot(endcap_axis)
+		)
+		if (
+			radial_direction_world.length_squared()
+			<= GEOMETRY_EPSILON_METERS * GEOMETRY_EPSILON_METERS
+		):
+			return StringName("%s_radial_degenerate" % direction_key)
+		if (
+			StringName(input_state.get(
+				"%s_authorized_closing_direction_source_origin_id" % authority_id,
+				StringName()
+			))
+			!= StringName(input_state.get(
+				"%s_point_source_origin_id" % authority_id,
+				StringName()
+			))
+		):
+			return StringName(
+				"%s_authorized_closing_direction_source_origin_id_mismatch"
+				% authority_id
+			)
+		if (
+			StringName(input_state.get(
+				"%s_authorized_closing_direction_rule_revision" % authority_id,
+				StringName()
+			))
+			!= StringName(input_state.get(
+				"skin_radius_calibration_revision",
+				StringName()
+			))
+		):
+			return StringName(
+				"%s_authorized_closing_direction_rule_revision_mismatch"
+				% authority_id
+			)
 	var index_radius: float = float(input_state.get(
 		"index_skin_to_bone_radius_meters",
 		-1.0
@@ -576,8 +723,6 @@ func _validate_input(prepared_surface: Dictionary, input_state: Dictionary) -> S
 		return &"index_skin_to_bone_radius_invalid"
 	if not is_finite(pinky_radius) or pinky_radius < 0.0:
 		return &"pinky_skin_to_bone_radius_invalid"
-	if not bool(input_state.get("enforce_ordinary_proximal_safety", false)):
-		return &"ready"
 	var ordinary_capsules_origin_id: StringName = input_state.get(
 		"ordinary_proximal_capsules_origin_id",
 		StringName()
@@ -602,6 +747,7 @@ func _validate_input(prepared_surface: Dictionary, input_state: Dictionary) -> S
 		&"pinky",
 	]
 	var seen_digit_ids: Dictionary = {}
+	var proximal_capsule_lookup: Dictionary = {}
 	for capsule_variant: Variant in ordinary_proximal_capsules:
 		if not capsule_variant is Dictionary:
 			return &"ordinary_proximal_capsule_record_invalid"
@@ -613,6 +759,7 @@ func _validate_input(prepared_surface: Dictionary, input_state: Dictionary) -> S
 		if not expected_digit_ids.has(digit_id) or seen_digit_ids.has(digit_id):
 			return &"ordinary_proximal_capsule_digit_invalid"
 		seen_digit_ids[digit_id] = true
+		proximal_capsule_lookup[digit_id] = capsule
 		if int(capsule.get("section_index", -1)) != 0:
 			return &"ordinary_proximal_capsule_section_invalid"
 		for vector_key: String in ["segment_start_world", "segment_end_world"]:
@@ -652,6 +799,42 @@ func _validate_input(prepared_surface: Dictionary, input_state: Dictionary) -> S
 		var radius_meters: float = float(capsule.get("radius_meters", -1.0))
 		if not is_finite(radius_meters) or radius_meters <= 0.0:
 			return &"ordinary_proximal_capsule_radius_invalid"
+	for authority_id: StringName in [&"index", &"pinky"]:
+		var authority_capsule: Dictionary = proximal_capsule_lookup.get(
+			authority_id,
+			{}
+		) as Dictionary
+		if authority_capsule.is_empty():
+			return StringName("%s_authority_proximal_capsule_missing" % authority_id)
+		if (
+			StringName(input_state.get(
+				"%s_authorized_closing_direction_source_origin_id" % authority_id,
+				StringName()
+			))
+			!= StringName(authority_capsule.get(
+				"segment_start_source_origin_id",
+				StringName()
+			))
+		):
+			return StringName(
+				"%s_authorized_closing_direction_proximal_source_mismatch"
+				% authority_id
+			)
+		if (
+			StringName(input_state.get(
+				"%s_authorized_closing_direction_segment_end_source_origin_id"
+				% authority_id,
+				StringName()
+			))
+			!= StringName(authority_capsule.get(
+				"segment_end_source_origin_id",
+				StringName()
+			))
+		):
+			return StringName(
+				"%s_authorized_closing_direction_segment_end_source_origin_id_mismatch"
+				% authority_id
+			)
 	return &"ready"
 
 
@@ -727,6 +910,8 @@ func _evaluate_candidate(
 	endcap_axis_world: Vector3,
 	index_bone_world: Vector3,
 	pinky_bone_world: Vector3,
+	index_authorized_closing_direction_world: Vector3,
+	pinky_authorized_closing_direction_world: Vector3,
 	index_skin_radius: float,
 	pinky_skin_radius: float,
 	ordinary_proximal_capsules: Array,
@@ -743,12 +928,19 @@ func _evaluate_candidate(
 		weapon_radial_translation_world
 	)
 	var inverse_correction: Transform3D = correction.affine_inverse()
+	var index_authorized_closing_direction_prepared_world: Vector3 = (
+		inverse_correction.basis * index_authorized_closing_direction_world
+	)
+	var pinky_authorized_closing_direction_prepared_world: Vector3 = (
+		inverse_correction.basis * pinky_authorized_closing_direction_world
+	)
 	var index_query: Dictionary = _query_radial_target(
 		prepared_surface,
 		surface_bounds,
 		inverse_correction * index_bone_world,
 		index_slice_center_ci_world,
 		endcap_axis_world,
+		index_authorized_closing_direction_prepared_world,
 		index_skin_radius,
 		index_point_source_origin_id,
 		surface_source_origin_id,
@@ -760,6 +952,7 @@ func _evaluate_candidate(
 		inverse_correction * pinky_bone_world,
 		pinky_slice_center_cp_world,
 		endcap_axis_world,
+		pinky_authorized_closing_direction_prepared_world,
 		pinky_skin_radius,
 		pinky_point_source_origin_id,
 		surface_source_origin_id,
@@ -924,6 +1117,30 @@ func _evaluate_candidate(
 		"pinky_handle_boundary_point_world": pinky_boundary_world,
 		"index_radial_error_meters": index_error,
 		"pinky_radial_error_meters": pinky_error,
+		"index_radial_signed_current_radius_meters": float(index_query.get(
+			"signed_current_radius_meters",
+			INF
+		)),
+		"pinky_radial_signed_current_radius_meters": float(pinky_query.get(
+			"signed_current_radius_meters",
+			INF
+		)),
+		"index_radial_closing_side_dot": float(index_query.get(
+			"closing_side_dot",
+			INF
+		)),
+		"pinky_radial_closing_side_dot": float(pinky_query.get(
+			"closing_side_dot",
+			INF
+		)),
+		"index_radial_side_flipped_for_closing_authority": bool(index_query.get(
+			"side_flipped_for_closing_authority",
+			false
+		)),
+		"pinky_radial_side_flipped_for_closing_authority": bool(pinky_query.get(
+			"side_flipped_for_closing_authority",
+			false
+		)),
 		"index_handle_boundary_radius_meters": float(index_query.get(
 			"boundary_radius_meters",
 			0.0
@@ -1156,6 +1373,7 @@ func _query_radial_target(
 	bone_point_prepared_world: Vector3,
 	slice_center_prepared_world: Vector3,
 	endcap_axis_prepared_world: Vector3,
+	authorized_closing_direction_prepared_world: Vector3,
 	skin_radius_meters: float,
 	bone_point_source_origin_id: StringName,
 	surface_source_origin_id: StringName,
@@ -1176,6 +1394,40 @@ func _query_radial_target(
 			"triangle_test_count": 0,
 		}
 	var radial_direction: Vector3 = radial_vector / current_radius
+	var closing_radial_direction: Vector3 = (
+		authorized_closing_direction_prepared_world
+		- endcap_axis_prepared_world
+			* authorized_closing_direction_prepared_world.dot(
+				endcap_axis_prepared_world
+			)
+	)
+	if (
+		not closing_radial_direction.is_finite()
+		or closing_radial_direction.length_squared()
+			<= GEOMETRY_EPSILON_METERS * GEOMETRY_EPSILON_METERS
+	):
+		return {
+			"valid": false,
+			"status": &"authorized_closing_radial_direction_degenerate",
+			"ray_count": 0,
+			"bvh_node_test_count": 0,
+			"triangle_test_count": 0,
+		}
+	closing_radial_direction = closing_radial_direction.normalized()
+	var initial_closing_side_dot: float = closing_radial_direction.dot(radial_direction)
+	if absf(initial_closing_side_dot) <= CLOSING_SIDE_DOT_EPSILON:
+		return {
+			"valid": false,
+			"status": &"authorized_closing_side_ambiguous",
+			"ray_count": 0,
+			"bvh_node_test_count": 0,
+			"triangle_test_count": 0,
+		}
+	var side_flipped_for_closing_authority: bool = initial_closing_side_dot > 0.0
+	if side_flipped_for_closing_authority:
+		radial_direction = -radial_direction
+	var closing_side_dot: float = closing_radial_direction.dot(radial_direction)
+	var signed_current_radius: float = radial_vector.dot(radial_direction)
 	var boundary: Dictionary = _trace_first_boundary(
 		prepared_surface,
 		surface_bounds,
@@ -1276,6 +1528,11 @@ func _query_radial_target(
 		"exact_surface_inside_ray_count": exact_surface_inside_ray_count,
 		"radial_direction_prepared_world": radial_direction,
 		"current_radius_meters": current_radius,
+		"signed_current_radius_meters": signed_current_radius,
+		"authorized_closing_radial_direction_prepared_world": closing_radial_direction,
+		"initial_closing_side_dot": initial_closing_side_dot,
+		"closing_side_dot": closing_side_dot,
+		"side_flipped_for_closing_authority": side_flipped_for_closing_authority,
 		"boundary_radius_meters": boundary_radius,
 		"skin_radius_meters": skin_radius_meters,
 		"target_radius_meters": target_radius,
@@ -1302,7 +1559,7 @@ func _query_radial_target(
 			false
 		)),
 		"authority_proximal_safe": authority_safe,
-		"radial_error_meters": current_radius - target_radius,
+		"radial_error_meters": signed_current_radius - target_radius,
 		"boundary_point_prepared_world": boundary.get(
 			"position_world",
 			slice_center_prepared_world + radial_direction * boundary_radius
@@ -1803,6 +2060,30 @@ func _sample_diagnostics(sample: Dictionary) -> Dictionary:
 			"pinky_radial_error_meters",
 			INF
 		)),
+		"index_radial_signed_current_radius_meters": float(sample.get(
+			"index_radial_signed_current_radius_meters",
+			INF
+		)),
+		"pinky_radial_signed_current_radius_meters": float(sample.get(
+			"pinky_radial_signed_current_radius_meters",
+			INF
+		)),
+		"index_radial_closing_side_dot": float(sample.get(
+			"index_radial_closing_side_dot",
+			INF
+		)),
+		"pinky_radial_closing_side_dot": float(sample.get(
+			"pinky_radial_closing_side_dot",
+			INF
+		)),
+		"index_radial_side_flipped_for_closing_authority": bool(sample.get(
+			"index_radial_side_flipped_for_closing_authority",
+			false
+		)),
+		"pinky_radial_side_flipped_for_closing_authority": bool(sample.get(
+			"pinky_radial_side_flipped_for_closing_authority",
+			false
+		)),
 		"max_abs_radial_error_meters": float(sample.get(
 			"max_abs_radial_error_meters",
 			INF
@@ -1897,6 +2178,8 @@ func _build_seat_signature(
 	pinky_slice_center_cp_world: Vector3,
 	index_bone_world: Vector3,
 	pinky_bone_world: Vector3,
+	index_authorized_closing_direction_world: Vector3,
+	pinky_authorized_closing_direction_world: Vector3,
 	index_skin_radius: float,
 	pinky_skin_radius: float,
 	ordinary_proximal_capsules: Array,
@@ -1919,6 +2202,14 @@ func _build_seat_signature(
 		_quantize_vector(pinky_slice_center_cp_world, SIGNATURE_POSITION_STEP_METERS),
 		_quantize_vector(index_bone_world, SIGNATURE_POSITION_STEP_METERS),
 		_quantize_vector(pinky_bone_world, SIGNATURE_POSITION_STEP_METERS),
+		_quantize_vector(
+			index_authorized_closing_direction_world,
+			SIGNATURE_BASIS_STEP
+		),
+		_quantize_vector(
+			pinky_authorized_closing_direction_world,
+			SIGNATURE_BASIS_STEP
+		),
 		roundi(index_skin_radius / SIGNATURE_POSITION_STEP_METERS),
 		roundi(pinky_skin_radius / SIGNATURE_POSITION_STEP_METERS),
 	]

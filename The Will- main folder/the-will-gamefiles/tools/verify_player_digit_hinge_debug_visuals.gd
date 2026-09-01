@@ -108,7 +108,7 @@ func _run_verification() -> void:
 		_check(absf(float(state.get("closed_angle_degrees", -999.0)) - expected_closed_degrees) <= 0.0001, "closed_angle_mismatch_%s" % String(bone_name))
 		_check(absf(float(state.get("min_angle_degrees", -999.0)) - expected_min_degrees) <= 0.0001, "min_angle_mismatch_%s" % String(bone_name))
 		_check(absf(float(state.get("max_angle_degrees", -999.0)) - expected_max_degrees) <= 0.0001, "max_angle_mismatch_%s" % String(bone_name))
-		var expected_sweep_degrees: float = 100.0 if is_bidirectional_thumb_root else 90.0
+		var expected_sweep_degrees: float = absf(expected_max_degrees - expected_min_degrees)
 		_check(
 			absf(float(state.get("allowed_sweep_degrees", -999.0)) - expected_sweep_degrees) <= 0.0001,
 			"sweep_mismatch_%s" % String(bone_name)
@@ -227,6 +227,11 @@ func _run_verification() -> void:
 	)
 	var live_solver_authority_probe_count: int = 0
 	var grip_presenter: RefCounted = PlayerRigFingerGripPresenterScript.new()
+	_verify_committed_grasp_invalidation_transaction(
+		grip_presenter,
+		skeleton,
+		before_rotations
+	)
 	for rule: Dictionary in rules:
 		var bone_name: StringName = rule.get("bone", StringName()) as StringName
 		var slot_id: StringName = rule.get("slot_id", StringName()) as StringName
@@ -477,6 +482,158 @@ func _run_verification() -> void:
 	rig.sync_authoring_joint_range_debug_now(true)
 	_check(boundary_probe_count == 20, "boundary_probe_count_not_20")
 
+	# The exact surface-grip lifecycle may commit digit rotations after the ordinary
+	# preview-frame debug sync. Hidden geometry must consume that final pose before
+	# visibility changes; the Debug View toggle itself remains display-only.
+	var hidden_lifecycle_probe_bone := &"CC_Base_R_Index1"
+	var hidden_lifecycle_probe_index: int = skeleton.find_bone(
+		String(hidden_lifecycle_probe_bone)
+	)
+	var hidden_lifecycle_probe_rule: Dictionary = PlayerDigitHingeRulesScript.get_rule_for_bone(
+		hidden_lifecycle_probe_bone
+	)
+	var hidden_lifecycle_probe_degrees: float = float(
+		hidden_lifecycle_probe_rule.get("closed_degrees", 0.0)
+	) * 0.5
+	var hidden_lifecycle_neutral_rotation: Quaternion = before_rotations.get(
+		hidden_lifecycle_probe_bone,
+		Quaternion.IDENTITY
+	) as Quaternion
+	var hidden_lifecycle_baseline_state: Dictionary = (
+		rig.get_authoring_joint_range_debug_state().get("digit_bones", {}) as Dictionary
+	).get(String(hidden_lifecycle_probe_bone), {}) as Dictionary
+	var hidden_lifecycle_visual_path := NodePath(String(
+		hidden_lifecycle_baseline_state.get("visual_node_path", "")
+	))
+	var hidden_lifecycle_visual_root: Node3D = rig.get_node_or_null(
+		hidden_lifecycle_visual_path
+	) as Node3D
+	if hidden_lifecycle_visual_root == null:
+		hidden_lifecycle_visual_root = root.get_node_or_null(
+			hidden_lifecycle_visual_path
+		) as Node3D
+	var hidden_lifecycle_marker: Node3D = (
+		hidden_lifecycle_visual_root.get_node_or_null("HingeCurrentMarker") as Node3D
+		if hidden_lifecycle_visual_root != null
+		else null
+	)
+	var hidden_lifecycle_marker_before: Vector3 = (
+		hidden_lifecycle_marker.global_position
+		if hidden_lifecycle_marker != null
+		else Vector3.INF
+	)
+	_check(hidden_lifecycle_probe_index >= 0, "hidden_lifecycle_probe_bone_missing")
+	_check(hidden_lifecycle_marker != null, "hidden_lifecycle_probe_marker_missing")
+	rig.set_authoring_joint_range_debug_visible(false)
+	if hidden_lifecycle_probe_index >= 0:
+		skeleton.set_bone_pose_rotation(
+			hidden_lifecycle_probe_index,
+			(
+				hidden_lifecycle_neutral_rotation
+				* Quaternion(
+					Vector3(0.0, 0.0, 1.0),
+					deg_to_rad(hidden_lifecycle_probe_degrees)
+				)
+			).normalized()
+		)
+	# No grip source is installed in this bounded fixture, so this lifecycle call
+	# preserves the authored probe rotation while executing the production final-
+	# digit debug synchronization gate.
+	rig.apply_authoring_digit_grip_now(false)
+	var hidden_lifecycle_state: Dictionary = rig.get_authoring_joint_range_debug_state()
+	var hidden_lifecycle_digit_state: Dictionary = (
+		hidden_lifecycle_state.get("digit_bones", {}) as Dictionary
+	).get(String(hidden_lifecycle_probe_bone), {}) as Dictionary
+	var hidden_lifecycle_joint_world: Vector3 = hidden_lifecycle_digit_state.get(
+		"joint_world",
+		Vector3.INF
+	) as Vector3
+	var hidden_lifecycle_expected_joint_world: Vector3 = _get_bone_world_transform(
+		skeleton,
+		hidden_lifecycle_probe_bone
+	).origin
+	var hidden_lifecycle_current_direction: Vector3 = hidden_lifecycle_digit_state.get(
+		"current_hinge_direction_world",
+		Vector3.ZERO
+	) as Vector3
+	var hidden_lifecycle_marker_direction := Vector3.ZERO
+	if hidden_lifecycle_marker != null:
+		hidden_lifecycle_marker_direction = (
+			hidden_lifecycle_marker.global_position - hidden_lifecycle_joint_world
+		).normalized()
+	_check(
+		not bool(hidden_lifecycle_state.get("visible", true)),
+		"hidden_lifecycle_sync_became_visible"
+	)
+	_check(
+		absf(
+			float(hidden_lifecycle_digit_state.get("angle_degrees", -999.0))
+			- hidden_lifecycle_probe_degrees
+		) <= 0.1,
+		"hidden_lifecycle_digit_angle_stale"
+	)
+	_check(
+		hidden_lifecycle_joint_world.distance_to(hidden_lifecycle_expected_joint_world)
+			<= DESCENDANT_MOVEMENT_EPSILON_METERS,
+		"hidden_lifecycle_joint_world_stale"
+	)
+	_check(
+		hidden_lifecycle_marker != null
+		and hidden_lifecycle_marker.global_position.distance_to(
+			hidden_lifecycle_marker_before
+		) > DESCENDANT_MOVEMENT_EPSILON_METERS,
+		"hidden_lifecycle_marker_did_not_follow_pose"
+	)
+	_check(
+		hidden_lifecycle_marker_direction.dot(hidden_lifecycle_current_direction)
+			>= DIRECTION_ALIGNMENT_MINIMUM,
+		"hidden_lifecycle_marker_direction_stale"
+	)
+	# Deliberately perturb the synchronized marker. If enabling Debug View rebuilds
+	# geometry, this sentinel will be erased even though the resulting pose matches.
+	if hidden_lifecycle_marker != null:
+		hidden_lifecycle_marker.global_position += DEBUG_VISIBILITY_SENTINEL_OFFSET
+	var hidden_lifecycle_nodes_before_toggle: Dictionary = _capture_debug_node_snapshot(
+		debug_root
+	)
+	var hidden_lifecycle_rotations_before_toggle: Dictionary = _capture_bone_rotations(
+		skeleton,
+		rules
+	)
+	rig.set_authoring_joint_range_debug_visible(true)
+	var hidden_lifecycle_nodes_after_toggle: Dictionary = _capture_debug_node_snapshot(debug_root)
+	var hidden_lifecycle_rotations_after_toggle: Dictionary = _capture_bone_rotations(
+		skeleton,
+		rules
+	)
+	var hidden_lifecycle_toggle_node_mismatches: PackedStringArray = (
+		_debug_node_snapshot_mismatches(
+			hidden_lifecycle_nodes_before_toggle,
+			hidden_lifecycle_nodes_after_toggle
+		)
+	)
+	var hidden_lifecycle_toggle_rotation_mismatches: PackedStringArray = (
+		_rotation_mismatches(
+			hidden_lifecycle_rotations_before_toggle,
+			hidden_lifecycle_rotations_after_toggle
+		)
+	)
+	_check(debug_root != null and debug_root.visible, "hidden_lifecycle_toggle_not_visible")
+	_check(
+		hidden_lifecycle_toggle_node_mismatches.is_empty(),
+		"hidden_lifecycle_toggle_recalculated_debug_nodes"
+	)
+	_check(
+		hidden_lifecycle_toggle_rotation_mismatches.is_empty(),
+		"hidden_lifecycle_toggle_changed_digit_pose"
+	)
+	if hidden_lifecycle_probe_index >= 0:
+		skeleton.set_bone_pose_rotation(
+			hidden_lifecycle_probe_index,
+			hidden_lifecycle_neutral_rotation.normalized()
+		)
+	rig.apply_authoring_digit_grip_now(false)
+
 	var after_rotations: Dictionary = _capture_bone_rotations(skeleton, rules)
 	var rotation_mismatches: PackedStringArray = _rotation_mismatches(before_rotations, after_rotations)
 	_check(rotation_mismatches.is_empty(), "debug_sync_changed_digit_pose")
@@ -583,6 +740,9 @@ func _run_verification() -> void:
 		"configured_hinge_probe_total_ms": configured_hinge_probe_elapsed_ms,
 		"configured_hinge_probe_ms_per_sync": configured_hinge_probe_elapsed_ms / maxf(float(configured_hinge_probe_count), 1.0),
 		"boundary_probe_count": boundary_probe_count,
+		"hidden_lifecycle_probe_degrees": hidden_lifecycle_probe_degrees,
+		"hidden_lifecycle_toggle_node_mismatches": hidden_lifecycle_toggle_node_mismatches,
+		"hidden_lifecycle_toggle_rotation_mismatches": hidden_lifecycle_toggle_rotation_mismatches,
 		"debug_root_child_count": enabled_child_count,
 		"rotation_mismatches": rotation_mismatches,
 		"disabled_node_mismatches": disabled_node_mismatches,
@@ -613,6 +773,20 @@ func _verify_thumb_proximal_penetration_policy() -> Dictionary:
 	)
 	_check(
 		absf(
+			PlayerFingerSurfaceGripSolverScript.THUMB_CLEARANCE_DEFAULT_MAX_DEGREES
+			- 130.0
+		) <= 0.0001,
+		"thumb_clearance_solver_cap_not_130_degrees"
+	)
+	_check(
+		absf(
+			PlayerFingerSurfaceGripSolverScript.DEFAULT_DIGIT_HINGE_LIMIT_DEGREES
+			- 130.0
+		) <= 0.0001,
+		"digit_hinge_solver_fallback_not_130_degrees"
+	)
+	_check(
+		absf(
 			PlayerFingerSurfaceGripSolverScript.THUMB_PROXIMAL_MAX_ALLOWED_OVERLAP_METERS
 			- 0.005
 		) <= 0.000000001,
@@ -629,6 +803,10 @@ func _verify_thumb_proximal_penetration_policy() -> Dictionary:
 		if thumb_snapshot.is_empty() or index_snapshot.is_empty():
 			continue
 		side_count += 1
+		_check(
+			absf(float(thumb_snapshot.get("thumb_clearance_max_degrees", -1.0)) - 130.0) <= 0.0001,
+			"thumb_clearance_authored_range_not_130_degrees_%s" % String(slot_id)
+		)
 		_check(
 			thumb_snapshot.get("section_target_overlaps_meters", []) == thumb_targets,
 			"thumb_section_targets_mismatch_%s" % String(slot_id)
@@ -763,6 +941,88 @@ func _verify_thumb_proximal_penetration_policy() -> Dictionary:
 		"summary_probe_count": summary_probe_count,
 	}
 
+
+func _verify_committed_grasp_invalidation_transaction(
+	presenter: RefCounted,
+	skeleton: Skeleton3D,
+	baseline_rotations: Dictionary
+) -> void:
+	var slot_id := PlayerDigitHingeRulesScript.SLOT_RIGHT
+	var execution_path_id := &"right_primary"
+	var slot_rules: Array[Dictionary] = []
+	for rule: Dictionary in PlayerDigitHingeRulesScript.get_all_rules():
+		if (rule.get("slot_id", StringName()) as StringName) == slot_id:
+			slot_rules.append(rule)
+	var committed_rotations: Dictionary = {}
+	var open_rotations: Dictionary = {}
+	var committed_delta := Quaternion(Vector3(0.0, 0.0, 1.0), deg_to_rad(12.0))
+	for bone_name: StringName in PlayerDigitHingeRulesScript.get_finger_bone_names(slot_id):
+		var baseline: Quaternion = baseline_rotations.get(
+			bone_name,
+			Quaternion.IDENTITY
+		) as Quaternion
+		committed_rotations[bone_name] = (baseline * committed_delta).normalized()
+		open_rotations[bone_name] = baseline.normalized()
+
+	# Deliberately omit the ancillary exact-zero packet. A safe committed pose is
+	# independently sufficient to survive invalidation and restore after a rejected
+	# replacement attempt.
+	var committed_state := {
+		"valid": true,
+		"status": &"solved",
+		"context_key": "digit_debug_transaction_context",
+		"rotations": committed_rotations.duplicate(true),
+	}
+	presenter.set("surface_grasp_state_lookup", {
+		execution_path_id: committed_state,
+	})
+	presenter.set("active_grip_execution_path_lookup", {
+		slot_id: execution_path_id,
+	})
+	presenter.call("_apply_surface_grasp_rotations", skeleton, slot_id, committed_rotations)
+	presenter.call("invalidate_cached_surface_grasp", slot_id)
+	var invalidated_lookup: Dictionary = presenter.get("surface_grasp_state_lookup") as Dictionary
+	var invalidated_state: Dictionary = invalidated_lookup.get(
+		execution_path_id,
+		{}
+	) as Dictionary
+	_check(bool(invalidated_state.get("valid", false)), "surface_grasp_invalidation_revoked_validity")
+	_check(
+		String(invalidated_state.get("context_key", "")) == "digit_debug_transaction_context",
+		"surface_grasp_invalidation_revoked_context"
+	)
+	_check(
+		(invalidated_state.get("rotations", {}) as Dictionary).size() == 15,
+		"surface_grasp_invalidation_revoked_rotations"
+	)
+	_check(
+		bool(invalidated_state.get("force_surface_resolve", false)),
+		"surface_grasp_invalidation_did_not_request_replacement"
+	)
+
+	presenter.call("_apply_surface_grasp_rotations", skeleton, slot_id, open_rotations)
+	var opened_rotations: Dictionary = _capture_bone_rotations(
+		skeleton,
+		slot_rules
+	)
+	_check(
+		not _rotation_mismatches(committed_rotations, opened_rotations).is_empty(),
+		"surface_grasp_transaction_open_probe_did_not_move"
+	)
+	_check(
+		bool(presenter.call("reapply_committed_surface_grasp", skeleton, slot_id)),
+		"surface_grasp_transaction_restore_rejected"
+	)
+	var restored_rotations: Dictionary = _capture_bone_rotations(
+		skeleton,
+		slot_rules
+	)
+	_check(
+		_rotation_mismatches(committed_rotations, restored_rotations).is_empty(),
+		"surface_grasp_transaction_restore_mismatch"
+	)
+	presenter.call("_apply_surface_grasp_rotations", skeleton, slot_id, open_rotations)
+
 func _find_surface_digit_rule(side_rules: Dictionary, digit_id: StringName) -> Dictionary:
 	for digit_variant: Variant in side_rules.get("digits", []):
 		var digit_rule: Dictionary = digit_variant as Dictionary
@@ -860,7 +1120,7 @@ func _expected_open_degrees(
 ) -> float:
 	if digit_id != &"thumb" or section_index != 1:
 		return 0.0
-	return 70.0 if slot_id == &"hand_right" else -70.0
+	return 130.0 if slot_id == &"hand_right" else -130.0
 
 func _expected_closed_degrees(
 	slot_id: StringName,
@@ -869,11 +1129,11 @@ func _expected_closed_degrees(
 ) -> float:
 	if slot_id == &"hand_right":
 		if digit_id == &"thumb":
-			return -30.0 if section_index == 1 else -90.0
-		return 90.0
+			return -30.0 if section_index == 1 else -130.0
+		return 130.0
 	if digit_id == &"thumb":
-		return 30.0 if section_index == 1 else 90.0
-	return -90.0
+		return 30.0 if section_index == 1 else 130.0
+	return -130.0
 
 func _expected_local_direction_for_degrees(angle_degrees: float) -> Vector3:
 	var angle_radians: float = deg_to_rad(angle_degrees)

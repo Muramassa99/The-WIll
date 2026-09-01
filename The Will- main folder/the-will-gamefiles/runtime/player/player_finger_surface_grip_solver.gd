@@ -12,7 +12,7 @@ const PlayerFingerCapsuleSurfaceQueryScript = preload(
 ## serial one-axis hinges per digit, and returns local pose rotations for the caller
 ## to cache/apply at an explicit lifecycle boundary.
 
-const SOLVER_REVISION: StringName = &"serial_hinge_capsule_surface_v7"
+const SOLVER_REVISION: StringName = &"serial_hinge_capsule_surface_v8"
 const MAX_ALLOWED_OVERLAP_METERS := 0.0005
 const THUMB_PROXIMAL_CONTACT_TARGET_REQUIRED := false
 const THUMB_PROXIMAL_MAX_ALLOWED_OVERLAP_METERS := 0.005
@@ -31,7 +31,8 @@ const OVERLAP_NUMERIC_EPSILON_METERS := 0.00000005
 const SECTION_TARGET_TOLERANCE_METERS := 0.00008
 const HARD_CAP_TARGET_GUARD_METERS := 0.00000025
 const THUMB_CLEARANCE_DEFAULT_STEP_DEGREES := 20.0
-const THUMB_CLEARANCE_DEFAULT_MAX_DEGREES := 90.0
+const THUMB_CLEARANCE_DEFAULT_MAX_DEGREES := 130.0
+const DEFAULT_DIGIT_HINGE_LIMIT_DEGREES := 130.0
 const COLLINEAR_SECTION_MAX_ANGLE_DEGREES := 0.25
 const RAY_EPSILON := 0.0000001
 const ANGLE_EPSILON := 0.000001
@@ -255,6 +256,7 @@ func solve_prepared(
 		"inside_ray_count": 0,
 	}
 	var rotations: Dictionary = {}
+	var zero_rotations: Dictionary = {}
 	var digit_results: Dictionary = {}
 	var baseline_digest: Array = []
 	var supplied_base_pose_rotations: Dictionary = options.get(
@@ -297,6 +299,12 @@ func solve_prepared(
 		var digit_rotations: Dictionary = digit_result.get("rotations", {}) as Dictionary
 		for bone_name_variant: Variant in digit_rotations.keys():
 			rotations[bone_name_variant] = digit_rotations[bone_name_variant]
+		var digit_zero_rotations: Dictionary = digit_result.get(
+			"zero_rotations",
+			{}
+		) as Dictionary
+		for bone_name_variant: Variant in digit_zero_rotations.keys():
+			zero_rotations[bone_name_variant] = digit_zero_rotations[bone_name_variant]
 		var digit_diagnostics: Dictionary = digit_result.get("diagnostics", {}) as Dictionary
 		if not bool(digit_diagnostics.get("overlap_limit_respected", false)):
 			diagnostics["unsafe_digit_count"] = int(
@@ -344,6 +352,7 @@ func solve_prepared(
 	))
 	var expected_rotation_count: int = digits.size() * 3
 	result["rotations"] = rotations
+	result["zero_rotations"] = zero_rotations
 	result["valid"] = expected_rotation_count == 15 and rotations.size() == expected_rotation_count
 	result["all_sections_contacted"] = int(diagnostics.get("contacted_section_count", 0)) == expected_rotation_count
 	result["all_stages_accepted"] = int(diagnostics.get("accepted_section_count", 0)) == expected_rotation_count
@@ -482,6 +491,7 @@ func _solve_digit(
 		return {
 			"solved": false,
 			"rotations": _build_output_rotations(snapshot, solved_angles),
+			"zero_rotations": _build_output_zero_rotations(snapshot),
 			"diagnostics": diagnostic,
 		}
 	var maximum_ray_distance: float = clampf(float(options.get(
@@ -566,6 +576,7 @@ func _solve_digit(
 		return {
 			"solved": false,
 			"rotations": _build_output_rotations(snapshot, open_angles),
+			"zero_rotations": _build_output_zero_rotations(snapshot),
 			"diagnostics": diagnostic,
 		}
 	var radii: Array = snapshot.get("capsule_radii_m", [0.0, 0.0, 0.0]) as Array
@@ -854,6 +865,7 @@ func _solve_digit(
 	return {
 		"solved": solved,
 		"rotations": _build_output_rotations(snapshot, solved_angles),
+		"zero_rotations": _build_output_zero_rotations(snapshot),
 		"diagnostics": diagnostic,
 	}
 
@@ -887,6 +899,7 @@ func _solve_digit_motion_sweep_fallback(
 		return {
 			"solved": false,
 			"rotations": _build_output_rotations(snapshot, open_angles),
+			"zero_rotations": _build_output_zero_rotations(snapshot),
 			"diagnostics": diagnostic,
 		}
 	var seed_fraction: float = float(contact_resolution.get("seed_fraction", 0.0))
@@ -939,6 +952,7 @@ func _solve_digit_motion_sweep_fallback(
 	return {
 		"solved": solved,
 		"rotations": _build_output_rotations(snapshot, solved_angles),
+		"zero_rotations": _build_output_zero_rotations(snapshot),
 		"diagnostics": diagnostic,
 	}
 
@@ -3474,8 +3488,16 @@ func _capture_digit_snapshot(
 			Quaternion.IDENTITY,
 		]) as Array).duplicate(),
 		"hinge_axes_local": (digit_rules.get("hinge_axes_local", [Vector3.FORWARD, Vector3.FORWARD, Vector3.FORWARD]) as Array).duplicate(),
-		"min_angles_rad": (digit_rules.get("min_angles_rad", [-PI * 0.5, -PI * 0.5, -PI * 0.5]) as Array).duplicate(),
-		"max_angles_rad": (digit_rules.get("max_angles_rad", [PI * 0.5, PI * 0.5, PI * 0.5]) as Array).duplicate(),
+		"min_angles_rad": (digit_rules.get("min_angles_rad", [
+			-deg_to_rad(DEFAULT_DIGIT_HINGE_LIMIT_DEGREES),
+			-deg_to_rad(DEFAULT_DIGIT_HINGE_LIMIT_DEGREES),
+			-deg_to_rad(DEFAULT_DIGIT_HINGE_LIMIT_DEGREES),
+		]) as Array).duplicate(),
+		"max_angles_rad": (digit_rules.get("max_angles_rad", [
+			deg_to_rad(DEFAULT_DIGIT_HINGE_LIMIT_DEGREES),
+			deg_to_rad(DEFAULT_DIGIT_HINGE_LIMIT_DEGREES),
+			deg_to_rad(DEFAULT_DIGIT_HINGE_LIMIT_DEGREES),
+		]) as Array).duplicate(),
 		"preferred_angles_rad": (digit_rules.get("preferred_angles_rad", [0.0, 0.0, 0.0]) as Array).duplicate(),
 		"capsule_radii_m": (digit_rules.get("capsule_radii_m", [0.006, 0.005, 0.004]) as Array).duplicate(),
 		"section_target_overlaps_meters": (digit_rules.get(
@@ -3698,7 +3720,7 @@ func _find_thumb_strict_clearance_pose(
 	var maximum_degrees: float = clampf(float(snapshot.get(
 		"thumb_clearance_max_degrees",
 		THUMB_CLEARANCE_DEFAULT_MAX_DEGREES
-	)), step_degrees, 90.0)
+	)), step_degrees, THUMB_CLEARANCE_DEFAULT_MAX_DEGREES)
 	var result := {
 		"attempted": true,
 		"clearance_established": false,
@@ -3877,6 +3899,10 @@ func _build_output_rotations(snapshot: Dictionary, angles: Array[float]) -> Dict
 		var hinge_rotation := Quaternion(axis.normalized(), angles[joint_index])
 		rotations[StringName(bone_names[joint_index])] = (base_rotation * neutral_rotation * hinge_rotation).normalized()
 	return rotations
+
+
+func _build_output_zero_rotations(snapshot: Dictionary) -> Dictionary:
+	return _build_output_rotations(snapshot, [0.0, 0.0, 0.0])
 
 
 func _resolve_open_angles(snapshot: Dictionary) -> Array[float]:
@@ -4358,6 +4384,7 @@ func _make_empty_result(slot_id: StringName) -> Dictionary:
 	return {
 		"valid": false,
 		"rotations": {},
+		"zero_rotations": {},
 		"diagnostics": {},
 		"surface_signature": "",
 		"cache_key": "",

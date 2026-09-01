@@ -2498,11 +2498,10 @@ func _resolve_slot_contact_hand_basis_world(
 	if held_item == null:
 		return Basis.IDENTITY
 	if (
-		slot_id == &"hand_right"
-		and finger_guide_node != null
+		finger_guide_node != null
 		and StringName(finger_guide_node.name) == &"SecondaryGripGuide"
 	):
-		return _resolve_right_support_contact_hand_basis_world(
+		return _resolve_support_contact_hand_basis_world(
 			humanoid_rig,
 			held_item,
 			slot_id,
@@ -2542,7 +2541,7 @@ func _resolve_standard_slot_contact_hand_basis_world(
 	)
 
 
-func _resolve_right_support_contact_hand_basis_world(
+func _resolve_support_contact_hand_basis_world(
 	humanoid_rig: Node3D,
 	held_item: Node3D,
 	slot_id: StringName,

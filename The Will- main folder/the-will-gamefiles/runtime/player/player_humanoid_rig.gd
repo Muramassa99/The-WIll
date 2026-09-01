@@ -146,6 +146,8 @@ const AUTHORING_GRIP_RELATIONSHIP_CONTACT_SETTLE_PASSES: int = 3
 const AUTHORING_GRIP_RELATIONSHIP_PRECISE_SETTLE_PASSES: int = 6
 const AUTHORING_GRIP_RELATIONSHIP_PRECISE_SOLVE_ITERATIONS: int = 24
 const AUTHORING_GRIP_RELATIONSHIP_ALIGNMENT_EPSILON_METERS: float = 0.0005
+const AUTHORING_GRIP_RELATIONSHIP_CONTACT_AXIS_EPSILON_DEGREES: float = 0.5
+const AUTHORING_SHOULDER_ENDPOINT_RESEAT_EPSILON_METERS: float = 0.00005
 const AUTHORING_ARM_SPLINE_CONTACT_AXIS_BIAS: float = 0.0
 const AUTHORING_LIMB_TWIST_FOREARM_SHARE: float = 0.78
 const AUTHORING_LIMB_TWIST_UPPERARM_SHARE: float = 0.22
@@ -293,6 +295,8 @@ var grip_solve_root: Node3D = null
 var runtime_bone_debug_root: Node3D = null
 var authoring_joint_range_debug_root: Node3D = null
 var authoring_joint_range_debug_state: Dictionary = {}
+var authoring_joint_range_debug_pose_snapshot: Dictionary = {}
+var authoring_joint_range_debug_config_signature: int = 0
 var runtime_bone_debug_state: Dictionary = {}
 var dominant_grip_slot_id: StringName = StringName()
 var locomotion_grounded: bool = true
@@ -367,7 +371,7 @@ func _process(delta: float) -> void:
 	_refresh_runtime_body_restriction_sync_modifier_state()
 	_refresh_runtime_bone_debug_modifier_state()
 	if _uses_direct_authoring_solver_mode() and not authoring_preview_mode_enabled:
-		_sync_authoring_joint_range_debug()
+		_sync_authoring_joint_range_debug_if_pose_changed()
 		return
 	if upper_body_authoring_auto_apply_enabled:
 		_apply_upper_body_authoring_pose()
@@ -378,7 +382,7 @@ func _process(delta: float) -> void:
 	_refresh_finger_grip_ik_influences()
 	if authoring_preview_mode_enabled:
 		_advance_skeleton_modifiers_now(delta)
-	_sync_authoring_joint_range_debug()
+	_sync_authoring_joint_range_debug_if_pose_changed()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not _is_runtime_debug_visual_toggle_event(event):
@@ -579,6 +583,7 @@ func resolve_hand_surface_seat_anatomy_state(slot_id: StringName) -> Dictionary:
 		invalid["status"] = &"hand_surface_seat_skin_calibration_missing"
 		return invalid
 	var ordinary_proximal_capsules: Array[Dictionary] = []
+	var authorized_closing_directions: Dictionary = {}
 	for digit_id: StringName in [&"index", &"middle", &"ring", &"pinky"]:
 		var chain_rules: Array[Dictionary] = (
 			PlayerDigitHingeRulesScript.get_chain_rules(slot_id, digit_id)
@@ -620,6 +625,56 @@ func resolve_hand_surface_seat_anatomy_state(slot_id: StringName) -> Dictionary:
 		):
 			invalid["status"] = &"hand_surface_seat_proximal_anatomy_degenerate"
 			return invalid
+		if digit_id == &"index" or digit_id == &"pinky":
+			var hinge_axis_local: Vector3 = proximal_rule.get(
+				"hinge_axis_local",
+				Vector3.ZERO
+			) as Vector3
+			var hinge_axis_origin_id: StringName = proximal_rule.get(
+				"hinge_axis_origin_id",
+				StringName()
+			) as StringName
+			var bone_root_origin_id: StringName = proximal_rule.get(
+				"bone_root_origin_id",
+				StringName()
+			) as StringName
+			var motion_direction_sign: float = float(proximal_rule.get(
+				"motion_direction_sign",
+				0.0
+			))
+			if (
+				not hinge_axis_local.is_finite()
+				or hinge_axis_local.length_squared() <= 0.000001
+				or hinge_axis_origin_id != start_bone
+				or bone_root_origin_id != CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+				or not PlayerDigitHingeRulesScript.rule_has_valid_origin_chain(
+					proximal_rule,
+					skeleton
+				)
+				or not is_finite(motion_direction_sign)
+				or is_zero_approx(motion_direction_sign)
+			):
+				invalid["status"] = &"hand_surface_seat_closing_authority_missing"
+				return invalid
+			var start_world_basis: Basis = (
+				skeleton.global_basis
+				* skeleton.get_bone_global_pose(start_index).basis
+			).orthonormalized()
+			var signed_hinge_axis_world: Vector3 = (
+				start_world_basis * hinge_axis_local.normalized()
+			) * signf(motion_direction_sign)
+			var authorized_closing_direction_world: Vector3 = (
+				signed_hinge_axis_world.cross(end_world - start_world)
+			)
+			if (
+				not authorized_closing_direction_world.is_finite()
+				or authorized_closing_direction_world.length_squared() <= 0.000001
+			):
+				invalid["status"] = &"hand_surface_seat_closing_authority_degenerate"
+				return invalid
+			authorized_closing_directions[digit_id] = (
+				authorized_closing_direction_world.normalized()
+			)
 		ordinary_proximal_capsules.append({
 			"digit_id": digit_id,
 			"section_index": 0,
@@ -632,6 +687,12 @@ func resolve_hand_surface_seat_anatomy_state(slot_id: StringName) -> Dictionary:
 			"radius_meters": radius_meters,
 			"radius_source_id": PlayerDigitHingeRulesScript.get_revision(),
 		})
+	if (
+		not authorized_closing_directions.has(&"index")
+		or not authorized_closing_directions.has(&"pinky")
+	):
+		invalid["status"] = &"hand_surface_seat_closing_authority_missing"
+		return invalid
 	return {
 		"valid": true,
 		"status": &"hand_surface_seat_anatomy_ready",
@@ -644,6 +705,38 @@ func resolve_hand_surface_seat_anatomy_state(slot_id: StringName) -> Dictionary:
 		"pinky_point_world": pinky_world,
 		"pinky_point_world_origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
 		"pinky_point_source_origin_id": pinky_bone,
+		"index_authorized_closing_direction_world": (
+			authorized_closing_directions.get(&"index", Vector3.ZERO) as Vector3
+		),
+		"index_authorized_closing_direction_world_origin_id": (
+			CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+		),
+		"index_authorized_closing_direction_source_origin_id": index_bone,
+		"index_authorized_closing_direction_segment_end_source_origin_id": (
+			PlayerDigitHingeRulesScript.get_chain_rules(slot_id, &"index")[0].get(
+				"next_bone",
+				StringName()
+			)
+		),
+		"index_authorized_closing_direction_rule_revision": (
+			PlayerDigitHingeRulesScript.get_revision()
+		),
+		"pinky_authorized_closing_direction_world": (
+			authorized_closing_directions.get(&"pinky", Vector3.ZERO) as Vector3
+		),
+		"pinky_authorized_closing_direction_world_origin_id": (
+			CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+		),
+		"pinky_authorized_closing_direction_source_origin_id": pinky_bone,
+		"pinky_authorized_closing_direction_segment_end_source_origin_id": (
+			PlayerDigitHingeRulesScript.get_chain_rules(slot_id, &"pinky")[0].get(
+				"next_bone",
+				StringName()
+			)
+		),
+		"pinky_authorized_closing_direction_rule_revision": (
+			PlayerDigitHingeRulesScript.get_revision()
+		),
 		"index_skin_to_bone_radius_meters": index_skin_radius_meters,
 		"index_skin_to_bone_radius_source_id": PlayerDigitHingeRulesScript.get_revision(),
 		"pinky_skin_to_bone_radius_meters": pinky_skin_radius_meters,
@@ -1492,7 +1585,7 @@ func apply_authoring_preview_frame_now(allow_exact_surface_solve: bool = false) 
 	if skeleton != null:
 		_advance_skeleton_modifiers_now(1.0 / 60.0)
 		skeleton.force_update_all_bone_transforms()
-	_sync_authoring_joint_range_debug()
+	_sync_authoring_joint_range_debug_if_pose_changed()
 
 func apply_authoring_preview_drag_frame_now(allow_exact_surface_solve: bool = false) -> void:
 	_apply_upper_body_authoring_pose()
@@ -1510,6 +1603,7 @@ func apply_authoring_preview_drag_frame_now(allow_exact_surface_solve: bool = fa
 	if skeleton != null:
 		_advance_skeleton_modifiers_now(1.0 / 60.0)
 		skeleton.force_update_all_bone_transforms()
+	_sync_authoring_joint_range_debug_if_pose_changed()
 
 func apply_runtime_combat_authoring_frame_now() -> void:
 	process_combat_authoring_modifier_frame(1.0 / 60.0)
@@ -1570,6 +1664,8 @@ func reset_authoring_preview_baseline_pose(baseline_animation_name: StringName =
 
 func set_authoring_preview_mode_enabled(enabled: bool, baseline_animation_name: StringName = StringName()) -> void:
 	authoring_preview_mode_enabled = enabled
+	if not authoring_preview_mode_enabled:
+		_clear_authoring_joint_range_debug_pose_snapshot()
 	_set_skeleton_modifier_callback_mode_for_authoring(authoring_preview_mode_enabled)
 	_refresh_combat_authoring_modifier_state()
 	_refresh_runtime_solved_replay_modifier_state()
@@ -1673,6 +1769,13 @@ func _apply_authoring_direct_arm_reach_pose(
 			RIGHT_FOREARM_BONE,
 			RIGHT_HAND_BONE
 		)
+		_enforce_authoring_upperarm_swing_authority(
+			&"hand_right",
+			RIGHT_CLAVICLE_BONE,
+			RIGHT_UPPERARM_BONE,
+			RIGHT_FOREARM_BONE,
+			RIGHT_HAND_BONE
+		)
 		_enforce_authoring_elbow_max_angle(RIGHT_UPPERARM_BONE, RIGHT_FOREARM_BONE, RIGHT_HAND_BONE)
 	if is_arm_guidance_active(&"hand_left") and left_hand_ik_target != null:
 		var left_hand_target_world: Vector3 = left_hand_ik_target.global_position
@@ -1709,6 +1812,13 @@ func _apply_authoring_direct_arm_reach_pose(
 		)
 		_apply_authoring_manual_upperarm_roll_pose(
 			&"hand_left",
+			LEFT_UPPERARM_BONE,
+			LEFT_FOREARM_BONE,
+			LEFT_HAND_BONE
+		)
+		_enforce_authoring_upperarm_swing_authority(
+			&"hand_left",
+			LEFT_CLAVICLE_BONE,
 			LEFT_UPPERARM_BONE,
 			LEFT_FOREARM_BONE,
 			LEFT_HAND_BONE
@@ -1803,11 +1913,13 @@ func _sync_authoring_joint_range_debug() -> void:
 	}
 	var debug_root: Node3D = _ensure_authoring_joint_range_debug_root()
 	if debug_root == null:
+		_clear_authoring_joint_range_debug_pose_snapshot()
 		return
 	var debug_active: bool = authoring_preview_mode_enabled and skeleton != null
 	var debug_visible: bool = debug_active and show_authoring_joint_range_debug
 	debug_root.visible = debug_visible
 	if not debug_active:
+		_clear_authoring_joint_range_debug_pose_snapshot()
 		return
 	debug_root.global_transform = Transform3D.IDENTITY
 	var joints: Dictionary = {}
@@ -1927,6 +2039,120 @@ func _sync_authoring_joint_range_debug() -> void:
 		"twist_bones": twist_bones,
 		"digit_bones": digit_bones,
 	}
+	_capture_authoring_joint_range_debug_pose_snapshot()
+
+
+func _sync_authoring_joint_range_debug_if_pose_changed() -> void:
+	if _authoring_joint_range_debug_pose_matches_snapshot():
+		return
+	_sync_authoring_joint_range_debug()
+
+
+func _authoring_joint_range_debug_pose_matches_snapshot() -> bool:
+	if (
+		skeleton == null
+		or not authoring_preview_mode_enabled
+		or authoring_joint_range_debug_pose_snapshot.is_empty()
+		or authoring_joint_range_debug_config_signature
+			!= _resolve_authoring_joint_range_debug_config_signature()
+	):
+		return false
+	var existing_bone_count := 0
+	for bone_name: StringName in RUNTIME_UPPER_BODY_POSE_BONES:
+		var bone_index: int = skeleton.find_bone(String(bone_name))
+		if bone_index < 0:
+			continue
+		existing_bone_count += 1
+		var cached_pose_variant: Variant = (
+			authoring_joint_range_debug_pose_snapshot.get(bone_name, null)
+		)
+		if not cached_pose_variant is Transform3D:
+			return false
+		var current_pose_world: Transform3D = (
+			skeleton.global_transform * skeleton.get_bone_global_pose(bone_index)
+		)
+		if not current_pose_world.is_equal_approx(cached_pose_variant as Transform3D):
+			return false
+	return existing_bone_count == authoring_joint_range_debug_pose_snapshot.size()
+
+
+func _capture_authoring_joint_range_debug_pose_snapshot() -> void:
+	authoring_joint_range_debug_pose_snapshot.clear()
+	if skeleton == null or not authoring_preview_mode_enabled:
+		authoring_joint_range_debug_config_signature = 0
+		return
+	for bone_name: StringName in RUNTIME_UPPER_BODY_POSE_BONES:
+		var bone_index: int = skeleton.find_bone(String(bone_name))
+		if bone_index < 0:
+			continue
+		authoring_joint_range_debug_pose_snapshot[bone_name] = (
+			skeleton.global_transform * skeleton.get_bone_global_pose(bone_index)
+		)
+	authoring_joint_range_debug_config_signature = (
+		_resolve_authoring_joint_range_debug_config_signature()
+	)
+
+
+func _clear_authoring_joint_range_debug_pose_snapshot() -> void:
+	authoring_joint_range_debug_pose_snapshot.clear()
+	authoring_joint_range_debug_config_signature = 0
+
+
+func _resolve_authoring_joint_range_debug_config_signature() -> int:
+	var right_digit_zero_packet: Dictionary = (
+		_resolve_committed_authoring_digit_zero_packet(&"hand_right")
+	)
+	var left_digit_zero_packet: Dictionary = (
+		_resolve_committed_authoring_digit_zero_packet(&"hand_left")
+	)
+	return hash([
+		show_authoring_joint_range_labels,
+		authoring_shoulder_min_plane_angle_degrees,
+		authoring_shoulder_max_plane_angle_degrees,
+		authoring_elbow_min_plane_angle_degrees,
+		authoring_elbow_max_plane_angle_degrees,
+		PlayerDigitHingeRulesScript.get_revision(),
+		hash(authoring_limb_twist_neutral_rotation_lookup),
+		hash(authoring_digit_hinge_neutral_rotation_lookup),
+		String(right_digit_zero_packet.get("context_key", "")),
+		String(right_digit_zero_packet.get("packet_signature", "")),
+		String(left_digit_zero_packet.get("context_key", "")),
+		String(left_digit_zero_packet.get("packet_signature", "")),
+	])
+
+
+func _resolve_committed_authoring_digit_zero_packet(
+	slot_id: StringName
+) -> Dictionary:
+	if not finger_grip_presenter.has_method(
+		"get_committed_surface_grasp_zero_packet"
+	):
+		return {}
+	var packet: Dictionary = finger_grip_presenter.call(
+		"get_committed_surface_grasp_zero_packet",
+		slot_id
+	) as Dictionary
+	if not bool(packet.get("valid", false)):
+		return {}
+	var expected_bones: Array[StringName] = (
+		PlayerDigitHingeRulesScript.get_finger_bone_names(slot_id)
+	)
+	var zero_rotations: Dictionary = packet.get("zero_rotations", {}) as Dictionary
+	if expected_bones.size() != 15 or zero_rotations.size() != expected_bones.size():
+		return {}
+	for bone_name: StringName in expected_bones:
+		var zero_rotation_variant: Variant = zero_rotations.get(bone_name, null)
+		if not zero_rotation_variant is Quaternion:
+			return {}
+		var zero_rotation: Quaternion = zero_rotation_variant as Quaternion
+		if (
+			not is_finite(zero_rotation.x)
+			or not is_finite(zero_rotation.y)
+			or not is_finite(zero_rotation.z)
+			or not is_finite(zero_rotation.w)
+		):
+			return {}
+	return packet
 
 func _ensure_authoring_joint_range_debug_root() -> Node3D:
 	if authoring_joint_range_debug_root != null and is_instance_valid(authoring_joint_range_debug_root):
@@ -2180,6 +2406,10 @@ func _sync_authoring_digit_hinge_range_chain(
 ) -> int:
 	if authoring_digit_hinge_neutral_rotation_lookup.is_empty():
 		_cache_authoring_digit_hinge_neutral_pose()
+	var exact_zero_packets: Dictionary = {
+		&"hand_right": _resolve_committed_authoring_digit_zero_packet(&"hand_right"),
+		&"hand_left": _resolve_committed_authoring_digit_zero_packet(&"hand_left"),
+	}
 	var visual_count: int = 0
 	for rule: Dictionary in PlayerDigitHingeRulesScript.get_all_rules():
 		var slot_id: StringName = rule.get("slot_id", StringName()) as StringName
@@ -2193,7 +2423,8 @@ func _sync_authoring_digit_hinge_range_chain(
 			"%s%s%02dDigitRange" % [side_name, String(digit_id).capitalize(), section_index],
 			"%s %s %d" % [side_label, String(digit_id), section_index],
 			rule,
-			_resolve_authoring_digit_range_color(slot_id, digit_id, section_index)
+			_resolve_authoring_digit_range_color(slot_id, digit_id, section_index),
+			exact_zero_packets.get(slot_id, {}) as Dictionary
 		)
 		if bool(visual_state.get("visible", false)):
 			visual_count += 1
@@ -2205,7 +2436,8 @@ func _sync_authoring_digit_hinge_range_visual(
 	visual_name: String,
 	label_text: String,
 	rule: Dictionary,
-	base_color: Color
+	base_color: Color,
+	exact_zero_packet: Dictionary = {}
 ) -> Dictionary:
 	var visual_root: Node3D = _ensure_named_node3d(debug_root, visual_name)
 	var slot_id: StringName = rule.get("slot_id", StringName()) as StringName
@@ -2214,14 +2446,31 @@ func _sync_authoring_digit_hinge_range_visual(
 	var digit_id: StringName = rule.get("digit", StringName()) as StringName
 	var section_index: int = int(rule.get("section", 0))
 	var open_angle_degrees: float = float(rule.get("open_degrees", 0.0))
-	var closed_angle_degrees: float = float(rule.get("closed_degrees", 90.0))
+	var closed_angle_degrees: float = float(rule.get("closed_degrees", 130.0))
 	var min_angle_degrees: float = float(rule.get("min_degrees", 0.0))
-	var max_angle_degrees: float = float(rule.get("max_degrees", 90.0))
+	var max_angle_degrees: float = float(rule.get("max_degrees", 130.0))
 	var hinge_axis_local: Vector3 = rule.get("hinge_axis_local", Vector3.FORWARD) as Vector3
 	var hinge_axis_origin_id: StringName = rule.get("hinge_axis_origin_id", StringName()) as StringName
 	var zero_direction_local: Vector3 = rule.get("zero_direction_local", Vector3.UP) as Vector3
 	var zero_direction_origin_id: StringName = rule.get("zero_direction_origin_id", StringName()) as StringName
 	var bone_root_origin_id: StringName = rule.get("bone_root_origin_id", StringName()) as StringName
+	var exact_zero_rotations: Dictionary = exact_zero_packet.get(
+		"zero_rotations",
+		{}
+	) as Dictionary
+	var exact_zero_rotation_variant: Variant = exact_zero_rotations.get(
+		bone_name,
+		null
+	)
+	var uses_exact_solver_zero: bool = (
+		bool(exact_zero_packet.get("valid", false))
+		and exact_zero_rotation_variant is Quaternion
+	)
+	var reference_pose: String = (
+		"committed_exact_surface_solver_zero"
+		if uses_exact_solver_zero
+		else "authoring_baseline"
+	)
 	var result := {
 		"visible": false,
 		"bone": String(bone_name),
@@ -2239,6 +2488,19 @@ func _sync_authoring_digit_hinge_range_visual(
 		"zero_direction_local": zero_direction_local,
 		"zero_direction_origin_id": zero_direction_origin_id,
 		"bone_root_origin_id": bone_root_origin_id,
+		"reference_pose": reference_pose,
+		"reference_context_key": String(exact_zero_packet.get(
+			"context_key",
+			""
+		)) if uses_exact_solver_zero else "",
+		"reference_packet_signature": String(exact_zero_packet.get(
+			"packet_signature",
+			""
+		)) if uses_exact_solver_zero else "",
+		"reference_execution_path_id": StringName(exact_zero_packet.get(
+			"grip_execution_path_id",
+			StringName()
+		)) if uses_exact_solver_zero else StringName(),
 		"state": "missing",
 	}
 	var bone_index: int = skeleton.find_bone(String(bone_name)) if skeleton != null else -1
@@ -2257,11 +2519,15 @@ func _sync_authoring_digit_hinge_range_visual(
 	hinge_axis_local = hinge_axis_local.normalized()
 	zero_direction_local = zero_direction_local.normalized()
 	var neutral_local_rotation: Quaternion = (
-		authoring_digit_hinge_neutral_rotation_lookup.get(
-			bone_name,
-			skeleton.get_bone_pose_rotation(bone_index)
-		) as Quaternion
-	).normalized()
+		(exact_zero_rotation_variant as Quaternion).normalized()
+		if uses_exact_solver_zero
+		else (
+			authoring_digit_hinge_neutral_rotation_lookup.get(
+				bone_name,
+				skeleton.get_bone_pose_rotation(bone_index)
+			) as Quaternion
+		).normalized()
+	)
 	var parent_pose: Transform3D = skeleton.get_bone_global_pose(parent_index)
 	var neutral_skeleton_basis: Basis = (
 		parent_pose.basis * Basis(neutral_local_rotation)
@@ -2364,7 +2630,7 @@ func _sync_authoring_digit_hinge_range_visual(
 	result["visible"] = true
 	result["angle_degrees"] = current_angle_degrees
 	result["angle_delta_degrees"] = current_angle_degrees
-	result["reference_pose"] = "authoring_baseline"
+	result["reference_pose"] = reference_pose
 	result["hinge_axis_local"] = hinge_axis_local
 	result["hinge_axis_origin_id"] = hinge_axis_origin_id
 	result["zero_direction_local"] = zero_direction_local
@@ -3111,6 +3377,7 @@ func _record_authoring_limb_twist_state(
 	}
 
 func _cache_authoring_limb_twist_neutral_pose() -> void:
+	_clear_authoring_joint_range_debug_pose_snapshot()
 	authoring_limb_twist_neutral_rotation_lookup.clear()
 	for twist_bone in RIGHT_FOREARM_TWIST_BONES:
 		_cache_authoring_limb_twist_neutral_bone(twist_bone)
@@ -3128,6 +3395,7 @@ func _cache_authoring_limb_twist_neutral_bone(twist_bone: StringName) -> void:
 	authoring_limb_twist_neutral_rotation_lookup[twist_bone] = skeleton.get_bone_pose_rotation(twist_index).normalized()
 
 func _cache_authoring_digit_hinge_neutral_pose() -> void:
+	_clear_authoring_joint_range_debug_pose_snapshot()
 	authoring_digit_hinge_neutral_rotation_lookup.clear()
 	if skeleton == null:
 		return
@@ -3408,18 +3676,17 @@ func _apply_authoring_arm_spline_preference(
 	upperarm_bone: StringName,
 	forearm_bone: StringName,
 	hand_bone: StringName,
-	hand_anchor: Node3D
+	hand_anchor: Node3D,
+	contact_axis_bias: float = AUTHORING_ARM_SPLINE_CONTACT_AXIS_BIAS
 ) -> void:
 	if skeleton == null:
 		return
-	if not authoring_contact_anchor_basis_lookup.has(slot_id):
-		return
-	if hand_anchor == null or not is_instance_valid(hand_anchor):
-		return
-	var desired_anchor_basis_world: Basis = authoring_contact_anchor_basis_lookup.get(slot_id, Basis.IDENTITY) as Basis
-	var anchor_local_basis: Basis = hand_anchor.transform.basis.orthonormalized()
-	var desired_hand_basis_world: Basis = (desired_anchor_basis_world * anchor_local_basis.inverse()).orthonormalized()
-	var contact_axis_world: Vector3 = desired_hand_basis_world.y.normalized()
+	var contact_axis_world: Vector3 = _resolve_authoring_contact_axis_world(
+		slot_id,
+		forearm_bone,
+		hand_bone,
+		hand_anchor
+	)
 	if contact_axis_world.length_squared() <= 0.000001:
 		return
 	var clavicle_world: Vector3 = _get_bone_world_position(clavicle_bone)
@@ -3430,11 +3697,9 @@ func _apply_authoring_arm_spline_preference(
 	if current_wrist_axis_world.length_squared() <= 0.000001:
 		return
 	var current_wrist_axis_normalized: Vector3 = current_wrist_axis_world.normalized()
-	if current_wrist_axis_normalized.dot(contact_axis_world) < 0.0:
-		contact_axis_world = -contact_axis_world
 	var preferred_wrist_axis_world: Vector3 = current_wrist_axis_normalized.lerp(
 		contact_axis_world,
-		clampf(AUTHORING_ARM_SPLINE_CONTACT_AXIS_BIAS, 0.0, 1.0)
+		clampf(contact_axis_bias, 0.0, 1.0)
 	)
 	if preferred_wrist_axis_world.length_squared() <= 0.000001:
 		preferred_wrist_axis_world = current_wrist_axis_normalized
@@ -3475,6 +3740,71 @@ func _apply_authoring_arm_spline_preference(
 		AUTHORING_ARM_SPLINE_FOREARM_WEIGHT
 	)
 	skeleton.force_update_all_bone_transforms()
+
+
+func _resolve_authoring_contact_axis_world(
+	slot_id: StringName,
+	forearm_bone: StringName,
+	hand_bone: StringName,
+	hand_anchor: Node3D
+) -> Vector3:
+	if (
+		skeleton == null
+		or not authoring_contact_anchor_basis_lookup.has(slot_id)
+		or hand_anchor == null
+		or not is_instance_valid(hand_anchor)
+	):
+		return Vector3.ZERO
+	var desired_anchor_basis_world: Basis = authoring_contact_anchor_basis_lookup.get(
+		slot_id,
+		Basis.IDENTITY
+	) as Basis
+	var anchor_local_basis: Basis = hand_anchor.transform.basis.orthonormalized()
+	var desired_hand_basis_world: Basis = (
+		desired_anchor_basis_world * anchor_local_basis.inverse()
+	).orthonormalized()
+	var contact_axis_world: Vector3 = desired_hand_basis_world.y.normalized()
+	var current_wrist_axis_world: Vector3 = (
+		_get_bone_world_position(hand_bone)
+		- _get_bone_world_position(forearm_bone)
+	)
+	if (
+		contact_axis_world.length_squared() <= 0.000001
+		or current_wrist_axis_world.length_squared() <= 0.000001
+	):
+		return Vector3.ZERO
+	current_wrist_axis_world = current_wrist_axis_world.normalized()
+	if current_wrist_axis_world.dot(contact_axis_world) < 0.0:
+		contact_axis_world = -contact_axis_world
+	return contact_axis_world.normalized()
+
+
+func _resolve_authoring_contact_axis_error_degrees(
+	slot_id: StringName,
+	forearm_bone: StringName,
+	hand_bone: StringName,
+	hand_anchor: Node3D
+) -> float:
+	var desired_axis_world: Vector3 = _resolve_authoring_contact_axis_world(
+		slot_id,
+		forearm_bone,
+		hand_bone,
+		hand_anchor
+	)
+	var current_axis_world: Vector3 = (
+		_get_bone_world_position(hand_bone)
+		- _get_bone_world_position(forearm_bone)
+	)
+	if (
+		desired_axis_world.length_squared() <= 0.000001
+		or current_axis_world.length_squared() <= 0.000001
+	):
+		return INF
+	return rad_to_deg(acos(clampf(
+		current_axis_world.normalized().dot(desired_axis_world),
+		-1.0,
+		1.0
+	)))
 
 func _apply_authoring_manual_upperarm_roll_pose(
 	slot_id: StringName,
@@ -3524,6 +3854,110 @@ func _apply_authoring_manual_upperarm_roll_pose(
 		1.0
 	)
 	skeleton.force_update_all_bone_transforms()
+
+
+func _enforce_authoring_upperarm_swing_authority(
+	slot_id: StringName,
+	clavicle_bone: StringName,
+	upperarm_bone: StringName,
+	forearm_bone: StringName,
+	hand_bone: StringName
+) -> void:
+	if skeleton == null:
+		return
+	var clavicle_index: int = skeleton.find_bone(String(clavicle_bone))
+	var upperarm_index: int = skeleton.find_bone(String(upperarm_bone))
+	var forearm_index: int = skeleton.find_bone(String(forearm_bone))
+	var hand_index: int = skeleton.find_bone(String(hand_bone))
+	if clavicle_index < 0 or upperarm_index < 0 or forearm_index < 0 or hand_index < 0:
+		return
+	if (
+		skeleton.get_bone_parent(upperarm_index) != clavicle_index
+		or skeleton.get_bone_parent(forearm_index) != upperarm_index
+	):
+		return
+
+	# Shoulder authority is a two-axis swing in the actual side's Clavicle-local
+	# frame. The main Upperarm carries no independent longitudinal roll; that job
+	# belongs to the dedicated UpperarmTwist chain. Preserve the already-solved
+	# shoulder-to-elbow direction, then rebuild a pure swing from this bone's own
+	# rest frame instead of mirroring the opposite side.
+	var upperarm_pose_before: Transform3D = skeleton.get_bone_global_pose(upperarm_index)
+	var forearm_pose_before: Transform3D = skeleton.get_bone_global_pose(forearm_index)
+	var hand_position_before: Vector3 = skeleton.get_bone_global_pose(hand_index).origin
+	var shoulder_to_elbow_skeleton: Vector3 = (
+		forearm_pose_before.origin - upperarm_pose_before.origin
+	)
+	if shoulder_to_elbow_skeleton.length_squared() <= 0.000001:
+		return
+
+	var clavicle_pose: Transform3D = skeleton.get_bone_global_pose(clavicle_index)
+	var upperarm_rest_basis_parent: Basis = (
+		skeleton.get_bone_rest(upperarm_index).basis.orthonormalized()
+	)
+	var solved_direction_parent: Vector3 = (
+		clavicle_pose.basis.orthonormalized().inverse()
+		* shoulder_to_elbow_skeleton.normalized()
+	).normalized()
+	var solved_direction_neutral: Vector3 = (
+		upperarm_rest_basis_parent.inverse() * solved_direction_parent
+	).normalized()
+	if solved_direction_neutral.length_squared() <= 0.000001:
+		return
+
+	var polar_radians: float = acos(clampf(solved_direction_neutral.y, -1.0, 1.0))
+	var swing_rotation: Quaternion = Quaternion.IDENTITY
+	if polar_radians > 0.000001:
+		var swing_axis_neutral: Vector3 = Vector3.UP.cross(solved_direction_neutral)
+		if swing_axis_neutral.length_squared() <= 0.000001:
+			# Exact rest-opposite is the only ambiguous swing. Keep the documented
+			# right 0..+180 and left 0..-180 conventions explicit and deterministic.
+			swing_axis_neutral = Vector3.BACK
+		else:
+			swing_axis_neutral = swing_axis_neutral.normalized()
+		if slot_id == &"hand_left":
+			swing_axis_neutral = -swing_axis_neutral
+			polar_radians = -polar_radians
+		swing_rotation = Quaternion(swing_axis_neutral, polar_radians).normalized()
+
+	var desired_upperarm_basis_parent: Basis = (
+		upperarm_rest_basis_parent * Basis(swing_rotation)
+	).orthonormalized()
+	var desired_upperarm_basis_skeleton: Basis = (
+		clavicle_pose.basis.orthonormalized() * desired_upperarm_basis_parent
+	).orthonormalized()
+	var restored_forearm_basis_parent: Basis = (
+		desired_upperarm_basis_skeleton.inverse()
+		* forearm_pose_before.basis.orthonormalized()
+	).orthonormalized()
+	skeleton.set_bone_pose_rotation(
+		upperarm_index,
+		desired_upperarm_basis_parent.get_rotation_quaternion().normalized()
+	)
+	# Removing Upperarm roll changes every descendant basis. Restore the solved
+	# Forearm world orientation under the corrected parent so the existing hand
+	# target and grip shell do not orbit around the humerus. Both local rotations
+	# are written before one skeleton refresh, keeping this an atomic pose update.
+	skeleton.set_bone_pose_rotation(
+		forearm_index,
+		restored_forearm_basis_parent.get_rotation_quaternion().normalized()
+	)
+	skeleton.force_update_all_bone_transforms()
+
+	# The imported arm segments are longitudinal +Y, so the basis transaction
+	# normally preserves the endpoint exactly. A Forearm-only reseat handles any
+	# sub-millimetre bind-axis deviation without granting Upperarm another writer.
+	if (
+		skeleton.get_bone_global_pose(hand_index).origin.distance_to(hand_position_before)
+		> AUTHORING_SHOULDER_ENDPOINT_RESEAT_EPSILON_METERS
+	):
+		_rotate_bone_toward_end_target(
+			forearm_bone,
+			hand_bone,
+			hand_position_before,
+			1.0
+		)
+
 
 func _resolve_authoring_manual_upperarm_roll_degrees(slot_id: StringName) -> float:
 	if upper_body_authoring_state.is_empty():
@@ -4060,12 +4494,62 @@ func apply_authoring_digit_grip_now(
 	)
 	_refresh_finger_grip_ik_influences()
 	skeleton.force_update_all_bone_transforms()
+	# Keep the hidden debug geometry synchronized with the committed digit pose.
+	# The visibility toggle must remain display-only, so it cannot repair a stale
+	# pre-solve snapshot when the user turns Debug View on later.
+	_sync_authoring_joint_range_debug_if_pose_changed()
+
+
+func prepare_authoring_surface_grip_open_pose_now(slot_id: StringName) -> bool:
+	if (
+		skeleton == null
+		or not finger_grip_source_lookup.has(slot_id)
+		or not finger_grip_presenter.has_method("apply_exact_surface_open_pose_now")
+	):
+		return false
+	var applied: bool = bool(finger_grip_presenter.call(
+		"apply_exact_surface_open_pose_now",
+		skeleton,
+		slot_id
+	))
+	if applied:
+		skeleton.force_update_all_bone_transforms()
+		# A seat rejection can end this lifecycle immediately after the canonical
+		# open pose is applied. Keep the hidden gizmo snapshot current here as well;
+		# visibility remains a display-only toggle and must not repair stale data.
+		_sync_authoring_joint_range_debug_if_pose_changed()
+	return applied
+
+
+func restore_authoring_committed_surface_grip_now(slot_id: StringName) -> bool:
+	if (
+		skeleton == null
+		or not finger_grip_presenter.has_method("reapply_committed_surface_grasp")
+	):
+		return false
+	var restored: bool = bool(finger_grip_presenter.call(
+		"reapply_committed_surface_grasp",
+		skeleton,
+		slot_id
+	))
+	if restored:
+		skeleton.force_update_all_bone_transforms()
+		_sync_authoring_joint_range_debug_if_pose_changed()
+	return restored
 
 
 func invalidate_authoring_surface_grasp(slot_id: StringName) -> void:
 	if finger_grip_presenter.has_method("invalidate_cached_surface_grasp"):
 		finger_grip_presenter.call(
 			"invalidate_cached_surface_grasp",
+			slot_id
+		)
+
+
+func invalidate_authoring_weapon_surface_seat(slot_id: StringName) -> void:
+	if finger_grip_presenter.has_method("invalidate_cached_weapon_surface_seat"):
+		finger_grip_presenter.call(
+			"invalidate_cached_weapon_surface_seat",
 			slot_id
 		)
 
@@ -4096,12 +4580,34 @@ func settle_authoring_grip_relationship_macro_pose_now() -> void:
 		_update_support_arm_ik_targets(support_snap_delta)
 		_apply_authoring_contact_alignment_pose(1)
 		skeleton.force_update_all_bone_transforms()
+	settle_authoring_support_grip_macro_pose_now()
+
+
+func settle_authoring_support_grip_macro_pose_now(
+	alignment_epsilon_meters: float = (
+		AUTHORING_GRIP_RELATIONSHIP_ALIGNMENT_EPSILON_METERS
+	)
+) -> void:
+	if skeleton == null:
+		return
+	var resolved_alignment_epsilon_meters: float = alignment_epsilon_meters
+	if (
+		not is_finite(resolved_alignment_epsilon_meters)
+		or resolved_alignment_epsilon_meters <= 0.0
+	):
+		resolved_alignment_epsilon_meters = (
+			AUTHORING_GRIP_RELATIONSHIP_ALIGNMENT_EPSILON_METERS
+		)
 	var support_slot_id: StringName = (
 		&"hand_right"
 		if dominant_grip_slot_id == &"hand_left"
 		else &"hand_left"
 	)
 	if is_support_hand_active(support_slot_id):
+		var support_snap_delta: float = 1.0 / maxf(
+			support_arm_ik_target_smoothing_speed,
+			0.001
+		)
 		# The ordinary authoring pass intentionally accepts a coarse arm-arrival
 		# tolerance for interactive editing. A relationship-changing support grip
 		# needs millimetre-scale agreement before the transactional digit solver can
@@ -4112,7 +4618,10 @@ func settle_authoring_grip_relationship_macro_pose_now() -> void:
 			AUTHORING_GRIP_RELATIONSHIP_PRECISE_SETTLE_PASSES
 		):
 			_update_support_arm_ik_targets(support_snap_delta)
-			_apply_authoring_precise_contact_alignment_for_slot(support_slot_id)
+			_apply_authoring_precise_contact_alignment_for_slot(
+				support_slot_id,
+				resolved_alignment_epsilon_meters
+			)
 			skeleton.force_update_all_bone_transforms()
 			var guidance_target: Node3D = get_arm_guidance_target(support_slot_id)
 			if guidance_target == null or not is_instance_valid(guidance_target):
@@ -4120,9 +4629,34 @@ func settle_authoring_grip_relationship_macro_pose_now() -> void:
 			var alignment_world: Vector3 = (
 				resolve_hand_grip_alignment_world_position(support_slot_id)
 			)
+			var forearm_bone: StringName = (
+				LEFT_FOREARM_BONE
+				if support_slot_id == &"hand_left"
+				else RIGHT_FOREARM_BONE
+			)
+			var hand_bone: StringName = (
+				LEFT_HAND_BONE
+				if support_slot_id == &"hand_left"
+				else RIGHT_HAND_BONE
+			)
+			var hand_anchor: Node3D = (
+				get_left_hand_item_anchor()
+				if support_slot_id == &"hand_left"
+				else get_right_hand_item_anchor()
+			)
+			var contact_axis_error_degrees: float = (
+				_resolve_authoring_contact_axis_error_degrees(
+					support_slot_id,
+					forearm_bone,
+					hand_bone,
+					hand_anchor
+				)
+			)
 			if (
 				alignment_world.distance_to(guidance_target.global_position)
-				<= AUTHORING_GRIP_RELATIONSHIP_ALIGNMENT_EPSILON_METERS
+					<= resolved_alignment_epsilon_meters
+				and contact_axis_error_degrees
+					<= AUTHORING_GRIP_RELATIONSHIP_CONTACT_AXIS_EPSILON_DEGREES
 			):
 				break
 	_refresh_finger_grip_ik_influences()
@@ -4130,7 +4664,10 @@ func settle_authoring_grip_relationship_macro_pose_now() -> void:
 
 
 func _apply_authoring_precise_contact_alignment_for_slot(
-	slot_id: StringName
+	slot_id: StringName,
+	alignment_epsilon_meters: float = (
+		AUTHORING_GRIP_RELATIONSHIP_ALIGNMENT_EPSILON_METERS
+	)
 ) -> void:
 	if skeleton == null or not is_arm_guidance_active(slot_id):
 		return
@@ -4181,7 +4718,38 @@ func _apply_authoring_precise_contact_alignment_for_slot(
 		AUTHORING_DIRECT_ARM_UPPERARM_WEIGHT,
 		clavicle_bone,
 		AUTHORING_DIRECT_ARM_CLAVICLE_WEIGHT,
-		AUTHORING_GRIP_RELATIONSHIP_ALIGNMENT_EPSILON_METERS
+		alignment_epsilon_meters
+	)
+	# The support hand follows the fixed primary-hand/weapon unit. Align the
+	# existing arm chain to the published Handle contact axis, then reseat the
+	# hand point; do not grant the wrist an independent roll solve.
+	_apply_authoring_arm_spline_preference(
+		slot_id,
+		clavicle_bone,
+		upperarm_bone,
+		forearm_bone,
+		hand_bone,
+		hand_anchor,
+		1.0
+	)
+	_apply_ccd_arm_reach_pose(
+		upperarm_bone,
+		forearm_bone,
+		hand_bone,
+		target_world,
+		AUTHORING_ARM_SPLINE_RESEAT_ITERATIONS,
+		AUTHORING_DIRECT_ARM_FOREARM_WEIGHT * 0.5,
+		AUTHORING_DIRECT_ARM_UPPERARM_WEIGHT * 0.5,
+		clavicle_bone,
+		AUTHORING_DIRECT_ARM_CLAVICLE_WEIGHT * 0.5,
+		alignment_epsilon_meters
+	)
+	_enforce_authoring_upperarm_swing_authority(
+		slot_id,
+		clavicle_bone,
+		upperarm_bone,
+		forearm_bone,
+		hand_bone
 	)
 	if enable_authoring_contact_wrist_basis:
 		_apply_authoring_contact_wrist_basis_for_slot(
@@ -4206,7 +4774,7 @@ func get_hand_surface_seat_debug_state(slot_id: StringName) -> Dictionary:
 
 func _update_finger_grip_targets(
 	delta: float,
-	allow_exact_surface_solve: bool = true
+	allow_exact_surface_solve: bool = false
 ) -> void:
 	finger_grip_presenter.update_finger_grip_targets(
 		skeleton,

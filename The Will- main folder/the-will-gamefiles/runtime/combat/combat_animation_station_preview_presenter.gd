@@ -22,6 +22,9 @@ const CombatAnimationSpeedStateSamplerScript = preload("res://core/resolvers/com
 const CombatCollisionLegalityResolverScript = preload("res://runtime/combat/combat_collision_legality_resolver.gd")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const PrimaryGripSeatResolverScript = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
+const PlayerHandSurfaceSeatSolverScript = preload(
+	"res://runtime/player/player_hand_surface_seat_solver.gd"
+)
 
 const PREVIEW_ROOT_NAME := "CombatAnimationPreviewRoot3D"
 const PREVIEW_CAMERA_NAME := "PreviewCamera3D"
@@ -159,8 +162,18 @@ const PREVIEW_SUPPORT_HAND_SEAT_APPLIED_RELATIONSHIP_KEY_META := (
 const PREVIEW_SUPPORT_HAND_SEAT_APPLIED_CONTEXT_KEY_META := (
 	"preview_support_hand_seat_applied_context_key"
 )
+const PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_LOCAL_META := (
+	"preview_support_hand_seat_accumulated_correction_local"
+)
+const PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_ORIGIN_META := (
+	"preview_support_hand_seat_accumulated_correction_origin_id"
+)
 const PREVIEW_SUPPORT_HAND_SURFACE_SEAT_STATE_META := (
 	"preview_support_hand_surface_seat_state"
+)
+const SUPPORT_HAND_SURFACE_SEAT_FIXED_POINT_PASSES: int = 3
+const SUPPORT_HAND_SURFACE_SEAT_REALIZATION_EPSILON_METERS: float = (
+	PlayerHandSurfaceSeatSolverScript.CLEARANCE_ROOT_TOLERANCE_METERS
 )
 const PREVIEW_SECONDARY_GRIP_SEAT_AUTHORED_META := "preview_secondary_grip_seat_authored"
 const PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_META := "hand_mount_local_transform"
@@ -4218,6 +4231,14 @@ func _motion_node_matches_hand_mounted_seed(
 			"preferred_grip_style_mode",
 			motion_node.preferred_grip_style_mode
 		))
+		and motion_node.two_hand_state == StringName(hand_mount_seed.get(
+			"two_hand_state",
+			motion_node.two_hand_state
+		))
+		and motion_node.primary_hand_slot == StringName(hand_mount_seed.get(
+			"primary_hand_slot",
+			motion_node.primary_hand_slot
+		))
 		and is_equal_approx(
 			motion_node.weapon_roll_degrees,
 			float(hand_mount_seed.get("weapon_roll_degrees", motion_node.weapon_roll_degrees))
@@ -4761,6 +4782,12 @@ func _sync_preview_support_grip_relationship_state(
 		PREVIEW_SUPPORT_HAND_SEAT_APPLIED_RELATIONSHIP_KEY_META
 	)
 	support_anchor.remove_meta(PREVIEW_SUPPORT_HAND_SEAT_APPLIED_CONTEXT_KEY_META)
+	support_anchor.remove_meta(
+		PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_LOCAL_META
+	)
+	support_anchor.remove_meta(
+		PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_ORIGIN_META
+	)
 	held_item.remove_meta(PREVIEW_SUPPORT_HAND_SURFACE_SEAT_STATE_META)
 
 
@@ -4792,7 +4819,7 @@ func _apply_preview_resolved_grip_state(
 
 func _recompose_preview_support_grip_anchor(
 	held_item: Node3D,
-	actor: Node3D
+	_actor: Node3D
 ) -> bool:
 	if held_item == null:
 		return false
@@ -4809,9 +4836,9 @@ func _recompose_preview_support_grip_anchor(
 		secondary_guide
 	)
 	var support_anchor: Node3D = weapon_grip_anchor_provider.get_support_grip_anchor(
-		held_item
+	held_item
 	)
-	if support_anchor == null or actor == null:
+	if support_anchor == null:
 		return false
 	var relationship_key: String = String(held_item.get_meta(
 		PREVIEW_SUPPORT_GRIP_RELATIONSHIP_KEY_META,
@@ -4829,32 +4856,31 @@ func _recompose_preview_support_grip_anchor(
 		relationship_key.is_empty()
 		or applied_relationship_key != relationship_key
 		or applied_context_key.is_empty()
-		or not actor.has_method("get_weapon_surface_seat_debug_state")
 	):
 		return false
-	var seat_state: Dictionary = actor.call(
-		"get_weapon_surface_seat_debug_state",
-		_resolve_preview_support_slot_id()
-	) as Dictionary
-	if (
-		not bool(seat_state.get("valid", false))
-		or String(seat_state.get("context_key", "")) != applied_context_key
-		or int(seat_state.get("source_instance_id", 0))
-			!= secondary_guide.get_instance_id()
-		or StringName(seat_state.get(
-			"seat_correction_grip_local_origin_id",
+	var accumulated_correction_variant: Variant = support_anchor.get_meta(
+		PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_LOCAL_META,
+		null
+	)
+	var accumulated_correction_origin_id: StringName = StringName(
+		support_anchor.get_meta(
+			PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_ORIGIN_META,
 			StringName()
-		)) != CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		)
+	)
+	if (
+		not accumulated_correction_variant is Transform3D
+		or accumulated_correction_origin_id
+			!= CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	):
 		return false
-	var seat_correction_local: Transform3D = seat_state.get(
-		"seat_correction_grip_local",
-		Transform3D.IDENTITY
-	) as Transform3D
-	if not _preview_transform_is_finite(seat_correction_local):
+	var accumulated_correction_local: Transform3D = (
+		accumulated_correction_variant as Transform3D
+	)
+	if not _preview_transform_is_finite(accumulated_correction_local):
 		return false
 	support_anchor.transform = (
-		seat_correction_local.affine_inverse()
+		accumulated_correction_local
 		* secondary_guide.transform
 	)
 	return true
@@ -5451,16 +5477,39 @@ func _apply_preview_weapon_surface_seat(
 		or not actor.has_method("resolve_exact_surface_weapon_seat")
 	):
 		return result
-	if _preview_actor_has_active_support_hand(actor):
-		result["status"] = &"weapon_surface_seat_two_hand_deferred"
-		_publish_preview_weapon_surface_seat_state(held_item, result)
-		return result
+	var dominant_slot_id: StringName = _resolve_preview_dominant_slot_id()
+	var opened_surface_grip_pose: bool = false
+	if (
+		allow_surface_solve
+		and _preview_actor_has_active_support_hand(actor)
+		and actor.has_method("settle_authoring_grip_relationship_macro_pose_now")
+	):
+		# Establish the complete two-hand macro pose before the dominant hand seats
+		# the weapon. From that point onward the primary hand/weapon pair is fixed;
+		# only the support limb may converge on its updated Handle station.
+		actor.call("settle_authoring_grip_relationship_macro_pose_now")
+	if (
+		allow_surface_solve
+		and actor.has_method("prepare_authoring_surface_grip_open_pose_now")
+	):
+		# The seat and serial digit solver must measure the same anatomy. Previously
+		# the seat consumed whichever curl happened to be live, while the digit pass
+		# replaced it with the canonical Idle-open pose after the weapon had moved.
+		opened_surface_grip_pose = bool(actor.call(
+			"prepare_authoring_surface_grip_open_pose_now",
+			dominant_slot_id
+		))
 	result = actor.call(
 		"resolve_exact_surface_weapon_seat",
-		_resolve_preview_dominant_slot_id(),
+		dominant_slot_id,
 		allow_surface_solve
 	) as Dictionary
 	if not bool(result.get("valid", false)):
+		_restore_preview_committed_surface_grip_after_failed_seat(
+			actor,
+			dominant_slot_id,
+			opened_surface_grip_pose
+		)
 		_publish_preview_weapon_surface_seat_state(held_item, result)
 		return result
 	if (
@@ -5475,6 +5524,11 @@ func _apply_preview_weapon_surface_seat(
 	):
 		result["valid"] = false
 		result["status"] = &"weapon_surface_seat_local_origin_mismatch"
+		_restore_preview_committed_surface_grip_after_failed_seat(
+			actor,
+			dominant_slot_id,
+			opened_surface_grip_pose
+		)
 		_publish_preview_weapon_surface_seat_state(held_item, result)
 		return result
 	var seat_correction_local: Transform3D = result.get(
@@ -5494,6 +5548,11 @@ func _apply_preview_weapon_surface_seat(
 	):
 		result["valid"] = false
 		result["status"] = &"weapon_surface_seat_local_transform_invalid"
+		_restore_preview_committed_surface_grip_after_failed_seat(
+			actor,
+			dominant_slot_id,
+			opened_surface_grip_pose
+		)
 		_publish_preview_weapon_surface_seat_state(held_item, result)
 		return result
 	var base_transform: Transform3D = held_item.global_transform
@@ -5512,6 +5571,11 @@ func _apply_preview_weapon_surface_seat(
 	if not span_start_variant is Vector3 or not span_end_variant is Vector3:
 		result["valid"] = false
 		result["status"] = &"weapon_surface_seat_endcap_axis_missing"
+		_restore_preview_committed_surface_grip_after_failed_seat(
+			actor,
+			dominant_slot_id,
+			opened_surface_grip_pose
+		)
 		_publish_preview_weapon_surface_seat_state(held_item, result)
 		return result
 	var endcap_axis_world: Vector3 = base_transform.basis * (
@@ -5520,6 +5584,11 @@ func _apply_preview_weapon_surface_seat(
 	if endcap_axis_world.length_squared() <= 0.000000000001:
 		result["valid"] = false
 		result["status"] = &"weapon_surface_seat_endcap_axis_missing"
+		_restore_preview_committed_surface_grip_after_failed_seat(
+			actor,
+			dominant_slot_id,
+			opened_surface_grip_pose
+		)
 		_publish_preview_weapon_surface_seat_state(held_item, result)
 		return result
 	endcap_axis_world = endcap_axis_world.normalized()
@@ -5530,6 +5599,11 @@ func _apply_preview_weapon_surface_seat(
 		result["valid"] = false
 		result["status"] = &"weapon_surface_seat_axial_displacement_forbidden"
 		result["c0_axial_displacement_meters"] = c0_axial_displacement_meters
+		_restore_preview_committed_surface_grip_after_failed_seat(
+			actor,
+			dominant_slot_id,
+			opened_surface_grip_pose
+		)
 		_publish_preview_weapon_surface_seat_state(held_item, result)
 		return result
 	held_item.global_transform = final_transform
@@ -5582,10 +5656,25 @@ func _publish_preview_weapon_surface_seat_state(
 	)
 
 
+func _restore_preview_committed_surface_grip_after_failed_seat(
+	actor: Node3D,
+	slot_id: StringName,
+	opened_surface_grip_pose: bool
+) -> void:
+	if (
+		not opened_surface_grip_pose
+		or actor == null
+		or not actor.has_method("restore_authoring_committed_surface_grip_now")
+	):
+		return
+	actor.call("restore_authoring_committed_surface_grip_now", slot_id)
+
+
 func _apply_preview_support_hand_surface_seat(
 	actor: Node3D,
 	held_item: Node3D,
-	allow_surface_solve: bool
+	allow_surface_solve: bool,
+	force_residual_application: bool = false
 ) -> Dictionary:
 	var result := {
 		"valid": false,
@@ -5603,6 +5692,17 @@ func _apply_preview_support_hand_surface_seat(
 		_publish_preview_support_hand_surface_seat_state(held_item, result)
 		return result
 	var support_slot_id: StringName = _resolve_preview_support_slot_id()
+	var opened_surface_grip_pose: bool = false
+	if (
+		allow_surface_solve
+		and actor.has_method("prepare_authoring_surface_grip_open_pose_now")
+	):
+		# Match the support C0/Ci/Cp anatomy query to the exact open pose from which
+		# its three-link digit solve will begin after the anchor is applied.
+		opened_surface_grip_pose = bool(actor.call(
+			"prepare_authoring_surface_grip_open_pose_now",
+			support_slot_id
+		))
 	result = actor.call(
 		"resolve_exact_surface_weapon_seat",
 		support_slot_id,
@@ -5611,6 +5711,11 @@ func _apply_preview_support_hand_surface_seat(
 	result["applied"] = false
 	result["newly_applied"] = false
 	if not bool(result.get("valid", false)):
+		_restore_preview_committed_surface_grip_after_failed_seat(
+			actor,
+			support_slot_id,
+			opened_surface_grip_pose
+		)
 		_publish_preview_support_hand_surface_seat_state(held_item, result)
 		return result
 	if (
@@ -5625,6 +5730,11 @@ func _apply_preview_support_hand_surface_seat(
 	):
 		result["valid"] = false
 		result["status"] = &"support_hand_surface_seat_local_origin_mismatch"
+		_restore_preview_committed_surface_grip_after_failed_seat(
+			actor,
+			support_slot_id,
+			opened_surface_grip_pose
+		)
 		_publish_preview_support_hand_surface_seat_state(held_item, result)
 		return result
 	var seat_correction_local: Transform3D = result.get(
@@ -5634,6 +5744,11 @@ func _apply_preview_support_hand_surface_seat(
 	if not _preview_transform_is_finite(seat_correction_local):
 		result["valid"] = false
 		result["status"] = &"support_hand_surface_seat_local_transform_invalid"
+		_restore_preview_committed_surface_grip_after_failed_seat(
+			actor,
+			support_slot_id,
+			opened_surface_grip_pose
+		)
 		_publish_preview_support_hand_surface_seat_state(held_item, result)
 		return result
 	var secondary_guide: Node3D = held_item.get_node_or_null(
@@ -5657,6 +5772,11 @@ func _apply_preview_support_hand_surface_seat(
 	):
 		result["valid"] = false
 		result["status"] = &"support_hand_surface_seat_anchor_contract_invalid"
+		_restore_preview_committed_surface_grip_after_failed_seat(
+			actor,
+			support_slot_id,
+			opened_surface_grip_pose
+		)
 		_publish_preview_support_hand_surface_seat_state(held_item, result)
 		return result
 	var previous_relationship_key: String = String(support_anchor.get_meta(
@@ -5667,6 +5787,80 @@ func _apply_preview_support_hand_surface_seat(
 		PREVIEW_SUPPORT_HAND_SEAT_APPLIED_CONTEXT_KEY_META,
 		""
 	))
+	var accumulated_correction_missing: bool = not support_anchor.has_meta(
+		PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_LOCAL_META
+	)
+	var previous_accumulated_correction_local := Transform3D.IDENTITY
+	if (
+		previous_relationship_key == relationship_key
+		and not accumulated_correction_missing
+	):
+		var previous_accumulated_variant: Variant = support_anchor.get_meta(
+			PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_LOCAL_META,
+			null
+		)
+		var previous_accumulated_origin_id: StringName = StringName(
+			support_anchor.get_meta(
+				PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_ORIGIN_META,
+				StringName()
+			)
+		)
+		if (
+			not previous_accumulated_variant is Transform3D
+			or previous_accumulated_origin_id
+				!= CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		):
+			result["valid"] = false
+			result["status"] = &"support_hand_surface_seat_accumulator_origin_invalid"
+			_restore_preview_committed_surface_grip_after_failed_seat(
+				actor,
+				support_slot_id,
+				opened_surface_grip_pose
+			)
+			_publish_preview_support_hand_surface_seat_state(held_item, result)
+			return result
+		previous_accumulated_correction_local = (
+			previous_accumulated_variant as Transform3D
+		)
+		if not _preview_transform_is_finite(
+			previous_accumulated_correction_local
+		):
+			result["valid"] = false
+			result["status"] = &"support_hand_surface_seat_accumulator_invalid"
+			_restore_preview_committed_surface_grip_after_failed_seat(
+				actor,
+				support_slot_id,
+				opened_surface_grip_pose
+			)
+			_publish_preview_support_hand_surface_seat_state(held_item, result)
+			return result
+	var newly_applied: bool = (
+		force_residual_application
+		or previous_relationship_key != relationship_key
+		or previous_context_key != context_key
+	)
+	var accumulated_correction_local: Transform3D = (
+		previous_accumulated_correction_local
+	)
+	if newly_applied or accumulated_correction_missing:
+		# Each accepted support seat is a residual weapon-side correction measured
+		# against the current post-IK hand. The support hand owns the inverse of that
+		# residual, accumulated in WeaponRoot space; replacing the total with only the
+		# latest residual makes consecutive exact events alternate between two poses.
+		accumulated_correction_local = (
+			seat_correction_local.affine_inverse()
+			* previous_accumulated_correction_local
+		)
+	if not _preview_transform_is_finite(accumulated_correction_local):
+		result["valid"] = false
+		result["status"] = &"support_hand_surface_seat_accumulator_invalid"
+		_restore_preview_committed_surface_grip_after_failed_seat(
+			actor,
+			support_slot_id,
+			opened_surface_grip_pose
+		)
+		_publish_preview_support_hand_surface_seat_state(held_item, result)
+		return result
 	support_anchor.set_meta(
 		PREVIEW_SUPPORT_HAND_SEAT_APPLIED_RELATIONSHIP_KEY_META,
 		relationship_key
@@ -5675,6 +5869,14 @@ func _apply_preview_support_hand_surface_seat(
 		PREVIEW_SUPPORT_HAND_SEAT_APPLIED_CONTEXT_KEY_META,
 		context_key
 	)
+	support_anchor.set_meta(
+		PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_LOCAL_META,
+		accumulated_correction_local
+	)
+	support_anchor.set_meta(
+		PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_ORIGIN_META,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
 	if not _recompose_preview_support_grip_anchor(held_item, actor):
 		support_anchor.remove_meta(
 			PREVIEW_SUPPORT_HAND_SEAT_APPLIED_RELATIONSHIP_KEY_META
@@ -5682,15 +5884,23 @@ func _apply_preview_support_hand_surface_seat(
 		support_anchor.remove_meta(
 			PREVIEW_SUPPORT_HAND_SEAT_APPLIED_CONTEXT_KEY_META
 		)
+		support_anchor.remove_meta(
+			PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_LOCAL_META
+		)
+		support_anchor.remove_meta(
+			PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_ORIGIN_META
+		)
 		result["valid"] = false
 		result["status"] = &"support_hand_surface_seat_anchor_recompose_failed"
+		_restore_preview_committed_surface_grip_after_failed_seat(
+			actor,
+			support_slot_id,
+			opened_surface_grip_pose
+		)
 		_publish_preview_support_hand_surface_seat_state(held_item, result)
 		return result
 	result["applied"] = true
-	result["newly_applied"] = (
-		previous_relationship_key != relationship_key
-		or previous_context_key != context_key
-	)
+	result["newly_applied"] = newly_applied
 	result["status"] = &"support_hand_surface_seat_applied"
 	result["support_slot_id"] = support_slot_id
 	result["support_anchor_transform_local"] = support_anchor.transform
@@ -5746,26 +5956,48 @@ func _settle_preview_digits_on_resolved_weapon(
 	):
 		return
 	var support_active: bool = _preview_actor_has_active_support_hand(actor)
-	var can_settle_macro: bool = actor.has_method(
-		"settle_authoring_grip_relationship_macro_pose_now"
+	var can_settle_support_macro: bool = actor.has_method(
+		"settle_authoring_support_grip_macro_pose_now"
 	)
-	if support_active and can_settle_macro:
-		# First finish the uncorrected arm/wrist frame. The pure C0/Ci/Cp solver
-		# then measures one deterministic correction against that stable anatomy.
-		actor.call("settle_authoring_grip_relationship_macro_pose_now")
-	var support_seat_result: Dictionary = {}
+	if support_active and can_settle_support_macro:
+		# The dominant hand and weapon were seated as one unit immediately before
+		# this stage. Converge only the support limb on that fixed relationship.
+		actor.call("settle_authoring_support_grip_macro_pose_now")
+	var support_grasp_needs_invalidation: bool = false
 	if support_active:
-		support_seat_result = _apply_preview_support_hand_surface_seat(
-			actor,
-			held_item,
-			allow_exact_surface_solve
+		var support_seat_pass_count: int = (
+			SUPPORT_HAND_SURFACE_SEAT_FIXED_POINT_PASSES
+			if allow_exact_surface_solve
+			else 1
 		)
-		if (
-			bool(support_seat_result.get("valid", false))
-			and bool(support_seat_result.get("applied", false))
-		):
+		for _support_seat_pass: int in range(support_seat_pass_count):
+			var force_residual_application: bool = _support_seat_pass > 0
+			if force_residual_application:
+				if not actor.has_method("invalidate_authoring_weapon_surface_seat"):
+					break
+				# Ordinary seat contexts quantize at 0.1 mm for cache stability. This
+				# bounded follow-up owns the smaller residual and must measure it afresh.
+				actor.call(
+					"invalidate_authoring_weapon_surface_seat",
+					_resolve_preview_support_slot_id()
+				)
+			var support_seat_result: Dictionary = (
+				_apply_preview_support_hand_surface_seat(
+					actor,
+					held_item,
+					allow_exact_surface_solve,
+					force_residual_application
+				)
+			)
+			if (
+				not bool(support_seat_result.get("valid", false))
+				or not bool(support_seat_result.get("applied", false))
+			):
+				break
 			# The support anchor owns only the arm/wrist target. Re-publish its
-			# corrected basis without granting the support hand weapon authority.
+			# accumulated corrected basis without granting the support hand weapon
+			# authority, then let the limb realize that target before measuring the
+			# next residual. Two bounded passes close this support-only fixed point.
 			equipped_item_presenter.sync_single_weapon_contact_guidance(
 				actor,
 				held_item,
@@ -5776,16 +6008,25 @@ func _settle_preview_digits_on_resolved_weapon(
 				true,
 				true
 			)
-			if (
-				bool(support_seat_result.get("newly_applied", false))
-				and actor.has_method("invalidate_authoring_surface_grasp")
-			):
+			support_grasp_needs_invalidation = (
+				support_grasp_needs_invalidation
+				or bool(support_seat_result.get("newly_applied", false))
+			)
+			if can_settle_support_macro:
 				actor.call(
-					"invalidate_authoring_surface_grasp",
-					_resolve_preview_support_slot_id()
+					"settle_authoring_support_grip_macro_pose_now",
+					SUPPORT_HAND_SURFACE_SEAT_REALIZATION_EPSILON_METERS
 				)
-			if can_settle_macro:
-				actor.call("settle_authoring_grip_relationship_macro_pose_now")
+		if (
+			support_grasp_needs_invalidation
+			and actor.has_method("invalidate_authoring_surface_grasp")
+		):
+			# Invalidate once, after the final accepted support residual. The exact
+			# digit packet must be solved against the hand pose that will be kept.
+			actor.call(
+				"invalidate_authoring_surface_grasp",
+				_resolve_preview_support_slot_id()
+			)
 	actor.call(
 		"apply_authoring_digit_grip_now",
 		allow_exact_surface_solve

@@ -2,6 +2,7 @@ extends RefCounted
 class_name TwoHandPoseSolver
 
 const CharacterFrameResolverScript = preload("res://runtime/player/character_frame_resolver.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const SLOT_RIGHT: StringName = &"hand_right"
 const SLOT_LEFT: StringName = &"hand_left"
 const TORSO_WAIST_BONE: StringName = &"CC_Base_Waist"
@@ -26,6 +27,7 @@ func solve_arm_targets(
 	left_hand_bone: StringName,
 	get_bone_world_position_callable: Callable,
 	resolve_hand_grip_alignment_world_position_callable: Callable,
+	resolve_hand_item_anchor_world_transform_state_callable: Callable,
 	constraint_solver,
 	settings: Dictionary = {}
 ) -> Dictionary:
@@ -66,9 +68,43 @@ func solve_arm_targets(
 		var slot_is_dominant: bool = slot_id == dominant_slot_id
 		if aligned_hand_target_world.length_squared() > 0.000001:
 			desired_target -= aligned_hand_target_world - current_hand_world
-		elif slot_is_dominant and hand_anchor_node != null and is_instance_valid(hand_anchor_node):
-			desired_target -= hand_anchor_node.global_position - current_hand_world
-		var source_world: Vector3 = get_bone_world_position_callable.call(upperarm_bone_name)
+		elif slot_is_dominant:
+			var hand_anchor_world_state: Dictionary = {}
+			if resolve_hand_item_anchor_world_transform_state_callable.is_valid():
+				var hand_anchor_state_variant: Variant = (
+					resolve_hand_item_anchor_world_transform_state_callable.call(slot_id)
+				)
+				if hand_anchor_state_variant is Dictionary:
+					hand_anchor_world_state = hand_anchor_state_variant as Dictionary
+			var anchor_world_variant: Variant = hand_anchor_world_state.get(
+				"transform_world",
+				null
+			)
+			if (
+				bool(hand_anchor_world_state.get("valid", false))
+				and anchor_world_variant is Transform3D
+				and StringName(hand_anchor_world_state.get(
+					"transform_world_origin_id",
+					StringName()
+				)) == CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+			):
+				var anchor_world: Transform3D = anchor_world_variant as Transform3D
+				if anchor_world.origin.is_finite():
+					desired_target -= anchor_world.origin - current_hand_world
+			elif hand_anchor_node != null and is_instance_valid(hand_anchor_node):
+				# Compatibility-only path for non-rig callers without the explicit
+				# current-skeleton anchor-frame contract.
+				desired_target -= hand_anchor_node.global_position - current_hand_world
+		# The legality projector traces the moving Hand target from its current
+		# position to the requested contact.  The Upperarm origin is the arm-root
+		# pivot, not the target's path origin; it deliberately sits inside the torso
+		# clearance proxy and therefore makes every shoulder-to-target ray report an
+		# immediate false collision.  Keep both origins explicit because the elbow
+		# pole still needs the real arm root below.
+		var arm_root_world: Vector3 = get_bone_world_position_callable.call(
+			upperarm_bone_name
+		)
+		var target_path_source_world: Vector3 = current_hand_world
 		var weapon_body_proxy_samples: Array[Vector3] = _collect_weapon_body_proxy_sample_positions(guidance_target)
 		var query_exclusions: Array = []
 		if constraint_solver != null and constraint_solver.has_method("build_arm_self_query_exclusions"):
@@ -87,7 +123,7 @@ func solve_arm_targets(
 				slot_settings["enforce_front_bias"] = false
 		var projection: Dictionary = constraint_solver.project_target_to_legal_grip_space(
 			body_restriction_root,
-			source_world,
+			target_path_source_world,
 			desired_target,
 			torso_frame.get("origin_world", Vector3.ZERO),
 			torso_frame.get("forward_world", character_frame_resolver.resolve_basis_forward_world(global_basis)),
@@ -116,7 +152,7 @@ func solve_arm_targets(
 		var forearm_world: Vector3 = get_bone_world_position_callable.call(forearm_bone_name)
 		var pole_target: Vector3 = _resolve_pole_target(
 			forearm_world,
-			source_world,
+			arm_root_world,
 			corrected_target,
 			torso_frame.get("right_world", global_basis.x),
 			torso_frame.get("up_world", global_basis.y),

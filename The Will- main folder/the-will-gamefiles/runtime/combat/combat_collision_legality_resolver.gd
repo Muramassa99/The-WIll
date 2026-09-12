@@ -78,6 +78,21 @@ func evaluate_weapon_path(
 	solved_transforms: Array[Transform3D],
 	constraint_solver
 ) -> Dictionary:
+	var evaluation_job: Dictionary = begin_weapon_path_evaluation(
+		body_restriction_root,
+		held_item,
+		solved_transforms,
+		constraint_solver
+	)
+	advance_weapon_path_evaluation(evaluation_job, maxi(solved_transforms.size(), 1))
+	return (evaluation_job.get("result", {}) as Dictionary).duplicate(true)
+
+func begin_weapon_path_evaluation(
+	body_restriction_root: Node3D,
+	held_item: Node3D,
+	solved_transforms: Array[Transform3D],
+	constraint_solver
+) -> Dictionary:
 	var result := {
 		"legal": true,
 		"path_legal": true,
@@ -91,8 +106,46 @@ func evaluate_weapon_path(
 		"estimated_clearance_meters": INF,
 		"suggested_correction_world": Vector3.ZERO,
 	}
-	var min_clearance: float = INF
-	for transform_index: int in range(solved_transforms.size()):
+	if solved_transforms.is_empty():
+		result["estimated_clearance_meters"] = -1.0
+	return {
+		"complete": solved_transforms.is_empty(),
+		"next_transform_index": 0,
+		"minimum_clearance_meters": INF,
+		"body_restriction_root": body_restriction_root,
+		"held_item": held_item,
+		"solved_transforms": solved_transforms,
+		"constraint_solver": constraint_solver,
+		"result": result,
+	}
+
+func advance_weapon_path_evaluation(evaluation_job: Dictionary, max_pose_count: int = 1) -> Dictionary:
+	if evaluation_job.is_empty():
+		return {"complete": true, "processed_pose_count": 0, "remaining_pose_count": 0}
+	if bool(evaluation_job.get("complete", false)):
+		return {
+			"complete": true,
+			"processed_pose_count": 0,
+			"remaining_pose_count": 0,
+			"result": evaluation_job.get("result", {}),
+		}
+	var body_restriction_root: Node3D = evaluation_job.get("body_restriction_root", null) as Node3D
+	var held_item: Node3D = evaluation_job.get("held_item", null) as Node3D
+	var solved_transforms: Array[Transform3D] = evaluation_job.get("solved_transforms", []) as Array[Transform3D]
+	var constraint_solver: Variant = evaluation_job.get("constraint_solver", null)
+	var result: Dictionary = evaluation_job.get("result", {}) as Dictionary
+	var transform_index: int = clampi(
+		int(evaluation_job.get("next_transform_index", 0)),
+		0,
+		solved_transforms.size()
+	)
+	var stop_index: int = mini(
+		transform_index + maxi(max_pose_count, 1),
+		solved_transforms.size()
+	)
+	var processed_pose_count: int = 0
+	var min_clearance: float = float(evaluation_job.get("minimum_clearance_meters", INF))
+	while transform_index < stop_index:
 		var pose_result: Dictionary = evaluate_weapon_pose(
 			body_restriction_root,
 			held_item,
@@ -114,9 +167,20 @@ func evaluate_weapon_path(
 				result["colliding_sample_name"] = String(pose_result.get("colliding_sample_name", ""))
 				result["estimated_clearance_meters"] = clearance
 				result["suggested_correction_world"] = pose_result.get("suggested_correction_world", Vector3.ZERO)
-	if bool(result.get("legal", true)):
+		transform_index += 1
+		processed_pose_count += 1
+	evaluation_job["next_transform_index"] = transform_index
+	evaluation_job["minimum_clearance_meters"] = min_clearance
+	var complete: bool = transform_index >= solved_transforms.size()
+	evaluation_job["complete"] = complete
+	if complete and bool(result.get("legal", true)):
 		result["estimated_clearance_meters"] = min_clearance if min_clearance < INF else -1.0
-	return result
+	return {
+		"complete": complete,
+		"processed_pose_count": processed_pose_count,
+		"remaining_pose_count": maxi(solved_transforms.size() - transform_index, 0),
+		"result": result,
+	}
 
 func _collect_weapon_proxy_local_samples(held_item: Node3D) -> Array[Dictionary]:
 	var samples: Array[Dictionary] = []

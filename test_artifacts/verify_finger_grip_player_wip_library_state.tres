@@ -311,6 +311,7 @@ motion_node_chain = Array[Resource]([SubResource("Resource_1136n"), SubResource(
 
 [sub_resource type="Resource" id="Resource_ums6g"]
 script = ExtResource("4_hrd88")
+station_version = 4
 selected_skill_id = &"skill_slot_1"
 idle_drafts = Array[Resource]([SubResource("Resource_aysry"), SubResource("Resource_4w27f")])
 skill_drafts = Array[Resource]([SubResource("Resource_sbxnb"), SubResource("Resource_yb6jh"), SubResource("Resource_6mos1"), SubResource("Resource_lupnp"), SubResource("Resource_125aw"), SubResource("Resource_exv0s"), SubResource("Resource_geees"), SubResource("Resource_m34ik"), SubResource("Resource_rvxn7"), SubResource("Resource_a1ydb"), SubResource("Resource_fhc02"), SubResource("Resource_exihj"), SubResource("Resource_477kh")])
@@ -1339,7 +1340,7 @@ script = ExtResource("1_xogyk")
 wip_id = &"verify_two_hand_finger_grip"
 forge_project_name = "Verify Two Hand Finger Grip"
 creator_id = &"verify"
-created_timestamp = 1787593684.993
+created_timestamp = 1788216393.714
 combat_animation_station_state = SubResource("Resource_ums6g")
 forge_intent = &"intent_melee"
 equipment_context = &"ctx_weapon"

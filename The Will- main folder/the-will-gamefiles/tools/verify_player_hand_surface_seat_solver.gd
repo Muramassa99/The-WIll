@@ -98,6 +98,7 @@ func _run_verification() -> void:
 		"pinky_radial_direction": Vector3(0.0, 0.9, 0.4358899),
 	})
 	_verify_wrong_side_branch_correction()
+	_verify_transaction_provisional_scope()
 	_verify_explicit_failures()
 	_finish()
 
@@ -468,6 +469,93 @@ func _verify_wrong_side_branch_correction() -> void:
 			<= HandSurfaceSeatSolverScript.ACCEPTED_RADIAL_ERROR_METERS
 			+ DISTANCE_EPSILON_METERS,
 		"wrong_side_pinky_outside_acceptance_band"
+	)
+
+
+func _verify_transaction_provisional_scope() -> void:
+	var case_state: Dictionary = {
+		"section_x": PackedFloat32Array([-0.05, -0.02, 0.0, 0.02, 0.05]),
+		"center_y": PackedFloat32Array([0.0, 0.0, 0.0, 0.0, 0.0]),
+		"center_z": PackedFloat32Array([0.0, 0.0, 0.0, 0.0, 0.0]),
+		"half_y": PackedFloat32Array([0.01, 0.01, 0.01, 0.01, 0.01]),
+		"half_z": PackedFloat32Array([0.01, 0.01, 0.01, 0.01, 0.01]),
+	}
+	var prepared_surface: Dictionary = _prepare_surface(
+		case_state,
+		"transaction_provisional_scope"
+	)
+	_check(
+		bool(prepared_surface.get("valid", false)),
+		"transaction_provisional_surface_not_prepared"
+	)
+	if not bool(prepared_surface.get("valid", false)):
+		return
+	# This intentionally requests an index/pinky chord that no rigid weapon-side
+	# correction can fit into the +/-1 mm radial band. It gives the Support
+	# transaction useful noncommittable guidance while remaining an invalid seat.
+	var primary_anatomy: Dictionary = _build_anatomy_state(
+		Vector3(0.08, 0.0, 0.0205),
+		Vector3(-0.08, 0.0, 0.0192),
+		Vector3.BACK,
+		Vector3.BACK
+	)
+	var support_anatomy: Dictionary = primary_anatomy.duplicate(true)
+	support_anatomy["allow_transaction_provisional_candidate"] = true
+	var solver = HandSurfaceSeatSolverScript.new()
+	var primary_result: Dictionary = solver.solve_prepared(
+		prepared_surface,
+		primary_anatomy,
+		Vector3.ZERO,
+		Vector3(0.02, 0.0, 0.0),
+		Vector3(-0.02, 0.0, 0.0),
+		Vector3.RIGHT,
+		SURFACE_ORIGIN,
+		ROOT_ORIGIN
+	)
+	var support_result: Dictionary = solver.solve_prepared(
+		prepared_surface,
+		support_anatomy,
+		Vector3.ZERO,
+		Vector3(0.02, 0.0, 0.0),
+		Vector3(-0.02, 0.0, 0.0),
+		Vector3.RIGHT,
+		SURFACE_ORIGIN,
+		ROOT_ORIGIN
+	)
+	_check(
+		not bool(primary_result.get("valid", true)),
+		"transaction_provisional_primary_fixture_unexpectedly_valid"
+	)
+	_check(
+		not primary_result.has("provisional_candidate_available"),
+		"transaction_provisional_published_for_default_primary"
+	)
+	_check(
+		not bool(support_result.get("valid", true)),
+		"transaction_provisional_support_fixture_unexpectedly_valid"
+	)
+	_check(
+		bool(support_result.get("provisional_candidate_available", false))
+		and bool(support_result.get(
+			"provisional_candidate_noncommittable",
+			false
+		))
+		and bool(support_result.get(
+			"provisional_candidate_transaction_only",
+			false
+		)),
+		"transaction_provisional_missing_for_explicit_support"
+	)
+	_check(
+		support_result.get(
+			"provisional_weapon_correction_about_grip_world",
+			null
+		) is Transform3D
+		and StringName(support_result.get(
+			"provisional_weapon_correction_about_grip_world_origin_id",
+			StringName()
+		)) == ROOT_ORIGIN,
+		"transaction_provisional_support_correction_invalid"
 	)
 
 

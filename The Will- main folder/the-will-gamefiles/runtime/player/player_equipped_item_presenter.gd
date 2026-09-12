@@ -2417,6 +2417,47 @@ func sync_single_weapon_contact_guidance(
 		authoring_contact_basis_enabled
 	)
 
+
+func sync_single_weapon_support_contact_guidance(
+	humanoid_rig: Node3D,
+	held_item: Node3D,
+	dominant_slot_id: StringName,
+	support_arm_guidance_active: bool = true,
+	authoring_contact_basis_enabled: bool = true
+) -> bool:
+	if humanoid_rig == null or held_item == null:
+		return false
+	var resolved_dominant_slot_id: StringName = _normalize_hand_slot_id(
+		dominant_slot_id
+	)
+	var support_slot_id: StringName = _resolve_support_slot_id(
+		resolved_dominant_slot_id
+	)
+	var secondary_guide: Node3D = held_item.get_node_or_null(
+		"SecondaryGripGuide"
+	) as Node3D
+	var support_anchor: Node3D = (
+		weapon_grip_anchor_provider.get_support_grip_anchor(held_item)
+	)
+	if secondary_guide == null or support_anchor == null:
+		return false
+	# A support relationship transaction may only republish the child hand.
+	# Reusing sync_single_weapon_contact_guidance here also rewrites Primary's
+	# guidance/contact-basis dictionaries and invalidates exact transaction
+	# identity even though the weapon and Primary hand did not move.
+	_assign_slot_weapon_contact_guidance(
+		humanoid_rig,
+		held_item,
+		support_slot_id,
+		support_anchor,
+		secondary_guide,
+		support_arm_guidance_active,
+		true,
+		false,
+		authoring_contact_basis_enabled
+	)
+	return true
+
 func _assign_slot_weapon_contact_guidance(
 	humanoid_rig: Node3D,
 	held_item: Node3D,

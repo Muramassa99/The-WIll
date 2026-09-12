@@ -15,6 +15,8 @@ const TRANSITION_KIND_PRIMARY_HAND_SWAP: StringName = &"primary_hand_swap"
 const TRANSITION_KIND_TWO_HAND_STATE_SWAP: StringName = &"two_hand_state_swap"
 const DEFAULT_GRIP_SEAT_SLIDE_OFFSET: float = 0.2
 const DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET: float = 0.0
+const WEAPON_ROLL_MIN_DEGREES: float = -90.0
+const WEAPON_ROLL_MAX_DEGREES: float = 90.0
 const GRIP_SEAT_COORDINATE_SCHEMA_LEGACY_DISPLAY_VALUE := 1
 const GRIP_SEAT_COORDINATE_SCHEMA_NORMALIZED_HANDLE := 2
 const GRIP_SEAT_COORDINATE_SCHEMA_VERSION := (
@@ -40,8 +42,8 @@ const GRIP_SEAT_COORDINATE_SCHEMA_VERSION := (
 @export var pommel_curve_in_handle: Vector3 = Vector3.ZERO
 @export var pommel_curve_out_handle: Vector3 = Vector3.ZERO
 
-## Weapon Orientation - roll around grip axis (+/-120 degrees).
-@export_range(-120.0, 120.0, 1.0) var weapon_roll_degrees: float = 0.0
+## Weapon Orientation - wrist-owned roll around grip axis (+/-90 degrees).
+@export_range(-90.0, 90.0, 1.0) var weapon_roll_degrees: float = 0.0
 
 ## Grip Adjustments. Grip-seat values are stored as normalized Pommel-to-Tip
 ## Handle coordinates in 0..1. A balanced weapon may present these as -1..1 in
@@ -159,7 +161,11 @@ func normalize() -> void:
 			-1.0,
 			1.0
 		)
-	weapon_roll_degrees = clampf(weapon_roll_degrees, -120.0, 120.0)
+	weapon_roll_degrees = clampf(
+		weapon_roll_degrees,
+		WEAPON_ROLL_MIN_DEGREES,
+		WEAPON_ROLL_MAX_DEGREES
+	)
 	right_upperarm_roll_degrees = clampf(right_upperarm_roll_degrees, -180.0, 180.0)
 	left_upperarm_roll_degrees = clampf(left_upperarm_roll_degrees, -180.0, 180.0)
 	if transition_duration_seconds < 0.0:

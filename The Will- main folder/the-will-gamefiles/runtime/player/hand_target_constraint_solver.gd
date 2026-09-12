@@ -366,7 +366,10 @@ func query_point_body_restriction(body_restriction_root: Node3D, point_world: Ve
 		result["estimated_clearance_meters"] = -1.0
 	return result
 
-func evaluate_body_self_collision(body_restriction_root: Node3D) -> Dictionary:
+func evaluate_body_self_collision(
+	body_restriction_root: Node3D,
+	include_all_illegal_pairs: bool = false
+) -> Dictionary:
 	var result := {
 		"legal": true,
 		"checked_pair_count": 0,
@@ -374,6 +377,7 @@ func evaluate_body_self_collision(body_restriction_root: Node3D) -> Dictionary:
 		"allowed_overlap_pair_count": 0,
 		"illegal_pair_count": 0,
 		"illegal_pairs": [],
+		"illegal_pairs_complete": true,
 		"first_illegal_pair": {},
 		"first_allowed_overlap_pair": {},
 		"minimum_clearance_meters": INF,
@@ -406,13 +410,17 @@ func evaluate_body_self_collision(body_restriction_root: Node3D) -> Dictionary:
 			result["legal"] = false
 			result["illegal_pair_count"] = int(result.get("illegal_pair_count", 0)) + 1
 			var illegal_pairs: Array = result.get("illegal_pairs", []) as Array
-			if illegal_pairs.size() < 12:
+			if include_all_illegal_pairs or illegal_pairs.size() < 12:
 				illegal_pairs.append(pair_result)
 				result["illegal_pairs"] = illegal_pairs
 			if (result.get("first_illegal_pair", {}) as Dictionary).is_empty():
 				result["first_illegal_pair"] = pair_result
 	if float(result.get("minimum_clearance_meters", INF)) == INF:
 		result["minimum_clearance_meters"] = -1.0
+	result["illegal_pairs_complete"] = (
+		int(result.get("illegal_pair_count", 0))
+			== (result.get("illegal_pairs", []) as Array).size()
+	)
 	return result
 
 func build_arm_self_query_exclusions(body_restriction_root: Node3D, slot_id: StringName) -> Array:

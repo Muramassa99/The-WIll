@@ -2,6 +2,7 @@ extends Resource
 class_name CombatAnimationRetargetNode
 
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
 
 const SCHEMA_ID: StringName = &"combat_animation_retarget_node_v1"
 const ORIGIN_SPACE_PRIMARY_SHOULDER: StringName = &"primary_shoulder"
@@ -61,7 +62,11 @@ func normalize() -> void:
 		weapon_axis_local = weapon_axis_local.normalized()
 	pivot_range_percent = clampf(pivot_range_percent, 0.0, 1.0)
 	pivot_ratio_from_pommel = clampf(pivot_ratio_from_pommel, 0.0, 1.0)
-	weapon_roll_degrees = clampf(weapon_roll_degrees, -120.0, 120.0)
+	weapon_roll_degrees = clampf(
+		weapon_roll_degrees,
+		CombatAnimationMotionNodeScript.WEAPON_ROLL_MIN_DEGREES,
+		CombatAnimationMotionNodeScript.WEAPON_ROLL_MAX_DEGREES
+	)
 	axial_reposition_offset = clampf(axial_reposition_offset, -1.0, 1.0)
 	grip_seat_slide_offset = clampf(grip_seat_slide_offset, 0.0, 1.0)
 	secondary_grip_seat_slide_offset = clampf(secondary_grip_seat_slide_offset, 0.0, 1.0)

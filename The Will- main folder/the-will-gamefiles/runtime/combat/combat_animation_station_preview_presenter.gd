@@ -84,6 +84,9 @@ const PREVIEW_POSE_MODE_META := "preview_pose_mode"
 const PREVIEW_POSE_MODE_HAND_AUTHORED: StringName = &"hand_authored"
 const PREVIEW_POSE_MODE_NONCOMBAT_STOW: StringName = &"noncombat_stow"
 const GRIP_RESOLVE_REASON_HANDLE_POSITION: StringName = &"handle_position_changed"
+const GRIP_RESOLVE_REASON_ACTIVE_GRIP_STATE: StringName = &"active_grip_state_requested"
+const GRIP_RESOLVE_REASON_SUPPORT_STATE: StringName = &"support_grip_state_changed"
+const WEAPON_ROLL_CONTACT_RESULT_META := "weapon_roll_contact_result"
 const DEBUGGER_VIEW_ENABLED_META: StringName = &"debugger_view_enabled"
 const CAMERA_STATE_READY_META := "camera_state_ready"
 const CAMERA_FOCUS_POINT_META := "camera_focus_point"
@@ -139,8 +142,11 @@ const AUTHORING_BODY_SEPARATION_MAX_STEP_METERS := 0.20
 const AUTHORING_BODY_CONTACT_COUPLED_ITERATIONS := 3
 const AUTHORING_BODY_CONTACT_FINAL_SEPARATION_ITERATIONS := 8
 const AUTHORING_BODY_CONTACT_SETTLE_EPSILON_METERS := 0.0015
+const PRIMARY_SURFACE_GRIP_PACKET_BONE_COUNT: int = 15
+const PRIMARY_HAND_SURFACE_SEAT_FIXED_POINT_PASSES: int = 3
 const AUTHORING_BODY_CONTACT_GRIP_EPSILON_METERS := 0.02
 const AUTHORING_BODY_CONTACT_GRIP_STALL_EPSILON_METERS := 0.0005
+const WEAPON_ROLL_CONTACT_ALIGNMENT_TOLERANCE_METERS := 0.0005
 
 var motion_node_editor: CombatAnimationMotionNodeEditor = CombatAnimationMotionNodeEditorScript.new()
 const AUTHORING_CONTACT_TETHER_ITERATIONS := 4
@@ -172,9 +178,15 @@ const PREVIEW_SUPPORT_HAND_SURFACE_SEAT_STATE_META := (
 	"preview_support_hand_surface_seat_state"
 )
 const SUPPORT_HAND_SURFACE_SEAT_FIXED_POINT_PASSES: int = 3
+const SUPPORT_HAND_SURFACE_SEAT_AXIAL_CANDIDATE_FIXED_POINT_PASSES: int = 4
+const SUPPORT_HAND_SURFACE_SEAT_AXIAL_CANDIDATE_DEGREES: float = 20.0
 const SUPPORT_HAND_SURFACE_SEAT_REALIZATION_EPSILON_METERS: float = (
 	PlayerHandSurfaceSeatSolverScript.CLEARANCE_ROOT_TOLERANCE_METERS
 )
+const SUPPORT_HAND_SURFACE_SEAT_IDENTITY_ROTATION_EPSILON_DEGREES: float = 0.001
+const SUPPORT_HAND_SURFACE_SEAT_PROGRESS_EPSILON: float = 0.000001
+const SUPPORT_HAND_SURFACE_SEAT_CORRECTION_SIGNATURE_STEP: float = 0.000001
+const SUPPORT_BODY_SELF_COLLISION_COMPARISON_EPSILON_METERS: float = 0.000001
 const PREVIEW_SECONDARY_GRIP_SEAT_AUTHORED_META := "preview_secondary_grip_seat_authored"
 const PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_META := "hand_mount_local_transform"
 const PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_ORIGIN_META := "hand_mount_local_transform_origin_id"
@@ -194,10 +206,92 @@ var collision_legality_resolver = CombatCollisionLegalityResolverScript.new()
 var material_lookup_cache: Dictionary = {}
 var preview_dominant_slot_id: StringName = &"hand_right"
 var preview_default_two_hand: bool = false
+var pending_collision_path_evaluation_job: Dictionary = {}
+var pending_collision_path_preview_root: Node3D = null
+var pending_collision_path_generation: int = 0
 
 func configure_preview_hand_setup(dominant_slot_id: StringName, default_two_hand: bool) -> void:
 	preview_dominant_slot_id = _normalize_preview_slot_id(dominant_slot_id)
 	preview_default_two_hand = default_two_hand
+
+func has_pending_collision_path_validation() -> bool:
+	return not pending_collision_path_evaluation_job.is_empty()
+
+func cancel_pending_collision_path_validation() -> bool:
+	var had_pending_validation: bool = not pending_collision_path_evaluation_job.is_empty()
+	var pending_preview_root: Node3D = pending_collision_path_preview_root
+	pending_collision_path_generation += 1
+	pending_collision_path_evaluation_job.clear()
+	pending_collision_path_preview_root = null
+	if had_pending_validation and pending_preview_root != null and is_instance_valid(pending_preview_root):
+		pending_preview_root.set_meta("collision_path_pending", false)
+		pending_preview_root.set_meta("collision_path_processed_pose_count", 0)
+		pending_preview_root.set_meta("collision_path_legal", true)
+		pending_preview_root.set_meta("collision_path_sample_count", 0)
+		pending_preview_root.set_meta("collision_path_illegal_pose_count", 0)
+		pending_preview_root.set_meta("collision_path_first_illegal_index", -1)
+		pending_preview_root.set_meta("collision_path_region", "")
+		# A canceled job cannot authorize the cached static trajectory state.
+		# Force the next settled refresh to publish a result for its own revision.
+		pending_preview_root.set_meta("trajectory_static_visual_signature", "")
+	return had_pending_validation
+
+func advance_pending_collision_path_validation(max_pose_count: int = 1) -> Dictionary:
+	if pending_collision_path_evaluation_job.is_empty():
+		return {"active": false, "completed": false}
+	if int(pending_collision_path_evaluation_job.get("generation", -1)) != pending_collision_path_generation:
+		cancel_pending_collision_path_validation()
+		return {"active": false, "completed": false, "canceled": true}
+	if (
+		pending_collision_path_preview_root == null
+		or not is_instance_valid(pending_collision_path_preview_root)
+	):
+		cancel_pending_collision_path_validation()
+		return {"active": false, "completed": false, "canceled": true}
+	var held_item: Node3D = pending_collision_path_evaluation_job.get("held_item", null) as Node3D
+	if held_item == null or not is_instance_valid(held_item):
+		cancel_pending_collision_path_validation()
+		return {"active": false, "completed": false, "canceled": true}
+	var body_restriction_root: Node3D = pending_collision_path_evaluation_job.get(
+		"body_restriction_root",
+		null
+	) as Node3D
+	if body_restriction_root == null or not is_instance_valid(body_restriction_root):
+		cancel_pending_collision_path_validation()
+		return {"active": false, "completed": false, "canceled": true}
+	var advance_result: Dictionary = collision_legality_resolver.advance_weapon_path_evaluation(
+		pending_collision_path_evaluation_job,
+		maxi(max_pose_count, 1)
+	)
+	var path_result: Dictionary = advance_result.get("result", {}) as Dictionary
+	var completed: bool = bool(advance_result.get("complete", false))
+	_publish_preview_collision_path_result(
+		pending_collision_path_preview_root,
+		path_result,
+		not completed,
+		int(pending_collision_path_evaluation_job.get("next_transform_index", 0))
+	)
+	if completed:
+		pending_collision_path_evaluation_job.clear()
+		pending_collision_path_preview_root = null
+	return {
+		"active": not completed,
+		"completed": completed,
+		"processed_pose_count": int(advance_result.get("processed_pose_count", 0)),
+		"remaining_pose_count": int(advance_result.get("remaining_pose_count", 0)),
+		"result": path_result,
+	}
+
+func flush_pending_collision_path_validation() -> Dictionary:
+	if pending_collision_path_evaluation_job.is_empty():
+		return {"active": false, "completed": false}
+	var path_result: Dictionary = pending_collision_path_evaluation_job.get("result", {}) as Dictionary
+	var remaining_pose_count: int = maxi(
+		int(path_result.get("path_sample_count", 0))
+		- int(pending_collision_path_evaluation_job.get("next_transform_index", 0)),
+		1
+	)
+	return advance_pending_collision_path_validation(remaining_pose_count)
 
 func set_debugger_view_enabled(preview_subviewport: SubViewport, enabled: bool) -> void:
 	var preview_root: Node3D = _get_preview_root(preview_subviewport)
@@ -365,112 +459,8 @@ func refresh_preview(
 	playback_state: Dictionary = {},
 	live_motion_node_override: CombatAnimationMotionNode = null
 ) -> void:
-	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
-	_sync_preview_size(preview_container, preview_subviewport)
-	var cached_effective_chain: Array = playback_state.get("authoring_drag_effective_motion_node_chain", []) as Array
-	var effective_motion_node_chain: Array = (
-		cached_effective_chain
-		if not cached_effective_chain.is_empty()
-		else _build_effective_motion_node_chain(active_draft, selected_node_index, live_motion_node_override)
-	)
-	var selected_motion_node: CombatAnimationMotionNode = _resolve_selected_motion_node(effective_motion_node_chain, selected_node_index)
-	var cached_visible_chain: Array = playback_state.get("authoring_drag_visible_motion_node_chain", []) as Array
-	var visible_motion_node_chain: Array = (
-		cached_visible_chain
-		if not cached_visible_chain.is_empty()
-		else _build_visible_motion_node_chain(active_draft, effective_motion_node_chain)
-	)
-	var visible_selected_node_index: int = (
-		int(playback_state.get("authoring_drag_visible_selected_node_index", -1))
-		if not cached_visible_chain.is_empty()
-		else _resolve_visible_selected_motion_node_index(active_draft, selected_node_index, visible_motion_node_chain.size())
-	)
-	var playback_motion_node: CombatAnimationMotionNode = _build_effective_preview_motion_node(selected_motion_node, playback_state)
-	_refresh_actor_and_weapon(state, active_wip, playback_motion_node, active_draft)
-	_prepare_trajectory_root_for_authoring(state)
-	var open_mount_seed: Dictionary = playback_state.get("open_mount_seed", {}) as Dictionary
-	if active_wip != null and not bool(playback_state.get("active", false)):
-		if open_mount_seed.is_empty():
-			open_mount_seed = resolve_preview_hand_mounted_motion_seed(
-				preview_subviewport,
-				{},
-				active_wip.wip_id
-			)
-	var use_open_mount_baseline: bool = (
-		not _is_noncombat_idle_draft(active_draft)
-		and StringName(playback_state.get("grip_resolve_reason", StringName()))
-			!= GRIP_RESOLVE_REASON_HANDLE_POSITION
-		and _motion_node_matches_hand_mounted_seed(playback_motion_node, open_mount_seed)
-	)
-	var dominant_seat_lock_strength: float = (
-		AUTHORING_DRAG_DOMINANT_SEAT_LOCK_STRENGTH
-		if live_motion_node_override != null
-		else AUTHORING_PREVIEW_DOMINANT_SEAT_LOCK_STRENGTH
-	)
-	var resolved_playback_state: Dictionary = (
-		_apply_preview_open_mount_pose(state, playback_motion_node, playback_state, true)
-		if use_open_mount_baseline
-		else _apply_authored_weapon_pose(
-			state,
-			playback_motion_node,
-			playback_state,
-			true,
-			dominant_seat_lock_strength,
-			true,
-			active_draft,
-			live_motion_node_override != null
-		)
-	)
-	var debugger_view_enabled: bool = _resolve_debugger_view_enabled(state, resolved_playback_state)
-	var display_motion_node_chain: Array = visible_motion_node_chain
-	if not (bool(resolved_playback_state.get("authoring_drag_budgeted_visuals", false)) and live_motion_node_override != null):
-		display_motion_node_chain = _build_resolved_display_motion_node_chain(
-			visible_motion_node_chain,
-			visible_selected_node_index,
-			resolved_playback_state
-		)
-	if bool(resolved_playback_state.get("authoring_drag_budgeted_visuals", false)):
-		_refresh_drag_budgeted_visuals(
-			state,
-			display_motion_node_chain,
-			visible_selected_node_index,
-			active_focus,
-			active_draft
-		)
-	else:
-		var speed_state_config: Dictionary = _build_speed_state_config(active_draft)
-		resolved_playback_state["trajectory_static_visual_signature"] = _build_trajectory_static_visual_signature(
-			visible_motion_node_chain,
-			speed_state_config,
-			active_draft,
-			bool(resolved_playback_state.get("authoring_drag_lightweight", false))
-		)
-		_refresh_trajectory_visuals(
-			state,
-			display_motion_node_chain,
-			visible_selected_node_index,
-			active_focus,
-			resolved_playback_state,
-			speed_state_config,
-			active_draft
-		)
-		_refresh_weapon_and_sphere_visuals(state, display_motion_node_chain, visible_selected_node_index, active_focus, baked_profile)
-	if not bool(resolved_playback_state.get("authoring_drag_active", false)):
-		_refresh_collision_debug_visuals(state)
-	else:
-		_apply_debugger_view_visibility(state, debugger_view_enabled)
-
-func sync_preview_pose(
-	preview_container: SubViewportContainer,
-	preview_subviewport: SubViewport,
-	active_wip: CraftedItemWIP,
-	active_draft: Resource,
-	selected_node_index: int,
-	playback_state: Dictionary = {},
-	live_motion_node_override: CombatAnimationMotionNode = null,
-	active_focus: StringName = &"tip",
-	baked_profile: BakedProfile = null
-) -> void:
+	if not bool(playback_state.get("authoring_async_collision_path_validation", false)):
+		cancel_pending_collision_path_validation()
 	var trace_enabled: bool = bool(get_meta("trace_preview_latency", false))
 	var trace: Array = []
 	var trace_step_usec: int = Time.get_ticks_usec()
@@ -515,10 +505,23 @@ func sync_preview_pose(
 			)
 	if trace_enabled:
 		trace_step_usec = _append_latency_trace_elapsed(trace, "resolve_open_mount_seed", trace_step_usec)
+	var grip_resolve_reason: StringName = StringName(playback_state.get(
+		"grip_resolve_reason",
+		StringName()
+	))
+	var force_authored_grip_resolve: bool = grip_resolve_reason in [
+		GRIP_RESOLVE_REASON_HANDLE_POSITION,
+		GRIP_RESOLVE_REASON_ACTIVE_GRIP_STATE,
+		GRIP_RESOLVE_REASON_SUPPORT_STATE,
+	]
+	var support_state_only_resolve: bool = (
+		grip_resolve_reason == GRIP_RESOLVE_REASON_SUPPORT_STATE
+	)
 	var use_open_mount_baseline: bool = (
 		not _is_noncombat_idle_draft(active_draft)
-		and StringName(playback_state.get("grip_resolve_reason", StringName()))
-			!= GRIP_RESOLVE_REASON_HANDLE_POSITION
+		and not force_authored_grip_resolve
+		and not _is_weapon_roll_interaction(playback_state)
+		and absf(playback_motion_node.weapon_roll_degrees) <= 0.00001
 		and _motion_node_matches_hand_mounted_seed(playback_motion_node, open_mount_seed)
 	)
 	var dominant_seat_lock_strength: float = (
@@ -526,10 +529,494 @@ func sync_preview_pose(
 		if live_motion_node_override != null
 		else AUTHORING_PREVIEW_DOMINANT_SEAT_LOCK_STRENGTH
 	)
-	var resolved_playback_state: Dictionary = (
-		_apply_preview_open_mount_pose(state, playback_motion_node, playback_state, false)
-		if use_open_mount_baseline
-		else _apply_authored_weapon_pose(
+	var primary_grip_preseed_validation: Dictionary = (
+		_validate_preview_primary_grip_preseed_for_refresh(state, playback_state)
+	)
+	var primary_grip_preseed_requested: bool = bool(
+		primary_grip_preseed_validation.get("requested", false)
+	)
+	var primary_grip_preseed_valid: bool = bool(
+		primary_grip_preseed_validation.get("valid", false)
+	)
+	var primary_grip_bootstrap_invoked: bool = false
+	var primary_grip_bootstrap_outcome: Dictionary = {}
+	if (
+		force_authored_grip_resolve
+		and not _is_weapon_roll_interaction(playback_state)
+		and not primary_grip_preseed_requested
+		and not support_state_only_resolve
+	):
+		primary_grip_bootstrap_invoked = true
+		primary_grip_bootstrap_outcome = _bootstrap_preview_primary_grip_relationship(
+			state,
+			playback_motion_node,
+			playback_state,
+			dominant_seat_lock_strength,
+			active_draft,
+			bool(playback_state.get(
+				"initialize_primary_from_handle_zero",
+				false
+			))
+		)
+	var primary_transaction_preview_root: Node3D = state.get(
+		"preview_root",
+		null
+	) as Node3D
+	var primary_grip_bootstrap_disposition: StringName = StringName(
+		primary_grip_bootstrap_outcome.get("disposition", StringName())
+	)
+	var primary_grip_bootstrap_committed: bool = (
+		primary_grip_bootstrap_invoked
+		and primary_grip_bootstrap_disposition == &"committed"
+	)
+	var primary_grip_current_relationship_reused: bool = (
+		primary_grip_bootstrap_invoked
+		and primary_grip_bootstrap_disposition == &"reuse_current_primary"
+	)
+	var resolved_playback_state: Dictionary = {}
+	if primary_grip_bootstrap_committed:
+		var committed_preview_root: Node3D = state.get("preview_root", null) as Node3D
+		resolved_playback_state = (
+			(committed_preview_root.get_meta(
+				"resolved_playback_state",
+				playback_state
+			) as Dictionary).duplicate(true)
+			if committed_preview_root != null
+			else playback_state.duplicate(true)
+		)
+		if committed_preview_root != null:
+			var committed_held_item: Node3D = _get_node_meta_or_default(
+				committed_preview_root,
+				"preview_held_item",
+				null
+			) as Node3D
+			if committed_held_item != null and is_instance_valid(committed_held_item):
+				if _should_preview_use_support_hand(
+					committed_held_item,
+					playback_motion_node
+				):
+					resolved_playback_state = (
+						_resolve_preview_support_after_primary_transaction(
+							state,
+							playback_motion_node,
+							playback_state,
+							true
+						)
+					)
+				else:
+					_update_camera(
+						committed_preview_root,
+						weapon_grip_anchor_provider.get_primary_grip_anchor(
+							committed_held_item
+						)
+					)
+	elif primary_grip_preseed_valid or primary_grip_current_relationship_reused:
+		var primary_reuse_outcome: Dictionary = _reuse_preview_primary_transaction_frame(
+			state,
+			playback_motion_node,
+			playback_state,
+			true
+		)
+		resolved_playback_state = primary_reuse_outcome.get(
+			"resolved_playback_state",
+			playback_state
+		) as Dictionary
+		var preseed_held_item: Node3D = _get_node_meta_or_default(
+			primary_transaction_preview_root,
+			"preview_held_item",
+			null
+		) as Node3D
+		if (
+			bool(primary_reuse_outcome.get("valid", false))
+			and preseed_held_item != null
+			and is_instance_valid(preseed_held_item)
+			and _should_preview_use_support_hand(
+				preseed_held_item,
+				playback_motion_node
+			)
+		):
+			resolved_playback_state = (
+				_resolve_preview_support_after_primary_transaction(
+					state,
+					playback_motion_node,
+					playback_state,
+					true
+				)
+			)
+	elif support_state_only_resolve:
+		var support_state_held_item: Node3D = _get_node_meta_or_default(
+			primary_transaction_preview_root,
+			"preview_held_item",
+			null
+		) as Node3D
+		if (
+			support_state_held_item != null
+			and is_instance_valid(support_state_held_item)
+			and _should_preview_use_support_hand(
+				support_state_held_item,
+				playback_motion_node
+			)
+		):
+			resolved_playback_state = (
+				_resolve_preview_support_after_primary_transaction(
+					state,
+					playback_motion_node,
+					playback_state,
+					true
+				)
+			)
+		else:
+			# 2H -> 1H clears only Support. The committed Primary hand/weapon unit
+			# remains byte-for-byte authoritative; no general macro/seat path runs.
+			var support_clear_outcome: Dictionary = (
+				_clear_preview_support_preserving_primary_transaction_frame(
+					state,
+					playback_motion_node,
+					playback_state,
+					true
+				)
+			)
+			resolved_playback_state = support_clear_outcome.get(
+				"resolved_playback_state",
+				playback_state
+			) as Dictionary
+	elif primary_grip_bootstrap_invoked or primary_grip_preseed_requested:
+		# Failed transaction/preseed handoff is terminal. Its exact snapshot is
+		# already restored; even a non-exact general pose rebuild would mutate it.
+		resolved_playback_state = (
+			(primary_transaction_preview_root.get_meta(
+				"resolved_playback_state",
+				playback_state
+			) as Dictionary).duplicate(true)
+			if primary_transaction_preview_root != null
+			else playback_state.duplicate(true)
+		)
+	elif use_open_mount_baseline:
+		resolved_playback_state = _apply_preview_open_mount_pose(
+			state,
+			playback_motion_node,
+			playback_state,
+			true
+		)
+	else:
+		resolved_playback_state = _apply_authored_weapon_pose(
+			state,
+			playback_motion_node,
+			playback_state,
+			true,
+			dominant_seat_lock_strength,
+			true,
+			active_draft,
+			live_motion_node_override != null,
+			live_motion_node_override != null or force_authored_grip_resolve
+		)
+	# Startup/Reset zero-initialization is a one-refresh command. Never retain it in
+	# the preview-root playback snapshot consumed by later relationship changes.
+	resolved_playback_state.erase("initialize_primary_from_handle_zero")
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "apply_authoring_pose", trace_step_usec)
+	var debugger_view_enabled: bool = _resolve_debugger_view_enabled(state, resolved_playback_state)
+	var display_motion_node_chain: Array = visible_motion_node_chain
+	if not (bool(resolved_playback_state.get("authoring_drag_budgeted_visuals", false)) and live_motion_node_override != null):
+		display_motion_node_chain = _build_resolved_display_motion_node_chain(
+			visible_motion_node_chain,
+			visible_selected_node_index,
+			resolved_playback_state
+		)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "build_display_chain", trace_step_usec)
+	if bool(resolved_playback_state.get("authoring_drag_budgeted_visuals", false)):
+		_refresh_drag_budgeted_visuals(
+			state,
+			display_motion_node_chain,
+			visible_selected_node_index,
+			active_focus,
+			active_draft
+		)
+		if trace_enabled:
+			trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_drag_budgeted_visuals", trace_step_usec)
+	else:
+		var speed_state_config: Dictionary = _build_speed_state_config(active_draft)
+		resolved_playback_state["trajectory_static_visual_signature"] = _build_trajectory_static_visual_signature(
+			visible_motion_node_chain,
+			speed_state_config,
+			active_draft,
+			bool(resolved_playback_state.get("authoring_drag_lightweight", false))
+		)
+		_refresh_trajectory_visuals(
+			state,
+			display_motion_node_chain,
+			visible_selected_node_index,
+			active_focus,
+			resolved_playback_state,
+			speed_state_config,
+			active_draft
+		)
+		if trace_enabled:
+			trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_trajectory_visuals", trace_step_usec)
+		_refresh_weapon_and_sphere_visuals(state, display_motion_node_chain, visible_selected_node_index, active_focus, baked_profile)
+		if trace_enabled:
+			trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_weapon_and_sphere_visuals", trace_step_usec)
+	if not bool(resolved_playback_state.get("authoring_drag_active", false)):
+		_refresh_collision_debug_visuals(state)
+		if trace_enabled:
+			trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_collision_debug_visuals", trace_step_usec)
+	else:
+		_apply_debugger_view_visibility(state, debugger_view_enabled)
+		if trace_enabled:
+			trace_step_usec = _append_latency_trace_elapsed(trace, "apply_debugger_view_visibility", trace_step_usec)
+	if trace_enabled:
+		set_meta("last_refresh_preview_latency_trace", trace)
+
+func sync_preview_pose(
+	preview_container: SubViewportContainer,
+	preview_subviewport: SubViewport,
+	active_wip: CraftedItemWIP,
+	active_draft: Resource,
+	selected_node_index: int,
+	playback_state: Dictionary = {},
+	live_motion_node_override: CombatAnimationMotionNode = null,
+	active_focus: StringName = &"tip",
+	baked_profile: BakedProfile = null
+) -> void:
+	if not bool(playback_state.get("authoring_async_collision_path_validation", false)):
+		cancel_pending_collision_path_validation()
+	var trace_enabled: bool = bool(get_meta("trace_preview_latency", false))
+	var trace: Array = []
+	var trace_step_usec: int = Time.get_ticks_usec()
+	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
+	_sync_preview_size(preview_container, preview_subviewport)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "ensure_nodes_and_size", trace_step_usec)
+	var cached_effective_chain: Array = playback_state.get("authoring_drag_effective_motion_node_chain", []) as Array
+	var effective_motion_node_chain: Array = (
+		cached_effective_chain
+		if not cached_effective_chain.is_empty()
+		else _build_effective_motion_node_chain(active_draft, selected_node_index, live_motion_node_override)
+	)
+	var selected_motion_node: CombatAnimationMotionNode = _resolve_selected_motion_node(effective_motion_node_chain, selected_node_index)
+	var cached_visible_chain: Array = playback_state.get("authoring_drag_visible_motion_node_chain", []) as Array
+	var visible_motion_node_chain: Array = (
+		cached_visible_chain
+		if not cached_visible_chain.is_empty()
+		else _build_visible_motion_node_chain(active_draft, effective_motion_node_chain)
+	)
+	var visible_selected_node_index: int = (
+		int(playback_state.get("authoring_drag_visible_selected_node_index", -1))
+		if not cached_visible_chain.is_empty()
+		else _resolve_visible_selected_motion_node_index(active_draft, selected_node_index, visible_motion_node_chain.size())
+	)
+	var playback_motion_node: CombatAnimationMotionNode = _build_effective_preview_motion_node(selected_motion_node, playback_state)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "build_motion_chain", trace_step_usec)
+	_refresh_actor_and_weapon(state, active_wip, playback_motion_node, active_draft)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_actor_and_weapon", trace_step_usec)
+	_prepare_trajectory_root_for_authoring(state)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "prepare_trajectory_root", trace_step_usec)
+	var open_mount_seed: Dictionary = playback_state.get("open_mount_seed", {}) as Dictionary
+	if active_wip != null and not bool(playback_state.get("active", false)):
+		if open_mount_seed.is_empty():
+			open_mount_seed = resolve_preview_hand_mounted_motion_seed(
+				preview_subviewport,
+				{},
+				active_wip.wip_id
+			)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "resolve_open_mount_seed", trace_step_usec)
+	var grip_resolve_reason: StringName = StringName(playback_state.get(
+		"grip_resolve_reason",
+		StringName()
+	))
+	var force_authored_grip_resolve: bool = grip_resolve_reason in [
+		GRIP_RESOLVE_REASON_HANDLE_POSITION,
+		GRIP_RESOLVE_REASON_ACTIVE_GRIP_STATE,
+		GRIP_RESOLVE_REASON_SUPPORT_STATE,
+	]
+	var support_state_only_resolve: bool = (
+		grip_resolve_reason == GRIP_RESOLVE_REASON_SUPPORT_STATE
+	)
+	var use_open_mount_baseline: bool = (
+		not _is_noncombat_idle_draft(active_draft)
+		and not force_authored_grip_resolve
+		and not _is_weapon_roll_interaction(playback_state)
+		and absf(playback_motion_node.weapon_roll_degrees) <= 0.00001
+		and _motion_node_matches_hand_mounted_seed(playback_motion_node, open_mount_seed)
+	)
+	var dominant_seat_lock_strength: float = (
+		AUTHORING_DRAG_DOMINANT_SEAT_LOCK_STRENGTH
+		if live_motion_node_override != null
+		else AUTHORING_PREVIEW_DOMINANT_SEAT_LOCK_STRENGTH
+	)
+	var primary_grip_preseed_validation: Dictionary = (
+		_validate_preview_primary_grip_preseed_for_refresh(state, playback_state)
+	)
+	var primary_grip_preseed_requested: bool = bool(
+		primary_grip_preseed_validation.get("requested", false)
+	)
+	var primary_grip_preseed_valid: bool = bool(
+		primary_grip_preseed_validation.get("valid", false)
+	)
+	var primary_grip_bootstrap_invoked: bool = false
+	var primary_grip_bootstrap_outcome: Dictionary = {}
+	if (
+		force_authored_grip_resolve
+		and not _is_weapon_roll_interaction(playback_state)
+		and not primary_grip_preseed_requested
+		and not support_state_only_resolve
+	):
+		primary_grip_bootstrap_invoked = true
+		primary_grip_bootstrap_outcome = _bootstrap_preview_primary_grip_relationship(
+			state,
+			playback_motion_node,
+			playback_state,
+			dominant_seat_lock_strength,
+			active_draft,
+			bool(playback_state.get(
+				"initialize_primary_from_handle_zero",
+				false
+			))
+		)
+	var primary_transaction_preview_root: Node3D = state.get(
+		"preview_root",
+		null
+	) as Node3D
+	var primary_grip_bootstrap_disposition: StringName = StringName(
+		primary_grip_bootstrap_outcome.get("disposition", StringName())
+	)
+	var primary_grip_bootstrap_committed: bool = (
+		primary_grip_bootstrap_invoked
+		and primary_grip_bootstrap_disposition == &"committed"
+	)
+	var primary_grip_current_relationship_reused: bool = (
+		primary_grip_bootstrap_invoked
+		and primary_grip_bootstrap_disposition == &"reuse_current_primary"
+	)
+	var resolved_playback_state: Dictionary = {}
+	if primary_grip_bootstrap_committed:
+		var committed_preview_root: Node3D = state.get("preview_root", null) as Node3D
+		resolved_playback_state = (
+			(committed_preview_root.get_meta(
+				"resolved_playback_state",
+				playback_state
+			) as Dictionary).duplicate(true)
+			if committed_preview_root != null
+			else playback_state.duplicate(true)
+		)
+		var committed_held_item: Node3D = (
+			_get_node_meta_or_default(
+				committed_preview_root,
+				"preview_held_item",
+				null
+			) as Node3D
+			if committed_preview_root != null
+			else null
+		)
+		if (
+			committed_held_item != null
+			and is_instance_valid(committed_held_item)
+			and _should_preview_use_support_hand(
+				committed_held_item,
+				playback_motion_node
+			)
+		):
+			resolved_playback_state = (
+				_resolve_preview_support_after_primary_transaction(
+					state,
+					playback_motion_node,
+					playback_state,
+					false
+				)
+			)
+	elif primary_grip_preseed_valid or primary_grip_current_relationship_reused:
+		var primary_reuse_outcome: Dictionary = _reuse_preview_primary_transaction_frame(
+			state,
+			playback_motion_node,
+			playback_state,
+			false
+		)
+		resolved_playback_state = primary_reuse_outcome.get(
+			"resolved_playback_state",
+			playback_state
+		) as Dictionary
+		var preseed_held_item: Node3D = _get_node_meta_or_default(
+			primary_transaction_preview_root,
+			"preview_held_item",
+			null
+		) as Node3D
+		if (
+			bool(primary_reuse_outcome.get("valid", false))
+			and preseed_held_item != null
+			and is_instance_valid(preseed_held_item)
+			and _should_preview_use_support_hand(
+				preseed_held_item,
+				playback_motion_node
+			)
+		):
+			resolved_playback_state = (
+				_resolve_preview_support_after_primary_transaction(
+					state,
+					playback_motion_node,
+					playback_state,
+					false
+				)
+			)
+	elif support_state_only_resolve:
+		var support_state_held_item: Node3D = _get_node_meta_or_default(
+			primary_transaction_preview_root,
+			"preview_held_item",
+			null
+		) as Node3D
+		if (
+			support_state_held_item != null
+			and is_instance_valid(support_state_held_item)
+			and _should_preview_use_support_hand(
+				support_state_held_item,
+				playback_motion_node
+			)
+		):
+			resolved_playback_state = (
+				_resolve_preview_support_after_primary_transaction(
+					state,
+					playback_motion_node,
+					playback_state,
+					false
+				)
+			)
+		else:
+			var support_clear_outcome: Dictionary = (
+				_clear_preview_support_preserving_primary_transaction_frame(
+					state,
+					playback_motion_node,
+					playback_state,
+					false
+				)
+			)
+			resolved_playback_state = support_clear_outcome.get(
+				"resolved_playback_state",
+				playback_state
+			) as Dictionary
+	elif primary_grip_bootstrap_invoked or primary_grip_preseed_requested:
+		# Preserve the exact rollback frame. No pose builder may run after a failed
+		# Primary transaction or rejected one-shot preseed handoff.
+		resolved_playback_state = (
+			(primary_transaction_preview_root.get_meta(
+				"resolved_playback_state",
+				playback_state
+			) as Dictionary).duplicate(true)
+			if primary_transaction_preview_root != null
+			else playback_state.duplicate(true)
+		)
+	elif use_open_mount_baseline:
+		resolved_playback_state = _apply_preview_open_mount_pose(
+			state,
+			playback_motion_node,
+			playback_state,
+			false
+		)
+	else:
+		resolved_playback_state = _apply_authored_weapon_pose(
 			state,
 			playback_motion_node,
 			playback_state,
@@ -537,9 +1024,10 @@ func sync_preview_pose(
 			dominant_seat_lock_strength,
 			true,
 			active_draft,
-			live_motion_node_override != null
+			live_motion_node_override != null,
+			live_motion_node_override != null or force_authored_grip_resolve
 		)
-	)
+	resolved_playback_state.erase("initialize_primary_from_handle_zero")
 	if trace_enabled:
 		trace_step_usec = _append_latency_trace_elapsed(trace, "apply_authoring_pose", trace_step_usec)
 	var debugger_view_enabled: bool = _resolve_debugger_view_enabled(state, resolved_playback_state)
@@ -604,6 +1092,7 @@ func sync_playback_pose(
 	playback_state: Dictionary = {},
 	live_motion_node_override: CombatAnimationMotionNode = null
 ) -> void:
+	cancel_pending_collision_path_validation()
 	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
 	_sync_preview_size(preview_container, preview_subviewport)
 	if bool(playback_state.get("runtime_clip_playback", false)) and bool(playback_state.get("solved_replay_available", false)):
@@ -643,6 +1132,29 @@ func bake_runtime_clip_upper_body_pose_track(
 	runtime_clip,
 	selected_node_index: int = 0
 ) -> Dictionary:
+	var bake_job: Dictionary = begin_runtime_clip_upper_body_pose_track_bake(
+		preview_container,
+		preview_subviewport,
+		active_wip,
+		active_draft,
+		runtime_clip,
+		selected_node_index
+	)
+	if not bool(bake_job.get("completed", true)):
+		advance_runtime_clip_upper_body_pose_track_bake(
+			bake_job,
+			maxi(int(bake_job.get("frame_count", 0)), 1)
+		)
+	return (bake_job.get("result", {}) as Dictionary).duplicate(true)
+
+func begin_runtime_clip_upper_body_pose_track_bake(
+	preview_container: SubViewportContainer,
+	preview_subviewport: SubViewport,
+	active_wip: CraftedItemWIP,
+	active_draft: Resource,
+	runtime_clip,
+	selected_node_index: int = 0
+) -> Dictionary:
 	var result := {
 		"baked": false,
 		"reason": "",
@@ -654,27 +1166,36 @@ func bake_runtime_clip_upper_body_pose_track(
 		"primary_anchor_to_anatomical_grip_avg_meters": -1.0,
 		"primary_anchor_to_anatomical_grip_max_frame": -1,
 	}
+	var bake_job: Dictionary = {
+		"active": false,
+		"completed": true,
+		"failed": false,
+		"result": result,
+		"frame_count": 0,
+		"next_frame_index": 0,
+	}
 	if preview_container == null or preview_subviewport == null:
 		result["reason"] = "missing_preview"
-		return result
+		return bake_job
 	if active_wip == null or active_draft == null or runtime_clip == null:
 		result["reason"] = "missing_source"
-		return result
+		return bake_job
 	if _is_noncombat_idle_draft(active_draft):
 		result["reason"] = "noncombat_stow_does_not_use_hand_pose"
-		return result
+		return bake_job
 	if not runtime_clip.has_method("get_frame_count"):
 		result["reason"] = "runtime_clip_has_no_frames"
-		return result
+		return bake_job
 	var frame_count: int = int(runtime_clip.call("get_frame_count"))
 	result["frame_count"] = frame_count
+	bake_job["frame_count"] = frame_count
 	if frame_count <= 0:
 		result["reason"] = "runtime_clip_empty"
-		return result
+		return bake_job
 	var clip_motion_node_chain: Array = runtime_clip.get("motion_node_chain") as Array
 	if clip_motion_node_chain.is_empty():
 		result["reason"] = "runtime_clip_has_no_motion_nodes"
-		return result
+		return bake_job
 	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
 	_sync_preview_size(preview_container, preview_subviewport)
 	var base_node_index: int = clampi(selected_node_index, 0, clip_motion_node_chain.size() - 1)
@@ -683,121 +1204,202 @@ func bake_runtime_clip_upper_body_pose_track(
 		base_motion_node = clip_motion_node_chain[0] as CombatAnimationMotionNode
 	if base_motion_node == null:
 		result["reason"] = "runtime_clip_has_invalid_motion_node"
-		return result
+		return bake_job
 	_refresh_actor_and_weapon(state, active_wip, base_motion_node, active_draft)
 	_prepare_trajectory_root_for_authoring(state)
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D
 	var actor_pivot: Node3D = state.get("actor_pivot", null) as Node3D
+	var trajectory_root: Node3D = state.get("trajectory_root", null) as Node3D
 	var actor: Node3D = actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D if actor_pivot != null else null
 	if preview_root == null or actor == null:
 		result["reason"] = "missing_preview_actor"
-		return result
+		return bake_job
 	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
 	if held_item == null or not is_instance_valid(held_item):
 		result["reason"] = "missing_preview_weapon"
-		return result
+		return bake_job
 	if not actor.has_method("capture_runtime_upper_body_pose_frame"):
 		result["reason"] = "actor_cannot_capture_upper_body_pose"
-		return result
+		return bake_job
 	var requested_bone_names: Array = []
 	if actor.has_method("get_runtime_upper_body_pose_bone_names"):
 		requested_bone_names = actor.call("get_runtime_upper_body_pose_bone_names") as Array
-	var resolved_bone_names: Array[StringName] = []
-	var captured_position_frames: Array = []
-	var captured_rotation_frames: Array = []
-	var captured_scale_frames: Array = []
-	var solved_weapon_positions := PackedVector3Array()
-	var solved_weapon_rotations := PackedVector4Array()
-	var solved_weapon_scales := PackedVector3Array()
 	var solved_anchor_paths: Array[StringName] = _resolve_solved_replay_anchor_node_paths(held_item)
-	var solved_anchor_position_frames: Array = []
-	var solved_anchor_rotation_frames: Array = []
-	var solved_anchor_scale_frames: Array = []
-	var solved_frame_available: Array = []
-	var primary_anchor_to_anatomical_grip_max: float = 0.0
-	var primary_anchor_to_anatomical_grip_sum: float = 0.0
-	var primary_anchor_to_anatomical_grip_count: int = 0
-	var primary_anchor_to_anatomical_grip_max_frame: int = -1
-	for frame_index: int in range(frame_count):
-		var frame_motion_node: CombatAnimationMotionNode = _build_runtime_clip_frame_motion_node(
-			runtime_clip,
-			frame_index,
-			base_motion_node
-		)
-		var playback_state: Dictionary = _build_runtime_clip_frame_playback_state(
-			runtime_clip,
-			frame_index,
-			frame_motion_node
-		)
-		playback_state["runtime_clip_playback"] = true
-		# Baking is the deliberate offline solve stage. Live F playback consumes the
-		# captured digit track and must never run the exact Handle solver per frame.
-		_apply_runtime_clip_preview_pose(
-			state,
-			frame_motion_node,
-			playback_state,
-			active_draft,
-			true
-		)
-		var frame_capture: Dictionary = actor.call(
-			"capture_runtime_upper_body_pose_frame",
-			requested_bone_names
-		) as Dictionary
-		var captured_names: Array = frame_capture.get("bone_names", []) as Array
-		var captured_positions: PackedVector3Array = frame_capture.get("pose_positions", PackedVector3Array()) as PackedVector3Array
-		var captured_rotations: PackedVector4Array = frame_capture.get("pose_rotations", PackedVector4Array()) as PackedVector4Array
-		var captured_scales: PackedVector3Array = frame_capture.get("pose_scales", PackedVector3Array()) as PackedVector3Array
-		if captured_positions.is_empty() or captured_rotations.is_empty() or captured_scales.is_empty():
-			result["reason"] = "empty_upper_body_capture"
-			return result
-		if frame_index == 0:
-			resolved_bone_names.clear()
-			for bone_name_variant: Variant in captured_names:
-				resolved_bone_names.append(StringName(bone_name_variant))
-			requested_bone_names = resolved_bone_names.duplicate()
-		if (
-			captured_positions.size() != resolved_bone_names.size()
-			or captured_rotations.size() != resolved_bone_names.size()
-			or captured_scales.size() != resolved_bone_names.size()
-		):
-			result["reason"] = "upper_body_capture_size_mismatch"
-			return result
-		var reference_transform: Transform3D = _resolve_trajectory_authoring_transform(actor)
-		var weapon_reference_transform: Transform3D = reference_transform.affine_inverse() * held_item.global_transform
-		var anchor_capture: Dictionary = _capture_solved_replay_anchor_frame(held_item, solved_anchor_paths)
-		var primary_anchor: Node3D = weapon_grip_anchor_provider.get_primary_grip_anchor(held_item)
-		if primary_anchor != null and actor.has_method("resolve_hand_grip_alignment_world_position"):
-			var anatomical_grip_world: Vector3 = actor.call(
-				"resolve_hand_grip_alignment_world_position",
-				_resolve_preview_dominant_slot_id()
-			) as Vector3
-			if anatomical_grip_world.length_squared() > 0.000001:
-				var anchor_error_meters: float = primary_anchor.global_position.distance_to(anatomical_grip_world)
-				primary_anchor_to_anatomical_grip_sum += anchor_error_meters
-				primary_anchor_to_anatomical_grip_count += 1
-				if anchor_error_meters > primary_anchor_to_anatomical_grip_max:
-					primary_anchor_to_anatomical_grip_max = anchor_error_meters
-					primary_anchor_to_anatomical_grip_max_frame = frame_index
-		var anchor_positions: PackedVector3Array = anchor_capture.get("positions", PackedVector3Array()) as PackedVector3Array
-		var anchor_rotations: PackedVector4Array = anchor_capture.get("rotations", PackedVector4Array()) as PackedVector4Array
-		var anchor_scales: PackedVector3Array = anchor_capture.get("scales", PackedVector3Array()) as PackedVector3Array
-		if (
-			anchor_positions.size() != solved_anchor_paths.size()
-			or anchor_rotations.size() != solved_anchor_paths.size()
-			or anchor_scales.size() != solved_anchor_paths.size()
-		):
-			result["reason"] = "solved_anchor_capture_size_mismatch"
-			return result
-		captured_position_frames.append(captured_positions)
-		captured_rotation_frames.append(captured_rotations)
-		captured_scale_frames.append(captured_scales)
-		solved_weapon_positions.append(weapon_reference_transform.origin)
-		solved_weapon_rotations.append(_pack_quaternion(weapon_reference_transform.basis.orthonormalized().get_rotation_quaternion()))
-		solved_weapon_scales.append(weapon_reference_transform.basis.get_scale())
-		solved_anchor_position_frames.append(anchor_positions)
-		solved_anchor_rotation_frames.append(anchor_rotations)
-		solved_anchor_scale_frames.append(anchor_scales)
-		solved_frame_available.append(true)
+	var resolved_bone_names: Array[StringName] = []
+	bake_job.merge({
+		"active": true,
+		"completed": false,
+		"runtime_clip": runtime_clip,
+		"active_draft": active_draft,
+		"state": state,
+		"actor": actor,
+		"held_item": held_item,
+		"base_motion_node": base_motion_node,
+		"requested_bone_names": requested_bone_names,
+		"resolved_bone_names": resolved_bone_names,
+		"captured_position_frames": [],
+		"captured_rotation_frames": [],
+		"captured_scale_frames": [],
+		"solved_weapon_positions": PackedVector3Array(),
+		"solved_weapon_rotations": PackedVector4Array(),
+		"solved_weapon_scales": PackedVector3Array(),
+		"solved_anchor_paths": solved_anchor_paths,
+		"solved_anchor_position_frames": [],
+		"solved_anchor_rotation_frames": [],
+		"solved_anchor_scale_frames": [],
+		"solved_frame_available": [],
+		"primary_anchor_to_anatomical_grip_max": 0.0,
+		"primary_anchor_to_anatomical_grip_sum": 0.0,
+		"primary_anchor_to_anatomical_grip_count": 0,
+		"primary_anchor_to_anatomical_grip_max_frame": -1,
+	}, true)
+	return bake_job
+
+func advance_runtime_clip_upper_body_pose_track_bake(
+	bake_job: Dictionary,
+	max_frame_count: int = 1
+) -> Dictionary:
+	if bake_job.is_empty():
+		return {"active": false, "completed": true, "failed": true, "result": {"reason": "missing_bake_job"}}
+	if bool(bake_job.get("completed", false)):
+		return _build_runtime_clip_pose_bake_progress(bake_job, 0)
+	var processed_frame_count: int = 0
+	var frame_count: int = int(bake_job.get("frame_count", 0))
+	while (
+		bool(bake_job.get("active", false))
+		and int(bake_job.get("next_frame_index", 0)) < frame_count
+		and processed_frame_count < maxi(max_frame_count, 1)
+	):
+		var frame_index: int = int(bake_job.get("next_frame_index", 0))
+		if not _bake_runtime_clip_upper_body_pose_frame(bake_job, frame_index):
+			break
+		bake_job["next_frame_index"] = frame_index + 1
+		processed_frame_count += 1
+	if (
+		bool(bake_job.get("active", false))
+		and int(bake_job.get("next_frame_index", 0)) >= frame_count
+	):
+		_finalize_runtime_clip_upper_body_pose_track_bake(bake_job)
+	return _build_runtime_clip_pose_bake_progress(bake_job, processed_frame_count)
+
+func _bake_runtime_clip_upper_body_pose_frame(
+	bake_job: Dictionary,
+	frame_index: int
+) -> bool:
+	var runtime_clip = bake_job.get("runtime_clip", null)
+	var active_draft: Resource = bake_job.get("active_draft", null) as Resource
+	var state: Dictionary = bake_job.get("state", {}) as Dictionary
+	var actor: Node3D = bake_job.get("actor", null) as Node3D
+	var held_item: Node3D = bake_job.get("held_item", null) as Node3D
+	var base_motion_node: CombatAnimationMotionNode = bake_job.get("base_motion_node", null) as CombatAnimationMotionNode
+	if runtime_clip == null or active_draft == null or actor == null or held_item == null or not is_instance_valid(held_item):
+		_fail_runtime_clip_upper_body_pose_track_bake(bake_job, "bake_context_became_invalid")
+		return false
+	var frame_motion_node: CombatAnimationMotionNode = _build_runtime_clip_frame_motion_node(
+		runtime_clip,
+		frame_index,
+		base_motion_node
+	)
+	var playback_state: Dictionary = _build_runtime_clip_frame_playback_state(
+		runtime_clip,
+		frame_index,
+		frame_motion_node
+	)
+	playback_state["runtime_clip_playback"] = true
+	# Baking is the deliberate offline solve stage. Live F playback consumes the
+	# captured digit track and must never run the exact Handle solver per frame.
+	_apply_runtime_clip_preview_pose(
+		state,
+		frame_motion_node,
+		playback_state,
+		active_draft,
+		true,
+		true
+	)
+	var requested_bone_names: Array = bake_job.get("requested_bone_names", []) as Array
+	var frame_capture: Dictionary = actor.call(
+		"capture_runtime_upper_body_pose_frame",
+		requested_bone_names
+	) as Dictionary
+	var captured_names: Array = frame_capture.get("bone_names", []) as Array
+	var captured_positions: PackedVector3Array = frame_capture.get("pose_positions", PackedVector3Array()) as PackedVector3Array
+	var captured_rotations: PackedVector4Array = frame_capture.get("pose_rotations", PackedVector4Array()) as PackedVector4Array
+	var captured_scales: PackedVector3Array = frame_capture.get("pose_scales", PackedVector3Array()) as PackedVector3Array
+	if captured_positions.is_empty() or captured_rotations.is_empty() or captured_scales.is_empty():
+		_fail_runtime_clip_upper_body_pose_track_bake(bake_job, "empty_upper_body_capture")
+		return false
+	var resolved_bone_names: Array[StringName] = bake_job.get("resolved_bone_names", []) as Array[StringName]
+	if frame_index == 0:
+		resolved_bone_names.clear()
+		for bone_name_variant: Variant in captured_names:
+			resolved_bone_names.append(StringName(bone_name_variant))
+		requested_bone_names = resolved_bone_names.duplicate()
+		bake_job["resolved_bone_names"] = resolved_bone_names
+		bake_job["requested_bone_names"] = requested_bone_names
+	if (
+		captured_positions.size() != resolved_bone_names.size()
+		or captured_rotations.size() != resolved_bone_names.size()
+		or captured_scales.size() != resolved_bone_names.size()
+	):
+		_fail_runtime_clip_upper_body_pose_track_bake(bake_job, "upper_body_capture_size_mismatch")
+		return false
+	var reference_transform: Transform3D = _resolve_trajectory_authoring_transform(actor)
+	var weapon_reference_transform: Transform3D = reference_transform.affine_inverse() * held_item.global_transform
+	var solved_anchor_paths: Array[StringName] = bake_job.get("solved_anchor_paths", []) as Array[StringName]
+	var anchor_capture: Dictionary = _capture_solved_replay_anchor_frame(held_item, solved_anchor_paths)
+	var primary_anchor: Node3D = weapon_grip_anchor_provider.get_primary_grip_anchor(held_item)
+	if primary_anchor != null and actor.has_method("resolve_hand_grip_alignment_world_position"):
+		var anatomical_grip_world: Vector3 = actor.call(
+			"resolve_hand_grip_alignment_world_position",
+			_resolve_preview_dominant_slot_id()
+		) as Vector3
+		if anatomical_grip_world.length_squared() > 0.000001:
+			var anchor_error_meters: float = primary_anchor.global_position.distance_to(anatomical_grip_world)
+			bake_job["primary_anchor_to_anatomical_grip_sum"] = float(bake_job.get("primary_anchor_to_anatomical_grip_sum", 0.0)) + anchor_error_meters
+			bake_job["primary_anchor_to_anatomical_grip_count"] = int(bake_job.get("primary_anchor_to_anatomical_grip_count", 0)) + 1
+			if anchor_error_meters > float(bake_job.get("primary_anchor_to_anatomical_grip_max", 0.0)):
+				bake_job["primary_anchor_to_anatomical_grip_max"] = anchor_error_meters
+				bake_job["primary_anchor_to_anatomical_grip_max_frame"] = frame_index
+	var anchor_positions: PackedVector3Array = anchor_capture.get("positions", PackedVector3Array()) as PackedVector3Array
+	var anchor_rotations: PackedVector4Array = anchor_capture.get("rotations", PackedVector4Array()) as PackedVector4Array
+	var anchor_scales: PackedVector3Array = anchor_capture.get("scales", PackedVector3Array()) as PackedVector3Array
+	if (
+		anchor_positions.size() != solved_anchor_paths.size()
+		or anchor_rotations.size() != solved_anchor_paths.size()
+		or anchor_scales.size() != solved_anchor_paths.size()
+	):
+		_fail_runtime_clip_upper_body_pose_track_bake(bake_job, "solved_anchor_capture_size_mismatch")
+		return false
+	(bake_job.get("captured_position_frames", []) as Array).append(captured_positions)
+	(bake_job.get("captured_rotation_frames", []) as Array).append(captured_rotations)
+	(bake_job.get("captured_scale_frames", []) as Array).append(captured_scales)
+	var solved_weapon_positions: PackedVector3Array = bake_job.get("solved_weapon_positions", PackedVector3Array()) as PackedVector3Array
+	var solved_weapon_rotations: PackedVector4Array = bake_job.get("solved_weapon_rotations", PackedVector4Array()) as PackedVector4Array
+	var solved_weapon_scales: PackedVector3Array = bake_job.get("solved_weapon_scales", PackedVector3Array()) as PackedVector3Array
+	solved_weapon_positions.append(weapon_reference_transform.origin)
+	solved_weapon_rotations.append(_pack_quaternion(weapon_reference_transform.basis.orthonormalized().get_rotation_quaternion()))
+	solved_weapon_scales.append(weapon_reference_transform.basis.get_scale())
+	bake_job["solved_weapon_positions"] = solved_weapon_positions
+	bake_job["solved_weapon_rotations"] = solved_weapon_rotations
+	bake_job["solved_weapon_scales"] = solved_weapon_scales
+	(bake_job.get("solved_anchor_position_frames", []) as Array).append(anchor_positions)
+	(bake_job.get("solved_anchor_rotation_frames", []) as Array).append(anchor_rotations)
+	(bake_job.get("solved_anchor_scale_frames", []) as Array).append(anchor_scales)
+	(bake_job.get("solved_frame_available", []) as Array).append(true)
+	return true
+
+func _finalize_runtime_clip_upper_body_pose_track_bake(bake_job: Dictionary) -> void:
+	var runtime_clip = bake_job.get("runtime_clip", null)
+	var result: Dictionary = bake_job.get("result", {}) as Dictionary
+	if runtime_clip == null:
+		_fail_runtime_clip_upper_body_pose_track_bake(bake_job, "missing_runtime_clip_at_finalize")
+		return
+	var resolved_bone_names: Array[StringName] = bake_job.get("resolved_bone_names", []) as Array[StringName]
+	var captured_position_frames: Array = bake_job.get("captured_position_frames", []) as Array
+	var captured_rotation_frames: Array = bake_job.get("captured_rotation_frames", []) as Array
+	var captured_scale_frames: Array = bake_job.get("captured_scale_frames", []) as Array
+	var solved_anchor_paths: Array[StringName] = bake_job.get("solved_anchor_paths", []) as Array[StringName]
+	var solved_frame_available: Array = bake_job.get("solved_frame_available", []) as Array
 	runtime_clip.set("baked_upper_body_bone_names", resolved_bone_names)
 	runtime_clip.set("baked_upper_body_bone_pose_rotations", captured_rotation_frames)
 	runtime_clip.set(
@@ -814,26 +1416,58 @@ func bake_runtime_clip_upper_body_pose_track(
 	runtime_clip.set("baked_solved_upper_body_pose_positions", captured_position_frames)
 	runtime_clip.set("baked_solved_upper_body_pose_rotations", captured_rotation_frames)
 	runtime_clip.set("baked_solved_upper_body_pose_scales", captured_scale_frames)
-	runtime_clip.set("baked_solved_weapon_positions_reference_local", solved_weapon_positions)
-	runtime_clip.set("baked_solved_weapon_rotations_reference_local", solved_weapon_rotations)
-	runtime_clip.set("baked_solved_weapon_scales_reference_local", solved_weapon_scales)
+	runtime_clip.set("baked_solved_weapon_positions_reference_local", bake_job.get("solved_weapon_positions", PackedVector3Array()))
+	runtime_clip.set("baked_solved_weapon_rotations_reference_local", bake_job.get("solved_weapon_rotations", PackedVector4Array()))
+	runtime_clip.set("baked_solved_weapon_scales_reference_local", bake_job.get("solved_weapon_scales", PackedVector3Array()))
 	runtime_clip.set("baked_solved_anchor_node_paths", solved_anchor_paths)
-	runtime_clip.set("baked_solved_anchor_positions_weapon_local", solved_anchor_position_frames)
-	runtime_clip.set("baked_solved_anchor_rotations_weapon_local", solved_anchor_rotation_frames)
-	runtime_clip.set("baked_solved_anchor_scales_weapon_local", solved_anchor_scale_frames)
+	runtime_clip.set("baked_solved_anchor_positions_weapon_local", bake_job.get("solved_anchor_position_frames", []))
+	runtime_clip.set("baked_solved_anchor_rotations_weapon_local", bake_job.get("solved_anchor_rotation_frames", []))
+	runtime_clip.set("baked_solved_anchor_scales_weapon_local", bake_job.get("solved_anchor_scale_frames", []))
 	if runtime_clip.has_method("normalize"):
 		runtime_clip.call("normalize")
-	result["baked"] = not resolved_bone_names.is_empty() and captured_rotation_frames.size() == frame_count
+	result["baked"] = not resolved_bone_names.is_empty() and captured_rotation_frames.size() == int(bake_job.get("frame_count", 0))
 	result["solved_replay_track"] = runtime_clip.has_method("has_solved_replay_track") and bool(runtime_clip.call("has_solved_replay_track"))
 	result["bone_count"] = resolved_bone_names.size()
 	result["anchor_count"] = solved_anchor_paths.size()
+	var primary_anchor_to_anatomical_grip_count: int = int(bake_job.get("primary_anchor_to_anatomical_grip_count", 0))
 	if primary_anchor_to_anatomical_grip_count > 0:
-		result["primary_anchor_to_anatomical_grip_max_meters"] = primary_anchor_to_anatomical_grip_max
-		result["primary_anchor_to_anatomical_grip_avg_meters"] = primary_anchor_to_anatomical_grip_sum / float(primary_anchor_to_anatomical_grip_count)
-		result["primary_anchor_to_anatomical_grip_max_frame"] = primary_anchor_to_anatomical_grip_max_frame
+		result["primary_anchor_to_anatomical_grip_max_meters"] = float(bake_job.get("primary_anchor_to_anatomical_grip_max", 0.0))
+		result["primary_anchor_to_anatomical_grip_avg_meters"] = float(bake_job.get("primary_anchor_to_anatomical_grip_sum", 0.0)) / float(primary_anchor_to_anatomical_grip_count)
+		result["primary_anchor_to_anatomical_grip_max_frame"] = int(bake_job.get("primary_anchor_to_anatomical_grip_max_frame", -1))
 	if not bool(result.get("baked", false)):
 		result["reason"] = "no_upper_body_bones_captured"
-	return result
+	bake_job["result"] = result
+	bake_job["active"] = false
+	bake_job["completed"] = true
+	bake_job["failed"] = not bool(result.get("baked", false))
+
+func _fail_runtime_clip_upper_body_pose_track_bake(
+	bake_job: Dictionary,
+	reason: String
+) -> void:
+	var result: Dictionary = bake_job.get("result", {}) as Dictionary
+	result["reason"] = reason
+	bake_job["result"] = result
+	bake_job["active"] = false
+	bake_job["completed"] = true
+	bake_job["failed"] = true
+
+func _build_runtime_clip_pose_bake_progress(
+	bake_job: Dictionary,
+	processed_frame_count: int
+) -> Dictionary:
+	var frame_count: int = int(bake_job.get("frame_count", 0))
+	var next_frame_index: int = int(bake_job.get("next_frame_index", 0))
+	return {
+		"active": bool(bake_job.get("active", false)),
+		"completed": bool(bake_job.get("completed", false)),
+		"failed": bool(bake_job.get("failed", false)),
+		"processed_frame_count": processed_frame_count,
+		"completed_frame_count": mini(next_frame_index, frame_count),
+		"remaining_frame_count": maxi(frame_count - next_frame_index, 0),
+		"frame_count": frame_count,
+		"result": bake_job.get("result", {}),
+	}
 
 func _resolve_solved_replay_anchor_node_paths(held_item: Node3D) -> Array[StringName]:
 	var resolved_paths: Array[StringName] = []
@@ -1619,6 +2253,8 @@ func get_debug_state(preview_subviewport: SubViewport) -> Dictionary:
 		"collision_pose_sample": String(_get_node_meta_or_default(preview_root, "collision_pose_sample", "")),
 		"collision_pose_clearance_meters": float(_get_node_meta_or_default(preview_root, "collision_pose_clearance_meters", -1.0)),
 		"collision_path_legal": bool(_get_node_meta_or_default(preview_root, "collision_path_legal", true)),
+		"collision_path_pending": bool(_get_node_meta_or_default(preview_root, "collision_path_pending", false)),
+		"collision_path_processed_pose_count": int(_get_node_meta_or_default(preview_root, "collision_path_processed_pose_count", 0)),
 		"collision_path_sample_count": int(_get_node_meta_or_default(preview_root, "collision_path_sample_count", 0)),
 		"collision_path_illegal_pose_count": int(_get_node_meta_or_default(preview_root, "collision_path_illegal_pose_count", 0)),
 		"collision_path_first_illegal_index": int(_get_node_meta_or_default(preview_root, "collision_path_first_illegal_index", -1)),
@@ -1744,13 +2380,23 @@ func resolve_unarmed_hand_authoring_seed(
 		Vector3(-0.12, 0.0, 0.0),
 		CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
 	)
-	var hand_anchor: Node3D = _resolve_preview_mount_anchor_for_slot(actor, slot_id)
+	var hand_anchor_world_state: Dictionary = (
+		_resolve_preview_mount_anchor_world_transform_state(actor, slot_id)
+	)
 	var grip_world: Vector3 = _resolve_preview_hand_grip_target_world(actor, slot_id)
-	if hand_anchor == null or not is_instance_valid(hand_anchor) or grip_world.length_squared() <= 0.000001:
+	if (
+		not bool(hand_anchor_world_state.get("valid", false))
+		or grip_world.length_squared() <= 0.000001
+	):
 		return {}
+	var hand_anchor_world: Transform3D = hand_anchor_world_state.get(
+		"transform_world",
+		Transform3D.IDENTITY
+	) as Transform3D
 	trajectory_root.global_transform = _resolve_trajectory_authoring_transform(actor)
-	var tip_world: Vector3 = grip_world + hand_anchor.global_basis.orthonormalized() * tip_local_to_hand
-	var pommel_world: Vector3 = grip_world + hand_anchor.global_basis.orthonormalized() * pommel_local_to_hand
+	var hand_basis: Basis = hand_anchor_world.basis.orthonormalized()
+	var tip_world: Vector3 = grip_world + hand_basis * tip_local_to_hand
+	var pommel_world: Vector3 = grip_world + hand_basis * pommel_local_to_hand
 	if tip_world.is_equal_approx(pommel_world):
 		return {}
 	return {
@@ -1908,11 +2554,20 @@ func _resolve_hand_proxy_default_trajectory_segment_state(
 	var tip_local_to_hand: Vector3 = _resolve_hand_authoring_local_tip(hand_proxy_points_state)
 	var pommel_local_to_hand: Vector3 = _resolve_hand_authoring_local_pommel(hand_proxy_points_state)
 	var contact_center_local_to_hand: Vector3 = _resolve_hand_authoring_contact_center(hand_proxy_points_state)
-	var hand_anchor: Node3D = _resolve_preview_mount_anchor_for_slot(actor, slot_id)
+	var hand_anchor_world_state: Dictionary = (
+		_resolve_preview_mount_anchor_world_transform_state(actor, slot_id)
+	)
 	var grip_world: Vector3 = _resolve_preview_hand_grip_target_world(actor, slot_id)
-	if hand_anchor == null or not is_instance_valid(hand_anchor) or grip_world.length_squared() <= 0.000001:
+	if (
+		not bool(hand_anchor_world_state.get("valid", false))
+		or grip_world.length_squared() <= 0.000001
+	):
 		return {}
-	var hand_basis: Basis = hand_anchor.global_basis.orthonormalized()
+	var hand_anchor_world: Transform3D = hand_anchor_world_state.get(
+		"transform_world",
+		Transform3D.IDENTITY
+	) as Transform3D
+	var hand_basis: Basis = hand_anchor_world.basis.orthonormalized()
 	var tip_world: Vector3 = grip_world + hand_basis * tip_local_to_hand
 	var pommel_world: Vector3 = grip_world + hand_basis * pommel_local_to_hand
 	var contact_center_world: Vector3 = grip_world + hand_basis * contact_center_local_to_hand
@@ -1997,7 +2652,8 @@ func _get_hand_proxy_state_origin_id(
 
 func reset_preview_actor_to_mount_seed_baseline(
 	preview_subviewport: SubViewport,
-	selected_motion_node: CombatAnimationMotionNode = null
+	selected_motion_node: CombatAnimationMotionNode = null,
+	preserve_committed_grip_slot_id: StringName = StringName()
 ) -> void:
 	var preview_root: Node3D = _get_preview_root(preview_subviewport)
 	if preview_root == null:
@@ -2014,13 +2670,180 @@ func reset_preview_actor_to_mount_seed_baseline(
 	if actor.has_method("set_authoring_preview_mode_enabled"):
 		actor.call("set_authoring_preview_mode_enabled", true, baseline_animation_name)
 	if actor.has_method("reset_authoring_preview_baseline_pose"):
-		actor.call("reset_authoring_preview_baseline_pose", baseline_animation_name)
+		actor.call(
+			"reset_authoring_preview_baseline_pose",
+			baseline_animation_name,
+			preserve_committed_grip_slot_id
+		)
 	else:
 		if actor.has_method("clear_upper_body_authoring_state"):
 			actor.call("clear_upper_body_authoring_state")
 		if actor.has_method("clear_authoring_contact_anchor_bases"):
 			actor.call("clear_authoring_contact_anchor_bases")
 	_apply_preview_actor_upper_body_pose_now(actor)
+
+
+func validate_preview_primary_grip_preseed(
+	preview_subviewport: SubViewport,
+	expected_primary_slot_id: StringName
+) -> Dictionary:
+	var preview_root: Node3D = _get_preview_root(preview_subviewport)
+	var actor: Node3D = (
+		preview_root.get_node_or_null(
+			PREVIEW_ACTOR_PIVOT_NAME + "/" + PREVIEW_ACTOR_NAME
+		) as Node3D
+		if preview_root != null
+		else null
+	)
+	return _resolve_preview_primary_grip_preseed_evidence(
+		actor,
+		expected_primary_slot_id
+	)
+
+
+func _resolve_preview_primary_grip_preseed_evidence(
+	actor: Node3D,
+	expected_primary_slot_id: StringName
+) -> Dictionary:
+	var resolved_slot_id: StringName = _normalize_preview_slot_id(
+		expected_primary_slot_id
+	)
+	var slot_matches: bool = resolved_slot_id == _resolve_preview_dominant_slot_id()
+	var current_seat: Dictionary = {}
+	var committed_packet_valid: bool = false
+	var current_grasp_valid: bool = false
+	var committed_rotation_count: int = 0
+	if actor != null:
+		if actor.has_method("get_authoring_current_weapon_surface_seat"):
+			current_seat = actor.call(
+				"get_authoring_current_weapon_surface_seat",
+				resolved_slot_id
+			) as Dictionary
+		if actor.has_method("has_authoring_committed_surface_grip"):
+			# This rig query accepts only a complete zero packet containing the exact
+			# fifteen digit-bone Quaternion entries for the requested hand.
+			committed_packet_valid = bool(actor.call(
+				"has_authoring_committed_surface_grip",
+				resolved_slot_id
+			))
+		if actor.has_method("has_authoring_current_surface_grip"):
+			current_grasp_valid = bool(actor.call(
+				"has_authoring_current_surface_grip",
+				resolved_slot_id
+			))
+		if actor.has_method("get_authoring_surface_grasp_debug_state"):
+			var grasp_debug_state: Dictionary = actor.call(
+				"get_authoring_surface_grasp_debug_state",
+				resolved_slot_id
+			) as Dictionary
+			committed_rotation_count = int((grasp_debug_state.get(
+				"rotations",
+				{}
+			) as Dictionary).size())
+	var current_seat_valid: bool = bool(current_seat.get("valid", false))
+	var packet_complete: bool = (
+		committed_packet_valid
+		and committed_rotation_count == PRIMARY_SURFACE_GRIP_PACKET_BONE_COUNT
+	)
+	var valid: bool = (
+		actor != null
+		and slot_matches
+		and current_seat_valid
+		and packet_complete
+		and current_grasp_valid
+	)
+	var status: StringName = &"primary_grip_preseed_ready"
+	if actor == null:
+		status = &"primary_grip_preseed_actor_unavailable"
+	elif not slot_matches:
+		status = &"primary_grip_preseed_slot_mismatch"
+	elif not current_seat_valid:
+		status = &"primary_grip_preseed_current_seat_unavailable"
+	elif not committed_packet_valid:
+		status = &"primary_grip_preseed_committed_packet_unavailable"
+	elif not packet_complete:
+		status = &"primary_grip_preseed_packet_incomplete"
+	elif not current_grasp_valid:
+		status = &"primary_grip_preseed_grasp_not_current"
+	return {
+		"valid": valid,
+		"status": status,
+		"primary_slot_id": resolved_slot_id,
+		"slot_matches": slot_matches,
+		"current_seat_valid": current_seat_valid,
+		"current_seat_context_key": String(current_seat.get("context_key", "")),
+		"committed_packet_valid": committed_packet_valid,
+		"committed_packet_bone_count": committed_rotation_count,
+		"expected_packet_bone_count": PRIMARY_SURFACE_GRIP_PACKET_BONE_COUNT,
+		"current_grasp_valid": current_grasp_valid,
+	}
+
+
+func _validate_preview_primary_grip_preseed_for_refresh(
+	state: Dictionary,
+	playback_state: Dictionary
+) -> Dictionary:
+	var supplied_evidence: Dictionary = playback_state.get(
+		"authoring_primary_grip_preseed_evidence",
+		{}
+	) as Dictionary
+	if supplied_evidence.is_empty():
+		var idle_preview_root: Node3D = state.get("preview_root", null) as Node3D
+		if idle_preview_root != null:
+			idle_preview_root.remove_meta("reset_primary_grip_preseed_refresh_result")
+		return {
+			"requested": false,
+			"valid": false,
+			"status": &"primary_grip_preseed_not_requested",
+		}
+	var preview_root: Node3D = state.get("preview_root", null) as Node3D
+	var actor_pivot: Node3D = state.get("actor_pivot", null) as Node3D
+	var actor: Node3D = (
+		actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D
+		if actor_pivot != null
+		else null
+	)
+	var supplied_slot_id: StringName = StringName(supplied_evidence.get(
+		"primary_slot_id",
+		StringName()
+	))
+	var current_evidence: Dictionary = (
+		_resolve_preview_primary_grip_preseed_evidence(actor, supplied_slot_id)
+	)
+	var supplied_context_key: String = String(supplied_evidence.get(
+		"current_seat_context_key",
+		""
+	))
+	var current_context_key: String = String(current_evidence.get(
+		"current_seat_context_key",
+		""
+	))
+	var same_context: bool = (
+		not supplied_context_key.is_empty()
+		and supplied_context_key == current_context_key
+	)
+	current_evidence["requested"] = true
+	current_evidence["supplied_evidence_valid"] = bool(supplied_evidence.get(
+		"valid",
+		false
+	))
+	current_evidence["same_seat_context"] = same_context
+	current_evidence["valid"] = (
+		bool(current_evidence.get("valid", false))
+		and bool(current_evidence.get("supplied_evidence_valid", false))
+		and same_context
+	)
+	if not bool(current_evidence.get("valid", false)):
+		if not bool(current_evidence.get("supplied_evidence_valid", false)):
+			current_evidence["status"] = &"primary_grip_preseed_supplied_invalid"
+		elif not same_context:
+			current_evidence["status"] = &"primary_grip_preseed_context_changed"
+	if preview_root != null:
+		preview_root.set_meta(
+			"reset_primary_grip_preseed_refresh_result",
+			current_evidence.duplicate(true)
+		)
+	return current_evidence
 
 func constrain_authored_segment_to_preview_actor(
 	preview_subviewport: SubViewport,
@@ -2288,6 +3111,32 @@ func reseat_motion_node_grip_to_occupied_contact(
 	var trajectory_root: Node3D = preview_root.find_child(TRAJECTORY_ROOT_NAME, true, false) as Node3D
 	if actor == null or held_item == null or not is_instance_valid(held_item) or trajectory_root == null:
 		return {}
+	return _resolve_reseated_motion_node_grip_to_occupied_contact(
+		preview_root,
+		actor,
+		held_item,
+		trajectory_root,
+		motion_node
+	)
+
+
+func _resolve_reseated_motion_node_grip_to_occupied_contact(
+	preview_root: Node3D,
+	actor: Node3D,
+	held_item: Node3D,
+	trajectory_root: Node3D,
+	motion_node: CombatAnimationMotionNode
+) -> Dictionary:
+	if (
+		preview_root == null
+		or actor == null
+		or held_item == null
+		or not is_instance_valid(held_item)
+		or trajectory_root == null
+		or trajectory_root == null
+		or motion_node == null
+	):
+		return {}
 	var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
 	var local_pommel: Vector3 = _get_weapon_pommel_meta(held_item)
 	if local_tip.is_equal_approx(local_pommel):
@@ -2330,6 +3179,38 @@ func reseat_motion_node_grip_to_occupied_contact(
 		"pommel_position_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
 		"grip_seat_reseat_error_meters": grip_error,
 	}
+
+
+func _apply_reseated_segment_to_motion_node(
+	motion_node: CombatAnimationMotionNode,
+	resolved_segment: Dictionary
+) -> bool:
+	if motion_node == null or resolved_segment.is_empty():
+		return false
+	var tip_position_local: Vector3 = resolved_segment.get(
+		"tip_position_local",
+		motion_node.tip_position_local
+	) as Vector3
+	var pommel_position_local: Vector3 = resolved_segment.get(
+		"pommel_position_local",
+		motion_node.pommel_position_local
+	) as Vector3
+	var tip_origin_id: StringName = StringName(resolved_segment.get(
+		"tip_position_origin_id",
+		motion_node.tip_position_origin_id
+	))
+	var pommel_origin_id: StringName = StringName(resolved_segment.get(
+		"pommel_position_origin_id",
+		motion_node.pommel_position_origin_id
+	))
+	if tip_origin_id == StringName() or pommel_origin_id == StringName():
+		return false
+	motion_node.tip_position_local = tip_position_local
+	motion_node.tip_position_origin_id = tip_origin_id
+	motion_node.pommel_position_local = pommel_position_local
+	motion_node.pommel_position_origin_id = pommel_origin_id
+	motion_node.normalize()
+	return true
 
 func resolve_motion_node_primary_grip_seat_local(
 	preview_subviewport: SubViewport,
@@ -2675,6 +3556,32 @@ func _resolve_preview_authoring_baseline_animation_name(
 		return StringName()
 	var baseline_animation_name: StringName = StringName(actor.get("default_animation_name"))
 	if _should_preview_use_support_hand(held_item, selected_motion_node):
+		# Once Primary owns an exact Hand/Handle packet, enabling or repositioning
+		# Support must not swap the complete skeleton to the two-hand animation
+		# baseline. That baseline swap mutates the governing shoulder/arm before the
+		# support-only transaction even starts. Keep the already-realized baseline;
+		# Support receives authority through its own target and macro solve below.
+		var dominant_slot_id: StringName = _resolve_preview_dominant_slot_id()
+		var current_primary_authority: bool = (
+			actor.has_method("get_authoring_current_weapon_surface_seat")
+			and actor.has_method("has_authoring_current_surface_grip")
+			and bool((actor.call(
+				"get_authoring_current_weapon_surface_seat",
+				dominant_slot_id
+			) as Dictionary).get("valid", false))
+			and bool(actor.call(
+				"has_authoring_current_surface_grip",
+				dominant_slot_id
+			))
+		)
+		var current_baseline_animation_name: StringName = StringName(actor.get(
+			"authoring_preview_baseline_animation_name"
+		))
+		if (
+			current_primary_authority
+			and current_baseline_animation_name != StringName()
+		):
+			return current_baseline_animation_name
 		var two_hand_animation_name: StringName = StringName(actor.get("two_hand_idle_animation_name"))
 		if two_hand_animation_name != StringName():
 			baseline_animation_name = two_hand_animation_name
@@ -2722,6 +3629,8 @@ func _refresh_drag_budgeted_visuals(
 	preview_root.set_meta("speed_state_buildup_sample_count", 0)
 	preview_root.set_meta("speed_state_reset_sample_count", 0)
 	preview_root.set_meta("collision_path_legal", true)
+	preview_root.set_meta("collision_path_pending", false)
+	preview_root.set_meta("collision_path_processed_pose_count", 0)
 	preview_root.set_meta("collision_path_sample_count", 0)
 	preview_root.set_meta("collision_path_illegal_pose_count", 0)
 	preview_root.set_meta("selected_motion_node_index", selected_node_index)
@@ -2913,6 +3822,9 @@ func _refresh_trajectory_visuals(
 	speed_state_config: Dictionary = {},
 	active_draft: Resource = null
 ) -> void:
+	var trace_enabled: bool = bool(get_meta("trace_preview_latency", false))
+	var trace: Array = []
+	var trace_step_usec: int = Time.get_ticks_usec()
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D
 	var trajectory_root: Node3D = state.get("trajectory_root", null) as Node3D
 	var marker_root: Node3D = state.get("marker_root", null) as Node3D
@@ -2924,6 +3836,12 @@ func _refresh_trajectory_visuals(
 	var playback_active: bool = bool(playback_state.get("active", false))
 	var authoring_drag_active: bool = bool(playback_state.get("authoring_drag_active", false))
 	var authoring_drag_lightweight: bool = authoring_drag_active and bool(playback_state.get("authoring_drag_lightweight", false))
+	var async_collision_path_validation: bool = bool(playback_state.get(
+		"authoring_async_collision_path_validation",
+		false
+	))
+	if authoring_drag_active:
+		cancel_pending_collision_path_validation()
 	var static_visual_signature: String = _build_trajectory_static_visual_signature(
 		motion_node_chain,
 		speed_state_config,
@@ -2945,6 +3863,9 @@ func _refresh_trajectory_visuals(
 			active_focus,
 			active_draft
 		)
+		if trace_enabled:
+			_append_latency_trace_elapsed(trace, "selection_only", trace_step_usec)
+			set_meta("last_trajectory_visual_latency_trace", trace)
 		return
 	preview_root.set_meta("drag_budgeted_markers_active", false)
 	_prepare_trajectory_root_for_authoring(state)
@@ -2953,8 +3874,12 @@ func _refresh_trajectory_visuals(
 	if onion_skin_root != null:
 		for child_node: Node in onion_skin_root.get_children():
 			child_node.queue_free()
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "clear_visuals", trace_step_usec)
 	var tip_curve: Curve3D = motion_node_editor.build_tip_curve(motion_node_chain)
 	var pommel_curve: Curve3D = motion_node_editor.build_pommel_curve(motion_node_chain)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "build_curves", trace_step_usec)
 	var node_marker_count: int = 0
 	var handle_marker_count: int = 0
 	var stow_anchor_result: Dictionary = _refresh_noncombat_stow_anchor_markers(state, active_draft)
@@ -3015,6 +3940,8 @@ func _refresh_trajectory_visuals(
 				_create_handle_marker(marker_root, motion_node.pommel_position_local + pommel_curve_out_handle, Color(0.85, 0.4, 0.12, 1.0), "PomOut")
 				handle_marker_count += 1
 		node_marker_count += 2
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_markers", trace_step_usec)
 	if playback_active:
 		var playback_tip_position_local: Vector3 = _get_origin_tracked_vector3_state(
 			playback_state,
@@ -3040,16 +3967,32 @@ func _refresh_trajectory_visuals(
 			pommel_curve,
 			speed_state_config
 		)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "sample_speed_state", trace_step_usec)
 	var collision_path_result: Dictionary = {"legal": true, "path_sample_count": 0}
 	if not authoring_drag_active:
-		collision_path_result = _evaluate_preview_collision_path(state, motion_node_chain, speed_state_result)
+		if async_collision_path_validation:
+			collision_path_result = _queue_preview_collision_path_validation(
+				state,
+				motion_node_chain,
+				speed_state_result
+			)
+		else:
+			cancel_pending_collision_path_validation()
+			collision_path_result = _evaluate_preview_collision_path(state, motion_node_chain, speed_state_result)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "evaluate_collision_path", trace_step_usec)
 	if authoring_drag_lightweight:
 		_render_lightweight_curve_mesh(trajectory_mesh_instance.mesh as ImmediateMesh, tip_curve, pommel_curve)
 	else:
 		_render_speed_colored_curve_mesh(trajectory_mesh_instance.mesh as ImmediateMesh, speed_state_result)
 	_render_control_lines(control_mesh_instance.mesh as ImmediateMesh, motion_node_chain, selected_node_index)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "render_curves_and_controls", trace_step_usec)
 	if not authoring_drag_active:
 		_refresh_onion_skin(onion_skin_root, motion_node_chain, selected_node_index)
+	if trace_enabled:
+		trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_onion_skin", trace_step_usec)
 	preview_root.set_meta("motion_node_count", motion_node_chain.size())
 	preview_root.set_meta("draft_point_count", motion_node_chain.size())
 	var tip_baked_count: int = tip_curve.get_baked_points().size() if _curve_has_distinct_points(tip_curve) else 0
@@ -3061,11 +4004,12 @@ func _refresh_trajectory_visuals(
 	preview_root.set_meta("speed_state_max_effective_speed_mps", float(speed_state_result.get("max_effective_speed_mps", 0.0)))
 	preview_root.set_meta("speed_state_acceleration_percent", float(speed_state_result.get("acceleration_percent", 0.0)))
 	preview_root.set_meta("speed_state_deceleration_percent", float(speed_state_result.get("deceleration_percent", 0.0)))
-	preview_root.set_meta("collision_path_legal", bool(collision_path_result.get("legal", true)))
-	preview_root.set_meta("collision_path_sample_count", int(collision_path_result.get("path_sample_count", 0)))
-	preview_root.set_meta("collision_path_illegal_pose_count", int(collision_path_result.get("illegal_pose_count", 0)))
-	preview_root.set_meta("collision_path_first_illegal_index", int(collision_path_result.get("first_illegal_path_index", -1)))
-	preview_root.set_meta("collision_path_region", String(collision_path_result.get("colliding_body_region", "")))
+	_publish_preview_collision_path_result(
+		preview_root,
+		collision_path_result,
+		bool(collision_path_result.get("pending", false)),
+		int(collision_path_result.get("processed_pose_count", 0))
+	)
 	preview_root.set_meta("motion_node_marker_count", node_marker_count)
 	preview_root.set_meta("point_marker_count", node_marker_count)
 	preview_root.set_meta("control_handle_marker_count", handle_marker_count)
@@ -3081,6 +4025,9 @@ func _refresh_trajectory_visuals(
 	preview_root.set_meta("selected_motion_node_index", selected_node_index)
 	preview_root.set_meta("selected_point_index", selected_node_index)
 	preview_root.set_meta("trajectory_static_visual_signature", static_visual_signature if not playback_active and not authoring_drag_active else "")
+	if trace_enabled:
+		_append_latency_trace_elapsed(trace, "publish_metadata", trace_step_usec)
+		set_meta("last_trajectory_visual_latency_trace", trace)
 
 func _refresh_trajectory_selection_visuals(
 	state: Dictionary,
@@ -3220,23 +4167,86 @@ func _evaluate_preview_collision_path(
 	motion_node_chain: Array,
 	speed_state_result: Dictionary
 ) -> Dictionary:
+	var evaluation_context: Dictionary = _build_preview_collision_path_evaluation_context(
+		state,
+		motion_node_chain,
+		speed_state_result
+	)
+	if not bool(evaluation_context.get("available", false)):
+		return evaluation_context.get("result", {"legal": true, "path_sample_count": 0}) as Dictionary
+	return collision_legality_resolver.evaluate_weapon_path(
+		evaluation_context.get("body_restriction_root", null) as Node3D,
+		evaluation_context.get("held_item", null) as Node3D,
+		evaluation_context.get("transforms", []) as Array[Transform3D],
+		hand_target_constraint_solver
+	)
+
+func _queue_preview_collision_path_validation(
+	state: Dictionary,
+	motion_node_chain: Array,
+	speed_state_result: Dictionary
+) -> Dictionary:
+	cancel_pending_collision_path_validation()
+	var evaluation_context: Dictionary = _build_preview_collision_path_evaluation_context(
+		state,
+		motion_node_chain,
+		speed_state_result
+	)
+	if not bool(evaluation_context.get("available", false)):
+		return evaluation_context.get("result", {"legal": true, "path_sample_count": 0}) as Dictionary
+	var preview_root: Node3D = evaluation_context.get("preview_root", null) as Node3D
+	var transforms: Array[Transform3D] = evaluation_context.get("transforms", []) as Array[Transform3D]
+	pending_collision_path_evaluation_job = collision_legality_resolver.begin_weapon_path_evaluation(
+		evaluation_context.get("body_restriction_root", null) as Node3D,
+		evaluation_context.get("held_item", null) as Node3D,
+		transforms,
+		hand_target_constraint_solver
+	)
+	if bool(pending_collision_path_evaluation_job.get("complete", false)):
+		var immediate_result: Dictionary = pending_collision_path_evaluation_job.get("result", {}) as Dictionary
+		pending_collision_path_evaluation_job.clear()
+		return immediate_result
+	pending_collision_path_generation += 1
+	pending_collision_path_evaluation_job["generation"] = pending_collision_path_generation
+	pending_collision_path_preview_root = preview_root
+	var pending_result: Dictionary = (
+		pending_collision_path_evaluation_job.get("result", {}) as Dictionary
+	).duplicate(true)
+	pending_result["pending"] = true
+	pending_result["processed_pose_count"] = 0
+	return pending_result
+
+func _build_preview_collision_path_evaluation_context(
+	state: Dictionary,
+	motion_node_chain: Array,
+	speed_state_result: Dictionary
+) -> Dictionary:
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D
 	var actor_pivot: Node3D = state.get("actor_pivot", null) as Node3D
 	var trajectory_root: Node3D = state.get("trajectory_root", null) as Node3D
 	if preview_root == null or actor_pivot == null or trajectory_root == null or motion_node_chain.size() < 2:
-		return {"legal": true, "path_sample_count": 0}
+		return {
+			"available": false,
+			"result": {"legal": true, "path_sample_count": 0},
+		}
 	var actor: Node3D = actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D
 	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
 	var body_restriction_root: Node3D = _get_preview_actor_body_restriction_root(actor)
 	if actor == null or held_item == null or body_restriction_root == null:
-		return {"legal": true, "path_sample_count": 0}
+		return {
+			"available": false,
+			"result": {"legal": true, "path_sample_count": 0},
+		}
 	_sync_preview_body_restriction_root(actor, body_restriction_root)
 	var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
 	var local_tip_origin_id: StringName = _resolve_origin_meta_value(held_item, "weapon_tip_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
 	var local_pommel: Vector3 = _get_weapon_pommel_meta(held_item)
 	var local_pommel_origin_id: StringName = _resolve_origin_meta_value(held_item, "weapon_pommel_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
 	if local_tip.is_equal_approx(local_pommel):
-		return {"legal": true, "path_sample_count": 0}
+		return {
+			"available": false,
+			"result": {"legal": true, "path_sample_count": 0},
+		}
 	var local_axis: Vector3 = (local_tip - local_pommel).normalized()
 	var local_up_reference_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var local_up_reference: Vector3 = _resolve_weapon_local_up_reference(held_item, local_axis)
@@ -3273,12 +4283,29 @@ func _evaluate_preview_collision_path(
 			local_pommel_origin_id,
 			local_up_reference_origin_id
 		))
-	return collision_legality_resolver.evaluate_weapon_path(
-		body_restriction_root,
-		held_item,
-		transforms,
-		hand_target_constraint_solver
-	)
+	return {
+		"available": true,
+		"preview_root": preview_root,
+		"body_restriction_root": body_restriction_root,
+		"held_item": held_item,
+		"transforms": transforms,
+	}
+
+func _publish_preview_collision_path_result(
+	preview_root: Node3D,
+	collision_path_result: Dictionary,
+	pending: bool,
+	processed_pose_count: int
+) -> void:
+	if preview_root == null:
+		return
+	preview_root.set_meta("collision_path_pending", pending)
+	preview_root.set_meta("collision_path_processed_pose_count", processed_pose_count)
+	preview_root.set_meta("collision_path_legal", bool(collision_path_result.get("legal", true)))
+	preview_root.set_meta("collision_path_sample_count", int(collision_path_result.get("path_sample_count", 0)))
+	preview_root.set_meta("collision_path_illegal_pose_count", int(collision_path_result.get("illegal_pose_count", 0)))
+	preview_root.set_meta("collision_path_first_illegal_index", int(collision_path_result.get("first_illegal_path_index", -1)))
+	preview_root.set_meta("collision_path_region", String(collision_path_result.get("colliding_body_region", "")))
 
 func _evaluate_preview_collision_pose(
 	actor: Node3D,
@@ -3362,7 +4389,8 @@ func _apply_runtime_clip_preview_pose(
 	selected_motion_node: CombatAnimationMotionNode,
 	playback_state: Dictionary,
 	active_draft: Resource = null,
-	allow_exact_surface_solve: bool = false
+	allow_exact_surface_solve: bool = false,
+	preserve_authoring_endpoints: bool = false
 ) -> Dictionary:
 	return _apply_authored_weapon_pose(
 		state,
@@ -3370,7 +4398,7 @@ func _apply_runtime_clip_preview_pose(
 		playback_state,
 		false,
 		AUTHORING_PREVIEW_DOMINANT_SEAT_LOCK_STRENGTH,
-		false,
+		preserve_authoring_endpoints,
 		active_draft,
 		false,
 		allow_exact_surface_solve
@@ -3526,6 +4554,1626 @@ func _resolve_preview_replay_rotation(rotation_data: Variant) -> Quaternion:
 		return Quaternion(vector_rotation.x, vector_rotation.y, vector_rotation.z, vector_rotation.w)
 	return Quaternion.IDENTITY
 
+
+func _finalize_preview_primary_grip_bootstrap_outcome(
+	preview_root: Node3D,
+	disposition: StringName,
+	status: StringName,
+	transaction_result: Dictionary = {}
+) -> Dictionary:
+	var published_result: Dictionary = transaction_result.duplicate(true)
+	var resolved_status: StringName = status
+	if resolved_status == StringName():
+		resolved_status = StringName(published_result.get(
+			"status",
+			&"primary_surface_grip_bootstrap_failed"
+		))
+	var committed: bool = disposition == &"committed"
+	var reused_current_primary: bool = disposition == &"reuse_current_primary"
+	published_result["attempted"] = true
+	published_result["valid"] = committed or reused_current_primary
+	published_result["applied"] = committed
+	published_result["committed"] = committed
+	published_result["current_relationship_reused"] = reused_current_primary
+	published_result["bootstrap_disposition"] = disposition
+	published_result["status"] = resolved_status
+	if not committed:
+		# Only a fully committed acquisition may carry endpoint authority. A rejected
+		# or reuse-only outcome cannot be mistaken for a solved writeback packet.
+		for endpoint_key: String in [
+			"tip_position_local",
+			"tip_position_origin_id",
+			"pommel_position_local",
+			"pommel_position_origin_id",
+			"weapon_root_segment_length_meters",
+			"resolved_segment_length_meters",
+		]:
+			published_result.erase(endpoint_key)
+	_publish_preview_primary_surface_grip_transaction_result(
+		preview_root,
+		published_result
+	)
+	return {
+		"disposition": disposition,
+		"status": resolved_status,
+		"committed": committed,
+		"current_relationship_reused": reused_current_primary,
+	}
+
+
+func _reject_preview_primary_grip_bootstrap_from_snapshot(
+	preview_root: Node3D,
+	actor: Node3D,
+	held_item: Node3D,
+	snapshot: Dictionary,
+	dominant_slot_id: StringName,
+	requested_motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary,
+	status: StringName
+) -> Dictionary:
+	var rejected_result: Dictionary = _reject_preview_primary_surface_grip_transaction(
+		preview_root,
+		actor,
+		held_item,
+		snapshot,
+		dominant_slot_id,
+		requested_motion_node,
+		playback_state,
+		{
+			"attempted": true,
+			"valid": false,
+			"applied": false,
+			"committed": false,
+			"status": status,
+		}
+	)
+	return _finalize_preview_primary_grip_bootstrap_outcome(
+		preview_root,
+		&"failed_terminal",
+		StringName(),
+		rejected_result
+	)
+
+
+func _bootstrap_preview_primary_grip_relationship(
+	state: Dictionary,
+	requested_motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary,
+	dominant_seat_lock_strength: float,
+	active_draft: Resource,
+	initialize_from_handle_zero: bool = false
+) -> Dictionary:
+	var preview_root: Node3D = state.get("preview_root", null) as Node3D
+	var actor_pivot: Node3D = state.get("actor_pivot", null) as Node3D
+	var trajectory_root: Node3D = state.get("trajectory_root", null) as Node3D
+	var held_item: Node3D = (
+		_get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
+		if preview_root != null
+		else null
+	)
+	var actor: Node3D = (
+		actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D
+		if actor_pivot != null
+		else null
+	)
+	if (
+		requested_motion_node == null
+		or actor == null
+		or held_item == null
+		or not is_instance_valid(held_item)
+		or trajectory_root == null
+		or not actor.has_method("get_authoring_current_weapon_surface_seat")
+		or not actor.has_method("capture_authoring_active_grip_transaction_state")
+		or not actor.has_method("restore_authoring_active_grip_transaction_state")
+		or not actor.has_method("set_authoring_preview_mode_enabled")
+		or not actor.has_method("reset_authoring_preview_baseline_pose")
+	):
+		return _finalize_preview_primary_grip_bootstrap_outcome(
+			preview_root,
+			&"failed_terminal",
+			&"primary_surface_grip_bootstrap_contract_invalid"
+		)
+	var dominant_slot_id: StringName = _resolve_preview_dominant_slot_id()
+	var primary_guide: Node3D = held_item.get_node_or_null(
+		"PrimaryGripGuide"
+	) as Node3D
+	var primary_anchor: Node3D = weapon_grip_anchor_provider.get_primary_grip_anchor(
+		held_item
+	)
+	if primary_guide == null or primary_anchor == null:
+		return _finalize_preview_primary_grip_bootstrap_outcome(
+			preview_root,
+			&"failed_terminal",
+			&"primary_surface_grip_bootstrap_anchor_contract_invalid"
+		)
+	var bootstrap_snapshot: Dictionary = (
+		_capture_preview_primary_grip_transaction_snapshot(
+			preview_root,
+			actor,
+			held_item,
+			primary_guide,
+			primary_anchor,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state
+		)
+	)
+	if not bool(bootstrap_snapshot.get("valid", false)):
+		return _finalize_preview_primary_grip_bootstrap_outcome(
+			preview_root,
+			&"failed_terminal",
+			&"primary_surface_grip_bootstrap_snapshot_failed"
+		)
+	preview_root.remove_meta("primary_surface_grip_transaction_result")
+	_publish_preview_primary_surface_grip_transaction_result(
+		preview_root,
+		{
+			"attempted": true,
+			"valid": false,
+			"applied": false,
+			"committed": false,
+			"status": &"primary_surface_grip_bootstrap_pending",
+		}
+	)
+	var primary_only_motion_node: CombatAnimationMotionNode = (
+		requested_motion_node.duplicate_node()
+	)
+	if primary_only_motion_node == null:
+		return _reject_preview_primary_grip_bootstrap_from_snapshot(
+			preview_root,
+			actor,
+			held_item,
+			bootstrap_snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			&"primary_surface_grip_bootstrap_motion_node_duplicate_failed"
+		)
+	primary_only_motion_node.two_hand_state = (
+		CombatAnimationMotionNodeScript.TWO_HAND_STATE_ONE_HAND
+	)
+	primary_only_motion_node.normalize()
+	var primary_only_baseline_animation_name: StringName = (
+		_resolve_preview_authoring_baseline_animation_name(
+			actor,
+			held_item,
+			primary_only_motion_node
+		)
+	)
+	if actor.has_method("set_authoring_preview_mode_enabled"):
+		actor.call(
+			"set_authoring_preview_mode_enabled",
+			true,
+			primary_only_baseline_animation_name
+		)
+	if actor.has_method("reset_authoring_preview_baseline_pose"):
+		# A direct two-hand Reset may already have installed the two-hand animation
+		# baseline. Disabling the support source alone does not undo that skeletal
+		# pose, so establish the same clean one-hand baseline used by an actual
+		# one-hand Reset before committing the primary relationship packet.
+		actor.call(
+			"reset_authoring_preview_baseline_pose",
+			primary_only_baseline_animation_name,
+			dominant_slot_id
+		)
+	_apply_preview_actor_upper_body_pose_now(actor)
+	var primary_only_playback_state: Dictionary = playback_state.duplicate(true)
+	primary_only_playback_state["two_hand_state"] = (
+		CombatAnimationMotionNodeScript.TWO_HAND_STATE_ONE_HAND
+	)
+	if initialize_from_handle_zero:
+		# Initial skill/reset acquisition is the same weapon-follows/hand-fixed
+		# 0 -> authored Handle-seat transaction as two explicit slider actions. Both
+		# transient nodes are reseated around the occupied hand contact; changing only
+		# the scalar would move the contact station through a stationary weapon and is
+		# not the authored Handle-position operation.
+		var authored_handle_coordinate: float = (
+			primary_only_motion_node.grip_seat_slide_offset
+		)
+		var zero_motion_node: CombatAnimationMotionNode = (
+			primary_only_motion_node.duplicate_node()
+		)
+		if zero_motion_node == null:
+			return _reject_preview_primary_grip_bootstrap_from_snapshot(
+				preview_root,
+				actor,
+				held_item,
+				bootstrap_snapshot,
+				dominant_slot_id,
+				requested_motion_node,
+				playback_state,
+				&"primary_surface_grip_bootstrap_zero_node_duplicate_failed"
+			)
+		zero_motion_node.grip_seat_slide_offset = 0.0
+		zero_motion_node.normalize()
+		var zero_reseated_segment: Dictionary = (
+			_resolve_reseated_motion_node_grip_to_occupied_contact(
+				preview_root,
+				actor,
+				held_item,
+				trajectory_root,
+				zero_motion_node
+			)
+		)
+		if not _apply_reseated_segment_to_motion_node(
+			zero_motion_node,
+			zero_reseated_segment
+		):
+			return _reject_preview_primary_grip_bootstrap_from_snapshot(
+				preview_root,
+				actor,
+				held_item,
+				bootstrap_snapshot,
+				dominant_slot_id,
+				requested_motion_node,
+				playback_state,
+				&"primary_surface_grip_bootstrap_zero_reseat_failed"
+			)
+		var zero_playback_state: Dictionary = (
+			primary_only_playback_state.duplicate(true)
+		)
+		zero_playback_state["grip_seat_slide_offset"] = 0.0
+		_set_tip_pommel_position_state(
+			zero_playback_state,
+			zero_motion_node.tip_position_local,
+			zero_motion_node.pommel_position_local,
+			CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		)
+		_apply_authored_weapon_pose(
+			state,
+			zero_motion_node,
+			zero_playback_state,
+			false,
+			dominant_seat_lock_strength,
+			true,
+			active_draft,
+			false,
+			false
+		)
+		primary_only_motion_node = zero_motion_node.duplicate_node()
+		if primary_only_motion_node == null:
+			return _reject_preview_primary_grip_bootstrap_from_snapshot(
+				preview_root,
+				actor,
+				held_item,
+				bootstrap_snapshot,
+				dominant_slot_id,
+				requested_motion_node,
+				playback_state,
+				&"primary_surface_grip_bootstrap_selected_node_duplicate_failed"
+			)
+		primary_only_motion_node.grip_seat_slide_offset = (
+			authored_handle_coordinate
+		)
+		primary_only_motion_node.normalize()
+		var selected_reseated_segment: Dictionary = (
+			_resolve_reseated_motion_node_grip_to_occupied_contact(
+				preview_root,
+				actor,
+				held_item,
+				trajectory_root,
+				primary_only_motion_node
+			)
+		)
+		if not _apply_reseated_segment_to_motion_node(
+			primary_only_motion_node,
+			selected_reseated_segment
+		):
+			return _reject_preview_primary_grip_bootstrap_from_snapshot(
+				preview_root,
+				actor,
+				held_item,
+				bootstrap_snapshot,
+				dominant_slot_id,
+				requested_motion_node,
+				playback_state,
+				&"primary_surface_grip_bootstrap_selected_reseat_failed"
+			)
+		primary_only_playback_state["grip_seat_slide_offset"] = (
+			authored_handle_coordinate
+		)
+		_set_tip_pommel_position_state(
+			primary_only_playback_state,
+			primary_only_motion_node.tip_position_local,
+			primary_only_motion_node.pommel_position_local,
+			CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		)
+	var primary_only_resolved_playback_state: Dictionary = _apply_authored_weapon_pose(
+		state,
+		primary_only_motion_node,
+		primary_only_playback_state,
+		false,
+		dominant_seat_lock_strength,
+		true,
+		active_draft,
+		false,
+		false
+	)
+	var transaction_result: Dictionary = (
+		_acquire_preview_primary_surface_grip_transaction(
+			preview_root,
+			actor,
+			held_item,
+			trajectory_root,
+			requested_motion_node,
+			playback_state,
+			bootstrap_snapshot
+		)
+	)
+	if not bool(transaction_result.get("committed", false)):
+		return _finalize_preview_primary_grip_bootstrap_outcome(
+			preview_root,
+			&"failed_terminal",
+			StringName(),
+			transaction_result
+		)
+	_set_tip_pommel_position_state(
+		primary_only_resolved_playback_state,
+		transaction_result.get("tip_position_local", Vector3.ZERO) as Vector3,
+		transaction_result.get("pommel_position_local", Vector3.ZERO) as Vector3,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	primary_only_resolved_playback_state.erase("grip_resolve_reason")
+	primary_only_resolved_playback_state.erase(
+		"initialize_primary_from_handle_zero"
+	)
+	preview_root.set_meta(
+		"resolved_playback_state",
+		primary_only_resolved_playback_state.duplicate(true)
+	)
+	return _finalize_preview_primary_grip_bootstrap_outcome(
+		preview_root,
+		&"committed",
+		&"primary_surface_grip_transaction_committed",
+		transaction_result
+	)
+
+
+func _reuse_preview_primary_transaction_frame(
+	state: Dictionary,
+	requested_motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary,
+	update_camera: bool
+) -> Dictionary:
+	var resolved_playback_state: Dictionary = playback_state.duplicate(true)
+	resolved_playback_state.erase("grip_resolve_reason")
+	resolved_playback_state.erase("initialize_primary_from_handle_zero")
+	var outcome: Dictionary = {
+		"valid": false,
+		"status": &"primary_grip_preseed_relationship_reuse_unavailable",
+		"resolved_playback_state": resolved_playback_state,
+	}
+	var preview_root: Node3D = state.get("preview_root", null) as Node3D
+	var actor_pivot: Node3D = state.get("actor_pivot", null) as Node3D
+	var trajectory_root: Node3D = state.get("trajectory_root", null) as Node3D
+	var held_item: Node3D = (
+		_get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
+		if preview_root != null
+		else null
+	)
+	var actor: Node3D = (
+		actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D
+		if actor_pivot != null
+		else null
+	)
+	if (
+		preview_root == null
+		or actor == null
+		or trajectory_root == null
+		or held_item == null
+		or not is_instance_valid(held_item)
+		or requested_motion_node == null
+	):
+		if preview_root != null:
+			preview_root.set_meta(
+				"primary_grip_preseed_reuse_result",
+				outcome.duplicate(true)
+			)
+		return outcome
+	var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
+	var local_pommel: Vector3 = _get_weapon_pommel_meta(held_item)
+	var tip_position_local: Vector3 = trajectory_root.to_local(
+		held_item.to_global(local_tip)
+	)
+	var pommel_position_local: Vector3 = trajectory_root.to_local(
+		held_item.to_global(local_pommel)
+	)
+	_set_tip_pommel_position_state(
+		resolved_playback_state,
+		tip_position_local,
+		pommel_position_local,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	resolved_playback_state["weapon_orientation_degrees"] = playback_state.get(
+		"weapon_orientation_degrees",
+		_resolve_motion_node_weapon_orientation_degrees(requested_motion_node)
+	)
+	resolved_playback_state["weapon_roll_degrees"] = (
+		requested_motion_node.weapon_roll_degrees
+	)
+	var dominant_slot_id: StringName = _resolve_preview_dominant_slot_id()
+	var current_seat: Dictionary = actor.call(
+		"get_authoring_current_weapon_surface_seat",
+		dominant_slot_id
+	) as Dictionary
+	var restored_grasp: bool = false
+	if (
+		bool(current_seat.get("valid", false))
+		and actor.has_method("restore_authoring_current_surface_grip_now")
+	):
+		# This is packet reconstruction only. No seat query, open pose, or digit
+		# solve occurs during the one-shot Reset handoff refresh.
+		restored_grasp = bool(actor.call(
+			"restore_authoring_current_surface_grip_now",
+			dominant_slot_id
+		))
+	var reuse_valid: bool = bool(current_seat.get("valid", false)) and restored_grasp
+	outcome = {
+		"valid": reuse_valid,
+		"status": (
+			&"primary_grip_preseed_relationship_reused"
+			if reuse_valid
+			else &"primary_grip_preseed_relationship_reuse_failed"
+		),
+		"primary_slot_id": dominant_slot_id,
+		"surface_seat_requeried": false,
+		"digit_packet_resolved": false,
+		"committed_digit_packet_restored": restored_grasp,
+		"resolved_playback_state": resolved_playback_state,
+	}
+	preview_root.set_meta(
+		"primary_grip_preseed_reuse_result",
+		outcome.duplicate(true)
+	)
+	preview_root.set_meta(
+		"resolved_playback_state",
+		resolved_playback_state.duplicate(true)
+	)
+	if update_camera and reuse_valid:
+		_update_camera(
+			preview_root,
+			weapon_grip_anchor_provider.get_primary_grip_anchor(held_item)
+		)
+	return outcome
+
+
+func _resolve_preview_support_after_primary_transaction(
+	state: Dictionary,
+	requested_motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary,
+	update_camera: bool
+) -> Dictionary:
+	var preview_root: Node3D = state.get("preview_root", null) as Node3D
+	var actor_pivot: Node3D = state.get("actor_pivot", null) as Node3D
+	var trajectory_root: Node3D = state.get("trajectory_root", null) as Node3D
+	var held_item: Node3D = (
+		_get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
+		if preview_root != null
+		else null
+	)
+	var actor: Node3D = (
+		actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D
+		if actor_pivot != null
+		else null
+	)
+	var resolved_playback_state: Dictionary = (
+		(preview_root.get_meta("resolved_playback_state", playback_state) as Dictionary)
+			.duplicate(true)
+		if preview_root != null
+		else playback_state.duplicate(true)
+	)
+	if (
+		preview_root == null
+		or actor == null
+		or held_item == null
+		or not is_instance_valid(held_item)
+		or trajectory_root == null
+		or requested_motion_node == null
+		or not _should_preview_use_support_hand(held_item, requested_motion_node)
+	):
+		return resolved_playback_state
+	var dominant_slot_id: StringName = _resolve_preview_dominant_slot_id()
+	var fixed_primary_seat: Dictionary = actor.call(
+		"get_authoring_current_weapon_surface_seat",
+		dominant_slot_id
+	) as Dictionary
+	var fixed_primary_grasp: bool = bool(actor.call(
+		"has_authoring_current_surface_grip",
+		dominant_slot_id
+	))
+	if not bool(fixed_primary_seat.get("valid", false)) or not fixed_primary_grasp:
+		preview_root.set_meta("support_grip_transaction_result", {
+			"valid": false,
+			"applied": false,
+			"committed": false,
+			"status": &"support_surface_grip_primary_transaction_not_current",
+		})
+		return resolved_playback_state
+	var fixed_primary_weapon_transform: Transform3D = held_item.global_transform
+	_apply_preview_support_motion_grip_state(
+		held_item,
+		requested_motion_node,
+		playback_state,
+		actor
+	)
+	var support_guidance_synced: bool = _apply_support_hand_preview_state(
+		actor,
+		held_item,
+		requested_motion_node
+	)
+	held_item.global_transform = fixed_primary_weapon_transform
+	if not support_guidance_synced or not _preview_actor_has_active_support_hand(actor):
+		preview_root.set_meta("support_grip_transaction_result", {
+			"valid": false,
+			"applied": false,
+			"committed": false,
+			"status": &"support_surface_grip_activation_failed",
+		})
+		held_item.global_transform = fixed_primary_weapon_transform
+		return resolved_playback_state
+	# Support activation receives no general weapon authority. Enter the explicit
+	# fixed-Primary path so an unexpected gate failure cannot fall through and
+	# resolve Primary a second time.
+	held_item.global_transform = fixed_primary_weapon_transform
+	_apply_preview_resolved_support_grip_state(held_item, actor)
+	var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
+	var local_pommel: Vector3 = _get_weapon_pommel_meta(held_item)
+	var resolved_weapon_orientation_degrees: Vector3 = playback_state.get(
+		"weapon_orientation_degrees",
+		_resolve_motion_node_weapon_orientation_degrees(requested_motion_node)
+	) as Vector3
+	return _resolve_preview_support_on_fixed_primary_unit(
+		preview_root,
+		trajectory_root,
+		actor,
+		held_item,
+		requested_motion_node,
+		playback_state,
+		fixed_primary_weapon_transform,
+		local_tip,
+		local_pommel,
+		resolved_weapon_orientation_degrees,
+		update_camera
+	)
+
+
+func _clear_preview_support_preserving_primary_transaction_frame(
+	state: Dictionary,
+	requested_motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary,
+	update_camera: bool
+) -> Dictionary:
+	var resolved_playback_state: Dictionary = playback_state.duplicate(true)
+	resolved_playback_state.erase("grip_resolve_reason")
+	resolved_playback_state.erase("initialize_primary_from_handle_zero")
+	var outcome: Dictionary = {
+		"valid": false,
+		"applied": false,
+		"committed": false,
+		"status": &"support_clear_primary_frame_unavailable",
+		"resolved_playback_state": resolved_playback_state,
+	}
+	var preview_root: Node3D = state.get("preview_root", null) as Node3D
+	var actor_pivot: Node3D = state.get("actor_pivot", null) as Node3D
+	var trajectory_root: Node3D = state.get("trajectory_root", null) as Node3D
+	var held_item: Node3D = (
+		_get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
+		if preview_root != null
+		else null
+	)
+	var actor: Node3D = (
+		actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D
+		if actor_pivot != null
+		else null
+	)
+	if (
+		preview_root == null
+		or actor == null
+		or trajectory_root == null
+		or held_item == null
+		or not is_instance_valid(held_item)
+		or requested_motion_node == null
+		or _should_preview_use_support_hand(held_item, requested_motion_node)
+		or not actor.has_method("capture_authoring_active_grip_transaction_state")
+		or not actor.has_method("restore_authoring_active_grip_transaction_state")
+		or not actor.has_method("get_authoring_current_weapon_surface_seat")
+		or not actor.has_method("has_authoring_current_surface_grip")
+		or not actor.has_method("get_authoring_surface_grasp_debug_state")
+		or not actor.has_method("is_support_hand_active")
+		or not actor.has_method("capture_runtime_upper_body_pose_frame")
+	):
+		if preview_root != null:
+			preview_root.set_meta("support_grip_transaction_result", outcome.duplicate(true))
+		return outcome
+	var dominant_slot_id: StringName = _resolve_preview_dominant_slot_id()
+	var support_slot_id: StringName = _resolve_preview_support_slot_id()
+	var current_primary_seat: Dictionary = actor.call(
+		"get_authoring_current_weapon_surface_seat",
+		dominant_slot_id
+	) as Dictionary
+	var current_primary_grasp: bool = bool(actor.call(
+		"has_authoring_current_surface_grip",
+		dominant_slot_id
+	))
+	var primary_grasp_debug: Dictionary = actor.call(
+		"get_authoring_surface_grasp_debug_state",
+		dominant_slot_id
+	) as Dictionary
+	var primary_rotations_variant: Variant = primary_grasp_debug.get(
+		"rotations",
+		null
+	)
+	var primary_rotation_count: int = (
+		(primary_rotations_variant as Dictionary).size()
+		if primary_rotations_variant is Dictionary
+		else 0
+	)
+	if (
+		not bool(current_primary_seat.get("valid", false))
+		or not current_primary_grasp
+		or primary_rotation_count != PRIMARY_SURFACE_GRIP_PACKET_BONE_COUNT
+	):
+		outcome["status"] = &"support_clear_primary_relationship_not_current"
+		outcome["primary_packet_bone_count"] = primary_rotation_count
+		preview_root.set_meta("support_grip_transaction_result", outcome.duplicate(true))
+		return outcome
+	var primary_guide: Node3D = held_item.get_node_or_null(
+		"PrimaryGripGuide"
+	) as Node3D
+	var primary_anchor: Node3D = weapon_grip_anchor_provider.get_primary_grip_anchor(
+		held_item
+	)
+	if primary_guide == null or primary_anchor == null:
+		outcome["status"] = &"support_clear_primary_anchor_contract_invalid"
+		preview_root.set_meta("support_grip_transaction_result", outcome.duplicate(true))
+		return outcome
+	var transaction_snapshot: Dictionary = (
+		_capture_preview_primary_grip_transaction_snapshot(
+			preview_root,
+			actor,
+			held_item,
+			primary_guide,
+			primary_anchor,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state
+		)
+	)
+	if not bool(transaction_snapshot.get("valid", false)):
+		outcome["status"] = &"support_clear_snapshot_failed"
+		preview_root.set_meta("support_grip_transaction_result", outcome.duplicate(true))
+		return outcome
+	var fixed_primary_weapon_transform: Transform3D = held_item.global_transform
+	var expected_pose_frame: Dictionary = (
+		(transaction_snapshot.get("internal_snapshot", {}) as Dictionary).get(
+			"upper_body_pose_frame",
+			{}
+		) as Dictionary
+	)
+	var requested_grip_style: StringName = StringName(playback_state.get(
+		"preferred_grip_style_mode",
+		requested_motion_node.preferred_grip_style_mode
+	))
+	_sync_preview_support_grip_relationship_state(
+		held_item,
+		requested_motion_node,
+		requested_grip_style
+	)
+	var support_anchor: Node3D = weapon_grip_anchor_provider.get_support_grip_anchor(
+		held_item
+	)
+	if (
+		support_anchor != null
+		and not _compose_preview_support_grip_anchor_from_accumulator(
+			held_item,
+			Transform3D.IDENTITY
+		)
+	):
+		outcome["status"] = &"support_clear_anchor_reset_failed"
+		return _reject_preview_support_clear_transaction(
+			preview_root,
+			actor,
+			held_item,
+			transaction_snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			outcome
+		)
+	if support_anchor != null:
+		for meta_name: StringName in [
+			PREVIEW_SUPPORT_HAND_SEAT_APPLIED_RELATIONSHIP_KEY_META,
+			PREVIEW_SUPPORT_HAND_SEAT_APPLIED_CONTEXT_KEY_META,
+			PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_LOCAL_META,
+			PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_ORIGIN_META,
+		]:
+			support_anchor.remove_meta(meta_name)
+	held_item.remove_meta(PREVIEW_SUPPORT_HAND_SURFACE_SEAT_STATE_META)
+	if actor.has_method("invalidate_authoring_surface_grasp"):
+		actor.call("invalidate_authoring_surface_grasp", support_slot_id)
+	if actor.has_method("invalidate_authoring_weapon_surface_seat"):
+		actor.call("invalidate_authoring_weapon_surface_seat", support_slot_id)
+	_clear_hand_authoring_slot_guidance(actor, support_slot_id)
+	if (
+		actor.has_method("get_upper_body_authoring_state")
+		and actor.has_method("set_upper_body_authoring_state")
+	):
+		var upper_body_state: Dictionary = actor.call(
+			"get_upper_body_authoring_state"
+		) as Dictionary
+		upper_body_state["two_hand"] = false
+		actor.call("set_upper_body_authoring_state", upper_body_state)
+	var post_clear_primary_seat: Dictionary = actor.call(
+		"get_authoring_current_weapon_surface_seat",
+		dominant_slot_id
+	) as Dictionary
+	var post_clear_primary_grasp: bool = bool(actor.call(
+		"has_authoring_current_surface_grip",
+		dominant_slot_id
+	))
+	var post_clear_grasp_debug: Dictionary = actor.call(
+		"get_authoring_surface_grasp_debug_state",
+		dominant_slot_id
+	) as Dictionary
+	var post_clear_rotations_variant: Variant = post_clear_grasp_debug.get(
+		"rotations",
+		null
+	)
+	var post_clear_rotation_count: int = (
+		(post_clear_rotations_variant as Dictionary).size()
+		if post_clear_rotations_variant is Dictionary
+		else 0
+	)
+	var post_clear_pose_frame: Dictionary = actor.call(
+		"capture_runtime_upper_body_pose_frame"
+	) as Dictionary
+	var support_inactive: bool = (
+		not bool(actor.call("is_support_hand_active", &"hand_right"))
+		and not bool(actor.call("is_support_hand_active", &"hand_left"))
+	)
+	if (
+		held_item.global_transform != fixed_primary_weapon_transform
+		or post_clear_pose_frame != expected_pose_frame
+		or not bool(post_clear_primary_seat.get("valid", false))
+		or not post_clear_primary_grasp
+		or post_clear_rotation_count != PRIMARY_SURFACE_GRIP_PACKET_BONE_COUNT
+		or not support_inactive
+	):
+		outcome["status"] = &"support_clear_primary_frame_changed"
+		outcome["primary_packet_bone_count"] = post_clear_rotation_count
+		outcome["support_inactive"] = support_inactive
+		return _reject_preview_support_clear_transaction(
+			preview_root,
+			actor,
+			held_item,
+			transaction_snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			outcome
+		)
+	# Reassign only the newly free hand to its authored proxy (when one exists).
+	# This updates guidance/source ownership without applying a skeleton pose; the
+	# exact Primary limb and 15-bone packet validated above remain untouched.
+	_apply_hand_authoring_slot_proxy_preview_state(
+		actor,
+		held_item,
+		requested_motion_node,
+		resolved_playback_state
+	)
+	var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
+	var local_pommel: Vector3 = _get_weapon_pommel_meta(held_item)
+	var resolved_tip_local: Vector3 = trajectory_root.to_local(
+		held_item.to_global(local_tip)
+	)
+	var resolved_pommel_local: Vector3 = trajectory_root.to_local(
+		held_item.to_global(local_pommel)
+	)
+	_set_tip_pommel_position_state(
+		resolved_playback_state,
+		resolved_tip_local,
+		resolved_pommel_local,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	resolved_playback_state["two_hand_state"] = requested_motion_node.two_hand_state
+	resolved_playback_state["weapon_roll_degrees"] = (
+		requested_motion_node.weapon_roll_degrees
+	)
+	preview_root.set_meta("weapon_tip_alignment_error_meters", 0.0)
+	preview_root.set_meta("weapon_pommel_alignment_error_meters", 0.0)
+	preview_root.set_meta(
+		"resolved_playback_state",
+		resolved_playback_state.duplicate(true)
+	)
+	outcome = {
+		"valid": true,
+		"applied": true,
+		"committed": true,
+		"status": &"support_cleared_primary_frame_preserved",
+		"primary_slot_id": dominant_slot_id,
+		"support_slot_id": support_slot_id,
+		"primary_packet_bone_count": post_clear_rotation_count,
+		"support_inactive": true,
+		"weapon_transform_preserved_exactly": true,
+		"upper_body_pose_preserved_exactly": true,
+		"surface_seat_requeried": false,
+		"digit_packet_resolved": false,
+		"resolved_playback_state": resolved_playback_state,
+	}
+	preview_root.set_meta("support_grip_transaction_result", outcome.duplicate(true))
+	if update_camera:
+		_update_camera(preview_root, primary_anchor)
+	return outcome
+
+
+func _reject_preview_support_clear_transaction(
+	preview_root: Node3D,
+	actor: Node3D,
+	held_item: Node3D,
+	snapshot: Dictionary,
+	dominant_slot_id: StringName,
+	requested_motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary,
+	outcome: Dictionary
+) -> Dictionary:
+	var rollback_succeeded: bool = _restore_preview_primary_grip_transaction_snapshot(
+		preview_root,
+		actor,
+		held_item,
+		snapshot,
+		dominant_slot_id,
+		requested_motion_node,
+		playback_state
+	)
+	var rejected: Dictionary = outcome.duplicate(true)
+	rejected["valid"] = false
+	rejected["applied"] = false
+	rejected["committed"] = false
+	rejected["rollback_succeeded"] = rollback_succeeded
+	if not rollback_succeeded:
+		rejected["status_before_rollback_failure"] = rejected.get(
+			"status",
+			StringName()
+		)
+		rejected["status"] = &"support_clear_rollback_failed"
+	var restored_playback_state: Dictionary = (
+		(preview_root.get_meta(
+			"resolved_playback_state",
+			playback_state
+		) as Dictionary).duplicate(true)
+		if preview_root != null
+		else playback_state.duplicate(true)
+	)
+	restored_playback_state.erase("grip_resolve_reason")
+	restored_playback_state.erase("initialize_primary_from_handle_zero")
+	rejected["resolved_playback_state"] = restored_playback_state
+	preview_root.set_meta("support_grip_transaction_result", rejected.duplicate(true))
+	return rejected
+
+
+func _acquire_preview_primary_surface_grip_transaction(
+	preview_root: Node3D,
+	actor: Node3D,
+	held_item: Node3D,
+	trajectory_root: Node3D,
+	requested_motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary,
+	snapshot: Dictionary
+) -> Dictionary:
+	var result := {
+		"attempted": true,
+		"valid": false,
+		"applied": false,
+		"committed": false,
+		"status": &"primary_surface_grip_transaction_unavailable",
+	}
+	if (
+		preview_root == null
+		or actor == null
+		or held_item == null
+		or not is_instance_valid(held_item)
+		or trajectory_root == null
+		or requested_motion_node == null
+		or not actor.has_method("resolve_exact_surface_weapon_seat")
+		or not actor.has_method("apply_authoring_digit_grip_slot_now")
+		or not actor.has_method("prepare_authoring_surface_grip_open_pose_now")
+		or not actor.has_method("invalidate_authoring_active_weapon_surface_seat")
+		or not actor.has_method("invalidate_authoring_active_surface_grasp")
+		or not actor.has_method("mark_authoring_weapon_surface_seat_realized")
+		or not actor.has_method("capture_authoring_active_grip_transaction_state")
+		or not actor.has_method("restore_authoring_active_grip_transaction_state")
+		or not actor.has_method("has_authoring_committed_surface_grip")
+		or not actor.has_method("has_authoring_current_surface_grip")
+		or not actor.has_method("get_authoring_current_weapon_surface_seat")
+		or not actor.has_method("get_authoring_surface_grasp_debug_state")
+		or not actor.has_method("is_support_hand_active")
+	):
+		return _reject_preview_primary_surface_grip_transaction(
+			preview_root,
+			actor,
+			held_item,
+			snapshot,
+			_resolve_preview_dominant_slot_id(),
+			requested_motion_node,
+			playback_state,
+			result
+		)
+	var dominant_slot_id: StringName = _resolve_preview_dominant_slot_id()
+	var support_slot_id: StringName = _resolve_preview_support_slot_id()
+	var right_support_active_at_entry: bool = bool(actor.call(
+		"is_support_hand_active",
+		&"hand_right"
+	))
+	var left_support_active_at_entry: bool = bool(actor.call(
+		"is_support_hand_active",
+		&"hand_left"
+	))
+	result["support_slot_id"] = support_slot_id
+	result["right_support_active_at_entry"] = right_support_active_at_entry
+	result["left_support_active_at_entry"] = left_support_active_at_entry
+	if right_support_active_at_entry or left_support_active_at_entry:
+		result["status"] = &"primary_surface_grip_support_active_at_entry"
+		return _reject_preview_primary_surface_grip_transaction(
+			preview_root,
+			actor,
+			held_item,
+			snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			result
+		)
+	var primary_guide: Node3D = held_item.get_node_or_null(
+		"PrimaryGripGuide"
+	) as Node3D
+	var primary_anchor: Node3D = weapon_grip_anchor_provider.get_primary_grip_anchor(
+		held_item
+	)
+	if primary_guide == null or primary_anchor == null:
+		result["status"] = &"primary_surface_grip_anchor_contract_invalid"
+		return _reject_preview_primary_surface_grip_transaction(
+			preview_root,
+			actor,
+			held_item,
+			snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			result
+		)
+	var local_tip_variant: Variant = _get_weapon_tip_meta(held_item)
+	var local_pommel_variant: Variant = _get_weapon_pommel_meta(held_item)
+	if (
+		local_tip_variant is not Vector3
+		or local_pommel_variant is not Vector3
+		or StringName(held_item.get_meta(
+			"weapon_tip_origin_id",
+			StringName()
+		)) != CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		or StringName(held_item.get_meta(
+			"weapon_pommel_origin_id",
+			StringName()
+		)) != CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	):
+		result["status"] = &"primary_surface_grip_endpoint_provenance_invalid"
+		return _reject_preview_primary_surface_grip_transaction(
+			preview_root,
+			actor,
+			held_item,
+			snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			result
+		)
+	var local_tip: Vector3 = local_tip_variant as Vector3
+	var local_pommel: Vector3 = local_pommel_variant as Vector3
+	var span_start_variant: Variant = held_item.get_meta(
+		"primary_grip_span_start_local",
+		null
+	)
+	var span_end_variant: Variant = held_item.get_meta(
+		"primary_grip_span_end_local",
+		null
+	)
+	if (
+		span_start_variant is not Vector3
+		or span_end_variant is not Vector3
+		or StringName(held_item.get_meta(
+			"primary_grip_span_start_origin_id",
+			StringName()
+		)) != CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		or StringName(held_item.get_meta(
+			"primary_grip_span_end_origin_id",
+			StringName()
+		)) != CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	):
+		result["status"] = &"primary_surface_grip_span_provenance_invalid"
+		return _reject_preview_primary_surface_grip_transaction(
+			preview_root,
+			actor,
+			held_item,
+			snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			result
+		)
+	var primary_span_axis_local: Vector3 = (
+		(span_end_variant as Vector3) - (span_start_variant as Vector3)
+	)
+	var weapon_root_segment_length_meters: float = local_tip.distance_to(
+		local_pommel
+	)
+	if (
+		not local_tip.is_finite()
+		or not local_pommel.is_finite()
+		or not is_finite(weapon_root_segment_length_meters)
+		or weapon_root_segment_length_meters <= SEGMENT_LEGALITY_EPSILON_METERS
+		or primary_span_axis_local.length_squared() <= 0.000000000001
+	):
+		result["status"] = &"primary_surface_grip_weapon_segment_invalid"
+		return _reject_preview_primary_surface_grip_transaction(
+			preview_root,
+			actor,
+			held_item,
+			snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			result
+		)
+	if not bool(snapshot.get("valid", false)):
+		result["status"] = &"primary_surface_grip_snapshot_failed"
+		_publish_preview_primary_surface_grip_transaction_result(
+			preview_root,
+			result
+		)
+		return result
+	if not bool(actor.call(
+		"prepare_authoring_surface_grip_open_pose_now",
+		dominant_slot_id
+	)):
+		result["status"] = &"primary_surface_grip_open_pose_failed"
+		return _reject_preview_primary_surface_grip_transaction(
+			preview_root,
+			actor,
+			held_item,
+			snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			result
+		)
+	var transaction_passes: Array = []
+	var correction_signatures: Dictionary = {}
+	var previous_hard_law_excess: float = INF
+	var applied_correction_count: int = 0
+	var verified_seat_result: Dictionary = {}
+	for pass_index: int in range(PRIMARY_HAND_SURFACE_SEAT_FIXED_POINT_PASSES):
+		actor.call(
+			"invalidate_authoring_active_weapon_surface_seat",
+			dominant_slot_id
+		)
+		var seat_attempt: Dictionary = actor.call(
+			"resolve_exact_surface_weapon_seat",
+			dominant_slot_id,
+			true,
+			true
+		) as Dictionary
+		var correction_state: Dictionary = (
+			_resolve_preview_primary_transaction_correction(
+				seat_attempt,
+				primary_guide
+			)
+		)
+		var correction_local: Transform3D = correction_state.get(
+			"correction_local",
+			Transform3D.IDENTITY
+		) as Transform3D
+		transaction_passes.append({
+			"pass_index": pass_index,
+			"seat_valid": bool(seat_attempt.get("valid", false)),
+			"seat_status": seat_attempt.get("status", StringName()),
+			"candidate_sample_index": int(seat_attempt.get(
+				"candidate_sample_index",
+				-1
+			)),
+			"source_instance_id": int(seat_attempt.get(
+				"source_instance_id",
+				0
+			)),
+			"correction_valid": bool(correction_state.get("valid", false)),
+			"correction_kind": correction_state.get(
+				"correction_kind",
+				StringName()
+			),
+			"correction_local": correction_local,
+			"correction_local_origin_id": correction_state.get(
+				"correction_local_origin_id",
+				StringName()
+			),
+			"hard_law_excess_normalized": float(correction_state.get(
+				"hard_law_excess_normalized",
+				INF
+			)),
+		})
+		var accepted_identity: bool = (
+			bool(seat_attempt.get("valid", false))
+			and int(seat_attempt.get("candidate_sample_index", -1)) == 0
+			and bool(correction_state.get("valid", false))
+			and _preview_support_correction_is_identity(correction_local)
+		)
+		if accepted_identity:
+			verified_seat_result = seat_attempt.duplicate(true)
+			break
+		if not bool(correction_state.get("valid", false)):
+			result = seat_attempt.duplicate(true)
+			result["valid"] = false
+			result["applied"] = false
+			result["committed"] = false
+			result["status"] = correction_state.get(
+				"status",
+				seat_attempt.get(
+					"status",
+					&"primary_surface_grip_no_safe_correction"
+				)
+			)
+			break
+		if pass_index >= PRIMARY_HAND_SURFACE_SEAT_FIXED_POINT_PASSES - 1:
+			result = seat_attempt.duplicate(true)
+			result["valid"] = false
+			result["applied"] = false
+			result["committed"] = false
+			result["status"] = &"primary_surface_grip_verification_not_identity"
+			break
+		var hard_law_excess: float = float(correction_state.get(
+			"hard_law_excess_normalized",
+			INF
+		))
+		var correction_signature: String = (
+			_build_preview_support_correction_signature(correction_local)
+		)
+		var correction_kind: StringName = StringName(correction_state.get(
+			"correction_kind",
+			StringName()
+		))
+		if (
+			correction_signatures.has(correction_signature)
+			or (
+				correction_kind == &"provisional"
+				and is_finite(previous_hard_law_excess)
+				and hard_law_excess
+					>= previous_hard_law_excess
+						- SUPPORT_HAND_SURFACE_SEAT_PROGRESS_EPSILON
+			)
+		):
+			result = seat_attempt.duplicate(true)
+			result["valid"] = false
+			result["applied"] = false
+			result["committed"] = false
+			result["status"] = &"primary_surface_grip_no_progress"
+			break
+		correction_signatures[correction_signature] = true
+		if correction_kind == &"provisional":
+			previous_hard_law_excess = hard_law_excess
+		var corrected_weapon_transform: Transform3D = (
+			held_item.global_transform * correction_local
+		)
+		if not _preview_transform_is_finite(corrected_weapon_transform):
+			result = seat_attempt.duplicate(true)
+			result["valid"] = false
+			result["applied"] = false
+			result["committed"] = false
+			result["status"] = &"primary_surface_grip_composed_transform_invalid"
+			break
+		var grip_pivot_local: Vector3 = correction_state.get(
+			"grip_pivot_local",
+			Vector3.ZERO
+		) as Vector3
+		var base_c0_world: Vector3 = held_item.global_transform * grip_pivot_local
+		var corrected_c0_world: Vector3 = (
+			corrected_weapon_transform * grip_pivot_local
+		)
+		var primary_span_axis_world: Vector3 = (
+			held_item.global_transform.basis * primary_span_axis_local
+		).normalized()
+		var c0_axial_displacement_meters: float = (
+			corrected_c0_world - base_c0_world
+		).dot(primary_span_axis_world)
+		var pass_trace: Dictionary = transaction_passes.back() as Dictionary
+		pass_trace["c0_axial_displacement_meters"] = (
+			c0_axial_displacement_meters
+		)
+		transaction_passes[transaction_passes.size() - 1] = pass_trace
+		if absf(c0_axial_displacement_meters) > WEAPON_SURFACE_SEAT_AXIAL_EPSILON_METERS:
+			result = seat_attempt.duplicate(true)
+			result["valid"] = false
+			result["applied"] = false
+			result["committed"] = false
+			result["status"] = &"primary_surface_grip_axial_displacement_forbidden"
+			result["c0_axial_displacement_meters"] = (
+				c0_axial_displacement_meters
+			)
+			break
+		# Primary owns the weapon during a Handle relationship acquisition. The
+		# canonical hand remains fixed; the WeaponRoot-local correction is composed
+		# directly onto the weapon and the next pass re-queries that realized frame.
+		held_item.global_transform = corrected_weapon_transform
+		_apply_preview_resolved_grip_state(held_item, actor)
+		applied_correction_count += 1
+	result["transaction_passes"] = transaction_passes.duplicate(true)
+	result["applied_correction_count"] = applied_correction_count
+	if verified_seat_result.is_empty():
+		return _reject_preview_primary_surface_grip_transaction(
+			preview_root,
+			actor,
+			held_item,
+			snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			result
+		)
+	if not bool(actor.call(
+		"mark_authoring_weapon_surface_seat_realized",
+		dominant_slot_id
+	)):
+		result = verified_seat_result.duplicate(true)
+		result["valid"] = false
+		result["applied"] = false
+		result["committed"] = false
+		result["status"] = &"primary_surface_grip_realized_context_failed"
+		result["transaction_passes"] = transaction_passes.duplicate(true)
+		result["applied_correction_count"] = applied_correction_count
+		return _reject_preview_primary_surface_grip_transaction(
+			preview_root,
+			actor,
+			held_item,
+			snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			result
+		)
+	actor.call("invalidate_authoring_active_surface_grasp", dominant_slot_id)
+	var digit_packet_committed: bool = bool(actor.call(
+		"apply_authoring_digit_grip_slot_now",
+		dominant_slot_id,
+		true
+	))
+	var grasp_debug_state: Dictionary = actor.call(
+		"get_authoring_surface_grasp_debug_state",
+		dominant_slot_id
+	) as Dictionary
+	var rotations_variant: Variant = grasp_debug_state.get("rotations", null)
+	var committed_rotation_count: int = (
+		(rotations_variant as Dictionary).size()
+		if rotations_variant is Dictionary
+		else 0
+	)
+	var committed_packet_available: bool = bool(actor.call(
+		"has_authoring_committed_surface_grip",
+		dominant_slot_id
+	))
+	if (
+		not digit_packet_committed
+		or not committed_packet_available
+		or committed_rotation_count != PRIMARY_SURFACE_GRIP_PACKET_BONE_COUNT
+	):
+		result = verified_seat_result.duplicate(true)
+		result["valid"] = false
+		result["applied"] = false
+		result["committed"] = false
+		result["status"] = &"primary_surface_grip_digit_packet_rejected"
+		result["transaction_passes"] = transaction_passes.duplicate(true)
+		result["applied_correction_count"] = applied_correction_count
+		result["committed_packet_bone_count"] = committed_rotation_count
+		result["expected_packet_bone_count"] = (
+			PRIMARY_SURFACE_GRIP_PACKET_BONE_COUNT
+		)
+		result["digit_grip_attempt"] = grasp_debug_state.duplicate(true)
+		return _reject_preview_primary_surface_grip_transaction(
+			preview_root,
+			actor,
+			held_item,
+			snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			result
+		)
+	var current_seat: Dictionary = actor.call(
+		"get_authoring_current_weapon_surface_seat",
+		dominant_slot_id
+	) as Dictionary
+	var current_grasp_valid: bool = bool(actor.call(
+		"has_authoring_current_surface_grip",
+		dominant_slot_id
+	))
+	if (
+		not bool(current_seat.get("valid", false))
+		or int(current_seat.get("source_instance_id", 0))
+			!= primary_guide.get_instance_id()
+		or not current_grasp_valid
+	):
+		result = verified_seat_result.duplicate(true)
+		result["valid"] = false
+		result["applied"] = false
+		result["committed"] = false
+		result["status"] = &"primary_surface_grip_current_context_invalid"
+		result["transaction_passes"] = transaction_passes.duplicate(true)
+		result["applied_correction_count"] = applied_correction_count
+		return _reject_preview_primary_surface_grip_transaction(
+			preview_root,
+			actor,
+			held_item,
+			snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			result
+		)
+	var right_support_active_before_commit: bool = bool(actor.call(
+		"is_support_hand_active",
+		&"hand_right"
+	))
+	var left_support_active_before_commit: bool = bool(actor.call(
+		"is_support_hand_active",
+		&"hand_left"
+	))
+	if right_support_active_before_commit or left_support_active_before_commit:
+		result = verified_seat_result.duplicate(true)
+		result["valid"] = false
+		result["applied"] = false
+		result["committed"] = false
+		result["status"] = &"primary_surface_grip_support_active_before_commit"
+		result["support_slot_id"] = support_slot_id
+		result["right_support_active_at_entry"] = right_support_active_at_entry
+		result["left_support_active_at_entry"] = left_support_active_at_entry
+		result["right_support_active_before_commit"] = (
+			right_support_active_before_commit
+		)
+		result["left_support_active_before_commit"] = (
+			left_support_active_before_commit
+		)
+		result["transaction_passes"] = transaction_passes.duplicate(true)
+		result["applied_correction_count"] = applied_correction_count
+		return _reject_preview_primary_surface_grip_transaction(
+			preview_root,
+			actor,
+			held_item,
+			snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			result
+		)
+	var final_tip_position_local: Vector3 = trajectory_root.to_local(
+		held_item.to_global(local_tip)
+	)
+	var final_pommel_position_local: Vector3 = trajectory_root.to_local(
+		held_item.to_global(local_pommel)
+	)
+	var final_segment_length_meters: float = final_tip_position_local.distance_to(
+		final_pommel_position_local
+	)
+	if (
+		not final_tip_position_local.is_finite()
+		or not final_pommel_position_local.is_finite()
+		or not is_finite(final_segment_length_meters)
+		or final_segment_length_meters <= SEGMENT_LEGALITY_EPSILON_METERS
+		or absf(
+			final_segment_length_meters - weapon_root_segment_length_meters
+		) > SEGMENT_LEGALITY_EPSILON_METERS
+	):
+		result = verified_seat_result.duplicate(true)
+		result["valid"] = false
+		result["applied"] = false
+		result["committed"] = false
+		result["status"] = &"primary_surface_grip_endpoint_invariant_failed"
+		result["transaction_passes"] = transaction_passes.duplicate(true)
+		result["applied_correction_count"] = applied_correction_count
+		return _reject_preview_primary_surface_grip_transaction(
+			preview_root,
+			actor,
+			held_item,
+			snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state,
+			result
+		)
+	# All validation has completed. These synchronous writes are the single commit
+	# point: the selected motion node and its supplied playback state receive the
+	# exact same TrajectoryAuthoring segment derived from the solved WeaponRoot.
+	requested_motion_node.tip_position_local = final_tip_position_local
+	requested_motion_node.tip_position_origin_id = (
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	requested_motion_node.pommel_position_local = final_pommel_position_local
+	requested_motion_node.pommel_position_origin_id = (
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	_set_tip_pommel_position_state(
+		playback_state,
+		final_tip_position_local,
+		final_pommel_position_local,
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	_publish_preview_weapon_surface_seat_state(held_item, verified_seat_result)
+	result = verified_seat_result.duplicate(true)
+	result["attempted"] = true
+	result["valid"] = true
+	result["applied"] = true
+	result["committed"] = true
+	result["status"] = &"primary_surface_grip_transaction_committed"
+	result["primary_slot_id"] = dominant_slot_id
+	result["support_slot_id"] = support_slot_id
+	result["right_support_active_at_entry"] = right_support_active_at_entry
+	result["left_support_active_at_entry"] = left_support_active_at_entry
+	result["right_support_active_before_commit"] = (
+		right_support_active_before_commit
+	)
+	result["left_support_active_before_commit"] = (
+		left_support_active_before_commit
+	)
+	result["transaction_passes"] = transaction_passes.duplicate(true)
+	result["applied_correction_count"] = applied_correction_count
+	result["committed_packet_bone_count"] = committed_rotation_count
+	result["expected_packet_bone_count"] = PRIMARY_SURFACE_GRIP_PACKET_BONE_COUNT
+	result["committed_grasp_solve_count"] = int(grasp_debug_state.get(
+		"solve_count",
+		-1
+	))
+	result["committed_surface_seat_solve_count"] = int(
+		verified_seat_result.get("solve_count", -1)
+	)
+	result["tip_position_local"] = final_tip_position_local
+	result["tip_position_origin_id"] = (
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	result["pommel_position_local"] = final_pommel_position_local
+	result["pommel_position_origin_id"] = (
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	result["weapon_root_segment_length_meters"] = (
+		weapon_root_segment_length_meters
+	)
+	result["resolved_segment_length_meters"] = final_segment_length_meters
+	result["resolved_weapon_transform_world"] = held_item.global_transform
+	result["resolved_weapon_transform_world_origin_id"] = (
+		CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+	)
+	_publish_preview_primary_surface_grip_transaction_result(
+		preview_root,
+		result
+	)
+	return result
+
+
+func _resolve_preview_support_on_fixed_primary_unit(
+	preview_root: Node3D,
+	trajectory_root: Node3D,
+	actor: Node3D,
+	held_item: Node3D,
+	selected_motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary,
+	fixed_primary_weapon_transform: Transform3D,
+	local_tip: Vector3,
+	local_pommel: Vector3,
+	resolved_weapon_orientation_degrees: Vector3,
+	update_camera: bool
+) -> Dictionary:
+	var resolved_playback_state: Dictionary = playback_state.duplicate(true)
+	resolved_playback_state.erase("grip_resolve_reason")
+	# The equip-selected Primary Hand governs the weapon. Entering two-hand mode
+	# transfers only the formerly-free limb to Support authority; it cannot rerun
+	# the general coupling path and move the existing Primary Hand+weapon unit.
+	held_item.global_transform = fixed_primary_weapon_transform
+	# A changed support coordinate invalidates the previous committed correction
+	# metadata, but the anchor itself may still carry that old correction. Start
+	# this transaction from the newly-authored SecondaryGripGuide relationship.
+	_compose_preview_support_grip_anchor_from_accumulator(
+		held_item,
+		Transform3D.IDENTITY
+	)
+	_apply_preview_resolved_support_grip_state(held_item, actor)
+	if not _apply_support_hand_preview_state(
+		actor,
+		held_item,
+		selected_motion_node
+	):
+		preview_root.set_meta("support_grip_transaction_result", {
+			"valid": false,
+			"applied": false,
+			"committed": false,
+			"status": &"support_surface_grip_activation_failed",
+		})
+		return resolved_playback_state
+	if actor.has_method("settle_authoring_support_grip_macro_pose_now"):
+		actor.call("settle_authoring_support_grip_macro_pose_now")
+	var support_transaction_result: Dictionary = (
+		_acquire_preview_support_surface_grip_transaction(
+			actor,
+			held_item,
+			true
+		)
+	)
+	preview_root.set_meta(
+		"support_grip_transaction_result",
+		support_transaction_result.duplicate(true)
+	)
+	# The Support transaction never opens or invalidates Primary. Reapplying the
+	# current Primary packet here is an unnecessary quaternion write and breaks
+	# exact Primary-pose identity across Support join/rejection.
+	# A support transaction has no weapon authority, including on rejection.
+	held_item.global_transform = fixed_primary_weapon_transform
+	_apply_preview_resolved_support_grip_state(held_item, actor)
+	var solved_tip_world: Vector3 = held_item.to_global(local_tip)
+	var solved_pommel_world: Vector3 = held_item.to_global(local_pommel)
+	_set_tip_pommel_position_state(
+		resolved_playback_state,
+		trajectory_root.to_local(solved_tip_world),
+		trajectory_root.to_local(solved_pommel_world),
+		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	)
+	resolved_playback_state["weapon_orientation_degrees"] = (
+		resolved_weapon_orientation_degrees
+	)
+	resolved_playback_state["weapon_roll_degrees"] = (
+		selected_motion_node.weapon_roll_degrees
+	)
+	preview_root.set_meta("weapon_tip_alignment_error_meters", 0.0)
+	preview_root.set_meta("weapon_pommel_alignment_error_meters", 0.0)
+	preview_root.set_meta("resolved_playback_state", resolved_playback_state)
+	preview_root.set_meta("contact_coupling_metrics", {
+		"stopped_reason": &"support_activated_on_fixed_primary_unit",
+		"weapon_locked_to_moving_hand": false,
+		"support_transaction_valid": bool(support_transaction_result.get(
+			"valid",
+			false
+		)),
+	})
+	var collision_pose_result: Dictionary = _evaluate_preview_collision_pose(
+		actor,
+		held_item,
+		held_item.global_transform
+	)
+	preview_root.set_meta(
+		"collision_pose_legal",
+		bool(collision_pose_result.get("legal", true))
+	)
+	preview_root.set_meta(
+		"collision_pose_illegal_sample_count",
+		int(collision_pose_result.get("illegal_sample_count", 0))
+	)
+	preview_root.set_meta(
+		"collision_pose_region",
+		String(collision_pose_result.get("colliding_body_region", ""))
+	)
+	preview_root.set_meta(
+		"collision_pose_attachment",
+		String(collision_pose_result.get(
+			"colliding_body_attachment_name",
+			""
+		))
+	)
+	preview_root.set_meta(
+		"collision_pose_sample",
+		String(collision_pose_result.get("colliding_sample_name", ""))
+	)
+	preview_root.set_meta(
+		"collision_pose_clearance_meters",
+		float(collision_pose_result.get("estimated_clearance_meters", -1.0))
+	)
+	if update_camera:
+		_update_camera(
+			preview_root,
+			weapon_grip_anchor_provider.get_primary_grip_anchor(held_item)
+		)
+	return resolved_playback_state
+
 func _apply_authored_weapon_pose(
 	state: Dictionary,
 	selected_motion_node: CombatAnimationMotionNode,
@@ -3545,6 +6193,10 @@ func _apply_authored_weapon_pose(
 	var authoring_drag_lightweight: bool = bool(playback_state.get("authoring_drag_lightweight", false))
 	var authoring_drag_active: bool = bool(playback_state.get("authoring_drag_active", false))
 	var authoring_drag_budgeted_visuals: bool = bool(playback_state.get("authoring_drag_budgeted_visuals", false))
+	var authoring_relationship_contact_reuse: bool = bool(playback_state.get(
+		"authoring_relationship_contact_reuse",
+		false
+	))
 	var authoring_drag_endpoint_prevalidated: bool = bool(playback_state.get("authoring_drag_endpoint_authority_prevalidated", false))
 	preview_root.set_meta("weapon_tip_alignment_error_meters", -1.0)
 	preview_root.set_meta("weapon_pommel_alignment_error_meters", -1.0)
@@ -3566,8 +6218,106 @@ func _apply_authored_weapon_pose(
 			active_draft,
 			stow_endpoints_already_display_local
 		)
+	var support_was_active: bool = _preview_actor_has_active_support_hand(actor)
+	var support_requested: bool = _should_preview_use_support_hand(
+		held_item,
+		selected_motion_node
+	)
+	var support_ratio_before: float = float(held_item.get_meta(
+		PREVIEW_SUPPORT_GRIP_SEAT_RATIO_META,
+		INF
+	))
+	var support_ratio_origin_before: StringName = StringName(held_item.get_meta(
+		PREVIEW_SUPPORT_GRIP_SEAT_RATIO_ORIGIN_META,
+		StringName()
+	))
+	var grip_style_before: StringName = StringName(held_item.get_meta(
+		"grip_style_mode",
+		CraftedItemWIP.GRIP_NORMAL
+	))
+	var dominant_slot_id_before_support: StringName = (
+		_resolve_preview_dominant_slot_id()
+	)
+	var current_primary_seat_before_support: Dictionary = {}
+	if actor != null and actor.has_method(
+		"get_authoring_current_weapon_surface_seat"
+	):
+		current_primary_seat_before_support = actor.call(
+			"get_authoring_current_weapon_surface_seat",
+			dominant_slot_id_before_support
+		) as Dictionary
+	var current_primary_grasp_before_support: bool = (
+		bool(actor.call(
+			"has_authoring_current_surface_grip",
+			dominant_slot_id_before_support
+		))
+		if actor != null and actor.has_method(
+			"has_authoring_current_surface_grip"
+		)
+		else false
+	)
+	var fixed_primary_weapon_transform: Transform3D = held_item.global_transform
 	preview_root.set_meta(PREVIEW_POSE_MODE_META, PREVIEW_POSE_MODE_HAND_AUTHORED)
 	_apply_preview_motion_grip_state(held_item, selected_motion_node, playback_state, actor)
+	var support_ratio_after: float = float(held_item.get_meta(
+		PREVIEW_SUPPORT_GRIP_SEAT_RATIO_META,
+		INF
+	))
+	var support_ratio_origin_after: StringName = StringName(held_item.get_meta(
+		PREVIEW_SUPPORT_GRIP_SEAT_RATIO_ORIGIN_META,
+		StringName()
+	))
+	var grip_style_after: StringName = StringName(held_item.get_meta(
+		"grip_style_mode",
+		CraftedItemWIP.GRIP_NORMAL
+	))
+	var support_seat_changed: bool = (
+		support_was_active
+		and grip_style_before == grip_style_after
+		and (
+			support_ratio_origin_before != support_ratio_origin_after
+			or is_finite(support_ratio_before) != is_finite(support_ratio_after)
+			or (
+				is_finite(support_ratio_before)
+				and is_finite(support_ratio_after)
+				and not is_equal_approx(
+					support_ratio_before,
+					support_ratio_after
+				)
+			)
+		)
+	)
+	var support_relationship_changed: bool = (
+		support_requested
+		and (
+			not support_was_active
+			or support_seat_changed
+		)
+	)
+	var resolve_support_on_fixed_primary_unit: bool = (
+		actor != null
+		and support_relationship_changed
+		and bool(current_primary_seat_before_support.get("valid", false))
+		and current_primary_grasp_before_support
+		and allow_exact_surface_solve
+		and not authoring_drag_active
+	)
+	preview_root.set_meta("support_activation_gate_state", {
+		"support_was_active": support_was_active,
+		"support_requested": support_requested,
+		"support_seat_changed": support_seat_changed,
+		"support_relationship_changed": support_relationship_changed,
+		"support_ratio_before": support_ratio_before,
+		"support_ratio_after": support_ratio_after,
+		"primary_seat_current": bool(current_primary_seat_before_support.get(
+			"valid",
+			false
+		)),
+		"primary_grasp_current": current_primary_grasp_before_support,
+		"allow_exact_surface_solve": allow_exact_surface_solve,
+		"authoring_drag_active": authoring_drag_active,
+		"resolve_fixed_primary_unit": resolve_support_on_fixed_primary_unit,
+	})
 	_sync_preview_contact_axis_override(held_item, playback_state, trajectory_root)
 	var authored_tip_local: Vector3 = _get_origin_tracked_vector3_state(
 		playback_state,
@@ -3587,7 +6337,41 @@ func _apply_authored_weapon_pose(
 		"weapon_orientation_degrees",
 		_resolve_motion_node_weapon_orientation_degrees(selected_motion_node)
 	) as Vector3
+	if resolve_support_on_fixed_primary_unit:
+		return _resolve_preview_support_on_fixed_primary_unit(
+			preview_root,
+			trajectory_root,
+			actor,
+			held_item,
+			selected_motion_node,
+			playback_state,
+			fixed_primary_weapon_transform,
+			local_tip,
+			local_pommel,
+			resolved_weapon_orientation_degrees,
+			update_camera
+		)
+	var authoring_weapon_roll_only: bool = _is_weapon_roll_interaction(playback_state)
+	# Weapon Roll is a contact-hand semantic layer. Ordinary reconstruction solves
+	# the arm from a zero-Roll weapon frame, then layers the authored Roll onto the
+	# weapon and wrist after macro IK. A direct Roll transaction is the exception:
+	# it reuses the macro pose already established by the settled frame.
+	var macro_weapon_roll_degrees: float = (
+		selected_motion_node.weapon_roll_degrees
+		if authoring_weapon_roll_only
+		else 0.0
+	)
+	var authoring_weapon_roll_settled_reuse: bool = bool(playback_state.get(
+		"authoring_weapon_roll_settled_reuse",
+		false
+	))
+	preview_root.set_meta(WEAPON_ROLL_CONTACT_RESULT_META, {
+		"requested": authoring_weapon_roll_only,
+		"applied": false,
+		"status": &"not_requested" if not authoring_weapon_roll_only else &"pending",
+	})
 	var use_free_authoring_endpoint_authority: bool = false
+	var authoring_endpoint_legality_result: Dictionary = {}
 	var allow_free_authoring_endpoint_authority: bool = preserve_authoring_endpoints or authoring_drag_lightweight
 	var solved_transform: Transform3D
 	var solved_transform_valid: bool = false
@@ -3595,7 +6379,54 @@ func _apply_authored_weapon_pose(
 		var authored_tip_world_for_pose: Vector3 = trajectory_root.to_global(authored_tip_local)
 		var authored_pommel_world_for_pose: Vector3 = trajectory_root.to_global(authored_pommel_local)
 		var authored_pose_transform: Transform3D = held_item.global_transform
-		if authored_tip_world_for_pose.distance_to(authored_pommel_world_for_pose) > SEGMENT_LEGALITY_EPSILON_METERS:
+		if authoring_weapon_roll_only:
+			# A settled grip may have a non-identity surface-seat correction. Rebuilding
+			# from the raw authored endpoints here would silently remove that correction
+			# before adding Roll. Advance from the currently displayed settled frame by
+			# the scalar delta instead, preserving its exact Tip/Pommel axis and position.
+			var prior_resolved_state: Dictionary = preview_root.get_meta(
+				"resolved_playback_state",
+				{}
+			) as Dictionary
+			var prior_roll_degrees: float = clampf(
+				float(prior_resolved_state.get(
+					"weapon_roll_degrees",
+					selected_motion_node.weapon_roll_degrees
+				)),
+				CombatAnimationMotionNodeScript.WEAPON_ROLL_MIN_DEGREES,
+				CombatAnimationMotionNodeScript.WEAPON_ROLL_MAX_DEGREES
+			)
+			var target_roll_degrees: float = clampf(
+				selected_motion_node.weapon_roll_degrees,
+				CombatAnimationMotionNodeScript.WEAPON_ROLL_MIN_DEGREES,
+				CombatAnimationMotionNodeScript.WEAPON_ROLL_MAX_DEGREES
+			)
+			authored_tip_world_for_pose = held_item.to_global(local_tip)
+			authored_pommel_world_for_pose = held_item.to_global(local_pommel)
+			authored_tip_local = trajectory_root.to_local(authored_tip_world_for_pose)
+			authored_pommel_local = trajectory_root.to_local(authored_pommel_world_for_pose)
+			var settled_roll_axis_world: Vector3 = (
+				authored_tip_world_for_pose - authored_pommel_world_for_pose
+			)
+			if settled_roll_axis_world.length_squared() > 0.000001:
+				settled_roll_axis_world = settled_roll_axis_world.normalized()
+				var roll_delta_degrees: float = target_roll_degrees - prior_roll_degrees
+				if absf(roll_delta_degrees) > 0.00001:
+					var roll_delta_basis := Basis(
+						settled_roll_axis_world,
+						deg_to_rad(roll_delta_degrees)
+					)
+					var settled_transform: Transform3D = held_item.global_transform
+					authored_pose_transform = Transform3D(
+						roll_delta_basis * settled_transform.basis,
+						authored_pommel_world_for_pose
+							+ roll_delta_basis * (
+								settled_transform.origin - authored_pommel_world_for_pose
+							)
+					)
+				solved_transform = authored_pose_transform
+				solved_transform_valid = true
+		elif authored_tip_world_for_pose.distance_to(authored_pommel_world_for_pose) > SEGMENT_LEGALITY_EPSILON_METERS:
 			authored_pose_transform = _solve_weapon_segment_transform(
 				held_item,
 				trajectory_root,
@@ -3604,13 +6435,14 @@ func _apply_authored_weapon_pose(
 				local_pommel,
 				authored_tip_world_for_pose,
 				authored_pommel_world_for_pose,
-				resolved_weapon_orientation_degrees
+				resolved_weapon_orientation_degrees,
+				macro_weapon_roll_degrees
 			)
 		var needs_initial_authoring_pose: bool = not (
 			authoring_drag_budgeted_visuals
 			and authoring_drag_endpoint_prevalidated
 		)
-		if needs_initial_authoring_pose:
+		if needs_initial_authoring_pose and not authoring_weapon_roll_only:
 			# Publish one coherent candidate frame before the body solver runs. This
 			# is also the one-hand -> two-hand authority handoff: the formerly free
 			# hand stops following its empty-hand proxy and receives the weapon's
@@ -3635,12 +6467,34 @@ func _apply_authored_weapon_pose(
 			)
 			_apply_preview_actor_upper_body_pose_now(actor, authoring_drag_active)
 		if authoring_drag_lightweight:
-			var deferred_legality_result: Dictionary = {
-				"legal": true,
-				"deferred": true,
-				"reason": "authoring_drag_lightweight",
-			}
-			preview_root.set_meta("authoring_endpoint_legality_result", deferred_legality_result)
+			if authoring_weapon_roll_only:
+				authoring_endpoint_legality_result = {
+					"legal": true,
+					"authoring_endpoint_authority_preserved": true,
+					"relationship_contact_packet_reused": true,
+					"weapon_roll_macro_pose_preserved": true,
+				}
+			elif authoring_drag_endpoint_prevalidated:
+				authoring_endpoint_legality_result = (playback_state.get(
+					"authoring_drag_endpoint_validation_result",
+					{}
+				) as Dictionary).duplicate(true)
+			if authoring_endpoint_legality_result.is_empty():
+				authoring_endpoint_legality_result = _evaluate_preview_segment_legality(
+					actor,
+					held_item,
+					authored_pose_transform,
+					selected_motion_node
+				)
+			authoring_endpoint_legality_result["authoring_endpoint_authority_preserved"] = true
+			if authoring_relationship_contact_reuse:
+				authoring_endpoint_legality_result["relationship_contact_packet_reused"] = true
+			else:
+				authoring_endpoint_legality_result["relationship_contact_solve_deferred"] = true
+			preview_root.set_meta(
+				"authoring_endpoint_legality_result",
+				authoring_endpoint_legality_result
+			)
 			use_free_authoring_endpoint_authority = true
 		elif allow_free_authoring_endpoint_authority:
 			var authored_legality_result: Dictionary = {}
@@ -3657,6 +6511,7 @@ func _apply_authored_weapon_pose(
 					selected_motion_node
 				)
 			authored_legality_result["authoring_endpoint_authority_preserved"] = true
+			authoring_endpoint_legality_result = authored_legality_result
 			preview_root.set_meta("authoring_endpoint_legality_result", authored_legality_result)
 			# Legality reports whether the body can satisfy the authored action; it is
 			# not authority to rewrite that action. During authoring, Tip/Pommel stay
@@ -3673,7 +6528,8 @@ func _apply_authored_weapon_pose(
 				selected_motion_node,
 				authored_tip_local,
 				authored_pommel_local,
-				dominant_seat_lock_strength
+				dominant_seat_lock_strength,
+				macro_weapon_roll_degrees
 			)
 			authored_tip_local = _get_origin_tracked_vector3_state(
 				constrained_segment_state,
@@ -3703,7 +6559,8 @@ func _apply_authored_weapon_pose(
 			local_pommel,
 			authored_tip_world,
 			authored_pommel_world,
-			resolved_weapon_orientation_degrees
+			resolved_weapon_orientation_degrees,
+			macro_weapon_roll_degrees
 		)
 	held_item.global_transform = solved_transform
 	_apply_preview_resolved_grip_state(held_item, actor)
@@ -3722,30 +6579,215 @@ func _apply_authored_weapon_pose(
 		CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 	)
 	resolved_playback_state["weapon_orientation_degrees"] = resolved_weapon_orientation_degrees
+	resolved_playback_state["weapon_roll_degrees"] = selected_motion_node.weapon_roll_degrees
 	preview_root.set_meta("resolved_playback_state", resolved_playback_state)
 	if authoring_drag_lightweight:
+		var surface_seat_result: Dictionary = {}
+		var dominant_grip_restored: bool = false
+		var support_grip_restored: bool = false
+		var dominant_roll_wrist_applied: bool = false
+		var support_roll_wrist_applied: bool = false
+		var support_roll_macro_settled: bool = false
+		var roll_support_hand_active: bool = false
+		var roll_had_committed_surface_seat: bool = false
+		var roll_had_committed_support_surface_seat: bool = false
 		if actor != null:
-			_apply_two_hand_preview_state(actor, held_item, selected_motion_node)
-			_apply_preview_upper_body_authoring_state(actor, held_item, selected_motion_node, resolved_playback_state)
-			_apply_preview_actor_upper_body_pose_now(actor, bool(resolved_playback_state.get("authoring_drag_active", false)))
-			# Drag moves the macro weapon frame. Recompose an existing local seat only;
-			# the expensive C0/Ci/Cp solve remains a release/relationship-change action.
-			_apply_preview_weapon_surface_seat(actor, held_item, false)
+			if authoring_weapon_roll_only:
+				# Roll owns only the weapon frame and the contact-hand wrist layer. The
+				# already solved clavicle/upperarm/forearm frame is authoritative here;
+				# rerunning macro IK would turn a bounded weapon roll into accumulated
+				# deformation across the arm twist helpers. The committed surface seat is
+				# evidence for the relationship we are preserving; its correction was
+				# already consumed by the settled frame and must never be applied again.
+				if actor.has_method("get_authoring_current_weapon_surface_seat"):
+					var committed_seat_before_roll: Dictionary = actor.call(
+						"get_authoring_current_weapon_surface_seat",
+						_resolve_preview_dominant_slot_id()
+					) as Dictionary
+					surface_seat_result = committed_seat_before_roll.duplicate(true)
+					roll_had_committed_surface_seat = bool(
+						committed_seat_before_roll.get("valid", false)
+					)
+				_apply_two_hand_preview_state(
+					actor,
+					held_item,
+					selected_motion_node,
+					false
+				)
+				var dominant_slot_id: StringName = _resolve_preview_dominant_slot_id()
+				var support_hand_active: bool = _preview_actor_has_active_support_hand(actor)
+				roll_support_hand_active = support_hand_active
+				if (
+					support_hand_active
+					and actor.has_method("get_authoring_current_weapon_surface_seat")
+				):
+					var committed_support_seat_before_roll: Dictionary = actor.call(
+						"get_authoring_current_weapon_surface_seat",
+						_resolve_preview_support_slot_id()
+					) as Dictionary
+					roll_had_committed_support_surface_seat = bool(
+						committed_support_seat_before_roll.get("valid", false)
+					)
+				if (
+					support_hand_active
+					and not authoring_drag_active
+					and not authoring_weapon_roll_settled_reuse
+					and actor.has_method("settle_authoring_weapon_roll_support_macro_pose_now")
+				):
+					# The primary hand and weapon remain authoritative. A completed Roll
+					# transaction may move only the support chain to its transformed
+					# weapon-local anchor; the interactive samples keep this expensive
+					# convergence off the mouse-motion path.
+					support_roll_macro_settled = bool(actor.call(
+						"settle_authoring_weapon_roll_support_macro_pose_now"
+					))
+				elif support_hand_active and authoring_weapon_roll_settled_reuse:
+					support_roll_macro_settled = true
+				if actor.has_method("apply_authoring_weapon_roll_contact_pose_now"):
+					dominant_roll_wrist_applied = bool(actor.call(
+						"apply_authoring_weapon_roll_contact_pose_now",
+						dominant_slot_id,
+						selected_motion_node.weapon_roll_degrees,
+						held_item.global_transform,
+						CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+					))
+					if support_hand_active:
+						support_roll_wrist_applied = bool(actor.call(
+							"apply_authoring_weapon_roll_contact_pose_now",
+							_resolve_preview_support_slot_id(),
+							selected_motion_node.weapon_roll_degrees,
+							held_item.global_transform,
+							CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+						))
+			else:
+				# This branch starts from a freshly solved authored weapon transform every
+				# frame. Recompose the committed weapon-local seat before macro IK so the
+				# hand solves against the final weapon frame rather than chasing a later
+				# seat correction. Relationship changes never enter this reuse path.
+				surface_seat_result = _apply_preview_weapon_surface_seat(
+					actor,
+					held_item,
+					false,
+					authoring_relationship_contact_reuse
+				)
+				_apply_two_hand_preview_state(actor, held_item, selected_motion_node)
+				_apply_preview_upper_body_authoring_state(actor, held_item, selected_motion_node, resolved_playback_state)
+				_apply_preview_actor_upper_body_pose_now(actor, bool(resolved_playback_state.get("authoring_drag_active", false)))
+			if (
+				authoring_relationship_contact_reuse
+				and actor.has_method("restore_authoring_current_surface_grip_now")
+			):
+				dominant_grip_restored = bool(actor.call(
+					"restore_authoring_current_surface_grip_now",
+					_resolve_preview_dominant_slot_id()
+				))
+				if _preview_actor_has_active_support_hand(actor):
+					support_grip_restored = bool(actor.call(
+						"restore_authoring_current_surface_grip_now",
+						_resolve_preview_support_slot_id()
+					))
+			if not authoring_weapon_roll_only:
+				_apply_settled_preview_weapon_roll_layer(
+					preview_root,
+					actor,
+					held_item,
+					selected_motion_node,
+					local_tip,
+					local_pommel,
+					not authoring_drag_active,
+					false
+				)
+		var relationship_packet_reapplied: bool = (
+			authoring_relationship_contact_reuse
+			and dominant_grip_restored
+			and (
+				roll_had_committed_surface_seat
+				if authoring_weapon_roll_only
+				else bool(surface_seat_result.get("applied", false))
+			)
+		)
+		if authoring_weapon_roll_only:
+			var support_roll_complete: bool = (
+				not roll_support_hand_active
+				or (
+					not authoring_drag_active
+					and support_roll_macro_settled
+					and support_roll_wrist_applied
+					and roll_had_committed_support_surface_seat
+					and support_grip_restored
+				)
+			)
+			var committed_contact_packet_preserved: bool = (
+				roll_had_committed_surface_seat
+				and dominant_grip_restored
+			)
+			var weapon_roll_contact_applied: bool = (
+				dominant_roll_wrist_applied
+				and committed_contact_packet_preserved
+				and support_roll_complete
+			)
+			preview_root.set_meta(WEAPON_ROLL_CONTACT_RESULT_META, {
+				"requested": true,
+				"applied": weapon_roll_contact_applied,
+				"status": (
+					&"applied"
+					if weapon_roll_contact_applied
+					else &"live_support_settle_deferred"
+					if authoring_drag_active and roll_support_hand_active
+					else &"committed_contact_packet_reapply_failed"
+				),
+				"committed_contact_packet_was_available": roll_had_committed_surface_seat,
+				"committed_support_contact_packet_was_available": roll_had_committed_support_surface_seat,
+				"committed_contact_packet_preserved": committed_contact_packet_preserved,
+				"surface_seat_applied": false,
+				"surface_seat_reused_without_transform_reapply": roll_had_committed_surface_seat,
+				"dominant_wrist_applied": dominant_roll_wrist_applied,
+				"dominant_digits_restored": dominant_grip_restored,
+				"support_active": roll_support_hand_active,
+				"support_macro_settled": support_roll_macro_settled,
+				"support_wrist_applied": support_roll_wrist_applied,
+				"support_digits_restored": support_grip_restored,
+			})
 		var deferred_metrics: Dictionary = {
-			"stopped_reason": "authoring_drag_lightweight",
-			"weapon_locked_to_moving_hand": false,
-			"legality_deferred_until_release": true,
+			"stopped_reason": (
+				"relationship_contact_packet_reapplied"
+				if relationship_packet_reapplied
+				else "relationship_contact_packet_unavailable"
+				if authoring_relationship_contact_reuse
+				else "authoring_drag_lightweight"
+			),
+			"weapon_locked_to_moving_hand": relationship_packet_reapplied,
+			"committed_dominant_surface_seat_reapplied": bool(surface_seat_result.get("applied", false)),
+			"committed_dominant_digits_reapplied": dominant_grip_restored,
+			"committed_support_digits_reapplied": support_grip_restored,
+			"relationship_contact_solve_deferred_until_release": (
+				not authoring_relationship_contact_reuse
+			),
 		}
 		preview_root.set_meta("contact_coupling_metrics", deferred_metrics)
 		preview_root.set_meta("contact_clearance_settle_metrics", deferred_metrics)
 		preview_root.set_meta("final_anchor_reseat_metrics", deferred_metrics)
-		preview_root.set_meta("collision_pose_legal", true)
-		preview_root.set_meta("collision_pose_deferred", true)
-		preview_root.set_meta("collision_pose_illegal_sample_count", 0)
-		preview_root.set_meta("collision_pose_region", "")
-		preview_root.set_meta("collision_pose_attachment", "")
-		preview_root.set_meta("collision_pose_sample", "")
-		preview_root.set_meta("collision_pose_clearance_meters", -1.0)
+		var drag_collision_result: Dictionary = authoring_endpoint_legality_result.get(
+			"weapon_body_legality",
+			{}
+		) as Dictionary
+		var defer_roll_collision_until_release: bool = (
+			authoring_weapon_roll_only
+			and authoring_drag_active
+		)
+		if drag_collision_result.is_empty() and not defer_roll_collision_until_release:
+			drag_collision_result = _evaluate_preview_collision_pose(
+				actor,
+				held_item,
+				held_item.global_transform
+			)
+		preview_root.set_meta("collision_pose_legal", bool(drag_collision_result.get("legal", true)))
+		preview_root.set_meta("collision_pose_deferred", defer_roll_collision_until_release)
+		preview_root.set_meta("collision_pose_illegal_sample_count", int(drag_collision_result.get("illegal_sample_count", 0)))
+		preview_root.set_meta("collision_pose_region", String(drag_collision_result.get("colliding_body_region", "")))
+		preview_root.set_meta("collision_pose_attachment", String(drag_collision_result.get("colliding_body_attachment_name", "")))
+		preview_root.set_meta("collision_pose_sample", String(drag_collision_result.get("colliding_sample_name", "")))
+		preview_root.set_meta("collision_pose_clearance_meters", float(drag_collision_result.get("estimated_clearance_meters", -1.0)))
 		return resolved_playback_state
 	if actor != null:
 		if use_free_authoring_endpoint_authority:
@@ -3845,8 +6887,20 @@ func _apply_authored_weapon_pose(
 				_settle_preview_digits_on_resolved_weapon(
 					actor,
 					held_item,
-					true
+					true,
+					bool(free_endpoint_seat_result.get(
+						"committed_primary_seat_reused_for_support_activation",
+						false
+					))
 				)
+			_apply_settled_preview_weapon_roll_layer(
+				preview_root,
+				actor,
+				held_item,
+				selected_motion_node,
+				local_tip,
+				local_pommel
+			)
 			collision_pose_result = _evaluate_preview_collision_pose(
 				actor,
 				held_item,
@@ -3908,8 +6962,20 @@ func _apply_authored_weapon_pose(
 			_settle_preview_digits_on_resolved_weapon(
 				actor,
 				held_item,
-				true
+				true,
+				bool(constrained_seat_result.get(
+					"committed_primary_seat_reused_for_support_activation",
+					false
+				))
 			)
+		_apply_settled_preview_weapon_roll_layer(
+			preview_root,
+			actor,
+			held_item,
+			selected_motion_node,
+			local_tip,
+			local_pommel
+		)
 		final_anchor_metrics["pre_anchor_grip_error_meters"] = pre_anchor_grip_error
 		final_anchor_metrics["post_anchor_separation_delta_meters"] = post_anchor_separation_delta
 		final_anchor_metrics["grip_error_after_post_separation_meters"] = _resolve_preview_grip_alignment_error(actor, held_item, _resolve_preview_dominant_slot_id())
@@ -4318,7 +7384,24 @@ func _apply_preview_open_mount_pose(
 			_settle_preview_digits_on_resolved_weapon(
 				actor,
 				held_item,
-				true
+				true,
+				bool(open_mount_seat_result.get(
+					"committed_primary_seat_reused_for_support_activation",
+					false
+				))
+			)
+		var open_mount_local_tip: Vector3 = _get_weapon_tip_meta(held_item)
+		var open_mount_local_pommel: Vector3 = _get_weapon_pommel_meta(held_item)
+		if not open_mount_local_tip.is_equal_approx(open_mount_local_pommel):
+			_apply_settled_preview_weapon_roll_layer(
+				preview_root,
+				actor,
+				held_item,
+				selected_motion_node,
+				open_mount_local_tip,
+				open_mount_local_pommel,
+				true,
+				false
 			)
 	if update_camera:
 		_update_camera(preview_root, weapon_grip_anchor_provider.get_primary_grip_anchor(held_item))
@@ -4684,7 +7767,53 @@ func _apply_preview_motion_grip_state(
 		requested_primary_local,
 		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	)
-	var support_anchor: Node3D = weapon_grip_anchor_provider.get_support_grip_anchor(held_item)
+	_apply_preview_support_motion_grip_state(
+		held_item,
+		motion_node,
+		playback_state,
+		actor,
+		requested_grip_style,
+		unarmed_proxy,
+		requested_secondary_slide
+	)
+	_apply_preview_resolved_grip_state(held_item, actor)
+
+
+func _apply_preview_support_motion_grip_state(
+	held_item: Node3D,
+	motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary = {},
+	actor: Node3D = null,
+	requested_grip_style_override: StringName = StringName(),
+	unarmed_proxy_override: Variant = null,
+	requested_secondary_slide_override: float = INF
+) -> void:
+	if held_item == null:
+		return
+	var unarmed_proxy: bool = (
+		bool(unarmed_proxy_override)
+		if unarmed_proxy_override is bool
+		else _is_unarmed_preview_item(held_item)
+	)
+	var requested_grip_style: StringName = requested_grip_style_override
+	if requested_grip_style == StringName():
+		requested_grip_style = StringName(playback_state.get(
+			"preferred_grip_style_mode",
+			motion_node.preferred_grip_style_mode
+				if motion_node != null
+				else held_item.get_meta("grip_style_mode", CraftedItemWIP.GRIP_NORMAL)
+		))
+	var requested_secondary_slide: float = requested_secondary_slide_override
+	if not is_finite(requested_secondary_slide):
+		requested_secondary_slide = float(playback_state.get(
+			"secondary_grip_seat_slide_offset",
+			motion_node.secondary_grip_seat_slide_offset
+				if motion_node != null
+				else CombatAnimationMotionNodeScript.DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET
+		))
+	var support_anchor: Node3D = weapon_grip_anchor_provider.get_support_grip_anchor(
+		held_item
+	)
 	if support_anchor != null:
 		var requested_support_local: Vector3 = support_anchor.position
 		if not unarmed_proxy:
@@ -4733,7 +7862,6 @@ func _apply_preview_motion_grip_state(
 		motion_node,
 		requested_grip_style
 	)
-	_apply_preview_resolved_grip_state(held_item, actor)
 
 
 func _sync_preview_support_grip_relationship_state(
@@ -4805,6 +7933,15 @@ func _apply_preview_resolved_grip_state(
 		primary_local,
 		_get_preview_primary_grip_seat_origin_id(held_item)
 	)
+	_apply_preview_resolved_support_grip_state(held_item, actor)
+
+
+func _apply_preview_resolved_support_grip_state(
+	held_item: Node3D,
+	actor: Node3D = null
+) -> void:
+	if held_item == null:
+		return
 	if held_item.has_meta(PREVIEW_SUPPORT_GRIP_SEAT_LOCAL_META):
 		var support_local: Vector3 = _get_preview_support_grip_seat_meta(held_item)
 		_apply_preview_grip_local_position(
@@ -4828,13 +7965,6 @@ func _recompose_preview_support_grip_anchor(
 	) as Node3D
 	if secondary_guide == null:
 		return false
-	# Restore the complete Handle-authored base every time before applying any
-	# cached inverse seat. This keeps rotation and translation from compounding.
-	weapon_grip_anchor_provider.ensure_grip_anchor_nodes(
-		held_item,
-		null,
-		secondary_guide
-	)
 	var support_anchor: Node3D = weapon_grip_anchor_provider.get_support_grip_anchor(
 	held_item
 	)
@@ -4878,6 +8008,40 @@ func _recompose_preview_support_grip_anchor(
 		accumulated_correction_variant as Transform3D
 	)
 	if not _preview_transform_is_finite(accumulated_correction_local):
+		return false
+	return _compose_preview_support_grip_anchor_from_accumulator(
+		held_item,
+		accumulated_correction_local
+	)
+
+
+func _compose_preview_support_grip_anchor_from_accumulator(
+	held_item: Node3D,
+	accumulated_correction_local: Transform3D
+) -> bool:
+	if (
+		held_item == null
+		or not is_instance_valid(held_item)
+		or not _preview_transform_is_finite(accumulated_correction_local)
+	):
+		return false
+	var secondary_guide: Node3D = held_item.get_node_or_null(
+		"SecondaryGripGuide"
+	) as Node3D
+	if secondary_guide == null:
+		return false
+	# Restore the complete Handle-authored base every time before applying an
+	# inverse seat. This prevents both committed and transaction-local residuals
+	# from compounding against the previously corrected anchor.
+	weapon_grip_anchor_provider.ensure_grip_anchor_nodes(
+		held_item,
+		null,
+		secondary_guide
+	)
+	var support_anchor: Node3D = weapon_grip_anchor_provider.get_support_grip_anchor(
+		held_item
+	)
+	if support_anchor == null:
 		return false
 	support_anchor.transform = (
 		accumulated_correction_local
@@ -5163,7 +8327,12 @@ func _project_grip_span_ratio_for_local(
 		return clampf(fallback_ratio, 0.0, 1.0)
 	return clampf((local_position - span_start).dot(span_vector) / span_length_squared, 0.0, 1.0)
 
-func _apply_two_hand_preview_state(actor: Node3D, held_item: Node3D, selected_motion_node: CombatAnimationMotionNode) -> void:
+func _apply_two_hand_preview_state(
+	actor: Node3D,
+	held_item: Node3D,
+	selected_motion_node: CombatAnimationMotionNode,
+	update_locomotion_state: bool = true
+) -> void:
 	if actor == null:
 		return
 	var dominant_slot_id: StringName = _resolve_preview_dominant_slot_id()
@@ -5179,8 +8348,31 @@ func _apply_two_hand_preview_state(actor: Node3D, held_item: Node3D, selected_mo
 			true,
 			true
 		)
-	if actor.has_method("update_locomotion_state"):
+	if update_locomotion_state and actor.has_method("update_locomotion_state"):
 		actor.call("update_locomotion_state", 0.0, 0.0, true, 0.0, false)
+
+
+func _apply_support_hand_preview_state(
+	actor: Node3D,
+	held_item: Node3D,
+	selected_motion_node: CombatAnimationMotionNode
+) -> bool:
+	if (
+		actor == null
+		or held_item == null
+		or not is_instance_valid(held_item)
+		or not _should_preview_use_support_hand(held_item, selected_motion_node)
+	):
+		return false
+	# Entering Support authority is a child-hand operation. The already committed
+	# Primary guidance, contact basis, digit packet, and WeaponRoot are immutable.
+	return equipped_item_presenter.sync_single_weapon_support_contact_guidance(
+		actor,
+		held_item,
+		_resolve_preview_dominant_slot_id(),
+		true,
+		true
+	)
 
 func _apply_preview_upper_body_authoring_state(
 	actor: Node3D,
@@ -5463,7 +8655,8 @@ func _settle_preview_contact_group_on_resolved_weapon(
 func _apply_preview_weapon_surface_seat(
 	actor: Node3D,
 	held_item: Node3D,
-	allow_surface_solve: bool
+	allow_surface_solve: bool,
+	reuse_committed_surface_seat: bool = false
 ) -> Dictionary:
 	var result := {
 		"valid": false,
@@ -5478,10 +8671,25 @@ func _apply_preview_weapon_surface_seat(
 	):
 		return result
 	var dominant_slot_id: StringName = _resolve_preview_dominant_slot_id()
+	var reuse_primary_seat_for_support_activation: bool = false
+	var committed_primary_seat_for_support: Dictionary = {}
+	if (
+		allow_surface_solve
+		and _preview_actor_has_active_support_hand(actor)
+		and actor.has_method("get_authoring_current_weapon_surface_seat")
+	):
+		committed_primary_seat_for_support = actor.call(
+			"get_authoring_current_weapon_surface_seat",
+			dominant_slot_id
+		) as Dictionary
+		reuse_primary_seat_for_support_activation = bool(
+			committed_primary_seat_for_support.get("valid", false)
+		)
 	var opened_surface_grip_pose: bool = false
 	if (
 		allow_surface_solve
 		and _preview_actor_has_active_support_hand(actor)
+		and not reuse_primary_seat_for_support_activation
 		and actor.has_method("settle_authoring_grip_relationship_macro_pose_now")
 	):
 		# Establish the complete two-hand macro pose before the dominant hand seats
@@ -5490,6 +8698,7 @@ func _apply_preview_weapon_surface_seat(
 		actor.call("settle_authoring_grip_relationship_macro_pose_now")
 	if (
 		allow_surface_solve
+		and not reuse_primary_seat_for_support_activation
 		and actor.has_method("prepare_authoring_surface_grip_open_pose_now")
 	):
 		# The seat and serial digit solver must measure the same anatomy. Previously
@@ -5499,11 +8708,27 @@ func _apply_preview_weapon_surface_seat(
 			"prepare_authoring_surface_grip_open_pose_now",
 			dominant_slot_id
 		))
-	result = actor.call(
-		"resolve_exact_surface_weapon_seat",
-		dominant_slot_id,
-		allow_surface_solve
-	) as Dictionary
+	if reuse_primary_seat_for_support_activation:
+		# The primary packet was committed before support activation. It is now the
+		# governing Hand<->weapon relationship: compose its local seat exactly once
+		# into the requested weapon frame and leave all new convergence to support.
+		result = committed_primary_seat_for_support.duplicate(true)
+		result["committed_primary_seat_reused_for_support_activation"] = true
+	elif (
+		reuse_committed_surface_seat
+		and not allow_surface_solve
+		and actor.has_method("get_authoring_current_weapon_surface_seat")
+	):
+		result = actor.call(
+			"get_authoring_current_weapon_surface_seat",
+			dominant_slot_id
+		) as Dictionary
+	else:
+		result = actor.call(
+			"resolve_exact_surface_weapon_seat",
+			dominant_slot_id,
+			allow_surface_solve
+		) as Dictionary
 	if not bool(result.get("valid", false)):
 		_restore_preview_committed_surface_grip_after_failed_seat(
 			actor,
@@ -5535,6 +8760,15 @@ func _apply_preview_weapon_surface_seat(
 		"seat_correction_grip_local",
 		Transform3D.IDENTITY
 	) as Transform3D
+	if bool(result.get(
+		"committed_primary_seat_reused_for_support_activation",
+		false
+	)):
+		# A current seat proves that this exact Hand/Handle relationship already
+		# contains its original correction. Applying that correction again would
+		# double-seat the weapon during support activation.
+		result["committed_seat_correction_grip_local"] = seat_correction_local
+		seat_correction_local = Transform3D.IDENTITY
 	var grip_pivot_local: Vector3 = result.get(
 		"grip_pivot_local",
 		Vector3.ZERO
@@ -5608,6 +8842,11 @@ func _apply_preview_weapon_surface_seat(
 		return result
 	held_item.global_transform = final_transform
 	_apply_preview_resolved_grip_state(held_item, actor)
+	if actor.has_method("mark_authoring_weapon_surface_seat_realized"):
+		result["realized_context_marked"] = bool(actor.call(
+			"mark_authoring_weapon_surface_seat_realized",
+			dominant_slot_id
+		))
 	result["applied"] = true
 	result["base_weapon_transform_world"] = base_transform
 	result["base_weapon_transform_world_origin_id"] = (
@@ -5911,6 +9150,2545 @@ func _apply_preview_support_hand_surface_seat(
 	return result
 
 
+func _acquire_preview_support_surface_grip_transaction(
+	actor: Node3D,
+	held_item: Node3D,
+	allow_surface_solve: bool
+) -> Dictionary:
+	var result := {
+		"valid": false,
+		"applied": false,
+		"committed": false,
+		"status": &"support_surface_grip_transaction_unavailable",
+	}
+	if (
+		actor == null
+		or held_item == null
+		or not is_instance_valid(held_item)
+		or not allow_surface_solve
+		or not _preview_actor_has_active_support_hand(actor)
+		or not actor.has_method("resolve_exact_surface_weapon_seat")
+		or not actor.has_method("apply_authoring_digit_grip_slot_now")
+		or not actor.has_method(
+			"capture_authoring_active_grip_transaction_state"
+		)
+		or not actor.has_method(
+			"restore_authoring_active_grip_transaction_state"
+		)
+		or not actor.has_method("get_body_self_collision_debug_state")
+	):
+		return result
+	var support_slot_id: StringName = _resolve_preview_support_slot_id()
+	var dominant_slot_id: StringName = _resolve_preview_dominant_slot_id()
+	var secondary_guide: Node3D = held_item.get_node_or_null(
+		"SecondaryGripGuide"
+	) as Node3D
+	var support_anchor: Node3D = weapon_grip_anchor_provider.get_support_grip_anchor(
+		held_item
+	)
+	var relationship_key: String = String(held_item.get_meta(
+		PREVIEW_SUPPORT_GRIP_RELATIONSHIP_KEY_META,
+		""
+	))
+	if (
+		secondary_guide == null
+		or support_anchor == null
+		or relationship_key.is_empty()
+	):
+		result["status"] = &"support_surface_grip_anchor_contract_invalid"
+		return result
+	var current_support_seat: Dictionary = {}
+	if actor.has_method("get_authoring_current_weapon_surface_seat"):
+		current_support_seat = actor.call(
+			"get_authoring_current_weapon_surface_seat",
+			support_slot_id
+		) as Dictionary
+	var current_support_grasp: bool = (
+		bool(actor.call(
+			"has_authoring_current_surface_grip",
+			support_slot_id
+		))
+		if actor.has_method("has_authoring_current_surface_grip")
+		else false
+	)
+	if (
+		bool(current_support_seat.get("valid", false))
+		and current_support_grasp
+	):
+		result = current_support_seat.duplicate(true)
+		result["valid"] = true
+		result["applied"] = true
+		result["committed"] = true
+		result["reused_current_support_relationship"] = true
+		result["status"] = &"support_surface_grip_current_relationship_reused"
+		_publish_preview_support_hand_surface_seat_state(held_item, result)
+		return result
+	var snapshot: Dictionary = _capture_preview_support_grip_transaction_snapshot(
+		actor,
+		held_item,
+		support_anchor,
+		support_slot_id,
+		dominant_slot_id
+	)
+	if not bool(snapshot.get("valid", false)):
+		result["status"] = &"support_surface_grip_snapshot_failed"
+		return result
+	if actor.has_method("prepare_authoring_surface_grip_open_pose_now"):
+		if not bool(actor.call(
+			"prepare_authoring_surface_grip_open_pose_now",
+			support_slot_id
+		)):
+			result["status"] = &"support_surface_grip_open_pose_failed"
+			_rollback_preview_support_grip_transaction(
+				actor,
+				held_item,
+				support_anchor,
+				snapshot,
+				support_slot_id,
+				dominant_slot_id,
+				result
+			)
+			return result
+	var accumulated_correction_local: Transform3D = (
+		_resolve_preview_support_committed_accumulator(
+			support_anchor,
+			relationship_key
+		)
+	)
+	var support_axial_base_accumulated_correction_local: Transform3D = (
+		accumulated_correction_local
+	)
+	# Capture the immutable WeaponRoot-local candidate frame before the canonical
+	# transaction mutates Support.  Candidate retries always rebuild from this C0
+	# frame; they never compound from a rejected solve.
+	var support_axial_candidate_frame: Dictionary = (
+		_resolve_preview_support_axial_candidate_frame(
+			held_item,
+			secondary_guide,
+			support_axial_base_accumulated_correction_local
+		)
+	)
+	var support_grip_candidate_attempts: Array = []
+	var support_axial_candidate_attempts: Array = []
+	var support_axial_fallback_attempted: bool = false
+	var support_axial_fallback_committed: bool = false
+	var support_axial_candidate_winner_index: int = -1
+	var support_axial_candidate_winner_degrees: float = 0.0
+	var previous_hard_law_excess: float = INF
+	var correction_signatures: Dictionary = {}
+	var verified_seat_result: Dictionary = {}
+	var applied_correction_count: int = 0
+	var transaction_passes: Array = []
+	for pass_index: int in range(SUPPORT_HAND_SURFACE_SEAT_FIXED_POINT_PASSES):
+		if (
+			pass_index > 0
+			and actor.has_method(
+				"invalidate_authoring_active_weapon_surface_seat"
+			)
+		):
+			actor.call(
+				"invalidate_authoring_active_weapon_surface_seat",
+				support_slot_id
+			)
+		var seat_attempt: Dictionary = actor.call(
+			"resolve_exact_surface_weapon_seat",
+			support_slot_id,
+			true,
+			true
+		) as Dictionary
+		var correction_state: Dictionary = (
+			_resolve_preview_support_transaction_correction(
+				seat_attempt,
+				secondary_guide
+			)
+		)
+		transaction_passes.append({
+			"pass_index": pass_index,
+			"seat_status": seat_attempt.get("status", StringName()),
+			"seat_valid": bool(seat_attempt.get("valid", false)),
+			"context_key": String(seat_attempt.get("context_key", "")),
+			"candidate_sample_index": int(seat_attempt.get(
+				"candidate_sample_index",
+				-1
+			)),
+			"provisional_available": bool(seat_attempt.get(
+				"provisional_candidate_available",
+				false
+			)),
+			"provisional_sample_index": int(seat_attempt.get(
+				"provisional_candidate_sample_index",
+				-1
+			)),
+			"correction_valid": bool(correction_state.get("valid", false)),
+			"correction_kind": correction_state.get(
+				"correction_kind",
+				StringName()
+			),
+			"hard_law_excess_normalized": float(correction_state.get(
+				"hard_law_excess_normalized",
+				INF
+			)),
+			"correction_local": correction_state.get(
+				"correction_local",
+				Transform3D.IDENTITY
+			),
+			"correction_local_origin_id": correction_state.get(
+				"correction_local_origin_id",
+				StringName()
+			),
+		})
+		var accepted_identity: bool = (
+			bool(seat_attempt.get("valid", false))
+			and int(seat_attempt.get("candidate_sample_index", -1)) == 0
+			and bool(correction_state.get("valid", false))
+			and _preview_support_correction_is_identity(
+				correction_state.get(
+					"correction_local",
+					Transform3D.IDENTITY
+				) as Transform3D
+			)
+		)
+		if accepted_identity:
+			verified_seat_result = seat_attempt.duplicate(true)
+			break
+		if not bool(correction_state.get("valid", false)):
+			result = seat_attempt.duplicate(true)
+			result["valid"] = false
+			result["applied"] = false
+			result["committed"] = false
+			result["status"] = correction_state.get(
+				"status",
+				seat_attempt.get(
+					"status",
+					&"support_surface_grip_no_safe_correction"
+				)
+			)
+			break
+		# The final pass verifies the relationship realized by the first two; it
+		# must never apply a third unverified movement.
+		if pass_index >= SUPPORT_HAND_SURFACE_SEAT_FIXED_POINT_PASSES - 1:
+			result = seat_attempt.duplicate(true)
+			result["valid"] = false
+			result["applied"] = false
+			result["committed"] = false
+			result["status"] = &"support_surface_grip_verification_not_identity"
+			break
+		var correction_local: Transform3D = correction_state.get(
+			"correction_local",
+			Transform3D.IDENTITY
+		) as Transform3D
+		var hard_law_excess: float = float(correction_state.get(
+			"hard_law_excess_normalized",
+			INF
+		))
+		var correction_signature: String = (
+			_build_preview_support_correction_signature(correction_local)
+		)
+		var correction_kind: StringName = StringName(correction_state.get(
+			"correction_kind",
+			StringName()
+		))
+		if (
+			correction_signatures.has(correction_signature)
+			or (
+				correction_kind == &"provisional"
+				and is_finite(previous_hard_law_excess)
+				and hard_law_excess
+					>= previous_hard_law_excess
+						- SUPPORT_HAND_SURFACE_SEAT_PROGRESS_EPSILON
+			)
+		):
+			result = seat_attempt.duplicate(true)
+			result["valid"] = false
+			result["applied"] = false
+			result["committed"] = false
+			result["status"] = &"support_surface_grip_no_progress"
+			break
+		correction_signatures[correction_signature] = true
+		if correction_kind == &"provisional":
+			previous_hard_law_excess = hard_law_excess
+		accumulated_correction_local = (
+			correction_local.affine_inverse()
+			* accumulated_correction_local
+		)
+		if not _compose_preview_support_grip_anchor_from_accumulator(
+			held_item,
+			accumulated_correction_local
+		):
+			result["status"] = &"support_surface_grip_transient_recompose_failed"
+			break
+		applied_correction_count += 1
+		if not equipped_item_presenter.sync_single_weapon_support_contact_guidance(
+			actor,
+			held_item,
+			dominant_slot_id,
+			true,
+			true
+		):
+			result["status"] = &"support_surface_grip_guidance_sync_failed"
+			break
+		if actor.has_method("settle_authoring_support_grip_macro_pose_now"):
+			actor.call(
+				"settle_authoring_support_grip_macro_pose_now",
+				SUPPORT_HAND_SURFACE_SEAT_REALIZATION_EPSILON_METERS
+			)
+	result["transaction_passes"] = transaction_passes.duplicate(true)
+	result["applied_correction_count"] = applied_correction_count
+	if verified_seat_result.is_empty():
+		_rollback_preview_support_grip_transaction(
+			actor,
+			held_item,
+			support_anchor,
+			snapshot,
+			support_slot_id,
+			dominant_slot_id,
+			result
+		)
+		return result
+	var support_body_collision_gate: Dictionary = (
+		_evaluate_preview_support_body_self_collision_delta(
+			actor,
+			snapshot,
+			support_slot_id
+		)
+	)
+	var support_digit_packet_committed: bool = false
+	if (
+		bool(support_body_collision_gate.get("valid", false))
+		and bool(support_body_collision_gate.get("legal", false))
+	):
+		if actor.has_method("invalidate_authoring_active_surface_grasp"):
+			actor.call("invalidate_authoring_active_surface_grasp", support_slot_id)
+		support_digit_packet_committed = bool(actor.call(
+			"apply_authoring_digit_grip_slot_now",
+			support_slot_id,
+			true
+		))
+	else:
+		result = verified_seat_result.duplicate(true)
+		result["valid"] = false
+		result["applied"] = false
+		result["committed"] = false
+		result["status"] = support_body_collision_gate.get(
+			"status",
+			&"support_surface_grip_body_collision_state_unavailable"
+		)
+		result["support_body_self_collision_gate"] = (
+			support_body_collision_gate.duplicate(true)
+		)
+	if not support_digit_packet_committed:
+		if bool(support_body_collision_gate.get("legal", false)):
+			result = verified_seat_result.duplicate(true)
+			result["valid"] = false
+			result["applied"] = false
+			result["committed"] = false
+			result["status"] = &"support_surface_grip_digit_packet_rejected"
+			result["support_body_self_collision_gate"] = (
+				support_body_collision_gate.duplicate(true)
+			)
+		result["transaction_passes"] = transaction_passes.duplicate(true)
+		result["applied_correction_count"] = applied_correction_count
+		if (
+			bool(support_body_collision_gate.get("legal", false))
+			and actor.has_method("get_authoring_surface_grasp_debug_state")
+		):
+			result["support_digit_grip_attempt"] = (
+				actor.call(
+					"get_authoring_surface_grasp_debug_state",
+					support_slot_id
+				) as Dictionary
+			).duplicate(true)
+		support_grip_candidate_attempts.append(
+			_build_preview_support_grip_candidate_trace(
+				0,
+				&"canonical",
+				0.0,
+				SUPPORT_HAND_SURFACE_SEAT_FIXED_POINT_PASSES,
+				true,
+				false,
+				result,
+				transaction_passes,
+				applied_correction_count,
+				accumulated_correction_local,
+				{},
+				_preview_support_primary_weapon_unit_matches_snapshot(
+					held_item,
+					snapshot,
+					actor,
+					dominant_slot_id
+				)
+			)
+		)
+		support_axial_fallback_attempted = true
+		var fallback_state: Dictionary = (
+			_retry_preview_support_axial_grip_candidates(
+				actor,
+				held_item,
+				secondary_guide,
+				support_anchor,
+				snapshot,
+				support_slot_id,
+				dominant_slot_id,
+				support_axial_base_accumulated_correction_local,
+				support_axial_candidate_frame
+			)
+		)
+		support_axial_candidate_attempts = fallback_state.get(
+			"candidate_attempts",
+			[]
+		) as Array
+		for candidate_trace_variant: Variant in support_axial_candidate_attempts:
+			if candidate_trace_variant is Dictionary:
+				support_grip_candidate_attempts.append(
+					(candidate_trace_variant as Dictionary).duplicate(true)
+				)
+		if not bool(fallback_state.get("committed", false)):
+			_apply_preview_support_axial_trace_fields(
+				result,
+				support_slot_id,
+				support_axial_candidate_frame,
+				support_grip_candidate_attempts,
+				support_axial_candidate_attempts,
+				true,
+				false,
+				-1,
+				0.0
+			)
+			var fallback_failure_status: StringName = StringName(
+				fallback_state.get(
+					"status",
+					&"support_surface_grip_axial_candidates_rejected"
+				)
+			)
+			result["support_axial_fallback_status"] = fallback_failure_status
+			result["status"] = (
+				fallback_failure_status
+				if fallback_failure_status in [
+					&"support_surface_grip_axial_candidate_rollback_failed",
+					&"support_surface_grip_axial_candidate_restore_failed",
+				]
+				else &"support_surface_grip_digit_packet_rejected_after_axial_candidates"
+			)
+			_rollback_preview_support_grip_transaction(
+				actor,
+				held_item,
+				support_anchor,
+				snapshot,
+				support_slot_id,
+				dominant_slot_id,
+				result
+			)
+			_publish_preview_support_hand_surface_seat_state(held_item, result)
+			return result
+		support_axial_fallback_committed = true
+		support_axial_candidate_winner_index = int(fallback_state.get(
+			"winner_index",
+			-1
+		))
+		support_axial_candidate_winner_degrees = float(fallback_state.get(
+			"winner_degrees",
+			0.0
+		))
+		verified_seat_result = fallback_state.get(
+			"verified_seat_result",
+			{}
+		) as Dictionary
+		accumulated_correction_local = fallback_state.get(
+			"accumulated_correction_local",
+			Transform3D.IDENTITY
+		) as Transform3D
+		transaction_passes = fallback_state.get("transaction_passes", []) as Array
+		applied_correction_count = int(fallback_state.get(
+			"applied_correction_count",
+			0
+		))
+		support_body_collision_gate = (
+			fallback_state.get(
+				"support_body_self_collision_gate",
+				support_body_collision_gate
+			) as Dictionary
+		).duplicate(true)
+	if not support_axial_fallback_attempted:
+		var canonical_ready_result: Dictionary = verified_seat_result.duplicate(true)
+		canonical_ready_result["status"] = &"support_surface_grip_candidate_ready"
+		support_grip_candidate_attempts.append(
+			_build_preview_support_grip_candidate_trace(
+				0,
+				&"canonical",
+				0.0,
+				SUPPORT_HAND_SURFACE_SEAT_FIXED_POINT_PASSES,
+				true,
+				true,
+				canonical_ready_result,
+				transaction_passes,
+				applied_correction_count,
+				accumulated_correction_local,
+				{},
+				_preview_support_primary_weapon_unit_matches_snapshot(
+					held_item,
+					snapshot,
+					actor,
+					dominant_slot_id
+				)
+			)
+		)
+	if actor.has_method("mark_authoring_weapon_surface_seat_realized"):
+		if not bool(actor.call(
+			"mark_authoring_weapon_surface_seat_realized",
+			support_slot_id
+		)):
+			result = verified_seat_result.duplicate(true)
+			result["valid"] = false
+			result["applied"] = false
+			result["committed"] = false
+			result["status"] = &"support_surface_grip_realized_context_failed"
+			result["transaction_passes"] = transaction_passes.duplicate(true)
+			result["applied_correction_count"] = applied_correction_count
+			_rollback_preview_support_grip_transaction(
+				actor,
+				held_item,
+				support_anchor,
+				snapshot,
+				support_slot_id,
+				dominant_slot_id,
+				result
+			)
+			return result
+	support_anchor.set_meta(
+		PREVIEW_SUPPORT_HAND_SEAT_APPLIED_RELATIONSHIP_KEY_META,
+		relationship_key
+	)
+	support_anchor.set_meta(
+		PREVIEW_SUPPORT_HAND_SEAT_APPLIED_CONTEXT_KEY_META,
+		String(verified_seat_result.get("context_key", ""))
+	)
+	support_anchor.set_meta(
+		PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_LOCAL_META,
+		accumulated_correction_local
+	)
+	support_anchor.set_meta(
+		PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_ORIGIN_META,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	# Primary's committed packet never left the skeleton or its cache. Reapplying
+	# it here normalizes/writes the same quaternions and violates exact Primary
+	# immutability during a Support-only relationship change.
+	if not _preview_support_primary_weapon_unit_matches_snapshot(
+		held_item,
+		snapshot,
+		actor,
+		dominant_slot_id
+	):
+		result = verified_seat_result.duplicate(true)
+		result["valid"] = false
+		result["applied"] = false
+		result["committed"] = false
+		result["status"] = &"support_surface_grip_moved_primary_weapon_unit"
+		result["transaction_passes"] = transaction_passes.duplicate(true)
+		result["applied_correction_count"] = applied_correction_count
+		_rollback_preview_support_grip_transaction(
+			actor,
+			held_item,
+			support_anchor,
+			snapshot,
+			support_slot_id,
+			dominant_slot_id,
+			result
+		)
+		return result
+	result = verified_seat_result.duplicate(true)
+	result["valid"] = true
+	result["applied"] = true
+	result["committed"] = true
+	result["status"] = &"support_surface_grip_transaction_committed"
+	result["support_slot_id"] = support_slot_id
+	result["applied_correction_count"] = applied_correction_count
+	result["transaction_passes"] = transaction_passes.duplicate(true)
+	result["support_digit_packet_committed"] = true
+	result["support_body_self_collision_gate"] = (
+		support_body_collision_gate.duplicate(true)
+	)
+	result["support_anchor_transform_local"] = support_anchor.transform
+	result["support_anchor_transform_local_origin_id"] = (
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	_apply_preview_support_axial_trace_fields(
+		result,
+		support_slot_id,
+		support_axial_candidate_frame,
+		support_grip_candidate_attempts,
+		support_axial_candidate_attempts,
+		support_axial_fallback_attempted,
+		support_axial_fallback_committed,
+		support_axial_candidate_winner_index,
+		support_axial_candidate_winner_degrees
+	)
+	_publish_preview_support_hand_surface_seat_state(held_item, result)
+	return result
+
+
+func _retry_preview_support_axial_grip_candidates(
+	actor: Node3D,
+	held_item: Node3D,
+	secondary_guide: Node3D,
+	support_anchor: Node3D,
+	snapshot: Dictionary,
+	support_slot_id: StringName,
+	dominant_slot_id: StringName,
+	base_accumulated_correction_local: Transform3D,
+	candidate_frame: Dictionary
+) -> Dictionary:
+	var candidate_attempts: Array = []
+	var fallback := {
+		"committed": false,
+		"winner_index": -1,
+		"winner_degrees": 0.0,
+		"candidate_attempts": candidate_attempts,
+	}
+	if not bool(candidate_frame.get("valid", false)):
+		var invalid_frame_rollback_succeeded: bool = (
+			_restore_preview_support_candidate_baseline(
+				actor,
+				held_item,
+				support_anchor,
+				snapshot,
+				support_slot_id,
+				dominant_slot_id
+			)
+		)
+		fallback["rollback_succeeded"] = invalid_frame_rollback_succeeded
+		fallback["status"] = candidate_frame.get(
+			"status",
+			&"support_surface_grip_axial_candidate_frame_invalid"
+		)
+		if not invalid_frame_rollback_succeeded:
+			fallback["status"] = &"support_surface_grip_axial_candidate_rollback_failed"
+		return fallback
+	var candidate_degrees: PackedFloat32Array = (
+		_resolve_preview_support_axial_candidate_degrees(support_slot_id)
+	)
+	for candidate_offset: int in range(candidate_degrees.size()):
+		var candidate_index: int = candidate_offset + 1
+		var candidate_angle_degrees: float = candidate_degrees[candidate_offset]
+		if not _restore_preview_support_candidate_baseline(
+			actor,
+			held_item,
+			support_anchor,
+			snapshot,
+			support_slot_id,
+			dominant_slot_id
+		):
+			var restore_failure := {
+				"valid": false,
+				"status": &"support_surface_grip_axial_candidate_restore_failed",
+			}
+			candidate_attempts.append(
+				_build_preview_support_grip_candidate_trace(
+					candidate_index,
+					&"support_anchor_axial",
+					candidate_angle_degrees,
+					SUPPORT_HAND_SURFACE_SEAT_AXIAL_CANDIDATE_FIXED_POINT_PASSES,
+					false,
+					false,
+					restore_failure,
+					[],
+					0,
+					base_accumulated_correction_local,
+					candidate_frame,
+					false
+				)
+			)
+			# Exact baseline restoration is the isolation boundary between trials.
+			# Continuing after it fails would let a later candidate inherit unknown
+			# pose/cache state and produce a non-transactional result.
+			fallback["rollback_succeeded"] = false
+			fallback["status"] = &"support_surface_grip_axial_candidate_restore_failed"
+			return fallback
+		if actor.has_method("prepare_authoring_surface_grip_open_pose_now"):
+			if not bool(actor.call(
+				"prepare_authoring_surface_grip_open_pose_now",
+				support_slot_id
+			)):
+				var open_failure := {
+					"valid": false,
+					"status": &"support_surface_grip_axial_candidate_open_pose_failed",
+				}
+				candidate_attempts.append(
+					_build_preview_support_grip_candidate_trace(
+						candidate_index,
+						&"support_anchor_axial",
+						candidate_angle_degrees,
+						SUPPORT_HAND_SURFACE_SEAT_AXIAL_CANDIDATE_FIXED_POINT_PASSES,
+						false,
+						false,
+						open_failure,
+						[],
+						0,
+						base_accumulated_correction_local,
+						candidate_frame,
+						_preview_support_primary_weapon_unit_matches_snapshot(
+							held_item,
+							snapshot,
+							actor,
+							dominant_slot_id
+						)
+					)
+				)
+				continue
+		var candidate_accumulator: Transform3D = (
+			_build_preview_support_axial_candidate_accumulator(
+				base_accumulated_correction_local,
+				candidate_frame,
+				candidate_angle_degrees
+			)
+		)
+		if (
+			not _preview_transform_is_finite(candidate_accumulator)
+			or not _compose_preview_support_grip_anchor_from_accumulator(
+				held_item,
+				candidate_accumulator
+			)
+		):
+			var compose_failure := {
+				"valid": false,
+				"status": &"support_surface_grip_axial_candidate_compose_failed",
+			}
+			candidate_attempts.append(
+				_build_preview_support_grip_candidate_trace(
+					candidate_index,
+					&"support_anchor_axial",
+					candidate_angle_degrees,
+					SUPPORT_HAND_SURFACE_SEAT_AXIAL_CANDIDATE_FIXED_POINT_PASSES,
+					false,
+					false,
+					compose_failure,
+					[],
+					0,
+					candidate_accumulator,
+					candidate_frame,
+					_preview_support_primary_weapon_unit_matches_snapshot(
+						held_item,
+						snapshot,
+						actor,
+						dominant_slot_id
+					)
+				)
+			)
+			continue
+		if not equipped_item_presenter.sync_single_weapon_support_contact_guidance(
+			actor,
+			held_item,
+			dominant_slot_id,
+			true,
+			true
+		):
+			var sync_failure := {
+				"valid": false,
+				"status": &"support_surface_grip_guidance_sync_failed",
+			}
+			candidate_attempts.append(
+				_build_preview_support_grip_candidate_trace(
+					candidate_index,
+					&"support_anchor_axial",
+					candidate_angle_degrees,
+					SUPPORT_HAND_SURFACE_SEAT_AXIAL_CANDIDATE_FIXED_POINT_PASSES,
+					false,
+					false,
+					sync_failure,
+					[],
+					0,
+					candidate_accumulator,
+					candidate_frame,
+					_preview_support_primary_weapon_unit_matches_snapshot(
+						held_item,
+						snapshot,
+						actor,
+						dominant_slot_id
+					)
+				)
+			)
+			continue
+		if actor.has_method("settle_authoring_support_grip_macro_pose_now"):
+			actor.call(
+				"settle_authoring_support_grip_macro_pose_now",
+				SUPPORT_HAND_SURFACE_SEAT_REALIZATION_EPSILON_METERS
+			)
+		var attempt: Dictionary = _attempt_preview_support_surface_grip_candidate(
+			actor,
+			held_item,
+			secondary_guide,
+			snapshot,
+			support_slot_id,
+			dominant_slot_id,
+			candidate_accumulator,
+			SUPPORT_HAND_SURFACE_SEAT_AXIAL_CANDIDATE_FIXED_POINT_PASSES
+		)
+		candidate_attempts.append(
+			_build_preview_support_grip_candidate_trace(
+				candidate_index,
+				&"support_anchor_axial",
+				candidate_angle_degrees,
+				SUPPORT_HAND_SURFACE_SEAT_AXIAL_CANDIDATE_FIXED_POINT_PASSES,
+				bool(attempt.get("seat_verified", false)),
+				bool(attempt.get("digit_packet_committed", false)),
+				attempt.get("result", {}) as Dictionary,
+				attempt.get("transaction_passes", []) as Array,
+				int(attempt.get("applied_correction_count", 0)),
+				attempt.get(
+					"accumulated_correction_local",
+					candidate_accumulator
+				) as Transform3D,
+				candidate_frame,
+				bool(attempt.get("primary_weapon_unit_unchanged", false))
+			)
+		)
+		if bool(attempt.get("digit_packet_committed", false)):
+			var attempt_result: Dictionary = attempt.get("result", {}) as Dictionary
+			fallback["committed"] = true
+			fallback["status"] = &"support_surface_grip_axial_candidate_ready"
+			fallback["winner_index"] = candidate_index
+			fallback["winner_degrees"] = candidate_angle_degrees
+			fallback["verified_seat_result"] = (
+				attempt.get("verified_seat_result", {}) as Dictionary
+			).duplicate(true)
+			fallback["accumulated_correction_local"] = attempt.get(
+				"accumulated_correction_local",
+				candidate_accumulator
+			)
+			fallback["transaction_passes"] = (
+				attempt.get("transaction_passes", []) as Array
+			).duplicate(true)
+			fallback["applied_correction_count"] = int(attempt.get(
+				"applied_correction_count",
+				0
+			))
+			fallback["support_body_self_collision_gate"] = (
+				attempt_result.get(
+					"support_body_self_collision_gate",
+					{}
+				) as Dictionary
+			).duplicate(true)
+			return fallback
+	var rollback_succeeded: bool = (
+		_restore_preview_support_candidate_baseline(
+			actor,
+			held_item,
+			support_anchor,
+			snapshot,
+			support_slot_id,
+			dominant_slot_id
+		)
+	)
+	fallback["rollback_succeeded"] = rollback_succeeded
+	fallback["status"] = (
+		&"support_surface_grip_axial_candidates_rejected"
+		if rollback_succeeded
+		else &"support_surface_grip_axial_candidate_rollback_failed"
+	)
+	return fallback
+
+
+func _attempt_preview_support_surface_grip_candidate(
+	actor: Node3D,
+	held_item: Node3D,
+	secondary_guide: Node3D,
+	snapshot: Dictionary,
+	support_slot_id: StringName,
+	dominant_slot_id: StringName,
+	initial_accumulated_correction_local: Transform3D,
+	fixed_point_passes: int
+) -> Dictionary:
+	var attempt := {
+		"seat_verified": false,
+		"digit_packet_committed": false,
+		"primary_weapon_unit_unchanged": false,
+		"result": {
+			"valid": false,
+			"status": &"support_surface_grip_axial_candidate_unavailable",
+		},
+		"verified_seat_result": {},
+		"accumulated_correction_local": initial_accumulated_correction_local,
+		"transaction_passes": [],
+		"applied_correction_count": 0,
+	}
+	if fixed_point_passes < 1:
+		return attempt
+	if not _preview_support_primary_weapon_unit_matches_snapshot(
+		held_item,
+		snapshot,
+		actor,
+		dominant_slot_id
+	):
+		attempt["result"] = {
+			"valid": false,
+			"status": &"support_surface_grip_axial_candidate_moved_primary_weapon_unit",
+		}
+		return attempt
+	var accumulated_correction_local: Transform3D = (
+		initial_accumulated_correction_local
+	)
+	var previous_hard_law_excess: float = INF
+	var correction_signatures: Dictionary = {}
+	var verified_seat_result: Dictionary = {}
+	var applied_correction_count: int = 0
+	var transaction_passes: Array = []
+	var result: Dictionary = attempt.get("result", {}) as Dictionary
+	for pass_index: int in range(fixed_point_passes):
+		if (
+			pass_index > 0
+			and actor.has_method(
+				"invalidate_authoring_active_weapon_surface_seat"
+			)
+		):
+			actor.call(
+				"invalidate_authoring_active_weapon_surface_seat",
+				support_slot_id
+			)
+		var seat_attempt: Dictionary = actor.call(
+			"resolve_exact_surface_weapon_seat",
+			support_slot_id,
+			true,
+			true
+		) as Dictionary
+		var correction_state: Dictionary = (
+			_resolve_preview_support_transaction_correction(
+				seat_attempt,
+				secondary_guide
+			)
+		)
+		transaction_passes.append({
+			"pass_index": pass_index,
+			"seat_status": seat_attempt.get("status", StringName()),
+			"seat_valid": bool(seat_attempt.get("valid", false)),
+			"context_key": String(seat_attempt.get("context_key", "")),
+			"candidate_sample_index": int(seat_attempt.get(
+				"candidate_sample_index",
+				-1
+			)),
+			"provisional_available": bool(seat_attempt.get(
+				"provisional_candidate_available",
+				false
+			)),
+			"provisional_sample_index": int(seat_attempt.get(
+				"provisional_candidate_sample_index",
+				-1
+			)),
+			"correction_valid": bool(correction_state.get("valid", false)),
+			"correction_kind": correction_state.get(
+				"correction_kind",
+				StringName()
+			),
+			"hard_law_excess_normalized": float(correction_state.get(
+				"hard_law_excess_normalized",
+				INF
+			)),
+			"correction_local": correction_state.get(
+				"correction_local",
+				Transform3D.IDENTITY
+			),
+			"correction_local_origin_id": correction_state.get(
+				"correction_local_origin_id",
+				StringName()
+			),
+		})
+		var accepted_identity: bool = (
+			bool(seat_attempt.get("valid", false))
+			and int(seat_attempt.get("candidate_sample_index", -1)) == 0
+			and bool(correction_state.get("valid", false))
+			and _preview_support_correction_is_identity(
+				correction_state.get(
+					"correction_local",
+					Transform3D.IDENTITY
+				) as Transform3D
+			)
+		)
+		if accepted_identity:
+			verified_seat_result = seat_attempt.duplicate(true)
+			break
+		if not bool(correction_state.get("valid", false)):
+			result = seat_attempt.duplicate(true)
+			result["valid"] = false
+			result["applied"] = false
+			result["committed"] = false
+			result["status"] = correction_state.get(
+				"status",
+				seat_attempt.get(
+					"status",
+					&"support_surface_grip_no_safe_correction"
+				)
+			)
+			break
+		# Candidate retries deliberately receive one additional realization pass:
+		# three bounded corrections and a fourth identity-only verification.
+		if pass_index >= fixed_point_passes - 1:
+			result = seat_attempt.duplicate(true)
+			result["valid"] = false
+			result["applied"] = false
+			result["committed"] = false
+			result["status"] = &"support_surface_grip_verification_not_identity"
+			break
+		var correction_local: Transform3D = correction_state.get(
+			"correction_local",
+			Transform3D.IDENTITY
+		) as Transform3D
+		var hard_law_excess: float = float(correction_state.get(
+			"hard_law_excess_normalized",
+			INF
+		))
+		var correction_signature: String = (
+			_build_preview_support_correction_signature(correction_local)
+		)
+		var correction_kind: StringName = StringName(correction_state.get(
+			"correction_kind",
+			StringName()
+		))
+		if (
+			correction_signatures.has(correction_signature)
+			or (
+				correction_kind == &"provisional"
+				and is_finite(previous_hard_law_excess)
+				and hard_law_excess
+					>= previous_hard_law_excess
+						- SUPPORT_HAND_SURFACE_SEAT_PROGRESS_EPSILON
+			)
+		):
+			result = seat_attempt.duplicate(true)
+			result["valid"] = false
+			result["applied"] = false
+			result["committed"] = false
+			result["status"] = &"support_surface_grip_no_progress"
+			break
+		correction_signatures[correction_signature] = true
+		if correction_kind == &"provisional":
+			previous_hard_law_excess = hard_law_excess
+		accumulated_correction_local = (
+			correction_local.affine_inverse()
+			* accumulated_correction_local
+		)
+		if not _compose_preview_support_grip_anchor_from_accumulator(
+			held_item,
+			accumulated_correction_local
+		):
+			result = {
+				"valid": false,
+				"status": &"support_surface_grip_transient_recompose_failed",
+			}
+			break
+		applied_correction_count += 1
+		if not equipped_item_presenter.sync_single_weapon_support_contact_guidance(
+			actor,
+			held_item,
+			dominant_slot_id,
+			true,
+			true
+		):
+			result = {
+				"valid": false,
+				"status": &"support_surface_grip_guidance_sync_failed",
+			}
+			break
+		if actor.has_method("settle_authoring_support_grip_macro_pose_now"):
+			actor.call(
+				"settle_authoring_support_grip_macro_pose_now",
+				SUPPORT_HAND_SURFACE_SEAT_REALIZATION_EPSILON_METERS
+			)
+		if not _preview_support_primary_weapon_unit_matches_snapshot(
+			held_item,
+			snapshot,
+			actor,
+			dominant_slot_id
+		):
+			result = {
+				"valid": false,
+				"status": &"support_surface_grip_axial_candidate_moved_primary_weapon_unit",
+			}
+			break
+	attempt["transaction_passes"] = transaction_passes.duplicate(true)
+	attempt["applied_correction_count"] = applied_correction_count
+	attempt["accumulated_correction_local"] = accumulated_correction_local
+	attempt["primary_weapon_unit_unchanged"] = (
+		_preview_support_primary_weapon_unit_matches_snapshot(
+			held_item,
+			snapshot,
+			actor,
+			dominant_slot_id
+		)
+	)
+	if verified_seat_result.is_empty():
+		attempt["result"] = result
+		return attempt
+	attempt["seat_verified"] = true
+	var support_body_collision_gate: Dictionary = (
+		_evaluate_preview_support_body_self_collision_delta(
+			actor,
+			snapshot,
+			support_slot_id
+		)
+	)
+	if (
+		not bool(support_body_collision_gate.get("valid", false))
+		or not bool(support_body_collision_gate.get("legal", false))
+	):
+		result = verified_seat_result.duplicate(true)
+		result["valid"] = false
+		result["applied"] = false
+		result["committed"] = false
+		result["status"] = support_body_collision_gate.get(
+			"status",
+			&"support_surface_grip_body_collision_state_unavailable"
+		)
+		result["support_body_self_collision_gate"] = (
+			support_body_collision_gate.duplicate(true)
+		)
+		attempt["result"] = result
+		return attempt
+	if actor.has_method("invalidate_authoring_active_surface_grasp"):
+		actor.call("invalidate_authoring_active_surface_grasp", support_slot_id)
+	var support_digit_packet_committed: bool = bool(actor.call(
+		"apply_authoring_digit_grip_slot_now",
+		support_slot_id,
+		true
+	))
+	if not support_digit_packet_committed:
+		result = verified_seat_result.duplicate(true)
+		result["valid"] = false
+		result["applied"] = false
+		result["committed"] = false
+		result["status"] = &"support_surface_grip_digit_packet_rejected"
+		if actor.has_method("get_authoring_surface_grasp_debug_state"):
+			result["support_digit_grip_attempt"] = (
+				actor.call(
+					"get_authoring_surface_grasp_debug_state",
+					support_slot_id
+				) as Dictionary
+			).duplicate(true)
+		attempt["result"] = result
+		return attempt
+	attempt["digit_packet_committed"] = true
+	attempt["verified_seat_result"] = verified_seat_result.duplicate(true)
+	result = verified_seat_result.duplicate(true)
+	result["valid"] = true
+	result["applied"] = true
+	result["committed"] = false
+	result["status"] = &"support_surface_grip_axial_candidate_ready"
+	result["support_body_self_collision_gate"] = (
+		support_body_collision_gate.duplicate(true)
+	)
+	attempt["result"] = result
+	return attempt
+
+
+func _resolve_preview_support_axial_candidate_frame(
+	held_item: Node3D,
+	secondary_guide: Node3D,
+	base_accumulated_correction_local: Transform3D
+) -> Dictionary:
+	var invalid := {
+		"valid": false,
+		"status": &"support_surface_grip_axial_candidate_frame_invalid",
+	}
+	if (
+		held_item == null
+		or secondary_guide == null
+		or not _preview_transform_is_finite(
+			base_accumulated_correction_local
+		)
+	):
+		return invalid
+	var tip_origin_id: StringName = _resolve_origin_meta_value(
+		held_item,
+		"weapon_tip_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	var pommel_origin_id: StringName = _resolve_origin_meta_value(
+		held_item,
+		"weapon_pommel_origin_id",
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	)
+	if (
+		tip_origin_id != CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		or pommel_origin_id != CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	):
+		invalid["status"] = &"support_surface_grip_axial_candidate_origin_invalid"
+		return invalid
+	var tip_local: Vector3 = _get_weapon_tip_meta(held_item)
+	var pommel_local: Vector3 = _get_weapon_pommel_meta(held_item)
+	var axis_local: Vector3 = tip_local - pommel_local
+	if not axis_local.is_finite() or axis_local.length_squared() <= 0.000001:
+		invalid["status"] = &"support_surface_grip_axial_candidate_axis_invalid"
+		return invalid
+	axis_local = axis_local.normalized()
+	var base_anchor_local: Transform3D = (
+		base_accumulated_correction_local
+		* secondary_guide.transform
+	)
+	if not _preview_transform_is_finite(base_anchor_local):
+		invalid["status"] = &"support_surface_grip_axial_candidate_anchor_invalid"
+		return invalid
+	return {
+		"valid": true,
+		"status": &"support_surface_grip_axial_candidate_frame_ready",
+		"axis_local": axis_local,
+		"axis_local_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		"pivot_local": base_anchor_local.origin,
+		"pivot_local_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		"base_anchor_local": base_anchor_local,
+		"base_anchor_local_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+	}
+
+
+func _resolve_preview_support_axial_candidate_degrees(
+	support_slot_id: StringName
+) -> PackedFloat32Array:
+	# Left and Right consume the same bounded angles on their physical sides, not
+	# a mirrored coordinate reinterpretation.  Both signs remain available.
+	var preferred_degrees: float = (
+		SUPPORT_HAND_SURFACE_SEAT_AXIAL_CANDIDATE_DEGREES
+		if support_slot_id == &"hand_left"
+		else -SUPPORT_HAND_SURFACE_SEAT_AXIAL_CANDIDATE_DEGREES
+	)
+	return PackedFloat32Array([
+		preferred_degrees,
+		-preferred_degrees,
+		preferred_degrees * 2.0,
+		-preferred_degrees * 2.0,
+	])
+
+
+func _build_preview_support_axial_candidate_accumulator(
+	base_accumulated_correction_local: Transform3D,
+	candidate_frame: Dictionary,
+	candidate_angle_degrees: float
+) -> Transform3D:
+	if not bool(candidate_frame.get("valid", false)):
+		return Transform3D.IDENTITY
+	var axis_local: Vector3 = candidate_frame.get(
+		"axis_local",
+		Vector3.ZERO
+	) as Vector3
+	var pivot_local: Vector3 = candidate_frame.get(
+		"pivot_local",
+		Vector3.ZERO
+	) as Vector3
+	if (
+		not axis_local.is_finite()
+		or axis_local.length_squared() <= 0.000001
+		or not pivot_local.is_finite()
+	):
+		return Transform3D.IDENTITY
+	var rotation_local := Basis(
+		axis_local.normalized(),
+		deg_to_rad(candidate_angle_degrees)
+	)
+	var candidate_about_c0 := Transform3D(
+		rotation_local,
+		pivot_local - rotation_local * pivot_local
+	)
+	return candidate_about_c0 * base_accumulated_correction_local
+
+
+func _restore_preview_support_candidate_baseline(
+	actor: Node3D,
+	held_item: Node3D,
+	support_anchor: Node3D,
+	snapshot: Dictionary,
+	support_slot_id: StringName,
+	dominant_slot_id: StringName
+) -> bool:
+	return _restore_preview_support_grip_transaction_snapshot(
+		actor,
+		held_item,
+		support_anchor,
+		snapshot,
+		support_slot_id,
+		dominant_slot_id
+	)
+
+
+func _preview_support_primary_weapon_unit_matches_snapshot(
+	held_item: Node3D,
+	snapshot: Dictionary,
+	actor: Node3D = null,
+	dominant_slot_id: StringName = StringName()
+) -> bool:
+	if held_item == null or not is_instance_valid(held_item):
+		return false
+	if held_item.global_transform != (
+		snapshot.get(
+			"held_item_global_transform",
+			held_item.global_transform
+		) as Transform3D
+	):
+		return false
+	if bool(snapshot.get("primary_anchor_available", false)):
+		var primary_anchor: Node3D = (
+			weapon_grip_anchor_provider.get_primary_grip_anchor(held_item)
+		)
+		if (
+			primary_anchor == null
+			or primary_anchor.transform != (
+				snapshot.get(
+					"primary_anchor_transform",
+					primary_anchor.transform
+				) as Transform3D
+			)
+		):
+			return false
+	if actor == null or dominant_slot_id == StringName():
+		return true
+	if (
+		not actor.has_method("get_authoring_current_weapon_surface_seat")
+		or not actor.has_method("get_authoring_surface_grasp_debug_state")
+		or not actor.has_method(
+			"authoring_grip_transaction_slot_pose_matches_snapshot"
+		)
+	):
+		return false
+	var internal_snapshot_variant: Variant = snapshot.get(
+		"internal_snapshot",
+		null
+	)
+	if (
+		not internal_snapshot_variant is Dictionary
+		or not bool(actor.call(
+			"authoring_grip_transaction_slot_pose_matches_snapshot",
+			dominant_slot_id,
+			internal_snapshot_variant as Dictionary
+		))
+	):
+		return false
+	return (
+		(actor.call(
+			"get_authoring_current_weapon_surface_seat",
+			dominant_slot_id
+		) as Dictionary) == (snapshot.get("primary_surface_seat", {}) as Dictionary)
+		and (actor.call(
+			"get_authoring_surface_grasp_debug_state",
+			dominant_slot_id
+		) as Dictionary) == (snapshot.get("primary_surface_grasp", {}) as Dictionary)
+	)
+
+
+func _evaluate_preview_support_body_self_collision_delta(
+	actor: Node3D,
+	snapshot: Dictionary,
+	support_slot_id: StringName
+) -> Dictionary:
+	var result := {
+		"valid": false,
+		"legal": false,
+		"status": &"support_surface_grip_body_collision_state_unavailable",
+	}
+	if (
+		actor == null
+		or not actor.has_method("get_body_self_collision_debug_state")
+		or not bool(snapshot.get("valid", false))
+	):
+		return result
+	var baseline_state: Dictionary = snapshot.get(
+		"body_self_collision_state",
+		{}
+	) as Dictionary
+	var candidate_state: Dictionary = actor.call(
+		"get_body_self_collision_debug_state",
+		true
+	) as Dictionary
+	if (
+		not _preview_body_self_collision_state_is_complete(baseline_state)
+		or not _preview_body_self_collision_state_is_complete(candidate_state)
+	):
+		result["status"] = &"support_surface_grip_body_collision_state_incomplete"
+		return result
+	var baseline_lookup: Dictionary = (
+		_build_preview_support_body_collision_lookup(
+			baseline_state,
+			support_slot_id
+		)
+	)
+	var candidate_lookup: Dictionary = (
+		_build_preview_support_body_collision_lookup(
+			candidate_state,
+			support_slot_id
+		)
+	)
+	result["valid"] = true
+	result["baseline_illegal_pair_count"] = int(baseline_state.get(
+		"illegal_pair_count",
+		0
+	))
+	result["candidate_illegal_pair_count"] = int(candidate_state.get(
+		"illegal_pair_count",
+		0
+	))
+	result["baseline_support_illegal_pair_count"] = baseline_lookup.size()
+	result["candidate_support_illegal_pair_count"] = candidate_lookup.size()
+	for signature_variant: Variant in candidate_lookup.keys():
+		var signature: String = String(signature_variant)
+		var candidate_pair: Dictionary = candidate_lookup.get(
+			signature_variant,
+		{}
+		) as Dictionary
+		var candidate_clearance: float = float(candidate_pair.get(
+			"clearance_meters",
+			-INF
+		))
+		if not is_finite(candidate_clearance):
+			result["valid"] = false
+			result["status"] = &"support_surface_grip_body_collision_state_invalid"
+			result["rejected_pair_signature"] = signature
+			result["rejected_pair"] = candidate_pair.duplicate(true)
+			return result
+		if not baseline_lookup.has(signature_variant):
+			result["status"] = &"support_surface_grip_body_collision_new_illegal_pair"
+			result["rejected_pair_signature"] = signature
+			result["rejected_pair"] = candidate_pair.duplicate(true)
+			return result
+		var baseline_pair: Dictionary = baseline_lookup.get(
+			signature_variant,
+		{}
+		) as Dictionary
+		var baseline_clearance: float = float(baseline_pair.get(
+			"clearance_meters",
+			-INF
+		))
+		if (
+			not is_finite(baseline_clearance)
+			or candidate_clearance
+				< baseline_clearance
+					- SUPPORT_BODY_SELF_COLLISION_COMPARISON_EPSILON_METERS
+		):
+			result["status"] = &"support_surface_grip_body_collision_worsened_illegal_pair"
+			result["rejected_pair_signature"] = signature
+			result["baseline_pair"] = baseline_pair.duplicate(true)
+			result["rejected_pair"] = candidate_pair.duplicate(true)
+			return result
+	result["legal"] = true
+	result["status"] = &"support_surface_grip_body_collision_delta_legal"
+	return result
+
+
+func _preview_body_self_collision_state_is_complete(state: Dictionary) -> bool:
+	var illegal_pairs: Array = state.get("illegal_pairs", []) as Array
+	return (
+		int(state.get("checked_pair_count", 0)) > 0
+		and bool(state.get("illegal_pairs_complete", false))
+		and int(state.get("illegal_pair_count", -1)) == illegal_pairs.size()
+	)
+
+
+func _build_preview_support_body_collision_lookup(
+	state: Dictionary,
+	support_slot_id: StringName
+) -> Dictionary:
+	var lookup: Dictionary = {}
+	for pair_variant: Variant in state.get("illegal_pairs", []) as Array:
+		if not pair_variant is Dictionary:
+			continue
+		var pair: Dictionary = pair_variant as Dictionary
+		if not _preview_body_collision_pair_involves_support(
+			pair,
+			support_slot_id
+		):
+			continue
+		var signature: String = _build_preview_body_collision_pair_signature(pair)
+		if signature.is_empty():
+			continue
+		var clearance: float = float(pair.get("clearance_meters", -INF))
+		if (
+			not lookup.has(signature)
+			or clearance < float((lookup.get(signature, {}) as Dictionary).get(
+				"clearance_meters",
+				INF
+			))
+		):
+			lookup[signature] = pair.duplicate(true)
+	return lookup
+
+
+func _preview_body_collision_pair_involves_support(
+	pair: Dictionary,
+	support_slot_id: StringName
+) -> bool:
+	var support_regions: Array[String] = []
+	if support_slot_id == &"hand_left":
+		support_regions = ["left_shoulder", "left_upperarm", "left_forearm"]
+	elif support_slot_id == &"hand_right":
+		support_regions = ["right_shoulder", "right_upperarm", "right_forearm"]
+	else:
+		return false
+	return (
+		String(pair.get("first_region", "")) in support_regions
+		or String(pair.get("second_region", "")) in support_regions
+	)
+
+
+func _build_preview_body_collision_pair_signature(pair: Dictionary) -> String:
+	var descriptors: Array[String] = [
+		"%s|%s|%s" % [
+			String(pair.get("first_attachment_name", "")),
+			String(pair.get("first_region", "")),
+			String(pair.get("first_bone_name", "")),
+		],
+		"%s|%s|%s" % [
+			String(pair.get("second_attachment_name", "")),
+			String(pair.get("second_region", "")),
+			String(pair.get("second_bone_name", "")),
+		],
+	]
+	descriptors.sort()
+	if descriptors[0] == "||" or descriptors[1] == "||":
+		return ""
+	return "%s::%s" % [descriptors[0], descriptors[1]]
+
+
+func _build_preview_support_grip_candidate_trace(
+	candidate_index: int,
+	candidate_kind: StringName,
+	candidate_angle_degrees: float,
+	pass_budget: int,
+	seat_verified: bool,
+	digit_packet_committed: bool,
+	result: Dictionary,
+	transaction_passes: Array,
+	applied_correction_count: int,
+	accumulated_correction_local: Transform3D,
+	candidate_frame: Dictionary,
+	primary_weapon_unit_unchanged: bool
+) -> Dictionary:
+	var trace := {
+		"candidate_index": candidate_index,
+		"candidate_kind": candidate_kind,
+		"candidate_degrees": candidate_angle_degrees,
+		"pass_budget": pass_budget,
+		"seat_verified": seat_verified,
+		"digit_packet_committed": digit_packet_committed,
+		"transaction_only_until_atomic_commit": true,
+		"status": result.get("status", StringName()),
+		"transaction_passes": transaction_passes.duplicate(true),
+		"applied_correction_count": applied_correction_count,
+		"accumulated_correction_local": accumulated_correction_local,
+		"accumulated_correction_local_origin_id": (
+			CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		),
+		"primary_weapon_unit_unchanged": primary_weapon_unit_unchanged,
+	}
+	if result.has("support_digit_grip_attempt"):
+		trace["support_digit_grip_attempt"] = (
+			result.get("support_digit_grip_attempt", {}) as Dictionary
+		).duplicate(true)
+	if result.has("support_body_self_collision_gate"):
+		trace["support_body_self_collision_gate"] = (
+			result.get("support_body_self_collision_gate", {}) as Dictionary
+		).duplicate(true)
+	if bool(candidate_frame.get("valid", false)):
+		trace["axis_local"] = candidate_frame.get("axis_local", Vector3.ZERO)
+		trace["axis_local_origin_id"] = candidate_frame.get(
+			"axis_local_origin_id",
+			StringName()
+		)
+		trace["pivot_local"] = candidate_frame.get("pivot_local", Vector3.ZERO)
+		trace["pivot_local_origin_id"] = candidate_frame.get(
+			"pivot_local_origin_id",
+			StringName()
+		)
+	return trace
+
+
+func _apply_preview_support_axial_trace_fields(
+	result: Dictionary,
+	support_slot_id: StringName,
+	candidate_frame: Dictionary,
+	grip_candidate_attempts: Array,
+	axial_candidate_attempts: Array,
+	fallback_attempted: bool,
+	fallback_committed: bool,
+	winner_index: int,
+	winner_degrees: float
+) -> void:
+	var candidate_degrees: PackedFloat32Array = (
+		_resolve_preview_support_axial_candidate_degrees(support_slot_id)
+	)
+	result["support_grip_candidate_attempts"] = grip_candidate_attempts.duplicate(true)
+	result["support_axial_candidate_attempts"] = (
+		axial_candidate_attempts.duplicate(true)
+	)
+	result["support_axial_fallback_attempted"] = fallback_attempted
+	result["support_axial_fallback_committed"] = fallback_committed
+	result["support_axial_candidate_winner_index"] = winner_index
+	result["support_axial_candidate_winner_degrees"] = winner_degrees
+	result["support_axial_preferred_candidate_degrees"] = (
+		candidate_degrees[0] if not candidate_degrees.is_empty() else 0.0
+	)
+	result["support_axial_candidate_order_degrees"] = candidate_degrees
+	if bool(candidate_frame.get("valid", false)):
+		result["support_axial_axis_local"] = candidate_frame.get(
+			"axis_local",
+			Vector3.ZERO
+		)
+		result["support_axial_axis_local_origin_id"] = candidate_frame.get(
+			"axis_local_origin_id",
+			StringName()
+		)
+		result["support_axial_pivot_local"] = candidate_frame.get(
+			"pivot_local",
+			Vector3.ZERO
+		)
+		result["support_axial_pivot_local_origin_id"] = candidate_frame.get(
+			"pivot_local_origin_id",
+			StringName()
+		)
+
+
+func _resolve_preview_support_transaction_correction(
+	seat_attempt: Dictionary,
+	secondary_guide: Node3D
+) -> Dictionary:
+	return _resolve_preview_surface_transaction_correction(
+		seat_attempt,
+		secondary_guide,
+		&"support_surface_grip",
+		true
+	)
+
+
+func _resolve_preview_primary_transaction_correction(
+	seat_attempt: Dictionary,
+	primary_guide: Node3D
+) -> Dictionary:
+	var correction_state: Dictionary = _resolve_preview_surface_transaction_correction(
+		seat_attempt,
+		primary_guide,
+		&"primary_surface_grip",
+		true
+	)
+	if not bool(correction_state.get("valid", false)):
+		return correction_state
+	var grip_pivot_variant: Variant = seat_attempt.get("grip_pivot_local", null)
+	var grip_pivot_origin_id: StringName = StringName(seat_attempt.get(
+		"grip_pivot_local_origin_id",
+		StringName()
+	))
+	if grip_pivot_variant is not Vector3:
+		var diagnostics: Dictionary = seat_attempt.get("diagnostics", {}) as Dictionary
+		var stations: Dictionary = diagnostics.get("stations", {}) as Dictionary
+		grip_pivot_variant = stations.get("grip_pivot_c0_local", null)
+		grip_pivot_origin_id = StringName(stations.get(
+			"grip_pivot_c0_local_origin_id",
+			StringName()
+		))
+	if (
+		grip_pivot_variant is not Vector3
+		or not (grip_pivot_variant as Vector3).is_finite()
+		or grip_pivot_origin_id != CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+	):
+		return {
+			"valid": false,
+			"status": &"primary_surface_grip_pivot_provenance_invalid",
+		}
+	var correction_local: Transform3D = correction_state.get(
+		"correction_local",
+		Transform3D.IDENTITY
+	) as Transform3D
+	if not _preview_surface_correction_is_rigid(correction_local):
+		return {
+			"valid": false,
+			"status": &"primary_surface_grip_correction_not_rigid",
+		}
+	correction_state["grip_pivot_local"] = grip_pivot_variant as Vector3
+	correction_state["grip_pivot_local_origin_id"] = grip_pivot_origin_id
+	return correction_state
+
+
+func _resolve_preview_surface_transaction_correction(
+	seat_attempt: Dictionary,
+	grip_guide: Node3D,
+	status_prefix: StringName,
+	allow_provisional_correction: bool = false
+) -> Dictionary:
+	var invalid := {
+		"valid": false,
+		"status": StringName(
+			"%s_no_transaction_correction" % String(status_prefix)
+		),
+	}
+	if grip_guide == null:
+		return invalid
+	if int(seat_attempt.get("source_instance_id", 0)) != grip_guide.get_instance_id():
+		invalid["status"] = StringName(
+			"%s_source_instance_mismatch" % String(status_prefix)
+		)
+		return invalid
+	var correction_local := Transform3D.IDENTITY
+	var hard_law_excess: float = 0.0
+	var correction_kind: StringName = &"accepted"
+	if bool(seat_attempt.get("valid", false)):
+		if (
+			StringName(seat_attempt.get(
+				"seat_correction_grip_local_origin_id",
+				StringName()
+			)) != CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+			or not seat_attempt.has("seat_correction_grip_local")
+		):
+			invalid["status"] = StringName(
+				"%s_accepted_origin_invalid" % String(status_prefix)
+			)
+			return invalid
+		correction_local = seat_attempt.get(
+			"seat_correction_grip_local",
+			Transform3D.IDENTITY
+		) as Transform3D
+	elif (
+		allow_provisional_correction
+		and bool(seat_attempt.get("provisional_candidate_available", false))
+		and bool(seat_attempt.get(
+			"provisional_candidate_noncommittable",
+			false
+		))
+		and bool(seat_attempt.get(
+			"provisional_candidate_transaction_only",
+			false
+		))
+	):
+		if (
+			StringName(seat_attempt.get(
+				"provisional_seat_correction_grip_local_origin_id",
+				StringName()
+			)) != CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+			or not seat_attempt.has("provisional_seat_correction_grip_local")
+		):
+			invalid["status"] = StringName(
+				"%s_provisional_origin_invalid" % String(status_prefix)
+			)
+			return invalid
+		correction_kind = &"provisional"
+		correction_local = seat_attempt.get(
+			"provisional_seat_correction_grip_local",
+			Transform3D.IDENTITY
+		) as Transform3D
+		hard_law_excess = float(seat_attempt.get(
+			"provisional_hard_law_excess_normalized",
+			INF
+		))
+	else:
+		return invalid
+	if (
+		not _preview_transform_is_finite(correction_local)
+		or not is_finite(hard_law_excess)
+	):
+		invalid["status"] = StringName(
+			"%s_correction_invalid" % String(status_prefix)
+		)
+		return invalid
+	return {
+		"valid": true,
+		"status": StringName(
+			"%s_transaction_correction_ready" % String(status_prefix)
+		),
+		"correction_kind": correction_kind,
+		"correction_local": correction_local,
+		"correction_local_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		"hard_law_excess_normalized": hard_law_excess,
+	}
+
+
+func _preview_support_correction_is_identity(
+	correction_local: Transform3D
+) -> bool:
+	if not _preview_transform_is_finite(correction_local):
+		return false
+	return (
+		correction_local.origin.length()
+			<= SUPPORT_HAND_SURFACE_SEAT_REALIZATION_EPSILON_METERS
+		and rad_to_deg(
+			correction_local.basis.orthonormalized()
+				.get_rotation_quaternion().get_angle()
+		) <= SUPPORT_HAND_SURFACE_SEAT_IDENTITY_ROTATION_EPSILON_DEGREES
+	)
+
+
+func _preview_surface_correction_is_rigid(
+	correction_local: Transform3D
+) -> bool:
+	if not _preview_transform_is_finite(correction_local):
+		return false
+	var basis: Basis = correction_local.basis
+	var orthonormal_basis: Basis = basis.orthonormalized()
+	return (
+		basis.is_equal_approx(orthonormal_basis)
+		and absf(basis.determinant() - 1.0) <= 0.00001
+	)
+
+
+func _build_preview_support_correction_signature(
+	correction_local: Transform3D
+) -> String:
+	var step: float = SUPPORT_HAND_SURFACE_SEAT_CORRECTION_SIGNATURE_STEP
+	var basis: Basis = correction_local.basis.orthonormalized()
+	return str(hash([
+		roundi(correction_local.origin.x / step),
+		roundi(correction_local.origin.y / step),
+		roundi(correction_local.origin.z / step),
+		roundi(basis.x.x / step),
+		roundi(basis.x.y / step),
+		roundi(basis.x.z / step),
+		roundi(basis.y.x / step),
+		roundi(basis.y.y / step),
+		roundi(basis.y.z / step),
+		roundi(basis.z.x / step),
+		roundi(basis.z.y / step),
+		roundi(basis.z.z / step),
+	]))
+
+
+func _resolve_preview_support_committed_accumulator(
+	support_anchor: Node3D,
+	relationship_key: String
+) -> Transform3D:
+	if support_anchor == null:
+		return Transform3D.IDENTITY
+	if String(support_anchor.get_meta(
+		PREVIEW_SUPPORT_HAND_SEAT_APPLIED_RELATIONSHIP_KEY_META,
+		""
+	)) != relationship_key:
+		return Transform3D.IDENTITY
+	if StringName(support_anchor.get_meta(
+		PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_ORIGIN_META,
+		StringName()
+	)) != CombatOriginRecordScript.ORIGIN_WEAPON_ROOT:
+		return Transform3D.IDENTITY
+	var accumulator_variant: Variant = support_anchor.get_meta(
+		PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_LOCAL_META,
+		null
+	)
+	if not accumulator_variant is Transform3D:
+		return Transform3D.IDENTITY
+	var accumulator: Transform3D = accumulator_variant as Transform3D
+	return accumulator if _preview_transform_is_finite(accumulator) else Transform3D.IDENTITY
+
+
+func _capture_preview_primary_grip_transaction_snapshot(
+	preview_root: Node3D,
+	actor: Node3D,
+	held_item: Node3D,
+	primary_guide: Node3D,
+	primary_anchor: Node3D,
+	dominant_slot_id: StringName,
+	requested_motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary
+) -> Dictionary:
+	var internal_snapshot: Dictionary = actor.call(
+		"capture_authoring_active_grip_transaction_state",
+		dominant_slot_id
+	) as Dictionary
+	if not bool(internal_snapshot.get("valid", false)):
+		return {"valid": false}
+	var contact_node_states: Array = []
+	var captured_instance_ids: Dictionary = {}
+	for contact_root: Node3D in [
+		primary_guide,
+		primary_anchor,
+		held_item.get_node_or_null("SecondaryGripGuide") as Node3D,
+		weapon_grip_anchor_provider.get_support_grip_anchor(held_item),
+	]:
+		_capture_preview_transaction_contact_tree(
+			contact_root,
+			contact_node_states,
+			captured_instance_ids
+		)
+	return {
+		"valid": true,
+		"preview_root_meta": _capture_preview_all_meta_entries(preview_root),
+		"actor_meta": _capture_preview_all_meta_entries(actor),
+		"held_item_global_transform": held_item.global_transform,
+		"held_item_meta": _capture_preview_all_meta_entries(held_item),
+		"contact_node_states": contact_node_states,
+		"internal_snapshot": internal_snapshot,
+		"requested_tip_position_local": requested_motion_node.tip_position_local,
+		"requested_tip_position_origin_id": (
+			requested_motion_node.tip_position_origin_id
+		),
+		"requested_pommel_position_local": (
+			requested_motion_node.pommel_position_local
+		),
+		"requested_pommel_position_origin_id": (
+			requested_motion_node.pommel_position_origin_id
+		),
+		"playback_endpoint_entries": _capture_preview_dictionary_entries(
+			playback_state,
+			[
+				&"tip_position_local",
+				&"tip_position_origin_id",
+				&"pommel_position_local",
+				&"pommel_position_origin_id",
+			]
+		),
+	}
+
+
+func _restore_preview_primary_grip_transaction_snapshot(
+	preview_root: Node3D,
+	actor: Node3D,
+	held_item: Node3D,
+	snapshot: Dictionary,
+	dominant_slot_id: StringName,
+	requested_motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary
+) -> bool:
+	if not bool(snapshot.get("valid", false)):
+		return false
+	_restore_preview_all_meta_entries(
+		preview_root,
+		snapshot.get("preview_root_meta", {}) as Dictionary
+	)
+	_restore_preview_all_meta_entries(
+		actor,
+		snapshot.get("actor_meta", {}) as Dictionary
+	)
+	held_item.global_transform = snapshot.get(
+		"held_item_global_transform",
+		held_item.global_transform
+	) as Transform3D
+	_restore_preview_all_meta_entries(
+		held_item,
+		snapshot.get("held_item_meta", {}) as Dictionary
+	)
+	var contact_nodes_restored: bool = _restore_preview_transaction_contact_tree(
+		snapshot.get("contact_node_states", []) as Array
+	)
+	var actor_restored: bool = bool(actor.call(
+		"restore_authoring_active_grip_transaction_state",
+		dominant_slot_id,
+		snapshot.get("internal_snapshot", {}) as Dictionary
+	))
+	var actor_restore_call_succeeded: bool = actor_restored
+	var actor_internal_mismatch_keys: Array[StringName] = []
+	# The rig snapshot owns the hidden debug state as well as its visibility. Do
+	# not resync it here: that would replace the exact pre-transaction snapshot
+	# with a newly sampled (though visually equivalent) debug frame after rollback.
+	# Recapture the complete rig/finger state and demand exact equality with the
+	# authoritative boundary snapshot.
+	if (
+		actor_restored
+		and actor.has_method("capture_authoring_active_grip_transaction_state")
+	):
+		var restored_internal_snapshot: Dictionary = actor.call(
+			"capture_authoring_active_grip_transaction_state",
+			dominant_slot_id
+		) as Dictionary
+		var expected_internal_snapshot: Dictionary = snapshot.get(
+			"internal_snapshot",
+			{}
+		) as Dictionary
+		for snapshot_key_variant: Variant in expected_internal_snapshot.keys():
+			var snapshot_key: StringName = StringName(snapshot_key_variant)
+			if (
+				not restored_internal_snapshot.has(snapshot_key_variant)
+				or restored_internal_snapshot.get(snapshot_key_variant) != (
+					expected_internal_snapshot.get(snapshot_key_variant)
+				)
+			):
+				actor_internal_mismatch_keys.append(snapshot_key)
+		for restored_key_variant: Variant in restored_internal_snapshot.keys():
+			if not expected_internal_snapshot.has(restored_key_variant):
+				actor_internal_mismatch_keys.append(StringName(restored_key_variant))
+		actor_restored = restored_internal_snapshot == (
+			expected_internal_snapshot
+		)
+	requested_motion_node.tip_position_local = snapshot.get(
+		"requested_tip_position_local",
+		requested_motion_node.tip_position_local
+	) as Vector3
+	requested_motion_node.tip_position_origin_id = StringName(snapshot.get(
+		"requested_tip_position_origin_id",
+		requested_motion_node.tip_position_origin_id
+	))
+	requested_motion_node.pommel_position_local = snapshot.get(
+		"requested_pommel_position_local",
+		requested_motion_node.pommel_position_local
+	) as Vector3
+	requested_motion_node.pommel_position_origin_id = StringName(snapshot.get(
+		"requested_pommel_position_origin_id",
+		requested_motion_node.pommel_position_origin_id
+	))
+	_restore_preview_dictionary_entries(
+		playback_state,
+		snapshot.get("playback_endpoint_entries", {}) as Dictionary
+	)
+	var preview_root_meta_restored: bool = _preview_all_meta_entries_match(
+		preview_root,
+		snapshot.get("preview_root_meta", {}) as Dictionary
+	)
+	var actor_meta_restored: bool = _preview_all_meta_entries_match(
+		actor,
+		snapshot.get("actor_meta", {}) as Dictionary
+	)
+	var held_transform_restored: bool = held_item.global_transform == (
+		snapshot.get(
+			"held_item_global_transform",
+			Transform3D.IDENTITY
+		) as Transform3D
+	)
+	var held_meta_restored: bool = _preview_all_meta_entries_match(
+		held_item,
+		snapshot.get("held_item_meta", {}) as Dictionary
+	)
+	var requested_tip_restored: bool = (
+		requested_motion_node.tip_position_local
+			== (snapshot.get("requested_tip_position_local", Vector3.ZERO) as Vector3)
+		and requested_motion_node.tip_position_origin_id == StringName(snapshot.get(
+			"requested_tip_position_origin_id",
+			StringName()
+		))
+	)
+	var requested_pommel_restored: bool = (
+		requested_motion_node.pommel_position_local
+			== (snapshot.get("requested_pommel_position_local", Vector3.ZERO) as Vector3)
+		and requested_motion_node.pommel_position_origin_id == StringName(snapshot.get(
+			"requested_pommel_position_origin_id",
+			StringName()
+		))
+	)
+	var playback_endpoints_restored: bool = _preview_dictionary_entries_match(
+		playback_state,
+		snapshot.get("playback_endpoint_entries", {}) as Dictionary
+	)
+	var rollback_verification: Dictionary = {
+		"actor_restore_call_succeeded": actor_restore_call_succeeded,
+		"actor_internal_state_restored_exactly": actor_restored,
+		"actor_internal_mismatch_keys": actor_internal_mismatch_keys,
+		"contact_nodes_restored": contact_nodes_restored,
+		"preview_root_meta_restored": preview_root_meta_restored,
+		"actor_meta_restored": actor_meta_restored,
+		"held_transform_restored_exactly": held_transform_restored,
+		"held_meta_restored": held_meta_restored,
+		"requested_tip_restored_exactly": requested_tip_restored,
+		"requested_pommel_restored_exactly": requested_pommel_restored,
+		"playback_endpoints_restored": playback_endpoints_restored,
+	}
+	set_meta(
+		"primary_grip_last_rollback_verification",
+		rollback_verification.duplicate(true)
+	)
+	for restored_key_variant: Variant in rollback_verification.keys():
+		if restored_key_variant == "actor_internal_mismatch_keys":
+			continue
+		if not bool(rollback_verification.get(restored_key_variant)):
+			return false
+	return true
+
+
+func _reject_preview_primary_surface_grip_transaction(
+	preview_root: Node3D,
+	actor: Node3D,
+	held_item: Node3D,
+	snapshot: Dictionary,
+	dominant_slot_id: StringName,
+	requested_motion_node: CombatAnimationMotionNode,
+	playback_state: Dictionary,
+	result: Dictionary
+) -> Dictionary:
+	var rollback_succeeded: bool = (
+		_restore_preview_primary_grip_transaction_snapshot(
+			preview_root,
+			actor,
+			held_item,
+			snapshot,
+			dominant_slot_id,
+			requested_motion_node,
+			playback_state
+		)
+	)
+	result["attempted"] = true
+	result["valid"] = false
+	result["applied"] = false
+	result["committed"] = false
+	result["rollback_succeeded"] = rollback_succeeded
+	if not rollback_succeeded:
+		result["rollback_verification"] = get_meta(
+			"primary_grip_last_rollback_verification",
+			{}
+		) as Dictionary
+		result["status_before_rollback_failure"] = result.get(
+			"status",
+			StringName()
+		)
+		result["status"] = &"primary_surface_grip_rollback_failed"
+	for endpoint_key: StringName in [
+		&"tip_position_local",
+		&"tip_position_origin_id",
+		&"pommel_position_local",
+		&"pommel_position_origin_id",
+		&"weapon_root_segment_length_meters",
+		&"resolved_segment_length_meters",
+	]:
+		result.erase(endpoint_key)
+	_publish_preview_primary_surface_grip_transaction_result(
+		preview_root,
+		result
+	)
+	return result
+
+
+func _publish_preview_primary_surface_grip_transaction_result(
+	preview_root: Node3D,
+	result: Dictionary
+) -> void:
+	if preview_root == null or not is_instance_valid(preview_root):
+		return
+	var published_result: Dictionary = result.duplicate(true)
+	published_result["attempted"] = true
+	preview_root.set_meta(
+		"primary_surface_grip_transaction_result",
+		published_result
+	)
+
+
+func _capture_preview_transaction_contact_tree(
+	root_node: Node,
+	states: Array,
+	captured_instance_ids: Dictionary
+) -> void:
+	if root_node == null or not is_instance_valid(root_node):
+		return
+	var instance_id: int = root_node.get_instance_id()
+	if captured_instance_ids.has(instance_id):
+		return
+	captured_instance_ids[instance_id] = true
+	states.append({
+		"node": root_node,
+		"instance_id": instance_id,
+		"has_transform": root_node is Node3D,
+		"transform": (
+			(root_node as Node3D).transform
+			if root_node is Node3D
+			else Transform3D.IDENTITY
+		),
+		"meta": _capture_preview_all_meta_entries(root_node),
+	})
+	for child_node: Node in root_node.get_children():
+		_capture_preview_transaction_contact_tree(
+			child_node,
+			states,
+			captured_instance_ids
+		)
+
+
+func _restore_preview_transaction_contact_tree(states: Array) -> bool:
+	var restored: bool = true
+	for state_variant: Variant in states:
+		if state_variant is not Dictionary:
+			restored = false
+			continue
+		var state: Dictionary = state_variant as Dictionary
+		var node: Node = state.get("node", null) as Node
+		if (
+			node == null
+			or not is_instance_valid(node)
+			or node.get_instance_id() != int(state.get("instance_id", 0))
+		):
+			restored = false
+			continue
+		if bool(state.get("has_transform", false)):
+			if node is not Node3D:
+				restored = false
+			else:
+				(node as Node3D).transform = state.get(
+					"transform",
+					Transform3D.IDENTITY
+				) as Transform3D
+		_restore_preview_all_meta_entries(
+			node,
+			state.get("meta", {}) as Dictionary
+		)
+		if (
+			bool(state.get("has_transform", false))
+			and node is Node3D
+			and (node as Node3D).transform != (
+				state.get("transform", Transform3D.IDENTITY) as Transform3D
+			)
+		):
+			restored = false
+		if not _preview_all_meta_entries_match(
+			node,
+			state.get("meta", {}) as Dictionary
+		):
+			restored = false
+	return restored
+
+
+func _capture_preview_all_meta_entries(target: Object) -> Dictionary:
+	var entries: Dictionary = {}
+	if target == null:
+		return entries
+	for meta_name_variant: Variant in target.get_meta_list():
+		var meta_name: StringName = StringName(meta_name_variant)
+		entries[meta_name] = _duplicate_preview_transaction_value(
+			target.get_meta(meta_name)
+		)
+	return entries
+
+
+func _restore_preview_all_meta_entries(
+	target: Object,
+	entries: Dictionary
+) -> void:
+	if target == null:
+		return
+	for current_meta_name_variant: Variant in target.get_meta_list():
+		var current_meta_name: StringName = StringName(current_meta_name_variant)
+		if not entries.has(current_meta_name):
+			target.remove_meta(current_meta_name)
+	for meta_name_variant: Variant in entries.keys():
+		var meta_name: StringName = StringName(meta_name_variant)
+		target.set_meta(
+			meta_name,
+			_duplicate_preview_transaction_value(entries.get(meta_name_variant))
+		)
+
+
+func _preview_all_meta_entries_match(
+	target: Object,
+	entries: Dictionary
+) -> bool:
+	if target == null or target.get_meta_list().size() != entries.size():
+		return false
+	for meta_name_variant: Variant in entries.keys():
+		var meta_name: StringName = StringName(meta_name_variant)
+		if (
+			not target.has_meta(meta_name)
+			or target.get_meta(meta_name) != entries.get(meta_name_variant)
+		):
+			return false
+	return true
+
+
+func _duplicate_preview_transaction_value(value: Variant) -> Variant:
+	if value is Dictionary:
+		return (value as Dictionary).duplicate(true)
+	if value is Array:
+		return (value as Array).duplicate(true)
+	return value
+
+
+func _capture_preview_dictionary_entries(
+	target: Dictionary,
+	keys: Array
+) -> Dictionary:
+	var entries: Dictionary = {}
+	for key_variant: Variant in keys:
+		var key: StringName = StringName(key_variant)
+		entries[key] = {
+			"present": target.has(key),
+			"value": _duplicate_preview_transaction_value(target.get(key, null)),
+		}
+	return entries
+
+
+func _restore_preview_dictionary_entries(
+	target: Dictionary,
+	entries: Dictionary
+) -> void:
+	for key_variant: Variant in entries.keys():
+		var key: StringName = StringName(key_variant)
+		var entry: Dictionary = entries.get(key_variant, {}) as Dictionary
+		if bool(entry.get("present", false)):
+			target[key] = _duplicate_preview_transaction_value(entry.get("value", null))
+		else:
+			target.erase(key)
+
+
+func _preview_dictionary_entries_match(
+	target: Dictionary,
+	entries: Dictionary
+) -> bool:
+	for key_variant: Variant in entries.keys():
+		var key: StringName = StringName(key_variant)
+		var entry: Dictionary = entries.get(key_variant, {}) as Dictionary
+		if target.has(key) != bool(entry.get("present", false)):
+			return false
+		if (
+			bool(entry.get("present", false))
+			and target.get(key, null) != entry.get("value", null)
+		):
+			return false
+	return true
+
+
+func _capture_preview_support_grip_transaction_snapshot(
+	actor: Node3D,
+	held_item: Node3D,
+	support_anchor: Node3D,
+	support_slot_id: StringName,
+	dominant_slot_id: StringName
+) -> Dictionary:
+	var internal_snapshot: Dictionary = actor.call(
+		"capture_authoring_active_grip_transaction_state",
+		support_slot_id
+	) as Dictionary
+	if not bool(internal_snapshot.get("valid", false)):
+		return {"valid": false}
+	var body_self_collision_state: Dictionary = actor.call(
+		"get_body_self_collision_debug_state",
+		true
+	) as Dictionary
+	if (
+		int(body_self_collision_state.get("checked_pair_count", 0)) <= 0
+		or not bool(body_self_collision_state.get(
+			"illegal_pairs_complete",
+			false
+		))
+	):
+		return {"valid": false}
+	var primary_anchor: Node3D = weapon_grip_anchor_provider.get_primary_grip_anchor(
+		held_item
+	)
+	var contact_node_states: Array = []
+	var captured_instance_ids: Dictionary = {}
+	for contact_root: Node3D in [
+		held_item.get_node_or_null("PrimaryGripGuide") as Node3D,
+		primary_anchor,
+		held_item.get_node_or_null("SecondaryGripGuide") as Node3D,
+		support_anchor,
+	]:
+		_capture_preview_transaction_contact_tree(
+			contact_root,
+			contact_node_states,
+			captured_instance_ids
+		)
+	return {
+		"valid": true,
+		"actor_meta": _capture_preview_all_meta_entries(actor),
+		"held_item_global_transform": held_item.global_transform,
+		"held_item_all_meta": _capture_preview_all_meta_entries(held_item),
+		"body_self_collision_state": body_self_collision_state.duplicate(true),
+		"contact_node_states": contact_node_states,
+		"primary_anchor_available": primary_anchor != null,
+		"primary_anchor_transform": (
+			primary_anchor.transform if primary_anchor != null else Transform3D.IDENTITY
+		),
+		"primary_surface_seat": (
+			(actor.call(
+				"get_authoring_current_weapon_surface_seat",
+				dominant_slot_id
+			) as Dictionary).duplicate(true)
+			if actor.has_method("get_authoring_current_weapon_surface_seat")
+			else {}
+		),
+		"primary_surface_grasp": (
+			(actor.call(
+				"get_authoring_surface_grasp_debug_state",
+				dominant_slot_id
+			) as Dictionary).duplicate(true)
+			if actor.has_method("get_authoring_surface_grasp_debug_state")
+			else {}
+		),
+		"support_anchor_transform": support_anchor.transform,
+		"support_anchor_meta": _capture_preview_meta_entries(
+			support_anchor,
+			[
+				PREVIEW_SUPPORT_HAND_SEAT_APPLIED_RELATIONSHIP_KEY_META,
+				PREVIEW_SUPPORT_HAND_SEAT_APPLIED_CONTEXT_KEY_META,
+				PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_LOCAL_META,
+				PREVIEW_SUPPORT_HAND_SEAT_ACCUMULATED_CORRECTION_ORIGIN_META,
+			]
+		),
+		"held_item_meta": _capture_preview_meta_entries(
+			held_item,
+			[PREVIEW_SUPPORT_HAND_SURFACE_SEAT_STATE_META]
+		),
+		"internal_snapshot": internal_snapshot,
+		"support_committed_packet_available": (
+			bool(actor.call(
+				"has_authoring_committed_surface_grip",
+				support_slot_id
+			))
+			if actor.has_method("has_authoring_committed_surface_grip")
+			else false
+		),
+		"primary_current_packet_available": (
+			bool(actor.call(
+				"has_authoring_current_surface_grip",
+				dominant_slot_id
+			))
+			if actor.has_method("has_authoring_current_surface_grip")
+			else false
+		),
+	}
+
+
+func _restore_preview_support_grip_transaction_snapshot(
+	actor: Node3D,
+	held_item: Node3D,
+	support_anchor: Node3D,
+	snapshot: Dictionary,
+	support_slot_id: StringName,
+	dominant_slot_id: StringName
+) -> bool:
+	if (
+		actor == null
+		or held_item == null
+		or support_anchor == null
+		or not bool(snapshot.get("valid", false))
+	):
+		return false
+	held_item.global_transform = snapshot.get(
+		"held_item_global_transform",
+		held_item.global_transform
+	) as Transform3D
+	_restore_preview_all_meta_entries(
+		actor,
+		snapshot.get("actor_meta", {}) as Dictionary
+	)
+	_restore_preview_all_meta_entries(
+		held_item,
+		snapshot.get("held_item_all_meta", {}) as Dictionary
+	)
+	var contact_nodes_restored: bool = _restore_preview_transaction_contact_tree(
+		snapshot.get("contact_node_states", []) as Array
+	)
+	if bool(snapshot.get("primary_anchor_available", false)):
+		var primary_anchor: Node3D = (
+			weapon_grip_anchor_provider.get_primary_grip_anchor(held_item)
+		)
+		if primary_anchor != null:
+			primary_anchor.transform = snapshot.get(
+				"primary_anchor_transform",
+				primary_anchor.transform
+			) as Transform3D
+	support_anchor.transform = snapshot.get(
+		"support_anchor_transform",
+		support_anchor.transform
+	) as Transform3D
+	_restore_preview_meta_entries(
+		support_anchor,
+		snapshot.get("support_anchor_meta", {}) as Dictionary
+	)
+	_restore_preview_meta_entries(
+		held_item,
+		snapshot.get("held_item_meta", {}) as Dictionary
+	)
+	var actor_restore_succeeded: bool = bool(actor.call(
+		"restore_authoring_active_grip_transaction_state",
+		support_slot_id,
+		snapshot.get("internal_snapshot", {}) as Dictionary
+	))
+	var actor_internal_state_restored: bool = actor_restore_succeeded
+	if (
+		actor_restore_succeeded
+		and actor.has_method("capture_authoring_active_grip_transaction_state")
+	):
+		actor_internal_state_restored = (
+			actor.call(
+				"capture_authoring_active_grip_transaction_state",
+				support_slot_id
+			) as Dictionary
+		) == (snapshot.get("internal_snapshot", {}) as Dictionary)
+	var actor_meta_restored: bool = _preview_all_meta_entries_match(
+		actor,
+		snapshot.get("actor_meta", {}) as Dictionary
+	)
+	var held_transform_restored: bool = held_item.global_transform == (
+		snapshot.get("held_item_global_transform", Transform3D.IDENTITY) as Transform3D
+	)
+	var held_meta_restored: bool = _preview_all_meta_entries_match(
+		held_item,
+		snapshot.get("held_item_all_meta", {}) as Dictionary
+	)
+	var support_anchor_restored: bool = support_anchor.transform == (
+		snapshot.get("support_anchor_transform", Transform3D.IDENTITY) as Transform3D
+	)
+	var primary_weapon_unit_restored: bool = (
+		_preview_support_primary_weapon_unit_matches_snapshot(
+			held_item,
+			snapshot,
+			actor,
+			dominant_slot_id
+		)
+	)
+	var rollback_verification := {
+		"actor_restore_call_succeeded": actor_restore_succeeded,
+		"actor_internal_state_restored_exactly": actor_internal_state_restored,
+		"actor_meta_restored": actor_meta_restored,
+		"held_transform_restored_exactly": held_transform_restored,
+		"held_meta_restored": held_meta_restored,
+		"contact_nodes_restored": contact_nodes_restored,
+		"support_anchor_restored_exactly": support_anchor_restored,
+		"primary_weapon_unit_restored": primary_weapon_unit_restored,
+	}
+	set_meta(
+		"support_grip_last_rollback_verification",
+		rollback_verification.duplicate(true)
+	)
+	# The rig snapshot already owns every pose, IK target, guidance dictionary,
+	# contact basis, digit cache, and hidden-debug value. Any guidance sync,
+	# settle, or packet reapply after this point is a new write—not restoration.
+	for verification_value: Variant in rollback_verification.values():
+		if not bool(verification_value):
+			return false
+	return true
+
+
+func _rollback_preview_support_grip_transaction(
+	actor: Node3D,
+	held_item: Node3D,
+	support_anchor: Node3D,
+	snapshot: Dictionary,
+	support_slot_id: StringName,
+	dominant_slot_id: StringName,
+	result: Dictionary
+) -> bool:
+	var rollback_succeeded: bool = (
+		_restore_preview_support_grip_transaction_snapshot(
+			actor,
+			held_item,
+			support_anchor,
+			snapshot,
+			support_slot_id,
+			dominant_slot_id
+		)
+	)
+	result["rollback_succeeded"] = rollback_succeeded
+	if not rollback_succeeded:
+		result["rollback_verification"] = get_meta(
+			"support_grip_last_rollback_verification",
+			{}
+		) as Dictionary
+		result["status_before_rollback_failure"] = result.get(
+			"status",
+			StringName()
+		)
+		result["status"] = &"support_surface_grip_rollback_failed"
+	return rollback_succeeded
+
+
+func _capture_preview_meta_entries(
+	target: Object,
+	meta_names: Array
+) -> Dictionary:
+	var entries: Dictionary = {}
+	for meta_name_variant: Variant in meta_names:
+		var meta_name: StringName = StringName(meta_name_variant)
+		var present: bool = target.has_meta(meta_name)
+		entries[meta_name] = {
+			"present": present,
+			"value": target.get_meta(meta_name) if present else null,
+		}
+	return entries
+
+
+func _restore_preview_meta_entries(
+	target: Object,
+	entries: Dictionary
+) -> void:
+	for meta_name_variant: Variant in entries.keys():
+		var meta_name: StringName = StringName(meta_name_variant)
+		var entry: Dictionary = entries.get(meta_name_variant, {}) as Dictionary
+		if bool(entry.get("present", false)):
+			target.set_meta(meta_name, entry.get("value", null))
+		else:
+			target.remove_meta(meta_name)
+
+
 func _publish_preview_support_hand_surface_seat_state(
 	held_item: Node3D,
 	state: Dictionary
@@ -5946,7 +11724,8 @@ func _preview_surface_seat_allows_digit_settle(
 func _settle_preview_digits_on_resolved_weapon(
 	actor: Node3D,
 	held_item: Node3D,
-	allow_exact_surface_solve: bool
+	allow_exact_surface_solve: bool,
+	preserve_committed_dominant_grasp: bool = false
 ) -> void:
 	if (
 		actor == null
@@ -5956,77 +11735,61 @@ func _settle_preview_digits_on_resolved_weapon(
 	):
 		return
 	var support_active: bool = _preview_actor_has_active_support_hand(actor)
-	var can_settle_support_macro: bool = actor.has_method(
-		"settle_authoring_support_grip_macro_pose_now"
-	)
-	if support_active and can_settle_support_macro:
-		# The dominant hand and weapon were seated as one unit immediately before
-		# this stage. Converge only the support limb on that fixed relationship.
-		actor.call("settle_authoring_support_grip_macro_pose_now")
-	var support_grasp_needs_invalidation: bool = false
 	if support_active:
-		var support_seat_pass_count: int = (
-			SUPPORT_HAND_SURFACE_SEAT_FIXED_POINT_PASSES
-			if allow_exact_surface_solve
-			else 1
+		var dominant_slot_id: StringName = _resolve_preview_dominant_slot_id()
+		var dominant_packet_current: bool = (
+			bool(actor.call(
+				"has_authoring_current_surface_grip",
+				dominant_slot_id
+			))
+			if actor.has_method("has_authoring_current_surface_grip")
+			else false
 		)
-		for _support_seat_pass: int in range(support_seat_pass_count):
-			var force_residual_application: bool = _support_seat_pass > 0
-			if force_residual_application:
-				if not actor.has_method("invalidate_authoring_weapon_surface_seat"):
-					break
-				# Ordinary seat contexts quantize at 0.1 mm for cache stability. This
-				# bounded follow-up owns the smaller residual and must measure it afresh.
+		if (
+			allow_exact_surface_solve
+			and not dominant_packet_current
+			and actor.has_method("apply_authoring_digit_grip_slot_now")
+		):
+			# Establish Primary as an independent one-hand packet first. Support may
+			# then move only its own anchor/limb inside the bounded transaction.
+			dominant_packet_current = bool(actor.call(
+				"apply_authoring_digit_grip_slot_now",
+				dominant_slot_id,
+				true
+			))
+		if not allow_exact_surface_solve:
+			if actor.has_method("restore_authoring_current_surface_grip_now"):
 				actor.call(
-					"invalidate_authoring_weapon_surface_seat",
+					"restore_authoring_current_surface_grip_now",
+					dominant_slot_id
+				)
+				actor.call(
+					"restore_authoring_current_surface_grip_now",
 					_resolve_preview_support_slot_id()
 				)
-			var support_seat_result: Dictionary = (
-				_apply_preview_support_hand_surface_seat(
-					actor,
-					held_item,
-					allow_exact_surface_solve,
-					force_residual_application
-				)
-			)
-			if (
-				not bool(support_seat_result.get("valid", false))
-				or not bool(support_seat_result.get("applied", false))
-			):
-				break
-			# The support anchor owns only the arm/wrist target. Re-publish its
-			# accumulated corrected basis without granting the support hand weapon
-			# authority, then let the limb realize that target before measuring the
-			# next residual. Two bounded passes close this support-only fixed point.
-			equipped_item_presenter.sync_single_weapon_contact_guidance(
-				actor,
-				held_item,
-				_resolve_preview_dominant_slot_id(),
-				true,
-				true,
-				true,
-				true,
-				true
-			)
-			support_grasp_needs_invalidation = (
-				support_grasp_needs_invalidation
-				or bool(support_seat_result.get("newly_applied", false))
-			)
-			if can_settle_support_macro:
-				actor.call(
-					"settle_authoring_support_grip_macro_pose_now",
-					SUPPORT_HAND_SURFACE_SEAT_REALIZATION_EPSILON_METERS
-				)
-		if (
-			support_grasp_needs_invalidation
-			and actor.has_method("invalidate_authoring_surface_grasp")
-		):
-			# Invalidate once, after the final accepted support residual. The exact
-			# digit packet must be solved against the hand pose that will be kept.
+			return
+		if not dominant_packet_current:
+			_publish_preview_support_hand_surface_seat_state(held_item, {
+				"valid": false,
+				"applied": false,
+				"committed": false,
+				"status": &"support_surface_grip_primary_packet_unavailable",
+				"preserve_committed_dominant_grasp_requested": (
+					preserve_committed_dominant_grasp
+				),
+			})
+			return
+		_acquire_preview_support_surface_grip_transaction(
+			actor,
+			held_item,
+			true
+		)
+		if actor.has_method("restore_authoring_current_surface_grip_now"):
 			actor.call(
-				"invalidate_authoring_surface_grasp",
-				_resolve_preview_support_slot_id()
+				"restore_authoring_current_surface_grip_now",
+				dominant_slot_id
 			)
+		return
 	actor.call(
 		"apply_authoring_digit_grip_now",
 		allow_exact_surface_solve
@@ -6312,6 +12075,279 @@ func _seat_preview_weapon_to_current_dominant_hand(
 		"metrics": metrics,
 	}
 
+func _apply_settled_preview_weapon_roll_layer(
+	preview_root: Node3D,
+	actor: Node3D,
+	held_item: Node3D,
+	selected_motion_node: CombatAnimationMotionNode,
+	local_tip: Vector3,
+	local_pommel: Vector3,
+	settle_support_macro: bool = true,
+	restore_committed_digits: bool = true
+) -> Dictionary:
+	var result := {
+		"requested": true,
+		"applied": false,
+		"status": &"weapon_roll_layer_unavailable",
+		"dominant_grip_alignment_error_before_meters": -1.0,
+		"dominant_grip_alignment_error_after_meters": -1.0,
+		"support_grip_alignment_error_before_meters": -1.0,
+		"support_grip_alignment_error_after_meters": -1.0,
+	}
+	if (
+		held_item == null
+		or not is_instance_valid(held_item)
+		or selected_motion_node == null
+		or local_tip.is_equal_approx(local_pommel)
+	):
+		if preview_root != null:
+			preview_root.set_meta(WEAPON_ROLL_CONTACT_RESULT_META, result)
+		return result
+	var dominant_slot_id: StringName = _resolve_preview_dominant_slot_id()
+	var support_slot_id: StringName = _resolve_preview_support_slot_id()
+	var support_hand_active: bool = _preview_actor_has_active_support_hand(actor)
+	var dominant_relationship_before: Dictionary = (
+		_resolve_preview_hand_contact_weapon_local_state(
+			actor,
+			held_item,
+			dominant_slot_id
+		)
+	)
+	var support_relationship_before: Dictionary = (
+		_resolve_preview_hand_contact_weapon_local_state(
+			actor,
+			held_item,
+			support_slot_id
+		)
+		if support_hand_active
+		else {}
+	)
+	var dominant_zero_pose_captured: bool = actor == null
+	var support_zero_pose_captured: bool = not support_hand_active
+	if (
+		actor != null
+		and actor.has_method("capture_authoring_weapon_roll_zero_contact_pose_now")
+	):
+		dominant_zero_pose_captured = bool(actor.call(
+			"capture_authoring_weapon_roll_zero_contact_pose_now",
+			dominant_slot_id,
+			held_item.global_transform,
+			CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+		))
+		if support_hand_active:
+			support_zero_pose_captured = bool(actor.call(
+				"capture_authoring_weapon_roll_zero_contact_pose_now",
+				support_slot_id,
+				held_item.global_transform,
+				CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+			))
+	var dominant_error_before: float = _resolve_preview_grip_alignment_error(
+		actor,
+		held_item,
+		dominant_slot_id
+	)
+	var support_error_before: float = (
+		_resolve_preview_grip_alignment_error(actor, held_item, support_slot_id)
+		if support_hand_active
+		else -1.0
+	)
+	var tip_world: Vector3 = held_item.to_global(local_tip)
+	var pommel_world: Vector3 = held_item.to_global(local_pommel)
+	var roll_axis_world: Vector3 = tip_world - pommel_world
+	if roll_axis_world.length_squared() <= 0.000001:
+		result["status"] = &"weapon_roll_axis_unavailable"
+		if preview_root != null:
+			preview_root.set_meta(WEAPON_ROLL_CONTACT_RESULT_META, result)
+		return result
+	roll_axis_world = roll_axis_world.normalized()
+	var roll_degrees: float = clampf(
+		selected_motion_node.weapon_roll_degrees,
+		CombatAnimationMotionNodeScript.WEAPON_ROLL_MIN_DEGREES,
+		CombatAnimationMotionNodeScript.WEAPON_ROLL_MAX_DEGREES
+	)
+	if absf(roll_degrees) > 0.00001:
+		var roll_rotation := Basis(roll_axis_world, deg_to_rad(roll_degrees))
+		var zero_roll_transform: Transform3D = held_item.global_transform
+		held_item.global_transform = Transform3D(
+			roll_rotation * zero_roll_transform.basis,
+			pommel_world + roll_rotation * (zero_roll_transform.origin - pommel_world)
+		)
+	_apply_preview_resolved_grip_state(held_item, actor)
+	var support_macro_settled: bool = not support_hand_active
+	var dominant_wrist_applied: bool = actor == null
+	var support_wrist_applied: bool = not support_hand_active
+	var dominant_digits_restored: bool = not restore_committed_digits
+	var support_digits_restored: bool = not restore_committed_digits or not support_hand_active
+	if actor != null:
+		_apply_two_hand_preview_state(
+			actor,
+			held_item,
+			selected_motion_node,
+			false
+		)
+		if (
+			support_hand_active
+			and settle_support_macro
+			and actor.has_method("settle_authoring_weapon_roll_support_macro_pose_now")
+		):
+			support_macro_settled = bool(actor.call(
+				"settle_authoring_weapon_roll_support_macro_pose_now"
+			))
+		elif support_hand_active:
+			support_macro_settled = false
+		if actor.has_method("apply_authoring_weapon_roll_contact_pose_now"):
+			dominant_wrist_applied = bool(actor.call(
+				"apply_authoring_weapon_roll_contact_pose_now",
+				dominant_slot_id,
+				roll_degrees,
+				held_item.global_transform,
+				CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+			))
+			if support_hand_active and settle_support_macro:
+				support_wrist_applied = bool(actor.call(
+					"apply_authoring_weapon_roll_contact_pose_now",
+					support_slot_id,
+					roll_degrees,
+					held_item.global_transform,
+					CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+				))
+		if (
+			restore_committed_digits
+			and actor.has_method("restore_authoring_current_surface_grip_now")
+		):
+			dominant_digits_restored = bool(actor.call(
+				"restore_authoring_current_surface_grip_now",
+				dominant_slot_id
+			))
+			if support_hand_active:
+				support_digits_restored = bool(actor.call(
+					"restore_authoring_current_surface_grip_now",
+					support_slot_id
+				))
+	var dominant_error_after: float = _resolve_preview_grip_alignment_error(
+		actor,
+		held_item,
+		dominant_slot_id
+	)
+	var support_error_after: float = (
+		_resolve_preview_grip_alignment_error(actor, held_item, support_slot_id)
+		if support_hand_active
+		else -1.0
+	)
+	var dominant_relationship_after: Dictionary = (
+		_resolve_preview_hand_contact_weapon_local_state(
+			actor,
+			held_item,
+			dominant_slot_id
+		)
+	)
+	var support_relationship_after: Dictionary = (
+		_resolve_preview_hand_contact_weapon_local_state(
+			actor,
+			held_item,
+			support_slot_id
+		)
+		if support_hand_active
+		else {}
+	)
+	var dominant_relationship_drift_meters: float = INF
+	if (
+		bool(dominant_relationship_before.get("valid", false))
+		and bool(dominant_relationship_after.get("valid", false))
+	):
+		dominant_relationship_drift_meters = (
+			(dominant_relationship_before.get(
+				"hand_contact_weapon_local",
+				Vector3.ZERO
+			) as Vector3).distance_to(
+				dominant_relationship_after.get(
+					"hand_contact_weapon_local",
+					Vector3.ZERO
+				) as Vector3
+			)
+		)
+	var support_relationship_drift_meters: float = 0.0
+	if support_hand_active:
+		support_relationship_drift_meters = INF
+		if (
+			bool(support_relationship_before.get("valid", false))
+			and bool(support_relationship_after.get("valid", false))
+		):
+			support_relationship_drift_meters = (
+				(support_relationship_before.get(
+					"hand_contact_weapon_local",
+					Vector3.ZERO
+				) as Vector3).distance_to(
+					support_relationship_after.get(
+						"hand_contact_weapon_local",
+						Vector3.ZERO
+					) as Vector3
+				)
+			)
+	var dominant_alignment_preserved: bool = (
+		is_finite(dominant_relationship_drift_meters)
+		and dominant_relationship_drift_meters
+			<= WEAPON_ROLL_CONTACT_ALIGNMENT_TOLERANCE_METERS
+	)
+	var support_alignment_preserved: bool = (
+		not support_hand_active
+		or (
+			is_finite(support_relationship_drift_meters)
+			and support_relationship_drift_meters
+				<= WEAPON_ROLL_CONTACT_ALIGNMENT_TOLERANCE_METERS
+		)
+	)
+	var dominant_digit_packet_preserved: bool = (
+		not restore_committed_digits or dominant_digits_restored
+	)
+	var support_digit_packet_preserved: bool = (
+		not support_hand_active
+		or not restore_committed_digits
+		or support_digits_restored
+	)
+	var applied: bool = (
+		dominant_zero_pose_captured
+		and dominant_wrist_applied
+		and dominant_digit_packet_preserved
+		and dominant_alignment_preserved
+		and (
+			not support_hand_active
+			or (
+				support_zero_pose_captured
+				and
+				support_macro_settled
+				and support_wrist_applied
+				and support_digit_packet_preserved
+				and support_alignment_preserved
+			)
+		)
+	)
+	result.merge({
+		"applied": applied,
+		"status": &"applied" if applied else &"weapon_roll_contact_alignment_failed",
+		"roll_degrees": roll_degrees,
+		"dominant_zero_pose_captured": dominant_zero_pose_captured,
+		"dominant_wrist_applied": dominant_wrist_applied,
+		"dominant_digits_restored": dominant_digits_restored,
+		"dominant_alignment_preserved": dominant_alignment_preserved,
+		"dominant_contact_relationship_drift_meters": dominant_relationship_drift_meters,
+		"dominant_grip_alignment_error_before_meters": dominant_error_before,
+		"dominant_grip_alignment_error_after_meters": dominant_error_after,
+		"support_active": support_hand_active,
+		"support_zero_pose_captured": support_zero_pose_captured,
+		"support_macro_settled": support_macro_settled,
+		"support_wrist_applied": support_wrist_applied,
+		"support_digits_restored": support_digits_restored,
+		"support_alignment_preserved": support_alignment_preserved,
+		"support_contact_relationship_drift_meters": support_relationship_drift_meters,
+		"support_grip_alignment_error_before_meters": support_error_before,
+		"support_grip_alignment_error_after_meters": support_error_after,
+	}, true)
+	if preview_root != null:
+		preview_root.set_meta(WEAPON_ROLL_CONTACT_RESULT_META, result)
+	return result
+
+
 func _solve_weapon_segment_transform(
 	held_item: Node3D,
 	trajectory_root: Node3D,
@@ -6321,6 +12357,7 @@ func _solve_weapon_segment_transform(
 	authored_tip_world: Vector3,
 	authored_pommel_world: Vector3,
 	weapon_orientation_degrees: Vector3 = Vector3.ZERO,
+	weapon_roll_degrees_override: float = NAN,
 	local_tip_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
 	local_pommel_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 ) -> Transform3D:
@@ -6335,7 +12372,11 @@ func _solve_weapon_segment_transform(
 		local_up_reference,
 		trajectory_root.global_basis,
 		weapon_orientation_degrees,
-		selected_motion_node.weapon_roll_degrees,
+		(
+			weapon_roll_degrees_override
+			if is_finite(weapon_roll_degrees_override)
+			else selected_motion_node.weapon_roll_degrees
+		),
 		local_tip_origin_id,
 		local_pommel_origin_id,
 		local_up_reference_origin_id
@@ -6408,7 +12449,8 @@ func _resolve_constrained_authored_segment_local(
 	motion_node: CombatAnimationMotionNode,
 	tip_position_local: Vector3,
 	pommel_position_local: Vector3,
-	dominant_seat_lock_strength: float = 1.0
+	dominant_seat_lock_strength: float = 1.0,
+	weapon_roll_degrees_override: float = NAN
 ) -> Dictionary:
 	if actor == null or held_item == null or trajectory_root == null or motion_node == null:
 		return {
@@ -6529,7 +12571,8 @@ func _resolve_constrained_authored_segment_local(
 		local_pommel,
 		authored_tip_world,
 		authored_pommel_world,
-		resolved_weapon_orientation_degrees
+		resolved_weapon_orientation_degrees,
+		weapon_roll_degrees_override
 	)
 	var legality: Dictionary = _evaluate_preview_segment_legality(actor, held_item, provisional_transform, motion_node)
 	var resolved_grip_local: Vector3 = _get_origin_tracked_vector3_state(
@@ -6589,7 +12632,8 @@ func _resolve_constrained_authored_segment_local(
 		local_pommel,
 		resolved_tip_world,
 		resolved_pommel_world,
-		resolved_weapon_orientation_degrees
+		resolved_weapon_orientation_degrees,
+		weapon_roll_degrees_override
 	)
 	solved_transform = _lock_preview_transform_to_dominant_grip_target(
 		solved_transform,
@@ -6665,6 +12709,7 @@ func _evaluate_preview_segment_legality(
 		"weapon_body_illegal": false,
 		"weapon_body_correction_delta": Vector3.ZERO,
 		"weapon_body_region": "",
+		"weapon_body_legality": {},
 		"torso_frame": torso_frame,
 	}
 	if actor == null or held_item == null:
@@ -6761,6 +12806,7 @@ func _evaluate_preview_segment_legality(
 		solved_transform,
 		hand_target_constraint_solver
 	)
+	result["weapon_body_legality"] = weapon_body_legality.duplicate(true)
 	if not bool(weapon_body_legality.get("legal", true)):
 		result["weapon_body_illegal"] = true
 		result["weapon_body_correction_delta"] = weapon_body_legality.get("suggested_correction_world", Vector3.ZERO)
@@ -6832,6 +12878,12 @@ func _evaluate_preview_slot_legality(
 	var desired_target: Vector3 = (solved_transform * grip_anchor.transform).origin
 	var corrected_target: Vector3 = desired_target
 	var shoulder_world: Vector3 = _resolve_preview_shoulder_world(actor, slot_id)
+	var target_path_source_world: Vector3 = _resolve_preview_slot_wrist_world(
+		actor,
+		slot_id
+	)
+	if target_path_source_world.length_squared() <= 0.000001:
+		target_path_source_world = shoulder_world
 	var query_exclusions: Array = _resolve_preview_slot_query_exclusions(body_restriction_root, slot_id)
 	if body_restriction_root != null:
 		var enforce_front_bias: bool = (
@@ -6841,7 +12893,7 @@ func _evaluate_preview_slot_legality(
 		var enforce_path_restriction: bool = enforce_front_bias
 		var projection: Dictionary = hand_target_constraint_solver.project_target_to_legal_grip_space(
 			body_restriction_root,
-			shoulder_world,
+			target_path_source_world,
 			desired_target,
 			torso_frame.get("origin_world", Vector3.ZERO),
 			torso_frame.get("forward_world", character_frame_resolver.get_default_forward_world()),
@@ -8036,9 +14088,14 @@ func _preview_world_grip_target_is_legal(
 		body_restriction_root,
 		_resolve_preview_dominant_slot_id()
 	)
+	var target_path_source_world: Vector3 = _resolve_preview_primary_wrist_world(
+		actor
+	)
+	if target_path_source_world.length_squared() <= 0.000001:
+		target_path_source_world = shoulder_world
 	var projection: Dictionary = hand_target_constraint_solver.project_target_to_legal_grip_space(
 		body_restriction_root,
-		shoulder_world,
+		target_path_source_world,
 		target_world,
 		torso_frame.get("origin_world", Vector3.ZERO),
 		torso_frame.get("forward_world", character_frame_resolver.get_default_forward_world()),
@@ -8066,7 +14123,18 @@ func _resolve_preview_primary_grip_target_world(actor: Node3D, held_item: Node3D
 		return grip_target_world
 	var hand_anchor: Node3D = _resolve_preview_mount_anchor(actor)
 	if hand_anchor != null and is_instance_valid(hand_anchor):
-		return hand_anchor.global_position
+		var hand_anchor_world_state: Dictionary = (
+			_resolve_preview_mount_anchor_world_transform_state(
+				actor,
+				_resolve_preview_dominant_slot_id()
+			)
+		)
+		if bool(hand_anchor_world_state.get("valid", false)):
+			var hand_anchor_world: Transform3D = hand_anchor_world_state.get(
+				"transform_world",
+				Transform3D.IDENTITY
+			) as Transform3D
+			return hand_anchor_world.origin
 	var primary_anchor: Node3D = weapon_grip_anchor_provider.get_primary_grip_anchor(held_item)
 	return primary_anchor.global_position if primary_anchor != null else Vector3.ZERO
 
@@ -8085,7 +14153,15 @@ func _resolve_preview_slot_wrist_world(actor: Node3D, slot_id: StringName) -> Ve
 	if actor.has_method(anchor_method_name):
 		var hand_anchor: Node3D = actor.call(anchor_method_name) as Node3D
 		if hand_anchor != null and is_instance_valid(hand_anchor):
-			return hand_anchor.global_position
+			var hand_anchor_world_state: Dictionary = (
+				_resolve_preview_mount_anchor_world_transform_state(actor, slot_id)
+			)
+			if bool(hand_anchor_world_state.get("valid", false)):
+				var hand_anchor_world: Transform3D = hand_anchor_world_state.get(
+					"transform_world",
+					Transform3D.IDENTITY
+				) as Transform3D
+				return hand_anchor_world.origin
 	return Vector3.ZERO
 
 func _lock_preview_transform_to_dominant_grip_target(
@@ -8122,6 +14198,32 @@ func _resolve_preview_grip_alignment_error(actor: Node3D, held_item: Node3D, slo
 	if grip_anchor == null or not is_instance_valid(grip_anchor):
 		return -1.0
 	return target_world.distance_to(grip_anchor.global_position)
+
+func _resolve_preview_hand_contact_weapon_local_state(
+	actor: Node3D,
+	held_item: Node3D,
+	slot_id: StringName
+) -> Dictionary:
+	var result := {
+		"valid": false,
+		"hand_contact_weapon_local": Vector3.ZERO,
+		"hand_contact_weapon_local_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
+		"hand_contact_source_origin_id": CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT,
+	}
+	if (
+		actor == null
+		or held_item == null
+		or not is_instance_valid(held_item)
+		or not actor.has_method("resolve_hand_grip_alignment_world_position")
+	):
+		return result
+	var hand_contact_world: Vector3 = actor.call(
+		"resolve_hand_grip_alignment_world_position",
+		slot_id
+	) as Vector3
+	result["valid"] = true
+	result["hand_contact_weapon_local"] = held_item.to_local(hand_contact_world)
+	return result
 
 func _resolve_preview_grip_anchor_world(held_item: Node3D, slot_id: StringName) -> Vector3:
 	if held_item == null or not is_instance_valid(held_item):
@@ -8208,12 +14310,15 @@ func _resolve_preview_support_coupling_metrics(actor: Node3D, held_item: Node3D)
 func _resolve_preview_hand_grip_target_world(actor: Node3D, slot_id: StringName) -> Vector3:
 	if actor == null:
 		return Vector3.ZERO
-	var anchor_method_name: StringName = &"get_left_hand_item_anchor" if slot_id == &"hand_left" else &"get_right_hand_item_anchor"
-	if not actor.has_method(anchor_method_name):
+	var hand_anchor_world_state: Dictionary = (
+		_resolve_preview_mount_anchor_world_transform_state(actor, slot_id)
+	)
+	if not bool(hand_anchor_world_state.get("valid", false)):
 		return Vector3.ZERO
-	var hand_anchor: Node3D = actor.call(anchor_method_name) as Node3D
-	if hand_anchor == null or not is_instance_valid(hand_anchor):
-		return Vector3.ZERO
+	var hand_anchor_world: Transform3D = hand_anchor_world_state.get(
+		"transform_world",
+		Transform3D.IDENTITY
+	) as Transform3D
 	var hand_alignment_offset_state: Dictionary = _resolve_actor_hand_grip_alignment_offset_state(actor, slot_id)
 	if not hand_alignment_offset_state.is_empty():
 		var hand_alignment_offset_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
@@ -8228,8 +14333,8 @@ func _resolve_preview_hand_grip_target_world(actor: Node3D, slot_id: StringName)
 			Vector3.ZERO,
 			hand_alignment_offset_origin_id
 		)
-		return hand_anchor.to_global(grip_offset_local)
-	return hand_anchor.global_position
+		return hand_anchor_world * grip_offset_local
+	return hand_anchor_world.origin
 
 func _resolve_actor_hand_grip_alignment_offset_state(actor: Node3D, slot_id: StringName) -> Dictionary:
 	if actor == null:
@@ -8271,12 +14376,69 @@ func _resolve_preview_mount_anchor_for_slot(actor: Node3D, slot_id: StringName) 
 			return hand_anchor
 	return null
 
+func _resolve_preview_mount_anchor_world_transform_state(
+	actor: Node3D,
+	slot_id: StringName
+) -> Dictionary:
+	var result := {
+		"valid": false,
+		"transform_world": Transform3D.IDENTITY,
+		"transform_world_origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
+		"source": &"unavailable",
+	}
+	if actor == null:
+		return result
+	if actor.has_method("resolve_hand_item_anchor_world_transform_state"):
+		var state_variant: Variant = actor.call(
+			"resolve_hand_item_anchor_world_transform_state",
+			slot_id
+		)
+		if state_variant is Dictionary:
+			var source_state: Dictionary = state_variant as Dictionary
+			var source_origin_id: StringName = StringName(source_state.get(
+				"transform_world_origin_id",
+				StringName()
+			))
+			var transform_variant: Variant = source_state.get(
+				"transform_world",
+				Transform3D.IDENTITY
+			)
+			if (
+				bool(source_state.get("valid", false))
+				and source_origin_id == CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+				and transform_variant is Transform3D
+				and _preview_transform_is_finite(transform_variant as Transform3D)
+			):
+				result["valid"] = true
+				result["transform_world"] = transform_variant as Transform3D
+				result["source"] = &"current_skeleton_hand_bone"
+		return result
+	# Non-rig preview actors do not expose the authoritative skeleton-frame API.
+	# Their live anchor remains the compatibility source; rig actors fail closed
+	# above instead of silently returning to a one-frame-stale BoneAttachment.
+	var hand_anchor: Node3D = _resolve_preview_mount_anchor_for_slot(actor, slot_id)
+	if (
+		hand_anchor != null
+		and is_instance_valid(hand_anchor)
+		and _preview_transform_is_finite(hand_anchor.global_transform)
+	):
+		result["valid"] = true
+		result["transform_world"] = hand_anchor.global_transform
+		result["source"] = &"compatibility_live_anchor"
+	return result
+
 func _resolve_unarmed_hand_proxy_points_state(actor: Node3D, slot_id: StringName) -> Dictionary:
 	if actor == null:
 		return {}
-	var hand_anchor: Node3D = _resolve_preview_mount_anchor_for_slot(actor, slot_id)
-	if hand_anchor == null or not is_instance_valid(hand_anchor):
+	var hand_anchor_world_state: Dictionary = (
+		_resolve_preview_mount_anchor_world_transform_state(actor, slot_id)
+	)
+	if not bool(hand_anchor_world_state.get("valid", false)):
 		return {}
+	var hand_anchor_world: Transform3D = hand_anchor_world_state.get(
+		"transform_world",
+		Transform3D.IDENTITY
+	) as Transform3D
 	var skeleton: Skeleton3D = actor.get_node_or_null(PREVIEW_SKELETON_PATH) as Skeleton3D
 	if skeleton == null:
 		return {}
@@ -8302,8 +14464,8 @@ func _resolve_unarmed_hand_proxy_points_state(actor: Node3D, slot_id: StringName
 	var pommel_world: Vector3 = contact_center_world - tip_axis_world * half_length
 	var grip_world: Vector3 = _resolve_preview_hand_grip_target_world(actor, slot_id)
 	if grip_world.length_squared() <= 0.000001:
-		grip_world = hand_anchor.global_position
-	var anchor_basis_inverse: Basis = hand_anchor.global_basis.orthonormalized().inverse()
+		grip_world = hand_anchor_world.origin
+	var anchor_basis_inverse: Basis = hand_anchor_world.basis.orthonormalized().inverse()
 	return {
 		"tip_local": anchor_basis_inverse * (tip_world - grip_world),
 		"tip_origin_id": CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT,
@@ -8390,23 +14552,35 @@ func _resolve_preview_hand_mounted_transform(
 	grip_local_override: Variant = null,
 	mount_local_transform_override: Variant = null
 ) -> Transform3D:
-	var hand_anchor: Node3D = _resolve_preview_mount_anchor(actor)
+	var dominant_slot_id: StringName = _resolve_preview_dominant_slot_id()
+	var hand_anchor_world_state: Dictionary = (
+		_resolve_preview_mount_anchor_world_transform_state(actor, dominant_slot_id)
+	)
 	var mount_local_transform: Transform3D = (
 		mount_local_transform_override as Transform3D
 		if mount_local_transform_override is Transform3D
 		else _resolve_preview_hand_mount_local_transform(held_item)
 	)
-	if hand_anchor == null or not is_instance_valid(hand_anchor):
+	if not bool(hand_anchor_world_state.get("valid", false)):
 		return held_item.global_transform
+	var hand_anchor_world: Transform3D = hand_anchor_world_state.get(
+		"transform_world",
+		Transform3D.IDENTITY
+	) as Transform3D
 	var resolved_grip_local: Vector3 = (
 		grip_local_override as Vector3
 		if grip_local_override is Vector3
 		else _get_preview_primary_grip_seat_meta(held_item)
 	)
-	var grip_target_world: Vector3 = _resolve_preview_hand_grip_target_world(actor, _resolve_preview_dominant_slot_id())
-	var solved_basis: Basis = (hand_anchor.global_basis * mount_local_transform.basis).orthonormalized()
+	var grip_target_world: Vector3 = _resolve_preview_hand_grip_target_world(actor, dominant_slot_id)
+	var solved_basis: Basis = (
+		hand_anchor_world.basis * mount_local_transform.basis
+	).orthonormalized()
 	if grip_target_world.length_squared() <= 0.000001:
-		return Transform3D(solved_basis, (hand_anchor.global_transform * mount_local_transform).origin)
+		return Transform3D(
+			solved_basis,
+			(hand_anchor_world * mount_local_transform).origin
+		)
 	var solved_origin: Vector3 = grip_target_world - solved_basis * resolved_grip_local
 	return Transform3D(solved_basis, solved_origin)
 
@@ -8929,21 +15103,14 @@ func _get_preview_bone_world_position(skeleton: Skeleton3D, bone_name: StringNam
 	return skeleton.to_global(skeleton.get_bone_global_pose(bone_index).origin)
 
 func _resolve_weapon_rotation_normal_local(motion_node: CombatAnimationMotionNode) -> Vector3:
-	if motion_node == null:
-		return Vector3.UP
-	var axis: Vector3 = motion_node.tip_position_local - motion_node.pommel_position_local
-	if axis.length_squared() <= 0.000001:
-		return Vector3.UP
-	axis = axis.normalized()
-	var orientation_source: Vector3 = _resolve_motion_node_weapon_orientation_degrees(motion_node)
-	var orientation_rad: Vector3 = orientation_source * (PI / 180.0)
-	var desired_normal: Vector3 = Basis.from_euler(orientation_rad) * Vector3.UP
-	desired_normal -= axis * desired_normal.dot(axis)
-	if desired_normal.length_squared() <= 0.000001:
-		desired_normal = Vector3.UP - axis * Vector3.UP.dot(axis)
-	if desired_normal.length_squared() <= 0.000001:
-		desired_normal = Vector3.RIGHT - axis * Vector3.RIGHT.dot(axis)
-	return desired_normal.normalized()
+	return motion_node_editor.get_weapon_rotation_normal_local(motion_node)
+
+
+func _is_weapon_roll_interaction(playback_state: Dictionary) -> bool:
+	return (
+		StringName(playback_state.get("authoring_drag_target", StringName()))
+		== CombatAnimationMotionNodeEditorScript.DRAG_TARGET_WEAPON_ROTATION
+	)
 
 func _render_endpoint_sphere_wireframe(immediate_mesh: ImmediateMesh, center: Vector3, radius: float) -> void:
 	if immediate_mesh == null:

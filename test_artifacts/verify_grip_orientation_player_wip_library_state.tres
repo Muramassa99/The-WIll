@@ -311,6 +311,7 @@ motion_node_chain = Array[Resource]([SubResource("Resource_krtow"), SubResource(
 
 [sub_resource type="Resource" id="Resource_ntgs7"]
 script = ExtResource("4_k5u7d")
+station_version = 4
 selected_skill_id = &"skill_slot_1"
 idle_drafts = Array[Resource]([SubResource("Resource_gaq7l"), SubResource("Resource_2yalv")])
 skill_drafts = Array[Resource]([SubResource("Resource_4guqj"), SubResource("Resource_h1wii"), SubResource("Resource_qnhid"), SubResource("Resource_rxn7w"), SubResource("Resource_4r7k8"), SubResource("Resource_1b5wo"), SubResource("Resource_sic85"), SubResource("Resource_av6nn"), SubResource("Resource_pkt5k"), SubResource("Resource_pvy7t"), SubResource("Resource_k3smy"), SubResource("Resource_kwfqc"), SubResource("Resource_3vgec")])
@@ -1501,7 +1502,7 @@ script = ExtResource("1_spsd0")
 wip_id = &"verify_right_normal"
 forge_project_name = "verify_right_normal"
 creator_id = &"verify"
-created_timestamp = 1787593625.388
+created_timestamp = 1788145786.359
 combat_animation_station_state = SubResource("Resource_ntgs7")
 forge_intent = &"intent_melee"
 equipment_context = &"ctx_weapon"
@@ -1825,6 +1826,7 @@ motion_node_chain = Array[Resource]([SubResource("Resource_sd1nf"), SubResource(
 
 [sub_resource type="Resource" id="Resource_0655h"]
 script = ExtResource("4_k5u7d")
+station_version = 4
 selected_skill_id = &"skill_slot_1"
 idle_drafts = Array[Resource]([SubResource("Resource_knil3"), SubResource("Resource_k5u7d")])
 skill_drafts = Array[Resource]([SubResource("Resource_huhqw"), SubResource("Resource_8i0cy"), SubResource("Resource_joh8a"), SubResource("Resource_8jmli"), SubResource("Resource_dsmvl"), SubResource("Resource_bgmtd"), SubResource("Resource_5y27i"), SubResource("Resource_povud"), SubResource("Resource_l3q80"), SubResource("Resource_vqu3b"), SubResource("Resource_uhw3m"), SubResource("Resource_ki6ow"), SubResource("Resource_y5jhh")])
@@ -3015,7 +3017,7 @@ script = ExtResource("1_spsd0")
 wip_id = &"verify_right_reverse"
 forge_project_name = "verify_right_reverse"
 creator_id = &"verify"
-created_timestamp = 1787593625.403
+created_timestamp = 1788145786.37
 combat_animation_station_state = SubResource("Resource_0655h")
 forge_intent = &"intent_melee"
 equipment_context = &"ctx_weapon"
@@ -3325,6 +3327,7 @@ motion_node_chain = Array[Resource]([SubResource("Resource_7qxq3"), SubResource(
 
 [sub_resource type="Resource" id="Resource_8qsw1"]
 script = ExtResource("4_k5u7d")
+station_version = 4
 selected_skill_id = &"skill_slot_1"
 idle_drafts = Array[Resource]([SubResource("Resource_ug5k3"), SubResource("Resource_pqm7m")])
 skill_drafts = Array[Resource]([SubResource("Resource_sjb7b"), SubResource("Resource_hkeec"), SubResource("Resource_7o2bk"), SubResource("Resource_2wn6c"), SubResource("Resource_swfgi"), SubResource("Resource_shx3f"), SubResource("Resource_y7vwg"), SubResource("Resource_48ooo"), SubResource("Resource_plsxx"), SubResource("Resource_18y2p"), SubResource("Resource_orhmt"), SubResource("Resource_a4xxc"), SubResource("Resource_ddgy1")])
@@ -4515,7 +4518,7 @@ script = ExtResource("1_spsd0")
 wip_id = &"verify_left_normal"
 forge_project_name = "verify_left_normal"
 creator_id = &"verify"
-created_timestamp = 1787593625.426
+created_timestamp = 1788145786.386
 combat_animation_station_state = SubResource("Resource_8qsw1")
 forge_intent = &"intent_melee"
 equipment_context = &"ctx_weapon"
@@ -4839,6 +4842,7 @@ motion_node_chain = Array[Resource]([SubResource("Resource_1fy6g"), SubResource(
 
 [sub_resource type="Resource" id="Resource_o88t4"]
 script = ExtResource("4_k5u7d")
+station_version = 4
 selected_skill_id = &"skill_slot_1"
 idle_drafts = Array[Resource]([SubResource("Resource_rb8b0"), SubResource("Resource_ib4fq")])
 skill_drafts = Array[Resource]([SubResource("Resource_sxgsw"), SubResource("Resource_bxxyj"), SubResource("Resource_flpjm"), SubResource("Resource_6x7hx"), SubResource("Resource_xm02o"), SubResource("Resource_diro4"), SubResource("Resource_vftsk"), SubResource("Resource_npb0q"), SubResource("Resource_nibk1"), SubResource("Resource_717a6"), SubResource("Resource_jb5ea"), SubResource("Resource_02cg6"), SubResource("Resource_akade")])
@@ -6029,7 +6033,7 @@ script = ExtResource("1_spsd0")
 wip_id = &"verify_left_reverse"
 forge_project_name = "verify_left_reverse"
 creator_id = &"verify"
-created_timestamp = 1787593625.453
+created_timestamp = 1788145786.409
 combat_animation_station_state = SubResource("Resource_o88t4")
 forge_intent = &"intent_melee"
 equipment_context = &"ctx_weapon"

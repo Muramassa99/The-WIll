@@ -50,6 +50,10 @@ func solve_prepared(
 ) -> Dictionary:
 	var result: Dictionary = _make_result()
 	var input_state: Dictionary = anatomy_state.duplicate(true)
+	var allow_transaction_provisional_candidate: bool = bool(input_state.get(
+		"allow_transaction_provisional_candidate",
+		false
+	))
 	input_state["grip_pivot_c0_world"] = grip_pivot_c0_world
 	input_state["grip_pivot_c0_world_origin_id"] = resolved_world_origin_id
 	input_state["index_slice_center_ci_world"] = index_slice_center_ci_world
@@ -136,6 +140,7 @@ func solve_prepared(
 	var candidate_rotation := Basis.IDENTITY
 	var candidate_radial_translation_world := Vector3.ZERO
 	var best_overall: Dictionary = {}
+	var best_provisional: Dictionary = {}
 	var best_accepted: Dictionary = {}
 	var completed_iterations: int = 0
 	var ray_count: int = 0
@@ -201,6 +206,14 @@ func solve_prepared(
 			terminal_status = &"weapon_surface_seat_solved"
 			completed_iterations = sample_index
 			break
+		elif allow_transaction_provisional_candidate and (
+			best_provisional.is_empty()
+			or _provisional_sample_is_better(sample, best_provisional)
+		):
+			# A rejected sample is never an accepted seat. Retain the safest useful
+			# correction only as transaction-local guidance for the owning hand;
+			# callers must realize it and run a fresh exact verification afterward.
+			best_provisional = sample.duplicate(true)
 		if sample_index >= MAX_ITERATIONS:
 			completed_iterations = MAX_ITERATIONS
 			break
@@ -308,6 +321,9 @@ func solve_prepared(
 			MAX_AUTHORITY_PROXIMAL_PENETRATION_METERS
 		),
 		"ordinary_proximal_safety_enforced": enforce_ordinary_proximal_safety,
+		"transaction_provisional_candidate_allowed": (
+			allow_transaction_provisional_candidate
+		),
 		"correction_authority": (
 			&"weapon_shortest_arc_plus_c0_radial_translation_no_axial_slide"
 		),
@@ -369,6 +385,19 @@ func solve_prepared(
 			if terminal_status != &"iteration_limit"
 			else &"radial_tolerance_not_reached"
 		)
+		if (
+			allow_transaction_provisional_candidate
+			and not best_provisional.is_empty()
+		):
+			_publish_provisional_candidate(
+				result,
+				diagnostics,
+				best_provisional,
+				grip_pivot_c0_world,
+				endcap_axis_world,
+				surface_source_origin_id,
+				resolved_world_origin_id
+			)
 		result["status"] = diagnostics["status"]
 		result["diagnostics"] = diagnostics
 		return result
@@ -413,6 +442,7 @@ func solve_prepared(
 	result["solver_revision"] = SOLVER_REVISION
 	result["signature"] = seat_signature
 	result["seat_signature"] = seat_signature
+	result["candidate_sample_index"] = int(best_accepted.get("sample_index", -1))
 	result["candidate_weapon_correction_about_grip_world"] = accepted_correction
 	result["candidate_weapon_correction_about_grip_world_origin_id"] = (
 		resolved_world_origin_id
@@ -2046,6 +2076,198 @@ func _sample_is_better(candidate: Dictionary, incumbent: Dictionary) -> bool:
 			continue
 		return delta < 0.0
 	return int(candidate.get("sample_index", 0)) < int(incumbent.get("sample_index", 0))
+
+
+func _provisional_sample_is_better(
+	candidate: Dictionary,
+	incumbent: Dictionary
+) -> bool:
+	var candidate_rank: PackedFloat64Array = _build_provisional_rank(candidate)
+	var incumbent_rank: PackedFloat64Array = _build_provisional_rank(incumbent)
+	for rank_index: int in range(mini(
+		candidate_rank.size(),
+		incumbent_rank.size()
+	)):
+		var delta: float = candidate_rank[rank_index] - incumbent_rank[rank_index]
+		if absf(delta) <= SCORE_EPSILON:
+			continue
+		return delta < 0.0
+	return int(candidate.get("sample_index", 0)) < int(incumbent.get("sample_index", 0))
+
+
+func _build_provisional_rank(sample: Dictionary) -> PackedFloat64Array:
+	var radial_excess_normalized: float = (
+		_normalized_positive_excess(
+			absf(float(sample.get("index_radial_error_meters", INF))),
+			ACCEPTED_RADIAL_ERROR_METERS
+		)
+		+ _normalized_positive_excess(
+			absf(float(sample.get("pinky_radial_error_meters", INF))),
+			ACCEPTED_RADIAL_ERROR_METERS
+		)
+	)
+	var authority_excess_normalized: float = (
+		_normalized_positive_excess(
+			float(sample.get(
+				"index_authority_proximal_penetration_meters",
+				INF
+			)),
+			MAX_AUTHORITY_PROXIMAL_PENETRATION_METERS
+		)
+		+ _normalized_positive_excess(
+			float(sample.get(
+				"pinky_authority_proximal_penetration_meters",
+				INF
+			)),
+			MAX_AUTHORITY_PROXIMAL_PENETRATION_METERS
+		)
+	)
+	var ordinary_excess_normalized: float = 0.0
+	if bool(sample.get("ordinary_proximal_safety_enforced", false)):
+		ordinary_excess_normalized = _normalized_excess_value(
+			float(sample.get(
+				"ordinary_proximal_worst_excess_penetration_meters",
+				INF
+			)),
+			MAX_AUTHORITY_PROXIMAL_PENETRATION_METERS
+		)
+	var unsafe_classification_penalty: float = 0.0
+	if (
+		not bool(sample.get("index_authority_proximal_safe", false))
+		and not is_finite(float(sample.get(
+			"index_authority_proximal_penetration_meters",
+			INF
+		)))
+	):
+		unsafe_classification_penalty += 1.0
+	if (
+		not bool(sample.get("pinky_authority_proximal_safe", false))
+		and not is_finite(float(sample.get(
+			"pinky_authority_proximal_penetration_meters",
+			INF
+		)))
+	):
+		unsafe_classification_penalty += 1.0
+	if (
+		bool(sample.get("ordinary_proximal_safety_enforced", false))
+		and not bool(sample.get("ordinary_proximal_capsules_safe", false))
+		and not is_finite(float(sample.get(
+			"ordinary_proximal_worst_excess_penetration_meters",
+			INF
+		)))
+	):
+		unsafe_classification_penalty += 1.0
+	var total_hard_law_excess: float = (
+		radial_excess_normalized
+		+ authority_excess_normalized
+		+ ordinary_excess_normalized
+		+ unsafe_classification_penalty * 1000000.0
+	)
+	var existing_score: PackedFloat64Array = sample.get(
+		"score",
+		PackedFloat64Array()
+	) as PackedFloat64Array
+	var rank := PackedFloat64Array([
+		total_hard_law_excess,
+		unsafe_classification_penalty,
+	])
+	for score_value: float in existing_score:
+		rank.append(score_value)
+	return rank
+
+
+func _normalized_positive_excess(value: float, limit: float) -> float:
+	if not is_finite(value):
+		return 1000000.0
+	return maxf(value - limit, 0.0) / maxf(limit, GEOMETRY_EPSILON_METERS)
+
+
+func _normalized_excess_value(value: float, limit: float) -> float:
+	if not is_finite(value):
+		return 1000000.0
+	return maxf(value, 0.0) / maxf(limit, GEOMETRY_EPSILON_METERS)
+
+
+func _publish_provisional_candidate(
+	result: Dictionary,
+	diagnostics: Dictionary,
+	sample: Dictionary,
+	grip_pivot_c0_world: Vector3,
+	endcap_axis_world: Vector3,
+	surface_source_origin_id: StringName,
+	resolved_world_origin_id: StringName
+) -> void:
+	var correction_basis_world: Basis = (
+		sample.get("weapon_correction_basis_world", Basis.IDENTITY) as Basis
+	).orthonormalized()
+	var radial_translation_world: Vector3 = sample.get(
+		"weapon_radial_translation_world",
+		Vector3.ZERO
+	) as Vector3
+	var correction_world: Transform3D = _make_weapon_correction(
+		correction_basis_world,
+		grip_pivot_c0_world,
+		radial_translation_world
+	)
+	var axial_displacement_meters: float = radial_translation_world.dot(
+		endcap_axis_world
+	)
+	var perpendicular_translation_world: Vector3 = (
+		radial_translation_world
+		- endcap_axis_world * axial_displacement_meters
+	)
+	var provisional_rank: PackedFloat64Array = _build_provisional_rank(sample)
+	result["provisional_candidate_available"] = true
+	result["provisional_candidate_noncommittable"] = true
+	result["provisional_candidate_transaction_only"] = true
+	result["provisional_candidate_sample_index"] = int(sample.get(
+		"sample_index",
+		-1
+	))
+	result["provisional_weapon_correction_about_grip_world"] = correction_world
+	result["provisional_weapon_correction_about_grip_world_origin_id"] = (
+		resolved_world_origin_id
+	)
+	result["provisional_weapon_correction_basis_world"] = correction_basis_world
+	result["provisional_weapon_correction_basis_world_origin_id"] = (
+		resolved_world_origin_id
+	)
+	result["provisional_weapon_correction_pivot_world"] = grip_pivot_c0_world
+	result["provisional_weapon_correction_pivot_world_origin_id"] = (
+		resolved_world_origin_id
+	)
+	result["provisional_weapon_correction_pivot_source_origin_id"] = (
+		surface_source_origin_id
+	)
+	result["provisional_weapon_radial_translation_world"] = radial_translation_world
+	result["provisional_weapon_radial_translation_world_origin_id"] = (
+		resolved_world_origin_id
+	)
+	result["provisional_input_endcap_axis_world"] = endcap_axis_world
+	result["provisional_input_endcap_axis_world_origin_id"] = (
+		resolved_world_origin_id
+	)
+	result["provisional_weapon_radial_translation_axial_meters"] = (
+		axial_displacement_meters
+	)
+	result["provisional_weapon_radial_translation_perpendicular_world"] = (
+		perpendicular_translation_world
+	)
+	result[
+		"provisional_weapon_radial_translation_perpendicular_world_origin_id"
+	] = resolved_world_origin_id
+	result["provisional_weapon_radial_translation_perpendicular_meters"] = (
+		perpendicular_translation_world.length()
+	)
+	result["provisional_hard_law_excess_normalized"] = (
+		provisional_rank[0] if not provisional_rank.is_empty() else INF
+	)
+	result["provisional_rank"] = provisional_rank
+	diagnostics["best_provisional"] = _sample_diagnostics(sample)
+	diagnostics["provisional_hard_law_excess_normalized"] = result[
+		"provisional_hard_law_excess_normalized"
+	]
+	diagnostics["provisional_rank"] = provisional_rank
 
 
 func _sample_diagnostics(sample: Dictionary) -> Dictionary:

@@ -196,7 +196,15 @@ func _advance_runtime_clip(delta: float) -> void:
 			node_reached.emit(0)
 		else:
 			_clip_elapsed = _clip_total_duration
-			_apply_runtime_clip_sample(_clip_elapsed)
+			# `total_duration_seconds` and the PackedFloat32 frame-time tail can
+			# differ by one rounding step. A completed non-looping preview owns the
+			# authored final frame, so publish that frame directly instead of an
+			# almost-one interpolation against the final sample.
+			var final_frame_index: int = maxi(
+				int(runtime_clip.call("get_frame_count")) - 1,
+				0
+			)
+			_apply_runtime_clip_frame(final_frame_index)
 			_playing = false
 			playback_finished.emit()
 			return

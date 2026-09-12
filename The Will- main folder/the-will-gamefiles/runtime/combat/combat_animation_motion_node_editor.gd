@@ -26,10 +26,13 @@ const AUTO_CURVE_HANDLE_MIN_LENGTH_METERS: float = 0.025
 const AUTO_CURVE_ENDPOINT_STRENGTH: float = 0.3333333
 const AUTO_CURVE_MIDDLE_STRENGTH: float = 0.1666667
 const WEAPON_ROTATION_HANDLE_DISTANCE_METERS: float = 0.22
+const WEAPON_ROLL_MIN_DEGREES: float = CombatAnimationMotionNode.WEAPON_ROLL_MIN_DEGREES
+const WEAPON_ROLL_MAX_DEGREES: float = CombatAnimationMotionNode.WEAPON_ROLL_MAX_DEGREES
 
 var _dragging: bool = false
 var _drag_target: StringName = StringName()
 var _arm_roll_drag_state: Dictionary = {}
+var _weapon_roll_drag_state: Dictionary = {}
 
 ## Intersect a camera ray with a camera-facing drag plane through the current
 ## pommel. The pommel is the free translation handle for the whole weapon.
@@ -159,7 +162,14 @@ func get_weapon_rotation_normal_local(motion_node: CombatAnimationMotionNode) ->
 		desired_normal = Vector3.UP - axis * Vector3.UP.dot(axis)
 	if desired_normal.length_squared() <= 0.000001:
 		desired_normal = Vector3.RIGHT - axis * Vector3.RIGHT.dot(axis)
-	return desired_normal.normalized()
+	return desired_normal.normalized().rotated(
+		axis,
+		deg_to_rad(clampf(
+			motion_node.weapon_roll_degrees,
+			WEAPON_ROLL_MIN_DEGREES,
+			WEAPON_ROLL_MAX_DEGREES
+		))
+	).normalized()
 
 func get_weapon_rotation_handle_local(
 	motion_node: CombatAnimationMotionNode,
@@ -311,14 +321,26 @@ func raycast_curve_handle_on_view_drag_plane(
 		return null
 	return trajectory_root.global_transform.affine_inverse() * (intersection as Vector3)
 
-func begin_drag(target: StringName, _screen_position: Vector2 = Vector2.ZERO, _motion_node: CombatAnimationMotionNode = null) -> void:
+func begin_drag(target: StringName, _screen_position: Vector2 = Vector2.ZERO, motion_node: CombatAnimationMotionNode = null) -> void:
 	_dragging = true
 	_drag_target = target
+	_weapon_roll_drag_state = {}
+	if target == DRAG_TARGET_WEAPON_ROTATION and motion_node != null:
+		_weapon_roll_drag_state = {
+			"axis_local": get_weapon_axis_local(motion_node),
+			"last_normal_local": get_weapon_rotation_normal_local(motion_node),
+			"current_roll_degrees": clampf(
+				motion_node.weapon_roll_degrees,
+				WEAPON_ROLL_MIN_DEGREES,
+				WEAPON_ROLL_MAX_DEGREES
+			),
+		}
 
 func end_drag() -> void:
 	_dragging = false
 	_drag_target = StringName()
 	_arm_roll_drag_state = {}
+	_weapon_roll_drag_state = {}
 
 func is_dragging() -> bool:
 	return _dragging
@@ -326,14 +348,19 @@ func is_dragging() -> bool:
 func get_drag_target() -> StringName:
 	return _drag_target
 
-func resolve_weapon_orientation_drag(
+func resolve_weapon_roll_drag(
 	camera: Camera3D,
 	screen_position: Vector2,
 	motion_node: CombatAnimationMotionNode,
 	trajectory_root: Node3D,
 	handle_distance_meters: float = WEAPON_ROTATION_HANDLE_DISTANCE_METERS
 ) -> Variant:
-	if camera == null or motion_node == null or trajectory_root == null:
+	if (
+		camera == null
+		or motion_node == null
+		or trajectory_root == null
+		or _weapon_roll_drag_state.is_empty()
+	):
 		return null
 	var weapon_center_local: Vector3 = get_weapon_center_local(motion_node)
 	var weapon_center_global: Vector3 = trajectory_root.global_transform * weapon_center_local
@@ -347,11 +374,53 @@ func resolve_weapon_orientation_drag(
 		return null
 	var hit_local: Vector3 = trajectory_root.global_transform.affine_inverse() * (hit_global as Vector3)
 	var desired_normal: Vector3 = hit_local - weapon_center_local
-	var weapon_axis: Vector3 = get_weapon_axis_local(motion_node)
+	var weapon_axis: Vector3 = _weapon_roll_drag_state.get(
+		"axis_local",
+		get_weapon_axis_local(motion_node)
+	) as Vector3
+	if weapon_axis.length_squared() <= 0.000001:
+		return null
+	weapon_axis = weapon_axis.normalized()
 	desired_normal -= weapon_axis * desired_normal.dot(weapon_axis)
 	if desired_normal.length_squared() < 0.000001:
-		return motion_node.weapon_orientation_degrees
-	return _resolve_orientation_from_normal(desired_normal.normalized())
+		return float(_weapon_roll_drag_state.get(
+			"current_roll_degrees",
+			motion_node.weapon_roll_degrees
+		))
+	desired_normal = desired_normal.normalized()
+	var last_normal: Vector3 = _weapon_roll_drag_state.get(
+		"last_normal_local",
+		get_weapon_rotation_normal_local(motion_node)
+	) as Vector3
+	if last_normal.length_squared() <= 0.000001:
+		last_normal = desired_normal
+	else:
+		last_normal = last_normal.normalized()
+	var step_radians: float = atan2(
+		weapon_axis.dot(last_normal.cross(desired_normal)),
+		clampf(last_normal.dot(desired_normal), -1.0, 1.0)
+	)
+	var current_roll: float = float(_weapon_roll_drag_state.get(
+		"current_roll_degrees",
+		motion_node.weapon_roll_degrees
+	))
+	var resolved_roll: float = resolve_bounded_weapon_roll_step(
+		current_roll,
+		rad_to_deg(step_radians)
+	)
+	_weapon_roll_drag_state["last_normal_local"] = desired_normal
+	_weapon_roll_drag_state["current_roll_degrees"] = resolved_roll
+	return snappedf(resolved_roll, 0.1)
+
+func resolve_bounded_weapon_roll_step(
+	current_roll_degrees: float,
+	delta_degrees: float
+) -> float:
+	return clampf(
+		current_roll_degrees + delta_degrees,
+		WEAPON_ROLL_MIN_DEGREES,
+		WEAPON_ROLL_MAX_DEGREES
+	)
 
 func begin_upperarm_roll_drag(target: StringName, roll_state: Dictionary) -> void:
 	begin_drag(target)
@@ -554,23 +623,3 @@ func _raycast_global_sphere(
 	if t < 0.001:
 		return null
 	return ray_origin + ray_direction * t
-
-func _resolve_orientation_from_normal(desired_normal: Vector3) -> Vector3:
-	var normalized_normal: Vector3 = desired_normal.normalized()
-	var base_up: Vector3 = Vector3.UP
-	var dot_value: float = clampf(base_up.dot(normalized_normal), -1.0, 1.0)
-	var basis: Basis
-	if dot_value >= 0.9999:
-		basis = Basis.IDENTITY
-	elif dot_value <= -0.9999:
-		basis = Basis(Vector3.RIGHT, PI)
-	else:
-		var rotation_axis: Vector3 = base_up.cross(normalized_normal).normalized()
-		var rotation_angle: float = acos(dot_value)
-		basis = Basis(rotation_axis, rotation_angle)
-	var euler_degrees: Vector3 = basis.get_euler() * (180.0 / PI)
-	return Vector3(
-		snappedf(euler_degrees.x, 0.1),
-		snappedf(euler_degrees.y, 0.1),
-		snappedf(euler_degrees.z, 0.1)
-	)

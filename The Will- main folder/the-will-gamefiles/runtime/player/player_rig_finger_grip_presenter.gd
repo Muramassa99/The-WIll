@@ -45,6 +45,8 @@ const PREVIEW_SUPPORT_GRIP_SEAT_RATIO_ORIGIN_META := "preview_support_grip_seat_
 const SURFACE_GRASP_POSITION_SIGNATURE_STEP_METERS: float = 0.0001
 const SURFACE_GRASP_BASIS_SIGNATURE_STEP: float = 0.0001
 const SURFACE_GRASP_BAND_RADIUS_METERS: float = 0.18
+const PROVISIONAL_SEAT_AXIAL_EPSILON_METERS: float = 0.000001
+const PROVISIONAL_SEAT_BASIS_EPSILON: float = 0.00001
 const CONTACT_FULL_SEAT_MIN_METERS: float = 0.055
 const CONTACT_FADE_OUT_MIN_METERS: float = 0.18
 const CONTACT_FULL_SEAT_CELL_MULTIPLIER: float = 4.0
@@ -523,6 +525,12 @@ func invalidate_cached_surface_grasp(slot_id: StringName = StringName()) -> void
 			_mark_surface_grasp_path_for_resolve(path_id)
 
 
+func invalidate_active_cached_surface_grasp(slot_id: StringName) -> void:
+	var execution_path_id: StringName = _active_grip_execution_path_id(slot_id)
+	if execution_path_id != StringName():
+		_mark_surface_grasp_path_for_resolve(execution_path_id)
+
+
 func _mark_surface_grasp_path_for_resolve(execution_path_id: StringName) -> void:
 	var state: Dictionary = surface_grasp_state_lookup.get(
 		execution_path_id,
@@ -552,6 +560,107 @@ func invalidate_cached_weapon_surface_seat(slot_id: StringName = StringName()) -
 		for path_id: StringName in _grip_execution_paths_for_slot(slot_id):
 			weapon_surface_seat_state_lookup.erase(path_id)
 			weapon_surface_seat_prepared_attempt_lookup.erase(path_id)
+
+
+func invalidate_active_cached_weapon_surface_seat(slot_id: StringName) -> void:
+	var execution_path_id: StringName = _active_grip_execution_path_id(slot_id)
+	if execution_path_id == StringName():
+		return
+	weapon_surface_seat_state_lookup.erase(execution_path_id)
+	weapon_surface_seat_prepared_attempt_lookup.erase(execution_path_id)
+
+
+func capture_active_grip_transaction_state(slot_id: StringName) -> Dictionary:
+	if slot_id not in [&"hand_right", &"hand_left"]:
+		return {"valid": false}
+	var execution_path_id: StringName = _active_grip_execution_path_id(slot_id)
+	return {
+		"valid": true,
+		"slot_id": slot_id,
+		"grip_execution_path_id": execution_path_id,
+		# Baseline reset and source reassignment can erase either hand's active path.
+		# Snapshot every lookup so a rejected Primary acquisition restores both the
+		# governing hand and the untouched/free-or-Support hand atomically.
+		"animation_grip_baseline_cache": animation_grip_baseline_cache.duplicate(true),
+		"animation_idle_baseline_cache": animation_idle_baseline_cache.duplicate(true),
+		"surface_grasp_state_lookup": surface_grasp_state_lookup.duplicate(true),
+		"weapon_surface_seat_state_lookup": (
+			weapon_surface_seat_state_lookup.duplicate(true)
+		),
+		"weapon_surface_seat_prepared_attempt_lookup": (
+			weapon_surface_seat_prepared_attempt_lookup.duplicate(true)
+		),
+		"active_grip_execution_path_lookup": (
+			active_grip_execution_path_lookup.duplicate(true)
+		),
+	}
+
+
+func restore_active_grip_transaction_state(
+	slot_id: StringName,
+	snapshot: Dictionary
+) -> bool:
+	if (
+		not bool(snapshot.get("valid", false))
+		or StringName(snapshot.get("slot_id", StringName())) != slot_id
+	):
+		return false
+	for lookup_key: StringName in [
+		&"animation_grip_baseline_cache",
+		&"animation_idle_baseline_cache",
+		&"surface_grasp_state_lookup",
+		&"weapon_surface_seat_state_lookup",
+		&"weapon_surface_seat_prepared_attempt_lookup",
+		&"active_grip_execution_path_lookup",
+	]:
+		if snapshot.get(lookup_key, null) is not Dictionary:
+			return false
+	animation_grip_baseline_cache = (
+		(snapshot.get("animation_grip_baseline_cache") as Dictionary).duplicate(true)
+	)
+	animation_idle_baseline_cache = (
+		(snapshot.get("animation_idle_baseline_cache") as Dictionary).duplicate(true)
+	)
+	surface_grasp_state_lookup = (
+		(snapshot.get("surface_grasp_state_lookup") as Dictionary).duplicate(true)
+	)
+	weapon_surface_seat_state_lookup = (
+		(snapshot.get("weapon_surface_seat_state_lookup") as Dictionary).duplicate(true)
+	)
+	weapon_surface_seat_prepared_attempt_lookup = (
+		(snapshot.get(
+			"weapon_surface_seat_prepared_attempt_lookup"
+		) as Dictionary).duplicate(true)
+	)
+	active_grip_execution_path_lookup = (
+		(snapshot.get("active_grip_execution_path_lookup") as Dictionary).duplicate(true)
+	)
+	return (
+		animation_grip_baseline_cache
+			== snapshot.get("animation_grip_baseline_cache")
+		and animation_idle_baseline_cache
+			== snapshot.get("animation_idle_baseline_cache")
+		and surface_grasp_state_lookup
+			== snapshot.get("surface_grasp_state_lookup")
+		and weapon_surface_seat_state_lookup
+			== snapshot.get("weapon_surface_seat_state_lookup")
+		and weapon_surface_seat_prepared_attempt_lookup
+			== snapshot.get("weapon_surface_seat_prepared_attempt_lookup")
+		and active_grip_execution_path_lookup
+			== snapshot.get("active_grip_execution_path_lookup")
+	)
+
+
+func _restore_lookup_entry(
+	lookup: Dictionary,
+	key: StringName,
+	was_present: bool,
+	value: Dictionary
+) -> void:
+	if was_present:
+		lookup[key] = value.duplicate(true)
+	else:
+		lookup.erase(key)
 
 
 func get_surface_grasp_debug_state(slot_id: StringName) -> Dictionary:
@@ -587,6 +696,70 @@ func reapply_committed_surface_grasp(
 	if rotations.size() != 15:
 		return false
 	return _apply_surface_grasp_rotations(skeleton, slot_id, rotations)
+
+
+func has_current_committed_surface_grasp(
+	skeleton: Skeleton3D,
+	slot_id: StringName,
+	grip_guide: Node3D
+) -> bool:
+	if skeleton == null or grip_guide == null or not is_instance_valid(grip_guide):
+		return false
+	var execution_path_id: StringName = _resolve_grip_execution_path_id(
+		slot_id,
+		grip_guide
+	)
+	if (
+		execution_path_id == StringName()
+		or execution_path_id != _active_grip_execution_path_id(slot_id)
+	):
+		return false
+	var grip_center_node: Node3D = _resolve_grip_center_node(grip_guide)
+	var exact_surface_identity: Dictionary = (
+		_resolve_exact_handle_surface_identity_state(
+			grip_center_node,
+			execution_path_id
+		)
+	)
+	if not bool(exact_surface_identity.get("valid", false)):
+		return false
+	var current_context_key: String = _build_surface_grasp_context_key(
+		skeleton,
+		slot_id,
+		grip_guide,
+		grip_center_node,
+		exact_surface_identity,
+		execution_path_id
+	)
+	var state: Dictionary = surface_grasp_state_lookup.get(
+		execution_path_id,
+		{}
+	) as Dictionary
+	var expected_bone_count: int = PlayerDigitHingeRulesScript.get_finger_bone_names(
+		slot_id
+	).size()
+	if (
+		current_context_key.is_empty()
+		or not bool(state.get("valid", false))
+		or String(state.get("context_key", "")) != current_context_key
+		or (state.get("rotations", {}) as Dictionary).size()
+			!= expected_bone_count
+	):
+		return false
+	return bool(get_committed_surface_grasp_zero_packet(slot_id).get(
+		"valid",
+		false
+	))
+
+
+func reapply_current_committed_surface_grasp(
+	skeleton: Skeleton3D,
+	slot_id: StringName,
+	grip_guide: Node3D
+) -> bool:
+	if not has_current_committed_surface_grasp(skeleton, slot_id, grip_guide):
+		return false
+	return reapply_committed_surface_grasp(skeleton, slot_id)
 
 
 func get_committed_surface_grasp_zero_packet(slot_id: StringName) -> Dictionary:
@@ -736,7 +909,8 @@ func resolve_exact_surface_weapon_seat(
 	slot_id: StringName,
 	grip_guide: Node3D,
 	anatomy_state: Dictionary,
-	allow_surface_solve: bool
+	allow_surface_solve: bool,
+	allow_transaction_provisional_candidate: bool = false
 ) -> Dictionary:
 	match _resolve_grip_execution_path_id(slot_id, grip_guide):
 		GRIP_PATH_RIGHT_PRIMARY:
@@ -744,28 +918,32 @@ func resolve_exact_surface_weapon_seat(
 				skeleton,
 				grip_guide,
 				anatomy_state,
-				allow_surface_solve
+				allow_surface_solve,
+				allow_transaction_provisional_candidate
 			)
 		GRIP_PATH_LEFT_PRIMARY:
 			return resolve_left_primary_exact_surface_weapon_seat(
 				skeleton,
 				grip_guide,
 				anatomy_state,
-				allow_surface_solve
+				allow_surface_solve,
+				allow_transaction_provisional_candidate
 			)
 		GRIP_PATH_RIGHT_SUPPORT:
 			return resolve_right_support_exact_surface_weapon_seat(
 				skeleton,
 				grip_guide,
 				anatomy_state,
-				allow_surface_solve
+				allow_surface_solve,
+				allow_transaction_provisional_candidate
 			)
 		GRIP_PATH_LEFT_SUPPORT:
 			return resolve_left_support_exact_surface_weapon_seat(
 				skeleton,
 				grip_guide,
 				anatomy_state,
-				allow_surface_solve
+				allow_surface_solve,
+				allow_transaction_provisional_candidate
 			)
 	return {
 		"valid": false,
@@ -778,7 +956,8 @@ func resolve_right_primary_exact_surface_weapon_seat(
 	skeleton: Skeleton3D,
 	grip_guide: Node3D,
 	anatomy_state: Dictionary,
-	allow_surface_solve: bool
+	allow_surface_solve: bool,
+	allow_transaction_provisional_candidate: bool = false
 ) -> Dictionary:
 	return _resolve_exact_surface_weapon_seat_for_path(
 		skeleton,
@@ -787,7 +966,8 @@ func resolve_right_primary_exact_surface_weapon_seat(
 		anatomy_state,
 		allow_surface_solve,
 		GRIP_PATH_RIGHT_PRIMARY,
-		false
+		true,
+		allow_transaction_provisional_candidate
 	)
 
 
@@ -795,7 +975,8 @@ func resolve_left_primary_exact_surface_weapon_seat(
 	skeleton: Skeleton3D,
 	grip_guide: Node3D,
 	anatomy_state: Dictionary,
-	allow_surface_solve: bool
+	allow_surface_solve: bool,
+	allow_transaction_provisional_candidate: bool = false
 ) -> Dictionary:
 	return _resolve_exact_surface_weapon_seat_for_path(
 		skeleton,
@@ -804,7 +985,8 @@ func resolve_left_primary_exact_surface_weapon_seat(
 		anatomy_state,
 		allow_surface_solve,
 		GRIP_PATH_LEFT_PRIMARY,
-		false
+		true,
+		allow_transaction_provisional_candidate
 	)
 
 
@@ -812,7 +994,8 @@ func resolve_right_support_exact_surface_weapon_seat(
 	skeleton: Skeleton3D,
 	grip_guide: Node3D,
 	anatomy_state: Dictionary,
-	allow_surface_solve: bool
+	allow_surface_solve: bool,
+	allow_transaction_provisional_candidate: bool = false
 ) -> Dictionary:
 	return _resolve_exact_surface_weapon_seat_for_path(
 		skeleton,
@@ -821,7 +1004,8 @@ func resolve_right_support_exact_surface_weapon_seat(
 		anatomy_state,
 		allow_surface_solve,
 		GRIP_PATH_RIGHT_SUPPORT,
-		true
+		false,
+		allow_transaction_provisional_candidate
 	)
 
 
@@ -829,7 +1013,8 @@ func resolve_left_support_exact_surface_weapon_seat(
 	skeleton: Skeleton3D,
 	grip_guide: Node3D,
 	anatomy_state: Dictionary,
-	allow_surface_solve: bool
+	allow_surface_solve: bool,
+	allow_transaction_provisional_candidate: bool = false
 ) -> Dictionary:
 	return _resolve_exact_surface_weapon_seat_for_path(
 		skeleton,
@@ -838,7 +1023,8 @@ func resolve_left_support_exact_surface_weapon_seat(
 		anatomy_state,
 		allow_surface_solve,
 		GRIP_PATH_LEFT_SUPPORT,
-		true
+		false,
+		allow_transaction_provisional_candidate
 	)
 
 
@@ -849,7 +1035,8 @@ func _resolve_exact_surface_weapon_seat_for_path(
 	anatomy_state: Dictionary,
 	allow_surface_solve: bool,
 	execution_path_id: StringName,
-	enforce_ordinary_proximal_safety: bool
+	enforce_ordinary_proximal_safety: bool,
+	allow_transaction_provisional_candidate: bool
 ) -> Dictionary:
 	var invalid := {
 		"valid": false,
@@ -985,12 +1172,18 @@ func _resolve_exact_surface_weapon_seat_for_path(
 			prepared_surface
 		)
 	var seat_anatomy_state: Dictionary = anatomy_state.duplicate(true)
-	# Primary already owns and moves the weapon. The additional full proximal
-	# pre-seat safety gate exists for the inverse-composed support relationship,
-	# where accepting only the index/pinky point probes could leave an ordinary
-	# proximal phalanx buried before the shared digit solver starts.
+	# Seating owns the rigid Hand-to-Handle relationship. Primary acquisition must
+	# also keep every open ordinary proximal capsule outside the hard overlap cap;
+	# otherwise its fixed hand can leave the following hinge-only digit solve no
+	# safe neutral pose. A rejected candidate may still be exposed strictly as
+	# transaction-local guidance for either role; only a fresh accepted identity
+	# verification can become a committed seat. Support remains index/pinky-only
+	# because its fixed-weapon acquisition owns a different limb-side transaction.
 	seat_anatomy_state["enforce_ordinary_proximal_safety"] = (
 		enforce_ordinary_proximal_safety
+	)
+	seat_anatomy_state["allow_transaction_provisional_candidate"] = (
+		allow_transaction_provisional_candidate
 	)
 	var solve_started_usec: int = Time.get_ticks_usec()
 	var solve_result: Dictionary = hand_surface_seat_solver.call(
@@ -1051,6 +1244,10 @@ func _resolve_exact_surface_weapon_seat_for_path(
 			state["valid"] = false
 			state["status"] = &"weapon_surface_seat_result_invalid"
 		else:
+			state["candidate_sample_index"] = int(solve_result.get(
+				"candidate_sample_index",
+				-1
+			))
 			state["seat_correction_grip_local"] = seat_correction_grip_local
 			state["seat_correction_grip_local_origin_id"] = (
 				CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
@@ -1092,6 +1289,16 @@ func _resolve_exact_surface_weapon_seat_for_path(
 				"seat_signature",
 				""
 			))
+	elif allow_transaction_provisional_candidate:
+		var provisional_state: Dictionary = (
+			_resolve_provisional_weapon_surface_seat_state(
+				solve_result,
+				held_item.global_transform,
+				contact_surface_origin_id
+			)
+		)
+		for provisional_key: Variant in provisional_state.keys():
+			state[provisional_key] = provisional_state[provisional_key]
 	weapon_surface_seat_state_lookup[execution_path_id] = state
 	weapon_surface_seat_prepared_attempt_lookup[execution_path_id] = {
 		"context_key": context_key,
@@ -1101,6 +1308,151 @@ func _resolve_exact_surface_weapon_seat_for_path(
 	}
 	_publish_hand_surface_seat_diagnostics(grip_guide, grip_center_node, state)
 	return state.duplicate(true)
+
+
+func _resolve_provisional_weapon_surface_seat_state(
+	solve_result: Dictionary,
+	base_weapon_transform_world: Transform3D,
+	contact_surface_origin_id: StringName
+) -> Dictionary:
+	var unavailable := {
+		"provisional_candidate_available": false,
+	}
+	if (
+		not bool(solve_result.get("provisional_candidate_available", false))
+		or not bool(solve_result.get(
+			"provisional_candidate_noncommittable",
+			false
+		))
+		or not bool(solve_result.get(
+			"provisional_candidate_transaction_only",
+			false
+		))
+	):
+		return unavailable
+	var root_origin_id: StringName = PlayerDigitHingeRulesScript.ROOT_ORIGIN_ID
+	for origin_field: String in [
+		"provisional_weapon_correction_about_grip_world_origin_id",
+		"provisional_weapon_correction_basis_world_origin_id",
+		"provisional_weapon_correction_pivot_world_origin_id",
+		"provisional_weapon_radial_translation_world_origin_id",
+		"provisional_input_endcap_axis_world_origin_id",
+		"provisional_weapon_radial_translation_perpendicular_world_origin_id",
+	]:
+		if StringName(solve_result.get(origin_field, StringName())) != root_origin_id:
+			unavailable["provisional_candidate_status"] = (
+				&"provisional_seat_world_origin_mismatch"
+			)
+			return unavailable
+	if StringName(solve_result.get(
+		"provisional_weapon_correction_pivot_source_origin_id",
+		StringName()
+	)) != contact_surface_origin_id:
+		unavailable["provisional_candidate_status"] = (
+			&"provisional_seat_pivot_source_origin_mismatch"
+		)
+		return unavailable
+	var correction_world: Transform3D = solve_result.get(
+		"provisional_weapon_correction_about_grip_world",
+		Transform3D.IDENTITY
+	) as Transform3D
+	var correction_basis_world: Basis = solve_result.get(
+		"provisional_weapon_correction_basis_world",
+		Basis.IDENTITY
+	) as Basis
+	var pivot_world: Vector3 = solve_result.get(
+		"provisional_weapon_correction_pivot_world",
+		Vector3.ZERO
+	) as Vector3
+	var radial_translation_world: Vector3 = solve_result.get(
+		"provisional_weapon_radial_translation_world",
+		Vector3.ZERO
+	) as Vector3
+	var endcap_axis_world: Vector3 = solve_result.get(
+		"provisional_input_endcap_axis_world",
+		Vector3.ZERO
+	) as Vector3
+	var perpendicular_translation_world: Vector3 = solve_result.get(
+		"provisional_weapon_radial_translation_perpendicular_world",
+		Vector3.ZERO
+	) as Vector3
+	var axial_displacement_meters: float = float(solve_result.get(
+		"provisional_weapon_radial_translation_axial_meters",
+		INF
+	))
+	if (
+		not _transform_is_finite(correction_world)
+		or not _basis_is_orthonormal(correction_world.basis)
+		or not _basis_is_orthonormal(correction_basis_world)
+		or not pivot_world.is_finite()
+		or not radial_translation_world.is_finite()
+		or not endcap_axis_world.is_finite()
+		or endcap_axis_world.length_squared() <= 0.000000000001
+		or not perpendicular_translation_world.is_finite()
+		or not is_finite(axial_displacement_meters)
+	):
+		unavailable["provisional_candidate_status"] = (
+			&"provisional_seat_world_transform_invalid"
+		)
+		return unavailable
+	endcap_axis_world = endcap_axis_world.normalized()
+	var measured_axial_displacement_meters: float = (
+		radial_translation_world.dot(endcap_axis_world)
+	)
+	var measured_perpendicular_translation_world: Vector3 = (
+		radial_translation_world
+		- endcap_axis_world * measured_axial_displacement_meters
+	)
+	if (
+		absf(axial_displacement_meters) > PROVISIONAL_SEAT_AXIAL_EPSILON_METERS
+		or absf(measured_axial_displacement_meters)
+			> PROVISIONAL_SEAT_AXIAL_EPSILON_METERS
+		or absf(
+			axial_displacement_meters - measured_axial_displacement_meters
+		) > PROVISIONAL_SEAT_AXIAL_EPSILON_METERS
+		or perpendicular_translation_world.distance_to(
+			measured_perpendicular_translation_world
+		) > PROVISIONAL_SEAT_AXIAL_EPSILON_METERS
+	):
+		unavailable["provisional_candidate_status"] = (
+			&"provisional_seat_axial_displacement_forbidden"
+		)
+		return unavailable
+	var correction_grip_local: Transform3D = (
+		base_weapon_transform_world.affine_inverse()
+		* correction_world
+		* base_weapon_transform_world
+	)
+	if (
+		not _transform_is_finite(correction_grip_local)
+		or not _basis_is_orthonormal(correction_grip_local.basis)
+	):
+		unavailable["provisional_candidate_status"] = (
+			&"provisional_seat_local_transform_invalid"
+		)
+		return unavailable
+	return {
+		"provisional_candidate_available": true,
+		"provisional_candidate_noncommittable": true,
+		"provisional_candidate_transaction_only": true,
+		"provisional_candidate_status": &"provisional_seat_transaction_ready",
+		"provisional_candidate_sample_index": int(solve_result.get(
+			"provisional_candidate_sample_index",
+			-1
+		)),
+		"provisional_seat_correction_grip_local": correction_grip_local,
+		"provisional_seat_correction_grip_local_origin_id": (
+			CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+		),
+		"provisional_hard_law_excess_normalized": float(solve_result.get(
+			"provisional_hard_law_excess_normalized",
+			INF
+		)),
+		"provisional_rank": (
+			solve_result.get("provisional_rank", PackedFloat64Array())
+			as PackedFloat64Array
+		),
+	}
 
 
 func _resolve_weapon_surface_seat_stations(
@@ -1337,6 +1689,122 @@ func get_hand_surface_seat_debug_state(slot_id: StringName) -> Dictionary:
 		execution_path_id,
 		{}
 	) as Dictionary).duplicate(true)
+
+
+func get_committed_weapon_surface_seat(slot_id: StringName) -> Dictionary:
+	var invalid := {
+		"valid": false,
+		"terminal": false,
+		"status": &"committed_weapon_surface_seat_unavailable",
+	}
+	var execution_path_id: StringName = _active_grip_execution_path_id(slot_id)
+	if execution_path_id == StringName():
+		return invalid
+	var state: Dictionary = weapon_surface_seat_state_lookup.get(
+		execution_path_id,
+		{}
+	) as Dictionary
+	if (
+		not bool(state.get("valid", false))
+		or not bool(state.get("terminal", false))
+		or String(state.get("context_key", "")).is_empty()
+		or not state.has("seat_correction_grip_local")
+		or not state.has("grip_pivot_local")
+	):
+		return invalid
+	var committed_state: Dictionary = state.duplicate(true)
+	committed_state["committed_surface_seat_reuse"] = true
+	committed_state["committed_surface_seat_source_status"] = state.get(
+		"status",
+		StringName()
+	)
+	committed_state["status"] = &"committed_weapon_surface_seat_reused"
+	return committed_state
+
+
+func get_current_committed_weapon_surface_seat(
+	skeleton: Skeleton3D,
+	slot_id: StringName,
+	grip_guide: Node3D
+) -> Dictionary:
+	var invalid := {
+		"valid": false,
+		"terminal": false,
+		"status": &"current_committed_weapon_surface_seat_unavailable",
+	}
+	if skeleton == null or grip_guide == null or not is_instance_valid(grip_guide):
+		return invalid
+	var execution_path_id: StringName = _resolve_grip_execution_path_id(
+		slot_id,
+		grip_guide
+	)
+	if (
+		execution_path_id == StringName()
+		or execution_path_id != _active_grip_execution_path_id(slot_id)
+	):
+		return invalid
+	var current_context_key: String = (
+		_resolve_exact_surface_weapon_seat_context_key_for_path(
+			skeleton,
+			slot_id,
+			grip_guide,
+			execution_path_id
+		)
+	)
+	var committed_state: Dictionary = get_committed_weapon_surface_seat(slot_id)
+	var realized_context_key: String = String(committed_state.get(
+		"realized_context_key",
+		""
+	))
+	if (
+		current_context_key.is_empty()
+		or realized_context_key.is_empty()
+		or not bool(committed_state.get("valid", false))
+		or realized_context_key != current_context_key
+	):
+		invalid["context_key"] = current_context_key
+		invalid["realized_context_key"] = realized_context_key
+		return invalid
+	committed_state["current_surface_relationship_verified"] = true
+	return committed_state
+
+
+func mark_weapon_surface_seat_realized(
+	skeleton: Skeleton3D,
+	slot_id: StringName,
+	grip_guide: Node3D
+) -> bool:
+	if skeleton == null or grip_guide == null or not is_instance_valid(grip_guide):
+		return false
+	var execution_path_id: StringName = _resolve_grip_execution_path_id(
+		slot_id,
+		grip_guide
+	)
+	if (
+		execution_path_id == StringName()
+		or execution_path_id != _active_grip_execution_path_id(slot_id)
+	):
+		return false
+	var state: Dictionary = weapon_surface_seat_state_lookup.get(
+		execution_path_id,
+		{}
+	) as Dictionary
+	if not bool(state.get("valid", false)):
+		return false
+	var realized_context_key: String = (
+		_resolve_exact_surface_weapon_seat_context_key_for_path(
+			skeleton,
+			slot_id,
+			grip_guide,
+			execution_path_id
+		)
+	)
+	if realized_context_key.is_empty():
+		return false
+	state["realized_context_key"] = realized_context_key
+	state["realized_source_instance_id"] = grip_guide.get_instance_id()
+	weapon_surface_seat_state_lookup[execution_path_id] = state
+	return true
 
 
 func _publish_hand_surface_seat_diagnostics(
@@ -2292,6 +2760,24 @@ func _quantize_surface_grasp_basis(value: Basis) -> PackedInt64Array:
 
 func _basis_is_finite(value: Basis) -> bool:
 	return value.x.is_finite() and value.y.is_finite() and value.z.is_finite()
+
+
+func _basis_is_orthonormal(value: Basis) -> bool:
+	if not _basis_is_finite(value):
+		return false
+	return (
+		absf(value.x.length_squared() - 1.0)
+			<= PROVISIONAL_SEAT_BASIS_EPSILON
+		and absf(value.y.length_squared() - 1.0)
+			<= PROVISIONAL_SEAT_BASIS_EPSILON
+		and absf(value.z.length_squared() - 1.0)
+			<= PROVISIONAL_SEAT_BASIS_EPSILON
+		and absf(value.x.dot(value.y)) <= PROVISIONAL_SEAT_BASIS_EPSILON
+		and absf(value.x.dot(value.z)) <= PROVISIONAL_SEAT_BASIS_EPSILON
+		and absf(value.y.dot(value.z)) <= PROVISIONAL_SEAT_BASIS_EPSILON
+		and absf(absf(value.determinant()) - 1.0)
+			<= PROVISIONAL_SEAT_BASIS_EPSILON
+	)
 
 
 func _transform_is_finite(value: Transform3D) -> bool:

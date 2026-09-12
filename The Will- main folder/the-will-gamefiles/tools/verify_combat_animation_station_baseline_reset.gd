@@ -6,6 +6,7 @@ const CombatAnimationStationUIScene = preload("res://scenes/ui/combat_animation_
 const CombatAnimationStationStateScript = preload("res://core/models/combat_animation_station_state.gd")
 const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
 const CombatAnimationWeaponGeometryResolverScript = preload("res://core/resolvers/combat_animation_weapon_geometry_resolver.gd")
+const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const BakedProfileScript = preload("res://core/models/baked_profile.gd")
 
 const RESULT_FILE_PATH := "C:/WORKSPACE/combat_animation_station_baseline_reset_results.txt"
@@ -107,8 +108,6 @@ func _run_verification() -> void:
 	var active_draft_before_reset: CombatAnimationDraft = ui.call("_get_active_draft") as CombatAnimationDraft
 	var before_reset_first_node: CombatAnimationMotionNode = _get_motion_node(active_draft_before_reset, 0)
 	var before_reset_two_hand_state: StringName = before_reset_first_node.two_hand_state if before_reset_first_node != null else StringName()
-	var expected_reset_tip: Vector3 = seed_before_reset.get("tip_position_local", Vector3.ZERO) as Vector3
-	var expected_reset_pommel: Vector3 = seed_before_reset.get("pommel_position_local", Vector3.ZERO) as Vector3
 	var expected_reset_weapon_orientation: Vector3 = seed_before_reset.get("weapon_orientation_degrees", Vector3.ZERO) as Vector3
 
 	var reset_ok: bool = ui.reset_active_draft_to_baseline()
@@ -140,6 +139,82 @@ func _run_verification() -> void:
 		saved_library_first_node_after_reset.two_hand_state
 		if saved_library_first_node_after_reset != null
 		else StringName()
+	)
+	var after_reset_rendered_endpoints: Dictionary = _resolve_rendered_endpoints(ui)
+	var after_reset_rendered_tip: Vector3 = after_reset_rendered_endpoints.get(
+		"tip",
+		Vector3.INF
+	) as Vector3
+	var after_reset_rendered_pommel: Vector3 = after_reset_rendered_endpoints.get(
+		"pommel",
+		Vector3.INF
+	) as Vector3
+	var after_reset_preview_root: Node3D = ui.preview_subviewport.get_node_or_null(
+		"CombatAnimationPreviewRoot3D"
+	) as Node3D
+	var after_reset_transaction: Dictionary = (
+		after_reset_preview_root.get_meta(
+			"primary_surface_grip_transaction_result",
+			{}
+		) as Dictionary
+		if after_reset_preview_root != null
+		else {}
+	)
+	var after_reset_preseed: Dictionary = (
+		after_reset_preview_root.get_meta(
+			"reset_primary_grip_preseed_result",
+			{}
+		) as Dictionary
+		if after_reset_preview_root != null
+		else {}
+	)
+	var after_reset_refresh: Dictionary = (
+		after_reset_preview_root.get_meta(
+			"reset_primary_grip_preseed_refresh_result",
+			{}
+		) as Dictionary
+		if after_reset_preview_root != null
+		else {}
+	)
+	var after_reset_reuse: Dictionary = (
+		after_reset_preview_root.get_meta(
+			"primary_grip_preseed_reuse_result",
+			{}
+		) as Dictionary
+		if after_reset_preview_root != null
+		else {}
+	)
+	var transaction_tip: Vector3 = after_reset_transaction.get(
+		"tip_position_local",
+		Vector3.INF
+	) as Vector3
+	var transaction_pommel: Vector3 = after_reset_transaction.get(
+		"pommel_position_local",
+		Vector3.INF
+	) as Vector3
+	var after_reset_pair_exact: bool = (
+		after_reset_first_node != null
+		and after_reset_second_node != null
+		and after_reset_first_node.tip_position_local
+			== after_reset_second_node.tip_position_local
+		and after_reset_first_node.tip_position_origin_id
+			== after_reset_second_node.tip_position_origin_id
+		and after_reset_first_node.pommel_position_local
+			== after_reset_second_node.pommel_position_local
+		and after_reset_first_node.pommel_position_origin_id
+			== after_reset_second_node.pommel_position_origin_id
+	)
+	var after_reset_pair_has_authoring_origins: bool = (
+		after_reset_first_node != null
+		and after_reset_second_node != null
+		and after_reset_first_node.tip_position_origin_id
+			== CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and after_reset_first_node.pommel_position_origin_id
+			== CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and after_reset_second_node.tip_position_origin_id
+			== CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+		and after_reset_second_node.pommel_position_origin_id
+			== CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 	)
 	var after_reset_debug: Dictionary = ui.get_preview_debug_state()
 	var first_reset_signature: Dictionary = _build_reset_signature(after_reset_first_node, after_reset_second_node)
@@ -214,14 +289,61 @@ func _run_verification() -> void:
 		active_station_first_node_after_reset.two_hand_state if active_station_first_node_after_reset != null else StringName()
 	))
 	lines.append("saved_library_before_manual_save_first_node_two_hand_state=%s" % String(saved_library_before_manual_save_two_hand_state))
-	lines.append("after_reset_first_node_tip_matches_expected=%s" % str(
-		after_reset_first_node != null and after_reset_first_node.tip_position_local.is_equal_approx(expected_reset_tip)
+	lines.append("after_reset_primary_transaction_committed=%s" % str(
+		bool(after_reset_transaction.get("committed", false))
+		and bool(after_reset_transaction.get("valid", false))
+		and StringName(after_reset_transaction.get("status", StringName()))
+			== &"primary_surface_grip_transaction_committed"
 	))
-	lines.append("after_reset_station_tip_matches_expected=%s" % str(
-		active_station_first_node_after_reset != null and active_station_first_node_after_reset.tip_position_local.is_equal_approx(expected_reset_tip)
+	lines.append("after_reset_preseed_final_handoff_valid=%s" % str(
+		bool(after_reset_preseed.get("final_handoff_valid", false))
 	))
-	lines.append("after_reset_first_node_pommel_matches_expected=%s" % str(
-		after_reset_first_node != null and after_reset_first_node.pommel_position_local.is_equal_approx(expected_reset_pommel)
+	lines.append("after_reset_preseed_refresh_valid=%s" % str(
+		bool(after_reset_refresh.get("valid", false))
+	))
+	lines.append("after_reset_preseed_reuse_valid=%s" % str(
+		bool(after_reset_reuse.get("valid", false))
+	))
+	lines.append("after_reset_hidden_visible_endpoint_identity_exact=%s" % str(
+		after_reset_pair_exact
+	))
+	lines.append("after_reset_hidden_visible_authoring_origins=%s" % str(
+		after_reset_pair_has_authoring_origins
+	))
+	lines.append("after_reset_first_node_matches_transaction_exact=%s" % str(
+		after_reset_first_node != null
+		and after_reset_first_node.tip_position_local == transaction_tip
+		and after_reset_first_node.pommel_position_local == transaction_pommel
+	))
+	lines.append("after_reset_second_node_matches_transaction_exact=%s" % str(
+		after_reset_second_node != null
+		and after_reset_second_node.tip_position_local == transaction_tip
+		and after_reset_second_node.pommel_position_local == transaction_pommel
+	))
+	lines.append("after_reset_first_node_matches_rendered_exact=%s" % str(
+		after_reset_first_node != null
+		and after_reset_first_node.tip_position_local == after_reset_rendered_tip
+		and after_reset_first_node.pommel_position_local == after_reset_rendered_pommel
+	))
+	lines.append("after_reset_first_node_tip_rendered_drift_mm=%f" % (
+		after_reset_first_node.tip_position_local.distance_to(after_reset_rendered_tip)
+			* 1000.0
+		if after_reset_first_node != null
+		else INF
+	))
+	lines.append("after_reset_first_node_pommel_rendered_drift_mm=%f" % (
+		after_reset_first_node.pommel_position_local.distance_to(after_reset_rendered_pommel)
+			* 1000.0
+		if after_reset_first_node != null
+		else INF
+	))
+	lines.append("after_reset_station_node_matches_active_exact=%s" % str(
+		active_station_first_node_after_reset != null
+		and after_reset_first_node != null
+		and active_station_first_node_after_reset.tip_position_local
+			== after_reset_first_node.tip_position_local
+		and active_station_first_node_after_reset.pommel_position_local
+			== after_reset_first_node.pommel_position_local
 	))
 	lines.append("after_reset_first_node_weapon_orientation_matches_expected=%s" % str(
 		after_reset_first_node != null and after_reset_first_node.weapon_orientation_degrees.is_equal_approx(expected_reset_weapon_orientation)
@@ -327,6 +449,37 @@ func _get_motion_node(draft: CombatAnimationDraft, index: int) -> CombatAnimatio
 	if draft == null or index < 0 or index >= draft.motion_node_chain.size():
 		return null
 	return draft.motion_node_chain[index] as CombatAnimationMotionNode
+
+
+func _resolve_rendered_endpoints(ui) -> Dictionary:
+	if ui == null or ui.preview_subviewport == null:
+		return {}
+	var preview_root: Node3D = ui.preview_subviewport.get_node_or_null(
+		"CombatAnimationPreviewRoot3D"
+	) as Node3D
+	if preview_root == null:
+		return {}
+	var trajectory_root: Node3D = preview_root.find_child(
+		"TrajectoryRoot",
+		true,
+		false
+	) as Node3D
+	var held_item: Node3D = preview_root.get_meta("preview_held_item", null) as Node3D
+	if trajectory_root == null or held_item == null:
+		return {}
+	var local_tip: Vector3 = held_item.get_meta(
+		"weapon_tip_local",
+		Vector3.ZERO
+	) as Vector3
+	var local_pommel: Vector3 = held_item.get_meta(
+		"weapon_pommel_local",
+		Vector3.ZERO
+	) as Vector3
+	return {
+		"tip": trajectory_root.to_local(held_item.to_global(local_tip)),
+		"pommel": trajectory_root.to_local(held_item.to_global(local_pommel)),
+	}
+
 
 func _wait_for_manual_save(ui) -> void:
 	var frame_count: int = 0

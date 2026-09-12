@@ -52,12 +52,14 @@ func _run_verification() -> void:
 		and int(right_result.get("applied_bone_count", 0)) >= 4 \
 		and float(right_result.get("forearm_delta_radians", 0.0)) > 0.01 \
 		and float(right_result.get("upperarm_delta_radians", 0.0)) > 0.001 \
-		and float(right_result.get("hand_x_alignment", 0.0)) > 0.75
+		and float(right_result.get("hand_x_alignment", 0.0)) > 0.75 \
+		and bool(right_result.get("zero_reset_ok", false))
 	var left_ok: bool = bool(left_result.get("active", false)) \
 		and int(left_result.get("applied_bone_count", 0)) >= 4 \
 		and float(left_result.get("forearm_delta_radians", 0.0)) > 0.01 \
 		and float(left_result.get("upperarm_delta_radians", 0.0)) > 0.001 \
-		and float(left_result.get("hand_x_alignment", 0.0)) > 0.75
+		and float(left_result.get("hand_x_alignment", 0.0)) > 0.75 \
+		and bool(left_result.get("zero_reset_ok", false))
 	var all_checks_passed: bool = skeleton != null \
 		and int(initial_debug.get("right_forearm_twist_bone_count", 0)) == 2 \
 		and int(initial_debug.get("left_forearm_twist_bone_count", 0)) == 2 \
@@ -83,7 +85,7 @@ func _run_verification() -> void:
 	if file != null:
 		file.store_string("\n".join(lines))
 		file.close()
-	quit()
+	quit(0 if all_checks_passed else 1)
 
 func _exercise_slot(
 	rig_root: PlayerHumanoidRig,
@@ -139,7 +141,7 @@ func _exercise_slot(
 	var hand_basis_after: Basis = _get_bone_world_basis(skeleton, hand_bone)
 	var expected_x_axis: Vector3 = desired_hand_basis.x - twist_axis_world * desired_hand_basis.x.dot(twist_axis_world)
 	expected_x_axis = expected_x_axis.normalized() if expected_x_axis.length_squared() > 0.000001 else desired_hand_basis.x.normalized()
-	return {
+	var result: Dictionary = {
 		"active": bool(debug_state.get("%s_authoring_twist_distribution_active" % prefix, false)),
 		"requested_degrees": float(debug_state.get("%s_authoring_twist_requested_degrees" % prefix, 0.0)),
 		"forearm_applied_degrees": float(debug_state.get("%s_authoring_forearm_twist_applied_degrees" % prefix, 0.0)),
@@ -150,6 +152,42 @@ func _exercise_slot(
 		"hand_y_alignment": hand_basis_after.y.normalized().dot(twist_axis_world),
 		"hand_x_alignment": hand_basis_after.x.normalized().dot(expected_x_axis),
 	}
+	# A zero requested distribution must remove old helper rotations explicitly;
+	# otherwise a prior Roll survives after the authored contact returns to zero.
+	rig_root.call(
+		"_neutralize_authoring_limb_twist_distribution_for_slot",
+		slot_id,
+		1.0
+	)
+	skeleton.force_update_all_bone_transforms()
+	var zero_debug_state: Dictionary = rig_root.get_grip_contact_debug_state()
+	var zero_forearm_delta_radians: float = _sum_pose_rotation_delta(
+		skeleton,
+		forearm_twist_bones,
+		before_forearm
+	)
+	var zero_upperarm_delta_radians: float = _sum_pose_rotation_delta(
+		skeleton,
+		upperarm_twist_bones,
+		before_upperarm
+	)
+	var zero_requested_degrees: float = float(zero_debug_state.get(
+		"%s_authoring_twist_requested_degrees" % prefix,
+		INF
+	))
+	result["zero_reset_forearm_delta_radians"] = zero_forearm_delta_radians
+	result["zero_reset_upperarm_delta_radians"] = zero_upperarm_delta_radians
+	result["zero_reset_requested_degrees"] = zero_requested_degrees
+	result["zero_reset_ok"] = (
+		zero_forearm_delta_radians <= 0.00001
+		and zero_upperarm_delta_radians <= 0.00001
+		and absf(zero_requested_degrees) <= 0.01
+		and not bool(zero_debug_state.get(
+			"%s_authoring_twist_distribution_active" % prefix,
+			true
+		))
+	)
+	return result
 
 func _capture_pose_rotations(skeleton: Skeleton3D, bone_names: Array) -> Dictionary:
 	var rotations: Dictionary = {}
@@ -185,6 +223,10 @@ func _result_lines(prefix: String, result: Dictionary) -> PackedStringArray:
 	lines.append("%s_upperarm_twist_delta_radians=%.6f" % [prefix, float(result.get("upperarm_delta_radians", 0.0))])
 	lines.append("%s_hand_y_alignment=%.6f" % [prefix, float(result.get("hand_y_alignment", 0.0))])
 	lines.append("%s_hand_x_alignment=%.6f" % [prefix, float(result.get("hand_x_alignment", 0.0))])
+	lines.append("%s_zero_reset_requested_degrees=%.6f" % [prefix, float(result.get("zero_reset_requested_degrees", INF))])
+	lines.append("%s_zero_reset_forearm_delta_radians=%.6f" % [prefix, float(result.get("zero_reset_forearm_delta_radians", INF))])
+	lines.append("%s_zero_reset_upperarm_delta_radians=%.6f" % [prefix, float(result.get("zero_reset_upperarm_delta_radians", INF))])
+	lines.append("%s_zero_reset_ok=%s" % [prefix, str(bool(result.get("zero_reset_ok", false)))])
 	return lines
 
 func _get_bone_world_position(skeleton: Skeleton3D, bone_name: String) -> Vector3:

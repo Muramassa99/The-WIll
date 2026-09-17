@@ -1,0 +1,119 @@
+﻿[
+    {
+        "relative_path":  "Josie\\License.txt",
+        "lines":  12,
+        "status":  "fully_read",
+        "read_ranges":  [
+                            1,
+                            12
+                        ],
+        "semantic_grip_match":  false,
+        "sha256":  "5e88dd9c6ee1742593c10d0ba1eceab9d991bf2beaf73b3b5af11a5c53d8f213",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "relative_path":  "UPLOADED\\COLLABORATION_MINDSET.md",
+        "lines":  28,
+        "status":  "fully_read",
+        "read_ranges":  [
+                            1,
+                            28
+                        ],
+        "semantic_grip_match":  false,
+        "sha256":  "7ca821257dd4b89c8cc9eeb887893173299b541ea767233750ba19d501ac293b",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "relative_path":  "UPLOADED\\DISASSEMBLY_BENCH_UI_WORKING_SPEC_2026-03-26.md",
+        "lines":  117,
+        "status":  "fully_read",
+        "read_ranges":  [
+                            1,
+                            117
+                        ],
+        "semantic_grip_match":  false,
+        "sha256":  "88bf41c5ec61d391149f186bff20d6a225b94678e0a8032a9725d026b3250eae",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "relative_path":  "UPLOADED\\intro scene idea.txt",
+        "lines":  15,
+        "status":  "fully_read",
+        "read_ranges":  [
+                            1,
+                            15
+                        ],
+        "semantic_grip_match":  false,
+        "sha256":  "e0f000dd4003dd198caf299900d59cd7f0ff40b018e3bd0d348dad27f3fd0773",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "relative_path":  "UPLOADED\\more game stuff.txt",
+        "lines":  41,
+        "status":  "fully_read",
+        "read_ranges":  [
+                            1,
+                            41
+                        ],
+        "semantic_grip_match":  false,
+        "sha256":  "cbf554ea58ccc8c7d7d995505698ea35c3849e2fdaed0f14a02d8176661ad1d5",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "relative_path":  "UPLOADED\\rofile-replacement patch operations.md",
+        "lines":  80,
+        "status":  "fully_read",
+        "read_ranges":  [
+                            1,
+                            80
+                        ],
+        "semantic_grip_match":  false,
+        "sha256":  "7b0a0e5b0aa0199dbba610dc17b24159d5d24cf387b7662d1f55dbacc1ae28d5",
+        "created_local":  "2026-04-11T01:30:42",
+        "modified_local":  "2026-04-11T01:31:31"
+    },
+    {
+        "relative_path":  "UPLOADED\\the GAME.txt",
+        "lines":  266,
+        "status":  "fully_read",
+        "read_ranges":  [
+                            1,
+                            266
+                        ],
+        "semantic_grip_match":  false,
+        "sha256":  "2ee674056d8fd333f456de487c214d8a0b15bb02b694d37763f6cc81fe606dbd",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "relative_path":  "UPLOADED\\THE_WILL_Math_and_Variables_Cheat_Sheet_v0.02b_atomic_first.txt",
+        "lines":  287,
+        "status":  "fully_read",
+        "read_ranges":  [
+                            1,
+                            287
+                        ],
+        "semantic_grip_match":  false,
+        "sha256":  "a9ffaebebccd75ed5d4bc722f26474d8f1478671d47f53a9f7a3f31809731751",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "relative_path":  "UPLOADED\\weapon balancing  expl 1.md",
+        "lines":  42,
+        "status":  "fully_read",
+        "read_ranges":  [
+                            1,
+                            42
+                        ],
+        "semantic_grip_match":  false,
+        "sha256":  "4a35b0a60c8885b0503491f4d5db98f2148a2e05581746a41345f10255bf91fc",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    }
+]

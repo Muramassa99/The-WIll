@@ -1,0 +1,1613 @@
+{
+  "completed_local_date": "2026-09-18",
+  "matched_full_read_count": 106,
+  "supplemental_full_read_count": 9,
+  "matched_lines": 58401,
+  "matched_words": 314843,
+  "source_hashes_unchanged": true,
+  "files": [
+    {
+      "id": 1,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\Adaptive Outer Shell - Refinement Envelope 2.md",
+      "lines": 869,
+      "sha256": "7a3a169f280356164af47f7d86ea7ae9e5d5b798db397447ec3e3c9a87f54a6c",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          869
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 2,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\Adaptive Outer Shell - Refinement Envelope System 1.md",
+      "lines": 596,
+      "sha256": "3e3b8bf1a5ff9bc2ae4eb80e232cbbc5a9be589f67ab1b4b634b3e35dc4fa393",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          596
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 3,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\Combat System Canonical Truth 2026-04-21.md",
+      "lines": 577,
+      "sha256": "e9b207100348c2add5844840db264773d5ace0a7ab058511867c2cb3efdae702",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          577
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 4,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\How To Do Menu Work.md",
+      "lines": 448,
+      "sha256": "85e7bb8c0d9327c34cbdf5fbc22ad6cffbed7319cc0242500d54117664778ddd",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          448
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 5,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\last pass before tokens  where gone.md",
+      "lines": 67,
+      "sha256": "208f5961d98f366ffb2a6fb1fdfa1687d2604f0db77fc7afa3105cd806e1c27c",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          67
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 6,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\PROJECT ORIENTATION AND AUTHORITY MAP.md",
+      "lines": 643,
+      "sha256": "cdf8625dd704f7e1a5ac5fcec6f4040af73ffe04df70adef3c8cd40e60fb9ccb",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          643
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 7,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\Runtime Combat Editor Visual and System Addendum.md",
+      "lines": 354,
+      "sha256": "0884bff963a841eb6991bede95e79a2463e55d7e0777f2d24686cecb1049fbe9",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          354
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 8,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\Runtime Melee Combat Editor Visual-System.md",
+      "lines": 430,
+      "sha256": "9759da1861bbd63eec62d281a3ebd6e7687424f9c38ecd03bdb677b784b37baa",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          430
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 9,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\Runtime Weapon-Owned Melee Skill Crafter 1.md",
+      "lines": 926,
+      "sha256": "14615bcdfab8194bd283d7ef96fa355c7eca852042d77b7581478cc935100945",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          926
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 10,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\Runtime Weapon-Owned Melee Skill Crafter-2.md",
+      "lines": 557,
+      "sha256": "885cc07545142abec9bb7a56860991ff0a7bbea7786cfd9af85d45e25f37b55d",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          557
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 11,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_05_26_18-39.md",
+      "lines": 115,
+      "sha256": "884fa1d126975b50214e62e941469dbeee123435e3bc569c6010730031798000",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          115
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 12,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_05_27_00-38.md",
+      "lines": 171,
+      "sha256": "24b765eec736259263fd4a82c5fa6c2644c3e6684dabb258529963e58895c1e8",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          171
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 13,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_06_02_00-46.md",
+      "lines": 681,
+      "sha256": "e7a2d8af565d18cca477eb338340523112ef6455134d849bcb5e820281b98569",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          681
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 14,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_07_22_06-25.md",
+      "lines": 582,
+      "sha256": "94b718954560a5a517e33bf53e501cda37595accc074d59aa3bf14fd15d24196",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          582
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 15,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_07_26_08-37.md",
+      "lines": 575,
+      "sha256": "6143c2f3daf78f90d79e7c21632d7b65c153f4802759547d400b607c5b58b4d0",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          575
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 16,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_07_31_05-38.md",
+      "lines": 415,
+      "sha256": "8d730621893e84e52ba1dfbd06fa9866518a9d6ec2f9af7ff1814b939ddda2d5",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          415
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 17,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_10_22-49.md",
+      "lines": 177,
+      "sha256": "4fb2b0dbdbc2cbacc3d79757ddbfead4fd727968185ea660ab06a3d5fdb63d4e",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          177
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 18,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_12_05-07.md",
+      "lines": 864,
+      "sha256": "2495435ff6d8093aa5ddd9c95713243c51b829ccc90d6df337f54b7caf226341",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          864
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 19,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_14_01-11.md",
+      "lines": 252,
+      "sha256": "4724cf2776b5ff5cab063d2d2cbe72be0a58227bb232dec5489c47967d249170",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          252
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 20,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_16_22-37.md",
+      "lines": 235,
+      "sha256": "4dda6f9b18948d102b9231f76111c4436853f29dacf874701f2d0d4467a90d93",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          235
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 21,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_27_03-29.md",
+      "lines": 339,
+      "sha256": "e0036231949007483c3e8ef4e74f1ace561cd3edf36757340ceb7155cc680d25",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          339
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 22,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_29_09-52.md",
+      "lines": 100,
+      "sha256": "d7d3488d9137b8bfbc0115cf0063a46d5026639b072c776bc821ed5e03cb46cf",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          100
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 23,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_30_15-07.md",
+      "lines": 204,
+      "sha256": "a7eb47959415ebdd3ef061af65451c350d370bcb3806e9b78d0d3ea5c46aad73",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          204
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 24,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_30_16-42.md",
+      "lines": 119,
+      "sha256": "57cfb66f851677a00139253613c2b771f6f6e711cde7e733d5f0c4d824d639e4",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          119
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 25,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_09_01_07-04.md",
+      "lines": 341,
+      "sha256": "8931946c3a1579f1d058cdcd4a48a9d1ebf9a0473fa997661eed617f204a8f3b",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          341
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 26,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_09_12_04-02_questionable.md",
+      "lines": 520,
+      "sha256": "6911934e2d2427dc9f6d13433ccd9b925328ce50661b051b36d6855d63e4fd7d",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          520
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 27,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_09_14_12-24.md",
+      "lines": 60,
+      "sha256": "59c326069b8417e285c038d9a1491619e1a650a089eb2a9f28c0e2acbe454205",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          60
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 28,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_09_15_12-57.md",
+      "lines": 229,
+      "sha256": "85262682b268c649ba6228c8894da7cf4e83bd5efb808562044b40172ea9c299",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          229
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 29,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\Structural Volume Authoring System.md",
+      "lines": 513,
+      "sha256": "1c8c0083fdcc4fae60440bb2c842d3a8da8e6e8d9fe8a9c47b0639d6a07d6df7",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          513
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 30,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Character Creation Full Hand Preparation TODO 2026-09-15.md",
+      "lines": 52,
+      "sha256": "50fb5a11221239835cf27ab0d39e00237f4e83110a2687785e8e110cb159d464",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          52
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 31,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Combat Editor Original Intent Digest 2026-04-30.md",
+      "lines": 370,
+      "sha256": "38e25c2cf3be04be59a94054cc32c37903d96dd520cda0948e7696bb60a03ba4",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          370
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 32,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Forge V2 Action Undo Redo Work Scope 2026-08-30.md",
+      "lines": 171,
+      "sha256": "4f895ac3d72f28ebecdfc73204a59cd34f57c128c11383ed1d3f22d24360c307",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          171
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 33,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Forge V2 Bounded Native Add Continuation 2026-08-16.md",
+      "lines": 221,
+      "sha256": "9283a5aa39aec90c3764247747c3a107393075be9ef98b8e82f6018907d9cddf",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          221
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 34,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Forge V2 Chunked Workpiece Locality Prototype Report 2026-08-14.md",
+      "lines": 1041,
+      "sha256": "9961446aca9eec6076ae3861dccc45b0b1747b73de11dd04ca18614ec3607ec5",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          1041
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 35,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Forge V2 Physical Truth And Handle Transform Work Scope 2026-08-29.md",
+      "lines": 288,
+      "sha256": "a2e3359c57336b052e5050d9364e915ba3e0716afed3681063fd50ff6fa812c6",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          288
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 36,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Forge V2 Stroke Detailing Performance Implementation 2026-08-10.md",
+      "lines": 192,
+      "sha256": "e4a9170bedf07763cbdee499cf6f8c3360ac65410b546d29208f7b166b02783c",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          192
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 37,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Forge V2 Workpiece Compiler Architecture And Benchmark 2026-08-13.md",
+      "lines": 1279,
+      "sha256": "5bc395bb84fc84ae007950571db148474a84f6f6799667725a2cff950c9b8102",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          1279
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 38,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\forge_v2_design_notes.md",
+      "lines": 456,
+      "sha256": "d94f238f098f164ae30e5859b24a2bf906f4b7ca3ece97931e12efb3abec9dda",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          456
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 39,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Future Fishing And Cooldown Reset Trinket TODO 2026-09-01.md",
+      "lines": 208,
+      "sha256": "e8eacae1a3596a8ef4c2ef6864e3da77039418f38e82601d38ab7968c7e20d10",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          208
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 40,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\melee_skill_crafter_ranged_wave_attacks.md",
+      "lines": 261,
+      "sha256": "988ce69c0bc1234d62ee14b99714096027d676f25d469a66f35d506575320ed3",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          261
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 41,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Prepared Skin Contact Solver Proof 2026-09-15.md",
+      "lines": 319,
+      "sha256": "e8a6c228d0e2c9445a4116e37307691fff3a793014ebd835c62b9f847265ebe2",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          319
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 42,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Skill Crafter Implementation Stages 2026-04-24.md",
+      "lines": 346,
+      "sha256": "416cb0b5828d0393e7458360cb8b239bcb40e81ff58f44f4c46e26f7692e4081",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          346
+        ]
+      ],
+      "evidence_file": "additional_root_coverage.json"
+    },
+    {
+      "id": 43,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Skill Crafter Performance Recovery 2026-09-15.md",
+      "lines": 391,
+      "sha256": "17debdd25cc50b88ca685da6b5cf28aad051982988cb310b3b4960cfa2961ffd",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          391
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 44,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Skill Crafter TODO 2026-04-21.md",
+      "lines": 203,
+      "sha256": "3d4c0387d0bc577d94a68696b7f20c9d27d219f57fb6aeccc4c00bd22967fac4",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          203
+        ]
+      ],
+      "evidence_file": "additional_root_coverage.json"
+    },
+    {
+      "id": 45,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Skill Crafter Unified Implementation TODO 2026-04-30.md",
+      "lines": 986,
+      "sha256": "903aa4eabe45b0a523fad934197a3c4de11bde40a7080069ffbc93381d5850cd",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          986
+        ]
+      ],
+      "evidence_file": "additional_root_coverage.json"
+    },
+    {
+      "id": 46,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\the thing i figured out.md",
+      "lines": 139,
+      "sha256": "8f8e3198abc5257c13b4dcd7221b6e7fde74397a15c2f1bb1d29f6ac8e0743d9",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          139
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 47,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Two Digit Grip Plane Proof 2026-09-15.md",
+      "lines": 244,
+      "sha256": "0c9f0b24e85e2675b4129e28b65914398a00f5bb1e0ee564701846dfbf0f32ab",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          244
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 48,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Weapon Roll Wrist Tip Implementation 2026-09-14.md",
+      "lines": 143,
+      "sha256": "1d7737e80faee0d783c41ad11c16282ad457fb657578aa3ff11e0dd49c1e1956",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          143
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 49,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\agent-ready rule block for System 4 and System 5.md",
+      "lines": 330,
+      "sha256": "585bf2ac7565375c1632f237e4bda008577ce46d23a533ee79217b9de4f01fd5",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          330
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 50,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\AGENT_GUARDRAILS.md",
+      "lines": 34,
+      "sha256": "415da80bdecf02a49bf3544f58dc296ee049008bba67c3298dccb2777d4deefc",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          34
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 51,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\AGENT_HANDOFF_WORKFLOW_LAW_2026-05-26.md",
+      "lines": 430,
+      "sha256": "1f076627960bf4cca7f96fd61c469a3a0676e9ab81f8df15cd82e699e8ae3687",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          430
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 52,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\articulated segment  joint system.md",
+      "lines": 683,
+      "sha256": "cadb65991bb07d0c9f911f38805ec3692ebc89801ea49aee50fb001a6240cf16",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          683
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 53,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\base material tres list.txt",
+      "lines": 518,
+      "sha256": "072c804fba1294f7b48ac889377517f9a5f3ba0d221d0df318b043e4624341af",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          518
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 54,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\big w crafting.txt",
+      "lines": 1046,
+      "sha256": "e1328dac0d94c71b7d6c377cefa8b109182701eb0c86471a42834649e8138855",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          1046
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 55,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\Bow  Ranged Specialization.md",
+      "lines": 527,
+      "sha256": "0bfdfa215a8c5b11f780e49ce1691bdb975dc59e49bc174538afc25b9991cf9f",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          527
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 56,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\chat resume.md",
+      "lines": 3,
+      "sha256": "0e577fdbb2df8aeb197749d5ac195edbbed2a9943fec41420bcdb650f342d4e3",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          3
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 57,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\clean rule pack for next resolvers.md",
+      "lines": 616,
+      "sha256": "64d82c369e96847cc5d96fef717b6fe3e2db91892fd977826d8588572a7beac9",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          616
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 58,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\crafting  and other.txt",
+      "lines": 231,
+      "sha256": "bd0a9f059de2e4b245021ba9401f48cd5ff725c9436a230d172912673ec38ffd",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          231
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 59,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\Crafting Atoms v0.1a.txt",
+      "lines": 591,
+      "sha256": "0510ddacc2b4f3c075b806d76b844ba4aaf44a39a6a0bba61984f47249dcb392",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          591
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 60,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\CURRENT STATE OF THE WILL - IMPLEMENTATION MEMORY.md",
+      "lines": 6612,
+      "sha256": "d9ad8c04fe06ebd682bbebc7b03fdfdfdc3d0f4c28e3962147599a3f43523636",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          6612
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 61,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\DECISION_LEDGER_FIRST_SLICE.md",
+      "lines": 25,
+      "sha256": "b9ae74ca189c10429e057dc72cd6e486cf161781eae645e4ad856271f711e49c",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          25
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 62,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\forge material pipeline framework.txt",
+      "lines": 1046,
+      "sha256": "e1328dac0d94c71b7d6c377cefa8b109182701eb0c86471a42834649e8138855",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          1046
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 63,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\FULL_REPO_AUDIT_FIX_LEDGER_2026-04-01.md",
+      "lines": 481,
+      "sha256": "b484c792e85a2288ed7f7c88cd2638262d144e764ebe28868010d0eee8b64616",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          481
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 64,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\GDD v0.01.txt",
+      "lines": 342,
+      "sha256": "ffd77fcbb52b27c3c47959e0d0f5d8ac0c04d1f78f610541e424a7926acf0d20",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          342
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 65,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\GDD v0.02 (Consolidated).txt",
+      "lines": 581,
+      "sha256": "8f2356344533ca8f43d2b6e532129da372b5b137f12c7f4bfc0439a2006ef107",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          581
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 66,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\godot project architecture skeleton.txt",
+      "lines": 633,
+      "sha256": "e69bde529cba21adca6dd219f848800bf181b5f78da5eb97d13d60c0f7da52e7",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          633
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 67,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\godot structure .txt",
+      "lines": 633,
+      "sha256": "e69bde529cba21adca6dd219f848800bf181b5f78da5eb97d13d60c0f7da52e7",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          633
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 68,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\GODOT_DEVELOPMENT_GUIDE.txt",
+      "lines": 430,
+      "sha256": "b2a2b5e32c139c05e0b7de1c6e11d6f1217c74fa4dbf0bb1a4d105b6b54564d1",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          430
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 69,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\immersive world narative.txt",
+      "lines": 333,
+      "sha256": "bdfb71353411404d5feba829a41e02c7f080b6d2b39bdc9cd325e9b77f6365b8",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          333
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 70,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\IMPLEMENTATION_DATA_MODEL_SPEC_2026-03-23.md",
+      "lines": 608,
+      "sha256": "25ff8114db8042b8939b5a7b9b1c719111818490356266695046cdd506dc5da6",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          608
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 71,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\Joint Articulation Rules.md",
+      "lines": 562,
+      "sha256": "72f15c3ff1e8f81d8c3fbff98f93b55047487d31bbf81b0ac8ba020ea6d8edd5",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          562
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 72,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\LIVE_EXPORTED_KNOB_REGISTRY.md",
+      "lines": 1060,
+      "sha256": "cc5f6f0bcfd690b4371434df4fff69ff03e43d9903c4da8be63f996ace3400d8",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          1060
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 73,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\material and naming shematics .txt",
+      "lines": 518,
+      "sha256": "072c804fba1294f7b48ac889377517f9a5f3ba0d221d0df318b043e4624341af",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          518
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 74,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\material systems  separation explanation.txt",
+      "lines": 540,
+      "sha256": "014383d83c322229129648ee2b866f005ae0953aae781cb273f29ef62e3e9daa",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          540
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 75,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\MATERIAL_SCHEMA_NOTES.md",
+      "lines": 33,
+      "sha256": "c5874d7f8e977422494093ea52dc66130a22812d69ce0b523a9850a583352227",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          33
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 76,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\menu system inspiration.md",
+      "lines": 565,
+      "sha256": "80d20119dd86114b413ce6427212f0a7afe4bc665a8e46b902351bbbb4dac25a",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          565
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 77,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\monstronomicon.md",
+      "lines": 451,
+      "sha256": "75077c7ce672b2c2564fa9d964cd4e88499c408a02221e760c334c4966cffd0a",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          451
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 78,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\More things-crafting and stats.txt",
+      "lines": 25,
+      "sha256": "07e3d5b46aee45644365524ae5b2ef3f61701a392d88bd059c676a463e33807a",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          25
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 79,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\naming.md",
+      "lines": 518,
+      "sha256": "45ee4eea68b1e6b3ac927b8be4dbb3f673b9261e20e75e7240f3c1ad83c0b213",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          518
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 80,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\NAMING_LAW.md",
+      "lines": 378,
+      "sha256": "f77cb572db9adb438a4be94d1fbb31cd228787dbf1cbd359b8246fc749380407",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          378
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 81,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\Notes-1.txt",
+      "lines": 60,
+      "sha256": "fdd2fdad92d5f9d09f02bcc167d49fa474eecfa1324fedfd2ca1ab29caef315b",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          60
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 82,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\PLAYER_COMBAT_INPUT_AND_WEAPON_HANDLING_WORKING_SPEC_2026-03-29.md",
+      "lines": 454,
+      "sha256": "b868453606e319a12b60aa0d9d82326a8db2796301b0456db26c906879dcefb0",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          454
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 83,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\project-aligned workaround.md",
+      "lines": 236,
+      "sha256": "75f887eced32c692f7e10739fec0d560b8adcd8a716871c5b0e5c820455f8000",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          236
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 84,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\PROJECT_OVERVIEW_AND_SCOPE - Copy.md",
+      "lines": 714,
+      "sha256": "f2a8896ed889ab72353314f54eae40138806b3d08f101839d781e8f777f0c82d",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          714
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 85,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\PROJECT_OVERVIEW_AND_SCOPE_corrected.txt",
+      "lines": 263,
+      "sha256": "9be041ff820faaf4effbc81eed2e9895d9cd2c2e48ce2f9de5c8229e04b73178",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          263
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 86,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\quirky-cuddling-mochi.md",
+      "lines": 435,
+      "sha256": "2c1e17acdf17a94e69421426fd4518650ac3cfa717749d4d736c9cd7e00d1513",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          435
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 87,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\RANGED_PHYSICAL_WEAPON_AND_SHIELD_FOUNDATION_SPEC_2026-04-02.md",
+      "lines": 405,
+      "sha256": "2a87ee4bcad1586b0ca2ab9c68f5903eb56b1eeef5059e0275539d59d6e1521b",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          405
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 88,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\remarks.txt",
+      "lines": 405,
+      "sha256": "bad1d27590aac61887e6389f4d4173879b3ba0132256bc5f8d10cc13a7fac949",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          405
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 89,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\REPO_ALIGNMENT_RECOVERY_SAVEPOINT_2026-04-13.md",
+      "lines": 159,
+      "sha256": "9687f38d66a43bfd8e8bc14020176e61b9f32864c508ad0ccecfeb3da87c18a0",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          159
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 90,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\SKILL_SYSTEM_CONSOLIDATED_REFERENCE_2026-04-12.md",
+      "lines": 1191,
+      "sha256": "a2501ee5caa675f1b73f62785051232d5df98590a066249a929ff25a4250b90d",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          1191
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 91,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\smallest implementation checklist per file.md",
+      "lines": 601,
+      "sha256": "2a1cb38027ab41c2eecc40bf89af046fd197715ae61ee52b73355f19884cdc37",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          601
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 92,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\STAGE 2 - UNIFIED VISUAL SHELL IMPLEMENTATION SPEC 2026-04-09.md",
+      "lines": 699,
+      "sha256": "c9a2e49465f31b949e4488bc782f67a7b3a0fb550b8da342c996efd0d0f1d248",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          699
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 93,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\stat capability ID Packs.txt",
+      "lines": 735,
+      "sha256": "6b45ea4b7b1eb691f443ee075ffa1b71c3ffff4f13ef30960149c03b1bf6ee51",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          735
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 94,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\SYSTEM_SHUTDOWN_SAVEPOINT_2026-04-02.md",
+      "lines": 220,
+      "sha256": "3d54dd1949b9d60de11a5c3ef8dfb70a87e2318af74bdbb11ad212927107f8c7",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          220
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 95,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\systems demo-1.txt",
+      "lines": 61,
+      "sha256": "8774cc2ad9ae9d6f1331d597d3991ead8df84123f73cb3fe0efa0c7413f65aac",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          61
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 96,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\The creation process.txt",
+      "lines": 238,
+      "sha256": "b68b8d39153943170c726299619c55ee0ee6b936cd6987136b4b99e742c6c36b",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          238
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 97,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\the forge guide.md",
+      "lines": 603,
+      "sha256": "edbc0ff3ddf734d959a6b79d7286f83c885f967279ca329fcb5e8e6f61daf0d6",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          603
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 98,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\the GAME FEEL.txt",
+      "lines": 333,
+      "sha256": "bdfb71353411404d5feba829a41e02c7f080b6d2b39bdc9cd325e9b77f6365b8",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          333
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 99,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\The Will game into plan.md",
+      "lines": 956,
+      "sha256": "83a8fc0705c069dfa1efe5f34a67562f3975650a6672172d1ec7c52ff8615d7b",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          956
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 100,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\THE WILL — .tres RESOURCE RULES.md",
+      "lines": 256,
+      "sha256": "f251ffd15156aa059dacf456d43a8a5788ae69c87d996de58ea99b1116e0fd86",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          256
+        ]
+      ],
+      "evidence_file": "root_coverage.json"
+    },
+    {
+      "id": 101,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\THE_WILL_Math_and_Variables_Cheat_Sheet_v0.01a.txt",
+      "lines": 398,
+      "sha256": "ec3c7e858a1716d2ec07a56f140c81815070f20ccf85b309f5cd4be188090384",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          398
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 102,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\thought process .txt",
+      "lines": 6332,
+      "sha256": "67f4c80a797aeebe73cd51ae367db5119542147fb779850f14427602c2490177",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          6332
+        ]
+      ],
+      "evidence_file": "legacy_coverage.json"
+    },
+    {
+      "id": 103,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\TOWN_GATE_FLOOR_FORGE_AUTHORITY_SAVEPOINT_2026-03-23.md",
+      "lines": 1012,
+      "sha256": "537d5b3b7dafd5d95eca99cda2fbcceca2cde847204ce5415248c9de471004d2",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          1012
+        ]
+      ],
+      "evidence_file": "history_coverage.json"
+    },
+    {
+      "id": 104,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\weapon balancing  expl 2.md",
+      "lines": 299,
+      "sha256": "711f90e71b229dd5f484a13d01c5af975273b81bdc43b52356c6b2593b92c918",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          299
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 105,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\weapon crafter v2.md",
+      "lines": 644,
+      "sha256": "344022cd09786db5ef87d9bcd6e6827e9a540b74e0788c26af7404ec2b93499a",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          644
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    },
+    {
+      "id": 106,
+      "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\weapon mechanics  and crfting  mechanics .txt",
+      "lines": 40,
+      "sha256": "b2c699e3caa8eec262dd855ffee3a68c4b4f60312ee1e69d91277d21764e3d6c",
+      "full_read": true,
+      "read_ranges": [
+        [
+          1,
+          40
+        ]
+      ],
+      "evidence_file": "supporting_coverage.json"
+    }
+  ],
+  "supplemental_files": [
+    {
+      "relative_path": "Josie\\License.txt",
+      "lines": 12,
+      "status": "fully_read",
+      "read_ranges": [
+        1,
+        12
+      ],
+      "semantic_grip_match": false,
+      "sha256": "5e88dd9c6ee1742593c10d0ba1eceab9d991bf2beaf73b3b5af11a5c53d8f213",
+      "created_local": "2026-04-08T20:53:34",
+      "modified_local": "2026-04-08T20:53:34"
+    },
+    {
+      "relative_path": "UPLOADED\\COLLABORATION_MINDSET.md",
+      "lines": 28,
+      "status": "fully_read",
+      "read_ranges": [
+        1,
+        28
+      ],
+      "semantic_grip_match": false,
+      "sha256": "7ca821257dd4b89c8cc9eeb887893173299b541ea767233750ba19d501ac293b",
+      "created_local": "2026-04-08T20:53:34",
+      "modified_local": "2026-04-08T20:53:34"
+    },
+    {
+      "relative_path": "UPLOADED\\DISASSEMBLY_BENCH_UI_WORKING_SPEC_2026-03-26.md",
+      "lines": 117,
+      "status": "fully_read",
+      "read_ranges": [
+        1,
+        117
+      ],
+      "semantic_grip_match": false,
+      "sha256": "88bf41c5ec61d391149f186bff20d6a225b94678e0a8032a9725d026b3250eae",
+      "created_local": "2026-04-08T20:53:34",
+      "modified_local": "2026-04-08T20:53:34"
+    },
+    {
+      "relative_path": "UPLOADED\\intro scene idea.txt",
+      "lines": 15,
+      "status": "fully_read",
+      "read_ranges": [
+        1,
+        15
+      ],
+      "semantic_grip_match": false,
+      "sha256": "e0f000dd4003dd198caf299900d59cd7f0ff40b018e3bd0d348dad27f3fd0773",
+      "created_local": "2026-04-08T20:53:34",
+      "modified_local": "2026-04-08T20:53:34"
+    },
+    {
+      "relative_path": "UPLOADED\\more game stuff.txt",
+      "lines": 41,
+      "status": "fully_read",
+      "read_ranges": [
+        1,
+        41
+      ],
+      "semantic_grip_match": false,
+      "sha256": "cbf554ea58ccc8c7d7d995505698ea35c3849e2fdaed0f14a02d8176661ad1d5",
+      "created_local": "2026-04-08T20:53:34",
+      "modified_local": "2026-04-08T20:53:34"
+    },
+    {
+      "relative_path": "UPLOADED\\rofile-replacement patch operations.md",
+      "lines": 80,
+      "status": "fully_read",
+      "read_ranges": [
+        1,
+        80
+      ],
+      "semantic_grip_match": false,
+      "sha256": "7b0a0e5b0aa0199dbba610dc17b24159d5d24cf387b7662d1f55dbacc1ae28d5",
+      "created_local": "2026-04-11T01:30:42",
+      "modified_local": "2026-04-11T01:31:31"
+    },
+    {
+      "relative_path": "UPLOADED\\the GAME.txt",
+      "lines": 266,
+      "status": "fully_read",
+      "read_ranges": [
+        1,
+        266
+      ],
+      "semantic_grip_match": false,
+      "sha256": "2ee674056d8fd333f456de487c214d8a0b15bb02b694d37763f6cc81fe606dbd",
+      "created_local": "2026-04-08T20:53:34",
+      "modified_local": "2026-04-08T20:53:34"
+    },
+    {
+      "relative_path": "UPLOADED\\THE_WILL_Math_and_Variables_Cheat_Sheet_v0.02b_atomic_first.txt",
+      "lines": 287,
+      "status": "fully_read",
+      "read_ranges": [
+        1,
+        287
+      ],
+      "semantic_grip_match": false,
+      "sha256": "a9ffaebebccd75ed5d4bc722f26474d8f1478671d47f53a9f7a3f31809731751",
+      "created_local": "2026-04-08T20:53:34",
+      "modified_local": "2026-04-08T20:53:34"
+    },
+    {
+      "relative_path": "UPLOADED\\weapon balancing  expl 1.md",
+      "lines": 42,
+      "status": "fully_read",
+      "read_ranges": [
+        1,
+        42
+      ],
+      "semantic_grip_match": false,
+      "sha256": "4a35b0a60c8885b0503491f4d5db98f2148a2e05581746a41345f10255bf91fc",
+      "created_local": "2026-04-08T20:53:34",
+      "modified_local": "2026-04-08T20:53:34"
+    }
+  ]
+}

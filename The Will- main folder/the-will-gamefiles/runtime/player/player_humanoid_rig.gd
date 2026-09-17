@@ -18,6 +18,7 @@ const TwoHandPoseSolverScript = preload("res://runtime/player/two_hand_pose_solv
 const GripDebugDrawScript = preload("res://runtime/player/grip_debug_draw.gd")
 const RuntimeBoneDebugDrawScript = preload("res://runtime/player/runtime_bone_debug_draw.gd")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+const CombatOriginRegistryScript = preload("res://core/resolvers/combat_origin_registry.gd")
 const RIGHT_HAND_BONE := &"CC_Base_R_Hand"
 const LEFT_HAND_BONE := &"CC_Base_L_Hand"
 const RIGHT_INDEX1_BONE := &"CC_Base_R_Index1"
@@ -496,6 +497,116 @@ func get_right_hand_item_anchor() -> Node3D:
 
 func get_left_hand_item_anchor() -> Node3D:
 	return rig_model_presenter.get_left_hand_item_anchor(self)
+
+## Capture after the authoring pose has settled at POST_FINAL_POSE.
+## This reads the Hand bone frame; it does not advance modifiers or resolve grip.
+func capture_authoring_wrist_origin(slot_id: StringName) -> Dictionary:
+	if slot_id != &"hand_right" and slot_id != &"hand_left":
+		return {"available": false, "reason": &"unknown_hand_slot"}
+	if not is_instance_valid(skeleton):
+		return {"available": false, "reason": &"missing_skeleton"}
+	if not skeleton.is_inside_tree():
+		return {"available": false, "reason": &"missing_skeleton_world_frame"}
+	var hand_bone_name: StringName = RIGHT_HAND_BONE if slot_id == &"hand_right" else LEFT_HAND_BONE
+	var wrist_origin_id: StringName = (
+		CombatOriginRecordScript.ORIGIN_RIGHT_WRIST if slot_id == &"hand_right"
+		else CombatOriginRecordScript.ORIGIN_LEFT_WRIST
+	)
+	var root_bone_index: int = skeleton.find_bone(String(CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT))
+	var hand_bone_index: int = skeleton.find_bone(String(hand_bone_name))
+	if root_bone_index < 0:
+		return {"available": false, "reason": &"missing_machine_root_bone"}
+	if hand_bone_index < 0:
+		return {"available": false, "reason": &"missing_hand_bone"}
+	var ancestor_index: int = hand_bone_index
+	var visited_bone_indices: Dictionary = {}
+	while ancestor_index >= 0 and ancestor_index < skeleton.get_bone_count():
+		if ancestor_index == root_bone_index:
+			break
+		if visited_bone_indices.has(ancestor_index):
+			return {"available": false, "reason": &"cyclic_hand_bone_ancestry"}
+		visited_bone_indices[ancestor_index] = true
+		ancestor_index = skeleton.get_bone_parent(ancestor_index)
+	if ancestor_index != root_bone_index:
+		return {"available": false, "reason": &"hand_bone_outside_machine_root"}
+	var root_bone_in_skeleton: Transform3D = skeleton.get_bone_global_pose(root_bone_index)
+	var hand_bone_in_skeleton: Transform3D = skeleton.get_bone_global_pose(hand_bone_index)
+	var skeleton_to_world: Transform3D = skeleton.global_transform
+	var source_transforms: Dictionary = {
+		&"root_bone_transform": root_bone_in_skeleton,
+		&"hand_bone_transform": hand_bone_in_skeleton,
+		&"skeleton_world_transform": skeleton_to_world,
+	}
+	for transform_name in source_transforms:
+		var source_transform: Transform3D = source_transforms[transform_name]
+		if not source_transform.basis.is_finite() or not source_transform.origin.is_finite():
+			return {"available": false, "reason": StringName("non_finite_%s" % transform_name)}
+		var determinant: float = source_transform.basis.determinant()
+		if not is_finite(determinant) or determinant == 0.0:
+			return {"available": false, "reason": StringName("non_invertible_%s" % transform_name)}
+	# The full bone ancestry is composed into this explicit wrist -> machine edge.
+	# Keep scale: inverse() would assume an orthonormal basis.
+	var wrist_to_machine: Transform3D = root_bone_in_skeleton.affine_inverse() * hand_bone_in_skeleton
+	var machine_to_world: Transform3D = skeleton_to_world * root_bone_in_skeleton
+	var derived_transforms: Dictionary = {
+		&"wrist_to_machine_transform": wrist_to_machine,
+		&"machine_to_world_transform": machine_to_world,
+	}
+	for transform_name in derived_transforms:
+		var derived_transform: Transform3D = derived_transforms[transform_name]
+		if not derived_transform.basis.is_finite() or not derived_transform.origin.is_finite():
+			return {"available": false, "reason": StringName("non_finite_%s" % transform_name)}
+		var determinant: float = derived_transform.basis.determinant()
+		if not is_finite(determinant) or determinant == 0.0:
+			return {"available": false, "reason": StringName("non_invertible_%s" % transform_name)}
+	var registry = CombatOriginRegistryScript.new()
+	var wrist_record = CombatOriginRecordScript.new()
+	wrist_record.origin_id = wrist_origin_id
+	wrist_record.parent_origin_id = CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+	wrist_record.transform_to_parent = wrist_to_machine
+	wrist_record.owner_system = &"player_humanoid_rig"
+	wrist_record.resolve_phase = CombatOriginRecordScript.PHASE_POST_FINAL_POSE
+	wrist_record.space_type = CombatOriginRecordScript.SPACE_TYPE_BONE_FRAME
+	wrist_record.is_dynamic = true
+	if not registry.register_origin(wrist_record):
+		return {"available": false, "reason": &"wrist_origin_registration_failed"}
+	var validation: Dictionary = registry.validate_origin_chain(wrist_origin_id)
+	if not bool(validation.get("ok", false)):
+		return {"available": false, "reason": validation.get("reason", &"invalid_wrist_origin_chain")}
+	var registered_record = registry.get_origin(wrist_origin_id)
+	registered_record.resolved_transform_to_machine = registry.resolve_transform_to_machine(wrist_origin_id)
+	return {
+		"available": true,
+		"reason": &"ok",
+		"wrist_origin_id": wrist_origin_id,
+		"hand_bone_name": hand_bone_name,
+		"origin_record": registered_record,
+		"origin_chain": registry.resolve_chain(wrist_origin_id),
+		"origin_chain_ids": validation["chain_ids"],
+		"registry": registry,
+		"machine_to_world": machine_to_world,
+	}
+
+## Final editor Roll writer. Only the Hand rotation may change; no IK or digits.
+func apply_authoring_wrist_roll_pose(slot_id: StringName, desired_hand_world: Transform3D) -> bool:
+	var current: Dictionary = capture_authoring_wrist_origin(slot_id)
+	if not bool(current.get("available", false)) or not desired_hand_world.is_finite():
+		return false
+	var hand_world: Transform3D = current["machine_to_world"] * current["origin_record"].resolved_transform_to_machine
+	if hand_world.origin.distance_to(desired_hand_world.origin) > 0.00001:
+		return false
+	var bone_name: StringName = current["hand_bone_name"]
+	var bone_index: int = skeleton.find_bone(String(bone_name))
+	var previous_rotation: Quaternion = skeleton.get_bone_pose_rotation(bone_index)
+	_apply_bone_world_basis(bone_name, desired_hand_world.basis, 1.0)
+	skeleton.force_update_all_bone_transforms()
+	var applied_world: Transform3D = skeleton.global_transform * skeleton.get_bone_global_pose(bone_index)
+	if not applied_world.is_equal_approx(desired_hand_world):
+		skeleton.set_bone_pose_rotation(bone_index, previous_rotation)
+		skeleton.force_update_all_bone_transforms()
+		return false
+	_sync_authoring_joint_range_debug_if_pose_changed()
+	return true
 
 func resolve_hand_grip_alignment_offset_origin_id(_slot_id: StringName) -> StringName:
 	return CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT

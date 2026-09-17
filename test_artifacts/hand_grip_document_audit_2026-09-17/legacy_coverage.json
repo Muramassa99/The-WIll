@@ -1,0 +1,230 @@
+﻿[
+    {
+        "id":  49,
+        "relative_path":  "UPLOADED\\agent-ready rule block for System 4 and System 5.md",
+        "sha256":  "585bf2ac7565375c1632f237e4bda008577ce46d23a533ee79217b9de4f01fd5",
+        "read_ranges":  [
+                            1,
+                            330
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  55,
+        "relative_path":  "UPLOADED\\Bow  Ranged Specialization.md",
+        "sha256":  "0bfdfa215a8c5b11f780e49ce1691bdb975dc59e49bc174538afc25b9991cf9f",
+        "read_ranges":  [
+                            1,
+                            527
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  56,
+        "relative_path":  "UPLOADED\\chat resume.md",
+        "sha256":  "0e577fdbb2df8aeb197749d5ac195edbbed2a9943fec41420bcdb650f342d4e3",
+        "read_ranges":  [
+                            1,
+                            3
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  64,
+        "relative_path":  "UPLOADED\\GDD v0.01.txt",
+        "sha256":  "ffd77fcbb52b27c3c47959e0d0f5d8ac0c04d1f78f610541e424a7926acf0d20",
+        "read_ranges":  [
+                            1,
+                            342
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  65,
+        "relative_path":  "UPLOADED\\GDD v0.02 (Consolidated).txt",
+        "sha256":  "8f2356344533ca8f43d2b6e532129da372b5b137f12c7f4bfc0439a2006ef107",
+        "read_ranges":  [
+                            1,
+                            581
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  69,
+        "relative_path":  "UPLOADED\\immersive world narative.txt",
+        "sha256":  "bdfb71353411404d5feba829a41e02c7f080b6d2b39bdc9cd325e9b77f6365b8",
+        "read_ranges":  [
+                            1,
+                            333
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  77,
+        "relative_path":  "UPLOADED\\monstronomicon.md",
+        "sha256":  "75077c7ce672b2c2564fa9d964cd4e88499c408a02221e760c334c4966cffd0a",
+        "read_ranges":  [
+                            1,
+                            451
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-19T18:47:30",
+        "modified_local":  "2026-04-19T19:15:33"
+    },
+    {
+        "id":  78,
+        "relative_path":  "UPLOADED\\More things-crafting and stats.txt",
+        "sha256":  "07e3d5b46aee45644365524ae5b2ef3f61701a392d88bd059c676a463e33807a",
+        "read_ranges":  [
+                            1,
+                            25
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  81,
+        "relative_path":  "UPLOADED\\Notes-1.txt",
+        "sha256":  "fdd2fdad92d5f9d09f02bcc167d49fa474eecfa1324fedfd2ca1ab29caef315b",
+        "read_ranges":  [
+                            1,
+                            60
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  84,
+        "relative_path":  "UPLOADED\\PROJECT_OVERVIEW_AND_SCOPE - Copy.md",
+        "sha256":  "f2a8896ed889ab72353314f54eae40138806b3d08f101839d781e8f777f0c82d",
+        "read_ranges":  [
+                            1,
+                            714
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  85,
+        "relative_path":  "UPLOADED\\PROJECT_OVERVIEW_AND_SCOPE_corrected.txt",
+        "sha256":  "9be041ff820faaf4effbc81eed2e9895d9cd2c2e48ce2f9de5c8229e04b73178",
+        "read_ranges":  [
+                            1,
+                            263
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  86,
+        "relative_path":  "UPLOADED\\quirky-cuddling-mochi.md",
+        "sha256":  "2c1e17acdf17a94e69421426fd4518650ac3cfa717749d4d736c9cd7e00d1513",
+        "read_ranges":  [
+                            1,
+                            435
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  88,
+        "relative_path":  "UPLOADED\\remarks.txt",
+        "sha256":  "bad1d27590aac61887e6389f4d4173879b3ba0132256bc5f8d10cc13a7fac949",
+        "read_ranges":  [
+                            1,
+                            405
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  92,
+        "relative_path":  "UPLOADED\\STAGE 2 - UNIFIED VISUAL SHELL IMPLEMENTATION SPEC 2026-04-09.md",
+        "sha256":  "c9a2e49465f31b949e4488bc782f67a7b3a0fb550b8da342c996efd0d0f1d248",
+        "read_ranges":  [
+                            1,
+                            699
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-09T01:15:40",
+        "modified_local":  "2026-04-09T16:04:38"
+    },
+    {
+        "id":  95,
+        "relative_path":  "UPLOADED\\systems demo-1.txt",
+        "sha256":  "8774cc2ad9ae9d6f1331d597d3991ead8df84123f73cb3fe0efa0c7413f65aac",
+        "read_ranges":  [
+                            1,
+                            61
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  96,
+        "relative_path":  "UPLOADED\\The creation process.txt",
+        "sha256":  "b68b8d39153943170c726299619c55ee0ee6b936cd6987136b4b99e742c6c36b",
+        "read_ranges":  [
+                            1,
+                            238
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  98,
+        "relative_path":  "UPLOADED\\the GAME FEEL.txt",
+        "sha256":  "bdfb71353411404d5feba829a41e02c7f080b6d2b39bdc9cd325e9b77f6365b8",
+        "read_ranges":  [
+                            1,
+                            333
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  99,
+        "relative_path":  "UPLOADED\\The Will game into plan.md",
+        "sha256":  "83a8fc0705c069dfa1efe5f34a67562f3975650a6672172d1ec7c52ff8615d7b",
+        "read_ranges":  [
+                            1,
+                            956
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    },
+    {
+        "id":  102,
+        "relative_path":  "UPLOADED\\thought process .txt",
+        "sha256":  "67f4c80a797aeebe73cd51ae367db5119542147fb779850f14427602c2490177",
+        "read_ranges":  [
+                            1,
+                            6332
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-08T20:53:34",
+        "modified_local":  "2026-04-08T20:53:34"
+    }
+]

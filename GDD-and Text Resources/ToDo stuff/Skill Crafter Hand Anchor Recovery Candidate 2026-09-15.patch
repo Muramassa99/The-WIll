@@ -1,0 +1,528 @@
+--- a/The Will- main folder/the-will-gamefiles/core/models/combat_origin_record.gd	
++++ b/The Will- main folder/the-will-gamefiles/core/models/combat_origin_record.gd	
+@@ -12,6 +12,8 @@
+ const ORIGIN_HAND_GRIP_ALIGNMENT: StringName = &"HandGripAlignmentOrigin"
+ const ORIGIN_RIGHT_WRIST: StringName = &"RightWristOrigin"
+ const ORIGIN_LEFT_WRIST: StringName = &"LeftWristOrigin"
++const ORIGIN_RIGHT_HAND_ITEM_ANCHOR: StringName = &"RightHandItemAnchorOrigin"
++const ORIGIN_LEFT_HAND_ITEM_ANCHOR: StringName = &"LeftHandItemAnchorOrigin"
+ const ORIGIN_PRIMARY_SHOULDER: StringName = &"PrimaryShoulderOrigin"
+ const ORIGIN_BRIDGE_START: StringName = &"BridgeStartOrigin"
+ const ORIGIN_BRIDGE_TARGET: StringName = &"BridgeTargetOrigin"
+--- a/The Will- main folder/the-will-gamefiles/runtime/player/player_humanoid_rig.gd	
++++ b/The Will- main folder/the-will-gamefiles/runtime/player/player_humanoid_rig.gd	
+@@ -501,6 +501,9 @@
+ ## Capture after the authoring pose has settled at POST_FINAL_POSE.
+ ## This reads the Hand bone frame; it does not advance modifiers or resolve grip.
+ func capture_authoring_wrist_origin(slot_id: StringName) -> Dictionary:
++	return _capture_hand_bone_origin(slot_id, CombatOriginRecordScript.PHASE_POST_FINAL_POSE)
++
++func _capture_hand_bone_origin(slot_id: StringName, resolve_phase: StringName) -> Dictionary:
+ 	if slot_id != &"hand_right" and slot_id != &"hand_left":
+ 		return {"available": false, "reason": &"unknown_hand_slot"}
+ 	if not is_instance_valid(skeleton):
+@@ -565,7 +568,7 @@
+ 	wrist_record.parent_origin_id = CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT
+ 	wrist_record.transform_to_parent = wrist_to_machine
+ 	wrist_record.owner_system = &"player_humanoid_rig"
+-	wrist_record.resolve_phase = CombatOriginRecordScript.PHASE_POST_FINAL_POSE
++	wrist_record.resolve_phase = resolve_phase
+ 	wrist_record.space_type = CombatOriginRecordScript.SPACE_TYPE_BONE_FRAME
+ 	wrist_record.is_dynamic = true
+ 	if not registry.register_origin(wrist_record):
+@@ -587,6 +590,53 @@
+ 		"machine_to_world": machine_to_world,
+ 	}
+ 
++## EDITOR_PREVIEW read, including intermediate acquisition poses. BoneAttachment3D
++## may still present the previous pose during this synchronous authoring update.
++func resolve_authoring_hand_item_anchor_world_transform_state(slot_id: StringName) -> Dictionary:
++	var captured: Dictionary = _capture_hand_bone_origin(slot_id, CombatOriginRecordScript.PHASE_EDITOR_PREVIEW)
++	if not bool(captured.get("available", false)):
++		return {"valid": false, "reason": captured.get("reason")}
++	var anchor: Node3D = get_right_hand_item_anchor() if slot_id == &"hand_right" else get_left_hand_item_anchor()
++	if not is_instance_valid(anchor):
++		return {"valid": false, "reason": &"missing_hand_item_anchor"}
++	var attachment: BoneAttachment3D = anchor.get_parent() as BoneAttachment3D
++	if attachment == null or attachment.get_parent() != skeleton or attachment.bone_name != String(captured["hand_bone_name"]) or attachment.override_pose:
++		return {"valid": false, "reason": &"invalid_hand_item_anchor_attachment"}
++	if not anchor.transform.is_finite() or not is_finite(anchor.transform.basis.determinant()) or anchor.transform.basis.determinant() == 0.0:
++		return {"valid": false, "reason": &"invalid_hand_item_anchor_transform"}
++	var anchor_record = CombatOriginRecordScript.new()
++	anchor_record.origin_id = (
++		CombatOriginRecordScript.ORIGIN_RIGHT_HAND_ITEM_ANCHOR if slot_id == &"hand_right"
++		else CombatOriginRecordScript.ORIGIN_LEFT_HAND_ITEM_ANCHOR
++	)
++	anchor_record.parent_origin_id = captured["wrist_origin_id"]
++	anchor_record.transform_to_parent = anchor.transform
++	anchor_record.owner_system = &"player_humanoid_rig"
++	anchor_record.resolve_phase = CombatOriginRecordScript.PHASE_EDITOR_PREVIEW
++	anchor_record.space_type = CombatOriginRecordScript.SPACE_TYPE_ANCHOR
++	anchor_record.is_dynamic = true
++	var registry = captured["registry"]
++	if not registry.register_origin(anchor_record):
++		return {"valid": false, "reason": &"hand_item_anchor_registration_failed"}
++	var validation: Dictionary = registry.validate_origin_chain(anchor_record.origin_id)
++	if not bool(validation.get("ok", false)):
++		return {"valid": false, "reason": &"invalid_hand_item_anchor_chain"}
++	anchor_record = registry.get_origin(anchor_record.origin_id)
++	anchor_record.resolved_transform_to_machine = registry.resolve_transform_to_machine(anchor_record.origin_id)
++	var transform_world: Transform3D = captured["machine_to_world"] * anchor_record.resolved_transform_to_machine
++	if not transform_world.is_finite() or not is_finite(transform_world.basis.determinant()) or transform_world.basis.determinant() == 0.0:
++		return {"valid": false, "reason": &"invalid_hand_item_anchor_world_transform"}
++	return {
++		"valid": true,
++		"transform_world": transform_world,
++		"transform_world_origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
++		"anchor_origin_id": anchor_record.origin_id,
++		"origin_record": anchor_record,
++		"origin_chain_ids": validation["chain_ids"],
++		"registry": registry,
++		"machine_to_world": captured["machine_to_world"],
++	}
++
+ ## Final editor Roll writer. Only the Hand rotation may change; no IK or digits.
+ func apply_authoring_wrist_roll_pose(slot_id: StringName, desired_hand_world: Transform3D) -> bool:
+ 	var current: Dictionary = capture_authoring_wrist_origin(slot_id)
+@@ -612,10 +662,29 @@
+ 	return CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
+ 
+ func resolve_hand_grip_alignment_offset_state(slot_id: StringName) -> Dictionary:
+-	return {
++	var result := {
+ 		"hand_alignment_offset_local": resolve_hand_grip_alignment_offset_local(slot_id),
+ 		"hand_alignment_offset_origin_id": resolve_hand_grip_alignment_offset_origin_id(slot_id),
+ 	}
++	if authoring_preview_mode_enabled:
++		var anchor_state: Dictionary = resolve_authoring_hand_item_anchor_world_transform_state(slot_id)
++		result["valid"] = bool(anchor_state.get("valid", false)) and (result["hand_alignment_offset_local"] as Vector3).is_finite()
++		if not bool(result["valid"]):
++			return result
++		# Existing alignment offsets are measured in the item-anchor frame. Declare
++		# that frame explicitly while retaining the established field/origin ID.
++		var alignment_record = CombatOriginRecordScript.new()
++		alignment_record.origin_id = CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT
++		alignment_record.parent_origin_id = anchor_state["anchor_origin_id"]
++		alignment_record.owner_system = &"player_humanoid_rig"
++		alignment_record.resolve_phase = CombatOriginRecordScript.PHASE_EDITOR_PREVIEW
++		alignment_record.space_type = CombatOriginRecordScript.SPACE_TYPE_HAND_ALIGNMENT
++		alignment_record.is_dynamic = true
++		var registry = anchor_state["registry"]
++		result["valid"] = registry.register_origin(alignment_record)
++		result["registry"] = registry
++		result["machine_to_world"] = anchor_state["machine_to_world"]
++	return result
+ 
+ func resolve_hand_grip_alignment_offset_local(slot_id: StringName) -> Vector3:
+ 	if skeleton == null:
+@@ -634,6 +703,12 @@
+ 		)
+ 	if grip_center_world.length_squared() <= 0.000001:
+ 		return Vector3.ZERO
++	if authoring_preview_mode_enabled:
++		var anchor_state: Dictionary = resolve_authoring_hand_item_anchor_world_transform_state(slot_id)
++		if not bool(anchor_state.get("valid", false)):
++			return Vector3.ZERO # Legacy unavailable-offset sentinel; state.valid is false.
++		var anchor_world: Transform3D = anchor_state["transform_world"]
++		return anchor_world.affine_inverse() * grip_center_world
+ 	return hand_anchor.to_local(grip_center_world)
+ 
+ func resolve_hand_grip_alignment_world_position(slot_id: StringName) -> Vector3:
+@@ -644,6 +719,11 @@
+ 	if hand_anchor == null:
+ 		return Vector3.ZERO
+ 	var grip_alignment_offset_local: Vector3 = resolve_hand_grip_alignment_offset_local(slot_id)
++	if authoring_preview_mode_enabled:
++		var anchor_state: Dictionary = resolve_authoring_hand_item_anchor_world_transform_state(slot_id)
++		if not bool(anchor_state.get("valid", false)):
++			return Vector3.ZERO # Legacy unavailable world target, relative to RL_BoneRoot.
++		return (anchor_state["transform_world"] as Transform3D) * grip_alignment_offset_local
+ 	return hand_anchor.to_global(grip_alignment_offset_local)
+ 
+ func resolve_hand_surface_seat_anatomy_state(slot_id: StringName) -> Dictionary:
+--- a/The Will- main folder/the-will-gamefiles/runtime/combat/combat_animation_station_preview_presenter.gd	
++++ b/The Will- main folder/the-will-gamefiles/runtime/combat/combat_animation_station_preview_presenter.gd	
+@@ -8126,9 +8126,9 @@
+ 	var grip_target_world: Vector3 = _resolve_preview_hand_grip_target_world(actor, _resolve_preview_dominant_slot_id())
+ 	if grip_target_world.length_squared() > 0.000001:
+ 		return grip_target_world
+-	var hand_anchor: Node3D = _resolve_preview_mount_anchor(actor)
+-	if hand_anchor != null and is_instance_valid(hand_anchor):
+-		return hand_anchor.global_position
++	var anchor_state: Dictionary = _resolve_preview_mount_anchor_world_transform_state(actor, _resolve_preview_dominant_slot_id())
++	if bool(anchor_state.get("valid", false)):
++		return (anchor_state["transform_world"] as Transform3D).origin
+ 	var primary_anchor: Node3D = weapon_grip_anchor_provider.get_primary_grip_anchor(held_item)
+ 	return primary_anchor.global_position if primary_anchor != null else Vector3.ZERO
+ 
+@@ -8290,6 +8290,12 @@
+ 			Vector3.ZERO,
+ 			hand_alignment_offset_origin_id
+ 		)
++		if not bool(hand_alignment_offset_state.get("valid", true)) or not grip_offset_local.is_finite():
++			return Vector3.ZERO # Existing missing-target sentinel in RL_BoneRoot world presentation.
++		if hand_alignment_offset_state.has("registry"):
++			var registry = hand_alignment_offset_state["registry"]
++			var offset_to_world: Transform3D = hand_alignment_offset_state["machine_to_world"] * registry.resolve_transform_to_machine(hand_alignment_offset_origin_id)
++			return offset_to_world * grip_offset_local
+ 		return hand_anchor.to_global(grip_offset_local)
+ 	return hand_anchor.global_position
+ 
+@@ -8332,6 +8338,23 @@
+ 		if hand_anchor != null and is_instance_valid(hand_anchor):
+ 			return hand_anchor
+ 	return null
++
++func _resolve_preview_mount_anchor_world_transform_state(actor: Node3D, slot_id: StringName) -> Dictionary:
++	if actor == null:
++		return {"valid": false, "reason": &"missing_actor"}
++	if actor.has_method("resolve_authoring_hand_item_anchor_world_transform_state"):
++		var state: Dictionary = actor.call("resolve_authoring_hand_item_anchor_world_transform_state", slot_id)
++		# An unavailable authoritative frame must not fall back to a stale attachment.
++		if not bool(state.get("valid", false)):
++			return state
++		if state.get("transform_world_origin_id") != CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT or not state.get("transform_world") is Transform3D:
++			return {"valid": false, "reason": &"invalid_hand_item_anchor_packet"}
++		return state
++	# Existing non-rig preview fixtures expose only a live scene anchor.
++	var anchor: Node3D = _resolve_preview_mount_anchor_for_slot(actor, slot_id)
++	if anchor == null or not anchor.global_transform.is_finite():
++		return {"valid": false, "reason": &"missing_compatible_hand_item_anchor"}
++	return {"valid": true, "transform_world": anchor.global_transform, "transform_world_origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT}
+ 
+ func _resolve_unarmed_hand_proxy_points_state(actor: Node3D, slot_id: StringName) -> Dictionary:
+ 	if actor == null:
+@@ -8452,23 +8475,26 @@
+ 	grip_local_override: Variant = null,
+ 	mount_local_transform_override: Variant = null
+ ) -> Transform3D:
+-	var hand_anchor: Node3D = _resolve_preview_mount_anchor(actor)
++	var anchor_state: Dictionary = _resolve_preview_mount_anchor_world_transform_state(actor, _resolve_preview_dominant_slot_id())
+ 	var mount_local_transform: Transform3D = (
+ 		mount_local_transform_override as Transform3D
+ 		if mount_local_transform_override is Transform3D
+ 		else _resolve_preview_hand_mount_local_transform(held_item)
+ 	)
+-	if hand_anchor == null or not is_instance_valid(hand_anchor):
++	if not bool(anchor_state.get("valid", false)):
+ 		return held_item.global_transform
++	var anchor_world: Transform3D = anchor_state["transform_world"]
+ 	var resolved_grip_local: Vector3 = (
+ 		grip_local_override as Vector3
+ 		if grip_local_override is Vector3
+ 		else _get_preview_primary_grip_seat_meta(held_item)
+ 	)
+ 	var grip_target_world: Vector3 = _resolve_preview_hand_grip_target_world(actor, _resolve_preview_dominant_slot_id())
+-	var solved_basis: Basis = (hand_anchor.global_basis * mount_local_transform.basis).orthonormalized()
++	var solved_basis: Basis = (anchor_world.basis * mount_local_transform.basis).orthonormalized()
++	if not grip_target_world.is_finite():
++		return held_item.global_transform
+ 	if grip_target_world.length_squared() <= 0.000001:
+-		return Transform3D(solved_basis, (hand_anchor.global_transform * mount_local_transform).origin)
++		return Transform3D(solved_basis, (anchor_world * mount_local_transform).origin)
+ 	var solved_origin: Vector3 = grip_target_world - solved_basis * resolved_grip_local
+ 	return Transform3D(solved_basis, solved_origin)
+ 
+--- a/The Will- main folder/the-will-gamefiles/runtime/player/player_equipped_item_presenter.gd	
++++ b/The Will- main folder/the-will-gamefiles/runtime/player/player_equipped_item_presenter.gd	
+@@ -515,6 +515,9 @@
+ 	)
+ 	if mesh == null or mesh.get_surface_count() == 0:
+ 		return null
++	var hand_alignment_offset_state: Dictionary = _resolve_hand_alignment_offset_state(humanoid_rig, slot_id)
++	if not bool(hand_alignment_offset_state.get("valid", true)) or not (hand_alignment_offset_state.get("hand_alignment_offset_local", Vector3.INF) as Vector3).is_finite():
++		return null
+ 	var held_root := Node3D.new()
+ 	held_root.name = StringName("%sHeldItem" % ("Right" if slot_id == &"hand_right" else "Left"))
+ 	var resolved_grip_style: StringName = CraftedItemWIP.resolve_supported_grip_style(saved_wip.grip_style_mode, saved_wip.forge_intent, saved_wip.equipment_context)
+@@ -616,7 +619,6 @@
+ 				support_hand_local_position,
+ 				support_hand_position_origin_id
+ 			)
+-	var hand_alignment_offset_state: Dictionary = _resolve_hand_alignment_offset_state(humanoid_rig, slot_id)
+ 	var hand_alignment_offset_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+ 		hand_alignment_offset_state,
+ 		"hand_alignment_offset_origin_id",
+@@ -2319,6 +2321,8 @@
+ 	var mount_transform: Transform3D = resolve_hand_mount_local_transform(held_item)
+ 	var target_contact_local: Vector3 = mount_transform.origin + mount_transform.basis * primary_grip_contact_local
+ 	var hand_alignment_offset_state: Dictionary = _resolve_hand_alignment_offset_state(humanoid_rig, slot_id)
++	if not bool(hand_alignment_offset_state.get("valid", true)) or not (hand_alignment_offset_state.get("hand_alignment_offset_local", Vector3.INF) as Vector3).is_finite():
++		return {}
+ 	var target_contact_origin_id: StringName = _resolve_origin_tracked_state_origin_id(
+ 		hand_alignment_offset_state,
+ 		"hand_alignment_offset_origin_id",
+--- a/The Will- main folder/the-will-gamefiles/COMBAT_COORDINATE_LAW.md	
++++ b/The Will- main folder/the-will-gamefiles/COMBAT_COORDINATE_LAW.md	
+@@ -283,3 +283,33 @@
+ This is the one-handed manipulation stage on either side. F generation, saving,
+ baking, runtime playback and two-handed behavior still require their own scoped
+ integration; this editor transaction does not establish their parity.
++
++### Current hand-item anchors during editor acquisition — 2026-09-15
++
++`PlayerHumanoidRig.resolve_authoring_hand_item_anchor_world_transform_state(slot)`
++reads the current bone pose during `editor_preview`. It does not read the possibly
++delayed world frame of `BoneAttachment3D`, advance a solver, or write a pose.
++Its per-call registry declares the full chain:
++
++```text
++RightHandItemAnchorOrigin / LeftHandItemAnchorOrigin
++  -> RightWristOrigin / LeftWristOrigin
++  -> RL_BoneRoot
++  -> machine_to_world presentation
++```
++
++The anchor-to-wrist edge is the existing authored item-anchor `Transform3D`.
++The wrist-to-machine edge is `inverse(root pose) * current Hand pose`; both records
++are owned by `player_humanoid_rig` in `editor_preview`. Basis and model scale are
++retained. Invalid ancestry, attachment, or transforms return `valid=false` without
++a usable frame. The public settled wrist capture used by Roll remains a separate
++`post_final_pose` read.
++
++During authoring, mounting and the local alignment-offset conversion use this same
++current anchor frame. The existing `hand_alignment_offset_local` field retains its
++`HandGripAlignmentOrigin` ID. Its returned state now provides a registry where that
++origin is an identity child of the selected item-anchor origin, matching the frame
++in which the offset is measured. Converting the offset through that chain yields
++the existing anatomical contact point; this does not move its definition to the
++wrist. The reader changes are confined to editor authoring. Runtime offset reads
++and the later F/save integration have not been migrated by this change.
+--- /dev/null
++++ b/The Will- main folder/the-will-gamefiles/tools/verify_authoring_hand_item_anchor.gd	
+@@ -0,0 +1,235 @@
++extends SceneTree
++
++const OriginScript = preload("res://core/models/combat_origin_record.gd")
++const POSITION_EPSILON := 0.00001
++
++class AnchorFixtureRig:
++	extends "res://runtime/player/player_humanoid_rig.gd"
++	var fixture_right_anchor: Node3D
++	var fixture_left_anchor: Node3D
++
++	func get_right_hand_item_anchor() -> Node3D:
++		return fixture_right_anchor
++
++	func get_left_hand_item_anchor() -> Node3D:
++		return fixture_left_anchor
++
++class AnchorFixturePresenter:
++	extends "res://runtime/combat/combat_animation_station_preview_presenter.gd"
++	var fixture_dominant_slot: StringName = &"hand_right"
++
++	func _resolve_preview_dominant_slot_id() -> StringName:
++		return fixture_dominant_slot
++
++var failures: PackedStringArray = []
++var checks := 0
++
++func _init() -> void:
++	call_deferred("_run")
++
++func _check(condition: bool, label: String) -> void:
++	checks += 1
++	if not condition:
++		failures.append(label)
++
++func _run() -> void:
++	var scene := Node3D.new()
++	root.add_child(scene)
++	scene.transform = Transform3D(Basis(Vector3.UP, 0.61), Vector3(4.0, -2.0, 7.0))
++	var fixture := Skeleton3D.new()
++	scene.add_child(fixture)
++	fixture.transform = Transform3D(Basis(Vector3.RIGHT, -0.27).scaled(Vector3.ONE * 0.764), Vector3(0.3, 1.1, -0.4))
++	var bone_names: Array[String] = [
++		"PresentationRoot", "RL_BoneRoot", "Forearm",
++		"CC_Base_R_Hand", "CC_Base_L_Hand",
++		"CC_Base_R_Index1", "CC_Base_R_Pinky1",
++		"CC_Base_L_Index1", "CC_Base_L_Pinky1",
++	]
++	for bone_name: String in bone_names:
++		fixture.add_bone(bone_name)
++	for bone_index: int in range(1, 5):
++		fixture.set_bone_parent(bone_index, 2 if bone_index >= 3 else bone_index - 1)
++		fixture.set_bone_pose_position(bone_index, Vector3(0.11 * bone_index, 0.16, -0.07))
++		fixture.set_bone_pose_rotation(bone_index, Quaternion(Vector3.FORWARD, 0.13 * bone_index))
++	for bone_index: int in range(5, 9):
++		fixture.set_bone_parent(bone_index, 3 if bone_index < 7 else 4)
++		fixture.set_bone_pose_position(bone_index, Vector3(-0.035 if bone_index % 2 == 1 else 0.035, 0.08, 0.012))
++	fixture.force_update_all_bone_transforms()
++	# Keep the rig outside the tree: no locomotion, grip solve, UI or save startup.
++	# Only anchor lookup is overridden; all coordinate/contact readers are real.
++	var rig := AnchorFixtureRig.new()
++	rig.skeleton = fixture
++	rig.authoring_preview_mode_enabled = true
++	for slot: StringName in [&"hand_right", &"hand_left"]:
++		var hand_index: int = 3 if slot == &"hand_right" else 4
++		var attachment := BoneAttachment3D.new()
++		fixture.add_child(attachment)
++		attachment.bone_name = bone_names[hand_index]
++		attachment.override_pose = false
++		var anchor := Node3D.new()
++		attachment.add_child(anchor)
++		anchor.transform = Transform3D(
++			Basis.from_euler(Vector3(0.12, 0.9 if slot == &"hand_right" else -0.7, -0.16)),
++			Vector3(-0.0025, 0.0969, 0.0190)
++		)
++		if slot == &"hand_right":
++			rig.fixture_right_anchor = anchor
++		else:
++			rig.fixture_left_anchor = anchor
++		attachment.transform = fixture.get_bone_global_pose(hand_index)
++		_check_slot(rig, fixture, slot, hand_index, anchor, false)
++		var previous_attachment: Transform3D = attachment.transform
++		fixture.set_bone_pose_position(hand_index, Vector3(0.7, -0.2, 0.3))
++		fixture.set_bone_pose_rotation(hand_index, Quaternion(Vector3.UP, 0.9))
++		# Compute current bones, then hold the real attachment at the last published
++		# frame. This makes the lag precondition independent of signal scheduling.
++		fixture.get_bone_global_pose(hand_index)
++		attachment.transform = previous_attachment
++		_check_slot(rig, fixture, slot, hand_index, anchor, true)
++		_check_invalid_anchor(rig, slot, anchor, attachment)
++	_check_invalid_bones(rig, fixture)
++	rig.skeleton = null
++	_check(not bool(rig.resolve_authoring_hand_item_anchor_world_transform_state(&"hand_right").get("valid", false)), "missing skeleton rejected")
++	rig.free()
++	scene.free()
++	print("HAND_ITEM_ANCHOR_RESULT=" + JSON.stringify({"checks": checks, "failures": failures, "ok": failures.is_empty()}))
++	quit(0 if failures.is_empty() else 1)
++
++func _check_slot(rig: AnchorFixtureRig, fixture: Skeleton3D, slot: StringName, hand_index: int, anchor: Node3D, stale: bool) -> void:
++	var label := "%s %s" % [slot, "stale" if stale else "settled"]
++	var before: Array[Transform3D] = []
++	for bone_index: int in range(fixture.get_bone_count()):
++		before.append(fixture.get_bone_pose(bone_index))
++	var attachment: BoneAttachment3D = anchor.get_parent() as BoneAttachment3D
++	var attachment_before: Transform3D = attachment.transform
++	var anchor_before: Transform3D = anchor.transform
++	var expected_world: Transform3D = fixture.global_transform * fixture.get_bone_global_pose(hand_index) * anchor.transform
++	_check(not expected_world.is_equal_approx(anchor.global_transform) if stale else expected_world.is_equal_approx(anchor.global_transform), "%s attachment precondition" % label)
++	var state: Dictionary = rig.resolve_authoring_hand_item_anchor_world_transform_state(slot)
++	_check(bool(state.get("valid", false)), "%s available" % label)
++	if not bool(state.get("valid", false)):
++		return
++	var expected_anchor_id: StringName = OriginScript.ORIGIN_RIGHT_HAND_ITEM_ANCHOR if slot == &"hand_right" else OriginScript.ORIGIN_LEFT_HAND_ITEM_ANCHOR
++	var expected_wrist_id: StringName = OriginScript.ORIGIN_RIGHT_WRIST if slot == &"hand_right" else OriginScript.ORIGIN_LEFT_WRIST
++	var record: Resource = state["origin_record"]
++	var registry = state["registry"]
++	var expected_chain: Array = [expected_anchor_id, expected_wrist_id, OriginScript.ORIGIN_RL_BONE_ROOT]
++	_check(state.get("anchor_origin_id") == expected_anchor_id and state.get("origin_chain_ids") == expected_chain, "%s named anchor/wrist/machine chain" % label)
++	_check(state.get("transform_world_origin_id") == OriginScript.ORIGIN_RL_BONE_ROOT, "%s declared presentation origin" % label)
++	_check(record.parent_origin_id == expected_wrist_id and record.transform_to_parent.is_equal_approx(anchor_before), "%s authored anchor edge" % label)
++	_check(record.resolve_phase == OriginScript.PHASE_EDITOR_PREVIEW and record.is_dynamic, "%s anchor phase/lifetime" % label)
++	_check(registry.get_origin(expected_wrist_id).resolve_phase == OriginScript.PHASE_EDITOR_PREVIEW, "%s wrist intermediate phase" % label)
++	_check(bool(registry.validate_origin_chain(expected_anchor_id).get("ok", false)), "%s valid registry chain" % label)
++	var registered_world: Transform3D = state["machine_to_world"] * registry.resolve_transform_to_machine(expected_anchor_id)
++	_check(registered_world.is_equal_approx(expected_world) and (state["transform_world"] as Transform3D).is_equal_approx(expected_world), "%s full affine world frame" % label)
++	var expected_machine: Transform3D = fixture.get_bone_global_pose(1).affine_inverse() * fixture.get_bone_global_pose(hand_index) * anchor_before
++	_check(record.resolved_transform_to_machine.is_equal_approx(expected_machine), "%s machine-relative basis/position/scale" % label)
++	var wrist: Dictionary = rig.capture_authoring_wrist_origin(slot)
++	_check(bool(wrist.get("available", false)) and wrist["origin_record"].resolve_phase == OriginScript.PHASE_POST_FINAL_POSE, "%s public wrist phase preserved" % label)
++	# Real production anatomy calculates C; the test only checks the frame bridge.
++	var contact_world: Vector3 = rig._resolve_anatomically_seated_hand_grip_center_world(slot, rig._resolve_hand_index_pinky_contact_center_world(slot))
++	var offset_state: Dictionary = rig.resolve_hand_grip_alignment_offset_state(slot)
++	var offset: Vector3 = offset_state.get("hand_alignment_offset_local", Vector3.INF)
++	_check(offset.is_finite() and contact_world.is_finite(), "%s finite contact/offset" % label)
++	_check(offset_state.get("hand_alignment_offset_origin_id") == OriginScript.ORIGIN_HAND_GRIP_ALIGNMENT, "%s contact origin distinct from wrist" % label)
++	_check(bool(offset_state.get("valid", false)) and offset_state.has("registry") and offset_state.has("machine_to_world"), "%s registered contact packet" % label)
++	if bool(offset_state.get("valid", false)) and offset_state.has("registry") and offset_state.has("machine_to_world"):
++		var offset_registry = offset_state["registry"]
++		var offset_record: Resource = offset_registry.get_origin(OriginScript.ORIGIN_HAND_GRIP_ALIGNMENT)
++		_check(offset_record.parent_origin_id == expected_anchor_id and offset_record.transform_to_parent.is_equal_approx(Transform3D.IDENTITY), "%s contact coordinate frame parent" % label)
++		var offset_to_world: Transform3D = offset_state["machine_to_world"] * offset_registry.resolve_transform_to_machine(OriginScript.ORIGIN_HAND_GRIP_ALIGNMENT)
++		_check(bool(offset_registry.validate_origin_chain(OriginScript.ORIGIN_HAND_GRIP_ALIGNMENT).get("ok", false)) and (offset_to_world * offset).distance_to(contact_world) <= POSITION_EPSILON, "%s registry reconstructs anatomical contact" % label)
++	_check((expected_world * offset).distance_to(contact_world) <= POSITION_EPSILON, "%s current anchor reconstructs contact from local offset" % label)
++	_check(rig.resolve_hand_grip_alignment_world_position(slot).distance_to(contact_world) <= POSITION_EPSILON, "%s world contact meaning preserved" % label)
++	_check_presenter_consumers(rig, fixture, slot, expected_world, contact_world, label)
++	if stale:
++		var legacy_offset: Vector3 = anchor.to_local(contact_world)
++		_check((expected_world * legacy_offset).distance_to(contact_world) > POSITION_EPSILON, "%s detects old mixed-frame offset" % label)
++		_check(anchor.to_global(offset).distance_to(contact_world) > POSITION_EPSILON, "%s detects stale presenter offset application" % label)
++	# Non-authoring behavior retains the existing attachment-based conversion.
++	rig.authoring_preview_mode_enabled = false
++	_check(rig.resolve_hand_grip_alignment_offset_local(slot).distance_to(anchor.to_local(contact_world)) <= POSITION_EPSILON, "%s non-authoring local path unchanged" % label)
++	rig.authoring_preview_mode_enabled = true
++	for bone_index: int in range(fixture.get_bone_count()):
++		_check(before[bone_index].is_equal_approx(fixture.get_bone_pose(bone_index)), "%s no bone write %d" % [label, bone_index])
++	_check(anchor.transform.is_equal_approx(anchor_before) and attachment.transform.is_equal_approx(attachment_before), "%s no anchor/attachment write" % label)
++
++func _check_presenter_consumers(rig: AnchorFixtureRig, fixture: Skeleton3D, slot: StringName, anchor_world: Transform3D, contact_world: Vector3, label: String) -> void:
++	var presenter := AnchorFixturePresenter.new()
++	presenter.fixture_dominant_slot = slot
++	var target_world: Vector3 = presenter._resolve_preview_hand_grip_target_world(rig, slot)
++	_check(target_world.is_finite() and target_world.distance_to(contact_world) <= POSITION_EPSILON, "%s presenter resolves registered anatomical contact" % label)
++	var held := Node3D.new()
++	fixture.get_parent().add_child(held)
++	held.transform = Transform3D(Basis(Vector3.FORWARD, -0.37), Vector3(-1.2, 0.7, 0.4))
++	var grip_local_weapon_root := Vector3(0.014, -0.021, 0.16)
++	var mount_local_transform := Transform3D(Basis.from_euler(Vector3(-0.2, 0.31, 0.14)), Vector3(0.027, 0.041, -0.019))
++	held.set_meta(presenter.PREVIEW_PRIMARY_GRIP_SEAT_LOCAL_META, grip_local_weapon_root)
++	held.set_meta(presenter.PREVIEW_PRIMARY_GRIP_SEAT_ORIGIN_META, OriginScript.ORIGIN_WEAPON_ROOT)
++	held.set_meta(presenter.PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_META, mount_local_transform)
++	held.set_meta(presenter.PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_ORIGIN_META, OriginScript.ORIGIN_HAND_GRIP_ALIGNMENT)
++	var held_before: Transform3D = held.transform
++	var held_world_before: Transform3D = held.global_transform
++	var mounted: Transform3D = presenter._resolve_preview_hand_mounted_transform(rig, held, grip_local_weapon_root, mount_local_transform)
++	var expected_basis: Basis = (anchor_world.basis * mount_local_transform.basis).orthonormalized()
++	_check(mounted.is_finite(), "%s presenter mount is finite" % label)
++	_check(mounted.basis.is_equal_approx(expected_basis), "%s presenter mount uses current anchor basis" % label)
++	_check((mounted * grip_local_weapon_root).distance_to(contact_world) <= POSITION_EPSILON, "%s mounted WeaponRoot grip reaches anatomical contact" % label)
++	_check(held.transform.is_equal_approx(held_before) and held.global_transform.is_equal_approx(held_world_before), "%s presenter mount reader leaves held item untouched" % label)
++	held.free()
++
++func _check_invalid_anchor(rig: AnchorFixtureRig, slot: StringName, anchor: Node3D, attachment: BoneAttachment3D) -> void:
++	if slot == &"hand_right":
++		rig.fixture_right_anchor = null
++	else:
++		rig.fixture_left_anchor = null
++	_check(not bool(rig.resolve_authoring_hand_item_anchor_world_transform_state(slot).get("valid", false)), "%s missing anchor rejected" % slot)
++	var unavailable_offset: Dictionary = rig.resolve_hand_grip_alignment_offset_state(slot)
++	_check(not bool(unavailable_offset.get("valid", true)), "%s missing anchor invalidates offset packet" % slot)
++	var presenter := AnchorFixturePresenter.new()
++	presenter.fixture_dominant_slot = slot
++	var held := Node3D.new()
++	attachment.get_parent().add_child(held)
++	held.transform = Transform3D(Basis(Vector3.RIGHT, 0.24), Vector3(0.4, -0.2, 0.7))
++	var grip_local_weapon_root := Vector3(0.014, -0.021, 0.16)
++	held.set_meta("weapon_tip_local", Vector3(0.01, 0.02, 0.51))
++	held.set_meta("weapon_tip_origin_id", OriginScript.ORIGIN_WEAPON_ROOT)
++	held.set_meta("primary_grip_contact_local", grip_local_weapon_root)
++	held.set_meta("primary_grip_contact_origin_id", OriginScript.ORIGIN_WEAPON_ROOT)
++	held.set_meta(presenter.PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_META, held.transform)
++	held.set_meta(presenter.PREVIEW_HAND_MOUNT_LOCAL_TRANSFORM_ORIGIN_META, OriginScript.ORIGIN_HAND_GRIP_ALIGNMENT)
++	var held_before: Transform3D = held.transform
++	var held_world_before: Transform3D = held.global_transform
++	var mounted: Transform3D = presenter._resolve_preview_hand_mounted_transform(rig, held, grip_local_weapon_root, held_before)
++	_check(mounted.is_finite() and mounted.is_equal_approx(held_world_before), "%s unavailable mount returns unchanged finite held frame" % slot)
++	var style_state: Dictionary = presenter.equipped_item_presenter.resolve_held_item_grip_style_state(held, rig, slot, &"grip_normal")
++	_check(style_state.is_empty(), "%s unavailable alignment rejects equipped grip-style candidate" % slot)
++	_check(held.transform.is_equal_approx(held_before) and held.global_transform.is_equal_approx(held_world_before), "%s invalid-frame consumers do not write held transform" % slot)
++	held.free()
++	if slot == &"hand_right":
++		rig.fixture_right_anchor = anchor
++	else:
++		rig.fixture_left_anchor = anchor
++	var previous_transform: Transform3D = anchor.transform
++	anchor.transform = Transform3D(Basis.from_scale(Vector3(0.0, 1.0, 1.0)), anchor.position)
++	_check(not bool(rig.resolve_authoring_hand_item_anchor_world_transform_state(slot).get("valid", false)), "%s singular anchor rejected" % slot)
++	anchor.transform = previous_transform
++	var previous_bone_name: String = attachment.bone_name
++	attachment.bone_name = "RL_BoneRoot"
++	_check(not bool(rig.resolve_authoring_hand_item_anchor_world_transform_state(slot).get("valid", false)), "%s wrong attachment bone rejected" % slot)
++	attachment.bone_name = previous_bone_name
++
++func _check_invalid_bones(rig: AnchorFixtureRig, fixture: Skeleton3D) -> void:
++	_check(not bool(rig.resolve_authoring_hand_item_anchor_world_transform_state(&"invalid_slot").get("valid", false)), "unknown slot rejected")
++	for slot: StringName in [&"hand_right", &"hand_left"]:
++		var hand_index: int = 3 if slot == &"hand_right" else 4
++		var previous_name: String = fixture.get_bone_name(hand_index)
++		fixture.set_bone_name(hand_index, "MissingHand")
++		_check(not bool(rig.resolve_authoring_hand_item_anchor_world_transform_state(slot).get("valid", false)), "%s missing Hand rejected" % slot)
++		fixture.set_bone_name(hand_index, previous_name)
++		fixture.set_bone_parent(hand_index, 0)
++		_check(not bool(rig.resolve_authoring_hand_item_anchor_world_transform_state(slot).get("valid", false)), "%s Hand outside machine ancestry rejected" % slot)
++		fixture.set_bone_parent(hand_index, 2)
++	fixture.set_bone_name(1, "MissingMachineRoot")
++	_check(not bool(rig.resolve_authoring_hand_item_anchor_world_transform_state(&"hand_right").get("valid", false)), "missing machine root rejected")
++	fixture.set_bone_name(1, "RL_BoneRoot")

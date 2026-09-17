@@ -1,0 +1,278 @@
+﻿{
+    "reader":  "history",
+    "files":  [
+                  {
+                      "id":  11,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_05_26_18-39.md",
+                      "total_lines":  115,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  115
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "884fa1d126975b50214e62e941469dbeee123435e3bc569c6010730031798000"
+                  },
+                  {
+                      "id":  12,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_05_27_00-38.md",
+                      "total_lines":  171,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  171
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "24b765eec736259263fd4a82c5fa6c2644c3e6684dabb258529963e58895c1e8"
+                  },
+                  {
+                      "id":  13,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_06_02_00-46.md",
+                      "total_lines":  681,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  681
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "e7a2d8af565d18cca477eb338340523112ef6455134d849bcb5e820281b98569"
+                  },
+                  {
+                      "id":  14,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_07_22_06-25.md",
+                      "total_lines":  582,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  582
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "94b718954560a5a517e33bf53e501cda37595accc074d59aa3bf14fd15d24196"
+                  },
+                  {
+                      "id":  15,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_07_26_08-37.md",
+                      "total_lines":  575,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  575
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "6143c2f3daf78f90d79e7c21632d7b65c153f4802759547d400b607c5b58b4d0"
+                  },
+                  {
+                      "id":  16,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_07_31_05-38.md",
+                      "total_lines":  415,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  415
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "8d730621893e84e52ba1dfbd06fa9866518a9d6ec2f9af7ff1814b939ddda2d5"
+                  },
+                  {
+                      "id":  17,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_10_22-49.md",
+                      "total_lines":  177,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  177
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "4fb2b0dbdbc2cbacc3d79757ddbfead4fd727968185ea660ab06a3d5fdb63d4e"
+                  },
+                  {
+                      "id":  18,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_12_05-07.md",
+                      "total_lines":  864,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  864
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "2495435ff6d8093aa5ddd9c95713243c51b829ccc90d6df337f54b7caf226341"
+                  },
+                  {
+                      "id":  19,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_14_01-11.md",
+                      "total_lines":  252,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  252
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "4724cf2776b5ff5cab063d2d2cbe72be0a58227bb232dec5489c47967d249170"
+                  },
+                  {
+                      "id":  20,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_16_22-37.md",
+                      "total_lines":  235,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  235
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "4dda6f9b18948d102b9231f76111c4436853f29dacf874701f2d0d4467a90d93"
+                  },
+                  {
+                      "id":  21,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_27_03-29.md",
+                      "total_lines":  339,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  339
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "e0036231949007483c3e8ef4e74f1ace561cd3edf36757340ceb7155cc680d25"
+                  },
+                  {
+                      "id":  22,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_29_09-52.md",
+                      "total_lines":  100,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  100
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "d7d3488d9137b8bfbc0115cf0063a46d5026639b072c776bc821ed5e03cb46cf"
+                  },
+                  {
+                      "id":  23,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_30_15-07.md",
+                      "total_lines":  204,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  204
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "a7eb47959415ebdd3ef061af65451c350d370bcb3806e9b78d0d3ea5c46aad73"
+                  },
+                  {
+                      "id":  24,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_08_30_16-42.md",
+                      "total_lines":  119,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  119
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "57cfb66f851677a00139253613c2b771f6f6e711cde7e733d5f0c4d824d639e4"
+                  },
+                  {
+                      "id":  25,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_09_01_07-04.md",
+                      "total_lines":  341,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  341
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "8931946c3a1579f1d058cdcd4a48a9d1ebf9a0473fa997661eed617f204a8f3b"
+                  },
+                  {
+                      "id":  60,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\CURRENT STATE OF THE WILL - IMPLEMENTATION MEMORY.md",
+                      "total_lines":  6612,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  6612
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "d9ad8c04fe06ebd682bbebc7b03fdfdfdc3d0f4c28e3962147599a3f43523636"
+                  },
+                  {
+                      "id":  61,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\DECISION_LEDGER_FIRST_SLICE.md",
+                      "total_lines":  25,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  25
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "b9ae74ca189c10429e057dc72cd6e486cf161781eae645e4ad856271f711e49c"
+                  },
+                  {
+                      "id":  63,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\FULL_REPO_AUDIT_FIX_LEDGER_2026-04-01.md",
+                      "total_lines":  481,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  481
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "b484c792e85a2288ed7f7c88cd2638262d144e764ebe28868010d0eee8b64616"
+                  },
+                  {
+                      "id":  89,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\REPO_ALIGNMENT_RECOVERY_SAVEPOINT_2026-04-13.md",
+                      "total_lines":  159,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  159
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "9687f38d66a43bfd8e8bc14020176e61b9f32864c508ad0ccecfeb3da87c18a0"
+                  },
+                  {
+                      "id":  94,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\SYSTEM_SHUTDOWN_SAVEPOINT_2026-04-02.md",
+                      "total_lines":  220,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  220
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "3d54dd1949b9d60de11a5c3ef8dfb70a87e2318af74bdbb11ad212927107f8c7"
+                  },
+                  {
+                      "id":  103,
+                      "path":  "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\TOWN_GATE_FLOOR_FORGE_AUTHORITY_SAVEPOINT_2026-03-23.md",
+                      "total_lines":  1012,
+                      "read_ranges":  [
+                                          {
+                                              "start":  1,
+                                              "end":  1012
+                                          }
+                                      ],
+                      "complete":  true,
+                      "sha256":  "537d5b3b7dafd5d95eca99cda2fbcceca2cde847204ce5415248c9de471004d2"
+                  }
+              ]
+}

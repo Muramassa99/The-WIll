@@ -210,3 +210,76 @@ body restriction collision proxy origins
 
 Noncombat idle is allowed to keep the weapon stowed and detached from hand grip. Combat idle and skills must follow the combat-authored origin chain.
 
+## Wrist References — 2026-09-14
+
+`RightWristOrigin` and `LeftWristOrigin` identify the anatomical wrist frames at
+`CC_Base_R_Hand` and `CC_Base_L_Hand`. They are distinct from the derived
+`HandGripAlignmentOrigin` contact point. The IDs are constants in
+`core/models/combat_origin_record.gd`; the producer is
+`PlayerHumanoidRig.capture_authoring_wrist_origin(slot_id)`.
+
+The producer validates that the requested Hand bone descends from `RL_BoneRoot`,
+then registers its complete affine frame, including basis and scale:
+
+```text
+RightWristOrigin / LeftWristOrigin
+  parent_origin_id = RL_BoneRoot
+  transform_to_parent = inverse(root bone pose in skeleton) * hand bone pose in skeleton
+  owner_system = player_humanoid_rig
+  resolve_phase = post_final_pose
+  space_type = bone_frame
+  is_dynamic = true
+
+machine_to_world = skeleton.global_transform * root bone pose in skeleton
+wrist_to_world = machine_to_world * registered wrist transform to machine
+```
+
+This composes the existing bone ancestry into one explicit wrist-to-machine edge;
+it does not introduce another independent zero or require a scene marker node.
+Use `affine_inverse()` so model scale is retained. Scene/world presentation is
+the final conversion, not the wrist's coordinate authority.
+
+The caller must capture after the grip and body pose have settled. The producer
+reads the current pose; it does not advance modifiers, settle grip, or write
+bones. A Roll operation must retain that settled wrist reference while applying
+its angle. Recapturing from intermediate solver output would change authority.
+
+The returned packet contains `wrist_origin_id`, `origin_record`, a validated
+`origin_chain`/`origin_chain_ids`, its registry, and `machine_to_world`. Missing
+bones, wrong ancestry, absent scene/world presentation, and nonfinite or singular
+transforms produce `available=false` with a reason. Consumers must check that
+flag; they must not substitute an identity frame or an anonymous zero.
+
+The registry's generic defaults intentionally do not contain placeholder wrist
+frames. Actual wrist records are registered only after successful capture.
+`tools/verify_authoring_wrist_origin.gd` exercises this reference API.
+
+### One-handed Roll manipulation — 2026-09-15
+
+`CombatWeaponRollResolver.resolve()` consumes the settled wrist capture plus the
+actual weapon frame and its explicitly `WeaponRoot`-local Tip. It rotates Hand
+and weapon together about wrist-to-Tip by requested angle minus captured angle.
+The source capture is immutable. The output registry describes the resulting
+full wrist and weapon frames, each parented to `RL_BoneRoot`, owned by
+`combat_weapon_roll_resolver` in `editor_preview`. This output phase follows the
+settled `post_final_pose` capture; it does not share its mutable records.
+
+`CombatAnimationWeaponRollManipulator` owns the editor transaction. It registers
+`TrajectoryAuthoringOrigin -> RL_BoneRoot` using
+`inverse(machine_to_world) * trajectory.global_transform`, owner
+`combat_animation_weapon_roll_manipulator`, phase `editor_preview`. Endpoint
+writeback carries `TrajectoryAuthoringOrigin` explicitly. The existing endpoint
+frame representation must reproduce the complete output weapon transform before
+either live pose is written. Invalid origins or unrepresentable frames reject
+the request with a reason.
+
+The rig writer changes only the selected Hand bone's rotation. The editor holds
+the settled arm, body and finger articulation; it must not reopen their solvers
+during Roll or on pointer release. Passive collision observation may update
+restriction proxies and diagnostics but cannot correct the pose. Retention is
+invalidated by changed motion properties, geometry/origin IDs, actor/weapon
+identity, skeleton frame/version/bone poses, or trajectory frame.
+
+This is the one-handed manipulation stage on either side. F generation, saving,
+baking, runtime playback and two-handed behavior still require their own scoped
+integration; this editor transaction does not establish their parity.

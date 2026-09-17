@@ -1,0 +1,352 @@
+[
+  {
+    "id": 6,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\PROJECT ORIENTATION AND AUTHORITY MAP.md",
+    "lines": 643,
+    "read_ranges": [
+      [
+        1,
+        643
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "cdf8625dd704f7e1a5ac5fcec6f4040af73ffe04df70adef3c8cd40e60fb9ccb",
+    "note": "Current consolidated orientation: lines88-116 separate user intent/code/fresh verification/history; lines134-165 scope, no unrequested rollback/renaming/commit/push, reportdominoeffects. Lines444-501 contactspancontinuity, equipment-slotdominance, authoredmotionnode/curveownership, RL_BoneRootoriginchains. 503-549 SPS and sunset CURRENTSTATE/KNOB/NAMINGtrackers. July system state is timestamped, not September truth. Fullread initialoutput hadtruncation270-435 rereadfully; all643linescovered."
+  },
+  {
+    "id": 50,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\AGENT_GUARDRAILS.md",
+    "lines": 34,
+    "read_ranges": [
+      [
+        1,
+        34
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "415da80bdecf02a49bf3544f58dc296ee049008bba67c3298dccb2777d4deefc",
+    "note": "Global guardrails full34lines: do not invent/rename/scopeexpand; officialGodotfirst; gameplaybakedstate; dependencydefs->models->resolvers->services->runtime->UI. Notgripdesign."
+  },
+  {
+    "id": 71,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\Joint Articulation Rules.md",
+    "lines": 562,
+    "read_ranges": [
+      [
+        1,
+        562
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "72f15c3ff1e8f81d8c3fbff98f93b55047487d31bbf81b0ac8ba020ea6d8edd5",
+    "note": "Joint Articulation Rules is WEAPON articulated-segment grammar, NOT anatomicalriglimits. Lines15-30 explicitlyseparate AnchorResolver(primarygrip/handle/handanchors). 36-68 localcrossplaneA/B,chainC repeated2voxelunits.139-235square/rectangularspin/hingemodes;371-406 ownership;544-545 localnotworldaxes. Nohandtriangulationimplementation; olderV1material/voxelrules."
+  },
+  {
+    "id": 52,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\articulated segment  joint system.md",
+    "lines": 683,
+    "read_ranges": [
+      [
+        1,
+        683
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "cadb65991bb07d0c9f911f38805ec3692ebc89801ea49aee50fb001a6240cf16",
+    "note": "Articulated segment joint system predecessor/proposal, matching71domain.18-25AnchorResolvergripvsJointResolverarticulation; square/rectangularDOF and2voxelrigidunits.627-628 localaxes;658-664 expresslydo not rewriteAnchorResolver/ProfileResolver/combatyet. Notcharacterhand3pointcontact."
+  },
+  {
+    "id": 46,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\the thing i figured out.md",
+    "lines": 139,
+    "read_ranges": [
+      [
+        1,
+        139
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "8f8e3198abc5257c13b4dcd7221b6e7fde74397a15c2f1bb1d29f6ac8e0743d9",
+    "note": "User-authored anatomicalIK note (createdApr23modifiedApr27).8-66 spine/clavicle/upperarm/forearm/twist/Hand limits, mirroredsigns.69-82all30digitbones CC_Base_[L/R]_{Thumb,Index,Mid,Ring,Pinky}1/2/3, localYX plane/Zhinge.87-97hierarchicalIK/contactgroup owns handchildren, bothhandsadjustrespectiveIK.104-124unarmed two orientationpoints Hand->Index1 andHand->Pinky1 equivalentTip/Pommel.130twohands sameweaponTip/Pommel individuallysolved.133-139replacebody-plane withweaponrollpathing. HistoricalRollwordingmustreconcileacceptedSept14wrist-tiproll. NOthirdpalmpoint/triangulationinthisdoc."
+  },
+  {
+    "id": 82,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\PLAYER_COMBAT_INPUT_AND_WEAPON_HANDLING_WORKING_SPEC_2026-03-29.md",
+    "lines": 454,
+    "read_ranges": [
+      [
+        1,
+        454
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "b868453606e319a12b60aa0d9d82326a8db2796301b0456db26c906879dcefb0",
+    "note": "March29working spec, explicitlynotallimplemented(7-10).16-27normal/reverse perweaponrespectedineitherhand.29-56OLD reverse melee-only, disables2handtechniques,+25%attackspeed; this is potential historicalpolicyconflictwithcurrentcombination-neutralgeometry requirement, do notsilentlyreapply.146-156skillsfollowowningweapon,2handavailabilitybasedequipment.99-110bounds futureanti-clipping; otherinput/stow/dodge/UIplansfullread. Noanatomicaltriangulation."
+  },
+  {
+    "id": 87,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\RANGED_PHYSICAL_WEAPON_AND_SHIELD_FOUNDATION_SPEC_2026-04-02.md",
+    "lines": 405,
+    "read_ranges": [
+      [
+        1,
+        405
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "2a87ee4bcad1586b0ca2ab9c68f5903eb56b1eeef5059e0275539d59d6e1521b",
+    "note": "Apr2ranged/shieldfoundation; 155-180four-pointbowstringmapping(A1,A2,bowalignmentholdinghand,firinghandpull).notgripseattriangulation.182-219independentcraftedendpointspacing/normalizeddraw.302-324shieldfixedhandleandoutwardmannequinrestrictedbuild.386-405firstfoundationliveclaims; handconnected4pointstringNOTLIVE. Sourceearlycounts6markerpairsauthoringnotruntimeproof."
+  },
+  {
+    "id": 3,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\Combat System Canonical Truth 2026-04-21.md",
+    "lines": 577,
+    "read_ranges": [
+      [
+        1,
+        577
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "e9b207100348c2add5844840db264773d5ace0a7ab058511867c2cb3efdae702",
+    "note": "Canonical Truth Apr21, full577lines. 285-312 finger contact preserved from upper-body overrides; 314-330 geometry grip/endcap authority; 378-392 contact-span continuity. Historical body-plane/Stage1 rules require later authority reconciliation. No explicit three-point palm algorithm."
+  },
+  {
+    "id": 7,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\Runtime Combat Editor Visual and System Addendum.md",
+    "lines": 354,
+    "read_ranges": [
+      [
+        1,
+        354
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "0884bff963a841eb6991bede95e79a2463e55d7e0777f2d24686cecb1049fbe9",
+    "note": "Apr9 Visual and System Addendum, full354lines. Line237 explicitly weapon center of mass and grip-point triangulation influence motion. Conceptual handling intent, not implementation record or defined palm measurements. Truncated initial middle reread in full."
+  },
+  {
+    "id": 8,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\Runtime Melee Combat Editor Visual-System.md",
+    "lines": 430,
+    "read_ranges": [
+      [
+        1,
+        430
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "9759da1861bbd63eec62d281a3ebd6e7687424f9c38ecd03bdb677b784b37baa",
+    "note": "Apr9 Visual-System annex, full430lines. 291-305 especially297 grip relation/grip triangulation among mass/balance/CoM inputs. No algorithm or implementation proof."
+  },
+  {
+    "id": 80,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\NAMING_LAW.md",
+    "lines": 378,
+    "read_ranges": [
+      [
+        1,
+        378
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "f77cb572db9adb438a4be94d1fbb31cd228787dbf1cbd359b8246fc749380407",
+    "note": "NAMING_LAW full378lines; createdApr8 modifiedApr26, sunset per consolidated. 373-378 weapon-authored frame and per-node primary slot. No palm triangulation algorithm. Truncated initial read replaced by full378line read."
+  },
+  {
+    "id": 100,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\THE WILL — .tres RESOURCE RULES.md",
+    "lines": 256,
+    "read_ranges": [
+      [
+        1,
+        256
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "f251ffd15156aa059dacf456d43a8a5788ae69c87d996de58ea99b1116e0fd86",
+    "note": "TRES resource rules full256lines; immutable definitions, separate runtime state/save resources, behavior outside resource. No hand triangulation. UTF8 inventory-path decoding required."
+  },
+  {
+    "id": 51,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\AGENT_HANDOFF_WORKFLOW_LAW_2026-05-26.md",
+    "lines": 430,
+    "read_ranges": [
+      [
+        1,
+        430
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "1f076627960bf4cca7f96fd61c469a3a0676e9ab81f8df15cd82e699e8ae3687",
+    "note": "SPS law full430lines. Nine-section snapshot, no push implied, new snapshot not rewrite; historical tracker clauses overridden by consolidated. No grip triangulation."
+  },
+  {
+    "id": 90,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\UPLOADED\\SKILL_SYSTEM_CONSOLIDATED_REFERENCE_2026-04-12.md",
+    "lines": 1191,
+    "read_ranges": [
+      [
+        1,
+        1191
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "a2501ee5caa675f1b73f62785051232d5df98590a066249a929ff25a4250b90d",
+    "note": "Apr12 consolidated skill reference full1191lines in three contiguous chunks. 476-492 grip axis from furthest valid endcap slice centers; 518-541 dominant-hand projected seat determines tip/pommel. 677-720 independent hand slide vs weapon axial move. 543-570 historical axial roll, 572-642 historical body trajectory plane; Sept wrist-Tip user rule supersedes. No palm three-point centering implementation."
+  },
+  {
+    "id": 9,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\Runtime Weapon-Owned Melee Skill Crafter 1.md",
+    "lines": 926,
+    "read_ranges": [
+      [
+        1,
+        926
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "14615bcdfab8194bd283d7ef96fa355c7eca852042d77b7581478cc935100945",
+    "note": "Apr9 initial functional skill crafter full926lines in two chunks. Weapon-owned drafts, point-chain authoring, optional future grip/1H/2H/reverse fields204-210; no hand triangulation. Legacy F restart behavior superseded later cancel law; no dense bone authoring."
+  },
+  {
+    "id": 10,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\Runtime Weapon-Owned Melee Skill Crafter-2.md",
+    "lines": 557,
+    "read_ranges": [
+      [
+        1,
+        557
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "885cc07545142abec9bb7a56860991ff0a7bbea7786cfd9af85d45e25f37b55d",
+    "note": "Apr9 stricter skill brief full557lines. Shared editor/runtime/inspection chain playback313-344, immutable preview and weapon-owned persistence. No detailed hand geometry/triangulation."
+  },
+  {
+    "id": 26,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_09_12_04-02_questionable.md",
+    "lines": 520,
+    "read_ranges": [
+      [
+        1,
+        520
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "6911934e2d2427dc9f6d13433ccd9b925328ce50661b051b36d6855d63e4fd7d",
+    "note": "Questionable Sept12 SPS full520lines in two chunks. Mixed/unaccepted Roll and unrequested Support changes, tracked from92b8a24. Index-Pinky seat part of attempted support pipeline148-179; multiple tests red; source of backup not authority to restore. User later rollback and accepted wrist-Tip Roll supersede axial Roll description."
+  },
+  {
+    "id": 27,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_09_14_12-24.md",
+    "lines": 60,
+    "read_ranges": [
+      [
+        1,
+        60
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "59c326069b8417e285c038d9a1491619e1a650a089eb2a9f28c0e2acbe454205",
+    "note": "Sept14 rollback SPS full60lines. Active recovery branch92b8a24, d798cc01 preserved; no source restore via historical SPS. Wrist-Tip intended, no grip rewrite. GPU caution superseded."
+  },
+  {
+    "id": 28,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\SPS\\SPS_2026_09_15_12-57.md",
+    "lines": 229,
+    "read_ranges": [
+      [
+        1,
+        229
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "85262682b268c649ba6228c8894da7cf4e83bd5efb808562044b40172ea9c299",
+    "note": "Sept15 SPS full229lines. Accepted rigid wrist-Tip roll; production hinge/surface algorithms not lost in rollback55-59. Character measured Middle/Thumb proof unresolved contact, no full-hand certification. Preserve captured baseline before changing seat; same-hand deformation required."
+  },
+  {
+    "id": 30,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Character Creation Full Hand Preparation TODO 2026-09-15.md",
+    "lines": 52,
+    "read_ranges": [
+      [
+        1,
+        52
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "50fb5a11221239835cf27ab0d39e00237f4e83110a2687785e8e110cb159d464",
+    "note": "Full-hand character preparation TODO full52lines. Future10digits+palms, measured character output reused/invalidate changed model, no live integration yet. Weapon specific contact still unsolved."
+  },
+  {
+    "id": 31,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Combat Editor Original Intent Digest 2026-04-30.md",
+    "lines": 370,
+    "read_ranges": [
+      [
+        1,
+        370
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "38e25c2cf3be04be59a94054cc32c37903d96dd520cda0948e7696bb60a03ba4",
+    "note": "Apr30 original intent digest full370lines. 293-315 repeats grip relation/triangulation as future weapon-feel input after legal-motion foundation. Not palm centering algorithm. 282-291 removes stance/stow authority from Stage1 while retaining geometry/material truth."
+  },
+  {
+    "id": 41,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Prepared Skin Contact Solver Proof 2026-09-15.md",
+    "lines": 319,
+    "read_ranges": [
+      [
+        1,
+        319
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "e8a6c228d0e2c9445a4116e37307691fff3a793014ebd835c62b9f847265ebe2",
+    "note": "Prepared solver proof full319lines. Sept16 exact skin baseline crossings survive coherent neighboring poses; other fingers influence Middle slice. Current Index/Pinky seat not palm certification218-224. Two-dimensional movement permission244-257 differs from anatomy/contact measurements. User normal/reverse/eitherhand/twohand requirements259-280. Need audit historical hand-derived center before changing placement."
+  },
+  {
+    "id": 43,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Skill Crafter Performance Recovery 2026-09-15.md",
+    "lines": 391,
+    "read_ranges": [
+      [
+        1,
+        391
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "17debdd25cc50b88ca685da6b5cf28aad051982988cb310b3b4960cfa2961ffd",
+    "note": "Performance recovery full391lines in two chunks. Active accepted Roll and exact UI lookupreuse; no grasp certification.135-147 restored and backup digit hinges/surface solver identical; no lost digit algorithm.267-272 bone-derived palm frame is not surface proof. Initialmount cachedRun/SlowRun anatomy retained; current seat and full-digit gates differ. Character resource and planar proof future."
+  },
+  {
+    "id": 47,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Two Digit Grip Plane Proof 2026-09-15.md",
+    "lines": 244,
+    "read_ranges": [
+      [
+        1,
+        244
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "0c9f0b24e85e2675b4129e28b65914398a00f5bb1e0ee564701846dfbf0f32ab",
+    "note": "Two-digit proof full244lines. Full measured skin retains shared weights; round capsules rejected. Full held object contact within reach for every digit while selected Handle owns placement. Cached sourcegeometry, originchains, performance timings are bounded tool evidence, no live fullgrip."
+  },
+  {
+    "id": 48,
+    "path": "C:\\WORKSPACE\\GDD-and Text Resources\\ToDo stuff\\Weapon Roll Wrist Tip Implementation 2026-09-14.md",
+    "lines": 143,
+    "read_ranges": [
+      [
+        1,
+        143
+      ]
+    ],
+    "status": "full_read",
+    "sha256": "1d7737e80faee0d783c41ad11c16282ad457fb657578aa3ff11e0dd49c1e1956",
+    "note": "Wrist-Tip implementation full143lines. RigidHand+weapon Roll, fixedWrist/Tip and unchangedupstream/fingers useraccepted140. NamedWrist->RL_BoneRoot, readonlycapture. F/save/runtime andtwohandintegrationdeferred. No grip-centering construction."
+  }
+]

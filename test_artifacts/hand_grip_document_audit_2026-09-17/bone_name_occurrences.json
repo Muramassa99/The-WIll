@@ -1,0 +1,476 @@
+{
+  "RL_BoneRoot": [
+    {
+      "id": 6,
+      "line": 494
+    },
+    {
+      "id": 27,
+      "line": 14
+    },
+    {
+      "id": 28,
+      "line": 27
+    },
+    {
+      "id": 30,
+      "line": 33
+    },
+    {
+      "id": 41,
+      "line": 32
+    },
+    {
+      "id": 43,
+      "line": 164
+    },
+    {
+      "id": 43,
+      "line": 259
+    },
+    {
+      "id": 47,
+      "line": 70
+    },
+    {
+      "id": 48,
+      "line": 22
+    }
+  ],
+  "CC_Base_R_Forearm": [
+    {
+      "id": 24,
+      "line": 50
+    },
+    {
+      "id": 42,
+      "line": 108
+    },
+    {
+      "id": 46,
+      "line": 30
+    },
+    {
+      "id": 46,
+      "line": 31
+    },
+    {
+      "id": 46,
+      "line": 36
+    },
+    {
+      "id": 60,
+      "line": 884
+    },
+    {
+      "id": 60,
+      "line": 5262
+    }
+  ],
+  "LR_BoneRoot": [
+    {
+      "id": 42,
+      "line": 39
+    },
+    {
+      "id": 42,
+      "line": 40
+    },
+    {
+      "id": 42,
+      "line": 174
+    },
+    {
+      "id": 42,
+      "line": 193
+    }
+  ],
+  "CC_Base_L_Forearm": [
+    {
+      "id": 42,
+      "line": 92
+    },
+    {
+      "id": 46,
+      "line": 58
+    },
+    {
+      "id": 46,
+      "line": 59
+    },
+    {
+      "id": 46,
+      "line": 63
+    },
+    {
+      "id": 60,
+      "line": 885
+    },
+    {
+      "id": 60,
+      "line": 5264
+    }
+  ],
+  "CC_Base_L_Hand": [
+    {
+      "id": 42,
+      "line": 93
+    },
+    {
+      "id": 46,
+      "line": 63
+    },
+    {
+      "id": 46,
+      "line": 65
+    },
+    {
+      "id": 46,
+      "line": 90
+    },
+    {
+      "id": 46,
+      "line": 110
+    },
+    {
+      "id": 46,
+      "line": 112
+    },
+    {
+      "id": 60,
+      "line": 738
+    },
+    {
+      "id": 60,
+      "line": 885
+    }
+  ],
+  "CC_Base_L_Index1": [
+    {
+      "id": 42,
+      "line": 94
+    },
+    {
+      "id": 46,
+      "line": 72
+    },
+    {
+      "id": 46,
+      "line": 110
+    }
+  ],
+  "CC_Base_L_Pinky1": [
+    {
+      "id": 42,
+      "line": 95
+    },
+    {
+      "id": 46,
+      "line": 75
+    },
+    {
+      "id": 46,
+      "line": 112
+    }
+  ],
+  "CC_Base_R_Hand": [
+    {
+      "id": 42,
+      "line": 109
+    },
+    {
+      "id": 46,
+      "line": 36
+    },
+    {
+      "id": 46,
+      "line": 37
+    },
+    {
+      "id": 46,
+      "line": 91
+    },
+    {
+      "id": 60,
+      "line": 738
+    },
+    {
+      "id": 60,
+      "line": 884
+    }
+  ],
+  "CC_Base_R_Index1": [
+    {
+      "id": 42,
+      "line": 110
+    },
+    {
+      "id": 46,
+      "line": 77
+    }
+  ],
+  "CC_Base_R_Pinky1": [
+    {
+      "id": 42,
+      "line": 111
+    },
+    {
+      "id": 46,
+      "line": 80
+    }
+  ],
+  "CC_Base_Spine01": [
+    {
+      "id": 46,
+      "line": 8
+    },
+    {
+      "id": 46,
+      "line": 12
+    },
+    {
+      "id": 60,
+      "line": 5527
+    }
+  ],
+  "CC_Base_Waist": [
+    {
+      "id": 46,
+      "line": 8
+    },
+    {
+      "id": 46,
+      "line": 90
+    },
+    {
+      "id": 46,
+      "line": 91
+    }
+  ],
+  "CC_Base_Spine02": [
+    {
+      "id": 46,
+      "line": 12
+    },
+    {
+      "id": 46,
+      "line": 16
+    },
+    {
+      "id": 46,
+      "line": 44
+    },
+    {
+      "id": 60,
+      "line": 5528
+    }
+  ],
+  "CC_Base_R_Clavicle": [
+    {
+      "id": 46,
+      "line": 16
+    },
+    {
+      "id": 46,
+      "line": 18
+    },
+    {
+      "id": 46,
+      "line": 20
+    },
+    {
+      "id": 46,
+      "line": 24
+    },
+    {
+      "id": 60,
+      "line": 843
+    },
+    {
+      "id": 60,
+      "line": 5529
+    }
+  ],
+  "CC_Base_R_Upperarm": [
+    {
+      "id": 46,
+      "line": 20
+    },
+    {
+      "id": 46,
+      "line": 22
+    },
+    {
+      "id": 46,
+      "line": 24
+    },
+    {
+      "id": 46,
+      "line": 25
+    },
+    {
+      "id": 46,
+      "line": 30
+    },
+    {
+      "id": 60,
+      "line": 884
+    },
+    {
+      "id": 60,
+      "line": 5261
+    }
+  ],
+  "CC_Base_R_UpperarmTwist01": [
+    {
+      "id": 46,
+      "line": 27
+    },
+    {
+      "id": 46,
+      "line": 28
+    }
+  ],
+  "CC_Base_R_ForearmTwist01": [
+    {
+      "id": 46,
+      "line": 33
+    },
+    {
+      "id": 46,
+      "line": 34
+    }
+  ],
+  "CC_Base_L_Clavicle": [
+    {
+      "id": 46,
+      "line": 44
+    },
+    {
+      "id": 46,
+      "line": 46
+    },
+    {
+      "id": 46,
+      "line": 48
+    },
+    {
+      "id": 46,
+      "line": 52
+    },
+    {
+      "id": 60,
+      "line": 842
+    },
+    {
+      "id": 60,
+      "line": 5530
+    }
+  ],
+  "CC_Base_L_Upperarm": [
+    {
+      "id": 46,
+      "line": 48
+    },
+    {
+      "id": 46,
+      "line": 50
+    },
+    {
+      "id": 46,
+      "line": 52
+    },
+    {
+      "id": 46,
+      "line": 53
+    },
+    {
+      "id": 46,
+      "line": 58
+    },
+    {
+      "id": 60,
+      "line": 885
+    },
+    {
+      "id": 60,
+      "line": 5263
+    }
+  ],
+  "CC_Base_L_UpperarmTwist01": [
+    {
+      "id": 46,
+      "line": 55
+    },
+    {
+      "id": 46,
+      "line": 56
+    }
+  ],
+  "CC_Base_L_ForearmTwist01": [
+    {
+      "id": 46,
+      "line": 61
+    },
+    {
+      "id": 46,
+      "line": 62
+    }
+  ],
+  "CC_Base_L_Thumb1": [
+    {
+      "id": 46,
+      "line": 71
+    }
+  ],
+  "CC_Base_L_Mid1": [
+    {
+      "id": 46,
+      "line": 73
+    }
+  ],
+  "CC_Base_L_Ring1": [
+    {
+      "id": 46,
+      "line": 74
+    }
+  ],
+  "CC_Base_R_Thumb1": [
+    {
+      "id": 46,
+      "line": 76
+    }
+  ],
+  "CC_Base_R_Mid1": [
+    {
+      "id": 46,
+      "line": 78
+    }
+  ],
+  "CC_Base_R_Ring1": [
+    {
+      "id": 46,
+      "line": 79
+    }
+  ],
+  "CC_Base_L_Thigh": [
+    {
+      "id": 60,
+      "line": 844
+    },
+    {
+      "id": 60,
+      "line": 846
+    }
+  ],
+  "CC_Base_R_Thigh": [
+    {
+      "id": 60,
+      "line": 845
+    },
+    {
+      "id": 60,
+      "line": 847
+    }
+  ]
+}

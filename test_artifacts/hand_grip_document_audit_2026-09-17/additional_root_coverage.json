@@ -1,0 +1,38 @@
+﻿[
+    {
+        "id":  42,
+        "relative_path":  "ToDo stuff\\Skill Crafter Implementation Stages 2026-04-24.md",
+        "sha256":  "416cb0b5828d0393e7458360cb8b239bcb40e81ff58f44f4c46e26f7692e4081",
+        "read_ranges":  [
+                            1,
+                            346
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-24T02:07:04",
+        "modified_local":  "2026-04-27T01:37:53"
+    },
+    {
+        "id":  44,
+        "relative_path":  "ToDo stuff\\Skill Crafter TODO 2026-04-21.md",
+        "sha256":  "3d4c0387d0bc577d94a68696b7f20c9d27d219f57fb6aeccc4c00bd22967fac4",
+        "read_ranges":  [
+                            1,
+                            203
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-21T19:00:56",
+        "modified_local":  "2026-04-24T02:07:04"
+    },
+    {
+        "id":  45,
+        "relative_path":  "ToDo stuff\\Skill Crafter Unified Implementation TODO 2026-04-30.md",
+        "sha256":  "903aa4eabe45b0a523fad934197a3c4de11bde40a7080069ffbc93381d5850cd",
+        "read_ranges":  [
+                            1,
+                            986
+                        ],
+        "status":  "fully_read",
+        "created_local":  "2026-04-30T00:03:35",
+        "modified_local":  "2026-08-30T10:32:10"
+    }
+]

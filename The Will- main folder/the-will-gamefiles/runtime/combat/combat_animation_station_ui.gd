@@ -216,6 +216,9 @@ var preview_camera_orbit_guard_until_msec: int = 0
 var editor_state_dirty: bool = false
 var preview_drag_override_node: CombatAnimationMotionNode = null
 var preview_drag_has_moved: bool = false
+var preview_weapon_roll_dragging: bool = false
+var preview_weapon_roll_pointer_start: Vector2
+var preview_weapon_roll_degrees_start: float = 0.0
 var preview_drag_refresh_pending: bool = false
 var preview_drag_last_refresh_msec: int = 0
 var preview_drag_first_pending_msec: int = 0
@@ -233,6 +236,9 @@ var preview_drag_effective_motion_node_chain_cache: Array = []
 var preview_drag_visible_motion_node_chain_cache: Array = []
 var preview_drag_visible_selected_node_index_cache: int = -1
 var preview_drag_last_refresh_cost_msec: int = 0
+var preview_authoring_lookup_scope_depth: int = 0
+var preview_authoring_lookup_station: Resource = null
+var preview_authoring_lookup_inputs: Array = []
 var debugger_view_enabled: bool = false
 var draft_validator: CombatAnimationDraftValidator = CombatAnimationDraftValidatorScript.new()
 var weapon_geometry_resolver = CombatAnimationWeaponGeometryResolverScript.new()
@@ -3430,6 +3436,14 @@ func _refresh_summary(status_message: String = "") -> void:
 func _refresh_preview_scene(
 	grip_resolve_reason: StringName = StringName()
 ) -> void:
+	var scoped_lookup: bool = motion_node_editor.is_dragging()
+	if scoped_lookup:
+		_begin_preview_authoring_lookup_scope()
+	_refresh_preview_scene_prepared(grip_resolve_reason)
+	if scoped_lookup:
+		_end_preview_authoring_lookup_scope()
+
+func _refresh_preview_scene_prepared(grip_resolve_reason: StringName) -> void:
 	_ensure_current_focus_available()
 	var baked_profile: BakedProfile = _get_active_baked_profile()
 	var playback_state: Dictionary = _build_preview_playback_state()
@@ -3450,13 +3464,15 @@ func _refresh_preview_scene(
 		if _can_reuse_pommel_drag_authority_commit():
 			playback_state["authoring_drag_endpoint_authority_prevalidated"] = true
 			playback_state["authoring_drag_endpoint_validation_result"] = preview_drag_pommel_last_validation_result
+	var draft: Resource = _get_active_draft()
+	var selected_node_index: int = int(draft.get("selected_motion_node_index")) if draft != null else 0
 	preview_presenter.configure_preview_hand_setup(_resolve_active_motion_node_primary_slot_id(), active_preview_default_two_hand)
 	preview_presenter.refresh_preview(
 		preview_view_container,
 		preview_subviewport,
 		active_wip,
-		_get_active_draft(),
-		get_selected_motion_node_index(),
+		draft,
+		selected_node_index,
 		session_state.current_focus,
 		baked_profile,
 		playback_state,
@@ -4621,10 +4637,37 @@ func _get_forge_wip_library_state() -> PlayerForgeWipLibraryState:
 		return null
 	return active_player.call("get_forge_wip_library_state")
 
+func _begin_preview_authoring_lookup_scope() -> void:
+	preview_authoring_lookup_scope_depth += 1
+
+func _end_preview_authoring_lookup_scope() -> void:
+	preview_authoring_lookup_scope_depth -= 1
+	if preview_authoring_lookup_scope_depth == 0:
+		preview_authoring_lookup_station = null
+		preview_authoring_lookup_inputs.clear()
+
 func _get_active_station_state() -> Resource:
 	if active_wip == null:
 		return null
-	return active_wip.ensure_combat_animation_station_state()
+	if preview_authoring_lookup_scope_depth == 0:
+		return active_wip.ensure_combat_animation_station_state()
+	# Nested draft/node getters share one preparation only within this synchronous
+	# authoring call. Selection and node values still come from the live Resources.
+	var ensure_inputs: Array = [
+		active_wip,
+		active_wip.combat_animation_station_state,
+		active_wip.forge_builder_path_id,
+		active_wip.equipment_context,
+		active_wip.grip_style_mode,
+		active_wip.stow_position_mode,
+		active_wip.latest_baked_profile_snapshot,
+	]
+	if preview_authoring_lookup_station != null and ensure_inputs == preview_authoring_lookup_inputs:
+		return preview_authoring_lookup_station
+	preview_authoring_lookup_station = active_wip.ensure_combat_animation_station_state()
+	ensure_inputs[1] = preview_authoring_lookup_station
+	preview_authoring_lookup_inputs = ensure_inputs
+	return preview_authoring_lookup_station
 
 func _get_active_drafts() -> Array[Resource]:
 	var station_state: Resource = _get_active_station_state()
@@ -5436,7 +5479,7 @@ func _ensure_preview_drag_motion_chain_cache() -> Dictionary:
 	if preview_drag_override_node == null:
 		return {}
 	var draft: Resource = _get_active_draft()
-	var selected_node_index: int = get_selected_motion_node_index()
+	var selected_node_index: int = int(draft.get("selected_motion_node_index")) if draft != null else 0
 	if (
 		preview_drag_chain_cache_draft == draft
 		and preview_drag_chain_cache_selected_index == selected_node_index
@@ -5477,6 +5520,7 @@ func _ensure_preview_drag_motion_chain_cache() -> Dictionary:
 	}
 
 func _clear_preview_drag_override() -> void:
+	preview_weapon_roll_dragging = false
 	preview_drag_override_node = null
 	preview_drag_has_moved = false
 	preview_drag_refresh_pending = false
@@ -5926,6 +5970,13 @@ func _apply_motion_node_curve_handle_state(target: CombatAnimationMotionNode, so
 	return changed
 
 func _finalize_preview_drag(status_message: String = "Motion node edit locked in.") -> void:
+	if preview_weapon_roll_dragging:
+		preview_weapon_roll_dragging = false
+		_refresh_motion_node_list()
+		_refresh_editor_fields()
+		# Keep the last accepted/rejected sample's feedback on release.
+		_refresh_summary()
+		return
 	if preview_drag_override_node == null:
 		if not status_message.strip_edges().is_empty():
 			footer_status_label.text = status_message
@@ -6801,6 +6852,21 @@ func set_selected_motion_node_weapon_roll(
 	refresh_preview: bool = true,
 	refresh_summary: bool = true
 ) -> bool:
+	_begin_preview_authoring_lookup_scope()
+	var changed: bool = _set_selected_motion_node_weapon_roll_prepared(
+		roll_degrees, persist_change, refresh_list, refresh_fields, refresh_preview, refresh_summary
+	)
+	_end_preview_authoring_lookup_scope()
+	return changed
+
+func _set_selected_motion_node_weapon_roll_prepared(
+	roll_degrees: float,
+	persist_change: bool,
+	refresh_list: bool,
+	refresh_fields: bool,
+	refresh_preview: bool,
+	refresh_summary: bool
+) -> bool:
 	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
 	if motion_node == null:
 		return false
@@ -6810,6 +6876,23 @@ func set_selected_motion_node_weapon_roll(
 	var resolved_roll: float = clampf(roll_degrees, -120.0, 120.0)
 	if is_equal_approx(motion_node.weapon_roll_degrees, resolved_roll):
 		return false
+	if preview_presenter.supports_weapon_roll_manipulation(preview_subviewport, motion_node, _get_active_draft()):
+		var result: Dictionary = preview_presenter.apply_weapon_roll_manipulation(preview_subviewport, motion_node, resolved_roll)
+		if not bool(result.get("available", false)):
+			if footer_status_label != null:
+				footer_status_label.text = "Weapon roll could not be applied: %s" % String(result.get("reason", "invalid pose"))
+			_refresh_editor_fields()
+			return false
+		_stage_active_wip_edit("Weapon roll updated.")
+		if refresh_list:
+			_refresh_motion_node_list()
+		if refresh_fields:
+			_refresh_editor_fields()
+		if refresh_preview:
+			_refresh_preview_scene()
+		if refresh_summary:
+			_refresh_summary("Weapon roll updated.")
+		return true
 	motion_node.weapon_roll_degrees = resolved_roll
 	motion_node.normalize()
 	_apply_motion_node_change(
@@ -7049,7 +7132,17 @@ func _on_debugger_view_toggled(enabled: bool) -> void:
 	)
 
 func _on_preview_gui_input(event: InputEvent) -> void:
-	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	var scoped_lookup: bool = (
+		(event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT)
+		or (event is InputEventMouseMotion and motion_node_editor.is_dragging() and not preview_camera_orbiting)
+	)
+	if scoped_lookup:
+		_begin_preview_authoring_lookup_scope()
+	_on_preview_gui_input_prepared(event)
+	if scoped_lookup:
+		_end_preview_authoring_lookup_scope()
+
+func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_RIGHT:
@@ -7067,6 +7160,7 @@ func _on_preview_gui_input(event: InputEvent) -> void:
 			if zoom_preview_camera(1):
 				preview_view_container.accept_event()
 			return
+		var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
 		if chain_player.is_playing() or motion_node == null:
 			return
 		if mb.button_index == MOUSE_BUTTON_LEFT:
@@ -7119,6 +7213,14 @@ func _on_preview_gui_input(event: InputEvent) -> void:
 					_reject_locked_motion_node_edit()
 					preview_view_container.accept_event()
 					return
+				if drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_WEAPON_ROTATION and preview_presenter.supports_weapon_roll_manipulation(preview_subviewport, motion_node, _get_active_draft()):
+					preview_weapon_roll_dragging = true
+					preview_weapon_roll_pointer_start = mb.position
+					preview_weapon_roll_degrees_start = motion_node.weapon_roll_degrees
+					motion_node_editor.begin_drag(drag_target, mb.position, motion_node)
+					footer_status_label.text = "Drag left or right to roll the weapon."
+					preview_view_container.accept_event()
+					return
 				_begin_preview_drag_override(pick_motion_node)
 				if _is_arm_roll_focus(session_state.current_focus):
 					motion_node_editor.begin_upperarm_roll_drag(drag_target, arm_roll_pick.get("roll_state", {}) as Dictionary)
@@ -7165,13 +7267,19 @@ func _on_preview_gui_input(event: InputEvent) -> void:
 			if orbit_preview_camera(mm.relative):
 				preview_view_container.accept_event()
 			return
-		if chain_player.is_playing() or motion_node == null:
+		if chain_player.is_playing():
 			return
 		if motion_node_editor.is_dragging():
+			if _get_active_motion_node() == null:
+				return
 			_handle_preview_drag(mm.position)
 			preview_view_container.accept_event()
 
 func _handle_preview_drag(screen_position: Vector2) -> void:
+	if preview_weapon_roll_dragging:
+		var requested_degrees: float = preview_weapon_roll_degrees_start + (screen_position.x - preview_weapon_roll_pointer_start.x) * 0.5
+		set_selected_motion_node_weapon_roll(requested_degrees, false, false, true, true, false)
+		return
 	var camera: Camera3D = _get_preview_camera()
 	var trajectory_root: Node3D = _get_preview_trajectory_root()
 	if camera == null or trajectory_root == null:

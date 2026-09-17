@@ -147,10 +147,11 @@ func get_weapon_axis_local(motion_node: CombatAnimationMotionNode) -> Vector3:
 		return Vector3.FORWARD
 	return axis.normalized()
 
-func get_weapon_rotation_normal_local(motion_node: CombatAnimationMotionNode) -> Vector3:
+func get_weapon_rotation_normal_local(motion_node: CombatAnimationMotionNode, orientation_override: Variant = null) -> Vector3:
 	if motion_node == null:
 		return Vector3.UP
-	var orientation_rad: Vector3 = motion_node.weapon_orientation_degrees * (PI / 180.0)
+	var orientation_degrees: Vector3 = orientation_override if orientation_override is Vector3 else motion_node.weapon_orientation_degrees
+	var orientation_rad: Vector3 = orientation_degrees * (PI / 180.0)
 	var rotation_basis: Basis = Basis.from_euler(orientation_rad)
 	var axis: Vector3 = get_weapon_axis_local(motion_node)
 	var desired_normal: Vector3 = rotation_basis * Vector3.UP
@@ -159,7 +160,7 @@ func get_weapon_rotation_normal_local(motion_node: CombatAnimationMotionNode) ->
 		desired_normal = Vector3.UP - axis * Vector3.UP.dot(axis)
 	if desired_normal.length_squared() <= 0.000001:
 		desired_normal = Vector3.RIGHT - axis * Vector3.RIGHT.dot(axis)
-	return desired_normal.normalized()
+	return desired_normal.normalized().rotated(axis, deg_to_rad(motion_node.weapon_roll_degrees))
 
 func get_weapon_rotation_handle_local(
 	motion_node: CombatAnimationMotionNode,

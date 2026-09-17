@@ -21,6 +21,8 @@ const CombatAnimationTrajectoryVolumeResolverScript = preload("res://core/resolv
 const CombatAnimationSpeedStateSamplerScript = preload("res://core/resolvers/combat_animation_speed_state_sampler.gd")
 const CombatCollisionLegalityResolverScript = preload("res://runtime/combat/combat_collision_legality_resolver.gd")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+const WeaponRollManipulatorScript = preload("res://runtime/combat/combat_animation_weapon_roll_manipulator.gd")
+var weapon_roll_manipulator = WeaponRollManipulatorScript.new()
 const PrimaryGripSeatResolverScript = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
 const PlayerHandSurfaceSeatSolverScript = preload(
 	"res://runtime/player/player_hand_surface_seat_solver.gd"
@@ -3526,6 +3528,62 @@ func _resolve_preview_replay_rotation(rotation_data: Variant) -> Quaternion:
 		return Quaternion(vector_rotation.x, vector_rotation.y, vector_rotation.z, vector_rotation.w)
 	return Quaternion.IDENTITY
 
+func supports_weapon_roll_manipulation(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode, active_draft: Resource) -> bool:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	return not context.is_empty() and motion != null and not _is_noncombat_idle_draft(active_draft) and not _is_unarmed_preview_item(context["weapon"]) and not _should_preview_use_support_hand(context["weapon"], motion)
+
+func apply_weapon_roll_manipulation(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode, requested_degrees: float) -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or motion == null:
+		return {"available": false, "reason": "missing_preview"}
+	var weapon: Node3D = context["weapon"]
+	if _should_preview_use_support_hand(weapon, motion) or _is_unarmed_preview_item(weapon):
+		return {"available": false, "reason": "one_handed_weapon_required"}
+	var tip_value: Variant = weapon.get_meta("weapon_tip_local", null)
+	var pommel_value: Variant = weapon.get_meta("weapon_pommel_local", null)
+	if not tip_value is Vector3 or not pommel_value is Vector3 or (tip_value as Vector3).distance_squared_to(pommel_value as Vector3) < 0.00000001:
+		return {"available": false, "reason": "missing_weapon_axis"}
+	var up_in_weapon: Vector3 = _resolve_weapon_local_up_reference(weapon, ((tip_value as Vector3) - (pommel_value as Vector3)).normalized())
+	var result: Dictionary = weapon_roll_manipulator.apply(context["actor"], weapon, context["trajectory"], motion, _resolve_preview_dominant_slot_id(), up_in_weapon, requested_degrees)
+	if bool(result.get("available", false)):
+		context["root"].set_meta("weapon_roll_manipulation_result", result)
+	return result
+
+func _weapon_roll_context(preview_subviewport: SubViewport) -> Dictionary:
+	if preview_subviewport == null:
+		return {}
+	var preview_root: Node3D = preview_subviewport.get_node_or_null(PREVIEW_ROOT_NAME) as Node3D
+	if preview_root == null:
+		return {}
+	var actor: Node3D = preview_root.get_node_or_null(NodePath(PREVIEW_ACTOR_PIVOT_NAME + "/" + PREVIEW_ACTOR_NAME)) as Node3D
+	var weapon: Node3D = preview_root.get_meta("preview_held_item", null) as Node3D
+	var trajectory: Node3D = preview_root.find_child(TRAJECTORY_ROOT_NAME, true, false) as Node3D
+	if not is_instance_valid(actor) or not is_instance_valid(weapon) or trajectory == null:
+		return {}
+	return {"actor": actor, "weapon": weapon, "trajectory": trajectory, "root": preview_root}
+
+func _publish_retained_weapon_roll_pose(preview_root: Node3D, actor: Node3D, trajectory: Node3D, weapon: Node3D, motion: CombatAnimationMotionNode, playback: Dictionary) -> Dictionary:
+	var resolved: Dictionary = playback.duplicate(true)
+	_set_tip_pommel_position_state(resolved, trajectory.to_local(weapon.to_global(_get_weapon_tip_meta(weapon))), trajectory.to_local(weapon.to_global(_get_weapon_pommel_meta(weapon))), CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	resolved["weapon_orientation_degrees"] = motion.weapon_orientation_degrees
+	resolved["weapon_roll_degrees"] = motion.weapon_roll_degrees
+	resolved.erase("grip_resolve_reason")
+	preview_root.set_meta("resolved_playback_state", resolved)
+	# Observe the resulting pose without moving it to resolve a collision or reach.
+	var collision: Dictionary = _evaluate_preview_collision_pose(actor, weapon, weapon.global_transform)
+	preview_root.set_meta("collision_pose_deferred", false)
+	preview_root.set_meta("collision_pose_legal", bool(collision.get("legal", true)))
+	preview_root.set_meta("collision_pose_illegal_sample_count", int(collision.get("illegal_sample_count", 0)))
+	preview_root.set_meta("collision_pose_region", String(collision.get("colliding_body_region", "")))
+	preview_root.set_meta("collision_pose_attachment", String(collision.get("colliding_body_attachment_name", "")))
+	preview_root.set_meta("collision_pose_sample", String(collision.get("colliding_sample_name", "")))
+	preview_root.set_meta("collision_pose_clearance_meters", float(collision.get("estimated_clearance_meters", -1.0)))
+	preview_root.set_meta("authoring_endpoint_legality_result", {"available": false, "reason": "arm_reach_not_resolved_for_rigid_roll"})
+	if motion.tip_position_origin_id == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING and motion.pommel_position_origin_id == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING:
+		preview_root.set_meta("weapon_tip_alignment_error_meters", weapon.to_global(_get_weapon_tip_meta(weapon)).distance_to(trajectory.to_global(motion.tip_position_local)))
+		preview_root.set_meta("weapon_pommel_alignment_error_meters", weapon.to_global(_get_weapon_pommel_meta(weapon)).distance_to(trajectory.to_global(motion.pommel_position_local)))
+	return resolved
+
 func _apply_authored_weapon_pose(
 	state: Dictionary,
 	selected_motion_node: CombatAnimationMotionNode,
@@ -3566,6 +3624,8 @@ func _apply_authored_weapon_pose(
 			active_draft,
 			stow_endpoints_already_display_local
 		)
+	if not bool(playback_state.get("active", false)) and not playback_state.has("grip_resolve_reason") and weapon_roll_manipulator.matches(actor, held_item, trajectory_root, selected_motion_node, _resolve_preview_dominant_slot_id()):
+		return _publish_retained_weapon_roll_pose(preview_root, actor, trajectory_root, held_item, selected_motion_node, playback_state)
 	preview_root.set_meta(PREVIEW_POSE_MODE_META, PREVIEW_POSE_MODE_HAND_AUTHORED)
 	_apply_preview_motion_grip_state(held_item, selected_motion_node, playback_state, actor)
 	_sync_preview_contact_axis_override(held_item, playback_state, trajectory_root)
@@ -4275,6 +4335,8 @@ func _apply_preview_open_mount_pose(
 	var actor: Node3D = actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D if actor_pivot != null else null
 	if held_item == null or not is_instance_valid(held_item):
 		return resolved_playback_state
+	if not bool(playback_state.get("active", false)) and weapon_roll_manipulator.matches(actor, held_item, trajectory_root, selected_motion_node, _resolve_preview_dominant_slot_id()):
+		return _publish_retained_weapon_roll_pose(preview_root, actor, trajectory_root, held_item, selected_motion_node, playback_state)
 	if actor != null:
 		if actor.has_method("reset_authoring_preview_baseline_pose"):
 			actor.call("reset_authoring_preview_baseline_pose", _resolve_preview_authoring_baseline_animation_name(actor, held_item, selected_motion_node))
@@ -8934,16 +8996,7 @@ func _resolve_weapon_rotation_normal_local(motion_node: CombatAnimationMotionNod
 	var axis: Vector3 = motion_node.tip_position_local - motion_node.pommel_position_local
 	if axis.length_squared() <= 0.000001:
 		return Vector3.UP
-	axis = axis.normalized()
-	var orientation_source: Vector3 = _resolve_motion_node_weapon_orientation_degrees(motion_node)
-	var orientation_rad: Vector3 = orientation_source * (PI / 180.0)
-	var desired_normal: Vector3 = Basis.from_euler(orientation_rad) * Vector3.UP
-	desired_normal -= axis * desired_normal.dot(axis)
-	if desired_normal.length_squared() <= 0.000001:
-		desired_normal = Vector3.UP - axis * Vector3.UP.dot(axis)
-	if desired_normal.length_squared() <= 0.000001:
-		desired_normal = Vector3.RIGHT - axis * Vector3.RIGHT.dot(axis)
-	return desired_normal.normalized()
+	return motion_node_editor.get_weapon_rotation_normal_local(motion_node, _resolve_motion_node_weapon_orientation_degrees(motion_node))
 
 func _render_endpoint_sphere_wireframe(immediate_mesh: ImmediateMesh, center: Vector3, radius: float) -> void:
 	if immediate_mesh == null:

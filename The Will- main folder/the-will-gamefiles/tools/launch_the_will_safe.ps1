@@ -15,7 +15,7 @@ param(
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectDir = (Resolve-Path (Join-Path $scriptDir "..")).Path
 $workspaceDir = (Resolve-Path (Join-Path $projectDir "..\\..")).Path
-$godotDir = Join-Path $workspaceDir "Godot_v4.6.1"
+$godotDir = Join-Path $workspaceDir "Godot_v4.7"
 $logDir = Join-Path $workspaceDir "godot_runs"
 
 if ($UseGui -and $Headless) {
@@ -35,9 +35,9 @@ if ($CheckOnly -and $ScriptPath -eq "") {
 }
 
 $godotExeName = if ($UseGui -or $Editor) {
-	"Godot_v4.6.1-stable_win64.exe"
+	"Godot_v4.7-stable_win64.exe"
 } else {
-	"Godot_v4.6.1-stable_win64_console.exe"
+	"Godot_v4.7-stable_win64_console.exe"
 }
 $godotExePath = Join-Path $godotDir $godotExeName
 

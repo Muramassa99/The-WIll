@@ -33,6 +33,15 @@ func _run() -> void:
 	var args_before := var_to_bytes(args)
 	var baseline := _build(args)
 	_check(bool(baseline.get("valid", false)) and baseline.get("signature") == source["signature"], "reconstructed build arguments match the actual baker signature")
+	var expected := {}
+	for slot: StringName in [&"hand_right", &"hand_left"]:
+		for digit_id: StringName in [&"thumb", &"index", &"middle", &"ring", &"pinky"]:
+			expected[String(slot) + "/" + String(digit_id)] = false
+	for packet: Dictionary in args["rule_packets"]:
+		var identity := String(packet["slot_id"]) + "/" + String(packet["rules"]["digit_id"])
+		if expected.has(identity):
+			expected[identity] = true
+	_check(args["rule_packets"].size() == 10 and not expected.values().has(false), "source signature covers all ten authored digit packets")
 	var repeated := _build(args)
 	_check(var_to_bytes(repeated) == var_to_bytes(baseline), "identical source produces identical signature and diagnostic manifest")
 	var reordered: Dictionary = _reverse_dictionary_order(args)
@@ -49,6 +58,17 @@ func _run() -> void:
 		var result := _build(changed)
 		_check(bool(result.get("valid", false)) and result.get("signature") != baseline["signature"], mutation + " invalidates the source signature")
 		_check(var_to_bytes(changed) == changed_before, mutation + " hashing leaves its source untouched")
+	for packet_index: int in range(args["rule_packets"].size()):
+		var packet: Dictionary = args["rule_packets"][packet_index]
+		if packet["rules"]["digit_id"] not in [&"index", &"ring", &"pinky"]:
+			continue
+		var changed: Dictionary = args.duplicate(true)
+		changed["rule_packets"][packet_index]["rules"]["max_angles_rad"][0] += 0.001
+		var changed_before := var_to_bytes(changed)
+		var result := _build(changed)
+		var identity := String(packet["slot_id"]) + "/" + String(packet["rules"]["digit_id"])
+		_check(bool(result.get("valid", false)) and result.get("signature") != baseline["signature"], identity + " added joint rule invalidates the source signature")
+		_check(var_to_bytes(changed) == changed_before, identity + " hashing leaves the mutated source untouched")
 	var missing: Dictionary = args.duplicate(true)
 	missing["capture"]["reference_skin"].erase("mesh_origin_record")
 	var rejected := _build(missing)

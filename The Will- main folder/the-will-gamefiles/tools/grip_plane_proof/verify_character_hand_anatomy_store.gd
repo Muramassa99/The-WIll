@@ -5,6 +5,7 @@ extends SceneTree
 const Store = preload("res://tools/grip_plane_proof/character_hand_anatomy_store.gd")
 const Origin = preload("res://core/models/combat_origin_record.gd")
 const Registry = preload("res://core/resolvers/combat_origin_registry.gd")
+const Rules = preload("res://runtime/player/player_digit_hinge_rules.gd")
 const LOOKUP_ITERATIONS := 10000
 const PRECISION_M := 0.000001
 var checks: Array[Dictionary] = []
@@ -94,6 +95,17 @@ func _test_mutations(loaded: Resource, store: RefCounted) -> void:
 	copy = loaded.duplicate(true)
 	copy.get("digits")[0]["relative_transform_origin_ids"][0] = copy.get("digits")[0]["bone_names"][0]
 	_check(not bool(store.validate(copy).get("valid", true)), "wrong but registered relative-transform parent origin rejected")
+	if String(loaded.get("preparation_revision")) == Store.FULL_HAND_PREPARATION_REVISION:
+		for index: int in range(loaded.get("digits").size()):
+			copy = loaded.duplicate(true)
+			var missing: Dictionary = copy.get("digits")[index]
+			copy.get("digits").remove_at(index)
+			var missing_result: Dictionary = store.validate(copy)
+			_check(not bool(missing_result.get("valid", true)) and missing_result.get("status") == "incomplete_full_hand_digit_coverage", "full-hand revision rejects missing " + String(missing.slot_id) + "/" + String(missing.digit_id))
+		copy = loaded.duplicate(true)
+		copy.get("digits")[0]["digit_id"] = &"unknown_digit"
+		var unknown_result: Dictionary = store.validate(copy)
+		_check(not bool(unknown_result.get("valid", true)) and unknown_result.get("status") == "incomplete_full_hand_digit_coverage", "ten entries with an unknown digit do not satisfy full-hand coverage")
 
 
 func _check_digits(loaded: Resource) -> void:
@@ -104,7 +116,15 @@ func _check_digits(loaded: Resource) -> void:
 		for key: String in ["origin_id", "parent_origin_id", "transform_to_parent", "owner_system", "resolve_phase", "is_dynamic"]:
 			record.set(key, data[key])
 		registry.register_origin(record)
-	var expected := {"hand_right/middle": false, "hand_right/thumb": false, "hand_left/middle": false, "hand_left/thumb": false}
+	var selected: Array[StringName] = [&"middle", &"thumb"]
+	var revision := String(loaded.get("preparation_revision"))
+	if revision == Store.FULL_HAND_PREPARATION_REVISION:
+		selected = Rules.DIGIT_IDS.duplicate()
+	_check(revision in ["rest_middle_thumb_surface_measurements_v1", Store.FULL_HAND_PREPARATION_REVISION], "explicit historical or full-hand preparation revision")
+	var expected := {}
+	for slot: StringName in [Rules.SLOT_RIGHT, Rules.SLOT_LEFT]:
+		for digit_id: StringName in selected:
+			expected[String(slot) + "/" + String(digit_id)] = false
 	var outline_count := 0
 	var measured_ray_count := 0
 	var largest_length_error := 0.0
@@ -112,6 +132,14 @@ func _check_digits(loaded: Resource) -> void:
 		var identity := String(digit["slot_id"]) + "/" + String(digit["digit_id"])
 		if expected.has(identity):
 			expected[identity] = true
+		var authored: Dictionary = {}
+		for candidate: Dictionary in Rules.get_surface_solver_side_rules(digit.slot_id).get("digits", []):
+			if candidate.get("digit_id") == digit.digit_id:
+				authored = candidate
+		var rules_match := not authored.is_empty()
+		for key: String in ["bone_names", "hinge_axes_local", "hinge_axis_origin_ids", "min_angles_rad", "max_angles_rad", "preferred_angles_rad"]:
+			rules_match = rules_match and var_to_bytes(digit.get(key)) == var_to_bytes(authored.get(key))
+		_check(rules_match, identity + " retains authored bone names, hinge axes and joint ranges without retuning")
 		var plane_to_machine: Transform3D = digit["plane_to_machine"]
 		var machine_to_plane := plane_to_machine.affine_inverse()
 		# Every measured point remains in this digit's declared plane origin.
@@ -149,7 +177,8 @@ func _check_digits(loaded: Resource) -> void:
 					measured_ray_count += 1
 					rays_valid = rays_valid and float(ray.get("distance_m", -1.0)) > 0.0 and ray.get("position_in_plane_m") is Vector3 and int(ray.get("surface_triangle_index", -1)) >= 0
 		_check(rays_valid, identity + " retains measured asymmetric skin ray hits and source triangles")
-	_check(digits.size() == 4 and not expected.values().has(false), "exactly Middle and Thumb on both sides are persisted")
+	_check(digits.size() == expected.size() and not expected.values().has(false), "exactly the preparation revision's declared digits on both sides are persisted")
+	_check(outline_count == expected.size() * 3 and measured_ray_count == expected.size() * 36, "each prepared digit has three outline poses and 36 measured skin rays")
 	report["digit_count"] = digits.size()
 	report["outline_pose_count"] = outline_count
 	report["measured_ray_count"] = measured_ray_count

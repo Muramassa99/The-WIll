@@ -96,25 +96,17 @@ func _encode_motion(result: Dictionary, trajectory: Node3D, motion: Resource, de
 	var tip_in_weapon: Vector3 = _state["tip_in_weapon"]
 	var pommel_in_weapon: Vector3 = _state["pommel_in_weapon"]
 	var weapon_origin_id: StringName = Origin.ORIGIN_WEAPON_ROOT
-	if tip_in_weapon.distance_squared_to(pommel_in_weapon) <= 0.00000001 or not trajectory.global_transform.is_finite() or absf(trajectory.global_basis.determinant()) < 0.00000001:
-		return {"available": false, "reason": "invalid_authoring_frame"}
 	var solver = FrameSolver.new()
-	var intrinsic: Basis = solver.call("_build_basis_from_axis_and_up", (tip_in_weapon - pommel_in_weapon).normalized(), _state["up_in_weapon"])
-	var output_basis: Basis = target.basis * intrinsic
-	var unrolled_up_world: Vector3 = output_basis.y.rotated(output_basis.z.normalized(), -deg_to_rad(degrees))
-	var up_in_trajectory: Vector3 = trajectory.global_basis.inverse() * unrolled_up_world
+	var encoded: Dictionary = solver.encode_transform_for_authoring(
+		target, tip_in_weapon, pommel_in_weapon, _state["up_in_weapon"],
+		trajectory.global_transform, degrees, weapon_origin_id
+	)
+	if not bool(encoded.get("available", false)):
+		return encoded
 	var candidate: Resource = motion.duplicate(true)
-	candidate.set("tip_position_local", trajectory.to_local(target * tip_in_weapon))
-	candidate.set("pommel_position_local", trajectory.to_local(target * pommel_in_weapon))
-	candidate.set("tip_position_origin_id", Origin.ORIGIN_TRAJECTORY_AUTHORING)
-	candidate.set("pommel_position_origin_id", Origin.ORIGIN_TRAJECTORY_AUTHORING)
-	candidate.set("weapon_orientation_degrees", Quaternion(Vector3.UP, up_in_trajectory.normalized()).get_euler() * (180.0 / PI))
-	candidate.set("weapon_orientation_authored", true)
-	candidate.set("weapon_roll_degrees", degrees)
+	for property_name: StringName in [&"tip_position_local", &"tip_position_origin_id", &"pommel_position_local", &"pommel_position_origin_id", &"weapon_orientation_degrees", &"weapon_orientation_authored", &"weapon_roll_degrees"]:
+		candidate.set(property_name, encoded[property_name])
 	candidate.call("normalize")
-	var reconstructed: Transform3D = solver.solve_transform_from_segment(tip_in_weapon, pommel_in_weapon, trajectory.to_global(candidate.get("tip_position_local")), trajectory.to_global(candidate.get("pommel_position_local")), _state["up_in_weapon"], trajectory.global_basis, candidate.get("weapon_orientation_degrees"), candidate.get("weapon_roll_degrees"), weapon_origin_id, weapon_origin_id, weapon_origin_id)
-	if not reconstructed.is_equal_approx(target) or (reconstructed * tip_in_weapon).distance_to(target * tip_in_weapon) > 0.00001 or (reconstructed * pommel_in_weapon).distance_to(target * pommel_in_weapon) > 0.00001:
-		return {"available": false, "reason": "authored_frame_roundtrip_failed"}
 	# Returning to the captured starting angle restores its exact authored values.
 	# The initial mounted pose can intentionally differ from its abstract seed.
 	if is_equal_approx(degrees, _state["baseline_degrees"]):

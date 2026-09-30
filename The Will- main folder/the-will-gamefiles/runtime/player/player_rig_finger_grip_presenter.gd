@@ -191,6 +191,44 @@ var hand_surface_seat_solver = PlayerHandSurfaceSeatSolverScript.new()
 var weapon_surface_seat_state_lookup: Dictionary = {}
 var weapon_surface_seat_prepared_attempt_lookup: Dictionary = {}
 var active_grip_execution_path_lookup: Dictionary = {}
+var planar_grip_rotation_lookup: Dictionary = {}
+
+
+func set_planar_grip_rotations(skeleton: Skeleton3D, slot_id: StringName, rotations: Dictionary) -> bool:
+	if skeleton == null or rotations.size() != 15:
+		return false
+	var checked: Dictionary = {}
+	for bone_name: StringName in PlayerDigitHingeRulesScript.get_finger_bone_names(slot_id):
+		var value: Variant = rotations.get(bone_name)
+		if skeleton.find_bone(bone_name) < 0 or not value is Quaternion:
+			return false
+		var rotation: Quaternion = value
+		if not rotation.is_finite() or rotation.length_squared() < 0.000001:
+			return false
+		checked[bone_name] = rotation.normalized()
+	if checked.size() != 15:
+		return false
+	planar_grip_rotation_lookup[slot_id] = checked
+	return apply_planar_grip_rotations(skeleton, slot_id)
+
+
+func release_planar_grip_pose(slot_id: StringName) -> void:
+	planar_grip_rotation_lookup.erase(slot_id)
+
+
+func apply_planar_grip_rotations(skeleton: Skeleton3D, slot_id: StringName) -> bool:
+	if skeleton == null or not planar_grip_rotation_lookup.has(slot_id):
+		return false
+	var rotations: Dictionary = planar_grip_rotation_lookup[slot_id]
+	# Preflight every bone before changing any rotation. Positions and scales
+	# remain the actual character's; an acquired grip never stretches its skin.
+	for bone_name: StringName in rotations:
+		if skeleton.find_bone(bone_name) < 0:
+			return false
+	for bone_name: StringName in rotations:
+		skeleton.set_bone_pose_rotation(skeleton.find_bone(bone_name), rotations[bone_name])
+	skeleton.force_update_all_bone_transforms()
+	return true
 
 
 func _resolve_grip_execution_path_id(
@@ -299,6 +337,10 @@ func update_finger_grip_targets(
 	_ensure_animation_grip_baseline_cache()
 	for slot_id: StringName in [SLOT_RIGHT, SLOT_LEFT]:
 		var side_targets: Dictionary = finger_target_lookup.get(slot_id, {})
+		if planar_grip_rotation_lookup.has(slot_id):
+			apply_planar_grip_rotations(skeleton, slot_id)
+			_sync_finger_targets_to_current_pose(skeleton, slot_id, side_targets)
+			continue
 		var grip_guide: Node3D = source_lookup.get(slot_id) as Node3D
 		if grip_guide == null or not is_instance_valid(grip_guide):
 			continue
@@ -462,6 +504,9 @@ func apply_exact_surface_open_pose_now(
 	skeleton: Skeleton3D,
 	slot_id: StringName
 ) -> bool:
+	if planar_grip_rotation_lookup.has(slot_id):
+		apply_planar_grip_rotations(skeleton, slot_id)
+		return false
 	if skeleton == null or _active_grip_execution_path_id(slot_id) == StringName():
 		return false
 	_ensure_animation_grip_baseline_cache()
@@ -1438,6 +1483,9 @@ func _update_exact_surface_serial_grasp_for_path(
 	allow_surface_solve: bool,
 	execution_path_id: StringName
 ) -> void:
+	if planar_grip_rotation_lookup.has(slot_id):
+		apply_planar_grip_rotations(skeleton, slot_id)
+		return
 	if _resolve_grip_execution_path_id(slot_id, grip_guide) != execution_path_id:
 		_clear_contact_ray_debug(grip_center_node)
 		_apply_animation_contact_open_pose(skeleton, slot_id)
@@ -2069,6 +2117,8 @@ func _apply_surface_grasp_rotations(
 	slot_id: StringName,
 	rotations: Dictionary
 ) -> bool:
+	if planar_grip_rotation_lookup.has(slot_id):
+		return apply_planar_grip_rotations(skeleton, slot_id)
 	var wrote_pose := false
 	for bone_name: StringName in PlayerDigitHingeRulesScript.get_finger_bone_names(
 		slot_id
@@ -3168,6 +3218,9 @@ func _apply_animation_pose_cache_to_slot(
 	pose_cache: Dictionary,
 	slot_id: StringName
 ) -> void:
+	if planar_grip_rotation_lookup.has(slot_id):
+		apply_planar_grip_rotations(skeleton, slot_id)
+		return
 	var slot_cache: Dictionary = pose_cache.get(slot_id, {})
 	if slot_cache.is_empty():
 		return

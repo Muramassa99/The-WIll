@@ -8,9 +8,9 @@ const Outlines = preload("res://tools/grip_plane_proof/prepare_digit_skin_outlin
 const Spatial = preload("res://runtime/player/player_finger_surface_grip_solver.gd")
 const Rules = preload("res://runtime/player/player_digit_hinge_rules.gd")
 const Origins = preload("res://core/models/combat_origin_record.gd")
-const REVISION := "rest_middle_thumb_surface_measurements_v1"
+const REVISION := "rest_all_digits_surface_measurements_v1"
 const ROOT_ID := &"RL_BoneRoot"
-const SELECTED_DIGITS: Array[StringName] = [&"middle", &"thumb"]
+const SELECTED_DIGITS: Array[StringName] = Rules.DIGIT_IDS
 
 # Reads a disposable rig in an explicitly frozen rest pose. This tool never
 # opens a weapon library or Skill Crafter. The source signature is computed
@@ -24,6 +24,7 @@ func capture_source(actor: Node3D, character_id: StringName, scene_path: String)
 	var machine: Transform3D = skeleton.global_transform * skeleton.get_bone_global_pose(root_index)
 	var names: Array[StringName] = []
 	var packets: Array = []
+	var seen: Dictionary = {}
 	var definitions: Array = []
 	for index: int in range(skeleton.get_bone_count()):
 		definitions.append({"name": skeleton.get_bone_name(index), "parent": skeleton.get_bone_parent(index), "rest": skeleton.get_bone_rest(index)})
@@ -34,6 +35,10 @@ func capture_source(actor: Node3D, character_id: StringName, scene_path: String)
 		for rules: Dictionary in side["digits"]:
 			if not rules["digit_id"] in SELECTED_DIGITS:
 				continue
+			var identity := String(slot) + "/" + String(rules["digit_id"])
+			if seen.has(identity):
+				return {"valid": false, "reason": "duplicate_character_digit_rule", "digit": identity}
+			seen[identity] = true
 			var first: int = skeleton.find_bone(rules["bone_names"][0])
 			var hand: int = skeleton.find_bone(side["hand_bone_name"])
 			if first < 0 or hand < 0 or skeleton.get_bone_parent(first) != hand or not _descends_from(skeleton, first, root_index):
@@ -46,13 +51,20 @@ func capture_source(actor: Node3D, character_id: StringName, scene_path: String)
 			for key: String in ["capsule_radii_m", "terminal_length_m", "tip_offset_local"]:
 				anatomy_rules.erase(key)
 			packets.append({"slot_id": slot, "hand_bone_name": side["hand_bone_name"], "rules": anatomy_rules})
+	for slot: StringName in [Rules.SLOT_RIGHT, Rules.SLOT_LEFT]:
+		for digit_id: StringName in SELECTED_DIGITS:
+			var identity := String(slot) + "/" + String(digit_id)
+			if not seen.has(identity):
+				return {"valid": false, "reason": "missing_character_digit_rule", "digit": identity}
 	var capture: Dictionary = Sampler.new().capture(skeleton, mesh, names)
 	if not bool(capture.get("valid", false)):
 		return capture
 	var recipes: Dictionary = {}
 	for path: String in [get_script().resource_path, "res://tools/grip_plane_proof/character_hand_anatomy_def.gd", "res://tools/grip_plane_proof/character_anatomy_source_signature.gd", "res://tools/grip_plane_proof/capture_model_skin_samples.gd", "res://tools/grip_plane_proof/measure_digit_skin_surface.gd", "res://tools/grip_plane_proof/prepare_digit_skin_outlines.gd", "res://runtime/player/player_finger_surface_grip_solver.gd", "res://runtime/player/player_digit_hinge_rules.gd", "res://tools/grip_plane_proof/slice_reachable_surface.gd"]:
 		recipes[path] = FileAccess.get_sha256(path)
-	for path: String in ["res://core/resolvers/primary_grip_seat_resolver.gd", "res://core/resolvers/combat_origin_registry.gd", "res://core/models/combat_origin_record.gd"]:
+	# Include canonical bodies behind compatibility paths in future recipes.
+	# Existing saved signatures remain immutable and are never rebaked on load.
+	for path: String in ["res://core/models/character_hand_anatomy_def.gd", "res://runtime/player/grip/character_anatomy_source_signature.gd", "res://runtime/player/grip/slice_reachable_surface.gd", "res://core/resolvers/primary_grip_seat_resolver.gd", "res://core/resolvers/combat_origin_registry.gd", "res://core/models/combat_origin_record.gd"]:
 		recipes[path] = FileAccess.get_sha256(path)
 	recipes["godot_engine"] = JSON.stringify(Engine.get_version_info()).sha256_text()
 	var signature: Dictionary = SourceSignature.new().build(capture, definitions, machine.basis, packets, scene_path, REVISION, recipes)

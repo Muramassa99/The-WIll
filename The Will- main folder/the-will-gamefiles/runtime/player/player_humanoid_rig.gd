@@ -19,6 +19,7 @@ const GripDebugDrawScript = preload("res://runtime/player/grip_debug_draw.gd")
 const RuntimeBoneDebugDrawScript = preload("res://runtime/player/runtime_bone_debug_draw.gd")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const CombatOriginRegistryScript = preload("res://core/resolvers/combat_origin_registry.gd")
+const HandGripPoseBindingScript = preload("res://runtime/player/grip/hand_grip_pose_binding.gd")
 const RIGHT_HAND_BONE := &"CC_Base_R_Hand"
 const LEFT_HAND_BONE := &"CC_Base_L_Hand"
 const RIGHT_INDEX1_BONE := &"CC_Base_R_Index1"
@@ -283,6 +284,7 @@ var locomotion_presenter = PlayerRigLocomotionPresenterScript.new()
 var grip_layout_presenter = PlayerRigGripLayoutPresenterScript.new()
 var support_arm_ik_presenter = PlayerRigSupportArmIkPresenterScript.new()
 var finger_grip_presenter = PlayerRigFingerGripPresenterScript.new()
+var planar_grip_pose_binding = HandGripPoseBindingScript.new()
 var upper_body_pose_presenter = PlayerRigUpperBodyPosePresenterScript.new()
 var hand_target_constraint_solver = HandTargetConstraintSolverScript.new()
 var two_hand_pose_solver = TwoHandPoseSolverScript.new()
@@ -1089,6 +1091,64 @@ func clear_finger_grip_target(slot_id: StringName) -> void:
 	if finger_grip_presenter.has_method("note_grip_source_cleared"):
 		finger_grip_presenter.call("note_grip_source_cleared", slot_id)
 	_refresh_finger_grip_ik_influences()
+
+
+func claim_planar_grip_pose(slot_id: StringName, weapon: Node3D, relationship_key: String) -> Dictionary:
+	var claim: Dictionary = planar_grip_pose_binding.claim(skeleton, slot_id, weapon, relationship_key)
+	if not bool(claim.get("valid", false)):
+		return claim
+	if not finger_grip_presenter.set_planar_grip_rotations(skeleton, slot_id, claim.rotations):
+		planar_grip_pose_binding.release(slot_id)
+		return {"valid": false, "reason": "cannot_claim_all_fifteen_digit_rotations", "grip_accepted": false}
+	return claim
+
+
+func release_planar_grip_pose(slot_id: StringName) -> void:
+	planar_grip_pose_binding.release(slot_id)
+	finger_grip_presenter.release_planar_grip_pose(slot_id)
+
+
+func apply_planar_grip_pose(slot_id: StringName, weapon: Node3D, relationship_key: String, packet: Dictionary) -> Dictionary:
+	var plan: Dictionary = planar_grip_pose_binding.prepare(skeleton, slot_id, weapon, relationship_key, packet)
+	if not bool(plan.get("valid", false)):
+		return plan
+	var previous_rotations: Dictionary = planar_grip_pose_binding.states[slot_id].rotations.duplicate()
+	if not finger_grip_presenter.set_planar_grip_rotations(skeleton, slot_id, plan.rotations):
+		return {"valid": false, "reason": "cannot_apply_all_fifteen_digit_rotations", "grip_accepted": false}
+	for bone_name: StringName in plan.dimensions:
+		var index: int = skeleton.find_bone(bone_name)
+		var expected: Dictionary = plan.dimensions[bone_name]
+		if skeleton.get_bone_pose_position(index) != expected.position or skeleton.get_bone_pose_scale(index) != expected.scale:
+			finger_grip_presenter.set_planar_grip_rotations(skeleton, slot_id, previous_rotations)
+			return {"valid": false, "reason": "digit_dimensions_changed_during_rotation_application", "grip_accepted": false}
+	planar_grip_pose_binding.commit(slot_id, plan)
+	return {"valid": true, "status": &"planar_grip_pose_bound", "state": get_planar_grip_pose_state(slot_id),
+		"prepared_geometry_matches_live": plan.prepared_geometry_matches_live,
+		"geometry_checks": plan.geometry_checks, "digit_dimensions_preserved": true, "grip_accepted": false}
+
+
+func get_planar_grip_pose_state(slot_id: StringName) -> Dictionary:
+	return planar_grip_pose_binding.state(slot_id)
+
+## Movement reads the acquired relationship through the existing weapon
+## guidance owner. Pending acquisition and open/unarmed hands use their old
+## macro targets. This reader never writes poses or starts a grip solve.
+func resolve_planar_grip_motion_frame(slot_id: StringName) -> Dictionary:
+	if not authoring_preview_mode_enabled:
+		return {}
+	var guidance: Node3D = get_arm_guidance_target(slot_id)
+	if guidance == null or not is_instance_valid(guidance):
+		return {}
+	var weapon := guidance.get_parent() as Node3D
+	var relationship: Dictionary = planar_grip_pose_binding.relationship(slot_id, weapon)
+	if relationship.is_empty() or not weapon.global_transform.is_finite():
+		return {}
+	var target: Transform3D = weapon.global_transform * (relationship.hand_in_weapon as Transform3D)
+	return {"valid": target.is_finite(), "hand_to_world": target,
+		"hand_to_world_origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
+		"hand_in_weapon": relationship.hand_in_weapon,
+		"hand_in_weapon_origin_id": relationship.hand_in_weapon_origin_id}
+
 
 func set_authoring_contact_anchor_basis(slot_id: StringName, anchor_basis_world: Basis) -> void:
 	if slot_id != &"hand_right" and slot_id != &"hand_left":
@@ -1987,16 +2047,17 @@ func _apply_authoring_contact_wrist_basis_for_slot(
 	var desired_anchor_basis_world: Basis = authoring_contact_anchor_basis_lookup.get(slot_id, Basis.IDENTITY) as Basis
 	var anchor_local_basis: Basis = hand_anchor.transform.basis.orthonormalized()
 	var contact_hand_basis_world: Basis = (desired_anchor_basis_world * anchor_local_basis.inverse()).orthonormalized()
-	var desired_hand_basis_world: Basis = _resolve_anatomical_contact_hand_basis_for_slot(
-		slot_id,
-		forearm_bone,
-		hand_bone,
-		contact_hand_basis_world
-	)
-	desired_hand_basis_world = _apply_authoring_contact_wrist_straight_preference(
-		hand_bone,
-		desired_hand_basis_world
-	)
+	var bound_frame: Dictionary = resolve_planar_grip_motion_frame(slot_id)
+	var desired_hand_basis_world: Basis
+	if bound_frame.get("valid", false):
+		# Preserve the acquired orientation instead of deriving a different grip
+		# from forearm direction. The existing twist limits below still apply.
+		desired_hand_basis_world = (bound_frame.hand_to_world as Transform3D).basis.orthonormalized()
+	else:
+		desired_hand_basis_world = _resolve_anatomical_contact_hand_basis_for_slot(
+			slot_id, forearm_bone, hand_bone, contact_hand_basis_world)
+		desired_hand_basis_world = _apply_authoring_contact_wrist_straight_preference(
+			hand_bone, desired_hand_basis_world)
 	_apply_authoring_limb_twist_distribution_for_slot(
 		slot_id,
 		forearm_bone,
@@ -4319,7 +4380,9 @@ func _update_support_arm_ik_targets(delta: float) -> void:
 		Callable(self, "_get_bone_world_position"),
 		Callable(self, "resolve_hand_grip_alignment_world_position"),
 		hand_target_constraint_solver,
-		_get_two_hand_constraint_config()
+		_get_two_hand_constraint_config(),
+		{&"hand_right": resolve_planar_grip_motion_frame(&"hand_right"),
+		 &"hand_left": resolve_planar_grip_motion_frame(&"hand_left")}
 	) as Dictionary
 	solve_result["dominant_slot_id"] = dominant_grip_slot_id if dominant_grip_slot_id != StringName() else &"hand_right"
 	solve_result = _apply_usable_arm_reach_clamp_to_solve_result(solve_result)
@@ -4887,6 +4950,9 @@ func _update_finger_grip_targets(
 	delta: float,
 	allow_exact_surface_solve: bool = false
 ) -> void:
+	for slot_id: StringName in [&"hand_right", &"hand_left"]:
+		if not planar_grip_pose_binding.owns(slot_id):
+			finger_grip_presenter.release_planar_grip_pose(slot_id)
 	finger_grip_presenter.update_finger_grip_targets(
 		skeleton,
 		finger_grip_source_lookup,

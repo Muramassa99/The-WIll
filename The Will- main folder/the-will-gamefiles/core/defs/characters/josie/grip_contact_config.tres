@@ -1,0 +1,27 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://core/models/character_grip_data_def.gd" id="1_profile"]
+[ext_resource type="Resource" path="res://core/defs/characters/josie/hand_anatomy_4935fa57cf6cc689121ae6077987b0985fc1fa7d0d3d8718f096418ea3c5b702.tres" id="2_anatomy"]
+
+[resource]
+script = ExtResource("1_profile")
+character_id = &"josie"
+anatomy = ExtResource("2_anatomy")
+contact_config = {
+"schema": "character_grip_contact_config_v1",
+"character_id": &"josie",
+"anatomy_signature": "4935fa57cf6cc689121ae6077987b0985fc1fa7d0d3d8718f096418ea3c5b702",
+"measured_radius_m": 0.02209933693405612,
+"envelope_radius_multiplier": 2.3,
+"envelope_radius_m": 0.050828474948329073,
+"guide_inward_target_offset_m": 0.0015,
+"palm_guide_target_depth_m": 0.003,
+"measurement_kind": "user_selected_broad_S3_side_arc",
+"measurement_reference_case": "CC_Base_R_Mid1PreparedContactPlaneOrigin",
+"source_evidence_file": "shared_hand_closure_2026-09-18T05-05-25.json",
+"source_sha256": "d79dfb618bb061e61834d5cd94c3cf29642459d9723893beb188815f61a48dfc",
+"measurement_evidence_file": "fingertip_radius_2026-09-26.json",
+"measurement_sha256": "5e07de0ab2c33779c0a41d8bd3762fcab1588b5e3536128506e74de0dd6f04ba",
+"contact_input_evidence_file": "contact_envelope_input_2026-09-26.json",
+"measurement_scope": "Approved broad S3 side-arc measurement; not an all-ten-digit average. No new measurement or tuning during runtime promotion."
+}

@@ -1,0 +1,17 @@
+# Frozen grip inputs are checked by byte hash. Do not normalize their line endings.
+/forge_v2_grip_target_wrapper_2026-09-28T03-59-21_straight_library.tres -text
+/forge_v2_grip_target_wrapper_2026-09-28T03-59-21_curved_library.tres -text
+/full_hand_placement_hand_right_2026-09-27T14-46-36.bin -text
+/full_hand_placement_hand_left_2026-09-27T14-46-36.bin -text
+/planar_skin_overlap_budget_pre_duration_2026-09-30.gd -text
+/skin_plane_contact_query_pre_duration_2026-09-30.gd -text
+/contact_driven_preparation_2026-09-30T11-49-45.json -text
+/saved_grip_section_coordinates_2026-09-28T11-45-33.json -text
+/grip_placement_trace_hand_right_2026-09-18T02-30-57.bin -text
+/grip_placement_trace_hand_left_2026-09-18T02-31-08.bin -text
+/full_hand_placement_hand_right_2026-09-27T08-27-39.bin -text
+/full_hand_placement_hand_left_2026-09-27T08-27-39.bin -text
+/coordinated_grip_closure_2026-09-18T04-33-42.json -text
+/shared_hand_closure_2026-09-18T04-55-59.json -text
+/contact_envelope_input_2026-09-26.json -text
+/fingertip_radius_2026-09-26.json -text

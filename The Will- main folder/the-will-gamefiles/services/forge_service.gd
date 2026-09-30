@@ -438,6 +438,16 @@ func _build_forge_v2_runtime_mesh_packet(wip: CraftedItemWIP) -> Dictionary:
 				] = (
 					primary_grip_handle_mesh_origin_id
 				)
+	var primary_grip_target_wrapper := stage2_item_state.get(
+		"primary_grip_target_wrapper"
+	) as Resource
+	if primary_grip_target_wrapper != null:
+		# The adapter validates against the restored handle and current authored
+		# body, then copies the prepared target into its replacement Stage2.
+		# Missing legacy targets remain missing; no preparation occurs on load.
+		runtime_mesh_packet["primary_grip_target_wrapper"] = (
+			primary_grip_target_wrapper
+		)
 	return runtime_mesh_packet
 
 func _enrich_forge_v2_profile_material_data(

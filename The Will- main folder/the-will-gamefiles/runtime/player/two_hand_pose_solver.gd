@@ -2,6 +2,7 @@ extends RefCounted
 class_name TwoHandPoseSolver
 
 const CharacterFrameResolverScript = preload("res://runtime/player/character_frame_resolver.gd")
+const Origins = preload("res://core/models/combat_origin_record.gd")
 const SLOT_RIGHT: StringName = &"hand_right"
 const SLOT_LEFT: StringName = &"hand_left"
 const TORSO_WAIST_BONE: StringName = &"CC_Base_Waist"
@@ -27,7 +28,8 @@ func solve_arm_targets(
 	get_bone_world_position_callable: Callable,
 	resolve_hand_grip_alignment_world_position_callable: Callable,
 	constraint_solver,
-	settings: Dictionary = {}
+	settings: Dictionary = {},
+	bound_hand_frames: Dictionary = {}
 ) -> Dictionary:
 	var result := {
 		SLOT_RIGHT: {"active": false},
@@ -68,6 +70,11 @@ func solve_arm_targets(
 			desired_target -= aligned_hand_target_world - current_hand_world
 		elif slot_is_dominant and hand_anchor_node != null and is_instance_valid(hand_anchor_node):
 			desired_target -= hand_anchor_node.global_position - current_hand_world
+		var bound: Dictionary = bound_hand_frames.get(slot_id, {})
+		if bound.get("valid", false) and bound.get("hand_to_world_origin_id") == Origins.ORIGIN_RL_BONE_ROOT and bound.get("hand_in_weapon_origin_id") == Origins.ORIGIN_WEAPON_ROOT and bound.get("hand_to_world") is Transform3D:
+			# The solved Hand frame replaces the old contact-center subtraction.
+			# Reach, body restrictions and pole selection below remain unchanged.
+			desired_target = (bound.hand_to_world as Transform3D).origin
 		var source_world: Vector3 = get_bone_world_position_callable.call(upperarm_bone_name)
 		var weapon_body_proxy_samples: Array[Vector3] = _collect_weapon_body_proxy_sample_positions(guidance_target)
 		var query_exclusions: Array = []

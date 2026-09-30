@@ -190,6 +190,8 @@ var draft_notes_edit: TextEdit = null
 var summary_label: Label = null
 var debugger_view_button: Button = null
 var footer_status_label: Label = null
+var grip_acquisition_label: Label = null
+var grip_reacquire_button: Button = null
 var close_button: Button = null
 var tip_section_foldable: FoldableContainer = null
 var pommel_section_foldable: FoldableContainer = null
@@ -344,6 +346,7 @@ func _process(delta: float) -> void:
 	if panel != null and panel.visible and workflow_step == WORKFLOW_STEP_EDITOR:
 		_refresh_live_editor_shortcuts()
 		_flush_pending_preview_drag_refresh()
+		_refresh_grip_acquisition_status()
 	if not chain_player.is_playing():
 		return
 	chain_player.advance(delta)
@@ -354,6 +357,34 @@ func _process(delta: float) -> void:
 	if not chain_player.is_playing():
 		session_state.playback_active = false
 		footer_status_label.text = "Preview finished."
+
+func _refresh_grip_acquisition_status() -> void:
+	if grip_acquisition_label == null:
+		return
+	var states: Dictionary = preview_presenter.get_grip_acquisition_status(preview_subviewport)
+	var lines: PackedStringArray = []
+	for slot: StringName in states:
+		var state: Dictionary = states[slot]
+		var hand := "Right" if slot == &"hand_right" else "Left"
+		match str(state.get("status", "")):
+			"queued": lines.append("%s grip: waiting to seat." % hand)
+			"solving": lines.append("%s grip: solving (%.0f s). You can keep using the editor." % [hand, float(state.get("elapsed_seconds", 0.0))])
+			"assessing": lines.append("%s grip: checking contact on the posed hand." % hand)
+			"cancelled": lines.append("%s grip: unfinished solve cancelled by Roll. Reacquire grip to try again." % hand)
+			"preview_applied":
+				if not state.get("actual_assessment_current", false) or not state.get("actual_material_query_valid", false):
+					lines.append("%s grip: pose applied; current contact is unverified." % hand)
+				elif not state.get("contact_condition_met", false):
+					lines.append("%s grip: pose applied; contact still needs adjustment." % hand)
+				elif not state.get("actual_articulation_valid", false):
+					lines.append("%s grip: contact found; joint verification is unresolved." % hand)
+				else:
+					lines.append("%s grip: pose applied; measured contact passed." % hand)
+			"unresolved", "unavailable": lines.append("%s grip: could not finish seating (%s)." % [hand, str(state.get("reason", "unresolved"))])
+	grip_acquisition_label.text = "\n".join(lines)
+	grip_acquisition_label.visible = not lines.is_empty()
+	if grip_reacquire_button != null:
+		grip_reacquire_button.visible = not states.is_empty() and not session_state.playback_active
 
 func _input(event: InputEvent) -> void:
 	if _has_visible_weapon_open_popup():
@@ -450,6 +481,7 @@ func close_ui() -> void:
 	if motion_node_editor.is_dragging():
 		motion_node_editor.end_drag()
 	_finalize_preview_drag("Motion node edit locked in.")
+	preview_presenter.cancel_grip_acquisition(preview_subviewport)
 	editor_state_dirty = false
 	_set_manual_save_progress(0.0, "", false)
 	preview_drag_override_node = null
@@ -2245,6 +2277,17 @@ func _build_footer(parent: VBoxContainer) -> void:
 	footer_status_label.add_theme_color_override("font_color", COLOR_TEXT_DIM)
 	footer_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	parent.add_child(footer_status_label)
+	grip_acquisition_label = Label.new()
+	grip_acquisition_label.visible = false
+	grip_acquisition_label.add_theme_font_size_override("font_size", FONT_BODY)
+	grip_acquisition_label.add_theme_color_override("font_color", COLOR_TEXT_DIM)
+	grip_acquisition_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	parent.add_child(grip_acquisition_label)
+	grip_reacquire_button = Button.new()
+	grip_reacquire_button.text = "Reacquire grip"
+	grip_reacquire_button.visible = false
+	grip_reacquire_button.pressed.connect(func() -> void: preview_presenter.reacquire_grip(preview_subviewport))
+	parent.add_child(grip_reacquire_button)
 	save_progress_bar = ProgressBar.new()
 	save_progress_bar.min_value = 0.0
 	save_progress_bar.max_value = 100.0
@@ -5617,6 +5660,13 @@ func _build_display_motion_node_for_viewport_pick(source_motion_node: CombatAnim
 			display_motion_node.pommel_position_local,
 			display_motion_node.pommel_position_origin_id
 		)
+	var prepared_frame: Dictionary = preview_presenter.get_prepared_grip_display_state(preview_subviewport, source_motion_node)
+	if prepared_frame.get("available", false):
+		# A limited bound pose may differ in roll as well as position. A new
+		# endpoint edit starts from the complete visible frame, not old authored up.
+		for property: StringName in [&"tip_position_local", &"tip_position_origin_id", &"pommel_position_local", &"pommel_position_origin_id", &"weapon_orientation_degrees", &"weapon_orientation_authored", &"weapon_roll_degrees"]:
+			display_motion_node.set(property, prepared_frame[property])
+		display_motion_node.set_meta("prepared_grip_display_frame", true)
 	var draft: Resource = _get_active_draft()
 	if draft != null:
 		var visible_chain: Array = _get_visible_motion_node_chain_for_draft(draft)
@@ -5769,6 +5819,12 @@ func _apply_resolved_segment_to_motion_node(
 	if motion_node.pommel_position_origin_id != resolved_pommel_origin_id:
 		motion_node.pommel_position_origin_id = resolved_pommel_origin_id
 		changed = true
+	if resolved_segment.has("weapon_orientation_degrees"):
+		var orientation: Vector3 = resolved_segment.weapon_orientation_degrees
+		if not motion_node.weapon_orientation_degrees.is_equal_approx(orientation) or not motion_node.weapon_orientation_authored:
+			motion_node.weapon_orientation_degrees = orientation
+			motion_node.weapon_orientation_authored = true
+			changed = true
 	return changed
 
 func _apply_contact_tether_to_segment(
@@ -5791,6 +5847,8 @@ func _apply_contact_tether_to_segment(
 		constrained_segment["tip_position_local"] = motion_node.tip_position_local
 		constrained_segment["pommel_position_local"] = motion_node.pommel_position_local
 		constrained_segment["body_clearance_rejected"] = true
+	if motion_node.get_meta("prepared_grip_display_frame", false):
+		constrained_segment["weapon_orientation_degrees"] = motion_node.weapon_orientation_degrees
 	return constrained_segment
 
 func _resolve_motion_node_segment_for_tip_target(

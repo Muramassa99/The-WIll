@@ -130,6 +130,8 @@ func _run_verification() -> void:
 		"initial ordinary Save did not establish a stable saved identity"
 	):
 		return
+	if not await _wait_for_ui_save(ui):
+		return
 	var source_id := StringName(controller.call("get_active_saved_wip_id"))
 	var source_wip: CraftedItemWIP = library.get_saved_wip_clone(source_id, true)
 	if not _check(
@@ -181,12 +183,16 @@ func _run_verification() -> void:
 	name_line_edit.text = "  %s  " % FIRST_COPY_NAME
 	var rapid_save_as_started_msec := Time.get_ticks_msec()
 	name_save_button.emit_signal("pressed")
+	if not await _wait_for_ui_save(ui):
+		return
 	var first_copy_id := StringName(controller.call("get_active_saved_wip_id"))
 	_set_runtime_mesh_provider(controller)
 	if not _check(
 		bool(ui.call("_save_current_v2_draft_as", SECOND_COPY_NAME)),
 		"second immediate Save As failed"
 	):
+		return
+	if not await _wait_for_ui_save(ui):
 		return
 	var rapid_save_as_elapsed_msec := (
 		Time.get_ticks_msec() - rapid_save_as_started_msec
@@ -297,6 +303,8 @@ func _run_verification() -> void:
 		bool(ui.call("_save_current_v2_draft")),
 		"ordinary Save after Save As failed"
 	):
+		return
+	if not await _wait_for_ui_save(ui):
 		return
 	if not _check(
 		library.saved_wips.size() == 3
@@ -1050,7 +1058,8 @@ func _verify_delete_flow(
 	ctrl_s_event.keycode = KEY_S
 	ctrl_s_event.physical_keycode = KEY_S
 	ui.call("_unhandled_input", ctrl_s_event)
-	await process_frame
+	if not await _wait_for_ui_save(ui):
+		return false
 	var replacement_saved_id := StringName(
 		controller.call("get_active_saved_wip_id")
 	)
@@ -1589,6 +1598,15 @@ func _find_button_by_text(parent: Node, button_text: String) -> Button:
 		if nested_button != null:
 			return nested_button
 	return null
+
+
+func _wait_for_ui_save(ui: CanvasLayer) -> bool:
+	# The save indicator yields so 0 and 99 can draw, including empty drafts.
+	for _frame in range(1800):
+		if not bool(ui.get("v2_save_in_progress")):
+			return true
+		await process_frame
+	return _check(false, "UI Save transaction did not settle")
 
 
 func _check(condition: bool, message: String) -> bool:

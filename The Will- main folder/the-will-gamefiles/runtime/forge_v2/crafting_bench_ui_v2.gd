@@ -911,6 +911,7 @@ var view_menu_button: MenuButton = null
 var status_menu_button: MenuButton = null
 var settings_button: Button = null
 var action_status_label: Label = null
+var v2_save_progress_label: Label = null
 var keybinding_state: Resource = null
 var settings_popup: PopupPanel = null
 var freehand_smoothing_slider: HSlider = null
@@ -973,6 +974,9 @@ var v2_wip_delete_prompt_label: Label = null
 var v2_wip_delete_no_button: Button = null
 var v2_wip_delete_pending_wip_id: StringName = StringName()
 var v2_save_in_progress: bool = false
+var _v2_save_generation := 0
+var _v2_save_percent := 0
+var _v2_save_feedback_tween: Tween
 var keybindings_popup: PopupPanel = null
 var keybindings_list_vbox: VBoxContainer = null
 var keybinding_buttons_by_action: Dictionary = {}
@@ -1057,6 +1061,7 @@ func toggle_for(player, stage_controller: Node, bench_name: String, placement_sp
 	toggle_start_menu_for(player, stage_controller, bench_name, placement_space)
 
 func open_for(player, stage_controller: Node, bench_name: String, placement_space: Node3D = null) -> void:
+	_cancel_v2_save_feedback()
 	active_player = player
 	active_stage_controller = stage_controller
 	active_placement_space = placement_space
@@ -1142,6 +1147,7 @@ func close_ui() -> void:
 			return
 	panel.visible = false
 	visible = false
+	_cancel_v2_save_feedback()
 	if active_player != null and active_player.has_method("set_ui_mode_enabled"):
 		active_player.call("set_ui_mode_enabled", false)
 	_disconnect_stage_controller()
@@ -1201,11 +1207,23 @@ func _ensure_top_action_bar() -> void:
 	action_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	action_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	action_status_label.clip_text = true
+	v2_save_progress_label = action_host_row.get_node_or_null("V2SaveProgressLabel") as Label
+	if v2_save_progress_label == null:
+		v2_save_progress_label = Label.new()
+		v2_save_progress_label.name = "V2SaveProgressLabel"
+		v2_save_progress_label.visible = false
+		action_host_row.add_child(v2_save_progress_label)
+	v2_save_progress_label.custom_minimum_size.x = 88.0
+	v2_save_progress_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v2_save_progress_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	v2_save_progress_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if close_button != null:
 		if close_button.get_parent() != action_host_row:
 			close_button.reparent(action_host_row)
 		close_button.text = "Close"
 		close_button.custom_minimum_size = Vector2(92.0, 30.0)
+		action_host_row.move_child(close_button, action_host_row.get_child_count() - 1)
+		action_host_row.move_child(v2_save_progress_label, close_button.get_index() - 1)
 	if footer_row != null:
 		footer_row.visible = false
 
@@ -4594,7 +4612,7 @@ func _rebuild_v2_shape_menu(summary: Dictionary) -> void:
 				or not bool(detailing_summary.get("can_generate", false))
 			)
 		)
-	else:
+	elif active_tool_id != &"tool_handles":
 		var csg_noodle_enabled := bool(summary.get("spline_line_csg_noodle_enabled", false))
 		_add_v2_disabled_line(popup, String(summary.get(
 			"spline_line_csg_noodle_status_label",
@@ -5086,7 +5104,11 @@ func _begin_v2_save_transaction(
 ) -> void:
 	if v2_save_in_progress:
 		return
+	_reset_v2_save_feedback()
+	_v2_save_generation += 1
+	_v2_save_percent = 0
 	v2_save_in_progress = true
+	_update_v2_save_progress(0, _v2_save_generation)
 	_rebuild_v2_action_menus()
 	_set_v2_action_status_text(
 		"Saving as: committing pending work..."
@@ -5097,29 +5119,61 @@ func _begin_v2_save_transaction(
 		save_as,
 		project_name,
 		wip_library,
-		active_stage_controller
+		active_stage_controller,
+		_v2_save_generation
 	)
 
 func _run_v2_save_transaction(
 	save_as: bool,
 	project_name: String,
 	wip_library: PlayerForgeWipLibraryState,
-	stage_controller: Node
+	stage_controller: Node,
+	generation: int
 ) -> void:
+	# Allow 0 to draw before synchronous preparation, even on a cached save.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if not _is_current_v2_save(generation):
+		return
+	if not is_instance_valid(stage_controller) or stage_controller != active_stage_controller:
+		_finish_v2_save_transaction_failure(save_as, {"reason": &"stage_controller_changed"})
+		return
 	var preparation: Dictionary = {"ok": true}
 	if (
 		is_instance_valid(stage_controller)
 		and stage_controller.has_method("prepare_pending_work_for_save")
 	):
 		preparation = await stage_controller.call(
-			"prepare_pending_work_for_save"
+			"prepare_pending_work_for_save",
+			ForgeV2StageController.SAVE_PREPARATION_TIMEOUT_MSEC,
+			Callable(self, "_on_v2_save_preparation_progress").bind(generation)
 		) as Dictionary
+	if not _is_current_v2_save(generation):
+		return
 	if (
 		not is_instance_valid(stage_controller)
 		or stage_controller != active_stage_controller
 		or not bool(preparation.get("ok", false))
 	):
 		_finish_v2_save_transaction_failure(save_as, preparation)
+		return
+	# Persistence is synchronous. 99 remains displayed until its real result;
+	# no timer invents progress or changes success into a predicted outcome.
+	_update_v2_save_progress(99, generation)
+	var prepared_state := stage_controller.call("get_active_authoring_state") as Resource
+	var prepared_timestamp := float(prepared_state.get("updated_timestamp"))
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if not _is_current_v2_save(generation):
+		return
+	if not is_instance_valid(stage_controller) or stage_controller != active_stage_controller:
+		_finish_v2_save_transaction_failure(save_as, {"reason": &"stage_controller_changed"})
+		return
+	if (
+		stage_controller.call("get_active_authoring_state") != prepared_state
+		or float(prepared_state.get("updated_timestamp")) != prepared_timestamp
+	):
+		_finish_v2_save_transaction_failure(save_as, {"reason": &"authoring_state_changed"})
 		return
 	var saved_wip: CraftedItemWIP = (
 		stage_controller.call(
@@ -5137,6 +5191,7 @@ func _run_v2_save_transaction(
 	)
 	v2_save_in_progress = false
 	if saved_wip == null:
+		_finish_v2_save_feedback(false)
 		_rebuild_v2_action_menus()
 		_set_v2_action_status_text(
 			"Save As failed" if save_as else "Save failed"
@@ -5144,6 +5199,7 @@ func _run_v2_save_transaction(
 		return
 	_configure_options_from_controller()
 	_refresh_from_controller()
+	_finish_v2_save_feedback(true)
 	_set_v2_action_status_text(
 		("Saved as: %s" if save_as else "Saved: %s")
 		% _format_saved_v2_wip_label(saved_wip)
@@ -5154,6 +5210,7 @@ func _finish_v2_save_transaction_failure(
 	preparation: Dictionary
 ) -> void:
 	v2_save_in_progress = false
+	_finish_v2_save_feedback(false)
 	_rebuild_v2_action_menus()
 	var reason := StringName(preparation.get("reason", &"preparation_failed"))
 	var reason_label := String(reason).replace("_", " ")
@@ -5166,6 +5223,49 @@ func _finish_v2_save_transaction_failure(
 			reason_label,
 		]
 	)
+
+func _is_current_v2_save(generation: int) -> bool:
+	return (
+		generation == _v2_save_generation
+		and v2_save_in_progress
+	)
+
+func _on_v2_save_preparation_progress(completed_steps: int, generation: int) -> void:
+	# Three actual milestones: pending edits committed, mesh exported, wrapper
+	# ready. Remaining work is construction/persistence through the existing writer.
+	_update_v2_save_progress(clampi(completed_steps, 0, 3) * 30, generation)
+
+func _update_v2_save_progress(percent: int, generation: int) -> void:
+	if generation != _v2_save_generation or not v2_save_in_progress:
+		return
+	_v2_save_percent = maxi(_v2_save_percent, clampi(percent, 0, 99))
+	if v2_save_progress_label != null:
+		v2_save_progress_label.text = "%d%%" % _v2_save_percent
+		v2_save_progress_label.show()
+
+func _finish_v2_save_feedback(succeeded: bool) -> void:
+	if v2_save_progress_label == null:
+		return
+	v2_save_progress_label.text = "Saved" if succeeded else "Save failed"
+	_v2_save_feedback_tween = create_tween()
+	_v2_save_feedback_tween.set_ignore_time_scale(true)
+	_v2_save_feedback_tween.tween_interval(1.5)
+	_v2_save_feedback_tween.tween_property(v2_save_progress_label, "modulate:a", 0.0, 0.5)
+	_v2_save_feedback_tween.tween_callback(_reset_v2_save_feedback)
+
+func _reset_v2_save_feedback() -> void:
+	if _v2_save_feedback_tween != null:
+		_v2_save_feedback_tween.kill()
+		_v2_save_feedback_tween = null
+	if v2_save_progress_label != null:
+		v2_save_progress_label.hide()
+		v2_save_progress_label.modulate.a = 1.0
+		v2_save_progress_label.text = ""
+
+func _cancel_v2_save_feedback() -> void:
+	_v2_save_generation += 1
+	v2_save_in_progress = false
+	_reset_v2_save_feedback()
 
 func _rename_saved_v2_draft(
 	saved_wip_id: StringName,

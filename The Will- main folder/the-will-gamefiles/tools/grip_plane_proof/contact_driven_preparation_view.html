@@ -1,0 +1,115 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Contact-driven hand preparation</title>
+<style>
+body{font:16px system-ui;background:#edf0f4;color:#172936;margin:28px}h1{font-size:25px}section{background:white;padding:20px;margin:20px 0;border-radius:8px}button,input{vertical-align:middle;margin-right:12px}input{width:45%}.plots{display:flex;flex-wrap:wrap;gap:14px}canvas{background:#fff;border:1px solid #ccd3da;max-width:100%}p{max-width:1000px;line-height:1.5}.legend{display:flex;gap:18px;flex-wrap:wrap;font-weight:600}.note{color:#704611}
+</style>
+<h1>W3 circle preparation and W4 saved-wrapper attempt</h1>
+<p>Recorded poses from the actual prepared hand skin and a saved Forge handle. The hand and wrist stay fixed; the weapon and guide move together. The active guide is either a circle or the exact saved wrapper slice, as labelled for each stage.</p>
+<div class="legend"><span style="color:#1263eb">S1 skin</span><span style="color:#a330da">S2 skin</span><span style="color:#00896d">S3 skin</span><span style="color:#bd720f">Other skin</span><span style="color:#ba168e">Active circle guide</span><span style="color:#218344">Saved finger target (thick when active)</span><span style="color:#ab5d25">Saved palm target (thick when active)</span><span style="color:#697685">Physical handle: grey fill, overlap stopper</span></div>
+<p class="note">Middle controls one shared weapon translation. Each stage reports material checks for its displayed digit slice. The final material summary covers the Middle slice only, not contacts across the whole hand. Unbound attempts remain visible. Reaching a saved wrapper does not establish a valid grip, and sampled states do not certify uninterrupted contact between samples.</p>
+<div id="cases"></div><details><summary>Evidence and timings</summary><pre id="evidence"></pre></details>
+<script>
+const report=__REPORT__;
+const colors=['#1263eb','#a330da','#00896d'];
+const millimetres=v=>typeof v==='number'&&Number.isFinite(v)?(v*1000).toFixed(3):'unavailable';
+const dictArray=v=>Array.isArray(v)?v:Object.entries(v||{}).map(([digit,d])=>({digit,...d}));
+const guideKind=d=>d.guide_kind==='saved_wrapper'?'saved_wrapper':'circle';
+const stageDigits=s=>dictArray(s.digits).map(d=>({...d,radius_m:d.radius_m??s.radius_m,guide_kind:d.guide_kind??s.guide_kind??'circle'}));
+const contactName=c=>typeof c==='string'?c:c&&typeof c==='object'?[c.digit,c.section===0?'Palm':c.section!==undefined?'S'+c.section:undefined].filter(v=>v!==undefined).join('/')||JSON.stringify(c):String(c);
+const contactsText=v=>Array.isArray(v)&&v.length?v.map(contactName).join(', '):'none reported';
+function materialText(s,scope='Displayed slice'){
+  if(s.material_assessed!==true)return scope+' material: not assessed';
+  return scope+' material: '+(s.material_safe===true?'within checked overlap limits':s.material_safe===false?'overlap limits not satisfied':'safety unresolved')+'; contacts in this slice: '+contactsText(s.material_contacts);
+}
+function points(d){
+  let a=[];
+  for(const s of d.skin_segments||[])a.push(s.a,s.b);
+  for(const key of ['handle_polygon','wrapper_polygon','palm_polygon'])a.push(...d[key]||[]);
+  const c=d.center_m||d.center,r=d.radius_m;
+  if(guideKind(d)==='circle'&&c&&r)a.push([c[0]-r,c[1]-r],[c[0]+r,c[1]+r]);
+  return a.filter(p=>Array.isArray(p)&&p.every(Number.isFinite));
+}
+function bounds(ds){
+  const pts=ds.flatMap(points);
+  if(!pts.length)return[-.15,-.15,.15,.15];
+  return[Math.min(...pts.map(p=>p[0])),Math.min(...pts.map(p=>p[1])),Math.max(...pts.map(p=>p[0])),Math.max(...pts.map(p=>p[1]))];
+}
+function hasMaterial(r){return ['material_gap_m','material_depth_upper_m','cap_m','material_contact'].some(key=>key in r)}
+function panel(d,range){
+  const canvas=document.createElement('canvas');
+  canvas.width=480;
+  canvas.height=Math.max(600,525+(d.regions||[]).reduce((n,r)=>n+(hasMaterial(r)?54:18),0));
+  const g=canvas.getContext('2d'),scale=400/Math.max(range[2]-range[0],range[3]-range[1],.01),cx=(range[0]+range[2])/2,cy=(range[1]+range[3])/2,wrapper=guideKind(d)==='saved_wrapper';
+  const xy=p=>[240+(p[0]-cx)*scale,280-(p[1]-cy)*scale];
+  function path(a,color,fill=false,width=1.8,closed=false){
+    if(!a?.length)return;
+    g.beginPath();a.forEach((p,i)=>{let q=xy(p);i?g.lineTo(...q):g.moveTo(...q)});
+    if(fill||closed)g.closePath();
+    if(fill){g.fillStyle='#dbe1e7';g.fill()}
+    g.strokeStyle=color;g.lineWidth=width;g.stroke();
+  }
+  g.font='bold 19px system-ui';g.fillStyle='#172936';g.fillText(String(d.digit||'Digit'),18,27);g.font='13px system-ui';
+  g.fillText(wrapper?'Active guide: exact saved wrapper slice':'Active circle radius '+millimetres(d.radius_m)+' mm',18,50);
+  path(d.handle_polygon,'#697685',true);
+  path(d.wrapper_polygon,'#218344',false,wrapper?3:1.2,true);
+  path(d.palm_polygon,'#ab5d25',false,wrapper?3:1.2,true);
+  if(wrapper&&(!d.wrapper_polygon?.length||!d.palm_polygon?.length)){
+    g.fillStyle='#a52925';g.fillText('Saved target geometry missing from this record',18,70);
+  }
+  const c=d.center_m||d.center;
+  if(c){
+    const p=xy(c);
+    if(!wrapper&&d.radius_m){g.beginPath();g.arc(...p,d.radius_m*scale,0,2*Math.PI);g.strokeStyle='#ba168e';g.lineWidth=1.6;g.stroke()}
+    g.beginPath();g.arc(...p,3,0,2*Math.PI);g.fillStyle=wrapper?'#697685':'#ba168e';g.fill();
+  }
+  for(const s of d.skin_segments||[])path([s.a,s.b],colors[s.section_owner]||'#bd720f');
+  const joints=d.joints_m||[];
+  if(joints.length){
+    g.setLineDash([5,4]);path(joints,'#34465b');g.setLineDash([]);
+    joints.forEach((p,i)=>{let q=xy(p);g.beginPath();g.arc(...q,3,0,2*Math.PI);g.fillStyle='#34465b';g.fill();g.fillText('J'+(i+1),q[0]+5,q[1]-5)});
+  }
+  let y=474;
+  for(const r of d.regions||[]){
+    g.fillStyle=r.section===0?'#ab5d25':colors[(r.section||1)-1]||'#172936';
+    g.fillText((r.section===0?'Palm':'S'+r.section)+' guide gap: '+millimetres(r.gap_m??r.nearest_gap_m)+' mm',18,y);y+=18;
+    if(hasMaterial(r)){
+      g.fillStyle='#34465b';
+      g.fillText('Handle gap: '+millimetres(r.material_gap_m)+' mm | contact: '+(r.material_contact===true?'yes':r.material_contact===false?'no':'unassessed'),18,y);y+=18;
+      g.fillText('Depth upper bound: '+millimetres(r.material_depth_upper_m)+' / cap: '+millimetres(r.cap_m)+' mm',18,y);y+=18;
+    }
+    const w=r.witness||{},a=w.skin_point_m,b=wrapper?w.target_point_m:w.circle_point_m||w.target_point_m;
+    if(a&&b){g.setLineDash([3,3]);path([a,b],'#ce4654');g.setLineDash([])}
+  }
+  g.fillStyle='#34465b';g.fillRect(370,canvas.height-20,.01*scale,2);g.fillText('10 mm',370,canvas.height-29);
+  return canvas;
+}
+for(const result of report.cases||[]){
+  const block=document.createElement('section'),h=document.createElement('h2');h.textContent=String(result.slot);block.append(h);
+  const summary=document.createElement('p');
+  summary.textContent=result.valid?'Preparation and wrapper attempt: '+Number(result.total_ms).toFixed(1)+' ms. '+result.termination+'. Saved wrapper selected: '+(result.wrapper_target_selected===true?'yes':'no')+'. '+materialText(result,'Middle slice only')+'. Retained sections across accepted digit poses: '+contactsText(result.accepted_hand_material_contacts)+'. This report does not certify a complete 3D grip.':'Preparation could not run: '+result.reason;
+  block.append(summary);
+  for(const f of result.followers||[]){
+    const note=document.createElement('p');note.className='note';
+    note.textContent=f.digit+': '+(f.attached?'attached at fixed weapon position':f.reason)+(typeof f.max_contact_error_m==='number'?' | largest contact error '+millimetres(f.max_contact_error_m)+' mm':'');block.append(note);
+  }
+  const line=document.createElement('p'),slider=document.createElement('input'),play=document.createElement('button'),zoom=document.createElement('button'),plots=document.createElement('div');
+  plots.className='plots';slider.type='range';slider.min=0;slider.max=Math.max(0,(result.stages||[]).length-1);slider.value=0;play.textContent='Play stages';zoom.textContent='Fit current stage';
+  let fit=false,timer=null;
+  const all=(result.stages||[]).flatMap(stageDigits),fixed=bounds(all);
+  function draw(){
+    const i=+slider.value,s=(result.stages||[])[i]||{},ds=stageDigits(s),hasWrapper=ds.some(d=>guideKind(d)==='saved_wrapper')||s.guide_kind==='saved_wrapper',accepted=s.committed_contact_state===true&&s.accepted_contact_constraints===true;
+    line.textContent=(i+1)+'/'+(result.stages||[]).length+' - '+(s.label||s.stage||'No stage')+' | '+(accepted!==true?'UNRESOLVED / DIAGNOSTIC':hasWrapper?'RECORDED RESPONSE ACCEPTED; SEE MATERIAL CONTACTS':'CONTACT CONSTRAINTS ACCEPTED')+' | '+(hasWrapper?'Exact saved wrapper target':s.radius_m===0?'Enclosing radius per digit':millimetres(s.radius_m)+' mm circle')+' | '+(s.stage_elapsed_ms??s.elapsed_ms??s.total_ms??'')+' ms | '+materialText(s);
+    plots.replaceChildren(...ds.map(d=>panel(d,fit?bounds(ds):fixed)));
+  }
+  slider.oninput=draw;
+  zoom.onclick=()=>{fit=!fit;zoom.textContent=fit?'Use fixed scale':'Fit current stage';draw()};
+  play.onclick=()=>{
+    if(timer){clearInterval(timer);timer=null;play.textContent='Play stages';return}
+    slider.value=0;draw();play.textContent='Pause';
+    timer=setInterval(()=>{if(+slider.value>=+slider.max){clearInterval(timer);timer=null;play.textContent='Play stages';return}slider.value=+slider.value+1;draw()},1100);
+  };
+  block.append(play,slider,zoom,line,plots);document.querySelector('#cases').append(block);draw();
+}
+document.querySelector('#evidence').textContent=JSON.stringify({...report,cases:(report.cases||[]).map(c=>({...c,stages:(c.stages||[]).map(s=>({...s,digits:undefined})),candidate:undefined}))},null,2);
+</script>

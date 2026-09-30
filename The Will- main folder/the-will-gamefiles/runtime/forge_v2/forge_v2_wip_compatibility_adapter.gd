@@ -21,6 +21,9 @@ const PrimaryGripSeatResolverScript = preload(
 const PrimaryGripHandleMeshPacketScript = preload(
 	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
 )
+const PreparedGripTargetWrapperResolverScript = preload(
+	"res://core/resolvers/prepared_grip_target_wrapper_resolver.gd"
+)
 const MaterialMassResolverScript = preload(
 	"res://core/resolvers/material_mass_resolver.gd"
 )
@@ -201,6 +204,38 @@ static func build_runtime_contract(
 			profile,
 			stage2_item_state,
 			"forge_v2_primary_handle_exact_mesh_signature_mismatch"
+		)
+	# Legacy saved weapons have no prepared target. When one is supplied, it
+	# must match this exact handle before surviving the Stage2 reconstruction.
+	# Preparation belongs to Forge save; rebuilding never generates a wrapper.
+	if final_mesh_packet.has("primary_grip_target_wrapper"):
+		var wrapper_variant: Variant = final_mesh_packet.get(
+			"primary_grip_target_wrapper"
+		)
+		if not wrapper_variant is Resource:
+			return _build_invalid_result(
+				profile,
+				stage2_item_state,
+				"forge_v2_grip_target_wrapper_resource_invalid"
+			)
+		var wrapper: Resource = wrapper_variant as Resource
+		var wrapper_validation: Dictionary = (
+			PreparedGripTargetWrapperResolverScript.validate(
+				wrapper,
+				final_mesh_packet
+			)
+		)
+		if not bool(wrapper_validation.get("valid", false)):
+			return _build_invalid_result(
+				profile,
+				stage2_item_state,
+				"forge_v2_grip_target_wrapper_%s" % String(
+					wrapper_validation.get("error", "invalid")
+				)
+			)
+		stage2_item_state.set(
+			"primary_grip_target_wrapper",
+			wrapper.duplicate(true)
 		)
 	var material_resolution := _populate_profile_material_usage(
 		profile,

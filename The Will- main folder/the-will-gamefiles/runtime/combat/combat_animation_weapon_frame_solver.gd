@@ -7,6 +7,57 @@ const CombatOriginRecordScript = preload("res://core/models/combat_origin_record
 ## The authored segment owns weapon placement; no separate helper surface is
 ## part of this authority path.
 
+## Encode a realized weapon frame through the same segment representation used
+## by authoring. This is an inverse conversion, not a pose or limit policy.
+func encode_transform_for_authoring(
+	target: Transform3D,
+	local_tip: Vector3,
+	local_pommel: Vector3,
+	local_up_reference: Vector3,
+	trajectory_world: Transform3D,
+	roll_degrees: float,
+	weapon_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+) -> Dictionary:
+	if weapon_origin_id != CombatOriginRecordScript.ORIGIN_WEAPON_ROOT:
+		return {"available": false, "reason": "invalid_weapon_frame_origin"}
+	if not target.is_finite() or not trajectory_world.is_finite() or not local_tip.is_finite() or not local_pommel.is_finite() or not local_up_reference.is_finite() or not is_finite(roll_degrees):
+		return {"available": false, "reason": "non_finite_authoring_frame"}
+	if absf(target.basis.determinant()) < 0.00000001 or absf(trajectory_world.basis.determinant()) < 0.00000001:
+		return {"available": false, "reason": "non_invertible_authoring_frame"}
+	if local_tip.distance_squared_to(local_pommel) <= 0.00000001:
+		return {"available": false, "reason": "degenerate_weapon_segment"}
+	var local_axis: Vector3 = (local_tip - local_pommel).normalized()
+	# Retain the existing segment solver's fallback for a collinear up reference.
+	var intrinsic: Basis = _build_basis_from_axis_and_up(local_axis, local_up_reference)
+	var output_basis: Basis = target.basis * intrinsic
+	var unrolled_up_world: Vector3 = output_basis.y.rotated(output_basis.z.normalized(), -deg_to_rad(roll_degrees))
+	var up_in_trajectory: Vector3 = trajectory_world.basis.inverse() * unrolled_up_world
+	if not up_in_trajectory.is_finite() or up_in_trajectory.length_squared() <= 0.00000001:
+		return {"available": false, "reason": "invalid_authoring_up_reference"}
+	var world_to_trajectory: Transform3D = trajectory_world.affine_inverse()
+	var encoded := {
+		"available": true,
+		"tip_position_local": world_to_trajectory * (target * local_tip),
+		"pommel_position_local": world_to_trajectory * (target * local_pommel),
+		"tip_position_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+		"pommel_position_origin_id": CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING,
+		"weapon_orientation_degrees": Quaternion(Vector3.UP, up_in_trajectory.normalized()).get_euler() * (180.0 / PI),
+		"weapon_orientation_authored": true,
+		"weapon_roll_degrees": roll_degrees,
+	}
+	var reconstructed: Transform3D = solve_transform_from_segment(
+		local_tip, local_pommel,
+		trajectory_world * (encoded.tip_position_local as Vector3),
+		trajectory_world * (encoded.pommel_position_local as Vector3),
+		local_up_reference, trajectory_world.basis,
+		encoded.weapon_orientation_degrees, roll_degrees,
+		weapon_origin_id, weapon_origin_id, weapon_origin_id
+	)
+	if not reconstructed.is_equal_approx(target) or (reconstructed * local_tip).distance_to(target * local_tip) > 0.00001 or (reconstructed * local_pommel).distance_to(target * local_pommel) > 0.00001:
+		return {"available": false, "reason": "authored_frame_roundtrip_failed"}
+	return encoded
+
+
 func solve_transform_from_segment(
 	local_tip: Vector3,
 	local_pommel: Vector3,

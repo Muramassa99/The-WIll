@@ -14,6 +14,7 @@ const ForgeV2SplinePathSamplerScript = preload(
 const PrimaryGripHandleMeshPacketScript = preload(
 	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
 )
+const GripTargetWrapperBaker = preload("res://runtime/forge_v2/forge_v2_grip_target_wrapper_baker.gd")
 
 const PREVIEW_TUBE_SIDES := 12
 const PREVIEW_SPHERE_RINGS := 6
@@ -268,6 +269,9 @@ func clear_stage_controller() -> bool:
 func _connect_stage_controller() -> void:
 	if active_stage_controller == null:
 		return
+	if active_stage_controller.has_method("set_grip_target_wrapper_export_provider"):
+		active_stage_controller.call("set_grip_target_wrapper_export_provider",
+			Callable(self, "_provide_grip_target_wrapper_export"))
 	if not active_stage_controller.has_signal("authoring_state_changed"):
 		return
 	if not active_stage_controller.authoring_state_changed.is_connected(_on_authoring_state_changed):
@@ -293,6 +297,9 @@ func _connect_stage_controller() -> void:
 func _disconnect_stage_controller() -> void:
 	if active_stage_controller == null:
 		return
+	if active_stage_controller.has_method("clear_grip_target_wrapper_export_provider"):
+		active_stage_controller.call("clear_grip_target_wrapper_export_provider",
+			Callable(self, "_provide_grip_target_wrapper_export"))
 	if not active_stage_controller.has_signal("authoring_state_changed"):
 		return
 	if active_stage_controller.authoring_state_changed.is_connected(_on_authoring_state_changed):
@@ -307,6 +314,9 @@ func _disconnect_stage_controller() -> void:
 	if active_stage_controller.has_signal("placement_cursor_changed"):
 		if active_stage_controller.placement_cursor_changed.is_connected(_on_placement_cursor_changed):
 			active_stage_controller.placement_cursor_changed.disconnect(_on_placement_cursor_changed)
+
+func _provide_grip_target_wrapper_export(body: Resource, packet: Dictionary, config: Dictionary) -> Dictionary:
+	return await GripTargetWrapperBaker.new().bake(self, body, packet, config)
 
 func _on_authoring_state_changed(_state: Resource) -> void:
 	_sync_from_controller()

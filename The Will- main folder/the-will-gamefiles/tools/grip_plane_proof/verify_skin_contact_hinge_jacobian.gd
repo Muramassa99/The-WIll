@@ -20,6 +20,8 @@ var _covered: Dictionary = {}
 var _palmar_comparisons: int = 0
 var _moving_palmar_derivatives: int = 0
 var _point_comparisons: int = 0
+var _cross_digit_comparisons: int = 0
+var _moving_cross_digit_derivatives: int = 0
 
 
 func _run() -> void:
@@ -36,6 +38,8 @@ func _run() -> void:
 	_check(_palmar_comparisons > 0, "clipped palmar fragment perturbations executed")
 	_check(_moving_palmar_derivatives > 0, "clipped shared skin has nonzero independently checked hinge motion")
 	_check(_point_comparisons > 0, "noncircle fixed skin-segment parameter comparisons executed")
+	_check(_cross_digit_comparisons > 0, "cross-digit fixed-plane perturbation comparisons executed")
+	_check(_moving_cross_digit_derivatives > 0, "another digit moves measured skin in the fixed observation plane")
 	_finish()
 
 
@@ -117,6 +121,7 @@ func _case(path: String, _unused_wip: Resource, _unused_packet: Dictionary) -> v
 				bad_source.source_id = "invalid/source"
 				_check(not _jacobian.evaluate(prepared[digit], candidate, measured.edge, bad_source).get("valid", true), "mismatched contact source rejected")
 		_verify_palmar(source.slot,adapter,prepared,observations,candidate,angles,palm_region,pose_fraction)
+		_verify_cross_digit(source.slot,adapter,observations,candidate,angles,palm_region,pose_fraction)
 		_check(var_to_bytes(candidate) == immutable_candidate, "original candidate remains immutable")
 		await process_frame
 	_check(var_to_bytes(source.posed_character) == immutable_source, "original captured pose remains immutable")
@@ -143,6 +148,7 @@ func _choose_stable_edge(prepared: Dictionary, candidate: Dictionary, slice: Dic
 
 func _compare_hinge(adapter: Dictionary, observation: Dictionary, candidate: Dictionary, angles: Dictionary, digit: StringName, hinge: int, measured: Dictionary) -> Dictionary:
 	var snapshot: Dictionary = adapter.digit_inputs[digit].snapshot
+	var observation_digit: StringName = measured.get("observation_digit", digit)
 	var angle: float = angles[digit][hinge]
 	var minus_step: float = minf(STEP_RAD, angle - float(snapshot.min_angles_rad[hinge]))
 	var plus_step: float = minf(STEP_RAD, float(snapshot.max_angles_rad[hinge]) - angle)
@@ -158,7 +164,7 @@ func _compare_hinge(adapter: Dictionary, observation: Dictionary, candidate: Dic
 		trial_angles[digit][hinge] = angle + step
 		var trial: Dictionary = Candidate.new().evaluate(adapter, trial_angles, Vector3.ZERO, ROOT)
 		if not trial.get("valid", false): return {"valid":false,"reason":"perturbed_candidate_invalid"}
-		var state: Dictionary = trial.digit_states[digit]
+		var state: Dictionary = trial.digit_states[observation_digit]
 		var slice: Dictionary = _observer.slice_candidate(observation, trial, state.plane_to_world, state.plane_origin_id)
 		if not slice.get("valid", false): return {"valid":false,"reason":"perturbed_slice_invalid"}
 		if measured.get("palmar_fragment",false):
@@ -192,13 +198,67 @@ func _compare_hinge(adapter: Dictionary, observation: Dictionary, candidate: Dic
 	var analytic_clearance: float = 0.0 if measured.get("point_mode",false) else measured.analytic.clearance_derivatives_m_per_rad[hinge]
 	var tolerance: float = maxf(ABSOLUTE_TOLERANCE_M_PER_RAD, analytic_point.length() * RELATIVE_TOLERANCE)
 	return {"valid":true,"hinge":hinge + 1,"hinge_origin_id":snapshot.bone_names[hinge],
-		"plane_origin_id":candidate.digit_states[digit].plane_origin_id,
+		"plane_origin_id":candidate.digit_states[observation_digit].plane_origin_id,
+		"driving_digit":digit,"observation_digit":observation_digit,
 		"method":"central" if minus_step > 0.0 and plus_step > 0.0 else "one_sided_at_range_endpoint",
 		"minus_step_rad":minus_step,"plus_step_rad":plus_step,
 		"analytic_point_m_per_rad":analytic_point,"observed_point_m_per_rad":point_derivative,
 		"analytic_clearance_m_per_rad":analytic_clearance,"observed_clearance_m_per_rad":clearance_derivative,
 		"point_error_m_per_rad":analytic_point.distance_to(point_derivative),
 		"clearance_error_m_per_rad":absf(analytic_clearance - clearance_derivative),"tolerance_m_per_rad":tolerance}
+
+
+func _verify_cross_digit(slot: StringName,adapter: Dictionary,observations: Dictionary,candidate: Dictionary,
+		angles: Dictionary,palm_region: Dictionary,pose_fraction: float) -> void:
+	for observed_digit: StringName in TEST_DIGITS:
+		var state: Dictionary = candidate.digit_states[observed_digit]
+		var slice: Dictionary = _observer.slice_candidate(observations[observed_digit], candidate, state.plane_to_world, state.plane_origin_id)
+		if not _check(slice.get("valid", false), "cross-digit source slice resolves its named plane"): continue
+		slice = PalmarRegion.new().annotate(palm_region, candidate, slice, state.plane_to_world)
+		if not _check(slice.get("valid", false), "cross-digit source palmar annotation"): continue
+		for driving_digit: StringName in TEST_DIGITS:
+			if driving_digit == observed_digit: continue
+			var prepared: Dictionary = _jacobian.prepare(adapter, driving_digit, palm_region, observed_digit)
+			if not _check(prepared.get("valid", false), "cross-digit Jacobian prepares separate driving chain and observation plane"): continue
+			_check(prepared.digit_id == driving_digit and prepared.observation_digit == observed_digit
+				and prepared.plane_origin_id == state.plane_origin_id,
+				"cross-digit Jacobian retains explicit hinge and plane identities")
+			var selected: Dictionary = {}
+			var best_motion: float = -1.0
+			for edge: Dictionary in slice.segments:
+				if (edge.a as Vector2).distance_to(edge.b) < 0.0001: continue
+				var analytic: Dictionary = _jacobian.evaluate_point(prepared, candidate, edge, 0.37)
+				if not analytic.get("valid", false): continue
+				var motion: float = 0.0
+				for derivative: Vector2 in analytic.derivatives_m_per_rad: motion += derivative.length()
+				if motion <= best_motion: continue
+				best_motion = motion
+				selected = {"edge":edge,"analytic":analytic,"point_mode":true,"observation_digit":observed_digit,
+					"palmar_fragment":true,"palm_region":palm_region,
+					"witness":{"skin_segment_t":0.37,"skin_point_m":(edge.a as Vector2).lerp(edge.b,0.37),"signed_clearance_m":0.0}}
+			if selected.is_empty():
+				_skipped.append({"slot":slot,"driving_digit":driving_digit,"observation_digit":observed_digit,
+					"pose_fraction":pose_fraction,"reason":"no_differentiable_cross_digit_triangle_cut"})
+				continue
+			var record: Dictionary = {"case_kind":"cross_digit_fixed_observation_plane","slot":slot,
+				"driving_digit":driving_digit,"observation_digit":observed_digit,"pose_fraction":pose_fraction,
+				"source_id":selected.edge.source_id,"origin_id":state.plane_origin_id,
+				"palm_owned":selected.edge.get("palm_owned",false),"analytic_motion_sum_m_per_rad":best_motion,"hinges":[]}
+			for hinge: int in 3:
+				var compared: Dictionary = _compare_hinge(adapter,observations[observed_digit],candidate,angles,driving_digit,hinge,selected)
+				record.hinges.append(compared)
+				if not compared.get("valid", false): continue
+				_cross_digit_comparisons += 1
+				_moving_cross_digit_derivatives += int((compared.analytic_point_m_per_rad as Vector2).length() > 0.0001)
+				_check(compared.point_error_m_per_rad <= compared.tolerance_m_per_rad,
+					"cross-digit independent reslice derivative " + str(slot) + "/" + str(driving_digit) + "->" + str(observed_digit) + "/J" + str(hinge+1))
+			var wrong_plane: Dictionary = selected.edge.duplicate(true)
+			wrong_plane.origin_id = candidate.digit_states[driving_digit].plane_origin_id
+			_check(not _jacobian.evaluate_point(prepared,candidate,wrong_plane,0.37).get("valid",true),
+				"cross-digit rejects substituting driving plane for observation plane")
+			_cases.append(record)
+	var invalid: Dictionary = _jacobian.prepare(adapter, TEST_DIGITS[0], palm_region, &"missing_observation_digit")
+	_check(not invalid.get("valid", true), "unknown observation digit rejects without a plane fallback")
 
 
 func _verify_palmar(slot: StringName,adapter: Dictionary,prepared: Dictionary,observations: Dictionary,candidate: Dictionary,
@@ -295,6 +355,7 @@ func _finish() -> void:
 		"comparisons":_comparisons,"covered_sections":_covered.keys(),"cases":_cases,"skipped":_skipped,
 		"palmar_comparisons":_palmar_comparisons,"moving_palmar_derivatives":_moving_palmar_derivatives,
 		"noncircle_point_comparisons":_point_comparisons,
+		"cross_digit_comparisons":_cross_digit_comparisons,"moving_cross_digit_derivatives":_moving_cross_digit_derivatives,
 		"finite_difference_step_rad":STEP_RAD,"absolute_tolerance_m_per_rad":ABSOLUTE_TOLERANCE_M_PER_RAD,
 		"relative_tolerance":RELATIVE_TOLERANCE,"total_ms":float(Time.get_ticks_usec() - _started) / 1000.0,
 		"scope":"local analytic derivative against independent complete skin/FK/reslice measurements; not grip or continuous-contact acceptance",

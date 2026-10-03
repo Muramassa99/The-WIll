@@ -301,7 +301,7 @@ func _fragment_edge(edge: Dictionary, face: Dictionary, vertices: PackedVector3A
 		reference.append(polygon[0] * bary.x + polygon[1] * bary.y + polygon[2] * bary.z)
 	var intervals: Array[Vector2] = []
 	for domain: PackedVector2Array in face.domains_m:
-		var interval := _inside_interval(reference[0], reference[1], domain)
+		var interval := _inside_interval(reference[0], reference[1], domain, face.reference_polygon_m)
 		if interval.is_finite(): intervals.append(interval)
 	for occluder: PackedVector2Array in face.occluders_m:
 		var blocked := _inside_interval(reference[0], reference[1], occluder)
@@ -372,7 +372,7 @@ func _coalesce_unrepresentable_fragments(fragments: Array[Dictionary]) -> Dictio
 
 
 ## Vector2 here contains scalar segment parameters (lower, upper), not a point.
-func _inside_interval(a: Vector2, b: Vector2, polygon: PackedVector2Array) -> Vector2:
+func _inside_interval(a: Vector2, b: Vector2, polygon: PackedVector2Array, source_polygon: PackedVector2Array = PackedVector2Array()) -> Vector2:
 	if polygon.size() < 3: return Vector2.INF
 	var lower := 0.0
 	var upper := 1.0
@@ -382,6 +382,14 @@ func _inside_interval(a: Vector2, b: Vector2, polygon: PackedVector2Array) -> Ve
 		var direction: Vector2 = polygon[(index + 1) % polygon.size()] - start
 		var first := direction.cross(a - start) * winding
 		var last := direction.cross(b - start) * winding
+		# Only a boundary inherited from the original source triangle can receive
+		# this numerical correction. Genuine footprint/occluder cuts stay strict.
+		# Reconstructing a Float32 slice through world and reference frames can
+		# put its endpoint nanometres outside that same source edge.
+		if _is_source_boundary(start, start + direction, source_polygon):
+			var tolerance := EPSILON_M * direction.length()
+			if first < 0.0 and first >= -tolerance: first = 0.0
+			if last < 0.0 and last >= -tolerance: last = 0.0
 		if first < 0 and last < 0: return Vector2.INF
 		if (first < 0) != (last < 0):
 			var crossing := first / (first - last)
@@ -389,6 +397,22 @@ func _inside_interval(a: Vector2, b: Vector2, polygon: PackedVector2Array) -> Ve
 			else: upper = minf(upper, crossing)
 		if upper <= lower: return Vector2.INF
 	return Vector2(lower, upper)
+
+
+func _is_source_boundary(a: Vector2, b: Vector2, polygon: PackedVector2Array) -> bool:
+	if polygon.size() != 3: return false
+	for index: int in range(3):
+		var start: Vector2 = polygon[index]
+		var direction: Vector2 = polygon[(index + 1) % 3] - start
+		var length := direction.length()
+		if length <= EPSILON_M: continue
+		var delta_a := a - start
+		var delta_b := b - start
+		if absf(direction.cross(delta_a)) > EPSILON_M * length or absf(direction.cross(delta_b)) > EPSILON_M * length: continue
+		var along_a := direction.dot(delta_a) / length
+		var along_b := direction.dot(delta_b) / length
+		if minf(along_a, along_b) >= -EPSILON_M and maxf(along_a, along_b) <= length + EPSILON_M: return true
+	return false
 
 
 func _frame_error(a: Transform3D, b: Transform3D) -> float:
@@ -408,7 +432,19 @@ func _source_barycentric(world: Vector3, face: Dictionary, vertices: PackedVecto
 	var b := (delta.dot(u) * vv - delta.dot(v) * uv) / denominator
 	var c := (delta.dot(v) * uu - delta.dot(u) * uv) / denominator
 	if b < -0.0001 or c < -0.0001 or b + c > 1.0001 or (a + u * b + v * c).distance_to(world) > 0.000002: return Vector3.INF
-	return Vector3(1.0 - b - c, b, c)
+	var bary := Vector3(1.0 - b - c, b, c)
+	if minf(bary.x, minf(bary.y, bary.z)) < 0.0:
+		# These are interpolation coordinates, never the original bone weights.
+		# Correct source-simplex roundoff only when both physical reconstructions
+		# move by at most the existing numerical epsilon; actual skin stays put.
+		var bounded := Vector3(maxf(bary.x, 0.0), maxf(bary.y, 0.0), maxf(bary.z, 0.0))
+		bounded /= bounded.x + bounded.y + bounded.z
+		var polygon: PackedVector2Array = face.reference_polygon_m
+		var raw_reference := polygon[0] * bary.x + polygon[1] * bary.y + polygon[2] * bary.z
+		var bounded_reference := polygon[0] * bounded.x + polygon[1] * bounded.y + polygon[2] * bounded.z
+		if (u * (bounded.y - bary.y) + v * (bounded.z - bary.z)).length() <= EPSILON_M and raw_reference.distance_to(bounded_reference) <= EPSILON_M:
+			bary = bounded
+	return bary
 
 
 func _fail(reason: String) -> Dictionary:

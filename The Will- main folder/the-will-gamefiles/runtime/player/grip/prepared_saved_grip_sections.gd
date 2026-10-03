@@ -18,7 +18,20 @@ const OWNER := &"prepared_saved_grip_sections"
 const FRAME_TOLERANCE_M := 0.000005
 const AXIAL_TOLERANCE_M := 0.0000001
 const KINDS: Array[StringName] = [&"handle", &"digit_target", &"palm_target"]
+const DEFAULT_USE_NATIVE := Section.DEFAULT_USE_NATIVE
 var _section := Section.new()
+
+
+func configure_native_sections(enabled: bool) -> bool:
+	return _section.configure_native_sections(enabled)
+
+
+func reset_backend_statistics() -> void:
+	_section.reset_backend_statistics()
+
+
+func backend_statistics() -> Dictionary:
+	return _section.backend_statistics()
 
 
 ## plane_context contains digit_planes {digit: {plane_to_world, plane_origin_id}},
@@ -48,14 +61,23 @@ func prepare(wrapper: Resource, handle_packet: Dictionary, weapon_to_world: Tran
 	var registry = registered.registry
 	if not registry.has_origin(WEAPON) or not _same_frame(machine_to_world * registry.resolve_transform_to_machine(WEAPON), weapon_to_world):
 		return _fail("weapon_origin_frame_mismatch")
+	# The frozen Forge payload keeps its original frame/hash. An equipped mesh
+	# can rebase that frame to its grip origin; resolve the identical named chain
+	# for the saved Handle and both targets before building their query surfaces.
+	var source_id := StringName(plane_context.get("saved_source_origin_id",WEAPON))
+	if not registry.has_origin(source_id): return _fail("missing_saved_source_origin")
+	if source_id != WEAPON and not WEAPON in registry.validate_origin_chain(source_id).get("chain_ids",[]):
+		return _fail("saved_source_must_follow_weapon")
+	var source_to_world: Transform3D = machine_to_world * registry.resolve_transform_to_machine(source_id)
+	if not _metric_frame(source_to_world): return _fail("nonmetric_saved_source_frame")
 	var axis: Variant = plane_context.get("station_axis_world")
 	if not axis is Vector3 or not axis.is_finite() or axis.length_squared() < 1.0e-12:
 		return _fail("missing_or_degenerate_station_axis")
 	var source: Dictionary = HandlePacket.validate(handle_packet)
 	var surfaces: Dictionary = {
-		&"handle": _surface(source.vertices, source.indices, weapon_to_world),
-		&"digit_target": _surface(wrapper.get("target_vertices_m"), wrapper.get("target_indices"), weapon_to_world),
-		&"palm_target": _surface(wrapper.get("palm_target_vertices_m"), wrapper.get("palm_target_indices"), weapon_to_world),
+		&"handle": _surface(source.vertices, source.indices, source_to_world, source_id),
+		&"digit_target": _surface(wrapper.get("target_vertices_m"), wrapper.get("target_indices"), source_to_world, source_id),
+		&"palm_target": _surface(wrapper.get("palm_target_vertices_m"), wrapper.get("palm_target_indices"), source_to_world, source_id),
 	}
 	var digits: Dictionary = {}
 	for digit: Variant in plane_context.digit_planes:
@@ -89,7 +111,7 @@ func prepare(wrapper: Resource, handle_packet: Dictionary, weapon_to_world: Tran
 		"station_axis_world": (axis as Vector3).normalized(), "station_axis_origin_id": ROOT,
 		"origin_records": plane_context.origin_records.duplicate(true), "resolve_phase": phase,
 		"source_body_signature": source.body_signature, "config": expected.config.duplicate(true),
-		"source_fingerprint": var_to_bytes([REVISION, source.body_signature, expected.config,
+		"source_fingerprint": var_to_bytes([REVISION, source.body_signature, expected.config, source_id, source_to_world,
 			wrapper.get("source_handle_vertices_m"), wrapper.get("source_handle_indices"),
 			wrapper.get("target_vertices_m"), wrapper.get("target_indices"),
 			wrapper.get("palm_target_vertices_m"), wrapper.get("palm_target_indices")]).hex_encode().sha256_text(),
@@ -187,12 +209,12 @@ func slice(prepared: Dictionary, weapon_translation_world: Vector3, translation_
 	return result
 
 
-func _surface(vertices: PackedVector3Array, indices: PackedInt32Array, weapon_to_world: Transform3D) -> Dictionary:
+func _surface(vertices: PackedVector3Array, indices: PackedInt32Array, source_to_world: Transform3D, source_id: StringName) -> Dictionary:
 	var faces := PackedVector3Array()
 	faces.resize(indices.size())
 	for index: int in indices.size(): faces[index] = vertices[indices[index]]
-	return {"valid": true, "triangles_world": weapon_to_world * faces,
-		"surface_source_origin_id": WEAPON, "resolved_world_origin_id": ROOT}
+	return {"valid": true, "triangles_world": source_to_world * faces,
+		"surface_source_origin_id": source_id, "resolved_world_origin_id": ROOT}
 
 
 func _metric_frame(frame: Transform3D) -> bool:

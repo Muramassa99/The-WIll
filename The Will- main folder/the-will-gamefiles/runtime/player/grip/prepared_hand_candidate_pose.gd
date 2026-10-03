@@ -6,6 +6,7 @@ const Spatial = preload("res://runtime/player/player_finger_surface_grip_solver.
 const ROOT: StringName = &"RL_BoneRoot"
 const REVISION: StringName = &"prepared_hand_candidate_pose_v1"
 const OWNER: StringName = &"prepared_hand_candidate_pose"
+const DIMENSION_SCALE_GUARD: float = 0.000005
 
 # Offline candidate articulation/placement only. The caller freezes the weapon
 # AFTER its upstream authored placement; this tool does not handle station edits.
@@ -28,6 +29,8 @@ func prepare(definition: Resource, coherent_packet: Dictionary, slot: StringName
 		return base
 	if coherent_packet.get("resolve_phase") != &"editor_preview" or not coherent_packet.get("source_bone_parent_ids") is Dictionary:
 		return _fail("candidate_requires_editor_capture_with_source_hierarchy")
+	if coherent_packet.has("digit_dimension_reference") and not coherent_packet.digit_dimension_reference is Dictionary:
+		return _fail("invalid_frozen_digit_dimension_reference")
 	var parents: Dictionary = coherent_packet.source_bone_parent_ids
 	var registered: Dictionary = skin._registry(coherent_packet.origin_records, coherent_packet.resolve_phase)
 	var registry: RefCounted = registered.registry
@@ -79,6 +82,10 @@ func prepare(definition: Resource, coherent_packet: Dictionary, slot: StringName
 		var input: Dictionary = Adapter.new().build(definition, source, id)
 		if not bool(input.get("valid", false)):
 			return input
+		if coherent_packet.has("digit_dimension_reference"):
+			var dimensions: Dictionary = _apply_dimension_reference(input, coherent_packet, frames, hand_name)
+			if not bool(dimensions.get("valid", false)):
+				return dimensions
 		input.erase("registry")
 		input["other_bones_use_hand_rebased_rest"] = false
 		inputs[id] = input
@@ -117,6 +124,93 @@ func prepare(definition: Resource, coherent_packet: Dictionary, slot: StringName
 		"angle_convention": &"absolute_prepared_calibrated_hinges_zero_is_not_captured_pose",
 		"preparation_ms": float(Time.get_ticks_usec() - started) / 1000.0,
 		"arm_realization_verified": false, "actual_3d_grip_verified": false}
+
+
+## Only an explicitly frozen acquisition reference can change dimensions. A
+## later observed pose must reuse that reference; reading its current positions
+## here would make the observed articulation check agree with itself by design.
+## Prepared zero rotations, hinge axes, limits and measured skin stay untouched.
+func _apply_dimension_reference(input: Dictionary, packet: Dictionary, frames: Dictionary, hand_name: StringName) -> Dictionary:
+	var reference: Dictionary = packet.digit_dimension_reference
+	var snapshot: Dictionary = input.snapshot
+	var changes: Array[Dictionary] = []
+	var parent_name: StringName = hand_name
+	for joint: int in range(3):
+		var name: StringName = snapshot.bone_names[joint]
+		var raw: Variant = reference.get(name)
+		if not raw is Dictionary or not raw.get("local_transform") is Transform3D:
+			return _fail("missing_frozen_digit_local_transform", {"bone_name": name})
+		var observed: Dictionary = raw
+		var parent_id: StringName = StringName(packet.bone_origin_ids.get(parent_name, StringName()))
+		if parent_id == StringName() or observed.get("parent_bone_name") != parent_name or observed.get("parent_origin_id") != parent_id or snapshot.relative_transform_origin_ids[joint] != parent_name:
+			return _fail("frozen_digit_dimension_parent_mismatch", {"bone_name": name, "expected_parent_bone_name": parent_name, "expected_parent_origin_id": parent_id})
+		var local_transform: Transform3D = observed.local_transform
+		var relative: Transform3D = snapshot.relative_transforms[joint]
+		if not local_transform.is_finite() or not is_finite(local_transform.basis.determinant()) or local_transform.basis.determinant() <= 1.0e-12:
+			return _fail("invalid_frozen_digit_local_transform", {"bone_name": name})
+		var scale_error: float = local_transform.basis.get_scale().distance_to(relative.basis.get_scale())
+		if not is_finite(scale_error) or scale_error > DIMENSION_SCALE_GUARD:
+			return _fail("frozen_digit_metric_requires_anatomy_preparation", {"bone_name": name, "scale_error": scale_error, "scale_guard": DIMENSION_SCALE_GUARD})
+		var local_delta: Vector3 = local_transform.origin - relative.origin
+		var parent_world: Transform3D = packet.machine_to_world * (frames[parent_name] as Transform3D)
+		changes.append({"bone_name": name, "parent_bone_name": parent_name, "parent_origin_id": parent_id,
+			"prepared_rest_origin_parent_local": relative.origin, "frozen_origin_parent_local": local_transform.origin,
+			"origin_delta_parent_local": local_delta, "origin_delta_world_m": (parent_world.basis * local_delta).length(),
+			"scale_error": scale_error, "scale_guard": DIMENSION_SCALE_GUARD,
+			"prepared_basis_retained": true})
+		relative.origin = local_transform.origin
+		snapshot.relative_transforms[joint] = relative
+		parent_name = name
+	var zero: Dictionary = Spatial.new()._forward_kinematics(snapshot, [0.0, 0.0, 0.0])
+	for frame: Transform3D in zero.joint_transforms_world:
+		if not frame.is_finite():
+			return _fail("nonfinite_frozen_dimension_forward_kinematics")
+	# The section plane keeps its prepared orientation but begins at the actual
+	# first joint. Update both the convenience frame and its named origin record.
+	var plane: Transform3D = input.plane_to_world
+	var prepared_plane_origin: Vector3 = plane.origin
+	plane.origin = zero.joint_origins_world[0]
+	var registry: RefCounted = input.registry
+	var plane_record: Resource = registry.get_origin(input.plane_origin_id)
+	if plane_record == null:
+		return _fail("missing_frozen_dimension_plane_origin")
+	plane_record.transform_to_parent = (snapshot.root_parent_world as Transform3D).affine_inverse() * plane
+	plane_record.owner_system = OWNER
+	if not registry.register_origin(plane_record):
+		return _fail("frozen_dimension_plane_registration_failed")
+	var updated_records: Array = input.origin_records.duplicate(true)
+	var replaced: bool = false
+	for record: Dictionary in updated_records:
+		if record.origin_id == input.plane_origin_id:
+			record.transform_to_parent = plane_record.transform_to_parent
+			record.owner_system = OWNER
+			replaced = true
+	var chain: Dictionary = registry.validate_origin_chain(input.plane_origin_id)
+	if not replaced or not bool(chain.get("ok", false)):
+		return _fail("invalid_frozen_dimension_plane_origin_chain")
+	# Effective reach follows the measured local translations. S3 retains its
+	# prepared skin-tip measurement; the prepared anatomy Resource is immutable.
+	var digit: Dictionary = input.digit.duplicate(true)
+	var prepared_lengths: Array = digit.section_lengths_m.duplicate()
+	for section: int in range(2):
+		var length_m: float = (zero.joint_origins_world[section] as Vector3).distance_to(zero.joint_origins_world[section + 1])
+		if not is_finite(length_m) or length_m <= 0.0:
+			return _fail("invalid_frozen_digit_section_length")
+		digit.section_lengths_m[section] = length_m
+	input["snapshot"] = snapshot
+	input["digit"] = digit
+	input["plane_to_world"] = plane
+	input["origin_records"] = updated_records
+	input["origin_chain"] = chain
+	input["prepared_rest_section_length_round_trip_error_m"] = input.section_length_round_trip_error_m
+	input["section_length_round_trip_error_m"] = 0.0
+	input["dimension_reference_applied"] = true
+	input["dimension_reference_changes"] = changes
+	input["dimension_reference_prepared_section_lengths_m"] = prepared_lengths
+	input["dimension_reference_effective_section_lengths_m"] = digit.section_lengths_m.duplicate()
+	input["dimension_reference_plane_origin_delta_world"] = plane.origin - prepared_plane_origin
+	input["dimension_reference_plane_origin_delta_origin_id"] = ROOT
+	return {"valid": true}
 
 
 func evaluate(prepared: Dictionary, angles_by_digit: Dictionary, translation_world: Vector3, translation_origin_id: StringName) -> Dictionary:
@@ -283,5 +377,5 @@ func _record(id: StringName, parent: StringName, frame: Transform3D, phase: Stri
 		"space_type": &"machine" if id == ROOT else &"bone_frame", "is_dynamic": id != ROOT}
 
 
-func _fail(reason: String) -> Dictionary:
-	return {"valid": false, "reason": reason, "arm_realization_verified": false, "actual_3d_grip_verified": false}
+func _fail(reason: String, details: Dictionary = {}) -> Dictionary:
+	return {"valid": false, "reason": reason, "details": details, "arm_realization_verified": false, "actual_3d_grip_verified": false}

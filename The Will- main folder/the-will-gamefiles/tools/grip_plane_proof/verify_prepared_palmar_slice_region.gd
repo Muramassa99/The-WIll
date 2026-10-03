@@ -12,6 +12,7 @@ var _palm := PalmRegion.new()
 
 func _run() -> void:
 	_test_core_fixtures()
+	_test_source_boundary_roundoff()
 	var loaded: Dictionary = Store.new().load_matching(OldInputs.DEFINITION_PATH, OldInputs.SIGNATURE, "rest_middle_thumb_surface_measurements_v1")
 	if _palm_check(loaded.get("valid", false), "prepared anatomy loads"):
 		var before := var_to_bytes(loaded.resource.reference_skin)
@@ -153,6 +154,59 @@ func _fixture_core(points: PackedVector3Array, weights: PackedFloat64Array, foot
 		contributors.append({&"FixtureHand": weights[index], &"FixtureThumb": 1.0 - weights[index] - foreign_weight, &"FixtureForearm": foreign_weight})
 		if index % 3 == 0: surfaces.append(0); locals.append(index / 3)
 	return _palm._compile(points, indices, surfaces, locals, weights, totals, footprint, foreign, contributors)
+
+
+func _test_source_boundary_roundoff() -> void:
+	# Synthetic palm-reference metres. The named fixture plane is translated
+	# from the fixture root; it does not author or alter a character pose.
+	var plane := Transform3D(Basis.IDENTITY, Vector3(0, 0, 0.01))
+	var polygon := PackedVector2Array([Vector2.ZERO, Vector2(0.1, 0), Vector2(0, 0.1)])
+	var vertices := PackedVector3Array([plane * Vector3.ZERO, plane * Vector3(0.1, 0, 0), plane * Vector3(0, 0.1, 0)])
+	var face := {"vertex_indices": [0, 1, 2], "reference_polygon_m": polygon,
+		"domains_m": [polygon], "occluders_m": [], "source_vertex_contributors": [{&"FixtureHand": 0.4, &"FixtureThumb": 0.6}]}
+	var edge := {"a": Vector2(-0.000000025, 0.02), "b": Vector2(0.045, 0.055000025),
+		"section_owner": -1, "source_id": "0/0", "origin_id": &"PalmRoundoffFixturePlane",
+		"allowance_unassigned": true, "max_inward_depth_m": 0.0005,
+		"a_selected_weights": Vector3(0.1, 0.2, 0.3), "b_selected_weights": Vector3(0.2, 0.3, 0.4)}
+	var before := var_to_bytes([edge, face, vertices])
+	var split: Dictionary = _palm._fragment_edge(edge, face, vertices, plane)
+	_palm_check(split.get("valid", false) and split.get("fragments", []).size() == 1 and split.fragments[0].palm_owned, "nanometre source-boundary roundoff does not manufacture unassigned slivers")
+	if split.get("valid", false):
+		_palm_check(split.fragments[0].a == edge.a and split.fragments[-1].b == edge.b, "source-boundary correction never moves supplied skin endpoints")
+		_palm_check(split.fragments[0].a_selected_weights == edge.a_selected_weights and split.fragments[-1].b_selected_weights == edge.b_selected_weights, "source-boundary correction preserves original bone interpolation weights")
+		_palm_check(split.fragments[0].source_segment_t0 == 0.0 and split.fragments[-1].source_segment_t1 == 1.0, "source-boundary correction covers the entire original edge")
+	_palm_check(var_to_bytes([edge, face, vertices]) == before, "source-boundary correction leaves caller geometry and original bone contributors unchanged")
+	for point: Vector2 in [edge.a, edge.b]:
+		var world := plane * Vector3(point.x, point.y, 0)
+		var bary: Vector3 = _palm._source_barycentric(world, face, vertices)
+		_palm_check(bary.is_finite() and minf(bary.x, minf(bary.y, bary.z)) >= 0.0, "roundoff barycentrics remain inside original source simplex")
+		_palm_check((vertices[0] * bary.x + vertices[1] * bary.y + vertices[2] * bary.z).distance_to(world) <= PalmRegion.EPSILON_M, "source reconstruction correction stays within existing numerical epsilon")
+	var reversed_face := face.duplicate(true)
+	var reversed := polygon.duplicate(); reversed.reverse()
+	reversed_face.domains_m = [reversed]
+	var reversed_split: Dictionary = _palm._fragment_edge(edge, reversed_face, vertices, plane)
+	_palm_check(reversed_split.get("valid", false) and reversed_split.fragments.size() == 1 and reversed_split.fragments[0].palm_owned, "source-boundary correction is independent of domain winding")
+	# Real footprint cuts and occlusion boundaries are not source-simplex
+	# roundoff, even when a real outside interval is smaller than epsilon.
+	var clipped_face := face.duplicate(true)
+	clipped_face.domains_m = [PackedVector2Array([Vector2(0.02, 0), Vector2(0.1, 0), Vector2(0.02, 0.08)])]
+	var clipped_edge := edge.duplicate(true)
+	clipped_edge.a = Vector2(0.019999975, 0.01); clipped_edge.b = Vector2(0.04, 0.01)
+	var clipped_split: Dictionary = _palm._fragment_edge(clipped_edge, clipped_face, vertices, plane)
+	_palm_check(clipped_split.get("valid", false) and clipped_split.fragments.size() == 2 and not clipped_split.fragments[0].palm_owned and clipped_split.fragments[1].palm_owned, "genuine sub-epsilon footprint exclusion retains unassigned skin")
+	var hidden_face := face.duplicate(true)
+	hidden_face.occluders_m = [PackedVector2Array([Vector2(0.02, 0), Vector2(0.1, 0), Vector2(0.02, 0.08)])]
+	var hidden_split: Dictionary = _palm._fragment_edge(clipped_edge, hidden_face, vertices, plane)
+	_palm_check(hidden_split.get("valid", false) and hidden_split.fragments.size() == 2 and hidden_split.fragments[0].palm_owned and not hidden_split.fragments[1].palm_owned, "occluder exclusion stays strict at numerical-scale intervals")
+	var outside := edge.duplicate(true)
+	outside.a = Vector2(-0.000001, 0.02); outside.b = Vector2(0.04, 0.02)
+	var outside_split: Dictionary = _palm._fragment_edge(outside, face, vertices, plane)
+	_palm_check(outside_split.get("valid", false) and outside_split.fragments.size() == 2 and not outside_split.fragments[0].palm_owned, "outside-source displacement exceeding numerical epsilon remains unassigned")
+	outside.a = Vector2(-0.001, 0.02)
+	_palm_check(not _palm._fragment_edge(outside, face, vertices, plane).get("valid", false), "forged geometry beyond original source reconstruction tolerance still fails")
+	_palm_cases.append({"case": "source_boundary_roundoff", "numeric_epsilon_m": PalmRegion.EPSILON_M,
+		"skin_coordinates_changed": false, "bone_weights_normalized": false,
+		"genuine_footprint_and_occluder_exclusions_preserved": true})
 
 
 func _palm_check(value: bool, label: String) -> bool:

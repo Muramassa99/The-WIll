@@ -2,7 +2,7 @@ extends RefCounted
 
 ## Circle-only proof source. Index immutable world triangles once for a fixed
 ## metric plane orientation; every translated plane still gets its real section.
-## Existing Slicer owns intersection, welding and closed-loop extraction. This
+## The selected kernel retains Slicer's intersection, welding and contour rules. This
 ## helper certifies one complete simple planar loop, not a closed 3D solid/grip.
 const Slicer = preload("res://runtime/player/grip/slice_reachable_surface.gd")
 const Contact = preload("res://runtime/player/grip/skin_plane_contact_query.gd")
@@ -11,8 +11,66 @@ const Chronology = preload("res://runtime/player/grip/grip_chronology.gd")
 const REVISION := &"prepared_weapon_plane_section_v1"
 const MAX_INDEX_BINS: int = 64
 const FLOAT32_EPSILON: float = 0.00000011920928955078125
+const DEFAULT_USE_NATIVE := true
 var _slicer := Slicer.new()
 var _contact := Contact.new()
+var _native_slice: RefCounted
+var _native_topology: RefCounted
+var _native_requested := false
+var _backend_counts := {"native_slice_calls":0,"native_topology_calls":0,
+	"reference_slice_calls":0,"reference_topology_calls":0,"fallback_calls":0}
+
+
+func _init() -> void:
+	if not configure_native_sections(DEFAULT_USE_NATIVE):
+		push_warning("Compiled grip sections unavailable; using reference slicing/topology. Fallback usage is recorded.")
+
+
+## Configure before a synchronous section sequence. Geometry has no backend
+## metadata; counters are kept on this owner and never enter saved/cache packets.
+func configure_native_sections(enabled: bool) -> bool:
+	_native_requested = enabled
+	_native_slice = null
+	_native_topology = null
+	reset_backend_statistics()
+	if not enabled: return true
+	if not ClassDB.class_exists(&"GripSliceKernel") or not ClassDB.class_exists(&"GripTopologyKernel"):
+		return false
+	_native_slice = ClassDB.instantiate(&"GripSliceKernel") as RefCounted
+	_native_topology = ClassDB.instantiate(&"GripTopologyKernel") as RefCounted
+	if _native_slice == null or _native_topology == null:
+		_native_slice = null; _native_topology = null
+		return false
+	return true
+
+
+func reset_backend_statistics() -> void:
+	for key: String in _backend_counts: _backend_counts[key] = 0
+
+
+func backend_statistics() -> Dictionary:
+	var result := _backend_counts.duplicate()
+	result["section_backend"] = "cpp" if _native_requested and _native_slice != null else "gdscript"
+	result["native_requested"] = _native_requested
+	return result
+
+
+func _slice_surface(surface: Dictionary, plane: Transform3D, origin: StringName, reach: float) -> Dictionary:
+	if _native_requested and _native_slice != null:
+		_backend_counts.native_slice_calls += 1
+		return _native_slice.slice(surface, plane, origin, reach, 0.0)
+	_backend_counts.reference_slice_calls += 1
+	if _native_requested: _backend_counts.fallback_calls += 1
+	return _slicer.slice(surface, plane, origin, reach, 0.0)
+
+
+func _prepare_topology(edges: Array, origin: StringName) -> Dictionary:
+	if _native_requested and _native_topology != null:
+		_backend_counts.native_topology_calls += 1
+		return _native_topology.prepare_target(edges, origin)
+	_backend_counts.reference_topology_calls += 1
+	if _native_requested: _backend_counts.fallback_calls += 1
+	return _contact.prepare_target(edges, origin)
 
 
 func prepare(surface: Dictionary, plane_to_world: Transform3D, plane_origin_id: StringName) -> Dictionary:
@@ -123,7 +181,7 @@ func slice(prepared: Dictionary, current_plane_to_world: Transform3D) -> Diction
 		"source_triangles": original.size() / 3, "indexed_triangles": indices.size(),
 		"index_bins_visited": last - first + 1, "plane_height_m": height,
 		"reach_m": reach}) if recording else 0
-	var sliced: Dictionary = _slicer.slice(indexed_surface, current_plane_to_world, prepared.origin_id, reach, 0.0)
+	var sliced: Dictionary = _slice_surface(indexed_surface, current_plane_to_world, prepared.origin_id, reach)
 	if recording:
 		Chronology.finish(slice_span, {"valid": sliced.get("valid", false),
 			"reason": sliced.get("status", ""), "counts": sliced.get("counts", {})})
@@ -143,7 +201,7 @@ func slice(prepared: Dictionary, current_plane_to_world: Transform3D) -> Diction
 	var topology_span: int = Chronology.begin("section.topology_prepare", {
 		"plane_id": prepared.origin_id, "source_id": prepared.source_id,
 		"segments": edges.size()}) if recording else 0
-	var topology: Dictionary = _contact.prepare_target(edges, prepared.origin_id)
+	var topology: Dictionary = _prepare_topology(edges, prepared.origin_id)
 	if recording:
 		var topology_counts: Dictionary = topology.get("topology", {})
 		Chronology.finish(topology_span, {"valid": topology.get("valid", false),

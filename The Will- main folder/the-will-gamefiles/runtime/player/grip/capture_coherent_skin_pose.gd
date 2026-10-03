@@ -49,6 +49,22 @@ func capture(skeleton: Skeleton3D, mesh: MeshInstance3D, reference: Dictionary, 
 			return _fail("invalid_current_skin_bind_frame", {"bone_name": name})
 		bone_ids[name] = id
 		records.append(_record(id, Origins.ORIGIN_RL_BONE_ROOT, frame, phase, Origins.SPACE_TYPE_BONE_FRAME))
+	# Read the actual local pose directly. Reconstructing it from global frames
+	# adds affine round-off and using the rest pose loses animated translations.
+	# These are observations only: the acquisition owner explicitly freezes the
+	# chosen dictionary as digit_dimension_reference for one solve transaction.
+	var source_local_transforms: Dictionary = {}
+	for name: StringName in bone_ids:
+		if name == Origins.ORIGIN_RL_BONE_ROOT:
+			continue # The machine root's external parent is outside this origin tree.
+		var parent_name: StringName = source_parent_ids[name]
+		if not bone_ids.has(parent_name):
+			return _fail("missing_captured_local_pose_parent_origin", {"bone_name": name, "parent_bone_name": parent_name})
+		var local_transform: Transform3D = skeleton.get_bone_pose(skeleton.find_bone(name))
+		if not _valid_frame(local_transform):
+			return _fail("invalid_current_local_bone_pose", {"bone_name": name})
+		source_local_transforms[name] = {"local_transform": local_transform,
+			"parent_bone_name": parent_name, "parent_origin_id": bone_ids[parent_name]}
 	var mesh_to_machine: Transform3D = world_to_machine * mesh.global_transform
 	if not _valid_frame(mesh_to_machine):
 		return _fail("invalid_current_mesh_frame")
@@ -57,6 +73,7 @@ func capture(skeleton: Skeleton3D, mesh: MeshInstance3D, reference: Dictionary, 
 		"root_origin_id": Origins.ORIGIN_RL_BONE_ROOT, "pose_id": pose_id, "resolve_phase": phase,
 		"machine_to_world": machine_to_world, "mesh_origin_id": MESH_ORIGIN, "bone_origin_ids": bone_ids,
 		"origin_records": records, "source_bone_parent_ids": source_parent_ids,
+		"source_bone_local_transforms": source_local_transforms,
 		"reference_correspondence_verified": true, "all_skin_bind_poses_captured": true,
 		"pose_read_without_scene_writes": true, "anatomy_measurement_ran": false,
 		"production_pose_written": false, "actual_3d_grip_verified": false,

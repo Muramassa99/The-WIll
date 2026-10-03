@@ -65,14 +65,19 @@ func prepare(adapter: Dictionary, digit_id: StringName) -> Dictionary:
 		return _fail("missing_recovered_section_targets_or_caps")
 	var triangles: PackedInt32Array = PackedInt32Array()
 	var metadata: Dictionary = {}
+	var foreign_collision_sources: Dictionary = {}
 	var hand_names: Array = adapter.descendant_bones.keys()
 	for triangle: int in range(skin.triangle_count):
 		var relevant: bool = false
 		var total_max: float = 0.0
 		var cap: float = INF
 		var has_unassigned: bool = false
+		# Vector3 contains three original corner WEIGHTS, not a spatial point.
+		var foreign_corner_weights: Dictionary = {}
+		var vertex_indices: PackedInt32Array = PackedInt32Array()
 		for corner: int in range(3):
 			var vertex: int = skin.triangle_indices[triangle * 3 + corner]
+			vertex_indices.append(vertex)
 			var total: float = 0.0
 			for influence: int in range(skin.vertex_offsets[vertex], skin.vertex_offsets[vertex + 1]):
 				var name: StringName = names[skin.influence_binds[influence]]
@@ -80,6 +85,10 @@ func prepare(adapter: Dictionary, digit_id: StringName) -> Dictionary:
 				relevant = relevant or hand_names.has(name)
 				if section_caps.has(name):
 					cap = minf(cap, section_caps[name])
+					if not selected_names.has(name):
+						var corner_weights: Vector3 = foreign_corner_weights.get(name, Vector3.ZERO)
+						corner_weights[corner] += float(skin.influence_weights[influence])
+						foreign_corner_weights[name] = corner_weights
 				else:
 					has_unassigned = true
 			total_max = maxf(total_max, total)
@@ -87,6 +96,9 @@ func prepare(adapter: Dictionary, digit_id: StringName) -> Dictionary:
 			triangles.append(triangle)
 			var key: String = "%d/%d" % [skin.triangle_surface_ids[triangle], skin.triangle_local_ids[triangle]]
 			metadata[key] = {"total_weight_upper": total_max, "known_cap_m": cap, "has_unassigned_influences": has_unassigned}
+			if not foreign_corner_weights.is_empty():
+				foreign_collision_sources[key] = {"vertex_indices": vertex_indices,
+					"section_corner_weights": foreign_corner_weights}
 	var reach: float = 0.0
 	for length_m: float in digit.section_lengths_m:
 		if not is_finite(length_m) or length_m <= 0.0:
@@ -101,9 +113,11 @@ func prepare(adapter: Dictionary, digit_id: StringName) -> Dictionary:
 		"triangle_indices": skin.triangle_indices.duplicate(), "triangle_surface_ids": skin.triangle_surface_ids.duplicate(),
 		"triangle_local_ids": skin.triangle_local_ids.duplicate(), "selected_weights": weights,
 		"triangle_ids": triangles, "metadata": metadata, "targets_m": section_targets, "caps_m": selected_caps,
+		"foreign_collision_sources": foreign_collision_sources, "collision_section_caps_m": section_caps,
 		"reach_m": reach, "scope": "all_source_triangles_with_positive_Hand_or_descendant_influence",
 		"section_ownership": "same_bone_strict_majority_of_total_original_weight_at_both_edge_ends",
 		"safety_cap_policy": "trial_majority_owned_edge_uses_own_section_cap_other_tissue_uses_minimum_known_cap_or_remains_unassigned",
+		"foreign_collision_cap_policy": "same_foreign_bone_strict_majority_at_both_slice_endpoints_uses_its_existing_cap_without_attraction",
 		"weights_normalized_by_tool": false, "anatomy_recomputed": false,
 		"preparation_ms": float(Time.get_ticks_usec() - started) / 1000.0,
 		"actual_3d_grip_verified": false, "grip_accepted": false}
@@ -371,6 +385,8 @@ func slice_candidate(prepared: Dictionary, candidate: Dictionary, plane_to_world
 				edge.allowance_unassigned = false
 				edge["allowance_assignment_is_trial"] = true
 				owned[section].append(segments.size())
+		if edge.section_owner < 0:
+			_assign_foreign_collision_owner(edge, prepared, posed.vertices_world, plane_to_world)
 		unassigned_count += int(edge.allowance_unassigned)
 		segments.append(edge)
 	return {"valid": true, "revision": &"prepared_grip_candidate_slice_v1", "digit_id": digit_id,
@@ -380,6 +396,50 @@ func slice_candidate(prepared: Dictionary, candidate: Dictionary, plane_to_world
 		"plane_origin_validation_ms": validation_ms, "skin_slice_ms": slice_ms,
 		"slice_candidate_ms": float(Time.get_ticks_usec() - started) / 1000.0,
 		"anatomy_recomputed": false, "production_pose_written": false, "actual_3d_grip_verified": false, "grip_accepted": false}
+
+
+## An Index plane may cut Thumb skin. Its collision allowance belongs to the
+## actual contributing Thumb section; it must not become an Index attraction
+## target. Test the two sliced endpoints, never a whole-face owner or a nearest
+## bone. Original weights and the existing total-weight bound stay unnormalized.
+func _assign_foreign_collision_owner(edge: Dictionary, prepared: Dictionary, vertices_world: PackedVector3Array, plane_to_world: Transform3D) -> void:
+	if int(edge.get("section_owner", -1)) >= 0: return
+	var key: String = edge.source_id
+	var sources: Dictionary = prepared.foreign_collision_sources
+	if not sources.has(key): return
+	var source: Dictionary = sources[key]
+	var indices: PackedInt32Array = source.vertex_indices
+	var first: Vector3 = vertices_world[indices[0]]
+	var second: Vector3 = vertices_world[indices[1]]
+	var third: Vector3 = vertices_world[indices[2]]
+	# Same source-face degeneracy guard used by palmar source correspondence.
+	if (second - first).cross(third - first).length_squared() <= 1.0e-20: return
+	var barycentrics: Array[Vector3] = []
+	for endpoint: String in ["a", "b"]:
+		var point: Vector2 = edge[endpoint]
+		var world: Vector3 = plane_to_world * Vector3(point.x, point.y, 0.0)
+		# https://docs.godotengine.org/en/4.7/classes/class_geometry3d.html#class-geometry3d-method-get-triangle-barycentric-coords
+		var bary: Vector3 = Geometry3D.get_triangle_barycentric_coords(world, first, second, third)
+		if not bary.is_finite() or bary.x < -0.0001 or bary.y < -0.0001 or bary.z < -0.0001:
+			return
+		if bary.x > 1.0001 or bary.y > 1.0001 or bary.z > 1.0001 or (first * bary.x + second * bary.y + third * bary.z).distance_to(world) > 0.000002:
+			return
+		barycentrics.append(bary)
+	var total_upper: float = prepared.metadata[key].total_weight_upper
+	for bone: StringName in source.section_corner_weights:
+		var weights: Vector3 = source.section_corner_weights[bone]
+		var weight_a: float = weights.dot(barycentrics[0])
+		var weight_b: float = weights.dot(barycentrics[1])
+		if 2.0 * weight_a <= total_upper + 0.0000001 or 2.0 * weight_b <= total_upper + 0.0000001:
+			continue
+		edge["collision_owner_bone"] = bone
+		edge["collision_owner_weight_a"] = weight_a
+		edge["collision_owner_weight_b"] = weight_b
+		edge["collision_owner_total_weight_upper"] = total_upper
+		edge.max_inward_depth_m = prepared.collision_section_caps_m[bone]
+		edge.allowance_unassigned = false
+		edge["allowance_assignment_is_trial"] = true
+		return
 
 
 func _metric_plane(frame: Transform3D) -> bool:

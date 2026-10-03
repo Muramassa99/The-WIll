@@ -175,11 +175,17 @@ func _section_check(condition: bool, label: String) -> bool:
 
 
 func _finish_sections() -> void:
+	var backend := _section_helper.backend_statistics()
+	_section_check(backend.section_backend == ("cpp" if FastSection.DEFAULT_USE_NATIVE else "gdscript"), "configured section backend actually used")
+	_section_check(backend.fallback_calls == 0, "prepared section verification has no hidden backend fallback")
+	if FastSection.DEFAULT_USE_NATIVE:
+		_section_check(backend.native_slice_calls > 0 and backend.native_topology_calls > 0, "both compiled section kernels execute")
 	var old_ms: float = 0.0
 	var fast_ms: float = 0.0
 	for case: Dictionary in _section_cases:
 		old_ms += float(case.old_ms); fast_ms += float(case.fast_ms)
 	var report := {"schema": "prepared_weapon_plane_section_verifier_v1", "ok": _section_failures.is_empty(),
+		"backend_statistics":backend,
 		"checks": _section_checks, "failures": _section_failures, "cases": _section_cases,
 		"comparison_tolerance_m": COMPARISON_TOLERANCE_M, "old_total_ms": old_ms, "fast_total_ms": fast_ms,
 		"warm_query_speed_ratio": old_ms / fast_ms if fast_ms > 0.0 else 0.0,

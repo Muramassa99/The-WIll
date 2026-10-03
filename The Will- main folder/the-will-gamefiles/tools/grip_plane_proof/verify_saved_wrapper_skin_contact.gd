@@ -1,6 +1,7 @@
 extends SceneTree
 
 const Query = preload("res://runtime/player/grip/saved_wrapper_skin_contact.gd")
+const SliceContact = preload("res://runtime/player/grip/prepared_grip_slice_contact.gd")
 const ORIGIN := &"SavedWrapperContactFixturePlaneOrigin"
 const SOURCE := &"WeaponRootOrigin"
 var _query := Query.new()
@@ -19,6 +20,7 @@ func _run() -> void:
 	var original := var_to_bytes(section)
 	var prepared := _query.prepare(section)
 	if _check(prepared.get("valid",false),"exact named saved targets prepare"):
+		_verify_foreign_section_allowance(prepared)
 		_check(not prepared.cache_hit,"first preparation is not cache hit")
 		for kind: StringName in Query.KINDS:
 			_check(prepared[kind].polygon == section[kind].polygon,str(kind)+": exact vertices preserved")
@@ -134,8 +136,70 @@ func _run() -> void:
 	quit(0 if _failures.is_empty() else 1)
 
 
+## Endpoint ownership is independent of the digit whose plane is being sliced.
+## This fixture's plane is ORIGIN, presented by the identity ROOT/world frame.
+func _verify_foreign_section_allowance(target: Dictionary) -> void:
+	var observer := SliceContact.new()
+	var vertices := PackedVector3Array([Vector3(-0.01,0,0),Vector3(0.01,0,0),Vector3(0,0.02,0)])
+	var bone := &"CC_Base_R_Thumb2"
+	var cap := 0.00108
+	var prepared := {"foreign_collision_sources":{"skin/0":{
+		"vertex_indices":PackedInt32Array([0,1,2]),"section_corner_weights":{bone:Vector3(0.45,0.45,0.9)}}},
+		"collision_section_caps_m":{bone:cap},"metadata":{"skin/0":{"total_weight_upper":1.0}}}
+	var original := _segment(0.0097,0.0005,false)
+	original.section_owner = -1
+	original.allowance_unassigned = true
+	var inputs_before := var_to_bytes([prepared,vertices,original])
+	var edge := original.duplicate(true)
+	observer._assign_foreign_collision_owner(edge,prepared,vertices,Transform3D.IDENTITY)
+	_check(edge.get("collision_owner_bone")==bone and edge.max_inward_depth_m==cap and not edge.allowance_unassigned,
+		"foreign section gets its own cap from both sliced endpoint weights even when two source corners lack majority")
+	_check(edge.section_owner==-1 and not edge.palm_owned,"foreign collision identity grants no selected digit or palm attraction")
+	var legal := _query.evaluate(target,[edge],ORIGIN)
+	_check(legal.get("valid",false) and legal.material_constraint_safe and legal.segments[0].max_inward_depth_m==cap,
+		"foreign skin's permitted 0.3 mm overlap is evaluated against its actual section cap")
+	var too_deep := original.duplicate(true)
+	too_deep.a.y=0.006;too_deep.b.y=0.006
+	observer._assign_foreign_collision_owner(too_deep,prepared,vertices,Transform3D.IDENTITY)
+	var rejected := _query.evaluate(target,[too_deep],ORIGIN)
+	_check(too_deep.get("collision_owner_bone")==bone and rejected.get("valid",false)
+		and not rejected.material_constraint_safe and rejected.segments[0].material_cap_status==&"exceeds",
+		"correct foreign ownership still rejects actual penetration beyond its unchanged cap")
+	for weights: Vector3 in [Vector3(0.2,0.8,0.49),Vector3(0.5,0.5,0.5)]:
+		var mixed := prepared.duplicate(true)
+		mixed.foreign_collision_sources["skin/0"].section_corner_weights[bone]=weights
+		var uncertain := original.duplicate(true)
+		observer._assign_foreign_collision_owner(uncertain,mixed,vertices,Transform3D.IDENTITY)
+		_check(uncertain.allowance_unassigned and not uncertain.has("collision_owner_bone"),
+			"one-end majority or exact-half tie cannot acquire a foreign section allowance")
+	var total_bound := prepared.duplicate(true)
+	total_bound.metadata["skin/0"].total_weight_upper=2.0
+	var unnormalized := original.duplicate(true)
+	observer._assign_foreign_collision_owner(unnormalized,total_bound,vertices,Transform3D.IDENTITY)
+	_check(unnormalized.allowance_unassigned,"foreign section majority retains original total-weight upper bound")
+	var unknown_source := prepared.duplicate(true)
+	unknown_source.foreign_collision_sources.clear()
+	var other_skin := original.duplicate(true)
+	observer._assign_foreign_collision_owner(other_skin,unknown_source,vertices,Transform3D.IDENTITY)
+	var unknown_result := _query.evaluate(target,[other_skin],ORIGIN)
+	_check(other_skin.allowance_unassigned and unknown_result.get("valid",false)
+		and unknown_result.segments[0].max_inward_depth_m==0.0 and not unknown_result.material_constraint_safe,
+		"unclassified/back skin retains zero-cap collision evaluation")
+	var selected := original.duplicate(true)
+	selected.section_owner=1;selected.allowance_unassigned=false
+	observer._assign_foreign_collision_owner(selected,prepared,vertices,Transform3D.IDENTITY)
+	_check(selected.section_owner==1 and selected.max_inward_depth_m==original.max_inward_depth_m
+		and not selected.has("collision_owner_bone"),"existing selected digit attraction and cap stay unchanged")
+	var degenerate := original.duplicate(true)
+	observer._assign_foreign_collision_owner(degenerate,prepared,
+		PackedVector3Array([Vector3(-0.01,0,0),Vector3(0.01,0,0),Vector3(0.02,0,0)]),Transform3D.IDENTITY)
+	_check(degenerate.allowance_unassigned,"degenerate source triangle remains conservatively unassigned")
+	_check(var_to_bytes([prepared,vertices,original])==inputs_before,"foreign ownership evaluation preserves original geometry, weights and caps")
+
+
 func _verify_cache_lifecycle(section: Dictionary) -> void:
 	var helper := Query.new()
+	_check(helper.configure_native_batch(false),"reference segment cache explicitly selected for lifecycle regression")
 	var target := helper.prepare(section)
 	var segments: Array = [_segment(0.012,0.0005,false),_segment(0.0097,0.0005,false),_segment(0.0077,0.0025,true)]
 	var uncached := helper.evaluate(target,segments,ORIGIN)

@@ -34,8 +34,13 @@ func _init() -> void:
 func _run() -> void:
 	_started = Time.get_ticks_usec()
 	for name: String in FIXTURES: _fixture(name)
+	var backend := _helper.backend_statistics()
+	_check(backend.section_backend == ("cpp" if Saved.DEFAULT_USE_NATIVE else "gdscript"), "configured section backend actually used")
+	_check(backend.fallback_calls == 0, "saved section verification has no hidden backend fallback")
+	if Saved.DEFAULT_USE_NATIVE:
+		_check(backend.native_slice_calls > 0 and backend.native_topology_calls > 0, "both compiled section kernels execute")
 	var report := {"schema": "prepared_saved_grip_sections_verify_v1", "checks": _checks,
-		"failures": _failures, "cases": _cases, "all_passed": _failures.is_empty(),
+		"failures": _failures, "cases": _cases, "backend_statistics":backend,"all_passed": _failures.is_empty(),
 		"duration_ms": float(Time.get_ticks_usec() - _started) / 1000.0,
 		"scope": "saved_geometry_slice_adapter_not_character_or_grip_acceptance"}
 	var path := "C:/WORKSPACE/test_artifacts/prepared_saved_grip_sections_" + Time.get_datetime_string_from_system().replace(":", "-") + ".json"
@@ -69,6 +74,7 @@ func _fixture(name: String) -> void:
 	if not _check(prepared.get("valid", false), name + ": named saved geometry preparation: " + str(prepared.get("reason", ""))): return
 	var prepared_before := var_to_bytes(prepared)
 	var source_before := _source_bytes(wrapper, packet, context)
+	_verify_equipped_rebase(name,wrapper,packet,weapon,machine,context,config,prepared)
 	var stale: Dictionary = packet.duplicate(true)
 	stale.primary_grip_handle_body_signature += ":stale"
 	_check(not _helper.prepare(wrapper, stale, weapon, machine, context, config).get("valid", false), name + ": changed physical signature rejected")
@@ -122,6 +128,7 @@ func _fixture(name: String) -> void:
 			for kind: StringName in Saved.KINDS:
 				var surface := _surface(wrapper, packet, kind, moved)
 				var reference_helper := Section.new()
+				_check(reference_helper.configure_native_sections(false), "direct translated mesh oracle uses reference kernels")
 				var reference := reference_helper.slice(reference_helper.prepare(surface, plane, result.origin_id), plane)
 				if not _check(reference.get("valid", false), label + "/" + str(digit) + "/" + str(kind) + ": direct translated mesh oracle"): continue
 				var section: Dictionary = result[kind]
@@ -148,6 +155,35 @@ func _fixture(name: String) -> void:
 	_check(_source_bytes(wrapper, packet, context) == source_before, name + ": sources and hand provenance unchanged")
 	_check(FileAccess.get_sha256(path) == FIXTURES[name], name + ": source save untouched")
 
+
+func _verify_equipped_rebase(label: String,wrapper: Resource,packet: Dictionary,source_world: Transform3D,
+        machine: Transform3D,context: Dictionary,config: Dictionary,reference: Dictionary) -> void:
+	var source_to_equipped := Transform3D(Basis.IDENTITY,Vector3(-0.12,0.013,-0.007))
+	var equipped := source_world * source_to_equipped.affine_inverse()
+	var rebased: Dictionary=context.duplicate(true)
+	for record: Dictionary in rebased.origin_records:
+		if record.origin_id==WEAPON: record.transform_to_parent=machine.affine_inverse()*equipped
+	var id := &"ForgeSavedGripSourceOrigin"
+	rebased["saved_source_origin_id"]=id
+	rebased.origin_records.append({"origin_id":id,"parent_origin_id":WEAPON,"transform_to_parent":source_to_equipped,
+		"owner_system":&"saved_wrapper_grip_source","resolve_phase":PHASE,"space_type":&"weapon","is_dynamic":false})
+	var prepared := _helper.prepare(wrapper,packet,equipped,machine,rebased,config)
+	if not _check(prepared.get("valid",false),label+": explicit equipped-origin rebase prepares unchanged saved source"): return
+	for shift: Vector3 in [Vector3.ZERO,source_world.basis.y*0.002]:
+		var actual := _helper.slice(prepared,shift,ROOT)
+		var expected := _helper.slice(reference,shift,ROOT)
+		if not _check(actual.get("valid",false) and expected.get("valid",false),label+": rebased source remains sliceable"): continue
+		_check(_frame_error(actual.weapon_to_world,equipped.translated(shift))<ERROR_M,label+": result belongs to equipped weapon frame")
+		var registry := HandSkin.new()._registry(actual.origin_records,PHASE)
+		_check(registry.get("valid",false) and _frame_error(machine*registry.registry.resolve_transform_to_machine(id),source_world.translated(shift))<ERROR_M,
+			label+": saved-source child follows equipped movement exactly once")
+		for digit: Variant in expected.digits:
+			for kind: StringName in Saved.KINDS:
+				_check(_boundary_error(actual.digits[digit][kind].polygon,expected.digits[digit][kind].polygon)<ERROR_M,
+					label+": rebased "+str(digit)+"/"+str(kind)+" matches original visible geometry")
+	var broken := rebased.duplicate(true)
+	broken.saved_source_origin_id=ROOT
+	_check(not _helper.prepare(wrapper,packet,equipped,machine,broken,config).get("valid",false),label+": saved source cannot escape weapon ancestry")
 
 func _verify_selected_digits(prepared: Dictionary, shift: Vector3, full: Dictionary, label: String) -> void:
 	var selections: Array = [[&"middle"], ["thumb"]]

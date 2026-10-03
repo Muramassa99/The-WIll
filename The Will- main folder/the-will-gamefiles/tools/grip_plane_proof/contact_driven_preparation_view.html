@@ -2,10 +2,11 @@
 <meta charset="utf-8">
 <title>Contact-driven hand preparation</title>
 <style>
-body{font:16px system-ui;background:#edf0f4;color:#172936;margin:28px}h1{font-size:25px}section{background:white;padding:20px;margin:20px 0;border-radius:8px}button,input{vertical-align:middle;margin-right:12px}input{width:45%}.plots{display:flex;flex-wrap:wrap;gap:14px}canvas{background:#fff;border:1px solid #ccd3da;max-width:100%}p{max-width:1000px;line-height:1.5}.legend{display:flex;gap:18px;flex-wrap:wrap;font-weight:600}.note{color:#704611}
+body{font:16px system-ui;background:#edf0f4;color:#172936;margin:28px}h1{font-size:25px}section{background:white;padding:20px;margin:20px 0;border-radius:8px}button,input{vertical-align:middle;margin-right:12px}input{width:45%}.plots{display:flex;flex-wrap:wrap;gap:14px}canvas{background:#fff;border:1px solid #ccd3da;max-width:100%}p{max-width:1000px;line-height:1.5}.legend{display:flex;gap:18px;flex-wrap:wrap;font-weight:600}.note{color:#704611}table{border-collapse:collapse;margin:12px 0 20px}th,td{padding:8px 14px;text-align:left;border-bottom:1px solid #ccd3da}
 </style>
-<h1>W3 circle preparation and W4 saved-wrapper attempt</h1>
+<h1>Initial four-contact circle → saved wrapper</h1>
 <p>Recorded poses from the actual prepared hand skin and a saved Forge handle. The hand and wrist stay fixed; the weapon and guide move together. The active guide is either a circle or the exact saved wrapper slice, as labelled for each stage.</p>
+<p>This experiment requests Middle S1, S2, S3 and the identified palm together on the initial circle, then attempts the saved wrapper directly. Intermediate shrinking checkpoints are omitted. Existing reseating remains limited to three attempts; other digits use the resulting shared weapon placement.</p>
 <div class="legend"><span style="color:#1263eb">S1 skin</span><span style="color:#a330da">S2 skin</span><span style="color:#00896d">S3 skin</span><span style="color:#bd720f">Other skin</span><span style="color:#ba168e">Active circle guide</span><span style="color:#218344">Saved finger target (thick when active)</span><span style="color:#ab5d25">Saved palm target (thick when active)</span><span style="color:#697685">Physical handle: grey fill, overlap stopper</span></div>
 <p class="note">Middle controls one shared weapon translation. Each stage reports material checks for its displayed digit slice. The final material summary covers the Middle slice only, not contacts across the whole hand. Unbound attempts remain visible. Reaching a saved wrapper does not establish a valid grip, and sampled states do not certify uninterrupted contact between samples.</p>
 <div id="cases"></div><details><summary>Evidence and timings</summary><pre id="evidence"></pre></details>
@@ -16,8 +17,35 @@ const millimetres=v=>typeof v==='number'&&Number.isFinite(v)?(v*1000).toFixed(3)
 const dictArray=v=>Array.isArray(v)?v:Object.entries(v||{}).map(([digit,d])=>({digit,...d}));
 const guideKind=d=>d.guide_kind==='saved_wrapper'?'saved_wrapper':'circle';
 const stageDigits=s=>dictArray(s.digits).map(d=>({...d,radius_m:d.radius_m??s.radius_m,guide_kind:d.guide_kind??s.guide_kind??'circle'}));
-const contactName=c=>typeof c==='string'?c:c&&typeof c==='object'?[c.digit,c.section===0?'Palm':c.section!==undefined?'S'+c.section:undefined].filter(v=>v!==undefined).join('/')||JSON.stringify(c):String(c);
+const contactName=c=>typeof c==='string'?c.replace(/\/S0$/,'/Palm'):c&&typeof c==='object'?[c.digit,c.section===0?'Palm':c.section!==undefined?'S'+c.section:undefined].filter(v=>v!==undefined).join('/')||JSON.stringify(c):String(c);
 const contactsText=v=>Array.isArray(v)&&v.length?v.map(contactName).join(', '):'none reported';
+const stageName=label=>({middle_initial_unbound:'Initial circle before attachment',middle_initial_attachment:'Initial S1/S2/S3 and palm attachment',middle_saved_wrapper_response:'Direct saved-wrapper response',saved_wrapper_unresolved_diagnostic:'Direct saved-wrapper attempt — unresolved',middle_saved_wrapper_reseated:'Saved-wrapper reseating',final_middle_recheck:'Final Middle recheck'})[label]||label||'No stage';
+function initialAttachment(result){
+  const box=document.createElement('div'),heading=document.createElement('h3'),status=document.createElement('p'),table=document.createElement('table');
+  heading.textContent='Initial Middle attachment: four requested sections';box.append(heading);
+  const stages=result.stages||[],initialIndex=stages.findIndex(s=>s.label==='middle_initial_attachment'),initial=initialIndex>=0?stages[initialIndex]:result.circle_selected||{};
+  const digit=stageDigits(initial).find(d=>d.digit==='middle'),event=(result.events||[]).find(e=>e.event==='initial_middle_attachment');
+  const outcome=event?.converged===true?'converged':event?.converged===false?'unresolved':'not recorded';
+  status.textContent='Measured outcome: '+outcome+(event?.reason?' ('+event.reason+')':'')+'. Radius: '+millimetres(initial.radius_m)+' mm. Largest contact error: '+millimetres(initial.max_contact_error_m)+' mm. All required guide contacts: '+(initial.all_required_tangent===true?'verified at this sample':initial.all_required_tangent===false?'not all verified':'unavailable')+'.';
+  box.append(status);
+  const header=document.createElement('tr');
+  for(const text of ['Requested section','Guide gap (mm)','Within guide contact band']){const th=document.createElement('th');th.textContent=text;header.append(th)}
+  table.append(header);
+  for(const section of [1,2,3,0]){
+    const region=(digit?.regions||[]).find(r=>r.section===section),row=document.createElement('tr');
+    const measured=region&&Array.isArray(initial.guide_contacts),inBand=measured&&initial.guide_contacts.includes('middle/S'+section);
+    for(const text of [section===0?'Identified palm':'S'+section,region?millimetres(region.gap_m??region.nearest_gap_m):'not measured',measured?(inBand?'yes':'no'):'not measured']){
+      const td=document.createElement('td');td.textContent=text;row.append(td);
+    }
+    table.append(row);
+  }
+  box.append(table);
+  const transition=document.createElement('p'),next=initialIndex>=0?stages[initialIndex+1]:null;
+  const direct=next&&['middle_saved_wrapper_response','saved_wrapper_unresolved_diagnostic'].includes(next.label);
+  transition.className='note';
+  transition.textContent='Next recorded stage: '+(next?stageName(next.label):'not recorded')+'. Direct transition observed: '+(direct?'yes':'no')+'. Reseating attempts: '+(result.reseat_attempts??'not recorded')+' / 3. Contact-band entries describe this circle sample, not physical handle contact or continuous tangency during the transition.';
+  box.append(transition);return box;
+}
 function materialText(s,scope='Displayed slice'){
   if(s.material_assessed!==true)return scope+' material: not assessed';
   return scope+' material: '+(s.material_safe===true?'within checked overlap limits':s.material_safe===false?'overlap limits not satisfied':'safety unresolved')+'; contacts in this slice: '+contactsText(s.material_contacts);
@@ -89,6 +117,7 @@ for(const result of report.cases||[]){
   const summary=document.createElement('p');
   summary.textContent=result.valid?'Preparation and wrapper attempt: '+Number(result.total_ms).toFixed(1)+' ms. '+result.termination+'. Saved wrapper selected: '+(result.wrapper_target_selected===true?'yes':'no')+'. '+materialText(result,'Middle slice only')+'. Retained sections across accepted digit poses: '+contactsText(result.accepted_hand_material_contacts)+'. This report does not certify a complete 3D grip.':'Preparation could not run: '+result.reason;
   block.append(summary);
+  block.append(initialAttachment(result));
   for(const f of result.followers||[]){
     const note=document.createElement('p');note.className='note';
     note.textContent=f.digit+': '+(f.attached?'attached at fixed weapon position':f.reason)+(typeof f.max_contact_error_m==='number'?' | largest contact error '+millimetres(f.max_contact_error_m)+' mm':'');block.append(note);
@@ -99,7 +128,7 @@ for(const result of report.cases||[]){
   const all=(result.stages||[]).flatMap(stageDigits),fixed=bounds(all);
   function draw(){
     const i=+slider.value,s=(result.stages||[])[i]||{},ds=stageDigits(s),hasWrapper=ds.some(d=>guideKind(d)==='saved_wrapper')||s.guide_kind==='saved_wrapper',accepted=s.committed_contact_state===true&&s.accepted_contact_constraints===true;
-    line.textContent=(i+1)+'/'+(result.stages||[]).length+' - '+(s.label||s.stage||'No stage')+' | '+(accepted!==true?'UNRESOLVED / DIAGNOSTIC':hasWrapper?'RECORDED RESPONSE ACCEPTED; SEE MATERIAL CONTACTS':'CONTACT CONSTRAINTS ACCEPTED')+' | '+(hasWrapper?'Exact saved wrapper target':s.radius_m===0?'Enclosing radius per digit':millimetres(s.radius_m)+' mm circle')+' | '+(s.stage_elapsed_ms??s.elapsed_ms??s.total_ms??'')+' ms | '+materialText(s);
+    line.textContent=(i+1)+'/'+(result.stages||[]).length+' - '+stageName(s.label||s.stage)+' | '+(accepted!==true?'UNRESOLVED / DIAGNOSTIC':hasWrapper?'RECORDED RESPONSE ACCEPTED; SEE MATERIAL CONTACTS':'CONTACT CONSTRAINTS ACCEPTED')+' | '+(hasWrapper?'Exact saved wrapper target':s.radius_m===0?'Enclosing radius per digit':millimetres(s.radius_m)+' mm circle')+' | '+(s.stage_elapsed_ms??s.elapsed_ms??s.total_ms??'')+' ms | '+materialText(s);
     plots.replaceChildren(...ds.map(d=>panel(d,fit?bounds(ds):fixed)));
   }
   slider.oninput=draw;

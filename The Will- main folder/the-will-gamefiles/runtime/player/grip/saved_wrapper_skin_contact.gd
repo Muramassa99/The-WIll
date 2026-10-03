@@ -4,41 +4,104 @@ extends RefCounted
 ## wrapper. Named material geometry remains the authority for every skin cap.
 ## Geometry2D's native nearest-segment query is used only to identify a selected
 ## depth witness's feature ambiguity; mature Depth owns contact/depth decisions.
-const Depth = preload("res://runtime/player/grip/exact_cached_planar_skin_overlap_budget.gd")
+const Depth = preload("res://runtime/player/grip/native_cached_planar_skin_overlap_budget.gd")
 const Contact = preload("res://runtime/player/grip/skin_plane_contact_query.gd")
+const Chronology = preload("res://runtime/player/grip/grip_chronology.gd")
 const REVISION := &"saved_wrapper_skin_contact_v1"
 const KINDS: Array[StringName] = [&"handle", &"digit_target", &"palm_target"]
 const MAX_PREPARED_CACHE := 64
+const DEFAULT_USE_NATIVE := true
+const DEFAULT_USE_NATIVE_BATCH := true
+# A 0.05 mm bound changed cap decisions and lost a recorded contact. Keep the
+# proven 0.01 mm bound; the user's accuracy allowance does not relax skin caps.
 const DEPTH_CONFIG := {"max_evaluations_per_segment":64,"depth_bound_tolerance_m":0.00001,"refine_depth_after_cap":false}
 var _depth := Depth.new()
+var _depth_config: Dictionary = DEPTH_CONFIG.duplicate(true)
 var _cache: Dictionary = {}
 var _cache_order: Array[String] = []
+var _native_batch: RefCounted
+var _native_requested := DEFAULT_USE_NATIVE
+var _batch_requested := DEFAULT_USE_NATIVE_BATCH
+var _acquisition_id := StringName()
+var _backend_fallbacks := 0
+
+
+func _init() -> void:
+	if not _select_backend(DEFAULT_USE_NATIVE, DEFAULT_USE_NATIVE_BATCH):
+		_backend_fallbacks += 1
+		_select_backend(false, false)
+		push_warning("Requested grip contact extension unavailable; using the reference evaluator. Fallback usage is recorded in statistics.")
+
+
+## Configure before acquisition; reset explicitly before changing an existing
+## acquisition's backend or tolerance. Defaults use C++ and the proven 0.01 mm.
+func configure_evaluation(use_native: bool, depth_tolerance_m: float) -> bool:
+	if _acquisition_id != &"" or not is_finite(depth_tolerance_m) or depth_tolerance_m <= 0.0:
+		return false
+	if not _select_backend(use_native, _batch_requested): return false
+	_depth_config["depth_bound_tolerance_m"] = depth_tolerance_m
+	return true
+
+
+## Select before acquisition. The complete batch and old segment adapter are
+## exclusive backends; the reference remains available for measured comparisons.
+func configure_native_batch(enabled: bool) -> bool:
+	if _acquisition_id != &"": return false
+	return _select_backend(_native_requested, enabled)
+
+
+func _select_backend(use_native: bool, use_batch: bool) -> bool:
+	var selected: RefCounted
+	if use_native and use_batch:
+		if not ClassDB.class_exists(&"GripSavedContactKernel"): return false
+		selected = ClassDB.instantiate(&"GripSavedContactKernel") as RefCounted
+		if selected == null: return false
+	if not _depth.configure_native_kernel(use_native and not use_batch): return false
+	_native_batch = selected
+	_native_requested = use_native
+	_batch_requested = use_batch
+	_cache.clear()
+	_cache_order.clear()
+	return true
 
 
 ## One explicit epoch per hand acquisition. Never reset per pose/section query:
-## exact repeat measurements retain the mature bounded cache's full key policy.
+## the batch retains exact prepared geometry; the old adapter retains its own
+## bounded segment-result cache when explicitly selected.
 func begin_acquisition(identity: StringName) -> bool:
-	if not _depth.begin_acquisition(identity): return false
+	if _native_batch != null:
+		if not _native_batch.begin_acquisition(identity): return false
+	elif not _depth.begin_acquisition(identity): return false
+	_acquisition_id = identity
 	_cache.clear()
 	_cache_order.clear()
 	return true
 
 
 func reset() -> bool:
-	if not _depth.clear_cache(): return false
+	if _native_batch != null:
+		if not _native_batch.reset(): return false
+	elif not _depth.clear_cache(): return false
+	_acquisition_id = &""
 	_cache.clear()
 	_cache_order.clear()
 	return true
 
 
 func cache_statistics() -> Dictionary:
-	var result: Dictionary = _depth.cache_statistics()
-	result["prepared_section_count"] = _cache.size()
+	var result: Dictionary = _native_batch.statistics() if _native_batch != null else _depth.cache_statistics()
+	if _native_batch == null: result["prepared_section_count"] = _cache.size()
+	result["native_batch_enabled"] = _native_batch != null
+	result["native_batch_requested"] = _native_requested and _batch_requested
+	result["backend_selection_fallbacks"] = _backend_fallbacks
+	result["contact_backend"] = "cpp" if _native_requested else "gdscript"
 	result["maximum_prepared_sections"] = MAX_PREPARED_CACHE
+	result["depth_bound_tolerance_m"] = _depth_config.depth_bound_tolerance_m
 	return result
 
 
 func prepare(section: Dictionary) -> Dictionary:
+	if _native_batch != null: return _native_batch.prepare(section)
 	var started := Time.get_ticks_usec()
 	var origin := StringName(section.get("origin_id", &""))
 	if origin == &"" or origin == &"RL_BoneRoot" or not section.get("center") is Vector2 or not section.center.is_finite():
@@ -77,6 +140,20 @@ func prepare(section: Dictionary) -> Dictionary:
 
 
 func evaluate(prepared: Dictionary, segments: Array, origin_id: StringName) -> Dictionary:
+	if _native_batch != null:
+		var span := Chronology.begin("saved_contact.native_batch", {"plane_origin_id":origin_id,
+			"skin_segments":segments.size(),"depth_bound_tolerance_m":_depth_config.depth_bound_tolerance_m}) if Chronology.enabled() else 0
+		var result: Dictionary = _native_batch.evaluate(prepared, segments, origin_id, _depth_config)
+		if span != 0:
+			Chronology.finish(span, {"valid":result.get("valid",false),"reason":result.get("reason",""),
+				"material_measurement_ms":result.get("material_measurement_ms",0.0),
+				"guide_measurement_ms":result.get("guide_measurement_ms",0.0),
+				"witness_normalization_ms":result.get("witness_normalization_ms",0.0),
+				"material_depth_evaluations":result.get("material_depth_evaluations",0),
+				"guide_depth_evaluations":result.get("guide_depth_evaluations",0),
+				"material_constraint_safe":result.get("material_constraint_safe",false),
+				"guide_constraint_safe":result.get("guide_constraint_safe",false)})
+		return result
 	var started := Time.get_ticks_usec()
 	if not prepared.get("valid", false) or prepared.get("revision") != REVISION or prepared.get("origin_id") != origin_id:
 		return _fail("invalid_prepared_saved_wrapper_contact")
@@ -88,7 +165,7 @@ func evaluate(prepared: Dictionary, segments: Array, origin_id: StringName) -> D
 		var query: Dictionary = source.duplicate(false)
 		if source.get("allowance_unassigned",true): query.max_inward_depth_m=0.0
 		query_segments.append(query)
-	var material := _depth.evaluate_segments(query_segments, prepared.handle, origin_id, DEPTH_CONFIG)
+	var material := _depth.evaluate_segments(query_segments, prepared.handle, origin_id, _depth_config)
 	if not material.get("valid", false): return _fail("saved_handle_material_measurement_failed", material)
 	var material_ms := float(Time.get_ticks_usec()-started)/1000.0
 	var guide_started := Time.get_ticks_usec()
@@ -103,7 +180,7 @@ func evaluate(prepared: Dictionary, segments: Array, origin_id: StringName) -> D
 	var guide_evaluations := 0
 	for kind: StringName in [&"digit_target", &"palm_target"]:
 		if groups[kind].is_empty(): continue
-		var result := _depth.evaluate_segments(groups[kind], prepared[kind], origin_id, DEPTH_CONFIG)
+		var result := _depth.evaluate_segments(groups[kind], prepared[kind], origin_id, _depth_config)
 		if not result.get("valid", false): return _fail("saved_wrapper_guide_measurement_failed", {"kind":kind,"result":result})
 		guide_evaluations += int(result.depth_evaluations)
 		for local_index: int in indices[kind].size():

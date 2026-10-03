@@ -22,6 +22,63 @@ powershell -NoProfile -ExecutionPolicy Bypass -File 'C:\WORKSPACE\The Will- main
 
 This runner awaits natural completion of both hands and closes the recorder once after its reports are written, including handled setup-failure paths. It has no wall-clock cutoff or 35-second observation cap. The live UI runner's `THE_WILL_GRIP_TRACE_TIMEOUT_SECONDS` and `THE_WILL_GRIP_TRACE_AFTER_SECONDS` settings do not govern this route. Do not add the launcher's `-QuitAfterSeconds` option: that forwards Godot `--quit-after` and can end the capture prematurely. Structural checks and a completed trace do not certify final grip acceptance or gameplay integration.
 
+### Contact/section backends and comparison settings
+
+The preparation runner defaults to the complete C++ contact batch and a 0.01 mm
+depth bound, both taken from `saved_wrapper_skin_contact.gd`. The batch includes
+ordered target preparation, material/guide evaluation and witness normalization.
+Stage order, pose ownership, physical allowances and the existing GDScript
+reference remain intact. The old per-segment C++ adapter remains selectable for
+comparison; ordinary calls execute only the selected backend.
+That isolated backend change did not switch the live UI owner. The subsequent
+October 1 live integration does; see "Native live-grip verification" below.
+
+For a controlled comparison, set these before the launcher command above:
+
+```powershell
+$env:THE_WILL_GRIP_CONTACT_BACKEND = 'cpp' # or 'gdscript'
+$env:THE_WILL_GRIP_CONTACT_BATCH = '1' # cpp only: 0 selects the old per-segment adapter
+$env:THE_WILL_GRIP_SECTION_BACKEND = 'cpp' # or 'gdscript'; triangle slices + topology
+$env:THE_WILL_GRIP_DEPTH_TOLERANCE_M = '0.00001' # meters: 0.01 mm
+```
+
+All selections are recorded in the report and trace. The runner rejects invalid
+settings, an unavailable requested C++ backend, and any native fallback in the
+completed acquisition. Runtime fallback remains available and is counted in
+`saved_contact_cache_statistics.backend_selection_fallbacks` and
+`native_kernel.fallback_calls`; it cannot silently count as a successful compiled
+proof. An explicit `gdscript` selection uses the reference batch; combining it
+with explicit `CONTACT_BATCH=1` is rejected.
+
+Complete-batch target storage belongs to one evaluator/acquisition, with at most
+64 prepared snapshots and 64 native sections / 192 typed targets. Hashes filter
+candidates; reuse requires exact type/component-bit comparison against detached
+packets. Reset and eviction release handles. The batch bypasses the old
+serialized segment-result cache, so actual work/cache statistics differ even
+when all logical results match. The old adapter retains its synchronous-query
+target lifetime and original exact segment-result cache when selected.
+
+`saved_contact.native_batch` records one full evaluation with inclusive material,
+guide and witness durations and logical depth counts. It contains no per-segment
+script/native round trips. `saved_contact_cache_statistics` additionally records
+actual segment work, prepared/native cache hits and retained target counts.
+
+Sections also default to C++; selection is owned by `prepared_weapon_plane_section.gd` and affects
+the saved weapon's triangle intersection/contour extraction and topology
+validation. The triangle index, named-frame checks and centroid owner remain
+unchanged. `totals.section_backend_statistics` records native/reference calls
+and fallback counts separately from geometric packets. The C++ proof requires
+both kernels to execute and zero section fallback; a native rejection of bad
+geometry is retained as a rejection, not retried under a different policy.
+`section.triangle_slice` and `section.topology_prepare` keep their existing
+trace boundaries, so the same analyzer can compare the two backends.
+
+Remove all four overrides to verify the current defaults. The 2026-10-01 comparison
+also tried `0.00005` (0.05 mm): it changed the left thumb's final contact and
+increased work, so it was not selected. A bound-refinement stopping tolerance
+is not a bound on the resulting hand-pose displacement. The user's 0.05 mm
+geometric accuracy allowance does not increase any section's overlap limit.
+
 ## Live UI capture
 
 `trace_skill_crafter_grip.gd` records the natural current live acquisition path: open Skill Crafter, activate an existing saved weapon through its real double-click handler, press the actual Skill 1 selector, and observe grip processing until it becomes quiescent or reaches the observation timeout. Skill selection has a button handler, not a separate double-click handler. The runner instantiates the real station UI with an isolated library provider; it does **not** measure full game startup, travel to the station, or physical mouse delivery.
@@ -49,6 +106,41 @@ The defaults are 1,800 seconds of observation and five seconds after a terminal 
 Timeout cancellation can itself produce stale-request or discarded-result events. Their position after `runner.timeout` or `runner.cancel_and_join` distinguishes cleanup effects from evidence of the original stall.
 
 ## Offline report
+
+### Native live-grip verification (October 1)
+
+`verify_live_saved_wrapper_grip.gd` uses the same real weapon/Skill 1 handlers,
+then verifies the current native primary acquisition rather than merely recording
+its duration. It rejects missing native work or fallback, measures the realized
+skin/articulation, distinguishes three contacts from full-hand completion, and
+writes a JSON report, actual-pose capture and rendered close-ups. It never injects
+a historical solved pose. The viewport run also checks Tip, Pommel and Roll
+retention; a partial grip can pass those retention checks without passing grip
+completion. Upstream bone comparisons begin after normal editor macro positioning.
+
+Use the isolated runtime variables from the live UI command above, then:
+
+```powershell
+$env:THE_WILL_GRIP_LIVE_LIBRARY = 'C:/WORKSPACE/test_artifacts/forge_v2_grip_target_wrapper_2026-09-28T03-59-21_straight_library.tres'
+$env:THE_WILL_GRIP_LIVE_WEAPON_NAME = 'Prepared target straight'
+powershell -NoProfile -ExecutionPolicy Bypass -File 'C:\WORKSPACE\The Will- main folder\the-will-gamefiles\tools\launch_the_will_safe.ps1' -ScriptPath 'res://tools/grip_plane_proof/verify_live_saved_wrapper_grip.gd'
+```
+
+The override must remain inside the workspace. It loads the supplied existing
+library without writing it and checks its hash afterward. It is a frozen fixture,
+not the user's current external save. The default observation timeout is 300 s;
+`THE_WILL_GRIP_LIVE_TIMEOUT_SECONDS` changes it. `THE_WILL_GRIP_LIVE_SKIP_MOTION=1`
+omits control checks; `-Headless` omits rendered evidence. Natural terminal state
+is observed for two quiet seconds before assessment and capture. One substantial
+Godot process at a time still applies.
+
+Follower diagnostics include `preparation.response.proposed_step`,
+`preparation.response.retained_contact_bound` and trial rejection details.
+`retained_contact_constraints_reject_proposed_direction` means an improving
+proposal was rejected for disturbing an acquired section; it is not proof that
+no better hand pose exists.
+
+### Chronology summary
 
 For either capture route, the analyzer only reads the JSONL and writes adjacent `.summary.json` and `.html` files. It does not open Skill Crafter or run a grip solve. Analyze an interrupted capture too: completed records remain useful, and incomplete final lines are reported.
 

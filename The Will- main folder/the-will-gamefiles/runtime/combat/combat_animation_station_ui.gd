@@ -378,6 +378,10 @@ func _refresh_grip_acquisition_status() -> void:
 					lines.append("%s grip: pose applied; contact still needs adjustment." % hand)
 				elif not state.get("actual_articulation_valid", false):
 					lines.append("%s grip: contact found; joint verification is unresolved." % hand)
+				elif not state.get("unresolved_digits",[]).is_empty():
+					var digits := PackedStringArray()
+					for digit: Variant in state.unresolved_digits: digits.append(str(digit))
+					lines.append("%s grip: partial; %s still need contact." % [hand,", ".join(digits)])
 				else:
 					lines.append("%s grip: pose applied; measured contact passed." % hand)
 			"unresolved", "unavailable": lines.append("%s grip: could not finish seating (%s)." % [hand, str(state.get("reason", "unresolved"))])

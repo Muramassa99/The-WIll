@@ -104,6 +104,7 @@ func _test_selected_capture(definition: Resource, packet: Dictionary, slot: Stri
 	var builder := Candidate.new()
 	var prepared: Dictionary = builder.prepare(definition, packet, slot, _selected_digits)
 	if not _check(prepared.get("valid", false), String(slot) + " prepare all explicitly selected digits: " + str(prepared.get("reason", ""))): return
+	_test_dimension_reference(definition, packet, slot, prepared)
 	var prepared_before: PackedByteArray = var_to_bytes(prepared)
 	_check(prepared.selected_bones.size() == _selected_digits.size() * 3, String(slot) + " selected layout has three unique named bones per digit")
 	var zero: Dictionary = _angles(prepared, 0.0)
@@ -227,6 +228,7 @@ func _test_capture(definition: Resource, packet: Dictionary, slot: StringName) -
 	var prepared: Dictionary = builder.prepare(definition, packet, slot, [&"middle"])
 	if not _check(bool(prepared.get("valid", false)), String(slot) + " prepare: " + str(prepared.get("reason", ""))):
 		return
+	_test_dimension_reference(definition, packet, slot, prepared)
 	var prepared_before: PackedByteArray = var_to_bytes(prepared)
 	var input: Dictionary = prepared.digit_inputs[&"middle"]
 	var plane: Transform3D = input.plane_to_world
@@ -273,6 +275,86 @@ func _test_capture(definition: Resource, packet: Dictionary, slot: StringName) -
 	var missing: Dictionary = packet.duplicate(true)
 	missing.source_bone_parent_ids.erase(input.digit.bone_names[0])
 	_rejected(builder.prepare(definition, missing, slot, [&"middle"]), String(slot) + " missing current ancestry")
+
+
+func _test_dimension_reference(definition: Resource, capture: Dictionary, slot: StringName, baseline: Dictionary) -> void:
+	# Synthetic dimension fault/contract cases, never relabelled as a live pose.
+	# Existing captured arrays/origins remain untouched. The explicit reference
+	# is the only allowed source of candidate local translation replacements.
+	var label: String = String(slot) + "/frozen_dimensions"
+	var selected: Array = baseline.digit_inputs.keys()
+	var reference: Dictionary = {}
+	for digit_id: Variant in selected:
+		var snapshot: Dictionary = baseline.digit_inputs[digit_id].snapshot
+		var parent_name: StringName = baseline.hand_bone_name
+		for joint: int in range(3):
+			var local: Transform3D = snapshot.relative_transforms[joint]
+			local.origin += Vector3(0.000017, 0.000023, -0.000009) * float(joint + 1)
+			reference[snapshot.bone_names[joint]] = {"local_transform": local, "parent_bone_name": parent_name,
+				"parent_origin_id": capture.bone_origin_ids[parent_name]}
+			parent_name = snapshot.bone_names[joint]
+	var packet: Dictionary = capture.duplicate(true)
+	packet["digit_dimension_reference"] = reference.duplicate(true)
+	packet["source_bone_local_transforms"] = reference.duplicate(true)
+	# A later observation's current local transforms deliberately disagree. They
+	# cannot overwrite the acquisition's frozen reference inside Candidate.prepare.
+	for name: Variant in packet.source_bone_local_transforms:
+		var current: Transform3D = packet.source_bone_local_transforms[name].local_transform
+		current.origin += Vector3(0.001, 0.0, 0.0)
+		packet.source_bone_local_transforms[name].local_transform = current
+	var before: PackedByteArray = var_to_bytes(packet)
+	var builder := Candidate.new()
+	var frozen: Dictionary = builder.prepare(definition, packet, slot, selected)
+	if not _check(frozen.get("valid", false), label + " explicit named reference prepares: " + str(frozen.get("reason", ""))): return
+	var zero: Dictionary = builder.evaluate(frozen, _angles(frozen, 0.0), Vector3.ZERO, &"RL_BoneRoot")
+	_verify_candidate(frozen, zero, Vector3.ZERO, label + "/candidate")
+	for digit_id: Variant in selected:
+		var input: Dictionary = frozen.digit_inputs[digit_id]
+		var original: Dictionary = baseline.digit_inputs[digit_id]
+		_check(input.get("dimension_reference_applied", false), label + " explicit reference marked " + String(digit_id))
+		for joint: int in range(3):
+			var name: StringName = input.snapshot.bone_names[joint]
+			_check((input.snapshot.relative_transforms[joint] as Transform3D).origin == (reference[name].local_transform as Transform3D).origin,
+				label + " uses frozen local origin despite different current observation " + String(name))
+			_check((input.snapshot.relative_transforms[joint] as Transform3D).basis == (original.snapshot.relative_transforms[joint] as Transform3D).basis,
+				label + " preserves calibrated relative basis " + String(name))
+		for key: String in ["neutral_local_rotations", "hinge_axes_local", "min_angles_rad", "max_angles_rad", "tip_offset_local"]:
+			_check(input.snapshot[key] == original.snapshot[key], label + " preserves " + key + "/" + String(digit_id))
+		if zero.get("valid", false):
+			var state: Dictionary = zero.digit_states[digit_id]
+			_check((input.plane_to_world as Transform3D).origin.distance_to(state.joint_origins_world[0]) <= EPSILON_M,
+				label + " plane follows adjusted first joint " + String(digit_id))
+			_check((input.plane_to_world as Transform3D).basis == (original.plane_to_world as Transform3D).basis,
+				label + " plane orientation stays prepared " + String(digit_id))
+			for section: int in range(2):
+				var length_m: float = (state.joint_origins_world[section] as Vector3).distance_to(state.joint_origins_world[section + 1])
+				_check(absf(float(input.digit.section_lengths_m[section]) - length_m) <= EPSILON_M,
+					label + " effective reach uses actual local dimensions " + String(digit_id) + "/" + str(section))
+	_check(var_to_bytes(packet) == before, label + " frozen source and current observation remain unchanged")
+	var unmarked: Dictionary = packet.duplicate(true)
+	unmarked.erase("digit_dimension_reference")
+	var default_packet: Dictionary = capture.duplicate(true)
+	default_packet.erase("digit_dimension_reference")
+	var standard: Dictionary = builder.prepare(definition, default_packet, slot, selected)
+	var ignored: Dictionary = builder.prepare(definition, unmarked, slot, selected)
+	if _check(standard.get("valid", false) and ignored.get("valid", false), label + " default proof route remains available"):
+		for digit_id: Variant in selected:
+			_check(ignored.digit_inputs[digit_id].snapshot == standard.digit_inputs[digit_id].snapshot,
+				label + " never implicitly adopts current captured locals " + String(digit_id))
+	var first_name: StringName = frozen.digit_inputs[selected[0]].snapshot.bone_names[0]
+	var broken: Dictionary = packet.duplicate(true)
+	broken.digit_dimension_reference[first_name].parent_origin_id = &"WrongDimensionParentOrigin"
+	_rejected(builder.prepare(definition, broken, slot, selected), label + " wrong named parent")
+	broken = packet.duplicate(true)
+	var scaled: Transform3D = broken.digit_dimension_reference[first_name].local_transform
+	scaled.basis = scaled.basis * Basis.from_scale(Vector3(1.01, 1.0, 1.0))
+	broken.digit_dimension_reference[first_name].local_transform = scaled
+	_rejected(builder.prepare(definition, broken, slot, selected), label + " changed metric requires preparation")
+	broken = packet.duplicate(true)
+	broken.digit_dimension_reference.erase(first_name)
+	_rejected(builder.prepare(definition, broken, slot, selected), label + " missing required local transform")
+	_cases.append({"label": label, "explicit_reference_only": true, "current_capture_cannot_replace_reference": true,
+		"basis_hinges_limits_skin_unchanged": true, "synthetic_contract_check_not_live_grip": true})
 
 
 func _verify_candidate(prepared: Dictionary, result: Dictionary, translation: Vector3, label: String) -> void:

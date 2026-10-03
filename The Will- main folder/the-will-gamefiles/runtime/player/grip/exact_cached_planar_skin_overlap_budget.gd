@@ -154,7 +154,7 @@ func _segment(segment: Dictionary, target: Dictionary, tolerance: float, epsilon
 	else:
 		_statistics.cache_bypasses+=1
 	var solve_started: int = Time.get_ticks_usec()
-	var result: Dictionary = super._segment(segment,target,tolerance,epsilon,budget,refine_after_cap,use_boundary_pruning)
+	var result: Dictionary = _solve_segment(segment,target,tolerance,epsilon,budget,refine_after_cap,use_boundary_pruning)
 	_statistics.actual_segment_calls+=1
 	_statistics.actual_segment_us+=Time.get_ticks_usec()-solve_started
 	_statistics.actual_depth_evaluations+=int(result.get("depth_evaluations",0))
@@ -175,6 +175,11 @@ func _segment(segment: Dictionary, target: Dictionary, tolerance: float, epsilon
 		else:
 			_statistics.unretained_entries+=1
 	return result
+
+## Numerical backend seam only. Validation, exact keys and transactional cache
+## ownership stay here; the default remains the original script calculation.
+func _solve_segment(segment: Dictionary, target: Dictionary, tolerance: float, epsilon: float, budget: int, refine_after_cap: bool, use_boundary_pruning: bool) -> Dictionary:
+	return super._segment(segment,target,tolerance,epsilon,budget,refine_after_cap,use_boundary_pruning)
 
 func _retain(key: String, item: Dictionary) -> void:
 	if _entries.has(key): return

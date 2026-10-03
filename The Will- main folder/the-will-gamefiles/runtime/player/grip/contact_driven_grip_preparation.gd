@@ -1,7 +1,8 @@
 extends RefCounted
 
-## W3: Middle owns one shared transverse weapon seat. Guide and actual skin are
-## projected together; a changed guide alone is never committed as a pose.
+## Middle owns one shared transverse weapon seat. Attach its three skin sections
+## and identified palm to the initial circle, then target the saved wrapper directly.
+## Guide and actual skin are projected together; guide-only changes are not poses.
 const Candidate = preload("res://runtime/player/grip/prepared_hand_candidate_pose.gd")
 const Observer = preload("res://runtime/player/grip/prepared_grip_slice_contact.gd")
 const CircleQuery = preload("res://runtime/player/grip/planar_circle_skin_contact.gd")
@@ -14,13 +15,11 @@ const Native = preload("res://runtime/player/grip/native_digit_contact_ik.gd")
 const SavedContact = preload("res://runtime/player/grip/saved_wrapper_skin_contact.gd")
 const Chronology = preload("res://runtime/player/grip/grip_chronology.gd")
 const ROOT := &"RL_BoneRoot"
-const REVISION := &"middle_first_coupled_contact_v2"
+const REVISION := &"middle_first_coupled_contact_v3"
 const CLEARANCE_M := 0.00002
 const CONTACT_BAND_M := 0.0001
 const NUMERIC_GUARD_M := 0.000002
-const PREPARATION_RADIUS_M := 0.05
 const PROJECTION_ITERATIONS := 20
-const MIN_RADIUS_STEP_M := 0.0001
 const PLACEMENT_PROBE_M := 0.0001
 const MAX_TRANSLATION_M := 0.35
 const ANGLE_SCALE := 0.12
@@ -34,17 +33,40 @@ var _palm := Palm.new()
 var _saved_contact := SavedContact.new()
 var _cache := {}
 var _derivatives := {}
+var _retained_derivatives := {}
 var _metrics := {}
 var _events: Array = []
 var _trace: Array = []
 var _recording := false
 var _recording_slot := ""
+var _cancel_check: Callable
+var _progress_callback: Callable
 
-func run(context: Dictionary, saved: Dictionary, host: Node) -> Dictionary:
+## Worker-owned callbacks inspect/update only the acquisition's mutex-protected
+## state. No live scene objects are touched by the numerical solver.
+func configure_lifecycle(cancel_check: Callable, progress_callback: Callable) -> void:
+	_cancel_check=cancel_check
+	_progress_callback=progress_callback
+
+func _cancelled() -> bool:
+	return _cancel_check.is_valid() and bool(_cancel_check.call())
+
+func configure_evaluation(use_native: bool, depth_tolerance_m: float) -> bool:
+	return _saved_contact.configure_evaluation(use_native, depth_tolerance_m)
+
+func configure_native_batch(enabled: bool) -> bool:
+	return _saved_contact.configure_native_batch(enabled)
+
+func configure_sections(use_native: bool) -> bool:
+	return _sections.configure_native_sections(use_native)
+
+func run(context: Dictionary, saved: Dictionary, _host: Node) -> Dictionary:
 	var start := Time.get_ticks_usec()
+	if _cancelled(): return {"valid":false,"cancelled":true,"reason":"acquisition_cancelled"}
 	_recording = Chronology.enabled()
 	_recording_slot = ""
-	_cache.clear(); _derivatives.clear(); _events.clear(); _trace.clear()
+	_cache.clear(); _derivatives.clear(); _retained_derivatives.clear(); _events.clear(); _trace.clear()
+	_sections.reset_backend_statistics()
 	_metrics = {"section_queries":0,"section_cache_hits":0,"section_slice_ms":0.0,
 		"skin_evaluations":0,"skin_ms":0.0,"candidate_ms":0.0,"projection_iterations":0}
 	var checked := _validate_context(context, saved)
@@ -62,69 +84,24 @@ func run(context: Dictionary, saved: Dictionary, host: Node) -> Dictionary:
 		_derivatives[digit] = _jacobian.prepare(context.adapter, digit, context.palm_region)
 		if not _derivatives[digit].get("valid", false): return _derivatives[digit]
 	var placement: Vector2 = -context.outward_parameters * initial_radius
-	var current := _evaluate(context, saved, angles, placement, &"middle", initial_radius, false)
+	var current := _evaluate(context, saved, angles, placement, &"middle", initial_radius, true)
 	if not current.get("valid", false): return current
-	# Acquisition is explicitly unbound. Only after all three contacts fit does
-	# contraction begin; unresolved attempts remain diagnostic, not fake binding.
+	# All four requested contacts participate from the start. An unresolved
+	# attachment stays diagnostic; the saved target is still attempted below.
 	_record(current, "middle_initial_unbound", false)
-	var fitted: Dictionary = _project(context, saved, current, initial_radius, true, false)
+	var fitted: Dictionary = _project(context, saved, current, initial_radius, true, true)
+	if _cancelled(): return {"valid":false,"cancelled":true,"reason":"acquisition_cancelled"}
 	_event({"event":"initial_middle_attachment","converged":fitted.converged,"reason":fitted.reason,"detail":fitted.get("detail",{})})
 	current = fitted.sample
 	_record(current, "middle_initial_attachment", fitted.converged)
 	var middle_ready: bool = fitted.converged
-	var termination := "initial_middle_attachment_unresolved"
-	if middle_ready:
-		termination = "middle_enclosing_target_reached"
-		var checkpoints: Array[float] = []
-		if current.enclosing_radius_m < PREPARATION_RADIUS_M: checkpoints.append(PREPARATION_RADIUS_M)
-		# Zero selects the current enclosure, which changes with shared placement.
-		checkpoints.append(0.0)
-		for checkpoint: float in checkpoints:
-			var continuation_steps := 0
-			while current.radius_m - maxf(checkpoint, current.enclosing_radius_m) > MIN_RADIUS_STEP_M:
-				if not is_instance_valid(host): return _fail("preparation_host_freed")
-				if continuation_steps >= 256:
-					termination = "continuation_budget_not_physical_limit"
-					middle_ready = false
-					break
-				continuation_steps += 1
-				# Request the agreed coarse waypoint directly. Halve only a failed
-				# constrained advance; do not march through fixed 5 mm radii.
-				var step: float = current.radius_m - maxf(checkpoint, current.enclosing_radius_m)
-				var accepted := false
-				while step >= MIN_RADIUS_STEP_M:
-					var response := _project(context, saved, current, current.radius_m - step, true, false)
-					_event({"event":"coupled_contraction_attempt","from_radius_m":current.radius_m,
-						"requested_radius_m":current.radius_m-step,"converged":response.converged,
-						"reason":response.reason,"max_contact_error_m":response.sample.max_contact_error_m,
-						"detail":response.get("detail",{})})
-					if response.converged and response.sample.radius_m < current.radius_m - 0.000001:
-						current = response.sample
-						_record(current, "middle_coupled_contraction", true)
-						accepted = true
-						break
-					step *= 0.5
-				if not accepted:
-					termination = "middle_contact_continuation_unresolved_not_a_physical_limit"
-					middle_ready = false
-					break
-				await host.get_tree().process_frame
-			if not middle_ready: break
-			_record(current, "middle_50mm_reached" if checkpoint == PREPARATION_RADIUS_M else "middle_enclosing_target_reached", true)
-		if middle_ready:
-			# Palm joins only after digit enclosure. This is still guide contact,
-			# not the W4 inward material target or physical penetration acceptance.
-			var seated := _project(context, saved, current, current.radius_m, true, true)
-			if seated.converged:
-				current = seated.sample
-				_record(current, "middle_palm_guide_seated", true)
-			else:
-				_event({"event":"palm_guide_seating_unresolved","reason":seated.reason,"detail":seated.get("detail",{})})
-				_record(seated.sample, "palm_seating_unbound_diagnostic", false)
+	var termination := "initial_middle_four_contact_attachment_complete" if middle_ready else "initial_middle_attachment_unresolved"
 	var circle_summary := _public(current)
-	# The saved guide is the next target even if a prep constraint was unresolved.
+	# No intermediate radius or late palm-seating stage: the exact saved guide is
+	# the next target. Keep the same two weapon-translation freedoms and all caps.
 	# No new envelope is built, and the existing inset is never applied twice.
 	var wrapped := _project(context,saved,current,current.radius_m,true,true,&"saved_wrapper")
+	if _cancelled(): return {"valid":false,"cancelled":true,"reason":"acquisition_cancelled"}
 	_event({"event":"saved_wrapper_match","converged":wrapped.converged,"reason":wrapped.reason,"detail":wrapped.get("detail",{})})
 	if wrapped.sample.get("guide_kind",&"circle")==&"saved_wrapper":
 		current=wrapped.sample
@@ -136,6 +113,7 @@ func run(context: Dictionary, saved: Dictionary, host: Node) -> Dictionary:
 		for attempt: int in 3:
 			var before: Dictionary=current
 			var reseated := _project(context,saved,current,current.radius_m,true,true,&"saved_wrapper",current.material_contacts,true)
+			if _cancelled(): return {"valid":false,"cancelled":true,"reason":"acquisition_cancelled"}
 			reseat_count+=1
 			var improved: bool = reseated.sample.get("accepted_contact_constraints",false) and reseated.sample.cost<before.cost-1e-12
 			_event({"event":"saved_wrapper_reseat","attempt":attempt+1,"improved":improved,
@@ -151,12 +129,13 @@ func run(context: Dictionary, saved: Dictionary, host: Node) -> Dictionary:
 	if placement_ready:
 		for digit: StringName in context.digit_order:
 			if digit == &"middle": continue
+			if _cancelled(): return {"valid":false,"cancelled":true,"reason":"acquisition_cancelled"}
 			var kind: StringName=current.guide_kind
 			var input := _evaluate(context,saved,current.angles,current.placement,digit,0.0,false,{},kind)
 			if not input.get("valid",false):
 				followers.append({"digit":digit,"valid":false,"reason":input.get("reason"),"detail":input.get("detail",{})})
 				continue
-			var response := _project(context,saved,input,input.radius_m,false,false,kind)
+			var response := _project(context,saved,input,input.radius_m,false,false,kind,[],false,retained)
 			var usable: bool=response.sample.get("accepted_contact_constraints",false) and not response.sample.get("material_contacts",[]).is_empty() if kind==&"saved_wrapper" else response.converged
 			var retained_contacts := true
 			if usable:
@@ -173,6 +152,9 @@ func run(context: Dictionary, saved: Dictionary, host: Node) -> Dictionary:
 						retained_contacts=false
 						_event({"event":"follower_would_lose_retained_contact","digit":digit,
 							"held_digit":held_digit,"reason":check.get("reason","shared_skin_contact_changed"),
+							"material_safe":check.get("material_safe",false),"guide_safe":check.get("guide_safe",false),
+							"contacts_before":held.contacts,"contacts_after":check.get("material_contacts",[]),
+							"constraint_blockers":check.get("constraint_blockers",[]),
 							"max_contact_error_m":check.get("max_contact_error_m",INF)})
 						break
 			var accepted: bool=usable and retained_contacts
@@ -187,7 +169,8 @@ func run(context: Dictionary, saved: Dictionary, host: Node) -> Dictionary:
 				retained[digit]={"radius_m":current.radius_m,"palm_required":false,"guide_kind":kind,"contacts":current.get("material_contacts",[])}
 				_record(current,"follower_response_fixed_weapon",true)
 			else: _record(response.sample,"follower_unbound_diagnostic",false)
-			await host.get_tree().process_frame
+			# This complete numerical operation is synchronous. The live owner
+			# awaits its worker; no scene or coroutine is accessed from this class.
 	var final_middle := _evaluate(context,saved,current.angles,current.placement,&"middle",middle_final.radius_m,middle_final.palm_required,{},middle_final.guide_kind)
 	if not final_middle.get("valid",false): return final_middle
 	_record(final_middle,"final_middle_recheck",final_middle.get("accepted_contact_constraints",false) if final_middle.guide_kind==&"saved_wrapper" else final_middle.attached)
@@ -198,17 +181,34 @@ func run(context: Dictionary, saved: Dictionary, host: Node) -> Dictionary:
 		if held_digit==&"middle": continue
 		for id: String in retained[held_digit].contacts:
 			if not hand_contacts.has(id): hand_contacts.append(id)
+	# A main-hand application writes all fifteen rotations. Measure the complete
+	# selected shared pose, including followers that were not accepted, rather
+	# than promoting Middle's material verdict into a full-hand verdict.
+	var final_digits: Array=[]
+	var full_material_safe := true
+	var actual_final_contacts: Array=[]
+	for digit: StringName in context.digit_order:
+		if _cancelled(): return {"valid":false,"cancelled":true,"reason":"acquisition_cancelled"}
+		var measured: Dictionary=final_middle if digit==&"middle" else _evaluate(context,saved,current.angles,current.placement,digit,0.0,false,{},&"saved_wrapper")
+		if not measured.get("valid",false): return measured
+		final_digits.append(_public(measured))
+		full_material_safe=full_material_safe and measured.get("material_assessed",false) and measured.get("material_safe",false)
+		for contact: String in measured.get("material_contacts",[]):
+			if not actual_final_contacts.has(contact): actual_final_contacts.append(contact)
 	_metrics["saved_contact_cache_statistics"] = _saved_contact.cache_statistics()
+	_metrics["section_backend_statistics"] = _sections.backend_statistics()
 	return {"valid":true,"revision":REVISION,"stages":_trace,"events":_events,
 		"selected":_public(final_middle),"circle_selected":circle_summary,"candidate":final_middle.candidate,"followers":followers,
-		"initial_radius_m":initial_radius,"preparation_radius_m":PREPARATION_RADIUS_M,
+		"initial_radius_m":initial_radius,"preparation_policy":&"four_contact_initial_circle_direct_saved_wrapper",
 		"total_ms":float(Time.get_ticks_usec()-start)/1000.0,"totals":_metrics,
 		"native_process_count":0,"termination":wrapped.reason,"preparation_termination":termination,"preparation_completed":middle_ready,
 		"middle_attachment_verified":final_middle.attached,"hand_transform_unchanged":_same_hand(context.adapter.baseline_hand_to_world,final_middle.candidate.hand_to_world),
 		"palm_attachment_verified":final_middle.palm_required and final_middle.attached,
 		"placement_owner":&"middle_contact_weapon_transverse_translation","grip_accepted":false,
 		"wrapper_target_selected":final_middle.get("wrapper_target_selected",false),"reseat_attempts":reseat_count,
-		"material_assessed":final_middle.get("material_assessed",false),"material_safe":final_middle.get("material_safe",false),
+		"material_assessed":final_middle.get("material_assessed",false),"material_safe":full_material_safe,
+		"final_digit_assessments":final_digits,"final_hand_material_contacts":actual_final_contacts,
+		"full_hand_contact_condition_met":full_material_safe and actual_final_contacts.size()>=3,
 		"material_contacts":final_middle.get("material_contacts",[]),
 		"material_contact_scope":&"selected_middle_slice","accepted_hand_material_contacts":hand_contacts,
 		"minimum_hand_contact_count_met":final_middle.get("accepted_contact_constraints",false) and hand_contacts.size()>=3,
@@ -335,6 +335,7 @@ func _wrapper_sample(sample: Dictionary) -> Dictionary:
 	var guide_safe := true
 	var guide_depth := 0.0
 	var cost := 0.0
+	var violation_cost := 0.0
 	var blockers: Array = []
 	for index: int in measured.segments.size():
 		var record: Dictionary = measured.segments[index]
@@ -372,11 +373,13 @@ func _wrapper_sample(sample: Dictionary) -> Dictionary:
 				rows.append({"segment":edge,"witness":witness,"section":-1,"required":false,
 					"measurement_index":index,"metric":&"material","residual":record.material_gap_m+cap})
 			cost+=64.0*excess*excess
+			violation_cost+=excess*excess
 		if not guide_ok:
 			if record.guide_depth_lower_m>cap and not record.witness.get("gradient_ambiguous",true):
 				rows.append({"segment":edge,"witness":record.witness,"section":-1,"required":false,
 					"measurement_index":index,"metric":&"guide","residual":record.guide_gap_m+cap})
 			cost+=64.0*guide_excess*guide_excess
+			violation_cost+=guide_excess*guide_excess
 	var contacts: Array = []
 	var max_error := 0.0
 	for section: int in required:
@@ -388,7 +391,7 @@ func _wrapper_sample(sample: Dictionary) -> Dictionary:
 		region["material_contact"]=region.material_safe and region.material_gap_m<=NUMERIC_GUARD_M
 		if region.material_contact: contacts.append("palm" if section==0 else str(sample.digit)+"/S"+str(section))
 	sample.merge({"rows":rows,"regions":regions,"records":measured.segments,"material_assessed":true,
-		"material_safe":material_safe,"guide_safe":guide_safe,"material_contacts":contacts,"cost":cost,"max_contact_error_m":max_error,
+		"material_safe":material_safe,"guide_safe":guide_safe,"material_contacts":contacts,"cost":cost,"violation_cost":violation_cost,"max_contact_error_m":max_error,
 		"max_guide_depth_m":guide_depth,"wrapper_target_selected":true,"constraint_blockers":blockers,
 		"attached":material_safe and guide_safe and max_error<=CONTACT_BAND_M,
 		"accepted_contact_constraints":material_safe and guide_safe,
@@ -399,7 +402,8 @@ func _complete(sample: Dictionary) -> bool:
 	return sample.get("material_condition_met",false) if sample.get("guide_kind",&"circle")==&"saved_wrapper" else sample.attached
 
 func _project(context: Dictionary,saved: Dictionary,seed: Dictionary,radius: float,movable: bool,palm: bool,
-        guide_kind: StringName = &"circle", retain_material: Array = [], settle: bool = false) -> Dictionary:
+        guide_kind: StringName = &"circle", retain_material: Array = [], settle: bool = false,
+        retained_slices: Dictionary = {}) -> Dictionary:
 	var span := Chronology.begin("preparation.response.cycle", {"job_id":str(get_instance_id()),"slot":_recording_slot,
 		"digit":seed.digit,"radius_m":radius,"movable_weapon":movable,"palm_required":palm,
 		"guide_kind":guide_kind,"reseat":settle,"iteration_limit":PROJECTION_ITERATIONS}) if _recording else 0
@@ -407,11 +411,19 @@ func _project(context: Dictionary,saved: Dictionary,seed: Dictionary,radius: flo
 	var current := _evaluate(context,saved,seed.angles,seed.placement,seed.digit,radius,palm,{},guide_kind)
 	if not current.get("valid",false): return _response_observed(span,iteration_span,{"sample":seed,"converged":false,"reason":current.get("reason"),"detail":current})
 	for iteration: int in PROJECTION_ITERATIONS:
+		if _cancelled(): return _response_observed(span,iteration_span,{"sample":current,"converged":false,"reason":"acquisition_cancelled"})
+		if _progress_callback.is_valid():
+			_progress_callback.call({"stage":"saved_wrapper" if guide_kind==&"saved_wrapper" else "initial_attachment",
+				"digit":current.digit,"iteration":iteration,"reseat":settle})
 		if _complete(current) and not settle: return _response_observed(span,iteration_span,{"sample":current,"converged":true,"reason":"material_contact_condition" if guide_kind==&"saved_wrapper" else "all_requested_sections_tangent"})
 		iteration_span = Chronology.begin("preparation.response.iteration", {"job_id":str(get_instance_id()),
 			"slot":_recording_slot,"digit":current.digit,"iteration":iteration,"guide_kind":guide_kind,"reseat":settle}) if _recording else 0
 		_metrics.projection_iterations += 1
 		var count := 5 if movable else 3
+		# An initially intersecting pose must first become feasible. A finite
+		# attraction penalty can otherwise balance against excess overlap and
+		# stop at an unsafe compromise. Physical caps remain unchanged.
+		var restoring: bool=guide_kind==&"saved_wrapper" and not current.accepted_contact_constraints
 		var matrix: Array = []; var rhs: Array = []
 		for column: int in count:
 			var row: Array = [];row.resize(count);row.fill(0.0);row[column]=0.00000001
@@ -431,6 +443,7 @@ func _project(context: Dictionary,saved: Dictionary,seed: Dictionary,radius: flo
 				if not probe.get("valid",false): return _response_observed(span,iteration_span,{"sample":current,"converged":false,"reason":"invalid_translation_probe_both_sides","detail":probe})
 				probes.append({"sample":probe,"step":probe_step})
 		for contact: Dictionary in current.rows:
+			if restoring and contact.required: continue
 			var differentiated := _contact_gradient(contact,current,probes,guide_kind)
 			if not differentiated.get("valid",false):
 				_event({"event":"skin_derivative_unresolved","digit":current.digit,"detail":differentiated})
@@ -442,11 +455,14 @@ func _project(context: Dictionary,saved: Dictionary,seed: Dictionary,radius: flo
 				for second: int in count: matrix[first][second]+=weight*gradient[first]*gradient[second]
 		var snapshot: Dictionary = context.adapter.digit_inputs[current.digit].snapshot
 		var delta: Array
-		if guide_kind==&"saved_wrapper" and current.accepted_contact_constraints:
+		if guide_kind==&"saved_wrapper" and (current.accepted_contact_constraints or not retained_slices.is_empty()):
 			var phase := Chronology.begin("preparation.response.constraint_derivatives", _trace_context(current.digit)) if _recording else 0
 			var bounded := _wrapper_constraints(current,probes,snapshot,count)
 			_end_observation(phase,bounded)
 			if not bounded.get("valid",false): return _response_observed(span,iteration_span,{"sample":current,"converged":_complete(current),"reason":"contact_constraint_derivative_unavailable","detail":bounded})
+			var held_bounds := _retained_linear_constraints(context,saved,current,retained_slices)
+			if not held_bounds.get("valid",false): return _response_observed(span,iteration_span,{"sample":current,"converged":false,"reason":"retained_contact_derivative_unavailable","detail":held_bounds})
+			bounded.constraints.append_array(held_bounds.constraints)
 			phase = Chronology.begin("preparation.response.constrained_step", _trace_context(current.digit)) if _recording else 0
 			var response := _constrained_linear(matrix,rhs,bounded.constraints)
 			_end_observation(phase,response)
@@ -458,10 +474,14 @@ func _project(context: Dictionary,saved: Dictionary,seed: Dictionary,radius: flo
 			delta=_active_bound_linear(matrix,rhs,current.angles[current.digit],snapshot)
 			if phase != 0: Chronology.finish(phase,{"delta_available":not delta.is_empty()})
 		if delta.is_empty(): return _response_observed(span,iteration_span,{"sample":current,"converged":false,"reason":"singular_contact_response"})
+		if _recording:
+			Chronology.event("preparation.response.proposed_step", {"digit":current.digit,"iteration":iteration,
+				"angles":current.angles[current.digit],"delta":delta,"restoring":restoring})
 		var norm := 1.0
 		for value: float in delta: norm=maxf(norm,absf(value))
 		var accepted := false
 		var material_blocked := false
+		var retained_blocker: Dictionary = {}
 		var rejected_constraints: Array = []
 		var fractions: Array = [1.0,0.5,0.25,0.125,0.0625,0.03125,0.015625] if guide_kind==&"saved_wrapper" else [1.0,0.5,0.25,0.125]
 		for fraction: float in fractions:
@@ -489,16 +509,100 @@ func _project(context: Dictionary,saved: Dictionary,seed: Dictionary,radius: flo
 				if not retained:
 					_end_observation(trial_span,trial,{"accepted":false,"outcome":"lost_retained_contact"})
 					continue
-			if trial.cost < current.cost - 1e-14:
+			var improves: bool=trial.cost < current.cost - 1e-14
+			if restoring: improves=trial.accepted_contact_constraints or trial.violation_cost < current.violation_cost - 1e-16
+			if improves:
+				# Skin is shared across digits. Respect acquired contacts while
+				# choosing each step, rather than discarding a completed follower
+				# because its last proposal disturbed an earlier slice.
+				var held_check := _retained_slices_hold(context,saved,trial,retained_slices)
+				if not held_check.get("valid",false):
+					retained_blocker=held_check
+					_end_observation(trial_span,trial,{"accepted":false,"outcome":"retained_slice_constraint","detail":held_check})
+					continue
 				_end_observation(trial_span,trial,{"accepted":true,"outcome":"improving_response"})
 				current=trial;accepted=true;break
 			_end_observation(trial_span,trial,{"accepted":false,"outcome":"no_cost_improvement"})
 		if not accepted:
-			return _response_observed(span,iteration_span,{"sample":current,"converged":_complete(current),"reason":"material_constraints_reject_proposed_direction" if material_blocked else "no_improving_coupled_response",
-				"detail":{"rejected_constraints":rejected_constraints}})
+			var stopped_by := "retained_contact_constraints_reject_proposed_direction" if not retained_blocker.is_empty() else ("material_constraints_reject_proposed_direction" if material_blocked else "no_improving_coupled_response")
+			return _response_observed(span,iteration_span,{"sample":current,"converged":_complete(current),"reason":stopped_by,
+				"detail":{"rejected_constraints":rejected_constraints,"retained_blocker":retained_blocker}})
 		_end_observation(iteration_span,current,{"accepted":true,"outcome":"improving_response"})
 		iteration_span=0
 	return _response_observed(span,iteration_span,{"sample":current,"converged":_complete(current),"reason":"projection_budget_not_physical_limit"})
+
+## The follower's hinges can influence shared palm skin in an earlier slice.
+## Solve a direction tangent to those boundaries, not merely shorten/reject the
+## same conflicting direction. All trials still receive full nonlinear checks.
+func _retained_linear_constraints(context: Dictionary,saved: Dictionary,current: Dictionary,retained: Dictionary) -> Dictionary:
+	var constraints: Array=[]
+	for digit: StringName in retained:
+		var held: Dictionary=retained[digit]
+		if held.guide_kind!=&"saved_wrapper": continue
+		var key: String=str(current.digit)+":"+str(digit)
+		if not _retained_derivatives.has(key):
+			_retained_derivatives[key]=_jacobian.prepare(context.adapter,current.digit,context.palm_region,digit)
+		var derivative: Dictionary=_retained_derivatives[key]
+		if not derivative.get("valid",false): return derivative
+		var sample := _evaluate(context,saved,current.angles,current.placement,digit,held.radius_m,held.palm_required,{},held.guide_kind)
+		if not sample.get("valid",false): return sample
+		var contact_records := {}
+		for index: int in sample.records.size():
+			var record: Dictionary=sample.records[index]
+			var edge: Dictionary=record.segment
+			var section: int=int(edge.section_owner)+1 if int(edge.section_owner)>=0 else (0 if edge.get("palm_owned",false) else -1)
+			var id: String="palm" if section==0 else str(digit)+"/S"+str(section)
+			for metric: StringName in [&"material",&"guide"]:
+				var gradient := _retained_witness_gradient(derivative,current.candidate,record,metric)
+				if gradient.is_empty(): continue
+				# A section can contain several contact edges. An ambiguous deepest
+				# witness must not hide another existing contact with a usable row.
+				if metric==&"material" and held.contacts.has(id) and record.material_gap_m<=NUMERIC_GUARD_M:
+					if not contact_records.has(id) or record.material_gap_m<contact_records[id].record.material_gap_m:
+						contact_records[id]={"record":record,"gradient":gradient.duplicate()}
+				var gap: float=record.material_gap_m if metric==&"material" else record.guide_gap_m
+				var upper: float=record.depth_upper_m if metric==&"material" else record.guide_depth_upper_m
+				var cap: float=record.max_inward_depth_m
+				var margin: float=maxf((cap-upper if gap<0.0 else cap+gap)-NUMERIC_GUARD_M,0.0)
+				constraints.append({"gradient":gradient,"minimum":-margin,"id":key+":"+str(metric)+":"+str(index)})
+		for contact: String in held.contacts:
+			if not contact_records.has(contact):
+				if _recording: Chronology.event("preparation.response.unlinearized_retained_contact", {"digit":current.digit,"held_digit":digit,"contact":contact})
+				continue # The complete nonlinear contact-preservation check remains.
+			var record: Dictionary=contact_records[contact].record
+			var gradient: Array=contact_records[contact].gradient
+			for coordinate: int in gradient.size(): gradient[coordinate]=-gradient[coordinate]
+			constraints.append({"gradient":gradient,"minimum":-maxf(-record.material_gap_m,0.0),"id":key+":retain:"+contact})
+			if _recording:
+				Chronology.event("preparation.response.retained_contact_bound", {"digit":current.digit,
+					"held_digit":digit,"contact":contact,"source_id":record.segment.source_id,
+					"material_gap_m":record.material_gap_m,"gradient":gradient,"minimum":constraints[-1].minimum})
+	return {"valid":true,"constraints":constraints}
+
+func _retained_witness_gradient(prepared: Dictionary,candidate: Dictionary,record: Dictionary,metric: StringName) -> Array:
+	var witness: Dictionary=record.material_witness if metric==&"material" else record.witness
+	if witness.gradient_ambiguous: return []
+	var measured := _jacobian.evaluate_point(prepared,candidate,record.segment,witness.skin_segment_t)
+	if not measured.get("valid",false): return []
+	var result: Array=[]
+	for value: Vector2 in measured.derivatives_m_per_rad: result.append(witness.target_outward_normal.dot(value)*ANGLE_SCALE)
+	return result
+
+func _retained_slices_hold(context: Dictionary,saved: Dictionary,trial: Dictionary,retained: Dictionary) -> Dictionary:
+	for digit: StringName in retained:
+		var held: Dictionary=retained[digit]
+		var check := _evaluate(context,saved,trial.angles,trial.placement,digit,held.radius_m,held.palm_required,{},held.guide_kind)
+		if not check.get("valid",false): return {"valid":false,"digit":digit,"reason":check.get("reason","")}
+		if held.guide_kind==&"saved_wrapper":
+			if not check.accepted_contact_constraints:
+				return {"valid":false,"digit":digit,"reason":"retained_surface_cap","blockers":check.constraint_blockers}
+			for contact: String in held.contacts:
+				if not check.material_contacts.has(contact):
+					var section: int=0 if contact=="palm" else int(contact.get_slice("/S",1))
+					return {"valid":false,"digit":digit,"reason":"retained_contact_lost","contact":contact,
+						"region":check.regions.get(section,{})}
+		elif not check.attached: return {"valid":false,"digit":digit,"reason":"retained_guide_contact_lost"}
+	return {"valid":true}
 
 func _contact_gradient(contact: Dictionary,current: Dictionary,probes: Array,kind: StringName) -> Dictionary:
 	var derivative: Dictionary
@@ -842,7 +946,8 @@ func _event(record: Dictionary) -> void:
 	if not _recording: return
 	var data := _trace_context()
 	for key: String in ["digit","held_digit","from_radius_m","requested_radius_m","converged",
-			"reason","max_contact_error_m","attempt","improved","preserved_contacts","coordinate"]:
+			"reason","max_contact_error_m","attempt","improved","preserved_contacts","coordinate",
+			"material_safe","guide_safe","contacts_before","contacts_after","constraint_blockers"]:
 		if record.has(key): data[key]=record[key]
 	Chronology.event("preparation."+str(record.event),data)
 

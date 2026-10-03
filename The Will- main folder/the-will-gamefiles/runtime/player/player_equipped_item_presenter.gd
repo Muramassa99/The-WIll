@@ -2,6 +2,7 @@ extends RefCounted
 class_name PlayerEquippedItemPresenter
 
 const PrimaryGripSliceProfileLibraryScript = preload("res://core/defs/primary_grip_slice_profile_library.gd")
+const SavedWrapperGripSource = preload("res://runtime/player/grip/saved_wrapper_grip_source.gd")
 const WeaponGripAnchorProviderScript = preload("res://runtime/player/weapon_grip_anchor_provider.gd")
 const CombatAnimationStationStateScript = preload("res://core/models/combat_animation_station_state.gd")
 const CombatAnimationDraftScript = preload("res://core/models/combat_animation_draft.gd")
@@ -634,6 +635,10 @@ func build_equipped_item_node(
 	var mesh_visual_offset_origin_id: StringName = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	var mesh_visual_offset_local: Vector3 = -dominant_grip_center_local * cell_world_size
 	mesh_instance.position = mesh_visual_offset_local
+	# Saved targets are already meters in the original Forge frame. Give them
+	# the same origin rebase as the visible mesh; do not scale or regenerate them.
+	held_root.set_meta(SavedWrapperGripSource.META, SavedWrapperGripSource.from_stage2(
+		test_print.stage2_item_state, Transform3D(Basis.IDENTITY, mesh_visual_offset_local)))
 	mesh_instance.set_meta("dominant_grip_center_origin_id", dominant_grip_center_mesh_origin_id)
 	_set_origin_tracked_vector3_meta(
 		mesh_instance,

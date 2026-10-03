@@ -14,15 +14,19 @@ const Palm = preload("res://runtime/player/grip/prepared_palmar_slice_region.gd"
 const MATCH_EPSILON_M: float = 0.000002
 
 
-func prepare(adapter: Dictionary, digit_id: StringName, palm_region: Dictionary = {}) -> Dictionary:
+func prepare(adapter: Dictionary, digit_id: StringName, palm_region: Dictionary = {}, observation_digit: StringName = &"") -> Dictionary:
 	if not adapter.get("valid", false) or adapter.get("revision") != Candidate.REVISION:
 		return _fail("requires_prepared_hand_candidate")
 	if not adapter.get("digit_inputs", {}).has(digit_id):
 		return _fail("missing_prepared_digit")
+	if observation_digit == &"": observation_digit = digit_id
+	if not adapter.digit_inputs.has(observation_digit):
+		return _fail("missing_prepared_observation_digit")
 	var skin: Dictionary = adapter.skin_prepared
 	if skin.get("revision") != HandSkin.REVISION or skin.get("weights_normalized_by_tool", true):
 		return _fail("requires_original_weighted_skin")
 	var input: Dictionary = adapter.digit_inputs[digit_id]
+	var observation_input: Dictionary = adapter.digit_inputs[observation_digit]
 	var snapshot: Dictionary = input.snapshot
 	if not palm_region.is_empty():
 		if not palm_region.get("valid", false) or palm_region.get("revision") != Palm.REVISION or palm_region.get("anatomy_signature") != adapter.anatomy_signature or palm_region.get("source_pose_id") != adapter.base_packet.pose_id or palm_region.get("slot") != adapter.slot:
@@ -47,10 +51,10 @@ func prepare(adapter: Dictionary, digit_id: StringName, palm_region: Dictionary 
 		var key: String = "%d/%d" % [skin.triangle_surface_ids[index], skin.triangle_local_ids[index]]
 		if triangles.has(key): return _fail("duplicate_skin_triangle_source")
 		triangles[key] = index
-	return {"valid": true, "revision": REVISION, "digit_id": digit_id,
+	return {"valid": true, "revision": REVISION, "digit_id": digit_id, "observation_digit": observation_digit,
 		"source_pose_id": adapter.base_packet.pose_id, "anatomy_signature": adapter.anatomy_signature,
 		"resolve_phase": adapter.base_packet.resolve_phase, "machine_to_world": adapter.base_packet.machine_to_world,
-		"plane_origin_id": input.plane_origin_id, "plane_to_world": input.plane_to_world,
+		"plane_origin_id": observation_input.plane_origin_id, "plane_to_world": observation_input.plane_to_world,
 		"bone_names": snapshot.bone_names.duplicate(), "hinge_axes_local": snapshot.hinge_axes_local.duplicate(),
 		"hinge_axis_origin_ids": snapshot.hinge_axis_origin_ids.duplicate(),
 		"skin": skin, "bind_hinge_masks": masks, "triangles": triangles, "palm_region": palm_region,
@@ -96,7 +100,13 @@ func _evaluate_witness(prepared: Dictionary, candidate: Dictionary, skin_segment
 		return _fail("jacobian_requires_fixed_hand")
 	if not candidate.get("digit_states", {}).has(prepared.digit_id):
 		return _fail("candidate_missing_digit")
-	var state: Dictionary = candidate.digit_states[prepared.digit_id]
+	# The moving hinges can affect shared skin in another digit's fixed plane.
+	# Keep that observation plane's identity separate from the driving chain.
+	# Vertex derivatives below still use only prepared.digit_id's three hinges.
+	var observation_digit: StringName = prepared.get("observation_digit", prepared.digit_id)
+	if not candidate.digit_states.has(observation_digit):
+		return _fail("candidate_missing_observation_digit")
+	var state: Dictionary = candidate.digit_states[observation_digit]
 	var plane: Transform3D = state.plane_to_world
 	if state.plane_origin_id != prepared.plane_origin_id or not _same_frame(plane, prepared.plane_to_world):
 		return _fail("jacobian_requires_same_fixed_named_digit_plane")
@@ -176,7 +186,7 @@ func _evaluate_witness(prepared: Dictionary, candidate: Dictionary, skin_segment
 		if not dp.is_finite(): return _fail("nonfinite_skin_contact_derivative")
 		result.append(dp)
 		if circle_mode: clearance.append(normal.dot(dp))
-	return {"valid": true, "revision": REVISION, "digit_id": prepared.digit_id,
+	return {"valid": true, "revision": REVISION, "digit_id": prepared.digit_id, "observation_digit": observation_digit,
 		"origin_id": prepared.plane_origin_id, "source_id": source, "pose_id": packet.pose_id,
 		"point_m": point, "derivatives_m_per_rad": result, "clearance_derivatives_m_per_rad": clearance,
 		"hinge_origin_ids": prepared.bone_names.duplicate(), "skin_segment_t": t,

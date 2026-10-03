@@ -2,6 +2,7 @@ extends RefCounted
 
 const SkinCapture = preload("res://runtime/player/grip/capture_coherent_skin_pose.gd")
 const Origins = preload("res://core/models/combat_origin_record.gd")
+const SavedSource = preload("res://runtime/player/grip/saved_wrapper_grip_source.gd")
 const OWNER := &"grip_placement_capture"
 const OBJECT_ORIGIN := &"GripPlacementObjectMeshOrigin"
 const GEOMETRY_POLICY := &"unaltered_surface_vertex_index_arrays_no_triangle_mesh"
@@ -95,6 +96,9 @@ func capture(actor: Node3D, held: Node3D, anatomy: Resource, slot: StringName, s
 		var field := "primary_grip_span_" + end + "_local"
 		_copy_named_point(held, object, field, "primary_grip_span_" + end + "_origin_id", field, "primary_grip_span_" + end + "_origin_id")
 	header["object"] = object
+	# Already detached at equipped-item creation; numerical consumers read only.
+	# Keep absent/invalid wrapper explicit rather than rebuilding during a grip.
+	header["saved_grip_source"] = (held.get_meta(SavedSource.META, {}) as Dictionary).duplicate(true)
 	if not actor.has_method("resolve_hand_grip_alignment_world_position"):
 		return _fail(header, "missing_anatomical_reference_reader")
 	# This existing reader lazily prepares animation baselines when cold. A

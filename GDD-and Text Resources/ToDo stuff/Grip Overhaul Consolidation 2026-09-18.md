@@ -1,11 +1,14 @@
 # Grip overhaul: working plan, ownership and replacement boundary
 
-Date: 2026-09-18, chat 14. Latest evidence and agreed direction: September 30.
-Status: primary acquisition keeps Hand/wrist/body fixed and seats the weapon.
-Latest user decision: the September 30 model is accepted; preserve its behavior
-and optimize calculation time. Weapon orientation remains an input to seating.
-The completeness notes below record existing scope, not a request to change the
-accepted outcome. See the duration-only entry under "How to use" first.
+Date: 2026-09-18, chat 14. Latest work: October 1 live native grip integration.
+Latest user decision: pause further optimization and establish valid in-game grip
+with the current C++ method. See the current-priority entry under "How to use".
+Status: primary acquisition now consumes the saved-wrapper method in an owned
+worker. The current natural rendered test is still a partial grip; native use,
+pose application and a three-section count do not prove full-hand success.
+Weapon orientation remains an input to seating.
+
+Historical September 28 measurements (not the current runtime duration):
 All ten digits are prepared. The complete September 28 diagnostic took 335.736
 seconds, including 313.093 seconds of numerical acquisition; actual contact met
 the measured condition, but articulation validation remained unresolved. This
@@ -14,19 +17,518 @@ Next work follows the [agreed Forge preparation and contact-driven IK replacemen
 W1 Forge target preparation/persistence and W2 save progress are implemented and
 verified below; W3 now has isolated coarse contact preparation and W4 consumes
 exact saved targets with measured, incomplete physical contact. W5, support
-cutover and full grip acceptance remain pending. The live finger
-solver has not yet switched to the saved target. Preserve historical measurements.
-W3 exposed overlapping saved digit-target cap triangles: W1 cap correctness now
-needs correction before general live consumption. See the final cap addendum.
+cutover and full grip acceptance remained pending at that checkpoint. Later
+entries describe the wrapper-cap fixes and October 1 primary live cutover;
+preserve historical measurements rather than treating them as current results.
 
 Repository: `C:/WORKSPACE`. Active project:
 `The Will- main folder/the-will-gamefiles`.
 Analyzed HEAD: `03c82dfd11c56364448e5e448e3c70551f85f9bc` on
 `recovery/stable-92b8a24-chat14`; backup tag:
 `pre-grip-overhaul-and-code-cleanup`.
-Continuation: [October 1 Git checkpoint](<../SPS/SPS_2026_10_01_00-05.md>).
+Continuation: [October 1 native live integration, incomplete grip](<../SPS/SPS_2026_10_01_04-37.md>).
 
 ## How to use this working file
+
+### October 1: current priority - live saved-wrapper grip validity
+
+User paused further timing optimization and explicitly requested the current C++
+method to function in game. The 11-second result is a usable intermediate timing
+target, not permission to hide functional failure. Current work replaces the
+live primary acquisition/application path, preserves fixed Hand/wrist/upstream
+ownership and verifies the actual realized grip and movement retention.
+
+Correction to the preceding SPS and chat: the frozen preparation already
+attempts all five digits. Only Middle and Thumb responses are retained; other
+followers have material-safety or retained-contact failures. The 11-second
+duration is not merely a two-digit workload. No full-hand success was proved.
+
+Implementation boundaries: expose the already saved Forge wrapper and exact
+handle packet from the equipped item; extract the accepted preparation context
+into a shared runtime owner; run the existing contact-driven preparation in an
+owned cancellable worker; consume its explicit final weapon frame in
+`preview_grip_acquisition.gd`; retain existing finger binding, motion retention
+and post-modifier realized assessment. Existing support ownership is unchanged
+in this primary integration step. No new optimization, Forge bake or blanket
+legacy cleanup. Prepared source/config/origin checks remain authoritative.
+
+Verification will use the real Skill Crafter weapon/skill handlers with no
+injected solved pose, record native backend activity, full-hand contact/safety
+and articulation outcomes, and capture the rendered viewport. Movement checks
+follow an actually applied valid result. Current workspace user-library copy is
+older and lacks a wrapper; permission to copy the user's current external save
+was requested. Until answered, use only existing workspace saved-wrapper inputs.
+
+Current implementation/evidence, before the next palm-boundary verification:
+
+- `saved_wrapper_grip_source.gd`, `saved_wrapper_grip_context.gd` and
+  `saved_wrapper_grip_acquisition.gd` are the primary native acquisition bridge.
+  `ForgeSavedGripSourceOrigin` traces original Forge meters through the equipped
+  visual offset to `WeaponRootOrigin`; the mesh and both guide surfaces share it.
+- Actual Idle bone translations differ slightly from imported rest. Each request
+  freezes its existing local dimensions; candidate and recaptured articulation
+  use that same reference without moving bones or modifying prepared anatomy.
+- All five realized digit planes are checked. A safe open follower is reported
+  as unresolved, not promoted to success by Middle/Pinky's contact count.
+- Natural rendered report `test_artifacts/live_saved_wrapper_grip_2026-10-01T04-25-36.json`
+  is deliberately FAIL: four safe contacts, valid actual articulation, but Thumb,
+  Index and Ring unresolved. Solver 20.891 s; terminal owner duration 26.016 s.
+  Six subsequent movement checks retain the applied relationship/15 rotations.
+- Source-frame verification: 461 checks; frozen candidate geometry: 1323;
+  saved-wrapper contact/foreign-section caps: 118; cross-digit skin derivatives:
+  700. Exact report paths belong in the next SPS. None certify full grip.
+- Follower trial validation preserves previously acquired shared-skin contacts.
+  Analytic cross-digit constraints predict those effects, then full nonlinear
+  checks verify each proposal. No physical caps or reseating budgets increased.
+- Fresh trace exposes a numerical palm-boundary defect: ~12–25 nm endpoint
+  fragments on faces `0/4202` and `0/4204` become unassigned zero-cap skin due to
+  source barycentric roundoff. They block Thumb at an otherwise permitted palm
+  overlap. Correct source-boundary classification; do not grant arbitrary skin
+  allowance or redesign the closure sequence to bypass this defect.
+
+Continuation: source-boundary correction passed 4493 focused checks. The 04:40:34
+rendered rerun now retains Middle/Index/palm contact, but remains FAIL for complete
+grip: Thumb hits the genuine palm-cap check; Ring/Pinky exhaust the existing
+iteration budget. Actual safety/articulation pass; all non-digit local poses
+remain unchanged after macro positioning and all six motion-retention checks
+pass on the partial pose. Solver 24.912 s, owner duration 30.000 s. These are
+current timings, not the earlier isolated 11-second measurement. No full-grip
+claim and no further optimization. Test the user's current weapon after the
+pending external-save-copy permission before changing the seating strategy.
+
+### October 1: complete contact evaluation in C++ - selected and verified
+
+User selected the C++ consolidation approach. This bounded slice moves the
+complete `saved_wrapper_skin_contact.gd` prepare/evaluate boundary into the
+existing grip extension: ordered targets, material and digit/palm guide batches,
+depth decisions and normalized contact witnesses. The existing numerical segment
+kernel remains the single calculation implementation used by the new batch;
+the selected backend does not also run the old script path. No geometry,
+per-section allowance, depth bound, pose sequence or body ownership change.
+
+New owners: `GripSavedContactKernel` and `prepare_grip_ordered_target` under
+`native/grip_contact/src`. GDScript keeps a thin explicit backend selector.
+Native prepared data is instance/acquisition owned and bounded; exact identity
+checks must reject stale/mutated data. The new batch bypasses the old serialized
+segment-result cache, so actual work/cache counters may differ. That is not a
+license for different logical depth results, contact choices or final poses.
+The original backend remains selectable for parity and timing comparisons.
+
+The complete batch is now selected by default. `THE_WILL_GRIP_CONTACT_BATCH=0|1`
+selects the comparison in the existing runner; `CONTACT_BACKEND=gdscript` uses
+the retained reference. Ordinary calls run one backend. Geometry caches are
+acquisition-owned, each bounded to 64 entries, with at most 192 native targets.
+The numerical configuration remains the proven 0.01 mm depth bound.
+
+Current evidence under `test_artifacts`:
+
+- `native_saved_contact_2026-10-01T03-37-19.json`: 522 checks passed. Full packets,
+  actual saved slices, caps/ties, mixed signed zero, stale/mutated inputs, exact
+  warm reuse, eviction and reset. Four captured cold component medians are
+  11.3-16.1x faster than the script reference; not whole-hand timings.
+- `saved_wrapper_skin_contact_2026-10-01T03-35-10.json`: 107 mature checks passed
+  on the selected default; old adapter cache checks remain explicitly selected.
+- Fresh control `contact_driven_preparation_2026-10-01T03-20-39.json`:
+  80 checks, right 15.397612 s, left 16.942334 s.
+- Final default `contact_driven_preparation_2026-10-01T03-35-22.{json,html}`:
+  79 checks, right 11.170773 s, left 11.322146 s, zero fallback. About 30.5%
+  combined time saved in this comparison. Counts differ because explicit backend
+  override validation is absent from the final no-override run.
+- `complete_native_contact_default_comparison_2026-10-01.json`: all 156,089
+  compared values match exactly, excluding timing/backend execution statistics.
+  Geometry, final poses, contact choices, iterations and logical counts match.
+- `grip_complete_batch_default_20261001_033520_448.{jsonl,summary.json,html}`:
+  12,523 records, natural completion, no issues/unclosed spans, 29.511 s whole
+  cycle including context/section setup and report work.
+
+Port review caught and corrected two issues: canonical signed-zero bounds must
+retain Godot's MIN/MAX tie semantics; untyped container script metadata is a
+null Object, so recursively rejecting Object values disabled cache hits.
+Container schema equality now uses Godot's `is_same_typed`; all actual data
+still compares exact type/component bits and source order. The focused verifier
+initially lost negative-zero fixture bits through literal constant folding;
+it now constructs them from the IEEE-754 byte pattern and all checks pass.
+Final prepared/native section hits are 115 right and 119 left. Mutable
+noncanonical internal packets are rejected explicitly, a stricter malformed-
+input contract than the reference's unchecked internal fields.
+
+The inclusive saved-contact prepare/evaluate cost is now 3.303 / 3.220 s,
+previously 8.001 / 8.522 s. Its nested preparation subtotal is 0.307 / 0.316 s;
+do not add that again. Candidate pose cost is 1.595 / 1.531 s, skin slicing plus
+palm annotation 2.353 / 2.228 s, saved weapon sections 2.030 / 2.066 s. These
+boundaries identify the remaining work. The initial post-port run at 03:25:44
+also matched exactly but preceded the cache/sign-bit fixes; final evidence above
+supersedes it. Current DLL SHA256:
+`dfa51ae084f3ddd150dd455ee20d8f9f22655c9ea962e62dd6b9ce3ea297d512`.
+
+The two-second target is not met. Existing isolated results still have two
+accepted sections per hand, below three; no grip acceptance is newly claimed.
+No live manual run was performed. Section and lower-level numerical verifiers
+from the preceding SPS were not rerun; the new full packet tests exercise that
+same numerical code through the batch. Git remains untouched.
+
+The live result-application mismatch described below remains an explicit next
+integration boundary. This numerical port does not silently substitute a new
+live acquisition owner or claim to fix the failed manual game test.
+
+### October 1: two-second target research and failed live baseline
+
+Current user direction: research outside information that fits this workload;
+bring acquisition to **two seconds or less**. The user also explicitly reports
+that the last actual-game test failed to produce a successful visual grip.
+The objective is a visibly working grip with that duration, preserving the
+accepted contact model and ownership. A fast rejected or unapplied pose is not
+success. This entry records research and a proposed sequence, not implementation
+or a new performance result. No engine run was made during this research pass.
+
+**Measured baseline and scope.** Historical current-code evidence remains
+`contact_driven_preparation_2026-10-01T02-15-26.json` and
+`grip_section_native_chronology_2026-10-01T02-15-00.jsonl` under `test_artifacts`.
+Right/left preparation took 14.652 / 15.379 seconds. This is the isolated
+middle/thumb preparation, not a timed successful five-digit gameplay grip.
+Both cases still report two accepted hand sections and
+`minimum_hand_contact_count_met=false`. Material safety and exact numerical
+parity do not establish grip completion. The current live owner is still
+`preview_grip_acquisition.gd` -> `handle_grip_acquisition.gd`; the proof runner
+uses `contact_driven_grip_preparation.gd`. That difference is established, but
+does not by itself diagnose the user's last visual failure.
+
+The live application contract also differs: `apply_primary_result()` consumes
+the old hypothetical hand translation and seats the weapon with
+`base.origin - translation`, checking the old
+`rigid_captured_pose_world_translation` packet. The new solver keeps the hand
+fixed and returns the actual seated weapon frame in `selected.weapon_to_world`;
+its candidate hand translation is zero. A class substitution would therefore
+reject the packet or lose/misapply seating. Explicit integration must consume
+the new final weapon frame, retain its basis and named origin chain, and derive
+the hand/weapon binding from that final frame. Preserve atomic application,
+cancellation and stale-result checks, then assess the recaptured realized hand.
+
+Contact preparation/evaluation costs about 7.7 seconds per measured hand. Its
+31,169 / 31,467 native segment calls total 0.897 / 0.913 seconds, including
+conversion. Cache key/result/target serialization costs 1.448 / 1.420 seconds
+within the contact stage. Native target construction is only 0.026 / 0.028
+seconds. Therefore simply keeping native targets alive longer is insufficient;
+the useful change is keeping more work and data together. Eliminating only the
+native arithmetic cannot remove the surrounding seconds. Whole-trace writer
+cost is 0.711 seconds across both hands and setup; logging is not the primary
+explanation. These nested timings must not be added as disjoint costs.
+
+**Research finding: batch and retain data before choosing more hardware.**
+[Godot 4.7 CPU optimization](https://docs.godotengine.org/en/4.7/tutorials/performance/cpu_optimization.html)
+supports compiled heavy calculations and contiguous data access. Our next
+useful numerical boundary is a complete contact evaluation, rather than one
+script/native call per skin segment. Convert inputs once; perform the ordered
+segment loop, physical/guide measurements and witness work in native storage;
+return the result together. Keep immutable prepared geometry in a bounded,
+acquisition-owned context. Do not assume changing planes or translated oblique
+sections have unchanged geometry. Existing triangle indexing and section caches
+already provide some reuse; extend measured gaps rather than adding another
+parallel cache blindly.
+
+[libigl's geometry-query guidance](https://libigl.github.io/tutorial/#signed-distances)
+also recommends retaining search structures when geometry is static and query
+points change. This is supporting design guidance, not a proposal to install
+libigl or replace our contact semantics. Godot's
+[physics-space queries](https://docs.godotengine.org/en/4.7/classes/class_physicsdirectspacestate2d.html)
+return intersections/contact information, but are not a direct replacement for
+our complete per-section depth bounds, ambiguity and witness-selection contract.
+
+**Parallel CPU/GPU options.** Independent segments of a fixed pose can run
+together. Later poses depend on earlier accepted contacts, so the approximately
+31,000 calls cannot all become one simultaneous job without changing the solve.
+[WorkerThreadPool](https://docs.godotengine.org/en/4.7/classes/class_workerthreadpool.html)
+provides grouped work but warns that small tasks may become slower. A background
+thread alone improves responsiveness, not necessarily completion time. Native
+workers would need immutable inputs, separate output ranges and ordered result
+reduction; the current mutable target table and last-timing fields must not be
+shared concurrently unchanged. Respect
+[Godot thread safety](https://docs.godotengine.org/en/4.7/tutorials/performance/thread_safe_apis.html)
+and publish scene poses through the existing main-thread owner.
+
+[Godot compute shaders](https://docs.godotengine.org/en/4.7/tutorials/shaders/compute_shaders.html)
+fit the current Forward+ renderer family, but repeated GPU waits/readbacks would
+sit between dependent solver steps. [NVIDIA's transfer guidance](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#data-transfer-between-host-and-device)
+likewise favors resident data and batched transfers. GPU remains a later measured
+option, not the chosen first implementation or a promised speed factor. A fair
+comparison must include upload, dispatch, readback and the real dependency order;
+31,000 unrelated replay queries in one artificial batch would be misleading.
+
+**Next bounded sequence.**
+
+1. Establish a real-game acceptance checkpoint through the existing chronology:
+   one actual saved weapon, empty Skill 1, solver result, pose application and
+   recaptured realized hand. Distinguish rejection, stale-job discard, unapplied
+   pose and realized contact failure. Do not infer the last failure's cause or
+   quietly replace the live owner while profiling the isolated tool.
+2. Optimize the chosen shared evaluator at `saved_wrapper_skin_contact.gd`
+   (`prepare`/`evaluate`), `native_cached_planar_skin_overlap_budget.gd`, and
+   `native/grip_contact/src/grip_contact_kernel.*`. Start with a complete native
+   segment batch and acquisition-scoped data, then include the measured ordered
+   target/witness work. Keep pose sequencing, physical caps and decisions intact.
+   A paired cache-enabled/disabled comparison can determine whether the old
+   serialized cache still pays for itself after compilation; its 10-12% hit rate
+   and 12-13 table flushes are evidence to test, not proof to delete it.
+3. Re-measure the whole path. Candidate skinning, slicing and palm annotation
+   still cost roughly 3.4-3.6 seconds in the isolated case; they may need the same
+   prepared native-data treatment. Select the next owner from the new trace.
+   Do not stop after reporting a component speed factor.
+4. Connect the accepted solver to the live owner through an explicit integration
+   slice and verify all five digits, shared weapon placement, existing movement
+   retention and support-hand ownership. Normal operation must select one solver.
+   Retaining a reference implementation for proof must not run both on each grip.
+
+Acceptance measures cold acquisition separately from cached reuse. Record input
+preparation, solve, result application and time to visible completion; whole UI
+loading/report generation remain separate scopes. The two-second goal applies
+to a completed hand acquisition, not only one kernel or this two-digit fixture.
+Check visual outcome and actual contact/cap decisions as well as elapsed time.
+Retain the proven 0.01 mm internal depth bound: the prior 0.05 mm experiment
+changed contact decisions, so user-visible precision tolerance is not permission
+to weaken numerical guards. No source changes, new benchmarks, installs or Git
+actions were performed for this research. The two-second outcome is unproven.
+
+### October 1: compiled section calculations completed
+
+User asked to move the remaining slicing/topology bottleneck into C++. This
+bounded slice adds `GripSliceKernel` and `GripTopologyKernel` to the existing
+grip extension. They port the existing `slice_reachable_surface.gd.slice` and
+`skin_plane_contact_query.gd.prepare_target` contracts. Prepared weapon sections
+select the backend; named-plane validation, triangle indexing, final centroid,
+saved-wrapper ownership and the rest of the grip sequence stay in their owners.
+The original script helpers remain reference implementations and an explicit
+fallback. Normal calls run one selected implementation, never both.
+
+Preserve vector/scalar precision boundaries, mesh traversal and welding order,
+clipping, contour order, topology failures and diagnostic counts. No tolerance
+changes, simplified contours, omitted checks or live acquisition-owner switch.
+Add full-packet analytic/captured comparisons; run the existing section and
+saved-section verifiers, then the current two-hand preparation to natural
+completion with chronology and HTML. Compare every recorded pose/decision
+against `contact_driven_preparation_2026-10-01T01-43-11.json` before selecting
+the default. Measure native overhead and end-to-end cost, not compile time.
+
+Official Godot 4.7 Geometry2D, Vector3 and CPU optimization docs reviewed again:
+bulk numerical work fits the existing GDExtension boundary. It does not require
+adding physics bodies or changing the contact model. Use the existing workspace
+compiler/bindings; no new install, outside application, or Git action.
+
+Implemented and selected C++ for prepared weapon sections. All 431 new kernel
+checks passed, covering synthetic failures and clipping, 12 captured triangle
+slices and 60 frozen topology cases. The original script helpers are unchanged.
+The final default passed 161 existing prepared-section checks and 421 saved-section
+checks (straight/curved assets, oblique planes, named origins and immutability).
+Native rejection stays rejection; only missing extension classes use the counted
+reference fallback. No duplicate normal calculation or skipped geometry checks.
+
+Fresh reference-section full run `contact_driven_preparation_2026-10-01T02-13-41`
+passed 72 checks; C++ section run `...02-15-26` passed 74. Both use the established
+C++ contact kernel at 0.01 mm. Right 22.243 -> 14.652 s, left 23.967 -> 15.379 s:
+about 35% less combined solver time. Full trace cycles 53.454 -> 37.194 s;
+these include setup/verification/report output and are not the per-hand solve.
+`native_section_pose_comparison_2026-10-01.json` confirms 156,181 existing case
+values, including poses, decisions and work counts, exactly match the prior
+01:43:11 result after excluding timings; backend counters are additional metadata.
+Both hands retain their same two accepted sections and the same known limitation.
+
+Solver weapon sections dropped 9.524 / 10.332 -> 1.862 / 1.971 s right/left.
+Inside those new totals, triangle slicing takes 0.329 / 0.349 s, topology
+0.556 / 0.584 s. Source queries remain 128 / 137; native slice/topology calls
+383/382 and 411/411, with zero reference calls/fallbacks. Remaining largest
+disjoint owners are saved-contact evaluation 5.476 / 5.411 s and saved-target
+preparation 2.190 / 2.276 s. They include script validation/cache/serialization
+and witness work around the already compiled segment kernel. No further port
+or live acquisition-owner switch was included in this slice.
+
+Evidence: `native_section_kernels_2026-10-01T02-15-03.json`,
+`verify_prepared_weapon_plane_section_2026-10-01T02-17-35.json`,
+`prepared_saved_grip_sections_2026-10-01T02-17-52.json`, and the two full reports
+above, all under `test_artifacts`. Complete C++ chronology:
+`grip_section_native_chronology_2026-10-01T02-15-00.{jsonl,summary.json,html}`,
+13,948 records, no issues or unclosed spans. New native README documents APIs,
+build provenance, exact scope and timings. No new Git action.
+
+### October 1: compiled contact comparison completed
+
+User approved the compiled contact benchmark and expressed interest in future
+measured C++ optimizations. Current scope is the contact/penetration kernel only;
+no broader port or live acquisition-owner replacement is implied.
+User finished the manual game test and reported no visible grip after roughly
+700 seconds, then closed the game. That is an observation of the older live
+acquisition path, not a timing of this isolated saved-target preparation solver.
+The compiled extension was activated only after that test ended.
+
+Implementation boundary: a standalone `native/grip_contact` GDExtension owns
+typed prepared target geometry and one complete numerical segment calculation.
+The existing script still owns target validation, exact memoization, section
+allowances, witnesses used by movement, stage order, and final grip decisions.
+The thin `native_cached_planar_skin_overlap_budget.gd` adapter dispatches through
+one cache-miss hook; `saved_wrapper_skin_contact.gd` selects it for the isolated
+saved-target solver. One numerical backend executes per successful cache miss.
+The script implementation remains the comparison/fallback; fallback use is
+counted and forbidden in the C++ proof. Native targets are instance-owned and
+released after each synchronous batch; the exact result cache retains its
+mature validation, identity and transactional behavior.
+Main-hand and support ownership and all named metric-plane origins remain as-is.
+
+Verification: kernel proof passed 420 checks over 2,471 compared segments at
+identical settings, with zero measured position/depth differences. The mature
+exact-cache regression passed all 114 checks. Complete two-hand C++ preparation
+at 0.01 mm passed 70 structural/configuration checks with zero native fallbacks.
+All 156,165 compared baseline case values, including stage poses, contact
+decisions and work counts, were identical after excluding timings.
+
+Against the 00:31:21 GDScript experiment, right solve 52.504 -> 19.672 seconds;
+left 59.618 -> 21.349 seconds (2.67x / 2.79x). Whole report cycle 120.533 ->
+47.102 seconds; the separate full trace span including report output is 47.600
+seconds. Do not mix these timing scopes. This is a full isolated preparation
+comparison, not evidence that the user's 700-second gameplay wait is fixed.
+
+The separate 0.05 mm depth-bound trial took 20.138 / 22.140 seconds. It altered
+the trajectory and removed left Thumb S3 from the accepted contacts: its final
+material gap changed from -0.274 mm to +1.908 mm. Final weapon placement shifted
+0.111 / 0.698 mm right/left. Refinement tolerance feeds contact witnesses and
+safety bounds; it is not cosmetic rounding or a bound on final-pose error.
+Selected default: C++ with the proven 0.01 mm depth bound. Physical allowances
+and numerical/topology guards remain unchanged. Runner overrides are documented
+in `tools/grip_plane_proof/GRIP_CHRONOLOGY.md`.
+
+Both retained 0.01 mm results still have two accepted sections, below the
+existing three-section minimum. The optimization preserves this limitation;
+structural PASS is not a claim of final gameplay grip correctness. Current
+live acquisition-owner replacement remains pending.
+
+Remaining measured solver cost: saved weapon sections 8.707 / 9.486 seconds
+(128 / 137 calls), roughly 44% of each hand solve. Topology assembly and triangle
+slicing are nested inside that cost. Native segment calls including conversion
+take 0.788 / 0.825 seconds. A next narrow optimization candidate is section
+slicing/topology with exact contour and pose comparisons, not a blanket C++ port.
+
+Evidence under `test_artifacts`: `native_overlap_kernel_2026-10-01T01-32-20.json`,
+`verify_exact_cached_planar_skin_overlap_budget_2026-10-01T01-33-50.json`,
+`contact_driven_preparation_2026-10-01T01-34-49.{json,html}`,
+`native_grip_comparison_001_2026-10-01.json`,
+`contact_driven_preparation_2026-10-01T01-40-22.{json,html}`, and
+`native_grip_comparison_005_2026-10-01.json`.
+Complete chronology: `grip_native_001_chronology_2026-10-01T01-35-10` with
+`.jsonl`, `.summary.json`, `.html`; 13,944 records, no unfinished spans/issues.
+
+Final default-settings run `contact_driven_preparation_2026-10-01T01-43-11`
+passed 67 checks with zero fallbacks; right 22.264 / left 24.706 seconds. All
+156,181 compared case values except timings match the first C++ run exactly
+(`native_grip_comparison_default_2026-10-01.json`). Use the observed range,
+roughly 20-25 seconds per hand, rather than claiming a fixed duration. Its
+`grip_native_default_chronology_2026-10-01T01-44-00` summary has 13,941 records
+and no unfinished spans/issues. The existing saved-wrapper-contact verifier
+also passed all 106 checks at 01:46:05 using the selected default.
+
+Files: new `native/grip_contact/{CMakeLists.txt,README.md,grip_contact.gdextension,
+src/grip_contact_kernel.h,src/grip_contact_kernel.cpp,src/register_types.*}`;
+new runtime adapter and `tools/grip_plane_proof/run_native_overlap_kernel.gd`;
+small dispatch/configuration changes to the existing cache, saved-contact owner,
+preparation owner/runner; current work note and a new completion SPS.
+Build uses the workspace compiler and validated already-built godot-cpp bindings.
+No installation, outside-workspace Python invocation, Forge behavior change or
+Git push is part of this experiment.
+
+### October 1: contact-query research and required accuracy
+
+User requested official Godot research into cheaper built-in contact/overlap
+queries and compiled code. User then specified that geometric accuracy finer
+than **0.05 mm (0.00005 m)** is unnecessary. This is the requested accuracy for
+future optimization; it is not an extra allowance on any section's overlap cap.
+Small numerical/topology guards must not all be replaced with that distance.
+No solver code, precision setting, build, installation or live behavior changed
+during this research.
+
+Current `saved_wrapper_skin_contact.gd` requests a 0.01 mm depth-bound width,
+64 evaluations per segment and no refinement after a cap has been decided.
+Simply loosening that width can leave a cap-straddling interval unresolved; it
+must not turn uncertainty into permission to penetrate. Future comparisons can
+use the requested geometric accuracy while retaining cap and contact semantics.
+
+The complete 00:31 experiment attributes 32.285 / 38.400 seconds right/left to
+saved-contact evaluation, including 20.069 / 25.839 seconds finding nearest
+contact and 4.737 / 5.393 seconds sampling/refining depth. These are nested
+timings, not additive independent costs. Weapon sections take another
+11.290 / 12.209 seconds. A precision change alone does not remove the dominant
+nearest-contact work.
+
+Official [Geometry2D](https://docs.godotengine.org/en/4.7/classes/class_geometry2d.html)
+provides useful closest-point, segment and polygon operations.
+[PhysicsDirectSpaceState2D](https://docs.godotengine.org/en/4.7/classes/class_physicsdirectspacestate2d.html)
+offers overlaps/contact pairs, but not the complete current outside-nearest
+witness plus whole-segment penetration bounds. Concave polygon collision shapes
+are hollow; no collision against those cannot prove that skin is outside solid
+material. These APIs are candidates for parts of the calculation, not an
+established replacement for the existing section policy.
+
+Recommended bounded next experiment: compiled contact/overlap computation using
+GDExtension, with original prepared target geometry, cached work and section caps.
+Keep loops inside compiled code; avoid a scripting/native call for every edge
+pair. Compare against captured geometry and the current reference, measure total
+cost including transfer, and retain current solver ownership/stage order.
+The project already contains `native/forge_v2_manifold` and a workspace-local C++
+toolchain; this is an existing build pattern, not permission to alter Forge.
+No speedup factor or sub-250 ms solve is established by this research.
+Official references: [CPU optimization](https://docs.godotengine.org/en/4.7/tutorials/performance/cpu_optimization.html),
+[GDExtension](https://docs.godotengine.org/en/4.7/engine_details/engine_api/gdextension/index.html).
+
+### October 1: four initial contacts, direct saved-wrapper experiment
+
+After publishing checkpoint `15534caa` / `hand-overhault-v5.0-sub-optimised`, the
+user requested a controlled sequence test. Add the existing identified neutral
+palm region to Middle S1/S2/S3 on the initial circle. Keep Middle-owned transverse
+weapon translation, orientation and fixed Hand/wrist/body rules. Attempt the
+exact saved Forge V2 target directly, skipping intermediate circle radii and
+late palm seating. Then run the existing bounded reseating, up to three attempts,
+and the existing fixed-weapon followers. No new envelope, cap, contact checker,
+generic optimizer or live controller change is part of this experiment.
+
+Files: `runtime/player/grip/contact_driven_grip_preparation.gd`,
+`tools/grip_plane_proof/run_contact_driven_preparation.gd`, its HTML view, and
+this note/new SPS. Initial four-point attachment is measured, not assumed;
+if unresolved, preserve that outcome and still attempt the saved target, as the
+existing preparation path did. Do not silently loosen limits or reinstate removed
+checkpoints to make the experiment look successful. Compare both captured hands
+visually and record the complete timing trace.
+
+Executed at 00:31:21. Both hands established all four initial circle contacts at
+117.111 mm radius. Each went directly to the saved target, then attempted one
+reseat; the unchanged no-improvement rule stopped further attempts. Each hand
+records eight stages instead of fourteen. All 61 structural checks passed,
+including exact saved target slices, unchanged caps, fixed Hand/wrist/orientation
+and station, and the new direct stage order. Contact/numerical helper bodies and
+the reseating/follower block are byte-identical to checkpoint 15534caa after
+normalizing file line endings. This is not final contact equivalence.
+
+Against the previous logged run (same frozen inputs and recording enabled):
+right 49.048 -> 52.504 s (7.05% slower); left 68.982 -> 59.618 s (13.57% faster).
+Combined solver time 118.031 -> 112.122 s (5.01% lower in this single comparison).
+Whole capture including setup/reports 126.409 -> 121.268 s. The direct Middle
+wrapper response itself is more expensive: 29.762 / 35.477 s right/left.
+No general performance or behavior-preservation claim follows from this test.
+
+The result changed: right retains Middle S2 + Thumb S3 (previously Middle S3 +
+Thumb S3); left retains Middle S1 + Thumb S3 (previously Middle S1 + Middle S2 +
+palm). Neither new result meets the existing minimum-three-section condition.
+Measured Middle skin remains within its physical allowances. Initial palm contact
+works, but final palm seating from the old left result is not preserved. Leave
+this experiment visible for user review; no automatic retuning or rollback.
+
+Artifacts under `test_artifacts`: `contact_driven_preparation_2026-10-01T00-31-21`
+(`.json`, interactive `.html`, inspected `.png`),
+`direct_wrapper_comparison_2026-10-01T00-31-21.json`, and
+`grip_direct_wrapper_chronology_2026-10-01T00-32-00` (`.jsonl`, `.html`,
+`.summary.json`). Chronology closed naturally with 13,934 records, zero issues
+and zero unfinished spans. The generated HTML embeds the measured JSON exactly.
+
+Official Godot 4.7 references checked before this slice:
+[SkeletonModifier3D](https://docs.godotengine.org/en/4.7/classes/class_skeletonmodifier3d.html)
+(pose modification/observation contract) and
+[Time](https://docs.godotengine.org/en/4.7/classes/class_time.html)
+(monotonic duration measurement).
+No native modifier lifecycle or timing API change is needed for stage reordering.
 
 ### October 1: checkpoint before the user's next experiment
 

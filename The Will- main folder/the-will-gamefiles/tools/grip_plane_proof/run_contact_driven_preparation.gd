@@ -1,14 +1,16 @@
 extends SceneTree
 
-## W3 circle preparation and W4 saved-wrapper attempt. Frozen workspace inputs;
+## Four-contact Middle circle, then direct saved-wrapper attempt. Frozen inputs;
 ## never opens gameplay or player saves. Structural PASS is not a grip verdict.
 ## Saved Forge triangles remain unscaled. Fixture placement reuses the captured
 ## handle direction, then centers the saved span at the captured Middle plane.
 ## This is fixture setup, not axial motion by the seating solver.
 const Acquisition = preload("res://runtime/player/grip/handle_grip_acquisition.gd")
 const Candidate = preload("res://runtime/player/grip/prepared_hand_candidate_pose.gd")
+const SavedContext = preload("res://runtime/player/grip/saved_wrapper_grip_context.gd")
 const Sections = preload("res://runtime/player/grip/prepared_saved_grip_sections.gd")
 const Follow = preload("res://runtime/player/grip/contact_driven_grip_preparation.gd")
+const SavedContact = preload("res://runtime/player/grip/saved_wrapper_skin_contact.gd")
 const Palm = preload("res://runtime/player/grip/prepared_palmar_slice_region.gd")
 const Packet = preload("res://core/resolvers/primary_grip_handle_mesh_packet.gd")
 const Config = preload("res://core/defs/characters/josie/grip_contact_config.tres")
@@ -26,6 +28,10 @@ var _checks := 0
 var _prefix: String
 var _started: int
 var _trace_run_span := 0
+var _contact_backend := "cpp" if SavedContact.DEFAULT_USE_NATIVE else "gdscript"
+var _contact_batch := SavedContact.DEFAULT_USE_NATIVE_BATCH
+var _section_backend := "cpp" if Sections.DEFAULT_USE_NATIVE else "gdscript"
+var _depth_tolerance_m: float = SavedContact.DEPTH_CONFIG.depth_bound_tolerance_m
 
 func _init() -> void:
 	call_deferred("_run")
@@ -36,6 +42,8 @@ func _run() -> void:
 		"natural_completion":true,"hand_count":TRACES.size(),"source_library":LIBRARY,"source_library_sha256":LIBRARY_HASH})
 	_trace_run_span = Chronology.begin("preparation.runner.full_cycle", {"scope":"accepted_frozen_fixture"})
 	_prefix = "C:/WORKSPACE/test_artifacts/contact_driven_preparation_" + Time.get_datetime_string_from_system().replace(":", "-")
+	if not _configure_evaluation_environment():
+		_finish(); return
 	var span := Chronology.begin("preparation.runner.verify_library", {})
 	var library_matches := _check(FileAccess.get_sha256(LIBRARY) == LIBRARY_HASH, "saved wrapper fixture hash")
 	Chronology.finish(span, {"valid":library_matches})
@@ -70,6 +78,34 @@ func _run() -> void:
 	_check(_cases.size() == 2, "both hands recorded")
 	Chronology.finish(span, {"valid":_failures.is_empty(),"case_count":_cases.size()})
 	_finish()
+
+func _configure_evaluation_environment() -> bool:
+	if OS.has_environment("THE_WILL_GRIP_CONTACT_BATCH"):
+		var requested := OS.get_environment("THE_WILL_GRIP_CONTACT_BATCH")
+		if not _check(requested in ["0", "1"], "contact batch selection must be 0 or 1"): return false
+		_contact_batch = requested == "1"
+	if OS.has_environment("THE_WILL_GRIP_SECTION_BACKEND"):
+		var requested := OS.get_environment("THE_WILL_GRIP_SECTION_BACKEND")
+		if not _check(requested in ["cpp", "gdscript"], "section backend must be cpp or gdscript"): return false
+		_section_backend = requested
+	if OS.has_environment("THE_WILL_GRIP_CONTACT_BACKEND"):
+		var requested := OS.get_environment("THE_WILL_GRIP_CONTACT_BACKEND")
+		if not _check(requested in ["cpp", "gdscript"], "contact backend must be cpp or gdscript"): return false
+		_contact_backend = requested
+	if _contact_backend == "gdscript":
+		if OS.has_environment("THE_WILL_GRIP_CONTACT_BATCH") and _contact_batch:
+			_check(false, "native contact batch requires the cpp contact backend")
+			return false
+		_contact_batch = false
+	if OS.has_environment("THE_WILL_GRIP_DEPTH_TOLERANCE_M"):
+		var requested := OS.get_environment("THE_WILL_GRIP_DEPTH_TOLERANCE_M")
+		if not _check(requested.is_valid_float(), "depth tolerance must be a numeric value in meters"): return false
+		var tolerance := requested.to_float()
+		if not _check(is_finite(tolerance) and tolerance > 0.0, "depth tolerance must be finite and positive"): return false
+		_depth_tolerance_m = tolerance
+	Chronology.event("preparation.runner.evaluation_configuration", {"contact_backend":_contact_backend,"contact_batch":_contact_batch,"section_backend":_section_backend,
+		"depth_bound_tolerance_m":_depth_tolerance_m})
+	return true
 
 func _case(path: String, wip: Resource, packet: Dictionary) -> void:
 	var span := Chronology.begin("preparation.runner.verify_capture", {"capture_source":path})
@@ -133,9 +169,17 @@ func _case(path: String, wip: Resource, packet: Dictionary) -> void:
 	Chronology.finish(span, {"valid":surfaces.get("valid",false),"reason":surfaces.get("reason","")})
 	if not _check(surfaces.get("valid", false), "saved sections prepared: " + str(surfaces.get("reason", ""))):
 		return
+	var follow := Follow.new()
+	if not _check(follow.configure_sections(_section_backend == "cpp"), "requested section backend configured before acquisition"):
+		return
+	if not _check(follow.configure_evaluation(_contact_backend == "cpp", _depth_tolerance_m),
+		"requested contact backend and tolerance configured before acquisition"):
+		return
+	if not _check(follow.configure_native_batch(_contact_batch), "requested contact batch mode configured before acquisition"):
+		return
 	print("W3_PREPARATION_START ", stage.slot)
 	span = Chronology.begin("preparation.runner.await_solver", {"slot":stage.slot,"scope":"accepted_frozen_fixture"})
-	var result: Dictionary = await Follow.new().run(context, surfaces, root)
+	var result: Dictionary = await follow.run(context, surfaces, root)
 	Chronology.finish(span, {"slot":stage.slot,"valid":result.get("valid",false),"reason":result.get("reason","")})
 	span = Chronology.begin("preparation.runner.verify_case", {"slot":stage.slot})
 	var verification_failures_before := _failures.size()
@@ -143,6 +187,26 @@ func _case(path: String, wip: Resource, packet: Dictionary) -> void:
 	_check(not result.get("grip_accepted", true), "preparation never claims final grip acceptance")
 	_check(var_to_bytes(stage.posed_character) == immutable_character, "captured character remains unchanged")
 	if result.get("valid", false):
+		var section_statistics: Dictionary = result.get("totals", {}).get("section_backend_statistics", {})
+		_check(section_statistics.get("section_backend", "") == _section_backend,
+			"completed acquisition retains requested section backend")
+		if _section_backend == "cpp":
+			_check(section_statistics.get("fallback_calls", -1) == 0
+				and section_statistics.get("native_slice_calls", 0) > 0 and section_statistics.get("native_topology_calls", 0) > 0,
+				"compiled sections execute without reference fallback")
+		var contact_statistics: Dictionary = result.get("totals", {}).get("saved_contact_cache_statistics", {})
+		_check(contact_statistics.get("contact_backend", "") == _contact_backend
+			and contact_statistics.get("depth_bound_tolerance_m", -1.0) == _depth_tolerance_m,
+			"completed acquisition retains requested backend and tolerance")
+		if _contact_backend == "cpp":
+			_check(contact_statistics.get("native_kernel", {}).get("fallback_calls", -1) == 0
+				and contact_statistics.get("backend_selection_fallbacks", 0) == 0,
+				"compiled contact acquisition completes without GDScript fallback")
+			_check(contact_statistics.get("native_batch_enabled", false) == _contact_batch,
+				"completed acquisition retains requested complete-batch mode")
+			if _contact_batch:
+				_check(contact_statistics.get("batch_calls",0) > 0 and contact_statistics.get("actual_segment_calls",0) > 0,
+					"complete native contact batches actually execute")
 		_check(result.get("hand_transform_unchanged", false), "fixed hand frame survives preparation")
 		var names: Array = []
 		var all_in_range := true
@@ -158,7 +222,7 @@ func _case(path: String, wip: Resource, packet: Dictionary) -> void:
 			all_named = all_named and sample.hand_to_world == candidate.hand_to_world
 			var displacement: Vector3 = sample.weapon_to_world.origin - stage.object.weapon_to_world.origin
 			shared_placement_valid = shared_placement_valid and sample.weapon_to_world.basis == stage.object.weapon_to_world.basis and absf(displacement.dot(context.station_axis_world)) <= 0.000001
-			if sample.label in ["middle_palm_guide_seated","middle_enclosing_target_reached","middle_saved_wrapper_response","middle_saved_wrapper_reseated"]: middle_seat = sample.weapon_to_world
+			if sample.label in ["middle_initial_attachment","middle_saved_wrapper_response","middle_saved_wrapper_reseated"]: middle_seat = sample.weapon_to_world
 			if str(sample.label).begins_with("follower_"):
 				shared_placement_valid = shared_placement_valid and middle_seat != null and sample.weapon_to_world == middle_seat
 			for digit: Dictionary in sample.digits:
@@ -190,27 +254,16 @@ func _case(path: String, wip: Resource, packet: Dictionary) -> void:
 		_check(all_in_range, "every recorded native angle retains prepared limits")
 		_check(all_named, "every stage retains fixed Hand and named digit planes")
 		_check(shared_placement_valid, "one weapon seat preserves orientation and station; followers cannot move it")
-		var bound_states := 0
 		var accepted_contacts_valid := true
 		for sample: Dictionary in result.stages:
 			if sample.get("committed_contact_state", false):
-				bound_states += 1
 				accepted_contacts_valid = accepted_contacts_valid and sample.accepted_contact_constraints
 		_check(accepted_contacts_valid, "committed circle tangency or wrapper physical constraints are verified")
-		_check(result.circle_selected.all_required_tangent, "Middle and late palm retain circle contact before saved shape transition")
+		_verify_direct_transition(result, names)
 		_check(result.get("wrapper_target_selected",false) and wrapper_samples>0 and wrapper_match,"active guide uses exact saved Forge target slices without another inset")
 		_check(caps_unchanged,"saved target depth never changes per-section physical allowances")
 		_check(result.get("material_assessed",false) and result.get("material_safe",false),"final selected skin is measured within physical Handle limits")
 		_check(result.get("reseat_attempts",4)<=3,"saved-wrapper reseating stays within three attempts")
-		var first_request := -1.0
-		for event: Dictionary in result.events:
-			if event.event=="coupled_contraction_attempt":
-				first_request=event.requested_radius_m
-				break
-		_check(absf(first_request-Follow.PREPARATION_RADIUS_M)<1e-9,
-			"coarse continuation requests 50mm directly rather than a fixed small radius step")
-		_check(result.get("preparation_completed", false) and bound_states > 2,
-			"coupled Middle contraction reaches enclosing target")
 	Chronology.finish(span, {"slot":stage.slot,"valid":_failures.size() == verification_failures_before,
 		"work_counts":{"new_failures":_failures.size()-verification_failures_before}})
 	span = Chronology.begin("preparation.runner.record_case", {"slot":stage.slot})
@@ -227,38 +280,47 @@ func _case(path: String, wip: Resource, packet: Dictionary) -> void:
 	Chronology.finish(span, {"slot":stage.slot,"case_count":_cases.size()})
 	await process_frame
 
+func _verify_direct_transition(result: Dictionary, names: Array) -> void:
+	_check(result.get("preparation_policy", "") == "four_contact_initial_circle_direct_saved_wrapper",
+		"direct experiment policy is reported")
+	var direct_order := names.size() >= 3
+	if direct_order:
+		direct_order = names[0] == "middle_initial_unbound" and names[1] == "middle_initial_attachment" \
+			and names[2] in ["middle_saved_wrapper_response", "saved_wrapper_unresolved_diagnostic"]
+	_check(direct_order, "initial Middle attachment goes directly to the saved-wrapper attempt")
+	var no_checkpoints := true
+	for label: String in names:
+		no_checkpoints = no_checkpoints and label not in ["middle_coupled_contraction", "middle_50mm_reached",
+			"middle_enclosing_target_reached", "middle_palm_guide_seated", "palm_seating_unbound_diagnostic"]
+	for event: Dictionary in result.get("events", []):
+		no_checkpoints = no_checkpoints and event.get("event", "") != "coupled_contraction_attempt"
+	_check(no_checkpoints, "no intermediate contraction or late-palm checkpoint is performed")
+	var initial: Dictionary = result.get("circle_selected", {})
+	var sections: Array = []
+	for digit: Dictionary in initial.get("digits", []):
+		if digit.get("digit", &"") != &"middle": continue
+		for region: Dictionary in digit.get("regions", []): sections.append(region.get("section", -1))
+	sections.sort()
+	_check(sections == [0, 1, 2, 3], "initial Middle circle records identified palm plus S1, S2 and S3")
+	_check(initial.get("guide_kind", &"") == &"circle"
+		and absf(float(initial.get("radius_m", -1.0)) - float(result.get("initial_radius_m", -2.0))) < 1e-9,
+		"initial attachment is measured at the original circle radius")
+	if names.size() > 1 and names[1] == "middle_initial_attachment":
+		var recorded: Dictionary = result.stages[1].duplicate(true)
+		for key: String in ["label", "committed_contact_state", "sweep"]: recorded.erase(key)
+		# The visual report projects joints into each digit plane after capture.
+		for digit: Dictionary in recorded.get("digits", []): digit.erase("joints_m")
+		_check(var_to_bytes(recorded) == var_to_bytes(initial), "initial attachment summary preserves its actual measured stage")
+	var attachment_events: Array = []
+	for event: Dictionary in result.get("events", []):
+		if event.get("event", "") == "initial_middle_attachment": attachment_events.append(event)
+	_check(attachment_events.size() == 1, "one initial attachment outcome is recorded")
+	if attachment_events.size() == 1:
+		_check(result.get("preparation_completed", false) == attachment_events[0].get("converged", false),
+			"initial attachment success or failure remains explicit")
+
 func _prepare_hand_context(job: RefCounted, stage: Dictionary) -> Dictionary:
-	# W3 needs prepared skin/hinges, not the old per-slice envelope builder.
-	var span := Chronology.begin("preparation.runner.prepare_adapter", {"slot":stage.slot})
-	var adapter: Dictionary = job._builder.prepare(Config.anatomy, stage.posed_character, stage.slot, job._selected_digits())
-	Chronology.finish(span, {"valid":adapter.get("valid",false),"reason":adapter.get("reason","")})
-	if not adapter.get("valid", false): return adapter
-	var frame: Transform3D = stage.object.weapon_to_world
-	var axis: Vector3 = (frame.basis * (stage.object.primary_grip_span_end_local - stage.object.primary_grip_span_start_local)).normalized()
-	var plane: Transform3D = adapter.digit_inputs[&"middle"].plane_to_world
-	var u: Vector3 = plane.basis.z.cross(axis)
-	if u.length_squared() < 1e-8: u = plane.basis.x - axis * plane.basis.x.dot(axis)
-	if u.length_squared() < 1e-8: return {"valid":false,"reason":"degenerate_shared_translation_basis"}
-	u = u.normalized()
-	var observations := {}
-	for digit: StringName in job._selected_digits():
-		span = Chronology.begin("preparation.runner.prepare_digit_observer", {"slot":stage.slot,"digit":digit})
-		var observed: Dictionary = job._observer.prepare(adapter, digit)
-		Chronology.finish(span, {"valid":observed.get("valid",false),"reason":observed.get("reason","")})
-		if not observed.get("valid", false): return observed
-		observations[digit] = observed
-	var context := {"valid":true,"adapter":adapter,"slot":stage.slot,"digit_order":job._selected_digits(),
-		"observations":observations,"station_axis_world":axis,"translation_u_world":u,
-		"translation_v_world":axis.cross(u).normalized(),"vectors_origin_id":ROOT}
-	span = Chronology.begin("preparation.runner.prepare_circle_context", {"slot":stage.slot})
-	context = Acquisition.op_circle_prepare(job, Config.anatomy, stage, context)
-	Chronology.finish(span, {"valid":context.get("valid",false),"reason":context.get("reason","")})
-	if not context.get("valid", false): return context
-	span = Chronology.begin("preparation.runner.prepare_palm_region", {"slot":stage.slot})
-	context["palm_region"] = Palm.new().prepare(context, Config.anatomy)
-	Chronology.finish(span, {"valid":context.palm_region.get("valid",false),"reason":context.palm_region.get("reason","")})
-	if not context.palm_region.get("valid", false): return context.palm_region
-	return context
+	return SavedContext.new().prepare_hand(Config.anatomy,stage,job._selected_digits())
 
 func _place_saved_fixture(source: Dictionary, wip: Resource, packet: Dictionary) -> Dictionary:
 	var stage: Dictionary = source.duplicate(true)
@@ -314,8 +376,9 @@ func _finish() -> void:
 	var report_span := Chronology.begin("preparation.runner.write_reports", {"report_prefix":_prefix})
 	var report := {"schema":"contact_driven_preparation_report_v1", "checks":_checks,"failures":_failures,
 		"cases":_cases,"total_ms":float(Time.get_ticks_usec()-_started)/1000.0,
+		"contact_backend":_contact_backend,"contact_batch":_contact_batch,"section_backend":_section_backend,"depth_bound_tolerance_m":_depth_tolerance_m,
 		"source_library":LIBRARY,"source_library_sha256":LIBRARY_HASH,
-		"scope":"W3 coarse circle preparation plus W4 exact saved-wrapper/planar-material attempt; no full 3D grip or live integration", "production_pose_written":false}
+		"scope":"Initial Middle S1/S2/S3 and identified-palm circle attachment, then direct exact saved-wrapper/planar-material attempt; no full 3D grip or live integration", "production_pose_written":false}
 	var span := Chronology.begin("preparation.runner.write_json", {})
 	var file := FileAccess.open(_prefix + ".json", FileAccess.WRITE)
 	file.store_string(JSON.stringify(_json(report), "\t"))

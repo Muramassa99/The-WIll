@@ -7,6 +7,42 @@ extends RefCounted
 const REVISION: StringName = &"planar_circle_skin_contact_v1"
 
 
+## A caller-selected point on the ORIGINAL skin edge, for attraction only.
+## Its parameter is frozen for one local response, not a permanent attachment.
+## Whole-edge evaluate() remains the separate safety/contact authority.
+func evaluate_point(segment: Dictionary, t: float, center_m: Vector2, radius_m: float,
+		origin_id: StringName, source_id: StringName) -> Dictionary:
+	if origin_id == &"" or source_id == &"": return _fail("missing_circle_origin_or_source")
+	if not is_finite(t) or t < 0.0 or t > 1.0: return _fail("invalid_attraction_point_parameter")
+	if not center_m.is_finite() or not is_finite(radius_m) or radius_m <= 0.0: return _fail("invalid_circle_center_or_radius")
+	var skin_source: Variant = segment.get("source_id")
+	if segment.get("origin_id") != origin_id or not (skin_source is String or skin_source is StringName) or String(skin_source).is_empty():
+		return _fail("missing_or_mismatched_skin_origin_or_source")
+	if not segment.get("a") is Vector2 or not segment.get("b") is Vector2: return _fail("missing_skin_endpoints")
+	var a: Vector2 = segment.a
+	var b: Vector2 = segment.b
+	if not a.is_finite() or not b.is_finite() or a == b: return _fail("nonfinite_or_zero_length_skin_segment")
+	var x: float = float(a.x) + t * (float(b.x) - float(a.x))
+	var y: float = float(a.y) + t * (float(b.y) - float(a.y))
+	var radial_x: float = x - float(center_m.x)
+	var radial_y: float = y - float(center_m.y)
+	var distance: float = sqrt(radial_x * radial_x + radial_y * radial_y)
+	var ambiguous: bool = distance == 0.0
+	var normal: Variant = null
+	var circle_point: Variant = null
+	if not ambiguous:
+		normal = Vector2(radial_x / distance, radial_y / distance)
+		circle_point = Vector2(float(center_m.x) + radius_m * radial_x / distance,
+			float(center_m.y) + radius_m * radial_y / distance)
+		if not (circle_point as Vector2).is_finite(): return _fail("circle_witness_outside_vector_numeric_range")
+	return {"valid": true, "revision": REVISION, "source_id": skin_source, "origin_id": origin_id,
+		"circle_source_id": source_id, "signed_clearance_m": distance - radius_m,
+		"skin_point_m": Vector2(x, y), "skin_segment_t": t, "distance_to_center_m": distance,
+		"circle_point_m": circle_point, "circle_outward_normal": normal, "tangent_ambiguous": ambiguous,
+		"attraction_only": true, "point_parameter_frozen_for_response": true,
+		"whole_skin_clearance_verified": false, "actual_3d_grip_verified": false, "grip_accepted": false}
+
+
 func evaluate(segments: Array, center_m: Vector2, radius_m: float, origin_id: StringName, source_id: StringName) -> Dictionary:
 	if origin_id == StringName() or source_id == StringName():
 		return _fail("missing_circle_origin_or_source")

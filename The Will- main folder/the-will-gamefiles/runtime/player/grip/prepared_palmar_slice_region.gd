@@ -2,8 +2,9 @@ extends RefCounted
 
 const HandSkin = preload("res://runtime/player/grip/prepared_hand_skin_query.gd")
 const Palmar = preload("res://runtime/player/grip/palmar_reference_geometry.gd")
+const Rules = preload("res://runtime/player/player_digit_hinge_rules.gd")
 const ROOT := &"RL_BoneRoot"
-const REVISION := &"clipped_reference_palmar_core_regions_v2"
+const REVISION := &"clipped_reference_palmar_core_and_web_regions_v3"
 const PALM_CAP_M := 0.0025
 const EPSILON_M := 0.0000001
 const POLYGON_SCALE := 100000.0
@@ -11,8 +12,10 @@ const POLYGON_SCALE := 100000.0
 
 ## Diagnostic region preparation, not a full palm segmentation or solid proof.
 ## The reference skeleton determines a core footprint and authored closing side.
-## Original skin faces must also be the first positive surface over that core;
-## skin weights alone never establish palmar orientation or anatomical position.
+## Original skin faces must also be the first positive surface over that core.
+## The thumb-index web additionally needs shared proximal influence evidence and
+## stays within the wrist-to-knuckle band on the thumb side of the core.
+## Skin weights alone never establish palmar orientation or anatomical position.
 func prepare(context: Dictionary, definition: Resource) -> Dictionary:
 	var started := Time.get_ticks_usec()
 	if definition == null or not context.get("adapter") is Dictionary:
@@ -56,12 +59,27 @@ func prepare(context: Dictionary, definition: Resource) -> Dictionary:
 	for bone: StringName in core.footprint_bone_origin_ids:
 		var point: Vector3 = inverse * (machine * checked.registry.resolve_transform_to_machine(bone)).origin
 		footprint.append(Vector2(point.x, point.y))
+	var thumb_rules: Array = Rules.get_chain_rules(slot, &"thumb")
+	if thumb_rules.size() != 3:
+		return _fail("missing_reference_web_thumb_chain")
+	var index_bone: StringName = core.footprint_bone_origin_ids[1]
+	var thumb_bones: Array[StringName] = [thumb_rules[0].bone, thumb_rules[1].bone]
+	for bone: StringName in thumb_bones:
+		if not checked.registry.has_origin(bone): return _fail("missing_reference_web_thumb_origin")
+	var thumb_base: Vector3 = inverse * (machine * checked.registry.resolve_transform_to_machine(thumb_bones[1])).origin
+	var core_side := (footprint[1] - footprint[0]).cross(footprint[2] - footprint[0])
+	var thumb_side := (footprint[1] - footprint[0]).cross(Vector2(thumb_base.x, thumb_base.y) - footprint[0])
+	if absf(core_side) <= 1.0e-12 or absf(thumb_side) <= 1.0e-12 or signf(core_side) == signf(thumb_side):
+		return _fail("ambiguous_reference_web_side")
 	var points: PackedVector3Array = inverse * (posed.vertices_world as PackedVector3Array)
 	var hand_weights := PackedFloat64Array()
 	var totals := PackedFloat64Array()
 	var foreign_weights := PackedFloat64Array()
 	var contributors: Array[Dictionary] = []
+	var web_index_weights := PackedFloat64Array()
+	var web_thumb_weights := PackedFloat64Array()
 	hand_weights.resize(skin.vertex_count); totals.resize(skin.vertex_count); foreign_weights.resize(skin.vertex_count)
+	web_index_weights.resize(skin.vertex_count); web_thumb_weights.resize(skin.vertex_count)
 	for vertex: int in range(skin.vertex_count):
 		var weights := {}
 		for influence: int in range(skin.vertex_offsets[vertex], skin.vertex_offsets[vertex + 1]):
@@ -70,10 +88,15 @@ func prepare(context: Dictionary, definition: Resource) -> Dictionary:
 			weights[bone] = float(weights.get(bone, 0.0)) + weight
 			totals[vertex] += weight
 			if bone == hand: hand_weights[vertex] += weight
+			if bone == index_bone: web_index_weights[vertex] += weight
+			if thumb_bones.has(bone): web_thumb_weights[vertex] += weight
 			if bone != hand and not adapter.descendant_bones.has(bone): foreign_weights[vertex] += weight
 		contributors.append(weights)
+	var web := {"index_weights":web_index_weights, "thumb_weights":web_thumb_weights,
+		"thumb_side":signf(thumb_side), "minimum_y":minf(footprint[0].y, minf(footprint[1].y, footprint[2].y)),
+		"maximum_y":maxf(footprint[0].y, maxf(footprint[1].y, footprint[2].y))}
 	var compiled := _compile(points, skin.triangle_indices, skin.triangle_surface_ids,
-		skin.triangle_local_ids, hand_weights, totals, footprint, foreign_weights, contributors)
+		skin.triangle_local_ids, hand_weights, totals, footprint, foreign_weights, contributors, web)
 	if not compiled.get("valid", false): return compiled
 	compiled.merge({"revision": REVISION, "anatomy_signature": signature, "slot": slot,
 		"source_pose_id": adapter.base_packet.pose_id, "hand_bone_name": hand,
@@ -82,12 +105,15 @@ func prepare(context: Dictionary, definition: Resource) -> Dictionary:
 		"reference_frame_origin_id": core.frame_origin_id,
 		"reference_origin_records": packet.origin_records + [core.origin_record],
 		"footprint_m": footprint, "footprint_origin_id": core.frame_origin_id,
+		"web_reference_bone_origin_ids": [hand, index_bone, thumb_bones[0], thumb_bones[1]],
+		"web_reference_origin_id": core.frame_origin_id,
+		"web_coverage": "shared_Hand_Index1_proximal_Thumb_skin_in_thumb_side_wrist_to_knuckle_band",
 		"closing_evidence": core.closing_evidence, "paired_core_samples_complete": core.get("complete", false),
 		"paired_core_accepted_sample_count": core.get("accepted_sample_count", 0),
 		"max_inward_depth_m": PALM_CAP_M,
 		"complete_palm_partition_verified": false, "solid_enclosure_verified": false,
-		"coverage": "clipped_first_positive_reference_surface_inside_bone_triangle_only",
-		"ownership_evidence": "geometric_palmar_core_plus_positive_Hand_and_same_hand_subtree_contributors",
+		"coverage": "clipped_first_positive_reference_core_and_attributable_thumb_index_web",
+		"ownership_evidence": "bounded_core_or_shared_proximal_thumb_index_web_plus_positive_Hand_and_same_hand_subtree_contributors",
 		"preparation_ms": float(Time.get_ticks_usec() - started) / 1000.0}, true)
 	return compiled
 
@@ -129,7 +155,9 @@ func annotate(prepared: Dictionary, candidate: Dictionary, slice: Dictionary, pl
 			return _fail("palmar_edge_origin_mismatch")
 		var source_id := "%d/%d" % [int(original.get("surface_index", -1)), int(original.get("surface_triangle_index", -1))]
 		var fragments: Array[Dictionary] = [original.duplicate(true)]
-		if int(original.get("section_owner", -1)) == -1 and prepared.faces.has(source_id):
+		# A different digit can cross this plane. Its established section cap
+		# still wins; palm expansion must not replace that digit's allowance.
+		if int(original.get("section_owner", -1)) == -1 and not original.has("collision_owner_bone") and prepared.faces.has(source_id):
 			var split: Dictionary = _fragment_edge(original, prepared.faces[source_id], posed.vertices_world, plane_to_world)
 			if not split.get("valid", false): return split
 			fragments = split.fragments
@@ -138,6 +166,8 @@ func annotate(prepared: Dictionary, candidate: Dictionary, slice: Dictionary, pl
 			edge["original_source_id"] = original.get("source_id", source_id)
 			if edge.has("palmar_reference_a_m"): edge["palmar_reference_origin_id"] = prepared.reference_frame_origin_id
 			if edge.get("palm_owned", false):
+				edge["grip_attraction_eligible"] = true
+				edge["grip_surface_reason"] = &"identified_palmar_surface"
 				edge["section_id"] = &"palm"
 				edge["max_inward_depth_m"] = PALM_CAP_M
 				edge["allowance_unassigned"] = false
@@ -161,11 +191,16 @@ func annotate(prepared: Dictionary, candidate: Dictionary, slice: Dictionary, pl
 	return output
 
 
-func _compile(points: PackedVector3Array, indices: PackedInt32Array, surfaces: PackedInt32Array, locals: PackedInt32Array, hand_weights: PackedFloat64Array, totals: PackedFloat64Array, footprint: PackedVector2Array, foreign_weights: PackedFloat64Array, contributors: Array = []) -> Dictionary:
+func _compile(points: PackedVector3Array, indices: PackedInt32Array, surfaces: PackedInt32Array, locals: PackedInt32Array, hand_weights: PackedFloat64Array, totals: PackedFloat64Array, footprint: PackedVector2Array, foreign_weights: PackedFloat64Array, contributors: Array = [], web: Dictionary = {}) -> Dictionary:
 	if indices.size() % 3 != 0 or surfaces.size() != indices.size() / 3 or locals.size() != surfaces.size() or points.size() != hand_weights.size() or totals.size() != points.size() or foreign_weights.size() != points.size() or footprint.size() != 3:
 		return _fail("invalid_reference_core_arrays")
 	if absf((footprint[1] - footprint[0]).cross(footprint[2] - footprint[0])) <= 1.0e-12:
 		return _fail("degenerate_reference_core_footprint")
+	if not web.is_empty():
+		if not web.get("index_weights") is PackedFloat64Array or not web.get("thumb_weights") is PackedFloat64Array or web.index_weights.size() != points.size() or web.thumb_weights.size() != points.size():
+			return _fail("invalid_reference_web_weights")
+		if not is_finite(float(web.get("thumb_side", 0))) or absf(float(web.get("thumb_side", 0))) != 1.0 or not is_finite(float(web.get("minimum_y", INF))) or not is_finite(float(web.get("maximum_y", INF))) or float(web.minimum_y) >= float(web.maximum_y):
+			return _fail("invalid_reference_web_band")
 	var faces: Array[Dictionary] = []
 	var candidates: Array[int] = []
 	var rejected := {"outside_footprint_or_nonpalmar": 0, "missing_same_hand_source_evidence": 0, "fully_occluded_by_one_face": 0}
@@ -174,6 +209,8 @@ func _compile(points: PackedVector3Array, indices: PackedInt32Array, surfaces: P
 		var polygon := PackedVector2Array()
 		var hands: Array[float] = []
 		var foreign: Array[float] = []
+		var web_index: Array[float] = []
+		var web_thumb: Array[float] = []
 		var source_contributors: Array = []
 		for corner: int in range(3):
 			var vertex := indices[triangle * 3 + corner]
@@ -183,6 +220,11 @@ func _compile(points: PackedVector3Array, indices: PackedInt32Array, surfaces: P
 				return _fail("invalid_reference_influence_weights")
 			hands.append(hand_weights[vertex] - 0.0000001)
 			foreign.append(0.0000001 - foreign_weights[vertex])
+			if not web.is_empty():
+				if not is_finite(web.index_weights[vertex]) or not is_finite(web.thumb_weights[vertex]) or web.index_weights[vertex] < 0.0 or web.thumb_weights[vertex] < 0.0:
+					return _fail("invalid_reference_web_influence")
+				web_index.append(web.index_weights[vertex] - 0.0000001)
+				web_thumb.append(web.thumb_weights[vertex] - 0.0000001)
 			if contributors.size() == points.size(): source_contributors.append(contributors[vertex].duplicate())
 		var cross := (polygon[1] - polygon[0]).cross(polygon[2] - polygon[0])
 		if absf(cross) <= 1.0e-14: continue
@@ -195,6 +237,18 @@ func _compile(points: PackedVector3Array, indices: PackedInt32Array, surfaces: P
 		faces.append(face)
 		if face.max_z <= EPSILON_M: rejected.outside_footprint_or_nonpalmar += 1; continue
 		var intersections: Array[PackedVector2Array] = Geometry2D.intersect_polygons(_scaled(polygon), _scaled(footprint))
+		if not web.is_empty() and maxf(web_index[0], maxf(web_index[1], web_index[2])) >= 0.0 and maxf(web_thumb[0], maxf(web_thumb[1], web_thumb[2])) >= 0.0:
+			var web_domain := _scaled(polygon)
+			var side_values: Array[float] = []
+			var near_values: Array[float] = []
+			var far_values: Array[float] = []
+			for point: Vector2 in polygon:
+				side_values.append((footprint[1] - footprint[0]).cross(point - footprint[0]) * float(web.thumb_side))
+				near_values.append(float(web.maximum_y) - point.y)
+				far_values.append(point.y - float(web.minimum_y))
+			for field: Array in [side_values, near_values, far_values, web_index, web_thumb]:
+				web_domain = _clip_field(web_domain, face, field)
+			if web_domain.size() >= 3: intersections.append(web_domain)
 		var geometry_found := false
 		for raw: PackedVector2Array in intersections:
 			var domain := _clip_positive(raw, face)

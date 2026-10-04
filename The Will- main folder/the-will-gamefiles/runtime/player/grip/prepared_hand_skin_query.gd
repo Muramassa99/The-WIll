@@ -1,5 +1,7 @@
 extends RefCounted
 
+const ContactPreference = preload("res://runtime/player/grip/skin_section_contact_preference.gd")
+
 const Origins = preload("res://core/models/combat_origin_record.gd")
 const Registry = preload("res://core/resolvers/combat_origin_registry.gd")
 const REVISION := &"coherent_prepared_hand_skin_v1"
@@ -58,6 +60,7 @@ func prepare(reference: Dictionary, anatomy_signature: String) -> Dictionary:
 	var triangle_surface_ids := PackedInt32Array()
 	var triangle_local_ids := PackedInt32Array()
 	var ranges: Array[Dictionary] = []
+	var preference_vertex_aliases := PackedInt32Array()
 	var used: Dictionary = {}
 	for surface_index: int in range(reference.surfaces.size()):
 		if not reference.surfaces[surface_index] is Dictionary:
@@ -72,6 +75,11 @@ func prepare(reference: Dictionary, anatomy_signature: String) -> Dictionary:
 			return _fail("mismatched_reference_influences")
 		var influences: int = weights.size() / points.size()
 		var first_vertex: int = residual_weights.size()
+		# Reconnect exact imported render seams for contour percentages only.
+		# Physical vertices, weights and source identities are never merged.
+		var local_aliases := ContactPreference.build_vertex_aliases(points, bones, weights, influences)
+		for vertex: int in points.size():
+			preference_vertex_aliases.append(first_vertex + (local_aliases[vertex] if local_aliases.size() == points.size() else vertex))
 		var first_triangle: int = triangle_indices.size() / 3
 		for vertex: int in range(points.size()):
 			if not points[vertex].is_finite():
@@ -128,6 +136,7 @@ func prepare(reference: Dictionary, anatomy_signature: String) -> Dictionary:
 		"residual_weights": residual_weights, "triangle_indices": triangle_indices,
 		"triangle_surface_ids": triangle_surface_ids, "triangle_local_ids": triangle_local_ids,
 		"surface_ranges": ranges, "vertex_count": residual_weights.size(),
+		"preference_vertex_aliases": preference_vertex_aliases,
 		"triangle_count": triangle_indices.size() / 3,
 		"reference_origin_records": records, "weights_normalized_by_tool": false,
 		"anatomy_measurement_ran": false, "actual_3d_grip_verified": false,

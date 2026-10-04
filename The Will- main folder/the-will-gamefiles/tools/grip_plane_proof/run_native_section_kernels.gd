@@ -3,6 +3,7 @@ extends SceneTree
 ## Whole-packet replacement proof, not a new geometry or acceptance policy.
 ## Includes native Variant conversion in timings; never applies a character pose.
 const SliceReference = preload("res://runtime/player/grip/slice_reachable_surface.gd")
+const SliceMath = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
 const TopologyReference = preload("res://runtime/player/grip/skin_plane_contact_query.gd")
 const LIBRARY := "C:/WORKSPACE/test_artifacts/forge_v2_grip_target_wrapper_2026-09-28T03-59-21_straight_library.tres"
 const LIBRARY_HASH := "8d6920bbf783e983499aee5c42ae59b23867475dcfacc243d691f626bae7dfa6"
@@ -27,6 +28,7 @@ var _captured_slice_cases := 0
 var _captured_topology_cases := 0
 var _preserved_invalid_topologies := 0
 var _started := 0
+var _failure_replays: Array = []
 
 
 func _init() -> void:
@@ -40,6 +42,11 @@ func _run() -> void:
 	_slice_native=ClassDB.instantiate(&"GripSliceKernel")
 	_topology_native=ClassDB.instantiate(&"GripTopologyKernel")
 	if not _check(_slice_native!=null and _topology_native!=null,"both compiled section instances are available"):
+		_finish(); return
+	_check(_diagnostic_repeat_stability().query_representative_stable,"identical intersection keeps its earliest compatible representative as buckets grow")
+	var replay_directory := OS.get_environment("THE_WILL_GRIP_SLICE_REPLAY_DIR")
+	if not replay_directory.is_empty():
+		_replay_failures(replay_directory)
 		_finish(); return
 	for input: Array in [[LIBRARY,LIBRARY_HASH],[CAPTURE,CAPTURE_HASH],[TOPOLOGY_CAPTURE,TOPOLOGY_CAPTURE_HASH]]:
 		if not _check(FileAccess.get_sha256(input[0])==input[1],"frozen input SHA256: "+input[0]):
@@ -55,6 +62,232 @@ func _run() -> void:
 	for input: Array in [[LIBRARY,LIBRARY_HASH],[CAPTURE,CAPTURE_HASH],[TOPOLOGY_CAPTURE,TOPOLOGY_CAPTURE_HASH]]:
 		_check(FileAccess.get_sha256(input[0])==input[1],"frozen input unchanged: "+input[0])
 	_finish()
+
+
+func _replay_failures(directory: String) -> void:
+	directory=directory.replace("\\","/").simplify_path().trim_suffix("/")
+	if not _check(directory.to_lower().begins_with("c:/workspace/test_artifacts/"),"replay directory belongs to workspace artifacts"): return
+	var names := DirAccess.get_files_at(directory)
+	names.sort()
+	for name: String in names:
+		if not name.begins_with("slice_failure_") or not name.ends_with(".bin"): continue
+		var path := directory.path_join(name)
+		var hash_before := FileAccess.get_sha256(path)
+		var file := FileAccess.open(path,FileAccess.READ)
+		if not _check(file!=null,"failure packet opens: "+name): continue
+		var value: Variant=file.get_var(false)
+		file.close()
+		if not _check(value is Dictionary and value.get("schema")=="grip_slice_failure_v1","known detached failure packet: "+name): continue
+		var input: Dictionary=value
+		var indexed := _compare_slice(name+"/indexed",input.surface,input.plane,input.origin,input.reach,input.padding)
+		if OS.get_environment("THE_WILL_GRIP_SLICE_REPLAY_EXPECT_CLOSED")=="1":
+			_check(indexed.contours.size()==1 and indexed.counts.open_or_branched_vertices==0,
+				name+": corrected query has one closed contour and no open/branched vertices")
+			var topology := _compare_topology(name+"/repaired_topology",indexed.segments,input.origin)
+			_check(topology.get("valid",false) and topology.get("topology_complete",false),name+": repaired contour passes complete simple target topology")
+		else:
+			_check(_difference(input.sliced,indexed,"captured").is_empty(),name+": original failure reproduced by reference kernel")
+		var full := _compare_slice(name+"/full",input.full_surface,input.plane,input.origin,input.reach,input.padding)
+		_check(_difference(indexed.segments,full.segments,"segments").is_empty(),name+": index retains source segments within existing parity tolerance")
+		_check(_difference(indexed.contours,full.contours,"contours").is_empty(),name+": index retains source contours within existing parity tolerance")
+		_failure_replays.append({"path":path,"sha256":hash_before,"origin":input.origin,
+			"counts":indexed.counts,"full_counts":full.counts,"graph":_exact_segment_graph(indexed.segments),
+			"intersection_diagnostic":_diagnose_slice_intersections(input,indexed,name)})
+		_check(FileAccess.get_sha256(path)==hash_before,name+": saved failure input remains unchanged")
+	_check(not _failure_replays.is_empty(),"at least one actual failed query replayed")
+
+
+## The returned segments already share the slicer's representatives. Reuse exact
+## endpoints here; another proximity weld would conceal the defect being measured.
+func _exact_segment_graph(segments: Array) -> Dictionary:
+	var incident := {}
+	for index: int in segments.size():
+		for endpoint: Vector2 in segments[index]:
+			if not incident.has(endpoint): incident[endpoint]=[]
+			incident[endpoint].append(index)
+	var abnormal: Array=[]
+	for point: Vector2 in incident:
+		if incident[point].size()==2: continue
+		var nearest := INF
+		var nearest_point := point
+		for other: Vector2 in incident:
+			if other!=point and point.distance_to(other)<nearest:
+				nearest=point.distance_to(other); nearest_point=other
+		var edges: Array=[]
+		for index: int in incident[point]: edges.append(segments[index])
+		abnormal.append({"point":point,"degree":incident[point].size(),"incident_edges":edges,
+			"nearest_other_point":nearest_point,"nearest_distance_m":nearest})
+	return {"vertex_count":incident.size(),"abnormal_vertices":abnormal}
+
+
+## Diagnostic reconstruction only: call the unchanged production reference
+## weld, farthest-pair, clipping and contour helpers in their original order.
+## Keep event detail within four weld radii of the observed abnormal endpoints.
+func _diagnose_slice_intersections(input: Dictionary, reference: Dictionary, label: String) -> Dictionary:
+	var anchors: Array[Vector2]=[]
+	# Keep inspecting the original gap even after the current graph is repaired.
+	for vertex: Dictionary in _exact_segment_graph(input.sliced.segments).abnormal_vertices:
+		anchors.append(vertex.point)
+	var radius: float=input.reach+input.padding
+	var plane: Transform3D=input.plane
+	var triangles: PackedVector3Array=input.surface.triangles_world
+	var points: Array[Vector2]=[]
+	var buckets := {}
+	var edges := {}
+	var coplanar := {}
+	var raw_history := {}
+	var weld_events: Array=[]
+	var triangle_events: Array=[]
+	var summaries := {"exact_repeat_id_changes":0,"collapsed_triangle_segments":0}
+	for offset: int in range(0,triangles.size(),3):
+		var vertices := PackedVector3Array([triangles[offset],triangles[offset+1],triangles[offset+2]])
+		var bounds := AABB(vertices[0],Vector3.ZERO).expand(vertices[1]).expand(vertices[2])
+		if plane.origin.clamp(bounds.position,bounds.end).distance_squared_to(plane.origin)>radius*radius: continue
+		var distances: Array[float]=[]
+		for vertex: Vector3 in vertices: distances.append((vertex-plane.origin).dot(plane.basis.z))
+		var epsilon: float=SliceReference.DISTANCE_EPSILON
+		var all_on: bool=absf(distances[0])<=epsilon and absf(distances[1])<=epsilon and absf(distances[2])<=epsilon
+		var ids := PackedInt32Array()
+		var raw_points := {}
+		var event_start := weld_events.size()
+		var triangle_id: int=offset/3
+		var source_id: int=input.selected_triangle_indices[triangle_id]
+		for edge_index: int in 3:
+			var following: int=(edge_index+1)%3
+			var candidates: Array=[]
+			if absf(distances[edge_index])<=epsilon:
+				candidates.append({"kind":"on_plane_vertex","point":vertices[edge_index]})
+			if (distances[edge_index]>epsilon and distances[following]<-epsilon) or (distances[edge_index]<-epsilon and distances[following]>epsilon):
+				candidates.append({"kind":"edge_crossing","point":vertices[edge_index].lerp(vertices[following],distances[edge_index]/(distances[edge_index]-distances[following]))})
+			for candidate: Dictionary in candidates:
+				var event := _diagnostic_weld(points,buckets,candidate.point,plane,raw_history,anchors,
+					{"triangle_index":triangle_id,"source_triangle_index":source_id,"edge_index":edge_index,"kind":candidate.kind})
+				raw_points[event.raw_point]=true
+				if event.exact_repeat_id_changed: summaries.exact_repeat_id_changes+=1
+				if event.near_gap: weld_events.append(event)
+				if not ids.has(event.representative_id): ids.append(event.representative_id)
+		var pair := Vector2i(-1,-1)
+		if all_on:
+			for index: int in ids.size(): SliceMath._increment_slice_edge_count(coplanar,ids[index],ids[(index+1)%ids.size()])
+		elif ids.size()>=2:
+			pair=SliceMath._resolve_farthest_slice_point_pair(ids,points)
+			edges[SliceMath._build_slice_edge_key(pair.x,pair.y)]=true
+		var collapsed: bool=not all_on and raw_points.size()>=2 and ids.size()<2
+		if collapsed: summaries.collapsed_triangle_segments+=1
+		if weld_events.size()>event_start:
+			triangle_events.append({"triangle_index":triangle_id,"source_triangle_index":source_id,
+				"vertices_world":vertices,"signed_plane_distances_m":distances,"coplanar":all_on,
+				"distinct_raw_points":raw_points.keys(),"representative_ids":ids,
+				"selected_pair":[pair.x,pair.y],"collapsed_triangle_segment":collapsed})
+	for edge: Vector2i in coplanar:
+		if int(coplanar[edge])%2==1: edges[edge]=true
+	var before_segments: Array=[]
+	for edge: Vector2i in edges: before_segments.append([points[edge.x],points[edge.y]])
+	var clipped_points: Array[Vector2]=[]
+	var clipped_buckets := {}
+	var clipped_edges := {}
+	var clipped_history := {}
+	var cut_vertices := {}
+	var disk_events: Array=[]
+	var disk_summaries := {"exact_repeat_id_changes":0,"discarded_segments":0,"collapsed_segments":0,"endpoints_changed_by_clip_arithmetic":0}
+	var edge_index := 0
+	for edge: Vector2i in edges:
+		var a: Vector2=points[edge.x]
+		var b: Vector2=points[edge.y]
+		var clipped: Dictionary=_slice_reference._clip_to_disk(a,b,radius)
+		if clipped.is_empty():
+			disk_summaries.discarded_segments+=1
+			if _near_diagnostic_gap(a,anchors) or _near_diagnostic_gap(b,anchors):
+				disk_events.append({"edge_index":edge_index,"input_a":a,"input_b":b,"discarded":true})
+			edge_index+=1
+			continue
+		var first := _diagnostic_weld(clipped_points,clipped_buckets,Vector3(clipped.a.x,clipped.a.y,0.0),Transform3D.IDENTITY,
+			clipped_history,anchors,{"edge_index":edge_index,"endpoint":"a","input_point":a,"source_representative_id":edge.x})
+		var last := _diagnostic_weld(clipped_points,clipped_buckets,Vector3(clipped.b.x,clipped.b.y,0.0),Transform3D.IDENTITY,
+			clipped_history,anchors,{"edge_index":edge_index,"endpoint":"b","input_point":b,"source_representative_id":edge.y})
+		for event: Dictionary in [first,last]:
+			if event.exact_repeat_id_changed: disk_summaries.exact_repeat_id_changes+=1
+			if event.raw_point!=event.input_point: disk_summaries.endpoints_changed_by_clip_arithmetic+=1
+			if event.near_gap:
+				event["clip_arithmetic_displacement_m"]=event.raw_point.distance_to(event.input_point)
+				event["segment_clipped"]=clipped.clipped
+				disk_events.append(event)
+		if clipped.clipped:
+			cut_vertices[first.representative_id]=true
+			cut_vertices[last.representative_id]=true
+		if first.representative_id!=last.representative_id:
+			clipped_edges[SliceMath._build_slice_edge_key(first.representative_id,last.representative_id)]=true
+		else: disk_summaries.collapsed_segments+=1
+		edge_index+=1
+	var emitted: Array=[]
+	var adjacency := {}
+	for edge: Vector2i in clipped_edges:
+		emitted.append([clipped_points[edge.x],clipped_points[edge.y]])
+		for directed: Vector2i in [edge,Vector2i(edge.y,edge.x)]:
+			if not adjacency.has(directed.x): adjacency[directed.x]=[]
+			adjacency[directed.x].append(directed.y)
+	for neighbors: Array in adjacency.values(): neighbors.sort()
+	var contours: Array=_slice_reference._closed_contours(clipped_points,clipped_edges,adjacency,cut_vertices)
+	var exact_segments: bool=var_to_bytes(emitted)==var_to_bytes(reference.segments)
+	var exact_contours: bool=var_to_bytes(contours)==var_to_bytes(reference.contours)
+	_check(exact_segments,label+": instrumented reconstruction retains binary-identical ordered segments")
+	_check(exact_contours,label+": instrumented reconstruction retains binary-identical ordered contours")
+	_check(edges.size()==reference.counts.segments_before_clip,label+": reconstructed preclip segment count matches")
+	return {"event_radius_m":4.0*SliceMath.SLICE_POINT_MERGE_EPSILON_METERS,"gap_endpoints":anchors,
+		"matches_reference_segments_exactly":exact_segments,"matches_reference_contours_exactly":exact_contours,
+		"repeat_stability_witness":_diagnostic_repeat_stability(),
+		"preclip_segment_count":edges.size(),"preclip_graph":_exact_segment_graph(before_segments),
+		"intersection_summary":summaries,"intersection_weld_events_near_gap":weld_events,"triangles_near_gap":triangle_events,
+		"disk_summary":disk_summaries,"disk_events_near_gap":disk_events}
+
+
+func _near_diagnostic_gap(point: Vector2, anchors: Array[Vector2]) -> bool:
+	for anchor: Vector2 in anchors:
+		if point.distance_to(anchor)<=4.0*SliceMath.SLICE_POINT_MERGE_EPSILON_METERS: return true
+	return false
+
+
+func _diagnostic_repeat_stability() -> Dictionary:
+	var points: Array[Vector2]=[]
+	var buckets := {}
+	var history := {}
+	var anchors: Array[Vector2]=[Vector2.ZERO]
+	var steps: Array=[]
+	var inputs := [Vector3(0.000008,0,0),Vector3(0.000004,0,0),Vector3.ZERO,Vector3(0.000004,0,0)]
+	var names := ["insert_B","query_P_first","insert_A","query_identical_P_again"]
+	for index: int in inputs.size():
+		steps.append(_diagnostic_weld(points,buckets,inputs[index],Transform3D.IDENTITY,history,anchors,{"step":names[index]}))
+	return {"steps":steps,"query_points_identical":steps[1].raw_point==steps[3].raw_point,
+		"query_representative_stable":steps[1].representative_id==steps[3].representative_id,
+		"uses_unmodified_reference_weld":true,"tolerance_changed":false}
+
+
+func _diagnostic_weld(points: Array[Vector2], buckets: Dictionary, point: Vector3, plane: Transform3D,
+		history: Dictionary, anchors: Array[Vector2], metadata: Dictionary) -> Dictionary:
+	var relative := point-plane.origin
+	var raw := Vector2(relative.dot(plane.basis.x),relative.dot(plane.basis.y))
+	var nearby: bool=_near_diagnostic_gap(raw,anchors)
+	var compatible: Array=[]
+	var epsilon: float=SliceMath.SLICE_POINT_MERGE_EPSILON_METERS
+	var bucket := Vector2i(roundi(raw.x/epsilon),roundi(raw.y/epsilon))
+	if nearby:
+		for x: int in range(bucket.x-1,bucket.x+2):
+			for y: int in range(bucket.y-1,bucket.y+2):
+				for candidate_id: int in buckets.get(Vector2i(x,y),[]):
+					if points[candidate_id].distance_squared_to(raw)<=epsilon*epsilon:
+						compatible.append({"id":candidate_id,"point":points[candidate_id],"bucket":[x,y],"distance_m":points[candidate_id].distance_to(raw)})
+	var point_count_before := points.size()
+	var id: int=SliceMath._resolve_welded_slice_point_id(points,buckets,point,plane.origin,plane.basis.x,plane.basis.y)
+	var previous: Array=history.get(raw,[])
+	var changed: bool=not previous.is_empty() and not previous.has(id)
+	var event := metadata.duplicate()
+	event.merge({"raw_point":raw,"representative_id":id,"representative_point":points[id],
+		"representative_displacement_m":points[id].distance_to(raw),"point_count_before":point_count_before,
+		"new_representative":id==point_count_before,"previous_exact_raw_representative_ids":previous.duplicate(),
+		"exact_repeat_id_changed":changed,"near_gap":nearby,"compatible_representatives_in_lookup_order":compatible})
+	if not previous.has(id): previous.append(id)
+	history[raw]=previous
+	return event
 
 
 func _synthetic_slices() -> void:
@@ -436,17 +669,28 @@ func _json(value: Variant) -> Variant:
 func _finish() -> void:
 	var path: String="C:/WORKSPACE/test_artifacts/native_section_kernels_"+Time.get_datetime_string_from_system().replace(":","-")+".json"
 	var report: Dictionary={"schema":"native_section_kernels_verification_v1","passed":_failures==0,"checks":_checks,"failures":_failures,
-		"cases":_cases,"benchmarks":_benchmarks,"duration_ms":float(Time.get_ticks_usec()-_started)/1000.0,
+		"cases":_cases,"benchmarks":_benchmarks,"failure_replays":_failure_replays,"duration_ms":float(Time.get_ticks_usec()-_started)/1000.0,
 		"library":LIBRARY,"library_sha256":LIBRARY_HASH,"capture":CAPTURE,"capture_sha256":CAPTURE_HASH,
 		"topology_capture":TOPOLOGY_CAPTURE,"topology_capture_sha256":TOPOLOGY_CAPTURE_HASH,
 		"slice_reference_sha256":FileAccess.get_sha256("res://runtime/player/grip/slice_reachable_surface.gd"),
+		"slice_shared_resolver_sha256":FileAccess.get_sha256("res://core/resolvers/primary_grip_seat_resolver.gd"),
+		"native_slice_source_sha256":FileAccess.get_sha256("res://native/grip_contact/src/grip_slice_kernel.cpp"),
+		"native_library_sha256":FileAccess.get_sha256("res://native/grip_contact/bin/grip_contact.windows.template_debug.x86_64.dll"),
 		"topology_reference_sha256":FileAccess.get_sha256("res://runtime/player/grip/skin_plane_contact_query.gd"),
 		"scalar_error_limit":SCALAR_ERROR,"vector_error_limit_m":VECTOR_ERROR,
 		"captured_slice_cases":_captured_slice_cases,"captured_topology_cases":_captured_topology_cases,
+		"replay_expects_closed":OS.get_environment("THE_WILL_GRIP_SLICE_REPLAY_EXPECT_CLOSED")=="1",
 		"preserved_invalid_topologies":_preserved_invalid_topologies,
 		"comparison_scope":"Complete result dictionaries, ordered segments/contours, preserved metadata, reasons, counts, provenance and first twelve ordered topology diagnostics. No fields removed.",
 		"timing_scope":"Three repeats after warm-up, alternating order; full native call and Variant packet construction/conversion included. Input preparation, comparison, hashing and report writing excluded. Slice timings use whole captured source triangle soups, not the live broad-phase subset. Not full-grip timings.",
 		"production_pose_written":false,"geometry_or_tolerances_changed":false,"actual_3d_grip_verified":false}
+	var replay_directory := OS.get_environment("THE_WILL_GRIP_SLICE_REPLAY_DIR")
+	report["mode"] = "captured_failure_replay" if not replay_directory.is_empty() else "historical_replacement_regression"
+	if not replay_directory.is_empty():
+		for field: String in ["library","library_sha256","capture","capture_sha256","topology_capture","topology_capture_sha256"]:
+			report.erase(field) # These historical fixtures are not loaded in replay mode.
+		report["replay_directory"] = replay_directory
+		report["timing_scope"] = "One native/reference replay per indexed and full-source query; not a benchmark or full-grip duration."
 	var file:=FileAccess.open(path,FileAccess.WRITE)
 	if file==null: _check(false,"write native section report")
 	else: file.store_string(JSON.stringify(_json(report),"\t")); file.close()

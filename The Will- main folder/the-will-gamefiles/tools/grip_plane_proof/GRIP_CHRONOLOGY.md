@@ -1,6 +1,49 @@
 # Skill Crafter grip chronology
 
-Two runners use the same chronology recorder and offline analyzer. Choose the runner matching the code being measured: the accepted frozen-fixture preparation runs `contact_driven_grip_preparation.gd`; the live UI runner still reaches `preview_grip_acquisition.gd` and `handle_grip_acquisition.gd`. These are different paths. Running the live UI tracer does not measure the accepted isolated preparation solver.
+## Exact failed saved-section replay
+
+For a closure/topology failure, set `THE_WILL_GRIP_SLICE_FAILURE_DIR` before
+launching the existing live verifier. It must name a new directory beneath
+`C:/WORKSPACE/test_artifacts/`. The section owner writes at most eight binary
+`slice_failure_*.bin` packets, only on the complete-contour rejection path.
+Capture is disabled when the variable is unset. No tolerances, source geometry,
+acceptance rules or pose ownership change. The live diagnostic duration includes
+capture I/O and must not be called an uninstrumented performance benchmark.
+
+Each packet preserves ordered indexed/full-source triangles, selected triangle
+IDs, exact plane transform with named origin, reach/padding, the returned slice
+and backend counters. Binary Variant storage retains vector values that the
+small chronological JSON records deliberately omit. Source resources and the
+user save are not written by this capture.
+
+After that Godot process exits, set `THE_WILL_GRIP_SLICE_REPLAY_DIR` to the same
+directory and run `res://tools/grip_plane_proof/run_native_section_kernels.gd`
+headlessly using the supported launcher and isolated user directories. This
+mode compares native/reference results on both indexed and full source, checks
+input immutability and describes abnormal exact-endpoint graph vertices.
+Vector parity uses the existing 10 nm comparison tolerance. A replay PASS means
+the failure is reproduced consistently, not that the failed slice or grip is
+accepted. Replay mode does not run the historical fixture/benchmark suite;
+unset the variable to run that existing suite.
+
+For regression of the October 3 captured Middle/Pinky gaps, also set
+`THE_WILL_GRIP_SLICE_REPLAY_EXPECT_CLOSED=1`. This requires one closed contour
+and no abnormal graph vertices instead of requiring the old failure to remain.
+Native/reference parity, complete-source comparison and source immutability
+still apply. Keep the original binary captures unchanged as the before inputs.
+
+`saved_wrapper_grip_acquisition.gd` now collects a detached solver diagnostic
+snapshot after both successful and failed runs. Early failure therefore retains
+native/contact/section counts and elapsed solver time; it keeps the original
+rejection reason. Cancellation still rejects the transaction while retaining
+available diagnostics. No scene access is added to the numerical worker.
+
+The frozen-fixture and live UI runners use the same chronology recorder. Choose
+the input route matching the question: frozen preparation invokes
+`contact_driven_grip_preparation.gd` directly; current primary live acquisition
+reaches it through `preview_grip_acquisition.gd` and the saved-wrapper worker.
+Earlier reports from the legacy `handle_grip_acquisition.gd` route remain
+historical. A frozen-input result is not proof of the current UI or user save.
 
 The recorder adds timing and state observations. It does not optimize the solver, change grip rules, substitute a solved pose, suppress acquisition, or trace skin/weapon geometry. Use one substantial Godot run at a time. Set recording environment variables before launching Godot; the logger reads its requested path when the script loads. Run from a dedicated PowerShell terminal so the environment overrides remain local to that terminal and its child process.
 

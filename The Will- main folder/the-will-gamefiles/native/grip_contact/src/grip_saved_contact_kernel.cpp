@@ -280,6 +280,8 @@ struct NativeEntry {
 
 struct Stats {
     int64_t batch_calls = 0;
+    int64_t guide_evaluated_segments = 0;
+    int64_t guide_skipped_segments = 0;
     int64_t depth_batches = 0;
     int64_t logical_segments = 0;
     int64_t actual_segments = 0;
@@ -634,6 +636,9 @@ Dictionary GripSavedContactKernel::evaluate(const Dictionary &prepared, const Ar
     for (int64_t i = 0; i < segments.size(); ++i) {
         if (segments[i].get_type() != Variant::DICTIONARY) return fail("invalid_skin_segment");
         const Dictionary source = segments[i];
+        if (source.has("grip_attraction_eligible") && source.get("grip_attraction_eligible", Variant()).get_type() != Variant::BOOL) {
+            return fail("invalid_grip_attraction_eligibility");
+        }
         double cap = -1.0;
         if (!numeric_value(source.get("max_inward_depth_m", -1.0), cap) || !std::isfinite(cap) || cap < 0.0) return fail("invalid_skin_segment_or_cap");
         Dictionary query = source.duplicate(false);
@@ -647,12 +652,19 @@ Dictionary GripSavedContactKernel::evaluate(const Dictionary &prepared, const Ar
     const ClockPoint guide_started = Clock::now();
     std::array<Array, 2> groups;
     std::array<std::vector<int64_t>, 2> indices;
+    int64_t guide_segment_count = 0;
     for (int64_t i = 0; i < segments.size(); ++i) {
         const Dictionary segment = segments[i];
+        // Eligibility limits guide work only. The complete material batch above
+        // and its original output indices remain unchanged for every skin edge.
+        if (!bool(segment.get("grip_attraction_eligible", true))) continue;
         const size_t group = bool(segment.get("palm_owned", false)) ? 1 : 0;
         groups[group].append(query_segments[i]);
         indices[group].push_back(i);
+        ++guide_segment_count;
     }
+    impl_->stats.guide_evaluated_segments += guide_segment_count;
+    impl_->stats.guide_skipped_segments += segments.size() - guide_segment_count;
     std::vector<Dictionary> guide_measurements(size_t(segments.size()));
     std::vector<size_t> guide_kinds(size_t(segments.size()));
     int64_t guide_evaluations = 0;
@@ -680,32 +692,35 @@ Dictionary GripSavedContactKernel::evaluate(const Dictionary &prepared, const Ar
     bool material_safe = true, guide_safe = true;
     for (int64_t index = 0; index < segments.size(); ++index) {
         const Dictionary segment = segments[index];
+        const bool guide_evaluated = bool(segment.get("grip_attraction_eligible", true));
         const Dictionary &guide = guide_measurements[size_t(index)];
         const Dictionary actual = material_segments[index];
         const size_t kind = guide_kinds[size_t(index)];
-        const Dictionary guide_witness = witness(segment, guide, entry.views[kind]);
+        const Dictionary guide_witness = guide_evaluated ? witness(segment, guide, entry.views[kind]) : Dictionary();
         const Dictionary material_witness = witness(segment, actual, entry.views[0]);
-        if (!bool(guide_witness.get("valid", false)) || !bool(material_witness.get("valid", false))) {
+        if ((guide_evaluated && !bool(guide_witness.get("valid", false))) || !bool(material_witness.get("valid", false))) {
             Dictionary detail;
             detail["index"] = index; detail["guide"] = guide_witness; detail["material"] = material_witness;
             return fail("saved_contact_witness_invalid", detail);
         }
         unresolved += int64_t(text_equals(actual["cap_status"], StringName("unresolved")));
         exceeding += int64_t(text_equals(actual["cap_status"], StringName("exceeds")));
-        const bool material_exterior = strictly_exterior(actual), guide_exterior = strictly_exterior(guide);
+        const bool material_exterior = strictly_exterior(actual);
+        const bool guide_exterior = guide_evaluated && strictly_exterior(guide);
         const bool assigned = !bool(segment.get("allowance_unassigned", true));
         const bool material_edge_safe = (assigned && text_equals(actual["cap_status"], StringName("within"))) || material_exterior;
-        const bool guide_edge_safe = (assigned && text_equals(guide["cap_status"], StringName("within"))) || guide_exterior;
+        const bool guide_edge_safe = !guide_evaluated || (assigned && text_equals(guide["cap_status"], StringName("within"))) || guide_exterior;
         material_safe = material_safe && material_edge_safe;
         guide_safe = guide_safe && guide_edge_safe;
         Dictionary record;
         record["segment"] = segment.duplicate(true);
         record["witness"] = guide_witness;
-        record["guide_kind"] = StringName(KINDS[kind]);
-        record["guide_gap_m"] = guide_witness["signed_clearance_m"];
-        record["guide_cap_status"] = guide["cap_status"];
-        record["guide_depth_lower_m"] = guide["max_inward_depth_lower_m"];
-        record["guide_depth_upper_m"] = guide["max_inward_depth_upper_m"];
+        record["guide_evaluated"] = guide_evaluated;
+        record["guide_kind"] = guide_evaluated ? StringName(KINDS[kind]) : StringName("not_evaluated");
+        record["guide_gap_m"] = guide_evaluated ? guide_witness["signed_clearance_m"] : Variant(INFINITY);
+        record["guide_cap_status"] = guide_evaluated ? guide["cap_status"] : Variant(StringName("not_evaluated"));
+        record["guide_depth_lower_m"] = guide_evaluated ? guide["max_inward_depth_lower_m"] : Variant();
+        record["guide_depth_upper_m"] = guide_evaluated ? guide["max_inward_depth_upper_m"] : Variant();
         record["material_witness"] = material_witness;
         record["material_gap_m"] = material_witness["signed_clearance_m"];
         record["material_cap_status"] = actual["cap_status"];
@@ -733,6 +748,9 @@ Dictionary GripSavedContactKernel::evaluate(const Dictionary &prepared, const Ar
     out["guide_constraint_safe"] = guide_safe;
     out["exceeding_segments"] = exceeding;
     out["unresolved_segments"] = unresolved;
+    out["material_segment_count"] = segments.size();
+    out["guide_evaluated_segment_count"] = guide_segment_count;
+    out["guide_skipped_segment_count"] = segments.size() - guide_segment_count;
     out["material_depth_evaluations"] = material["depth_evaluations"];
     out["guide_depth_evaluations"] = guide_evaluations;
     out["material_measurement_ms"] = material_ms;
@@ -772,6 +790,8 @@ Dictionary GripSavedContactKernel::statistics() const {
     out["native_section_cache_misses"] = stats.native_section_misses;
     out["native_section_evictions"] = stats.native_section_evictions;
     out["batch_calls"] = stats.batch_calls;
+    out["guide_evaluated_segment_count"] = stats.guide_evaluated_segments;
+    out["guide_skipped_segment_count"] = stats.guide_skipped_segments;
     out["depth_batch_calls"] = stats.depth_batches;
     out["logical_segment_calls"] = stats.logical_segments;
     out["actual_segment_calls"] = stats.actual_segments;

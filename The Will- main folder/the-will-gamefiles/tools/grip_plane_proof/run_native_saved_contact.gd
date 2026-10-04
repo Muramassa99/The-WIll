@@ -37,6 +37,7 @@ func _run() -> void:
 	if not _check(FileAccess.get_sha256(CAPTURE)==CAPTURE_HASH,"frozen real geometry capture SHA256"):
 		_finish(); return
 	_synthetic()
+	_guide_eligibility()
 	_invalid()
 	_detachment_and_epochs()
 	_bounded_cache_retention()
@@ -128,6 +129,61 @@ func _synthetic() -> void:
 	for edge: Dictionary in shifted_skin: edge.a+=shift; edge.b+=shift
 	_compare("synthetic/translated",translated,shifted_skin,PLANE)
 	_signed_zero_bounds()
+
+
+func _guide_eligibility() -> void:
+	var section := _section(_square())
+	var baseline := _compare("eligibility/default_all_guide", section, _segments(), PLANE)
+	var edges := _segments()
+	# A deep crossing and a harmless exterior edge both lose guide eligibility.
+	# The former must remain a material failure even with no attraction witness.
+	edges[0]["grip_attraction_eligible"] = false
+	edges[2]["grip_attraction_eligible"] = false
+	edges[3]["grip_attraction_eligible"] = true
+	var filtered := _compare("eligibility/mixed_front_and_back", section, edges, PLANE)
+	if not baseline.get("valid", false) or not filtered.get("valid", false): return
+	_check(filtered.segments.size() == baseline.segments.size(), "guide pruning preserves every material record and index")
+	_check(filtered.material_segment_count == edges.size() and filtered.guide_evaluated_segment_count == edges.size() - 2
+		and filtered.guide_skipped_segment_count == 2, "guide pruning reports measured and skipped work separately")
+	_check(filtered.guide_depth_evaluations < baseline.guide_depth_evaluations, "excluded edges perform fewer guide depth evaluations")
+	for index: int in edges.size():
+		var before: Dictionary = baseline.segments[index]
+		var after: Dictionary = filtered.segments[index]
+		_check(before.segment.source_id == after.segment.source_id, "guide pruning keeps source order " + str(index))
+		for field: String in ["material_witness", "material_gap_m", "material_cap_status", "max_inward_depth_m",
+			"source_max_inward_depth_m", "material_constraint_safe", "material_strictly_exterior",
+			"depth_lower_m", "depth_upper_m", "material_budget_exhausted", "material_evaluations"]:
+			_check(_difference(before[field], after[field], field).is_empty(), "guide eligibility leaves material " + field + " unchanged " + str(index))
+		if index in [0, 2]:
+			_check(not after.guide_evaluated and after.witness.is_empty() and after.guide_kind == &"not_evaluated"
+				and after.guide_cap_status == &"not_evaluated", "excluded edge has no invented guide witness " + str(index))
+			_check(after.guide_gap_m == INF and after.guide_depth_lower_m == null and after.guide_depth_upper_m == null
+				and after.guide_constraint_safe and not after.guide_strictly_exterior,
+				"excluded guide is neutral and explicitly unmeasured " + str(index))
+		else:
+			_check(after.guide_evaluated and _difference(before.witness, after.witness, "witness").is_empty(),
+				"retained guide witness unchanged " + str(index))
+	_check(not filtered.segments[2].material_constraint_safe and filtered.segments[2].depth_lower_m > 0.0099
+		and not filtered.material_constraint_safe, "excluded attraction edge still blocks deep physical penetration")
+	for field: String in ["material_safe", "any_exceeds", "any_unresolved", "material_constraint_safe",
+		"exceeding_segments", "unresolved_segments", "material_depth_evaluations"]:
+		_check(baseline[field] == filtered[field], "full material outcome unchanged " + field)
+	var stats: Dictionary = _native.call("statistics")
+	_check(stats.guide_evaluated_segment_count == edges.size() - 2 and stats.guide_skipped_segment_count == 2,
+		"native cumulative eligibility counters count executed guide work")
+	for edge: Dictionary in edges: edge.grip_attraction_eligible = false
+	var material_only := _compare("eligibility/all_material_no_guide", section, edges, PLANE)
+	if material_only.get("valid", false):
+		_check(material_only.guide_evaluated_segment_count == 0 and material_only.guide_depth_evaluations == 0
+			and material_only.guide_skipped_segment_count == edges.size(), "fully excluded batch runs no guide depth queries")
+		_check(material_only.guide_constraint_safe and not material_only.material_constraint_safe,
+			"no attraction targets cannot turn a physical failure into a valid grip")
+	for invalid: Variant in [null, 0, 1, "false"]:
+		var malformed: Dictionary = edges[0].duplicate(true)
+		malformed.grip_attraction_eligible = invalid
+		var result := _compare("eligibility/invalid_flag_" + str(typeof(invalid)) + "_" + str(invalid), section, [malformed], PLANE)
+		_check(not result.get("valid", false) and result.get("reason") == "invalid_grip_attraction_eligibility",
+			"only an explicit boolean may restrict guide eligibility " + str(invalid))
 
 
 func _signed_zero_bounds() -> void:

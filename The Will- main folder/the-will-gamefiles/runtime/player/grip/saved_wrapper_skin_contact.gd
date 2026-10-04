@@ -139,6 +139,50 @@ func prepare(section: Dictionary) -> Dictionary:
 	return prepared
 
 
+## Single point attraction on an already prepared, unchanged saved target.
+## Reuse existing nearest-feature/tie normalization; this never certifies a
+## section cap, whole-edge depth, material contact or completed grip.
+func evaluate_point(segment: Dictionary, t: float, target: Dictionary) -> Dictionary:
+	if not target.get("valid", false) or target.get("revision") != _depth.REVISION or not target.get("complete", false):
+		return _fail("invalid_prepared_attraction_target")
+	if not is_finite(t) or t < 0.0 or t > 1.0: return _fail("invalid_attraction_point_parameter")
+	var source: Variant = segment.get("source_id")
+	if target.get("origin_id", &"") == &"" or segment.get("origin_id") != target.origin_id or not (source is String or source is StringName) or String(source).is_empty():
+		return _fail("missing_or_mismatched_skin_origin_or_source")
+	if not segment.get("a") is Vector2 or not segment.get("b") is Vector2: return _fail("missing_skin_endpoints")
+	var a: Vector2 = segment.a
+	var b: Vector2 = segment.b
+	if not a.is_finite() or not b.is_finite() or a == b: return _fail("nonfinite_or_zero_length_skin_segment")
+	var point := Vector2(float(a.x) + t * (float(b.x) - float(a.x)), float(a.y) + t * (float(b.y) - float(a.y)))
+	var scale_m := maxf(float(target.coordinate_scale_m), maxf(absf(point.x), absf(point.y)))
+	var epsilon := maxf(float(_depth_config.get("numeric_epsilon_m", 0.000000001)), maxf(1.0e-12, scale_m * 1.0e-12))
+	var intersections: Array[Dictionary] = []
+	intersections.resize(target.edges.size()); intersections.fill({})
+	var nearest: Dictionary = _depth._nearest_contact(point, point, target, epsilon, intersections, true)
+	if not is_finite(float(nearest.get("distance_m", INF))): return _fail("attraction_point_nearest_feature_unavailable")
+	var depth: float = nearest.distance_m if Geometry2D.is_point_in_polygon(point, target.polygon) else 0.0
+	var lower := {}
+	if depth > 0.0:
+		lower = {"skin_point_m": point, "nearest_target_point_m": nearest.target_point_m,
+			"target_edge_index": nearest.target_edge_index}
+	var measured := {"contact": nearest, "numeric_epsilon_m": epsilon, "max_sampled_inward_depth_m": depth,
+		"depth_lower_bound_witness": lower, "max_inward_depth_lower_m": depth,
+		"max_inward_depth_upper_m": depth, "cap_status": &"not_assessed_attraction_only"}
+	var witness := _witness(segment, measured, target)
+	if not witness.get("valid", false): return witness
+	# Keep the requested parameter, not a round-trip projection of float Vector2.
+	witness.skin_segment_t = t
+	witness["witness_kind"] = &"caller_selected_point_on_skin_edge"
+	witness["attraction_only"] = true
+	witness["point_parameter_frozen_for_response"] = true
+	witness["depth_is_bounded_not_exact"] = false
+	witness["depth_scope"] = &"one_point_only_not_whole_edge_or_skin"
+	witness["whole_skin_clearance_verified"] = false
+	witness["actual_3d_grip_verified"] = false
+	witness["grip_accepted"] = false
+	return witness
+
+
 func evaluate(prepared: Dictionary, segments: Array, origin_id: StringName) -> Dictionary:
 	if _native_batch != null:
 		var span := Chronology.begin("saved_contact.native_batch", {"plane_origin_id":origin_id,
@@ -160,6 +204,8 @@ func evaluate(prepared: Dictionary, segments: Array, origin_id: StringName) -> D
 	var query_segments: Array = []
 	for source: Variant in segments:
 		if not source is Dictionary: return _fail("invalid_skin_segment")
+		if source.has("grip_attraction_eligible") and not source.grip_attraction_eligible is bool:
+			return _fail("invalid_grip_attraction_eligibility")
 		var cap: float = float(source.get("max_inward_depth_m",-1.0))
 		if not is_finite(cap) or cap<0.0: return _fail("invalid_skin_segment_or_cap")
 		var query: Dictionary = source.duplicate(false)
@@ -171,10 +217,15 @@ func evaluate(prepared: Dictionary, segments: Array, origin_id: StringName) -> D
 	var guide_started := Time.get_ticks_usec()
 	var groups := {&"digit_target":[], &"palm_target":[]}
 	var indices := {&"digit_target":[], &"palm_target":[]}
+	var guide_segment_count := 0
 	for index: int in segments.size():
+		# Anatomical attraction eligibility never removes material collision work.
+		# Keep one output record per original edge so response indices stay stable.
+		if not bool(segments[index].get("grip_attraction_eligible", true)): continue
 		var kind: StringName = &"palm_target" if segments[index].get("palm_owned", false) else &"digit_target"
 		groups[kind].append(query_segments[index])
 		indices[kind].append(index)
+		guide_segment_count += 1
 	var guides: Array = []
 	guides.resize(segments.size())
 	var guide_evaluations := 0
@@ -193,28 +244,31 @@ func evaluate(prepared: Dictionary, segments: Array, origin_id: StringName) -> D
 	var material_constraint_safe := true
 	var guide_constraint_safe := true
 	for index: int in segments.size():
-		var guide: Dictionary = guides[index]
+		var guide_evaluated: bool = bool(segments[index].get("grip_attraction_eligible", true))
+		var guide: Dictionary = guides[index] if guide_evaluated else {}
 		var actual: Dictionary = material.segments[index]
-		var witness := _witness(segments[index], guide.measurement, prepared[guide.kind])
+		var witness: Dictionary = _witness(segments[index], guide.measurement, prepared[guide.kind]) if guide_evaluated else {}
 		var material_witness := _witness(segments[index], actual, prepared.handle)
-		if not witness.get("valid", false) or not material_witness.get("valid", false):
+		if (guide_evaluated and not witness.get("valid", false)) or not material_witness.get("valid", false):
 			return _fail("saved_contact_witness_invalid", {"index":index,"guide":witness,"material":material_witness})
 		unresolved += int(actual.cap_status == &"unresolved")
 		exceeding += int(actual.cap_status == &"exceeds")
 		var material_exterior := _strictly_exterior(actual)
-		var guide_exterior := _strictly_exterior(guide.measurement)
+		var guide_exterior: bool = _strictly_exterior(guide.measurement) if guide_evaluated else false
 		# Unassigned edges may retain a known contributing bone's numeric cap,
 		# but that is not an allowance for the unassigned blend. They require the
 		# separate exterior proof, preserving the live controller's zero policy.
 		var assigned: bool = not bool(segments[index].get("allowance_unassigned",true))
 		var material_edge_safe: bool = (assigned and actual.cap_status == &"within") or material_exterior
-		var guide_edge_safe: bool = (assigned and guide.measurement.cap_status == &"within") or guide_exterior
+		var guide_edge_safe: bool = not guide_evaluated or (assigned and guide.measurement.cap_status == &"within") or guide_exterior
 		material_constraint_safe = material_constraint_safe and material_edge_safe
 		guide_constraint_safe = guide_constraint_safe and guide_edge_safe
-		records.append({"segment":segments[index].duplicate(true),"witness":witness,"guide_kind":guide.kind,
-			"guide_gap_m":witness.signed_clearance_m,"guide_cap_status":guide.measurement.cap_status,
-			"guide_depth_lower_m":guide.measurement.max_inward_depth_lower_m,
-			"guide_depth_upper_m":guide.measurement.max_inward_depth_upper_m,
+		records.append({"segment":segments[index].duplicate(true),"witness":witness,"guide_evaluated":guide_evaluated,
+			"guide_kind":guide.kind if guide_evaluated else &"not_evaluated",
+			"guide_gap_m":witness.signed_clearance_m if guide_evaluated else INF,
+			"guide_cap_status":guide.measurement.cap_status if guide_evaluated else &"not_evaluated",
+			"guide_depth_lower_m":guide.measurement.max_inward_depth_lower_m if guide_evaluated else null,
+			"guide_depth_upper_m":guide.measurement.max_inward_depth_upper_m if guide_evaluated else null,
 			"material_witness":material_witness,"material_gap_m":material_witness.signed_clearance_m,
 			"material_cap_status":actual.cap_status,"max_inward_depth_m":actual.max_inward_depth_m,
 			"source_max_inward_depth_m":segments[index].max_inward_depth_m,
@@ -226,6 +280,8 @@ func evaluate(prepared: Dictionary, segments: Array, origin_id: StringName) -> D
 		"material_safe":material.all_segments_within_cap,"any_exceeds":exceeding>0,"any_unresolved":unresolved>0,
 		"material_constraint_safe":material_constraint_safe,"guide_constraint_safe":guide_constraint_safe,
 		"exceeding_segments":exceeding,"unresolved_segments":unresolved,
+		"material_segment_count":segments.size(),"guide_evaluated_segment_count":guide_segment_count,
+		"guide_skipped_segment_count":segments.size()-guide_segment_count,
 		"material_depth_evaluations":material.depth_evaluations,"guide_depth_evaluations":guide_evaluations,
 		"material_measurement_ms":material_ms,"guide_measurement_ms":guide_ms,
 		"witness_normalization_ms":float(Time.get_ticks_usec()-witnesses_started)/1000.0,

@@ -17,6 +17,8 @@ var _contact := Contact.new()
 var _native_slice: RefCounted
 var _native_topology: RefCounted
 var _native_requested := false
+var _failure_capture_directory := OS.get_environment("THE_WILL_GRIP_SLICE_FAILURE_DIR")
+var _failure_capture_count := 0
 var _backend_counts := {"native_slice_calls":0,"native_topology_calls":0,
 	"reference_slice_calls":0,"reference_topology_calls":0,"fallback_calls":0}
 
@@ -188,7 +190,10 @@ func slice(prepared: Dictionary, current_plane_to_world: Transform3D) -> Diction
 	if not sliced.get("valid", false): return _fail("indexed_slice_failed", sliced)
 	var counts: Dictionary = sliced.counts
 	if sliced.contours.size() != 1 or counts.segments_clipped != 0 or counts.segments_outside_disk != 0 or counts.triangles_reach_pruned != 0 or counts.open_or_branched_vertices != 0 or counts.coplanar_triangles != 0:
-		return _fail("requires_one_complete_noncoplanar_section", counts)
+		var detail := counts.duplicate()
+		var capture_path := _capture_failed_slice(prepared, indexed_surface, indices, current_plane_to_world, reach, sliced)
+		if not capture_path.is_empty(): detail["diagnostic_capture_path"] = capture_path
+		return _fail("requires_one_complete_noncoplanar_section", detail)
 	var polygon: PackedVector2Array = sliced.contours[0].duplicate()
 	if polygon[0] == polygon[-1]: polygon.remove_at(polygon.size() - 1)
 	# The mature contour extractor omits cycles with invalid area/centroid. One
@@ -235,6 +240,33 @@ func slice(prepared: Dictionary, current_plane_to_world: Transform3D) -> Diction
 		"counts": {"source_triangles": original.size() / 3, "indexed_triangles": indices.size(),
 			"index_bins_visited": last - first + 1, "slice": counts},
 		"slice_preparation_ms": float(Time.get_ticks_usec() - started) / 1000.0}
+
+
+## Opt-in failure evidence only. No geometry is changed or accepted here. Binary
+## Variant storage preserves float/vector values and ordered source triangles.
+## Each section owner writes at most eight packets into workspace test artifacts.
+func _capture_failed_slice(prepared: Dictionary, surface: Dictionary, indices: Array,
+		plane: Transform3D, reach: float, sliced: Dictionary) -> String:
+	if _failure_capture_directory.is_empty() or _failure_capture_count >= 8: return ""
+	var directory := _failure_capture_directory.replace("\\", "/").simplify_path().trim_suffix("/")
+	if not directory.to_lower().begins_with("c:/workspace/test_artifacts/"): return ""
+	_failure_capture_count += 1
+	if DirAccess.make_dir_recursive_absolute(directory) != OK: return ""
+	var path := directory.path_join("slice_failure_%s_%s_%s.bin" % [OS.get_process_id(),get_instance_id(),_failure_capture_count])
+	if FileAccess.file_exists(path): return ""
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null: return ""
+	file.store_var({"schema":"grip_slice_failure_v1", "surface":surface,
+		"full_surface":{"valid":true,"triangles_world":prepared.triangles_world,
+			"surface_source_origin_id":prepared.source_id,"resolved_world_origin_id":prepared.resolved_world_origin_id},
+		"selected_triangle_indices":indices, "plane":plane, "plane_to_world_origin_id":prepared.resolved_world_origin_id,
+		"origin":prepared.origin_id, "reach":reach, "padding":0.0,
+		"sliced":sliced, "backend_statistics":backend_statistics()}, false)
+	var error := file.get_error()
+	file.close()
+	if error != OK: return ""
+	Chronology.event("section.failure_capture", {"path":path,"plane_id":prepared.origin_id,"counts":sliced.counts})
+	return path
 
 
 func _bin(value: float, minimum: float, maximum: float, count: int) -> int:

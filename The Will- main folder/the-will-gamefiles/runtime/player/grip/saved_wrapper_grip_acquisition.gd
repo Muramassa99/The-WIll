@@ -89,7 +89,7 @@ func solve() -> Dictionary:
 	var value: Variant=active.wait_to_finish() if active.is_started() else null
 	_worker=null; _running=false; _configured=false
 	var result: Dictionary=value if value is Dictionary else {"valid":false,"reason":"invalid_worker_result"}
-	if _is_cancelled(): result={"valid":false,"cancelled":true,"reason":"acquisition_cancelled"}
+	if _is_cancelled(): result.merge({"valid":false,"cancelled":true,"reason":"acquisition_cancelled"},true)
 	_progress_update({"stage":"cancelled" if _is_cancelled() else "complete","running":false,"valid":result.get("valid",false)})
 	Chronology.finish(span,{"valid":result.get("valid",false),"reason":result.get("reason",""),"cancelled":result.get("cancelled",false),"total_ms":result.get("total_ms",0.0)})
 	return result
@@ -104,7 +104,11 @@ func _work() -> Dictionary:
 	var solver := Solver.new()
 	solver.configure_lifecycle(Callable(self,"_is_cancelled"),Callable(self,"_progress_update"))
 	# No host: run's numerical path does not await or read a scene on this worker.
+	var solver_started := Time.get_ticks_usec()
 	var result: Dictionary=solver.run(prepared.context,prepared.saved,null)
+	var solver_elapsed_ms := float(Time.get_ticks_usec()-solver_started)/1000.0
+	result.merge(solver.diagnostic_snapshot(),true)
+	if not result.has("total_ms"): result["total_ms"]=solver_elapsed_ms
 	result["source_weapon_to_world"]=_capture.object.weapon_to_world
 	result["source_weapon_to_world_origin_id"]=ROOT
 	result["vectors_origin_id"]=ROOT

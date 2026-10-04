@@ -32,6 +32,7 @@ var _contact_backend := "cpp" if SavedContact.DEFAULT_USE_NATIVE else "gdscript"
 var _contact_batch := SavedContact.DEFAULT_USE_NATIVE_BATCH
 var _section_backend := "cpp" if Sections.DEFAULT_USE_NATIVE else "gdscript"
 var _depth_tolerance_m: float = SavedContact.DEPTH_CONFIG.depth_bound_tolerance_m
+var _preference_strength_override := -1.0
 
 func _init() -> void:
 	call_deferred("_run")
@@ -80,6 +81,12 @@ func _run() -> void:
 	_finish()
 
 func _configure_evaluation_environment() -> bool:
+	# Test override only; this runner never changes the game's configured rule.
+	if OS.has_environment("THE_WILL_GRIP_PREFERENCE_STRENGTH"):
+		var requested := OS.get_environment("THE_WILL_GRIP_PREFERENCE_STRENGTH")
+		if not _check(requested.is_valid_float(), "numeric preference strength override"): return false
+		_preference_strength_override = requested.to_float()
+		if not _check(is_finite(_preference_strength_override) and _preference_strength_override >= 0.0 and _preference_strength_override <= 1.0,"bounded preference strength override"): return false
 	if OS.has_environment("THE_WILL_GRIP_CONTACT_BATCH"):
 		var requested := OS.get_environment("THE_WILL_GRIP_CONTACT_BATCH")
 		if not _check(requested in ["0", "1"], "contact batch selection must be 0 or 1"): return false
@@ -170,6 +177,8 @@ func _case(path: String, wip: Resource, packet: Dictionary) -> void:
 	if not _check(surfaces.get("valid", false), "saved sections prepared: " + str(surfaces.get("reason", ""))):
 		return
 	var follow := Follow.new()
+	if _preference_strength_override >= 0.0:
+		if not _check(follow.configure_contact_preference(_preference_strength_override),"test-only contact preference configured"): return
 	if not _check(follow.configure_sections(_section_backend == "cpp"), "requested section backend configured before acquisition"):
 		return
 	if not _check(follow.configure_evaluation(_contact_backend == "cpp", _depth_tolerance_m),

@@ -360,6 +360,9 @@ func _nearest(a: Vector2, b: Vector2, c: Vector2, d: Vector2, hit: Dictionary) -
 
 
 func _project(point: Vector2, a: Vector2, b: Vector2) -> Vector2:
+	# Attraction may query a single skin point through the same nearest-feature
+	# owner. Validated physical segment queries still reject zero-length edges.
+	if a == b: return a
 	var delta := b - a
 	return a + delta * clampf((point - a).dot(delta) / delta.length_squared(), 0.0, 1.0)
 

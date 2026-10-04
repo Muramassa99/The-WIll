@@ -5,6 +5,8 @@ const HandSkin = preload("res://runtime/player/grip/prepared_hand_skin_query.gd"
 const DepthBudget = preload("res://runtime/player/grip/planar_skin_overlap_budget.gd")
 const DigitRules = preload("res://runtime/player/player_digit_hinge_rules.gd")
 const Spatial = preload("res://runtime/player/player_finger_surface_grip_solver.gd")
+const ContactPreference = preload("res://runtime/player/grip/skin_section_contact_preference.gd")
+const GrippingSurface = preload("res://runtime/player/grip/prepared_digit_gripping_surface.gd")
 const REVISION: StringName = &"prepared_grip_slice_contact_v1"
 const ROOT: StringName = &"RL_BoneRoot"
 const FRAME_EPSILON: float = 0.000005
@@ -35,15 +37,21 @@ func prepare(adapter: Dictionary, digit_id: StringName) -> Dictionary:
 	var names: Array = skin.bind_bone_names
 	var selected_names: Array = digit.bone_names
 	var weights: PackedVector3Array = PackedVector3Array()
+	var preference_hand_weights := PackedFloat64Array()
 	# HandSkin keeps every positive source influence in its original slot order.
 	# These are three scalar weights, not spatial vectors, and are not normalized.
 	for vertex: int in range(skin.vertex_count):
 		var selected: Vector3 = Vector3.ZERO
+		var hand_weight := 0.0
 		for influence: int in range(skin.vertex_offsets[vertex], skin.vertex_offsets[vertex + 1]):
-			var joint: int = selected_names.find(names[skin.influence_binds[influence]])
+			var bone_name: StringName = names[skin.influence_binds[influence]]
+			var joint: int = selected_names.find(bone_name)
 			if joint >= 0:
 				selected[joint] += float(skin.influence_weights[influence])
+			if bone_name == adapter.hand_bone_name:
+				hand_weight += float(skin.influence_weights[influence])
 		weights.append(selected)
+		preference_hand_weights.append(hand_weight)
 	var section_caps: Dictionary = {}
 	var section_targets: Array = []
 	var selected_caps: Array = []
@@ -106,12 +114,17 @@ func prepare(adapter: Dictionary, digit_id: StringName) -> Dictionary:
 		reach += length_m
 	if not is_finite(reach) or reach <= 0.0 or triangles.is_empty():
 		return _fail("missing_hand_source_triangles_or_digit_reach")
+	var gripping_surface := GrippingSurface.new().prepare(adapter, digit_id)
+	if not gripping_surface.get("valid", false): return gripping_surface
 	return {"valid": true, "revision": REVISION, "digit_id": digit_id, "digit": digit_id, "slot": adapter.slot,
 		"anatomy_signature": adapter.anatomy_signature, "source_pose_id": adapter.base_packet.pose_id,
 		"resolve_phase": adapter.base_packet.resolve_phase, "machine_to_world": adapter.base_packet.machine_to_world,
 		"bone_ids": selected_names.duplicate(), "vertex_count": skin.vertex_count,
 		"triangle_indices": skin.triangle_indices.duplicate(), "triangle_surface_ids": skin.triangle_surface_ids.duplicate(),
 		"triangle_local_ids": skin.triangle_local_ids.duplicate(), "selected_weights": weights,
+		"preference_hand_weights": preference_hand_weights,
+		"preference_vertex_aliases": skin.get("preference_vertex_aliases", PackedInt32Array()),
+		"gripping_surface": gripping_surface,
 		"triangle_ids": triangles, "metadata": metadata, "targets_m": section_targets, "caps_m": selected_caps,
 		"foreign_collision_sources": foreign_collision_sources, "collision_section_caps_m": section_caps,
 		"reach_m": reach, "scope": "all_source_triangles_with_positive_Hand_or_descendant_influence",
@@ -228,6 +241,9 @@ func evaluate(prepared: Dictionary, candidate: Dictionary, plane_to_world: Trans
 		for index: int in owned[section]:
 			var record: Dictionary = contact_measured.segments[index]
 			section_cap_ok = section_cap_ok and record.cap_status == "within" and not segments[index].allowance_unassigned
+			if has_contact_target:
+				material_section_cap_ok = material_section_cap_ok and measured.segments[index].cap_status == "within" and not segments[index].allowance_unassigned
+			if not segments[index].get("grip_attraction_eligible", true): continue
 			# Keep whole-loop depth classification, but only reachable witnesses
 			# attract the selected digit. No contour crop or infinite-range target.
 			var witness: Dictionary = record.depth_lower_bound_witness
@@ -389,11 +405,33 @@ func slice_candidate(prepared: Dictionary, candidate: Dictionary, plane_to_world
 			_assign_foreign_collision_owner(edge, prepared, posed.vertices_world, plane_to_world)
 		unassigned_count += int(edge.allowance_unassigned)
 		segments.append(edge)
+	# Preference coordinates are separate from section ownership and safety.
+	# Percentage coordinates retain their contour definition. Anatomical surface
+	# eligibility below limits both preference and ordinary attraction to the pad.
+	var preference := {"enabled": false, "reason": "digit_outside_contact_preference_scope"}
+	if digit_id in [&"index", &"middle", &"ring", &"pinky"]:
+		var to_plane := plane_to_world.affine_inverse()
+		var terminal_start_in_plane: Vector3 = to_plane * state.joint_origins_world[2]
+		var terminal_tip_in_plane: Vector3 = to_plane * state.tip_world
+		preference = ContactPreference.new().annotate(segments, prepared.get("preference_hand_weights", PackedFloat64Array()),
+			Vector2(terminal_start_in_plane.x, terminal_start_in_plane.y),
+			Vector2(terminal_tip_in_plane.x, terminal_tip_in_plane.y), plane_origin_id,
+			prepared.get("preference_vertex_aliases", PackedInt32Array()))
+	var gripping := GrippingSurface.new().annotate(prepared.gripping_surface, segments, plane_origin_id)
+	if not gripping.get("valid", false): return gripping
+	if preference.has("mapped_segments"):
+		preference["all_contour_mapped_segments"] = preference.mapped_segments
+		preference.mapped_segments = 0
+		for edge: Dictionary in segments:
+			if edge.has("location_bias"): preference.mapped_segments += 1
+		preference.neutral_segments = preference.eligible_segments - preference.mapped_segments
 	return {"valid": true, "revision": &"prepared_grip_candidate_slice_v1", "digit_id": digit_id,
 		"slot": prepared.slot, "pose_id": packet.pose_id, "pose_packet": packet, "digit_state": state,
 		"plane_origin_id": plane_origin_id, "segments": segments, "owned": owned,
 		"unassigned_segment_count": unassigned_count, "reach_center_m": reach_center, "reach_m": prepared.reach_m,
 		"plane_origin_validation_ms": validation_ms, "skin_slice_ms": slice_ms,
+		"section_contact_preference": preference,
+		"gripping_surface": gripping,
 		"slice_candidate_ms": float(Time.get_ticks_usec() - started) / 1000.0,
 		"anatomy_recomputed": false, "production_pose_written": false, "actual_3d_grip_verified": false, "grip_accepted": false}
 

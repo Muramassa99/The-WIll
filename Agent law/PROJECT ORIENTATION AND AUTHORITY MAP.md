@@ -121,12 +121,6 @@ The user is deliberately front-loading context so it only needs to be explained 
 
 These rules are collaboration aids, not a demand for paralysis. Use judgment freely inside the requested scope; make assumptions explicit when they matter; and bring material design choices back to the user before they harden into architecture.
 
-### Standing External-Application Boundary - 2026-10-03
-
-The user reaffirmed `C:\WORKSPACE` as the working root and requested durable retention of the Agent law instructions. The workspace [AGENTS.md](<../AGENTS.md>) is the session entry point to these laws and the SPS protocol.
-
-Full system access does not authorize applications outside `C:\WORKSPACE`. Before launching or using an application whose executable is outside that folder, advise the user of the application, its location, and the reason it is needed. Wait for the user's response and respect its permission or refusal. This includes helper utilities such as Git, search tools, interpreters, and build tools. Availability on PATH is not permission. Existing authorization remains valid within its approved scope.
-
 ### Pace And Shape Of Work
 
 - Prefer precision, maintainability, and correct ownership over speed.

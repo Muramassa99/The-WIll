@@ -15,6 +15,7 @@ const ActualView = preload("res://runtime/player/grip/observed_hand_pose_view.gd
 const Capture = preload("res://runtime/player/grip/capture_grip_placement_stage.gd")
 const Rules = preload("res://runtime/player/player_digit_hinge_rules.gd")
 const Chronology = preload("res://runtime/player/grip/grip_chronology.gd")
+const PreviewAcquisition = preload("res://runtime/player/grip/preview_grip_acquisition.gd")
 const OWNER_NAME := "PreparedGripAcquisition"
 const ROOT := &"RL_BoneRoot"
 const DIGITS := [&"middle", &"thumb", &"index", &"ring", &"pinky"]
@@ -60,6 +61,7 @@ func _run() -> void:
 	_report = {"scope":"natural_skill_crafter_ui_activation_and_actual_skeleton_observation",
 		"historical_pose_injected":false,"solver_suppressed":false,"source_save_written":false,
 		"actual_3d_grip_verified":false,"engine":Engine.get_version_info(),"display_server":DisplayServer.get_name()}
+	_verify_guidance_contract_guards()
 	var expected := _normalized(OS.get_environment("THE_WILL_DIAGNOSTIC_USER_ROOT"))
 	if not _check(expected.begins_with("c:/workspace/") and expected == _normalized(OS.get_user_data_dir()), "isolated workspace user directory"):
 		await _finish(); return
@@ -157,6 +159,7 @@ func _run() -> void:
 	await _closeup_screenshots()
 	var state: Dictionary = _owner.status().get(_slot, {})
 	_verify_native_route(state)
+	var guidance := _verify_guidance(state)
 	var contacts: Array = state.get("actual_material_contacts", [])
 	var unique: Array = []
 	for id: Variant in contacts:
@@ -166,24 +169,76 @@ func _run() -> void:
 	var current: bool = state.get("actual_assessment_current", false)
 	var articulation: bool = state.get("actual_articulation_valid", false)
 	var completion: Dictionary = _full_hand_completion(state, unique)
-	var planar_condition: bool = applied and safe and current and articulation and unique.size() >= 3
+	var planar_condition: bool = applied and safe and current and articulation and unique.size() >= 3 and guidance.valid
 	_report["full_hand_completion"] = completion
 	_report["acceptance"] = {"naturally_applied":applied,"actual_material_query_valid":state.get("actual_material_query_valid",false),
 		"actual_material_safe":safe,"actual_assessment_current":current,"actual_articulation_valid":articulation,
 		"distinct_actual_contact_sections":unique,"distinct_actual_contact_count":unique.size(),"required_contact_count":3,
+		"guide_following_verified":guidance.valid,"per_digit_guidance":state.get("per_digit_guidance", {}),
+		"working_guides":state.get("working_guides", {}),"continuous_tangency_verified":false,
 		"planar_grip_condition_met":planar_condition,
 		"full_hand_followers_complete":completion.complete,
 		"intended_full_hand_solve_complete":planar_condition and completion.complete,
 		"completion_state":"complete_pending_visual_review" if planar_condition and completion.complete else "unfinished",
 		"whole_hand_3d_contact_certified":false,"rendered_image_requires_visual_review":true}
 	_check(applied, "natural acquisition applies a pose")
-	_check(safe and current and articulation and unique.size() >= 3, "actual current pose satisfies safety, articulation and three-section contact condition")
+	_check(safe and current and articulation and unique.size() >= 3 and guidance.valid, "actual current pose satisfies guide following, safety, articulation and three-section contact condition")
 	_check(completion.complete, "intended full-hand solve has no unresolved follower response or missing realized follower contact")
-	if applied and safe and current and OS.get_environment("THE_WILL_GRIP_LIVE_SKIP_MOTION") != "1":
+	if applied and safe and current and guidance.valid and OS.get_environment("THE_WILL_GRIP_LIVE_SKIP_MOTION") != "1":
 		await _exercise_motion()
 	else:
-		_report["motion_checks_skipped"] = "requires naturally applied, current material-safe pose; or explicitly disabled"
+		_report["motion_checks_skipped"] = "requires naturally applied, guided, current material-safe pose; or explicitly disabled"
 	await _finish()
+
+## Fail-closed contract checks exercise the same gate used before pose writes.
+## A stopped-but-attached guide remains valid; exact wrapper completion is not
+## substituted for the user's permitted physical-limit stop and reseat rule.
+func _verify_guidance_contract_guards() -> void:
+	var baseline := {"guide_following_verified":true,"per_digit_guidance":{},"working_guides":{}}
+	for digit: StringName in DIGITS:
+		baseline.per_digit_guidance[digit] = {"attached":true,"progress":0.5,"initial_radius_m":0.117,
+			"stop_reason":"physical_limit_after_guided_contact"}
+		baseline.working_guides[digit] = {"radius_m":0.05,"progress":0.5}
+	_check(PreviewAcquisition.validate_guidance_result(baseline).valid, "attached guidance may stop at a physical limit before exact wrapper completion")
+	_check(not PreviewAcquisition.validate_guidance_result({"valid":true,"material_safe":true}).valid, "material safety alone cannot authorize pose application")
+	var altered: Dictionary = baseline.duplicate(true)
+	altered.guide_following_verified = false
+	_check(not PreviewAcquisition.validate_guidance_result(altered).valid, "unverified guide progression cannot authorize pose application")
+	for digit: StringName in DIGITS:
+		altered = baseline.duplicate(true)
+		altered.per_digit_guidance.erase(digit)
+		_check(not PreviewAcquisition.validate_guidance_result(altered).valid, str(digit) + " missing guidance cannot authorize pose application")
+		altered = baseline.duplicate(true)
+		altered.working_guides.erase(digit)
+		_check(not PreviewAcquisition.validate_guidance_result(altered).valid, str(digit) + " missing working guide cannot authorize pose application")
+		altered = baseline.duplicate(true)
+		altered.per_digit_guidance[digit].attached = false
+		_check(not PreviewAcquisition.validate_guidance_result(altered).valid, str(digit) + " detached contact cannot authorize pose application")
+	altered = baseline.duplicate(true)
+	altered.working_guides[&"middle"].progress = 0.75
+	_check(not PreviewAcquisition.validate_guidance_result(altered).valid, "mismatched guidance progress cannot authorize pose application")
+	altered = baseline.duplicate(true)
+	altered.per_digit_guidance[&"middle"].progress = NAN
+	_check(not PreviewAcquisition.validate_guidance_result(altered).valid, "nonfinite guidance cannot authorize pose application")
+
+func _verify_guidance(state: Dictionary) -> Dictionary:
+	var gate := PreviewAcquisition.validate_guidance_result(state)
+	_check(gate.valid, "all five digits retain verified guide following before natural pose application")
+	var entries: Dictionary = state.get("per_digit_guidance", {})
+	var guides: Dictionary = state.get("working_guides", {})
+	var per_digit := {}
+	for digit: StringName in DIGITS:
+		var entry: Dictionary = entries.get(digit, {})
+		var guide: Dictionary = guides.get(digit, {})
+		_check(not entry.is_empty() and not guide.is_empty(), str(digit) + " reports initial attachment and working guide")
+		_check(entry.get("attached") == true, str(digit) + " retains guide contact at its final accepted state")
+		per_digit[digit] = {"attached":entry.get("attached", false),"progress":entry.get("progress"),
+			"initial_radius_m":entry.get("initial_radius_m"),"stop_reason":entry.get("stop_reason", ""),
+			"working_radius_m":guide.get("radius_m"),"working_progress":guide.get("progress")}
+	_report["guidance"] = {"contract_valid":gate.valid,"rejection_reason":gate.get("reason", ""),
+		"rejection_details":gate.get("details", {}),"guide_following_verified":state.get("guide_following_verified", false),
+		"per_digit":per_digit,"continuous_tangency_verified":false,"whole_hand_3d_contact_certified":false}
+	return gate
 
 ## Three contacts can all belong to one digit plus the palm. That satisfies the
 ## planar minimum but cannot establish that the remaining intended digits solved.

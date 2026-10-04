@@ -24,18 +24,6 @@ under `GDD-and Text Resources`; use the four rule files in `Agent law` as the
 current agent-law sources. Discover the newest SPS and current repository
 metadata rather than treating a historical branch or resume pointer as current.
 
-## External applications
-
-Full system access is not permission to use applications outside `C:\WORKSPACE`.
-Before launching or using an application whose executable is outside that
-folder, advise the user of the application, its location, and why it is needed.
-Wait for the user's response and respect the resulting permission or refusal.
-This also applies to helper utilities such as Git, search tools, interpreters,
-and build tools. Availability on PATH is not authorization.
-
-Existing authorization applies only within its approved scope; do not ask again
-for the same already-authorized use. Prefer suitable workspace applications.
-
 ## Work and verification
 
 - Do proper work: inspect the authoritative owner and current code, make
@@ -74,8 +62,8 @@ It does not establish test success or authorize Git operations.
 
 The Git root is `C:\WORKSPACE`; the active Godot project is
 `The Will- main folder/the-will-gamefiles`. Inspect current Git status before
-editing project code, subject to the external-application rule. Preserve
-unrelated changes. Do not revert, clean, broadly reformat, stage, commit, push,
+editing project code. Preserve unrelated changes. Do not revert, clean,
+broadly reformat, stage, commit, push,
 or otherwise change branches, repository history, or the index unless the user
 requests that action. A Git
 savepoint is separate from an SPS and from ordinary implementation permission.

@@ -15,6 +15,54 @@ The kernel explicitly disables fast-math and floating-point contraction/FMA.
 Changing geometric accuracy to 0.05 mm is a solver configuration decision,
 not permission for unsafe compiler arithmetic or a change in overlap caps.
 
+## October 4 gripping-side guide-query restriction
+
+`GripSavedContactKernel` and its GDScript reference now skip wrapper queries
+when a skin edge explicitly has `grip_attraction_eligible=false`. Every edge
+still receives its physical handle overlap/contact measurement. Record indices
+are preserved. Skipped guide records have `guide_evaluated=false`, empty
+witnesses, infinite gap and null depth fields, not fabricated exterior evidence.
+Missing flags preserve existing behavior; malformed flags are rejected.
+The caller owns anatomical classification and contact acceptance.
+
+Material/evaluated-guide/skipped-guide counts are exposed. Fresh
+`native_saved_contact_2026-10-04T08-27-15.json` passes 763 parity and physical
+preservation checks. Current rebuilt DLL SHA256:
+`d819b1acdef73297ce4491ee5494132f0b816f879c26bc5a6b0004ef2ea7332e`.
+See the current grip task note for actual saved-weapon timing, remaining
+Middle contact gap and the limits of the passing live verifier.
+
+## October 4 slice-welding correction (earlier build)
+
+The shared GDScript resolver and C++ slicer now select the earliest compatible
+point representative across all neighbouring buckets. The existing 0.005 mm
+merge distance is unchanged. Previously, a newer representative in an earlier
+spatial bucket could steal a repeated intersection and remove a connector.
+
+The rebuilt DLL SHA256 is
+`cd7645f9226510b9f0ce883a6b8aad2d91460306c8941a450ea882364eae4899`.
+The user approved the existing link rule's external Windows Command Prompt
+helper. Workspace CMake/Ninja/Clang and existing bindings were used; no install
+or binding regeneration was needed.
+
+Fresh evidence under `C:/WORKSPACE/test_artifacts`:
+
+- `native_section_kernels_2026-10-04T00-07-24.json`: 37 captured-failure replay
+  checks pass. Both original Middle/Pinky inputs now produce closed contours
+  and complete topology, with native/reference and indexed/full-source parity.
+- `native_section_kernels_2026-10-04T00-07-42.json`: 432 regression checks pass.
+- `verify_prepared_weapon_plane_section_2026-10-04T00-08-08.json`: 161 checks pass.
+- `live_saved_wrapper_grip_2026-10-04T00-08-25.json`: rendered current saved
+  `Star_Handle_Testing Copy` gets past slicing, but correctly rejects the final
+  candidate as `no_pose_within_material_overlap_limits`. Solver 17.123 s;
+  complete verifier 39.707 s, including setup, observation and screenshots.
+  This is not a full-grip success or an optimization benchmark. Unassigned
+  skin face `0/4216` blocks Thumb/Index; Thumb/Index/Ring remain unresolved.
+
+See the current task note/SPS for the anatomical ownership decision following
+this repair. No contact allowances, joint ranges, placement freedoms or solve
+budgets changed as part of the weld correction.
+
 ## Workspace build using already compiled bindings
 
 Run from the game project root, after closing the game before replacing its
@@ -260,7 +308,7 @@ weapon sections 2.030 / 2.066 s. These remaining boundaries still matter.
 The two-second goal is not met, and this does not repair or replace live UI
 acquisition/application. The last user-reported failed visual grip remains open.
 
-Current DLL SHA256:
+DLL SHA256 at the October 1 complete-batch checkpoint (superseded above):
 `dfa51ae084f3ddd150dd455ee20d8f9f22655c9ea962e62dd6b9ce3ea297d512`.
 
 ## Validated binding provenance

@@ -12,6 +12,7 @@ const NODE_NAME := "PreparedGripAcquisition"
 const SEAT_AXIAL_GUARD_M := 0.00001
 const FRAME_GUARD_M := 0.000005
 const ACQUISITION_METHOD := &"saved_wrapper_contact_cpp"
+const GUIDED_DIGITS := [&"middle", &"thumb", &"index", &"ring", &"pinky"]
 signal primary_seat_applied(weapon: Node3D, actor: Node3D)
 
 var _actor: Node3D
@@ -270,7 +271,7 @@ func _run_next() -> void:
 	var applied: Dictionary = apply_primary_result(slot, request, result, source_stamp)
 	Chronology.finish(apply_span, {"valid":applied.get("valid",false),"reason":applied.get("reason",""),"status":applied.get("status","")})
 	if not applied.get("valid", false):
-		_finish_failure(slot, request, applied.get("reason", "pose_application_rejected"))
+		_finish_failure(slot, request, applied.get("reason", "pose_application_rejected"), applied.get("details", {}))
 		return
 	var realized: Dictionary = applied
 	_status[slot].merge({"status": "assessing", "serial": request.serial}, true)
@@ -324,6 +325,11 @@ func apply_primary_result(slot: StringName, request: Dictionary, result: Diction
 		return {"valid": false, "reason": "source_pose_changed_during_acquisition"}
 	if not result.get("valid", false) or not result.get("material_safe", false):
 		return {"valid": false, "reason": "no_pose_within_material_overlap_limits"}
+	# Safe material contact cannot replace the guide's position-driving proof.
+	# Reject before any actor/weapon write, including partial follower results.
+	var guidance := validate_guidance_result(result)
+	if not guidance.valid:
+		return guidance
 	var candidate: Dictionary = result.get("candidate", {})
 	var selected: Dictionary = result.get("selected", {})
 	if not result.get("source_weapon_to_world") is Transform3D or result.get("vectors_origin_id") != Origins.ORIGIN_RL_BONE_ROOT or not selected.get("weapon_to_world") is Transform3D or selected.get("weapon_to_world_origin_id") != Origins.ORIGIN_RL_BONE_ROOT or not candidate.get("translation_world") is Vector3 or not candidate.get("hand_to_world") is Transform3D or not candidate.get("pose_packet") is Dictionary:
@@ -370,6 +376,37 @@ func apply_primary_result(slot: StringName, request: Dictionary, result: Diction
 	_weapon.set_meta("weapon_surface_seat_state", report.duplicate(true))
 	primary_seat_applied.emit(_weapon, _actor)
 	return report
+
+
+## Validate the worker's guide-following contract at the only pose-write seam.
+## This is sampled-state evidence, not continuous swept or whole-hand 3D proof.
+static func validate_guidance_result(result: Dictionary) -> Dictionary:
+	if result.get("guide_following_verified") != true:
+		return {"valid": false, "reason": "guide_following_unverified"}
+	if not result.get("per_digit_guidance") is Dictionary or not result.get("working_guides") is Dictionary:
+		return {"valid": false, "reason": "missing_per_digit_guidance"}
+	var guidance: Dictionary = result.per_digit_guidance
+	var guides: Dictionary = result.working_guides
+	for digit: StringName in GUIDED_DIGITS:
+		var state: Variant = guidance.get(digit)
+		var guide: Variant = guides.get(digit)
+		if not state is Dictionary or not guide is Dictionary:
+			return {"valid": false, "reason": "missing_digit_guidance", "details": {"digit": digit}}
+		if state.get("attached") != true:
+			return {"valid": false, "reason": "digit_guide_contact_not_attached", "details": {"digit": digit, "stop_reason": state.get("stop_reason", "")}}
+		for field: String in ["progress", "initial_radius_m"]:
+			var value: Variant = state.get(field)
+			if not (value is float or value is int) or not is_finite(float(value)):
+				return {"valid": false, "reason": "invalid_digit_guidance_value", "details": {"digit": digit, "field": field}}
+		for field: String in ["progress", "radius_m"]:
+			var value: Variant = guide.get(field)
+			if not (value is float or value is int) or not is_finite(float(value)):
+				return {"valid": false, "reason": "invalid_working_guide_value", "details": {"digit": digit, "field": field}}
+		if float(state.progress) < 0.0 or float(state.progress) > 1.0 or float(state.initial_radius_m) <= 0.0 or float(guide.radius_m) <= 0.0 or absf(float(state.progress) - float(guide.progress)) > 1.0e-9:
+			return {"valid": false, "reason": "inconsistent_digit_guidance", "details": {"digit": digit}}
+		if str(state.get("stop_reason", "")).is_empty():
+			return {"valid": false, "reason": "missing_digit_guidance_stop_reason", "details": {"digit": digit}}
+	return {"valid": true}
 
 
 ## Controls request a pose; the existing arm/wrist solver limits that pose.
@@ -482,6 +519,10 @@ func _solver_diagnostics(result: Dictionary) -> Dictionary:
 		"predicted_minimum_hand_contact_count_met": result.get("minimum_hand_contact_count_met", false),
 		"predicted_material_contact_scope": result.get("material_contact_scope", StringName()),
 		"follower_results": result.get("followers", []).duplicate(true),
+		"guide_following_verified": result.get("guide_following_verified", false),
+		"per_digit_guidance": result.get("per_digit_guidance", {}).duplicate(true),
+		"working_guides": result.get("working_guides", {}).duplicate(true),
+		"continuous_tangency_verified": false,
 		"unresolved_digits":unresolved,
 		"final_digit_assessments": result.get("final_digit_assessments", []).duplicate(true),
 		"grip_accepted": false}

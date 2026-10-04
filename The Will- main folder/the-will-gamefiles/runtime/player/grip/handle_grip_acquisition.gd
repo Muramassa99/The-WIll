@@ -965,6 +965,9 @@ static func op_handle_circle_sample(owner: Object, context: Dictionary, paramete
 			region.material_cap_verified=region.material_cap_verified and material_excess<=0.0
 			region.depth_upper_m=maxf(region.depth_upper_m,m.depth_upper)
 			region.guide_depth_upper_m=maxf(region.guide_depth_upper_m,g.depth_upper)
+			# Collision safety above still sees the entire skin. Only the prepared
+			# gripping side (or positively identified palm) can count as contact.
+			if not edge.get("grip_attraction_eligible", true): continue
 			region.nearest_unrestricted_gap_m=minf(region.nearest_unrestricted_gap_m,g.gap)
 			if g.gap<region.nearest_gap_m and (region_owner==3 or (g.witness.target_point_m as Vector2).distance_to(sliced.reach_center_m)<=sliced.reach_m):
 				region.nearest_gap_m=g.gap; region.guide_witness=g.witness; region.guide_witness["source_id"]=edge.source_id

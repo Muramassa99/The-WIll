@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Actual captured grip — five digit slices</title>
+<style>
+:root{color-scheme:light;--ink:#203347;--muted:#506276;--line:#ccd6df;--blue:#1263eb;--purple:#a330da;--teal:#00896d;--palm:#c47912;--other:#a28b78}
+*{box-sizing:border-box}body{margin:0;background:#edf1f5;color:var(--ink);font:15px/1.45 system-ui,sans-serif}main{max-width:1800px;margin:auto;padding:22px}h1{font-size:25px;margin:0 0 8px}h2{font-size:20px;margin:0}p{margin:8px 0}.muted,.note{color:var(--muted)}.note{font-size:13px}.intro,.toolbar,.legend,.card{background:white;border:1px solid var(--line);border-radius:8px}.intro{padding:18px}.toolbar{display:flex;gap:12px 20px;flex-wrap:wrap;align-items:center;padding:12px 16px;margin:14px 0 8px}.toolbar label{white-space:nowrap;cursor:pointer}input{accent-color:#1263eb}select,button{font:inherit;padding:4px 8px;border:1px solid #9baab9;border-radius:4px;background:white;color:var(--ink)}.legend{display:flex;flex-wrap:wrap;gap:8px 18px;padding:12px 16px;margin-bottom:16px;font-size:13px}.key{display:inline-flex;align-items:center;gap:6px}.swatch{display:inline-block;width:22px;height:3px;background:currentColor}.dot{width:9px;height:9px;border-radius:50%;background:#cf343c}.diamond{width:9px;height:9px;background:#f3b52b;border:1px solid #68480e;transform:rotate(45deg)}.dash{height:0;border-top:2px dashed #d34450;background:none}.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,430px),1fr));gap:16px}.card{overflow:hidden;padding:14px;min-width:0}.card-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}.plane{font:11px ui-monospace,monospace;overflow-wrap:anywhere;color:var(--muted);margin:5px 0}.figure{margin:0;border:1px solid #e2e8ed;border-radius:5px;overflow:hidden}canvas{display:block;width:100%;height:auto;aspect-ratio:1.08}.caption{font-size:12px;min-height:38px;padding:7px 9px;color:var(--muted);background:#f8fafc;border-top:1px solid #e2e8ed}.metrics{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}.metrics th,.metrics td{text-align:right;padding:5px 3px;border-bottom:1px solid #e2e8ed;vertical-align:top}.metrics th:first-child,.metrics td:first-child{text-align:left}.metrics th{font-weight:600;color:var(--muted)}.contact-yes{color:#a51e28;font-weight:700}.section-name{font-weight:650;white-space:nowrap}.card-note{font-size:12px;color:var(--muted);margin-top:9px}.badge{font-size:12px;border-radius:4px;padding:3px 6px;background:#edf2f6;white-space:nowrap}.evidence{font-size:13px;margin-top:14px}.evidence dt{font-weight:600}.evidence dd{margin:2px 0 8px;overflow-wrap:anywhere;font:12px ui-monospace,monospace}.status{padding:8px 10px;background:#eef4fa;border-left:3px solid #547692;margin-top:12px}.warning{color:#9c3822}.empty{padding:24px}.axis{color:#506276}summary{cursor:pointer}noscript{display:block;padding:20px;background:#fff4dc}
+@media print{body{background:white}.toolbar{display:none}.panels{display:block}.card{break-inside:avoid;margin-bottom:16px;width:49%;display:inline-block;vertical-align:top}main{padding:0}.intro,.legend{break-inside:avoid}}
+</style>
+<main>
+<section class="intro">
+  <h1>Actual captured grip — five digit slices</h1>
+  <p id="identity"></p>
+  <p class="muted">The hand shown here is the observed live pose. Each digit has its own motion plane. The physical handle, saved end targets and recorded working guide are shown on that same plane. A rejected solve can leave the hand open.</p>
+  <p class="note" id="preference"></p>
+  <div class="status" id="status"></div>
+  <p class="note">A slice contact is a planar observation, not certification of the complete hand in 3D. Identified palm and other skin remain separate. Depth values are checked upper bounds; the allowance is a limit, not a drawn skin thickness. Contact labels use the live assessor's existing 0.002 mm numerical guard. Strict query results remain in the report data.</p>
+  <details class="evidence"><summary>Capture and evidence</summary><dl id="evidence"></dl></details>
+</section>
+<nav class="toolbar" aria-label="Slice display controls">
+  <label><input type="checkbox" data-layer="skin" checked> Skin</label>
+  <label><input type="checkbox" data-layer="handle" checked> Physical handle</label>
+  <label><input type="checkbox" data-layer="wrapper" checked> Saved targets</label>
+  <label><input type="checkbox" data-layer="working" checked> Working guide</label>
+  <label><input type="checkbox" data-layer="joints" checked> Joints and tip</label>
+  <label><input type="checkbox" data-layer="guides" checked> Guide witnesses</label>
+  <label><input type="checkbox" data-layer="blocked"> Rejected connections</label>
+  <label><input type="checkbox" data-layer="contacts" checked> Actual contacts</label>
+  <label><input type="checkbox" data-layer="bias" checked> Preferred locations</label>
+  <label><input type="checkbox" data-layer="grid" checked> Grid</label>
+  <label>Fit <select id="fit"><option value="finger">Finger and target</option><option value="whole">Whole captured slice</option></select></label>
+</nav>
+<div class="legend" aria-label="Color key">
+  <span class="key" style="color:var(--blue)"><i class="swatch"></i>S1 skin</span>
+  <span class="key" style="color:var(--purple)"><i class="swatch"></i>S2 skin</span>
+  <span class="key" style="color:var(--teal)"><i class="swatch"></i>S3 skin</span>
+  <span class="key" style="color:var(--palm)"><i class="swatch"></i>Identified palm</span>
+  <span class="key" style="color:var(--other)"><i class="swatch"></i>Other skin</span>
+  <span class="key" style="color:#697685"><i class="swatch"></i>Physical handle, grey fill</span>
+  <span class="key" style="color:#218344"><i class="swatch"></i>Saved finger end target</span>
+  <span class="key" style="color:#955526"><i class="swatch"></i>Saved palm end target</span>
+  <span class="key" style="color:#bb008d"><i class="swatch"></i>Current finger guide</span>
+  <span class="key" style="color:#df8e19"><i class="swatch"></i>Current palm guide</span>
+  <span class="key"><i class="dot"></i>Actual material contact witness</span>
+  <span class="key" style="color:#d34450"><i class="swatch dash"></i>Guide witness / target</span>
+  <span class="key" style="color:#6b4545"><i class="swatch"></i>Crossed line: rejected connection</span>
+  <span class="key"><i class="diamond"></i>Preferred section percentage</span>
+  <span class="key" style="color:#a28b78"><i class="swatch dash"></i>Collision-only skin (no attraction)</span>
+</div>
+<section id="panels" class="panels" aria-label="Captured digit slices"></section>
+<p class="note">Coordinates are millimetres in each registered digit plane. X and Y use exactly the same scale within a panel; different panels can have different magnification. The view is along local −Z. All five panels belong to the same captured hand and weapon.</p>
+</main>
+<noscript>This report requires JavaScript to draw the captured slices. It contains all its data locally and makes no network requests.</noscript>
+<script>
+'use strict';
+const report=__REPORT__;
+const colors=['#1263eb','#a330da','#00896d'], layers={};
+const finite=v=>typeof v==='number'&&Number.isFinite(v);
+const point=p=>Array.isArray(p)&&p.length>=2&&finite(p[0])&&finite(p[1]);
+const mm=v=>finite(v)?(v*1000).toFixed(3):'—';
+const clean=s=>String(s??'');
+const title=s=>clean(s).replace(/^./,c=>c.toUpperCase());
+const sectionName=s=>Number(s)===0?'Palm':'S'+s;
+const isPalm=s=>s.palm_owned===true||s.palm_region===true||s.section_id==='palm';
+const contacts=Array.isArray(report.material_contacts)?report.material_contacts:[];
+const allDigits=Array.isArray(report.digits)?report.digits:[];
+const evidence=report.evidence||{};
+const cards=[];
+const peaks=Array.isArray(evidence.bias_peaks_percent)?evidence.bias_peaks_percent:[];
+const peakText=peaks.length===3?peaks.map((p,i)=>'S'+(i+1)+' '+p+'%').join(', '):'peak locations not recorded';
+document.querySelector('#preference').textContent='Location preference: '+peakText+'; bell spread '+(finite(evidence.bias_spread_percentage_points)?evidence.bias_spread_percentage_points+' percentage points':'not recorded')+'; strength '+(finite(evidence.bias_strength)?(evidence.bias_strength*100).toFixed(0)+'%':'not recorded')+'. Thumb preference is unchanged. A preferred location is not a required contact.';
+document.querySelector('#identity').textContent=clean(report.weapon||'Saved weapon')+' · '+(report.slot==='hand_left'?'Left hand':report.slot==='hand_right'?'Right hand':clean(report.slot));
+document.querySelector('#status').textContent='Observed material contacts: '+(contacts.length?contacts.map(c=>clean(c).replace(/\/S0$/,'/Palm')).join(', '):'none reported')+'. '+(report.observed_not_reposed===true?'Captured geometry; no pose reconstruction.':'Capture provenance is not confirmed in this record.')+' Guide following: '+(evidence.guide_following_verified===true?'verified at accepted sampled states.':'unverified; material contact alone is insufficient.');
+if(report.observed_not_reposed!==true)document.querySelector('#status').classList.add('warning');
+const evidenceRows=[['Source report',report.source_report],['Source capture',report.source_capture],['Capture SHA-256',report.source_capture_sha256]];
+for(const [key,value] of Object.entries(evidence))if(value!==undefined&&value!==null)evidenceRows.push([key.replaceAll('_',' '),typeof value==='object'?JSON.stringify(value):String(value)]);
+for(const [key,value]of evidenceRows){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=key;dd.textContent=value===undefined?'Not provided':clean(value);document.querySelector('#evidence').append(dt,dd)}
+function textCell(row,text,tag='td',className=''){const cell=document.createElement(tag);cell.textContent=text;if(className)cell.className=className;row.append(cell);return cell}
+function tableFor(d){
+  const table=document.createElement('table');table.className='metrics';
+  const head=document.createElement('thead'),hr=document.createElement('tr');
+  for(const label of ['Section','Guide gap mm','Handle gap mm','Depth ≤ mm','Cap mm','Actual contact'])textCell(hr,label,'th');
+  head.append(hr);table.append(head);const body=document.createElement('tbody');
+  const regions=Array.isArray(d.regions)?d.regions:[];
+  for(const section of [1,2,3,0]){
+    const r=regions.find(r=>Number(r.section)===section),row=document.createElement('tr');
+    const name=textCell(row,sectionName(section),'td','section-name');name.style.color=section===0?'#a96a10':colors[section-1];
+    for(const value of [r?.gap_m,r?.material_gap_m,r?.material_depth_upper_m,r?.cap_m])textCell(row,mm(value));
+    textCell(row,r?.material_contact===true?'Yes':r?.material_contact===false?'No':'Unassessed','td',r?.material_contact===true?'contact-yes':'');body.append(row);
+  }
+  table.append(body);return table;
+}
+for(const d of allDigits){
+  const card=document.createElement('article');card.className='card';
+  const head=document.createElement('div');head.className='card-head';const h=document.createElement('h2');h.textContent=title(d.digit);head.append(h);
+  const badge=document.createElement('span');badge.className='badge';badge.textContent=evidence.live_acceptance?.naturally_applied===true?'Actual applied pose':'Actual observed pose';head.append(badge);card.append(head);
+  const plane=document.createElement('p');plane.className='plane';plane.textContent='Plane: '+clean(d.plane_origin_id||'unavailable');card.append(plane);
+  const figure=document.createElement('figure');figure.className='figure';const canvas=document.createElement('canvas');canvas.width=720;canvas.height=666;canvas.setAttribute('role','img');canvas.setAttribute('aria-label',title(d.digit)+' actual skin, handle and saved target slice');
+  const caption=document.createElement('figcaption');caption.className='caption';figure.append(canvas,caption);card.append(figure,tableFor(d));
+  const note=document.createElement('p');note.className='card-note';
+  note.textContent=(d.digit==='thumb'?'Thumb has no new location bias. ':'Diamonds mark preferred locations, not the final contact position. ')+(!Array.isArray(d.wrapper_polygon)||d.wrapper_polygon.length<3?'Finger wrapper is unavailable in this captured record. ':'')+(!Array.isArray(d.palm_polygon)||d.palm_polygon.length<3?'Palm wrapper is unavailable in this captured record. ':'')+'Dashed skin is collision-only. '+(finite(d.guide_skipped_segment_count)?'Wrapper queries: '+d.guide_evaluated_segment_count+' evaluated, '+d.guide_skipped_segment_count+' skipped. ':'')+'Other skin is not treated as identified palm.';
+  note.textContent+=' '+(d.working_guide_recorded===true?'Recorded guide progress '+(finite(d.working_guide?.progress)?(100*d.working_guide.progress).toFixed(2)+'%':'unknown')+'; initial radius '+mm(d.working_guide?.radius_m)+' mm. Stop: '+clean(d.guidance?.stop_reason||'not recorded')+'.':'Working guide was not recorded; saved end targets are not evidence of active guidance.')+' Nearest visible witnesses are observations, not replayed solver selections. Rejected connections are hidden unless enabled.';
+  if(d.guide_safe!==true)note.textContent+=' Guide overlap check is not satisfied; no exact tangency is claimed.';
+  card.append(note);document.querySelector('#panels').append(card);cards.push({d,canvas,caption});
+}
+if(!allDigits.length){const p=document.createElement('p');p.className='empty';p.textContent='No captured digit slices were supplied.';document.querySelector('#panels').append(p)}
+function getBounds(d,whole){
+  const points=[];const push=p=>{if(point(p))points.push(p)};
+  for(const key of ['handle_polygon','wrapper_polygon','palm_polygon','working_wrapper_polygon','working_palm_polygon','joints_m'])for(const p of d[key]||[])push(p);
+  push(d.tip_m);push(d.center_m);if(whole)push(d.wrist_m);
+  for(const s of d.skin_segments||[])if(whole||(Number.isInteger(s.section_owner)&&s.section_owner>=0&&s.section_owner<=2)){push(s.a);push(s.b)}
+  if(!points.length)return[-.05,-.05,.05,.05];
+  const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);return[Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)];
+}
+function draw(card){
+  const {d,canvas,caption}=card,g=canvas.getContext('2d'),width=canvas.width,height=canvas.height,whole=document.querySelector('#fit').value==='whole';
+  const bounds=getBounds(d,whole),cx=(bounds[0]+bounds[2])/2,cy=(bounds[1]+bounds[3])/2;
+  const scale=Math.min((width-110)/Math.max(bounds[2]-bounds[0],.02),(height-115)/Math.max(bounds[3]-bounds[1],.02));
+  const X=p=>[width/2+(p[0]-cx)*scale,(height-25)/2-(p[1]-cy)*scale];
+  g.clearRect(0,0,width,height);g.fillStyle='#fff';g.fillRect(0,0,width,height);g.lineJoin='round';g.lineCap='round';
+  function path(points,color,lineWidth=2,closed=false,fill=null){const ps=(points||[]).filter(point);if(!ps.length)return;g.beginPath();ps.forEach((p,i)=>{const q=X(p);i?g.lineTo(q[0],q[1]):g.moveTo(q[0],q[1])});if(closed)g.closePath();if(fill){g.fillStyle=fill;g.fill()}g.strokeStyle=color;g.lineWidth=lineWidth;g.stroke()}
+  function dot(p,color,r=4){if(!point(p))return;const q=X(p);g.beginPath();g.arc(q[0],q[1],r,0,Math.PI*2);g.fillStyle=color;g.fill()}
+  function label(p,text,color='#34465b',dx=7,dy=-9){if(!point(p))return;const q=X(p);g.fillStyle=color;g.font='15px system-ui';g.fillText(text,q[0]+dx,q[1]+dy)}
+  if(layers.grid){
+    const steps=[.001,.002,.005,.01,.02,.05,.1,.2,.5,1],step=steps.find(v=>v*scale>=35)||1;
+    const left=cx-width/(2*scale),right=cx+width/(2*scale),bottom=cy-height/(2*scale),top=cy+height/(2*scale);
+    for(let x=Math.ceil(left/step)*step;x<=right;x+=step)path([[x,bottom],[x,top]],'#eef2f6',1);
+    for(let y=Math.ceil(bottom/step)*step;y<=top;y+=step)path([[left,y],[right,y]],'#eef2f6',1);
+    g.fillStyle='#63788c';g.font='13px system-ui';g.fillText('Grid '+(step*1000).toFixed(step<.001?2:0)+' mm',18,24);
+  }
+  if(layers.handle)path(d.handle_polygon,'#697685',2,true,'#dbe1e7');
+  if(layers.wrapper){g.setLineDash([5,4]);path(d.wrapper_polygon,'#218344',1.5,true);path(d.palm_polygon,'#955526',1.5,true);g.setLineDash([])}
+  if(layers.working){path(d.working_wrapper_polygon,'#bb008d',2,true);path(d.working_palm_polygon,'#df8e19',2,true)}
+  if(layers.skin)for(const s of d.skin_segments||[]){const owned=Number.isInteger(s.section_owner)&&s.section_owner>=0&&s.section_owner<3,collisionOnly=s.grip_attraction_eligible===false;g.setLineDash(collisionOnly?[4,4]:[]);g.globalAlpha=collisionOnly ? 0.45 : 1;path([s.a,s.b],owned?colors[s.section_owner]:isPalm(s)?'#c47912':'#a28b78',owned||isPalm(s)?3:2);g.setLineDash([]);g.globalAlpha=1}
+  dot(d.center_m,'#697685',3);
+  if(layers.joints){
+    const js=(d.joints_m||[]).filter(point);g.setLineDash([7,6]);path(js,'#34465b',1.5);if(js.length&&point(d.tip_m))path([js[js.length-1],d.tip_m],'#34465b',1.5);g.setLineDash([]);
+    js.forEach((p,i)=>{dot(p,'#34465b',4);label(p,'J'+(i+1))});dot(d.tip_m,'#34465b',3);label(d.tip_m,'Tip');dot(d.wrist_m,'#34465b',4);label(d.wrist_m,'W');
+  }
+  for(const r of d.regions||[]){
+    const w=r.witness||{},m=r.material_witness||{};
+    if(layers.guides&&point(w.skin_point_m)&&point(w.target_point_m)){g.setLineDash([5,5]);path([w.skin_point_m,w.target_point_m],'#d34450',1.5);g.setLineDash([]);const q=X(w.target_point_m);g.beginPath();g.arc(q[0],q[1],4,0,Math.PI*2);g.strokeStyle='#d34450';g.lineWidth=1.5;g.stroke()}
+    const blocked=r.blocked_nearest_witness||{};
+    if(layers.blocked&&point(blocked.skin_point_m)&&point(blocked.target_point_m)){g.setLineDash([2,5]);path([blocked.skin_point_m,blocked.target_point_m],'#6b4545',1.5);g.setLineDash([]);const mid=[(blocked.skin_point_m[0]+blocked.target_point_m[0])/2,(blocked.skin_point_m[1]+blocked.target_point_m[1])/2],q=X(mid);g.beginPath();g.moveTo(q[0]-5,q[1]-5);g.lineTo(q[0]+5,q[1]+5);g.moveTo(q[0]+5,q[1]-5);g.lineTo(q[0]-5,q[1]+5);g.strokeStyle='#6b4545';g.stroke();label(mid,sectionName(r.section)+' rejected','#6b4545',8,-7)}
+    if(layers.contacts&&r.material_contact===true&&point(m.skin_point_m))dot(m.skin_point_m,'#cf343c',5);
+  }
+  if(layers.bias)for(const marker of d.bias_markers||[]){if(!point(marker.point_m))continue;const q=X(marker.point_m);g.beginPath();g.moveTo(q[0],q[1]-6);g.lineTo(q[0]+6,q[1]);g.lineTo(q[0],q[1]+6);g.lineTo(q[0]-6,q[1]);g.closePath();g.fillStyle='#f3b52b';g.fill();g.strokeStyle='#68480e';g.lineWidth=1;g.stroke();label(marker.point_m,'S'+marker.section+' '+marker.percent+'%','#68480e',9,17)}
+  // Fixed metric bar. It stays 10 mm even when a panel's fit changes.
+  g.fillStyle='#203347';g.fillRect(24,height-37,.01*scale,3);g.font='14px system-ui';g.fillText('10 mm',24,height-13);
+  const ax=width-68,ay=height-48;g.strokeStyle='#506276';g.lineWidth=1.5;g.beginPath();g.moveTo(ax,ay-30);g.lineTo(ax,ay);g.lineTo(ax+30,ay);g.moveTo(ax-4,ay-25);g.lineTo(ax,ay-30);g.lineTo(ax+4,ay-25);g.moveTo(ax+25,ay-4);g.lineTo(ax+30,ay);g.lineTo(ax+25,ay+4);g.stroke();g.fillStyle='#506276';g.font='13px system-ui';g.fillText('+Y',ax-10,ay-38);g.fillText('+X',ax+32,ay+4);
+  const clipped=!whole&&(d.skin_segments||[]).some(s=>[s.a,s.b].some(p=>point(p)&&(X(p)[0]<0||X(p)[0]>width||X(p)[1]<0||X(p)[1]>height)));
+  caption.textContent=(whole?'Whole captured slice. ':'Finger and target fit. ')+(clipped?'Some other skin lies outside this view; choose “Whole captured slice” to see it. ':'')+'Equal X/Y scale; view along local −Z.';
+}
+function redraw(){for(const card of cards)draw(card)}
+for(const input of document.querySelectorAll('[data-layer]')){layers[input.dataset.layer]=input.checked;input.addEventListener('change',()=>{layers[input.dataset.layer]=input.checked;redraw()})}
+document.querySelector('#fit').addEventListener('change',redraw);redraw();
+</script>
+</html>

@@ -122,16 +122,21 @@ int32_t welded_point_id(std::vector<Vector2> &points, Buckets &buckets, const Ve
     // Vector2i then stores 32-bit coordinates, as do the reference buckets.
     const int32_t bucket_x = int32_t(int64_t(std::round(double(point_2d.x) / POINT_MERGE_EPSILON_M)));
     const int32_t bucket_y = int32_t(int64_t(std::round(double(point_2d.y) / POINT_MERGE_EPSILON_M)));
+    // Match the shared resolver: spatial bucket order must not let a later
+    // representative steal an intersection already assigned to an earlier one.
+    int32_t representative = -1;
     for (int64_t x = int64_t(bucket_x) - 1; x < int64_t(bucket_x) + 2; ++x) {
         for (int64_t y = int64_t(bucket_y) - 1; y < int64_t(bucket_y) + 2; ++y) {
             const auto candidates = buckets.find(integer_pair_key(int32_t(x), int32_t(y)));
             if (candidates == buckets.end()) continue;
             for (const int32_t candidate : candidates->second) {
                 if (double(points[size_t(candidate)].distance_squared_to(point_2d)) <=
-                        POINT_MERGE_EPSILON_M * POINT_MERGE_EPSILON_M) return candidate;
+                        POINT_MERGE_EPSILON_M * POINT_MERGE_EPSILON_M &&
+                        (representative < 0 || candidate < representative)) representative = candidate;
             }
         }
     }
+    if (representative >= 0) return representative;
     const int32_t id = int32_t(points.size());
     points.push_back(point_2d);
     buckets[integer_pair_key(bucket_x, bucket_y)].push_back(id);

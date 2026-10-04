@@ -600,6 +600,10 @@ static func _resolve_welded_slice_point_id(
 		roundi(point_2d.x / SLICE_POINT_MERGE_EPSILON_METERS),
 		roundi(point_2d.y / SLICE_POINT_MERGE_EPSILON_METERS)
 	)
+	# Bucket order is spatial, not insertion order. A later point in an earlier
+	# bucket must not steal an existing shared intersection and open its contour.
+	# Keep the earliest compatible representative; never widen the merge radius.
+	var representative_id := -1
 	for bucket_x: int in range(bucket.x - 1, bucket.x + 2):
 		for bucket_y: int in range(bucket.y - 1, bucket.y + 2):
 			var candidate_bucket := Vector2i(bucket_x, bucket_y)
@@ -614,7 +618,10 @@ static func _resolve_welded_slice_point_id(
 					<= SLICE_POINT_MERGE_EPSILON_METERS
 					* SLICE_POINT_MERGE_EPSILON_METERS
 				):
-					return candidate_id
+					if representative_id < 0 or candidate_id < representative_id:
+						representative_id = candidate_id
+	if representative_id >= 0:
+		return representative_id
 	var point_id := points.size()
 	points.append(point_2d)
 	var bucket_ids: Array = point_ids_by_bucket.get(bucket, []) as Array

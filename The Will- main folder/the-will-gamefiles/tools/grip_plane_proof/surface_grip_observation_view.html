@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V6 grip — actual captured pose</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#edf1f5;color:#213345;font:15px/1.5 system-ui,sans-serif}main{max-width:1800px;margin:auto;padding:22px}h1{margin:0;font-size:25px}h2{margin:0;font-size:20px}p{margin:8px 0}section,.card{background:white;border:1px solid #ccd6df;border-radius:8px;padding:16px;margin-bottom:14px}.notice{padding:10px;background:#fff3d9;border-left:4px solid #b27716}label{white-space:nowrap;margin-right:14px}.legend{display:flex;flex-wrap:wrap;gap:8px 18px}.key:before{content:"";display:inline-block;width:22px;border-top:3px solid currentColor;margin-right:7px;vertical-align:middle}.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,530px),1fr));gap:16px}.card{min-width:0;margin:0}canvas{display:block;width:100%;height:auto;background:#fff;border:1px solid #e1e6eb}.small{font-size:12px;color:#536475;overflow-wrap:anywhere}.contact{font-weight:600}pre{overflow:auto;max-height:420px;font:12px/1.4 ui-monospace,monospace}summary{cursor:pointer}.errors{color:#9c3924}
+</style>
+<main>
+<section><h1>V6 grip — actual captured pose</h1><p id="identity"></p><div id="status" class="notice"></div>
+<p>Each panel is a slice through that digit's motion plane, taken from the captured applied pose. These are observed shapes; no finger or weapon was repositioned for this report.</p>
+<p class="small">The solver checks skin in 3D. These offline slices illustrate geometry and do not recalculate or certify the grip. Contact labels and Thumb participation come from the recorded solver result; no contact dots are invented from this drawing.</p>
+<p id="adaptation" class="notice"></p><details><summary>Capture, target contract and reseating evidence</summary><pre id="evidence"></pre></details></section>
+<section><p><label><input type="checkbox" id="showSkin" checked>Skin</label><label><input type="checkbox" id="showSaved" checked>Saved targets</label><label><input type="checkbox" id="showBones" checked>Joints / tip</label><label><input type="checkbox" id="showGrid" checked>10 mm grid</label></p>
+<div class="legend"><span class="key" style="color:#1263eb">S1 skin</span><span class="key" style="color:#a330da">S2 skin</span><span class="key" style="color:#00896d">S3 skin</span><span class="key" style="color:#c47912">Identified palm</span><span class="key" style="color:#a28b78">Other skin</span><span class="key" style="color:#657789">Physical handle</span><span class="key" style="color:#258238">Saved shared digit target</span><span class="key" style="color:#ca3270">Saved S1 target, when present</span><span class="key" style="color:#975927">Saved palm target</span></div><p class="small">Dashed skin is collision-only in this slice observer. Equal X/Y scale within each panel; view along local −Z. Saved layers can differ from runtime attraction when a legacy save is adapted.</p></section>
+<div id="panels" class="panels"></div>
+</main><script>
+const report=__REPORT__;
+const colors=['#1263eb','#a330da','#00896d'];
+const savedColors={digit:'#258238',s1:'#ca3270',palm:'#975927'};
+const evidence=report.contact_evidence||{},physical=new Set(evidence.physical_sections||[]),maximum=new Set(evidence.maximum_depth_sections||report.material_contacts||[]);
+const physicalKnown=evidence.physical_contact_reported===true;
+const depthWitnesses=evidence.depth_witnesses||[],attractionWitnesses=evidence.attraction_witnesses||[];
+const yesNo=v=>typeof v==='boolean'?(v?'yes':'no'):'not recorded';
+const mm=v=>Number.isFinite(v)?(v*1000).toFixed(3)+' mm':'not recorded';
+document.getElementById('identity').textContent=report.weapon+' · '+report.slot+' · solver '+(report.solver_ms/1000).toFixed(3)+' s · reseating attempts '+report.reseat_attempts;
+const a=report.section_assessment||{};
+const required=a.required_count||(report.thumb_deferred?12:14), count=a.satisfied_count??a.contact_count??report.material_contacts.filter(x=>x!=='palm').length;
+document.getElementById('status').textContent='Physical contact: '+(physicalKnown?physical.size+' / '+required+' sections':'not separately recorded')+'; palm '+yesNo(evidence.palm_physical_contact)+'. Maximum-depth qualification: '+count+' / '+required+' sections; palm '+yesNo(evidence.palm_maximum_depth??a.palm_contact)+'. '+(a.satisfactory?'Recorded depth contract met.':'Depth contract incomplete.')+' Sampled material safety: '+yesNo(report.sampled_material_safe)+'. Thumb '+(report.thumb_deferred?'deferred.':'S2/S3 enabled; S1 is a physical guard.');
+const contract=report.target_contract||{};
+document.getElementById('adaptation').textContent=contract.local_normal_adaptation_used?'This legacy save uses runtime offsets of individual query hits. The green/brown lines show the original SAVED surfaces. No closed replacement surface exists for that adaptation, so it is intentionally not drawn as one.':'The target lines are the saved geometry used as the attraction source. The physical overlap checker still limits how far skin can enter the material.';
+document.getElementById('evidence').textContent=JSON.stringify({evidence:report.evidence,contact_evidence:evidence,target_contract:contract,saved_surface_depths_mm:report.saved_surface_depths_mm,section_assessment:a,reseat_history:report.reseat_history},null,2);
+const panels=[];
+for(const digit of report.digits){
+ const card=document.createElement('article');card.className='card';
+const title=document.createElement('h2');title.textContent=digit.digit==='thumb'?'Thumb'+(report.thumb_deferred?' — deferred':''):digit.digit[0].toUpperCase()+digit.digit.slice(1);card.append(title);
+ const plane=document.createElement('p');plane.className='small';plane.textContent=digit.plane_origin_id;card.append(plane);
+ const canvas=document.createElement('canvas');canvas.width=960;canvas.height=680;card.append(canvas);
+ const status=document.createElement('p');status.className='contact';
+ const regions=digit.digit==='thumb'?['S2','S3']:['S1','S2','S3'];
+ status.textContent=digit.digit==='thumb'&&report.thumb_deferred?'Shown for context. No Thumb closure was solved.':regions.map(s=>{const key=digit.digit+':'+s;return s+': '+(physicalKnown?(physical.has(key)?'physical contact':'no physical contact'):'physical contact not recorded')+' / '+(maximum.has(key)?'maximum depth reached':'maximum depth not reached')}).join(' | ');card.append(status);
+ if(!(digit.digit==='thumb'&&report.thumb_deferred)){
+  const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Contact evidence and attraction preference';details.append(summary);
+  const explanation=document.createElement('p');explanation.className='small';explanation.textContent='Negative gap means overlap. The depth witness proves contact/depth; the attraction witness is the optimizer-selected preference point. They may differ. Neither changes the existing acceptance rules.';details.append(explanation);
+  for(const s of regions){const key=digit.digit+':'+s,w=depthWitnesses.find(x=>x.section===key)||{},target=attractionWitnesses.find(x=>x.section===key)||{};
+   const line=document.createElement('p');line.className='small';line.textContent=s+': signed gap '+mm(w.gap_m)+'; overlap allowance '+mm(w.cap_m)+'; depth witness '+(Number.isFinite(w.percent)&&w.percent>=0?w.percent.toFixed(1)+'%':'not recorded')+'; attraction witness '+(Number.isFinite(target.percent)&&target.percent>=0?target.percent.toFixed(1)+'%':'not recorded')+'.';details.append(line);
+  }card.append(details);
+ }
+ const angles=document.createElement('p');angles.className='small';angles.textContent='Measured angles: '+(digit.angles_rad||[]).map(x=>(x*180/Math.PI).toFixed(1)+'°').join(' / ');card.append(angles);
+ if(digit.errors.length){const error=document.createElement('p');error.className='errors small';error.textContent='Observation gaps: '+digit.errors.map(x=>x.surface+': '+x.reason).join('; ');card.append(error);}
+ document.getElementById('panels').append(card);panels.push({canvas,digit});
+}
+function draw({canvas,digit}){
+ const ctx=canvas.getContext('2d'),W=canvas.width,H=canvas.height;
+ ctx.clearRect(0,0,W,H);
+ const polygons=digit.polygons||{},segments=digit.skin_segments||[];
+ const all=[...(digit.joints_m||[]),digit.tip_m,digit.wrist_m,...Object.values(polygons).flat(),...segments.flatMap(e=>[e.a,e.b])].filter(p=>Array.isArray(p)&&Number.isFinite(p[0])&&Number.isFinite(p[1]));
+ if(!all.length){ctx.fillText('No slice geometry available',30,40);return;}
+ let minX=Math.min(...all.map(p=>p[0])),maxX=Math.max(...all.map(p=>p[0])),minY=Math.min(...all.map(p=>p[1])),maxY=Math.max(...all.map(p=>p[1]));
+ const scale=Math.min((W-100)/Math.max(.03,maxX-minX),(H-100)/Math.max(.03,maxY-minY)),cx=(minX+maxX)/2,cy=(minY+maxY)/2;
+ const xy=p=>[W/2+(p[0]-cx)*scale,H/2-(p[1]-cy)*scale];
+ function path(points,color,width=2,close=false,fill=null,dash=[]){if(!points||points.length<2)return;ctx.beginPath();points.forEach((p,i)=>{const q=xy(p);i?ctx.lineTo(...q):ctx.moveTo(...q)});if(close)ctx.closePath();ctx.setLineDash(dash);ctx.strokeStyle=color;ctx.lineWidth=width;if(fill){ctx.fillStyle=fill;ctx.fill()}ctx.stroke();ctx.setLineDash([])}
+ if(document.getElementById('showGrid').checked){for(let x=Math.floor(minX/.01)*.01;x<=maxX;x+=.01)path([[x,minY],[x,maxY]],'#edf1f5',1);for(let y=Math.floor(minY/.01)*.01;y<=maxY;y+=.01)path([[minX,y],[maxX,y]],'#edf1f5',1);}
+ path(polygons.physical,'#657789',2.2,true,'#d9e0e6');
+ if(document.getElementById('showSaved').checked)for(const [kind,color] of Object.entries(savedColors))path(polygons[kind],color,2,true);
+ if(document.getElementById('showSkin').checked)for(const e of segments){const owner=Number(e.section_owner),color=owner>=0&&owner<3?colors[owner]:e.palm_owned?'#c47912':'#a28b78';path([e.a,e.b],color,2.8,false,null,e.grip_attraction_eligible===false?[5,4]:[]);}
+ if(document.getElementById('showBones').checked){const chain=[...(digit.joints_m||[]),digit.tip_m];path(chain,'#394b5f',1.7,false,null,[7,5]);[...(digit.joints_m||[]),digit.tip_m,digit.wrist_m].forEach((p,i)=>{if(!p)return;const q=xy(p);ctx.beginPath();ctx.arc(...q,4,0,2*Math.PI);ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#394b5f';ctx.stroke();ctx.fillStyle='#263849';ctx.font='16px system-ui';ctx.fillText(i<digit.joints_m.length?'J'+(i+1):i===digit.joints_m.length?'Tip':'W',q[0]+7,q[1]-8)})}
+ ctx.fillStyle='#34485b';ctx.strokeStyle='#34485b';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(30,H-30);ctx.lineTo(30+.01*scale,H-30);ctx.stroke();ctx.font='16px system-ui';ctx.fillText('10 mm',30,H-8);ctx.fillText('+X →   +Y ↑',W-150,H-18);
+}
+for(const input of document.querySelectorAll('input'))input.addEventListener('change',()=>panels.forEach(draw));panels.forEach(draw);
+</script></html>

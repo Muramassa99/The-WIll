@@ -14,6 +14,8 @@ const PlayerFingerCapsuleSurfaceQueryScript = preload(
 
 const SOLVER_REVISION: StringName = &"serial_hinge_capsule_surface_v8"
 const MAX_ALLOWED_OVERLAP_METERS := 0.0005
+const NON_THUMB_PROXIMAL_MAX_ALLOWED_OVERLAP_METERS := 0.005
+const NON_THUMB_S2_S3_MAX_ALLOWED_OVERLAP_METERS := 0.0035
 const THUMB_PROXIMAL_CONTACT_TARGET_REQUIRED := false
 const THUMB_PROXIMAL_MAX_ALLOWED_OVERLAP_METERS := 0.005
 const DEFAULT_PREFERRED_OVERLAP_METERS := 0.00025
@@ -2421,6 +2423,10 @@ func _resolve_serial_section_max_allowed_overlap(
 	target_overlap: float,
 	max_overlap: float
 ) -> float:
+	if section_index == 0 and not bool(snapshot.get("is_thumb", false)):
+		return NON_THUMB_PROXIMAL_MAX_ALLOWED_OVERLAP_METERS
+	if section_index in [1, 2] and not bool(snapshot.get("is_thumb", false)):
+		return NON_THUMB_S2_S3_MAX_ALLOWED_OVERLAP_METERS
 	if (
 		not THUMB_PROXIMAL_CONTACT_TARGET_REQUIRED
 		and bool(snapshot.get("is_thumb", false))

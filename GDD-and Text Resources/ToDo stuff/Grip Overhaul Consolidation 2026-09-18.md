@@ -1,13 +1,723 @@
 # Grip overhaul: working plan, ownership and replacement boundary
 
-Date: 2026-09-18, chat 14. Latest direction: October 4 V6 savepoint and palm-first, surface-query grip pivot.
+Date: 2026-09-18, chat 14. Current implementation/evidence: October 13 resumed final-pose redesign. Older dated sections below retain their history.
+
+## October 13: new weapon blocked by unused full-render triangle validation
+
+User's first new-weapon trial, `Stage 1 V2 Draft Copy`, failed before fitting with
+`object_triangle_copy_failed`. Exact saved-file reproduction found one collapsed
+triangle (surface 0, triangle 478; equal second/third vertices) among 18,705 full
+visual triangles. It lies within the handle bounds; do not describe it as a blade
+fault. The separate saved handle packet and attraction wrapper both pass existing
+production validation. Source library SHA256:
+`d0486f9c7b469a82e0202c712dad66606a1ca389c64e5329f837b574fb65330d`.
+
+Root cause: live input capture still required copying/validating every rendered
+weapon triangle, although the current fitter uses only saved handle/wrapper
+geometry plus captured frame/station metadata. `capture_grip_placement_stage.gd`
+now has an explicit `capture_rendered_geometry` option. Its default preserves
+strict diagnostic extraction; live primary acquisition and realized-support
+recapture in `preview_grip_acquisition.gd` pass false. That mode omits render
+triangle arrays/count, records the saved-source policy, retains coordinate and
+station checks, and rejects invalid saved-source metadata. Existing downstream
+handle/wrapper validation remains required. No geometry repair, save rewrite,
+overlap-limit change, optimizer change or alternative solver was introduced.
+
+Fresh verification: 55/55 capture/source-boundary checks, including the same
+degenerate visual rejected by strict mode but accepted for a valid saved source,
+and malformed saved handle/wrapper geometry still rejected downstream.
+Report: `test_artifacts/verify_grip_placement_mesh_capture_2026-10-13T06-13-51.json`.
+Actual saved weapon completed the real Skill Crafter activation/acquisition route:
+`test_artifacts/grip_new_weapon_20261013/runtime_trace_status.json` and chronology.
+Result `preview_applied`, sampled-material-safe; solver 4697.044 ms, complete
+isolated UI trace 32.721 s. Physical sections 7/14 plus palm; strict depth 2/14
+plus palm. Orientation unchanged; station error 1.83e-8 m. This fixes preparation,
+not full-depth certification. This run did not capture a fresh independent visual
+or actual-pose assessment; the user's visual runtime test remains next.
+Original live library and isolated copy hashes remain unchanged. Focused logs have
+no script/parse/error entries. GUI editor remains open; test engine exited.
+
+Official Godot 4.7 ArrayMesh/Mesh documentation was checked for array extraction;
+the strict reader remains available to consumers that need those triangles:
+https://docs.godotengine.org/en/4.7/classes/class_arraymesh.html
+https://docs.godotengine.org/en/4.7/classes/class_mesh.html
+
+User authorized a pre/post Git push; selected post-verification checkpoint of the
+current grip implementation, native sources/DLL, portable tools and handoff notes.
+Exclude unrelated workspace/user changes and generated save/capture artifacts.
+
+## October 13: deferred arm-motion issue reported before manual grip testing
+
+Status: user-reported existing issue, recorded for later investigation only.
+The user has not yet begun the planned runtime grip test matrix. This report is
+not a result of that test matrix and does not establish a regression from the
+current grip changes. No runtime implementation or diagnostic run is requested
+by this note; current next action remains the user's staged grip testing.
+
+Observed behavior: the right elbow sometimes appears anatomically incorrect or
+inverted, especially when extending to maximum reach and retracting back within
+reach. The elbow is the visible symptom, not an established root cause. The left
+arm usually does not show it; the user has not reproduced equivalent left-side
+behavior, which is not proof that the left side is unaffected.
+
+User suspects premature or excessive shoulder/upper-arm rotation interacting
+with forearm motion. This is a hypothesis to investigate, not a confirmed cause.
+The user describes the existing wrist-and-up motion limits as approximate values
+chosen to make the system usable. Desired future outcome: consistent anatomical
+arm motion, with rotation and twist assigned to the appropriate joints and kept
+within suitable limits, including the wrist. Exact new limits remain
+NEEDS_DECISION after examining the current rig and reproducing the behavior.
+
+Possible later scope includes small limit adjustments/additional constraints and,
+if justified, spine tilt/rotation to accommodate reach. Spine compensation is a
+future option, not an instruction to implement it now or to make primary grip
+acquisition move the body.
+
+When this task is activated, first reproduce the right extension/retraction path
+and compare the same left-side path. Inspect the whole shoulder/upper-arm/forearm/
+wrist chain and its bend-direction continuity before attributing the fault to
+the elbow or changing numeric limits. Keep arm-motion defects distinguishable
+from finger-fit defects in the pending manual test reports.
+
+## October 13: resumed single whole-hand fit and current evidence
+
+User asked to resume the interrupted full grip redesign. Broad methodology changes
+remain authorized; preserve authored weapon orientation, selected handle station,
+and the primary Hand frame. No Git operation is authorized. This section supersedes
+the October 7 implementation-in-progress description immediately below.
+
+One `surface_driven_grip_solver.gd` owner now uses `surface_grip_hand_fit.gd` to fit
+all 15 digit hinges plus two transverse weapon translations together. Original
+skin weights, joint planes and ROM remain authoritative. A native triangle BVH
+provides signed Euclidean material depth, nearest points and normals; skin Jacobians
+are native too. The fit uses mobile palmar witnesses, a bounded active-set contact
+step and line-search safety checks. Six inexpensive seat candidates seed two bounded
+fits. There is no runtime slicing/circle progression or separate competing Thumb
+closure. New independent digit/Thumb fit helpers were removed after consolidation.
+
+The seed-selection correction compares the original open Thumb with its proposed
+preshape before ranking each of the same six starts. A preset Thumb had invalidated
+good near-palm starts for Handle 6, selecting distant starts the joints could not
+recover from. Keeping the better safe seed fixes that root cause without increasing
+the number of fitted basins or relaxing caps.
+
+Targets/caps remain: non-thumb S1 5.5/5 mm, S2/S3 4/3.5 mm, palm 4/3.5 mm;
+Thumb caps 5/1.08/0.38 mm. Non-thumb preferences remain 20/50/60 percent with
+25-percentage-point spread and pull weights 0.6/0.8/0.3. Physical engagement and
+strict maximum-depth qualification are separate reported results. The strict band
+is 0.05 mm with the existing 0.002 mm numerical excess guard. Do not present an
+applied safe pose as full maximum-depth acceptance.
+
+Fresh frozen-input replay of the six actual saved handles, with production pose
+application and original library hashes unchanged:
+
+| Saved handle | Solve ms | Physically engaged sections / 14 | Maximum-depth sections / 14 |
+| --- | ---: | ---: | ---: |
+| Handle 1 | 3280.843 | 12 | 3 |
+| Handle 2 | 3486.354 | 7 | 1 |
+| Handle 3 | 3196.148 | 12 | 2 |
+| Handle 4 | 3223.624 | 12 | 1 |
+| Handle 5 | 3321.281 | 11 | 3 |
+| Handle 6 | 3076.457 | 13 | 0 |
+
+All six have palm contact, pass sampled material limits, have zero tested bone
+crossings, and preserve weapon orientation/station. Handle 2 reaches the palm's
+strict maximum-depth band; the other five do not. Native rendered meshes were
+visually inspected: all show a coherent grasp, with a looser result on the large
+ribbed Handle 2. None satisfies all 14 sections' strict maximum-depth condition.
+This is not universal geometry or whole-triangle collision certification.
+
+Review: `test_artifacts/grip_finalfit_v15_resume_all6/comparison.html`, with actual
+native three-view PNGs, orbit views and offline slice observations. The slices are
+diagnostic exports from the captured pose, not runtime solving. The reports distinguish
+the deepest contact witness from the witness pulling toward the target. All six
+observation exports report zero slice errors and no geometry reposing.
+
+Focused final-pose contracts: 361/361 (`surface_grip_final_pose_contract_2026-10-13T01-17-02.json`).
+They cover prospective/duplicate constraints, ROM, seed poisoning, fixed-seat warm
+starts, input validation and witness semantics. Cached grip dimension validation:
+22/22 (`godot_runs/grip_binding_dimensions_20261013.log`); changed digit translations
+or scale reject before writes, evict replay packets, and require fresh acquisition.
+
+Support integration uses the same solver: solve a virtual placement against a fixed
+weapon, realize the Hand target through existing arm IK, then assess the actual
+permitted Hand frame. If needed, one fixed-seat warm-start fit adjusts the fingers
+to that actual frame; it does not bypass arm/wrist limits or move the weapon.
+The old soft arm-spline preference was competing with the bound support target.
+The shared preference now yields only for bound support; primary body positioning
+is retained. Ordinary updates also reclamped the wrist by roughly four degrees.
+A committed support grip now retains a validated body/weapon snapshot and restores
+it when subsequent arm motion would detach that grip. This implements the user's
+explicit permission to stop motion at arm/wrist limits. It does not add wrist ROM.
+Authored controls stay requests; a clamped visible pose is reported explicitly.
+Support removal and changed station/geometry/dimensions invalidate that snapshot.
+Final save/playback evidence and the movement limitation are recorded below/in SPS.
+
+Final actual support proof: 25/25,
+`test_artifacts/grip_support_2026-10-13T04-48-59_report.json`. Fit 5382.847 ms;
+the verifier's separate fresh actual-pose assessment took 1452.571 ms and passed
+sampled material limits. It reports 8/14 physically engaged sections plus palm,
+with only Index S3 in the strict maximum-depth band. Ordinary refresh error is
+5.87e-7 m/rad; primary finger pose remains unchanged. The requested 15 mm edit
+is explicitly clamped to zero weapon movement because the arm update would change
+the bound wrist orientation. A 10 m unreachable target is refused and rolled back;
+support removal clears the snapshot. This is safe retention, not proof that the
+requested two-hand motion is achievable. Support movement remains conservative.
+
+The actual current support mesh was exported without reposing and visually inspected:
+`test_artifacts/grip_support_2026-10-13T04-48-59_status_mesh.html` and its native
+`_mesh_rendered.png`. Palm seats and fingers curl around the handle, with uneven
+closure and small gaps (largest missing pad gap Thumb S3 1.640 mm). No full-grip
+certification is claimed. The support correction currently includes a synchronous
+fixed-seat fit; responsiveness can still be improved without changing these limits.
+
+Save integration retains local grip ownership across macro frames and captures only
+applied material-safe poses, reusing the existing full-bone/weapon clip schema.
+Skill Save refreshes the existing Combat Idle clip too. Solver revision invalidates
+stale derived clips, and prepared weapons cannot fall back to legacy finger closure.
+Existing authored skills require Save to refresh their old derived animation clips.
+
+Fresh v4 one-hand disk/reload/equipped proof: 28/28,
+`test_artifacts/grip_save_playback_2026-10-13T04-24-55_report.json`. Save took
+12.673 s including 19 macro-motion frames and Combat Idle. Equipped weapon position
+error is zero, maximum finger rotation error is 2.67e-7 radians, and editor/bake/
+equipped legacy-closure counters are zero. This test used the original saved
+Handle 1 library in isolation; no source library rewrite. It predates the final
+per-frame primary-hand bake ownership correction and two-hand guard proof.
+
+The final integration review found that offline baking had used the editor's
+selected primary hand even when a clip frame specified a different hand. Baking
+now sets ownership per frame, restores the editor's hand setup on all returns,
+and restores the visible selected preview even after bake failure. Focused real
+bake-loop orchestration checks: 10/10 (`godot_runs/grip_bake_hand_ownership_20261013.log`),
+covering left-primary, hand swap, differing Combat Idle ownership and failure cleanup.
+The corresponding bake cache header is now `runtime_cache_v8_committed_surface_grip`;
+solver revision is `coupled_hand_surface_fit_v4`. Cache/ownership verification is
+18/18 (`godot_runs/grip_cache_v8_ownership_20261013.log`), including rejection of
+the old v7 header even with a matching current solver revision.
+
+The actual two-hand Save trace exposed a separate cache miss: a primary station
+round-trip changed only a 1.887e-15 m numerical tail, but the exact byte key discarded
+the valid primary relationship and support snapshot. Station identity now uses a
+0.1-micrometre grid with canonical zero signs; actual target geometry is untouched.
+Geometry identity, epochs, hand roles and style remain exact. Meaningful station
+changes still invalidate the grip. The corrected trace reuses both committed grips
+through all 19 skill frames with zero solver calls. The final post-Idle preview
+restoration now uses an explicit Save-context token: the already validated body,
+weapon and both grip packets are restored only for the unchanged selected
+WIP/draft/node/motion signature, relationship keys, geometry epoch, skeleton version
+and digit dimensions. All checks precede writes. Cached packets are restored with
+their committed bindings. This token is not a generic body-pose cache during edits.
+The unsuccessful cached-arm-seed approach was removed.
+
+Final current two-hand Save proof: 33/33,
+`test_artifacts/grip_save_playback_2026-10-13T04-50-28_report.json`. Save 10.607 s;
+19 skill frames reuse both grips (zero solver calls), Combat Idle reuses its primary
+grip, and no support re-fit occurs on returning to the selected preview. Both cached
+packets match committed bindings; Hand-in-Weapon error is 2.25e-7 m/rad. Disk reload,
+Skill Crafter replay and equipped Idle/Skill playback preserve both hands. The
+requested two-hand edit is explicitly `clamped_by_support_guard` with zero actual
+translation/rotation and 38 guard clamps. This proves safe stationary transport and
+the permitted motion-refusal behavior, not a freely moving two-hand animation.
+Station identity regression is 6/6 (`godot_runs/grip_station_identity_final_20261013.log`).
+
+Final current one-hand Save proof supersedes the earlier 28-check run: 30/30,
+`test_artifacts/grip_save_playback_2026-10-13T04-51-54_report.json`. Save 8.261 s;
+all 21 replay preparations (19 skill frames, Idle and preview restoration) reuse
+the committed grip with zero new solver calls. Actual macro motion is retained,
+with Hand-in-Weapon error 7.12e-8 m/rad. Disk reload and equipped playback pass;
+legacy closure is not used. One-hand motion and the two-hand clamp are different
+outcomes and must remain clearly distinguished. These Save timings include clip
+baking and restoration; they are not grip-fit timings.
+
+Final focused engine logs have no script/parse/error entries. Read-only Git diff
+whitespace check passes; existing line-ending warnings remain. No staging, commit,
+push, cleanup or branch changes were performed. All test runs finished; the user's
+GUI Godot process was left untouched. The final SPS records the next manual review.
+
+Historical, not rerun by the six-case replay: native geometry 380/380, preparation
+cleanup 20/20, cache ownership 17/17, and the October 8 one-hand full disk/equipped
+proof 28/28. Do not substitute those historical results for the final current
+support/save proofs. The current root cause and remaining work are in the newest SPS.
+
+## October 7: final-pose redesign authorized; implementation in progress
+
+The latest user explicitly authorizes replacing the gripping methodology, including
+Forge-to-preview-to-saved/equipped-skill integration, to obtain a usable visual grip.
+This supersedes the older narrow-change/no-redesign and deferred-Thumb scope below.
+Authored weapon orientation, selected longitudinal station and stationary primary
+Hand remain invariant. Existing overlap values remain inputs, not tuning shortcuts.
+
+The previous contact-lock/projected search has been replaced in the same runtime
+solver owner by a bounded final-pose fit. It searches transverse seats and anatomical
+hinge poses, reselecting mobile palmar witnesses on every candidate. Prepared skin
+and saved Forge geometry are reused; no live slicing, guide-circle progression or
+second competing closure owner. A native nearest-triangle BVH measures signed
+Euclidean distance to actual material. This is a deliberate correction from the
+older directional skin-normal ray depth; an oblique ray length is not penetration
+depth. Physical caps remain separate from the saved attraction wrapper.
+
+All digit-influenced skin samples participate in final safety. Blended, anatomically
+palm-facing unlabelled hand skin receives the established palm cap; dorsal/forearm
+skin keeps the zero-overlap guard. Thumb S1 is a bounded opposition actuator and
+safety region, with unbiased S2/S3 contact targets fitted after the other fingers.
+Dense physical checks may reject proposals. Maximum-depth qualification remains
+reported separately and must never be inferred from pose application alone.
+
+Current fresh Handle1 fixture evidence: `test_artifacts/grip_finalfit_v4_handle1/`.
+Five-digit pose applied through the production owner in11.219s, sampled material
+safety passed, no bone intersections. Only IndexS3 and ThumbS3 reached the exact
+maximum-depth band; RingS2 and ThumbS2 retain roughly1.51/1.96mm gaps. This is a
+development result, NOT full-hand acceptance. Six saved schema2 handles are frozen
+under `test_artifacts/grip_frozen_inputs_20261007_new_six/manifest.json`, preserving
+the user's source library. Full six-case and visual/playback verification is ongoing.
+
+Fresh focused checks: native geometry380/380, final-pose contracts143/143,
+save/readiness bridge9/9. Old projection/contact-lock verifier assumptions were
+retired with their runtime method. Native skin-point evaluation optimization is
+in progress without changing geometry or overlap tolerances.
+
+Save bridge changes preserve the prepared owner during offline macro frames,
+wait for an applied material-safe grip before pose capture, and reuse committed
+hand-local packets for rigid motion. Failed/incomplete bakes are not marked cached;
+old/missing cache signatures are rejected. The existing full-bone/weapon/anchor
+clip schema is reused. Actual disk-save/reload/equipped playback proof is pending.
+
+## October 7: requested depth substitution and maximum-depth contact acceptance (earlier scope)
+
+Latest user request is a narrow change, superseding the earlier numeric settings
+and shallow-contact acceptance below. Shared digit attraction changes from1.5mm
+to4mm; non-thumb S2/S3 material caps change from0.48/0.38mm to3.5/3.5mm on both
+hands. Non-thumb S1 remains5.5mm target/5mm cap; palm remains4mm target/3.5mm cap.
+Thumb material caps remain unchanged and Thumb closure remains deferred; the
+shared digit target is also the target available to future Thumb closure.
+
+True contact now requires actual material penetration to reach the region's
+maximum allowed depth within the existing0.05mm contact tolerance. Mere surface
+touching and shallow overlap do not satisfy section or palm completion. The
+same test applies to newly acquired and retained section contacts; the existing
+0.002mm numerical over-cap guard remains unchanged. Bounds without a measured
+depth are not accepted as proof of reaching the target. The existing wrapper
+depth adapter serves older saves; new Forge saves bake4mm digit targets.
+
+No solver redesign, new joint order, weight/bias blend, iteration-budget change,
+or palm-depth-retention change is part of this request. Acquired-contact motion
+bounds use the same maximum-depth band as acceptance.
+
+Fresh Godot4.7 verification:408 focused reseating/contact/cap checks,67 material
+query checks and168 Forge wrapper checks passed. Evidence:
+- test_artifacts/surface_grip_reseating_contract_2026-10-07T19-12-26.json
+- test_artifacts/verify_surface_grip_material_query_2026-10-07T22-08-34.json
+- test_artifacts/forge_v2_grip_target_wrapper_2026-10-07T22-12-56.json
+
+One natural UI trace used the newly saved schema2 `Handle 1` without rewriting
+the fixture library: test_artifacts/grip_max_depth_handle1_20261007_2210_status.json.
+Solve6867.21ms; preview applied, sampled material safety passed, weapon orientation
+preserved; ZERO maximum-depth-qualified sections or palm, grip_accepted=false.
+This is not a successful grip. The trace confirms requested digit4mm versus
+saved1.5mm through the existing local-normal depth adapter, with S1/palm unchanged.
+A shared move hit unclassified skin triangle4165 at0.002018mm against its0mm cap
+(only0.002mm numerical guard). Initial palm depth was about1.851mm and the existing
+retention rule keeps that depth; it cannot qualify as3.5mm contact. These separate
+remaining restrictions were deliberately not changed by the numeric request.
+The older broad hinge verifier's expected caps were updated but that complete
+verifier was not rerun; the focused check exercised production caps on both hands.
+
+## October 7: shared reseating implementation and verification in progress
+
+User approved the audit and normal testing/corrections. The new process is now
+locally implemented in the existing V6 owner: initial two-translation palm seat,
+four-finger engagement, then at most three shared push/pull reseats with12joint
+coordinates plus2transverse weapon coordinates. Acquired points follow the weapon
+in weapon-local space; eligible skin contact remains mobile. Each accepted weapon
+move validates whole-hand sampled material/contact limits, preserving authored
+orientation and selected longitudinal station. Support corrections cannot move
+the held weapon. Thumb remains open/deferred. All12 finger sections+palm are
+required for four-finger completion; complete full-hand certification stays false.
+
+Exact new Forge saves include non-thumb S1target5.5mm, sharedotherdigit1.5mm,
+palm4mm; capsS1=5mm,palm=3.5mm. Existing saves are NOT rewritten. Their S1/palm
+queries explicitly adapt saved face hits by the local-normal depth difference;
+this is approximate at corners, reported in target_contract, not an exact rebake.
+
+Runtime corrections found through real UI traces: contact-step projection now
+releases obsolete active constraints; material queries classify the actual skin
+point before using a buried origin (outside skin was falsely reported inside);
+retained contact measures closest eligible skin-to-anchor separation with actual
+material classification/caps checked separately; initial closure preserves the
+acquired palm depth; prediction, trial and midpoint follow the same palm-depth
+correction. A stalled shared attempt can reuse the existing digit closure once
+per unresolved digit at the retained weapon pose, still within three attempts.
+Whole-hand improvement and safety accept or roll back that bounded recovery.
+
+Final focused verification:159 wrapper/schema tests,317 projection checks,
+67 actual TriangleMesh material-query checks. Current reseating verifier passes
+441 checks against rounded2026 and443 against star2028, with zero runtime errors.
+The earlier expanded fixture emitted SCRIPT ERROR despite a PASS footer; that run
+is INVALID. The fixture is fixed and the verifier now fails on engine errors.
+
+Current natural UI evidence (source library hashes unchanged):
+- Handle_test_1, test_artifacts/grip_reseat_handle_test1_20261007_2026_status.json:
+  9930.084ms, six solver-reported finger sections (MiddleS2/S3,IndexS1/S3,RingS3,
+  PinkyS3) plus palm, three attempts. Fixed-seat recovery gains useful contacts.
+- Star_Handle_Testing Copy, test_artifacts/grip_reseat_live_20261007_2028_status.json:
+  9937.681ms, RingS3 and PinkyS2 plus palm, three attempts.
+Both final prepared2600-sample checks pass; actual applied-pose geometry captures
+exist. Neither reaches all12 required sections. Thumb remains deferred. HTML
+observations sit beside those reports with suffix _status_observation.html.
+
+The rounded case stalls shared motion at a MiddleS3 physical cap; the star case
+at a PinkyS2 cap. This establishes local proposal failures, not geometric
+impossibility. A tighter internal palm projection experiment (rounded2031) gave
+five contacts in10.898s, did not fix the issue, and was removed; current behavior
+matches2026/2028. Do not increase overlap limits or iteration budgets to hide it.
+No old sliced closure solver was reintroduced; offline slicing is observation
+only. No Git mutations. See SPS_2026_10_07_20-40.md for the current first action.
+
+## October 7: corrected attraction depths, approved intent
+
+User resolved the ambiguity in the latest SPS append: their `1.5 mm` wording
+for non-thumb S1 attraction was a typo; they meant **5.5 mm attraction with a
+5 mm maximum overlap**. This applies to S1 of Index, Middle, Ring and Pinky on
+both hands. S2/S3 and Thumb remain unchanged. Palm is intended to use **4 mm
+attraction with a 3.5 mm maximum overlap**. The 0.5 mm deeper attraction drives
+contact while the physical cap remains the stopper.
+
+This is a documentation correction, not a game implementation. Current S1 cap
+is already 5 mm, but saved digit attraction is still 1.5 mm and palm target/cap
+are still 3/2.5 mm. Do not apply 5.5 mm globally to the shared digit wrapper:
+the future target contract must distinguish S1 without changing S2/S3 or Thumb.
+
+The user's later October 4 SPS append supplies the current reseating direction:
+retain initial axial positioning as reference, then allow contact-preserving
+weapon translation when finger sections cannot seat, with no more than three
+reseating attempts; lock the settled position before future Thumb engagement.
+This supersedes the older task-note statements that the weapon-unlock question
+is unanswered. Thumb articulation details and other explicitly noted decisions
+remain open. Lighter slicing is an option, not a required full pipeline rollback.
+
+See [latest SPS and dated correction](<../SPS/SPS_2026_10_04_14-51.md>).
+No solver changes, tests, regenerated saves or Git operations for this correction.
+
+## October 4: V6 live replacement, manual-test boundary
+
+### Session conclusion: retain positioning, reconsider targeting (October 4, 14:51)
+
+User tested the non-thumb S1 5 mm allowance and reported no visible improvement.
+They requested SPS and an end to the session. No further solver changes or runs
+are authorized for this handoff. The 5 mm setting remains in code; no rollback
+was requested.
+
+Next session's direction is to KEEP the existing weapon-axis/direction/palm
+positioning logic and RE-EVALUATE a lighter form of the previous slice-based
+targeting, combining useful parts of both approaches. The user reports current
+solves under six seconds and finds that manageable; aim not to exceed this cost.
+This is an evaluation direction, not authorization to restore the entire old
+circle progression, scanners or expensive search pipeline alongside V6.
+
+First separate `_seat` and the existing macro/orientation owners from the finger
+target/contact work in `surface_driven_grip_solver.gd`. Then inspect the smallest
+reusable slice helpers and propose a bounded targeting replacement using prepared
+character data and saved Forge geometry. Keep a single live closure owner. The
+choice of slice cadence, sample coverage and contact-following method is still
+open; do not claim a hybrid already exists or promise a runtime improvement.
+
+The earlier question about weapon translation during closure was not answered
+and is NOT approval for a seating change. Preserve positioning while evaluating
+the user's new direction. Thumb remains paused. Read the current handoff:
+[SPS 2026-10-04 14:51](<../SPS/SPS_2026_10_04_14-51.md>).
+
+### Non-thumb S1 maximum overlap changed to 5 mm (October 4)
+
+User explicitly requested a 5 mm overlap allowance for all non-thumb S1 regions.
+`player_finger_surface_grip_solver.gd` now returns 0.005 m for S1 of Index,
+Middle, Ring and Pinky on both hands. V6 preparation uses that same cap for its
+eligible section skin carriers and continuous contact patches; its cache identity
+now includes the resolved per-bone caps. This changes maximum allowed overlap,
+not the saved wrapper target depth or section preference/pull values. S2/S3,
+Thumb, palm (2.5 mm), dorsal and unassigned skin rules are unchanged.
+The live solver's attraction-ray retreat also covers the sample cap (minimum
+3 mm), so newly permitted deeper S1 skin does not retain the old fixed 3 mm
+query start. Physical safety rays already used their individual sample cap.
+
+This does not authorize the previously proposed weapon reseating change, which
+remains pending. In particular, the identified palm witness from the preceding
+diagnostic remains palm-owned with a 2.5 mm cap; finger influence alone does not
+reclassify it as S1. Visual engagement benefit is not yet verified.
+Fresh central UI/dependency compile passed without script errors in
+`godot_runs/the_will_2026-10-04_14-43-28.log`; focused whitespace check passed.
+No live grip run was performed for this tuning change; manual visual testing
+remains with the user under their reduced-testing instruction.
+
+### Poor engagement: focused live diagnostic and current blocker (October 4)
+
+User reported poor engagement after mobile skin contact and explicitly closed
+the game/authorized a focused stopping-reason diagnostic. The chronology tool
+now accepts `THE_WILL_GRIP_TRACE_LIBRARY` only under the workspace and exports
+the full pre-cleanup acquisition owner status to `<trace basename>_status.json`.
+This avoids the chronology summary's depth truncation. Source saves stay read-only.
+
+Fresh runs used the existing October 3 workspace copy of
+`Star_Handle_Testing Copy` in
+`test_artifacts/live_grip_current_save_20261003_232851/player_wip_library_state.tres`.
+This is a real saved-weapon UI activation, not proof of the exact latest edited
+pose in the user's screenshot. All three runs applied a safe sampled partial
+pose, exited 0, preserved the library hash, and did NOT achieve four-finger contact.
+
+- Before: `test_artifacts/grip_v6_engagement_before_20261004_1410_status.json`.
+  Solver 2641.819 ms cold; contacts only Pinky S2 and palm. Middle/Index rejected
+  palm triangle 4215 at the 2.5 mm cap; Ring lost the palm contact label. Pinky
+  learned two missed dense safety carriers. Repeatedly halving the same direction
+  could not steer along the unmodeled palm limits.
+- First correction: `test_artifacts/grip_v6_engagement_after_20261004_1435_status.json`.
+  Solver 3140.403 ms, only palm contact. More movement but numerical boundary
+  stalls: predictor had consumed the existing 2 micrometre validation guard.
+- Boundary correction: `test_artifacts/grip_v6_engagement_boundary_20261004_1427_status.json`.
+  Solver 4764.955 ms, only palm contact. Numeric stalling largely removed for
+  Middle/Index/Ring, exposing the actual seat/closure conflict: S1 angles remain
+  approximately 0, while S2 reaches approximately 1.93-2.05 radians without
+  engaging the handle. At palm triangle 4215 the local gap sensitivity is almost
+  entirely S1, so the correct overlap constraint prevents further S1 closure.
+  File suffixes are labels; actual run order is in the chronology/log timestamps.
+
+`surface_driven_grip_solver.gd` corrections now in working code:
+- Differentiate the re-queried saved-wrapper target used by acceptance, retaining
+  the free skin carrier during each probe. Previously a frozen radial hit could
+  give a direction inconsistent with acceptance.
+- Include affected sampled skin (including palm) and one current palm-contact
+  witness in the coordinated direction. Predict the same skin-normal ray gap
+  that final material/contact checks use, instead of mixing normal definitions.
+- Predict to nominal overlap caps, leaving the existing numerical guard for
+  validation error. Use a 0.001 radian derivative probe instead of 0.0001; Godot
+  Vector3 is single precision by default. Exact endpoint/midpoint/dense checks
+  still decide acceptance; caps and ROM were NOT increased.
+- Export per-pass rejection counts, last rejection, angles and the last requested
+  versus constrained movement, nearby limit rows, and unknown gap derivatives.
+  The final diagnostic-only unknown-derivative fields were added after the last
+  runtime run; no further runtime result is claimed for that logging-only edit.
+- Palm retention still uses one sampled witness reselected each step. It is not
+  a new continuous palm anchor implementation. Missing/exit ray probes remain
+  unknown and cannot certify a feasible direction; exact checks remain required.
+
+Current unresolved design boundary: seating the open palm all the way to its cap
+can make S1 closure incompatible with keeping the weapon fixed afterward. The
+user has been asked whether a small weapon translation during closure is allowed,
+preserving fixed Hand/wrist, authored weapon orientation, palm contact and all
+caps. This seating behavior change is NOT implemented pending their answer.
+Do not represent this as a fixed grip, increase caps, or run broad old sliced
+verifiers. Thumb remains open. No Git mutation was performed.
+
+Official precision reference:
+https://docs.godotengine.org/en/4.7/classes/class_vector3.html
+
+### Moving skin contact and coordinated closure implemented (October 4)
+
+User authorized a fixed weapon contact point with a mobile touching point inside
+the same finger section. They explicitly require the bias pull to remain active
+instead of being overwritten by contact locking. The live V6 path now implements
+this for all four non-thumb fingers on both hands; Thumb closure remains paused.
+
+- `prepared_surface_grip_anatomy.gd`: revision v3 caches valid palmar triangle
+  patches clipped by the same original-weight ownership and closing-half rules.
+  Neighbor links require a shared source edge with overlapping eligible domains.
+  Existing sampled safety pools/caps are preserved; no extra collision permission.
+- `surface_grip_skin_contact.gd`: follows the closest continuous skin point from
+  its seeded triangle through connected same-section patches (bounded 16 face
+  transitions). Uses actual posed original-weight triangle geometry, not a rigid
+  substitute. The weapon anchor stays fixed; the skin barycentric location and
+  its interpolated prepared percentage move. Missing coordinates stay explicit
+  at -1. No jumping to disconnected skin or dorsal targets.
+- `surface_driven_grip_solver.gd`: replaces independent hinge stepping with
+  a shared three-angle step. Three sparse skin probes differentiate the existing
+  weighted distance/bell score. The bias is evaluated at the mobile skin point;
+  free-section carriers/targets stay fixed within derivative probes. Preferences
+  remain 20/50/60, spread 25, bias strength 50%, pull weights 0.6/0.8/0.3.
+- Contact constrains the existing allowed normal-gap interval, not an exact
+  depth or skin percentage. A small bounded projection allows compensating joint
+  motion at contact or ROM boundaries. All three joints may open/close together;
+  final proposals still pass actual material, same-side and contact checks.
+- Backtracking now checks objective improvement as well as safety/contact.
+  Endpoint and midpoint checks reject obvious release/regrip moves. Full affected
+  skin confirmation follows short batches; rejection restores the confirmed pose
+  AND its contact state, learns the missed carrier and uses only the existing
+  maximum three whole-hand correction passes. There are 16 simultaneous digit
+  steps per pass, replacing up to 16 separate steps for each of three hinges.
+- Diagnostics retain every digit pass, selected percentages and stop reasons in
+  `solver_totals.digit_passes`, plus coupled-step count. The old independent
+  angular-request helper and contact-only early termination were removed. Contact
+  acquisition no longer ends bias adjustment by itself.
+
+Researched the official Godot 4.7 Geometry3D barycentric and closest-segment
+helpers before implementation:
+https://docs.godotengine.org/en/4.7/classes/class_geometry3d.html
+Fresh central UI/dependency compile passed without script errors:
+`godot_runs/the_will_2026-10-04_13-58-24.log`; whitespace check passed.
+No live grip, timing benchmark or broad verifier was run under the user's reduced
+testing instruction. Surface contact is continuous within the prepared polygons;
+the collision and motion checks remain sampled, not a whole-mesh swept collision
+certificate. Visual benefit, final contacts and duration await manual testing.
+
+### Pre-change observation and comparison
+
+Manual observation and code comparison before this change: Middle mostly behaves as intended;
+Index/Ring/Pinky bend before their middle sections seat, producing tip-hook contact
+with S2 still away from the Handle. User supplied an image. This is a partial
+visual result, not full-hand acceptance. Investigation made NO solver changes or
+new Godot runs; findings below are fresh code evidence, not a captured numerical
+replay of that image.
+
+- All four fingers use the same preparation, worker, FK, pose binding and retention.
+  No missing non-thumb anatomy or Middle-only application filter was found. The
+  complete fifteen-bone packet includes the explicitly open Thumb. Application
+  checks material safety and pose completeness, not all four fingers contacting.
+- Closure order is Middle, Index, Ring, Pinky. Weapon seating runs once before
+  closure; later fingers inherit the current pose and acquired-contact obligations.
+  Saved prepared right-hand chain lengths are approximately 102.1 / 85.1 / 92.8 /
+  83.8 mm respectively; individual root frames/planes differ. These facts can
+  favor Middle's reach, but do not prove the reason for the observed failure;
+  captured live dimensions may differ from the saved anatomy.
+- S3 preference really is 60% in current code. Sample selection includes the
+  broader palmar region; gap minus bell preference can still select nearer-tip
+  skin. Actual chosen percentages cannot be inferred from the screenshot.
+- `surface_driven_grip_solver.gd::_weighted_joint_request` normalizes over affected
+  sections. At the last hinge, only S3 contributes, so its 0.3 cancels. It is a
+  relative objective weight, not a distal-closing limit. S3 may improve its own
+  distance while S2 remains away; neither the loop nor acceptance requires S2
+  contact before accepting that move.
+- Once tip contact is acquired, `_retains_contacts` preserves that section.
+  One-joint-at-a-time proposals may reject a move that needs coordinated S1/S2/S3
+  adjustment to keep S3 contact while seating S2. Safe proposals with no score
+  improvement stop the hinge immediately; backtracking currently handles safety
+  and contact loss only. Later passes can repeat that same local stopping point.
+- Additional unresolved checks: targets use radial axis queries while motion is
+  projected onto each hinge plane; missing surface coordinates silently remove
+  the soft bias (percent -1). Neither has been demonstrated in the user's pose.
+
+Next narrow candidate direction, NOT IMPLEMENTED: evaluate coordinated bounded
+digit adjustments so S2 seating and S3 posture can improve together, retaining
+contact and all existing caps/ROM/20-50-60 preferences. Before claiming a specific
+runtime cause, expose chosen percentages and per-joint stopping reasons; current
+per-digit summaries omit most early-exit reasons and retain only the last pass.
+
+Latest contact-location tuning: user changed only S3 from 80% to 60% after
+observing excessive bending. Current non-thumb preferences on both hands are
+S1/S2/S3 = 20/50/60, with pull weights still 0.6/0.8/0.3, spread 25 percentage
+points and bias strength 50%. Thumb remains paused; joint and overlap limits
+are unchanged. Anatomy selection and solver targets now share the `PEAKS`
+constant, included in the anatomy cache identity to prevent stale targets.
+Earlier 20/50/80 references below record the preceding state.
+Fresh central Godot compile passed: `godot_runs/the_will_2026-10-04_13-30-06.log`.
+Visual outcome remains for the user's manual test; no live solve was run.
+
+User explicitly reduced automated testing for this slice to conserve tokens;
+visual behavior and duration will be assessed manually in game. Do not resume
+the long solver harness, HTML exports or a broad regression suite by default.
+The recovery snapshot is commit `f789651db50917104147eea9fd14c2531d3b042d`,
+tag `hand-overhault-v6.0-sub-optimised`; branch and tag were verified remotely.
+The replacement described here is local work AFTER that snapshot, not pushed.
+
+Production acquisition now uses `surface_driven_grip_solver.gd` through the
+existing `saved_wrapper_grip_acquisition.gd` worker and
+`preview_grip_acquisition.gd` pose owner. It no longer prepares sliced guide
+sections, runs circle progression, checks guide-attachment flags, or performs
+the old five-plane realized assessment after applying the pose.
+
+- `prepared_surface_grip_anatomy.gd`: original-weight skin samples, calibrated
+  open poses and fixed wrist/Index1/Pinky1 references. Section 0..100 is a cached
+  3D mesh-edge surface coordinate between skin-influence boundaries, not the
+  historical live-slice contour length and not a bone-length percentage.
+  This derived coordinate cache is in memory, not yet an anatomy-resource export.
+- `grip_surface_query.gd`: native immutable TriangleMesh BVHs for the saved
+  physical Handle and separate digit/palm targets. Private millimetre query
+  scaling preserves the requested precision; public positions remain named
+  metre coordinates. No wrapper regeneration or live surface slicing.
+- Main weapon seating translates in two stages at the selected station, with
+  fixed Hand/wrist and preserved weapon basis: align to the perpendicular palm
+  reference, then advance to the saved palm target or the physical overlap cap.
+- Four fingers use bounded ray-driven hinge adjustments and the existing
+  20/50/80 preferences, spread 25 and strength 50%. At most three correction
+  passes across the whole hand. Existing section limits and overlap caps remain.
+- Thumb has an explicit calibrated open pose under the same fifteen-bone owner;
+  no old Thumb solver runs. Its geometry remains obstruction data. Its new
+  articulation/closure feature is deferred.
+- Support retains its existing macro arm/wrist placement and uses the same
+  four-finger closure with weapon translation disabled. The old support seat
+  loop and pre-claim legacy finger scans are bypassed for the V6 preview.
+- Rigid-motion retention, stale-result rejection and handle-% invalidation
+  remain on the existing owner. The UI shows four-finger application duration,
+  pending-contact digits and paused Thumb, rather than declaring full success.
+
+Safety is explicitly sampled original skin plus bone-segment checks, not exact
+whole-mesh certification. Iterative candidate checks use bounded coverage;
+the complete prepared sample set is checked at the initial/final pose. A final
+sampled overlap violation prevents application. No physical cap is enlarged.
+Legacy files still used by historical diagnostics or non-V6 consumers remain;
+they are not a fallback or second closure writer for this preview.
+
+Verification: central Godot 4.7 `--check-only` on the Skill Crafter UI and its
+preloaded dependencies passed after fixing a type inference error. No numerical
+grip benchmark, screenshot, HTML report or live grip acceptance run was executed.
+Final compile log: `godot_runs/the_will_2026-10-04_12-16-09.log` (no script errors).
+Actual appearance, cold/warm duration, both hands and movement retention remain
+UNTESTED for this replacement. Next: user tests a saved weapon in a fresh skill,
+then handle-% changes and Tip/Pommel/Roll; inspect a specific failure if reported.
+
+### First manual failure: final overlap rejection (October 4)
+
+User's first manual run reported `no_pose_within_material_overlap_limits`.
+That gate means acquisition returned a candidate but its final full-sample safety
+check failed. Fast candidate checks could miss a point that the final pool caught.
+The exact rejected region was discarded by the application gate, so it is unknown
+for that run; no visual success or duration was established.
+
+Correction: confirm each completed section against its full affected-skin pool
+before keeping it. If rejected, retain its prior confirmed-safe pose and add the
+exact missed carrier to the private fast checks for the next bounded pass. The
+existing maximum three whole-hand corrections and final check remain; caps do
+not change. Affected samples now include all triangle-corner influences and
+their selected-bone ancestors, because a stationary sample's normal can change
+when another corner moves. Ownership/attraction labels are unchanged. Preparation
+revision is v2 to invalidate old coverage caches. Remaining hard failures expose
+region, section and depth/cap in the UI (inside-ray depth marked as a lower bound).
+This correction is pending the user's next visual run; only compile checks are
+being performed under the reduced-testing instruction.
+Fresh compile passed: `godot_runs/the_will_2026-10-04_12-43-27.log`; whitespace
+check passed. No live solver run or timing benchmark was added.
+
+### Section pull strengths (October 4)
+
+User selected S1 = 0.6, S2 = 0.8, S3 = 0.3 for the four non-thumb fingers
+on both hands. These are relative attraction weights, not contact percentages,
+overlap allowances or joint stiffness. S2 has strongest influence, S3 weakest.
+The existing 20/50/80 skin-location preferences, 25-point spread and 50% bias
+strength remain separate and unchanged. Thumb closure remains disabled.
+
+`surface_driven_grip_solver.gd` now combines angular requests from all sections
+downstream of each hinge using these weights. Candidate acceptance compares the
+weighted mean of the three available section costs, including the existing
+location preference. Losing a previously valid target rejects the candidate;
+newly available targets enter the objective after accepting the pose. This makes
+the weights influence competing pose choices rather than merely scaling isolated
+costs. Target sets are reused until the accepted pose changes. Each hinge stops
+on settled target contact only when all its downstream sections settle, or when
+the existing bounded search can no longer improve the pose.
+
+Safety, acquired-contact retention, full affected-sample section confirmation,
+joint limits and the maximum three whole-hand correction passes remain unchanged.
+The acquisition metrics include `section_pull_weights` for diagnosis. No extra
+solver, pass budget or exposed UI control was added.
+
+Fresh Godot 4.7 central UI/dependency compile passed with no script errors:
+`godot_runs/the_will_2026-10-04_13-15-42.log`. No runtime grip or timing benchmark
+was run; visual outcome and duration await the user's manual game test.
 
 ## October 4: current user-authorized pivot and requirements
 
 This section supersedes the circle/slice continuation instructions below as the
 next implementation direction. Preserve their history and current source in the
 requested `hand overhault v6.0 sub-optimised` Git savepoint before replacement.
-The new solver is PLANNED, NOT IMPLEMENTED. The latest strict-guide live run
+At this pre-replacement checkpoint the new solver was PLANNED, NOT IMPLEMENTED;
+the implementation note above supersedes that status. The latest strict-guide live run
 timed out during Middle, with no new pose applied. This is a recovery snapshot,
 not a working-grip release or proof that no improvements to the old method exist.
 

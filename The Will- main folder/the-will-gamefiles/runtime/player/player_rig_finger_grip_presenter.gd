@@ -4,6 +4,7 @@ class_name PlayerRigFingerGripPresenter
 const JosieRigScene = preload("res://Josie/josie.tscn")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const PlayerDigitHingeRulesScript = preload("res://runtime/player/player_digit_hinge_rules.gd")
+const SavedWrapperGripSource = preload("res://runtime/player/grip/saved_wrapper_grip_source.gd")
 const PlayerFingerSurfaceGripSolverScript = preload(
 	"res://runtime/player/player_finger_surface_grip_solver.gd"
 )
@@ -216,6 +217,25 @@ func release_planar_grip_pose(slot_id: StringName) -> void:
 	planar_grip_rotation_lookup.erase(slot_id)
 
 
+func _prepared_preview_enabled(skeleton: Skeleton3D) -> bool:
+	# The station declares the acquisition owner before its first claim. Do not
+	# run legacy closure during that gap, on configuration failure, or on release.
+	var ancestor: Node = skeleton
+	while ancestor != null:
+		if ancestor.has_meta("prepared_grip_preview_enabled"):
+			return bool(ancestor.get_meta("prepared_grip_preview_enabled"))
+		ancestor = ancestor.get_parent()
+	return false
+
+func _uses_prepared_weapon(grip_guide: Node3D) -> bool:
+	if not is_instance_valid(grip_guide):
+		return false
+	var weapon := grip_guide.get_parent()
+	# Invalid prepared data remains owned by the prepared pipeline. Falling back
+	# to serial closure would introduce a second, incompatible grip on failure.
+	return is_instance_valid(weapon) and weapon.has_meta(SavedWrapperGripSource.META)
+
+
 func apply_planar_grip_rotations(skeleton: Skeleton3D, slot_id: StringName) -> bool:
 	if skeleton == null or not planar_grip_rotation_lookup.has(slot_id):
 		return false
@@ -335,6 +355,7 @@ func update_finger_grip_targets(
 	if skeleton == null:
 		return
 	_ensure_animation_grip_baseline_cache()
+	var prepared_preview := _prepared_preview_enabled(skeleton)
 	for slot_id: StringName in [SLOT_RIGHT, SLOT_LEFT]:
 		var side_targets: Dictionary = finger_target_lookup.get(slot_id, {})
 		if planar_grip_rotation_lookup.has(slot_id):
@@ -343,6 +364,11 @@ func update_finger_grip_targets(
 			continue
 		var grip_guide: Node3D = source_lookup.get(slot_id) as Node3D
 		if grip_guide == null or not is_instance_valid(grip_guide):
+			continue
+		if prepared_preview or _uses_prepared_weapon(grip_guide):
+			# Prepared acquisition or its saved replay owns all digit rotations.
+			# Unarmed hands without a guide keep their existing animation branch.
+			_sync_finger_targets_to_current_pose(skeleton, slot_id, side_targets)
 			continue
 		var grip_center_node: Node3D = _resolve_grip_center_node(grip_guide)
 		if (
@@ -902,6 +928,9 @@ func _resolve_exact_surface_weapon_seat_for_path(
 		"context_key": "",
 		"grip_execution_path_id": execution_path_id,
 	}
+	if _prepared_preview_enabled(skeleton) or _uses_prepared_weapon(grip_guide):
+		invalid["status"] = &"weapon_surface_seat_owned_by_v6"
+		return invalid
 	if grip_guide == null or not is_instance_valid(grip_guide):
 		return invalid
 	if _resolve_grip_execution_path_id(slot_id, grip_guide) != execution_path_id:
@@ -1485,6 +1514,8 @@ func _update_exact_surface_serial_grasp_for_path(
 ) -> void:
 	if planar_grip_rotation_lookup.has(slot_id):
 		apply_planar_grip_rotations(skeleton, slot_id)
+		return
+	if _prepared_preview_enabled(skeleton) or _uses_prepared_weapon(grip_guide):
 		return
 	if _resolve_grip_execution_path_id(slot_id, grip_guide) != execution_path_id:
 		_clear_contact_ray_debug(grip_center_node)
@@ -2119,6 +2150,8 @@ func _apply_surface_grasp_rotations(
 ) -> bool:
 	if planar_grip_rotation_lookup.has(slot_id):
 		return apply_planar_grip_rotations(skeleton, slot_id)
+	if _prepared_preview_enabled(skeleton):
+		return false
 	var wrote_pose := false
 	for bone_name: StringName in PlayerDigitHingeRulesScript.get_finger_bone_names(
 		slot_id

@@ -114,6 +114,12 @@ func prepare(skeleton: Skeleton3D, slot: StringName, weapon: Node3D, key: String
 			rotations[name]=basis.orthonormalized().get_rotation_quaternion().normalized()
 			dimensions[name]={"position":skeleton.get_bone_pose_position(index),"scale":skeleton.get_bone_pose_scale(index)}
 			parent_name=name; parent_world=skeleton.global_transform*skeleton.get_bone_global_pose(index)
+	# A cached contact proof belongs to these exact digit dimensions. Rotations
+	# alone cannot preserve that proof after animation changes a local offset or
+	# scale. Reject before the caller writes any bone; acquisition can recapture.
+	if not matches_geometry:
+		return _fail("prepared_digit_dimensions_changed").merged({
+			"prepared_geometry_matches_live":false, "geometry_checks":geometry})
 	return {"valid":true,"rotations":rotations,"dimensions":dimensions,"hand_in_weapon":hand_local,
 		"hand_in_weapon_origin_id":Origins.ORIGIN_WEAPON_ROOT,
 		"anatomy_signature":packet.anatomy_signature,"source_pose_id":packet.source_pose_id,

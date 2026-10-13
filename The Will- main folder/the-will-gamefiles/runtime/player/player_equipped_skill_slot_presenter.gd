@@ -3,6 +3,7 @@ class_name PlayerEquippedSkillSlotPresenter
 
 const CombatAnimationStationStateScript = preload("res://core/models/combat_animation_station_state.gd")
 const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_state.gd")
+const SurfaceGripSolver = preload("res://runtime/player/grip/surface_driven_grip_solver.gd")
 
 const EQUIPMENT_SLOT_PRIORITY: Array[StringName] = [
 	&"hand_right",
@@ -112,6 +113,7 @@ func resolve_runtime_skill_slot(
 	result["preview_loop_enabled"] = draft.preview_loop_enabled
 	result["authored_for_two_hand_only"] = draft.authored_for_two_hand_only
 	result["equipment_state"] = equipment_state
+	_validate_prepared_grip_replay(result, saved_wip, draft)
 	return result
 
 func resolve_runtime_idle_pose(
@@ -214,7 +216,27 @@ func resolve_runtime_idle_pose(
 	result["speed_deceleration_percent"] = draft.speed_deceleration_percent
 	result["preview_loop_enabled"] = true
 	result["equipment_state"] = equipment_state
+	_validate_prepared_grip_replay(result, saved_wip, draft)
 	return result
+
+func _validate_prepared_grip_replay(result: Dictionary, weapon: CraftedItemWIP, draft: CombatAnimationDraft) -> void:
+	if weapon == null or weapon.stage2_item_state == null:
+		return
+	var fields := draft.runtime_cache_signature.split("|", false, 2)
+	var current_revision := (
+		fields.size() >= 2
+		and fields[0] == "runtime_cache_v8_committed_surface_grip"
+		and fields[1] == String(SurfaceGripSolver.REVISION)
+	)
+	var clip = result.get("baked_runtime_clip")
+	var ready: bool = current_revision and clip != null and clip.has_solved_replay_track()
+	result["grip_replay_ready"] = ready
+	if not ready:
+		# Keep authored nodes intact for Save to rebuild. Runtime cannot replay
+		# obsolete fingers or fall back to a different closure method.
+		result["baked_runtime_clip"] = null
+		result["success"] = false
+		result["message"] = "Saved grip needs refresh. Open this weapon in Skill Crafter and Save."
 
 func _apply_equipped_weapon_skill_slots(
 	equipment_slot_id: StringName,

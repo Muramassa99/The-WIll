@@ -71,7 +71,8 @@ func solve_arm_targets(
 		elif slot_is_dominant and hand_anchor_node != null and is_instance_valid(hand_anchor_node):
 			desired_target -= hand_anchor_node.global_position - current_hand_world
 		var bound: Dictionary = bound_hand_frames.get(slot_id, {})
-		if bound.get("valid", false) and bound.get("hand_to_world_origin_id") == Origins.ORIGIN_RL_BONE_ROOT and bound.get("hand_in_weapon_origin_id") == Origins.ORIGIN_WEAPON_ROOT and bound.get("hand_to_world") is Transform3D:
+		var bound_frame_valid: bool = bound.get("valid", false) and bound.get("hand_to_world_origin_id") == Origins.ORIGIN_RL_BONE_ROOT and bound.get("hand_in_weapon_origin_id") == Origins.ORIGIN_WEAPON_ROOT and bound.get("hand_to_world") is Transform3D
+		if bound_frame_valid:
 			# The solved Hand frame replaces the old contact-center subtraction.
 			# Reach, body restrictions and pole selection below remain unchanged.
 			desired_target = (bound.hand_to_world as Transform3D).origin
@@ -104,12 +105,18 @@ func solve_arm_targets(
 			query_exclusions
 		)
 		var corrected_target: Vector3 = projection.get("corrected_target", desired_target) as Vector3
-		if not slot_is_dominant and _weapon_body_proxy_intersects_body(
+		var weapon_body_illegal := not slot_is_dominant and _weapon_body_proxy_intersects_body(
 			body_restriction_root,
 			guidance_target,
 			constraint_solver,
 			query_exclusions
-		):
+		)
+		# A bound support hand follows an established weapon. Moving that hand
+		# cannot correct collision of the weapon against the torso. Preserve the
+		# genuine arm/path projection above; leave weapon displacement to its owner.
+		projection["weapon_body_illegal"] = weapon_body_illegal
+		projection["weapon_body_displacement_deferred_to_weapon_owner"] = weapon_body_illegal and bound_frame_valid
+		if weapon_body_illegal and not bound_frame_valid:
 			var forward_push: float = maxf(
 				float(settings.get("front_bias_amount", 0.18)) * 0.35,
 				float(settings.get("safety_margin_meters", 0.08))
@@ -117,9 +124,6 @@ func solve_arm_targets(
 			corrected_target += (
 				torso_frame.get("forward_world", character_frame_resolver.resolve_basis_forward_world(global_basis)) as Vector3
 			).normalized() * forward_push
-			projection["weapon_body_illegal"] = true
-		else:
-			projection["weapon_body_illegal"] = false
 		var forearm_world: Vector3 = get_bone_world_position_callable.call(forearm_bone_name)
 		var pole_target: Vector3 = _resolve_pole_target(
 			forearm_world,

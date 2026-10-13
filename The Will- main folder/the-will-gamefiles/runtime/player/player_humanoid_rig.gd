@@ -308,6 +308,7 @@ var locomotion_vertical_velocity: float = 0.0
 var runtime_locomotion_state_machine_playback: AnimationNodeStateMachinePlayback = null
 var upper_body_authoring_state: Dictionary = {}
 var authoring_contact_anchor_basis_lookup: Dictionary = {}
+var _prepared_support_grip_seat: Dictionary = {}
 var authoring_limb_twist_neutral_rotation_lookup: Dictionary = {}
 var authoring_digit_hinge_neutral_rotation_lookup: Dictionary = {}
 var authoring_limb_twist_distribution_state: Dictionary = {}
@@ -1104,6 +1105,8 @@ func claim_planar_grip_pose(slot_id: StringName, weapon: Node3D, relationship_ke
 
 
 func release_planar_grip_pose(slot_id: StringName) -> void:
+	if _prepared_support_grip_seat.get("slot") == slot_id:
+		finish_prepared_support_grip_seat(false)
 	planar_grip_pose_binding.release(slot_id)
 	finger_grip_presenter.release_planar_grip_pose(slot_id)
 
@@ -1140,6 +1143,12 @@ func resolve_planar_grip_motion_frame(slot_id: StringName) -> Dictionary:
 	if guidance == null or not is_instance_valid(guidance):
 		return {}
 	var weapon := guidance.get_parent() as Node3D
+	if _prepared_support_grip_seat.get("slot") == slot_id and _prepared_support_grip_seat.get("weapon") == weapon:
+		var target: Transform3D = weapon.global_transform * (_prepared_support_grip_seat.hand_in_weapon as Transform3D)
+		return {"valid": target.is_finite(), "hand_to_world": target,
+			"hand_to_world_origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
+			"hand_in_weapon": _prepared_support_grip_seat.hand_in_weapon,
+			"hand_in_weapon_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT}
 	var relationship: Dictionary = planar_grip_pose_binding.relationship(slot_id, weapon)
 	if relationship.is_empty() or not weapon.global_transform.is_finite():
 		return {}
@@ -1148,6 +1157,76 @@ func resolve_planar_grip_motion_frame(slot_id: StringName) -> Dictionary:
 		"hand_to_world_origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
 		"hand_in_weapon": relationship.hand_in_weapon,
 		"hand_in_weapon_origin_id": relationship.hand_in_weapon_origin_id}
+
+
+## A joining support hand may move to a numerical seat proposal while the
+## established weapon/primary unit remains fixed. Existing arm reach and wrist
+## operators realize the request; the caller validates the observed skin before
+## committing any new finger pose. This temporary frame never becomes a save.
+func begin_prepared_support_grip_seat(slot_id: StringName, weapon: Node3D, requested_hand: Transform3D) -> Dictionary:
+	if skeleton == null or not authoring_preview_mode_enabled or slot_id == dominant_grip_slot_id or not is_support_hand_active(slot_id):
+		return {"valid": false, "reason": "support_seat_requires_joining_support_hand"}
+	var guidance := get_arm_guidance_target(slot_id)
+	if not is_instance_valid(weapon) or guidance == null or guidance.get_parent() != weapon or not requested_hand.is_finite():
+		return {"valid": false, "reason": "invalid_support_seat_frame"}
+	if not _prepared_support_grip_seat.is_empty():
+		return {"valid": false, "reason": "support_seat_transaction_already_active"}
+	var hand_index := skeleton.find_bone(LEFT_HAND_BONE if slot_id == &"hand_left" else RIGHT_HAND_BONE)
+	var clavicle_index := skeleton.find_bone(LEFT_CLAVICLE_BONE if slot_id == &"hand_left" else RIGHT_CLAVICLE_BONE)
+	if hand_index < 0 or clavicle_index < 0:
+		return {"valid": false, "reason": "missing_support_arm_bones"}
+	var before: Transform3D = skeleton.global_transform * skeleton.get_bone_global_pose(hand_index)
+	if not before.basis.is_equal_approx(requested_hand.basis):
+		return {"valid": false, "reason": "support_seat_must_preserve_requested_orientation"}
+	var poses: Dictionary = {}
+	var pending: Array[int] = [clavicle_index]
+	while not pending.is_empty():
+		var bone: int = pending.pop_back()
+		poses[bone] = skeleton.get_bone_pose(bone)
+		for child: int in skeleton.get_bone_children(bone): pending.append(child)
+	var target: Node3D = left_hand_ik_target if slot_id == &"hand_left" else right_hand_ik_target
+	var pole: Node3D = left_hand_pole_target if slot_id == &"hand_left" else right_hand_pole_target
+	_prepared_support_grip_seat = {"slot": slot_id, "weapon": weapon, "poses": poses,
+		"arm_stage_trace": [],
+		"hand_in_weapon": weapon.global_transform.affine_inverse() * requested_hand,
+		"target": target, "target_transform": target.global_transform if is_instance_valid(target) else Transform3D.IDENTITY,
+		"pole": pole, "pole_transform": pole.global_transform if is_instance_valid(pole) else Transform3D.IDENTITY}
+	settle_authoring_support_grip_macro_pose_now(0.00005)
+	var actual: Transform3D = skeleton.global_transform * skeleton.get_bone_global_pose(hand_index)
+	var arm_diagnostics: Dictionary = last_two_hand_solve_result.get(slot_id, {}).duplicate(true)
+	var within_reach := not bool(arm_diagnostics.get("arm_reach_clamped", false))
+	return {"valid": actual.is_finite() and within_reach,
+		"reason": "support_seat_outside_arm_reach" if not within_reach else "",
+		"requested_hand_to_world": requested_hand,
+		"actual_hand_to_world": actual, "origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
+		"previous_hand_to_world": before,
+		"arm_target_diagnostics": arm_diagnostics,
+		"arm_stage_trace": _prepared_support_grip_seat.arm_stage_trace.duplicate(true),
+		"position_error_m": actual.origin.distance_to(requested_hand.origin),
+		"orientation_error_rad": actual.basis.orthonormalized().get_rotation_quaternion().angle_to(requested_hand.basis.orthonormalized().get_rotation_quaternion())}
+
+
+func finish_prepared_support_grip_seat(commit: bool) -> void:
+	if _prepared_support_grip_seat.is_empty(): return
+	var previous: Dictionary = _prepared_support_grip_seat
+	_prepared_support_grip_seat = {}
+	if not commit and skeleton != null:
+		if is_instance_valid(previous.target): previous.target.global_transform = previous.target_transform
+		if is_instance_valid(previous.pole): previous.pole.global_transform = previous.pole_transform
+		for bone: int in previous.poses:
+			skeleton.set_bone_pose(bone, previous.poses[bone])
+		skeleton.force_update_all_bone_transforms()
+
+func _record_prepared_support_arm_stage(slot_id: StringName, stage: StringName, target_world: Vector3) -> void:
+	if _prepared_support_grip_seat.is_empty() or _prepared_support_grip_seat.slot != slot_id:
+		return
+	var bone := skeleton.find_bone(LEFT_HAND_BONE if slot_id == &"hand_left" else RIGHT_HAND_BONE)
+	var actual: Transform3D = skeleton.global_transform * skeleton.get_bone_global_pose(bone)
+	var expected: Transform3D = _prepared_support_grip_seat.weapon.global_transform * _prepared_support_grip_seat.hand_in_weapon
+	_prepared_support_grip_seat.arm_stage_trace.append({"stage": stage,
+		"target_error_m": actual.origin.distance_to(target_world),
+		"requested_error_m": actual.origin.distance_to(expected.origin),
+		"orientation_error_rad": actual.basis.orthonormalized().get_rotation_quaternion().angle_to(expected.basis.orthonormalized().get_rotation_quaternion())})
 
 
 func set_authoring_contact_anchor_basis(slot_id: StringName, anchor_basis_world: Basis) -> void:
@@ -3853,6 +3932,11 @@ func _apply_authoring_arm_spline_preference(
 ) -> void:
 	if skeleton == null:
 		return
+	# A bound support Hand follows the established weapon. Its optional style
+	# preference cannot compete with that contact target in normal or precise
+	# updates. Primary body motion still carries the weapon through its owner.
+	if slot_id != dominant_grip_slot_id and resolve_planar_grip_motion_frame(slot_id).get("valid", false):
+		return
 	var contact_axis_world: Vector3 = _resolve_authoring_contact_axis_world(
 		slot_id,
 		forearm_bone,
@@ -4187,10 +4271,18 @@ func _rotate_bone_toward_end_target(
 	var target_vector: Vector3 = target_local - joint_pose.origin
 	if current_vector.length_squared() <= 0.000001 or target_vector.length_squared() <= 0.000001:
 		return
-	var swing_rotation: Quaternion = Quaternion(
-		current_vector.normalized(),
-		target_vector.normalized()
-	).normalized()
+	var current_direction := current_vector.normalized()
+	var target_direction := target_vector.normalized()
+	var swing_axis := current_direction.cross(target_direction)
+	# The from-to constructor rounds very small turns to identity. atan2 keeps
+	# their cross-product magnitude, allowing the existing precise endpoint
+	# tolerance to converge without increasing the iteration budget.
+	var swing_rotation: Quaternion
+	if swing_axis.length_squared() > 1.0e-16:
+		swing_rotation = Quaternion(swing_axis.normalized(), atan2(
+			swing_axis.length(), clampf(current_direction.dot(target_direction), -1.0, 1.0)))
+	else:
+		swing_rotation = Quaternion(current_direction, target_direction).normalized()
 	var weighted_rotation: Quaternion = Quaternion.IDENTITY.slerp(
 		swing_rotation,
 		clampf(rotation_weight, 0.0, 1.0)
@@ -4442,6 +4534,7 @@ func _build_slot_solve_debug_summary(slot_solve: Dictionary) -> Dictionary:
 		"used_orbit": bool(projection.get("used_orbit", false)),
 		"alternate_target_correction_disabled": bool(projection.get("alternate_target_correction_disabled", false)),
 		"weapon_body_illegal": bool(slot_solve.get("weapon_body_illegal", false)),
+		"weapon_body_displacement_deferred_to_weapon_owner": bool(projection.get("weapon_body_displacement_deferred_to_weapon_owner", false)),
 		"manual_upperarm_roll_active": bool(slot_solve.get("manual_upperarm_roll_active", false)),
 		"manual_upperarm_roll_degrees": float(slot_solve.get("manual_upperarm_roll_degrees", 0.0)),
 		"arm_reach_clamped": bool(slot_solve.get("arm_reach_clamped", false)),
@@ -4803,6 +4896,11 @@ func settle_authoring_support_grip_macro_pose_now(
 			var alignment_world: Vector3 = (
 				resolve_hand_grip_alignment_world_position(support_slot_id)
 			)
+			var alignment_target_world := guidance_target.global_position
+			var bound_frame := resolve_planar_grip_motion_frame(support_slot_id)
+			if bound_frame.get("valid", false):
+				alignment_world = _get_bone_world_position(LEFT_HAND_BONE if support_slot_id == &"hand_left" else RIGHT_HAND_BONE)
+				alignment_target_world = (bound_frame.hand_to_world as Transform3D).origin
 			var forearm_bone: StringName = (
 				LEFT_FOREARM_BONE
 				if support_slot_id == &"hand_left"
@@ -4827,7 +4925,7 @@ func settle_authoring_support_grip_macro_pose_now(
 				)
 			)
 			if (
-				alignment_world.distance_to(guidance_target.global_position)
+				alignment_world.distance_to(alignment_target_world)
 					<= resolved_alignment_epsilon_meters
 				and contact_axis_error_degrees
 					<= AUTHORING_GRIP_RELATIONSHIP_CONTACT_AXIS_EPSILON_DEGREES
@@ -4882,6 +4980,7 @@ func _apply_authoring_precise_contact_alignment_for_slot(
 		slot_id,
 		requested_target_world
 	).get("target_world", requested_target_world) as Vector3
+	_record_prepared_support_arm_stage(slot_id, &"before_reach", target_world)
 	_apply_ccd_arm_reach_pose(
 		upperarm_bone,
 		forearm_bone,
@@ -4894,9 +4993,7 @@ func _apply_authoring_precise_contact_alignment_for_slot(
 		AUTHORING_DIRECT_ARM_CLAVICLE_WEIGHT,
 		alignment_epsilon_meters
 	)
-	# The support hand follows the fixed primary-hand/weapon unit. Align the
-	# existing arm chain to the published Handle contact axis, then reseat the
-	# hand point; do not grant the wrist an independent roll solve.
+	_record_prepared_support_arm_stage(slot_id, &"after_reach", target_world)
 	_apply_authoring_arm_spline_preference(
 		slot_id,
 		clavicle_bone,
@@ -4906,6 +5003,7 @@ func _apply_authoring_precise_contact_alignment_for_slot(
 		hand_anchor,
 		1.0
 	)
+	_record_prepared_support_arm_stage(slot_id, &"after_spline", target_world)
 	_apply_ccd_arm_reach_pose(
 		upperarm_bone,
 		forearm_bone,
@@ -4918,6 +5016,7 @@ func _apply_authoring_precise_contact_alignment_for_slot(
 		AUTHORING_DIRECT_ARM_CLAVICLE_WEIGHT * 0.5,
 		alignment_epsilon_meters
 	)
+	_record_prepared_support_arm_stage(slot_id, &"after_reseat", target_world)
 	_enforce_authoring_upperarm_swing_authority(
 		slot_id,
 		clavicle_bone,
@@ -4925,6 +5024,7 @@ func _apply_authoring_precise_contact_alignment_for_slot(
 		forearm_bone,
 		hand_bone
 	)
+	_record_prepared_support_arm_stage(slot_id, &"after_swing_authority", target_world)
 	if enable_authoring_contact_wrist_basis:
 		_apply_authoring_contact_wrist_basis_for_slot(
 			slot_id,
@@ -4934,6 +5034,7 @@ func _apply_authoring_precise_contact_alignment_for_slot(
 			clampf(authoring_contact_wrist_basis_strength, 0.0, 1.0)
 		)
 	skeleton.force_update_all_bone_transforms()
+	_record_prepared_support_arm_stage(slot_id, &"after_wrist", target_world)
 
 func get_weapon_surface_seat_debug_state(slot_id: StringName) -> Dictionary:
 	if finger_grip_presenter.has_method("get_hand_surface_seat_debug_state"):

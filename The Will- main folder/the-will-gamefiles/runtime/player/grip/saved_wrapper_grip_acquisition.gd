@@ -1,12 +1,12 @@
 extends RefCounted
 
-## Live transaction boundary for the accepted saved-wrapper method. Scene reads
+## Live transaction boundary for V6 surface contact. Scene reads
 ## and application stay in preview_grip_acquisition; one owned worker prepares
 ## and solves detached input. Cancellation is observed between bounded steps.
-const Context = preload("res://runtime/player/grip/saved_wrapper_grip_context.gd")
-const Solver = preload("res://runtime/player/grip/contact_driven_grip_preparation.gd")
+const Solver = preload("res://runtime/player/grip/surface_driven_grip_solver.gd")
 const Chronology = preload("res://runtime/player/grip/grip_chronology.gd")
 const ROOT := &"RL_BoneRoot"
+const DIGITS := [&"index", &"middle", &"ring", &"pinky", &"thumb"]
 var _anatomy: Resource
 var _capture: Dictionary={}
 var _config: Dictionary={}
@@ -28,18 +28,15 @@ func configure(anatomy: Resource,capture: Dictionary,config: Dictionary,host: No
 		return {"valid":false,"reason":"invalid_acquisition_slot_or_host"}
 	if not capture.get("saved_grip_source",{}).get("valid",false):
 		return {"valid":false,"reason":capture.get("saved_grip_source",{}).get("reason","missing_saved_wrapper_source")}
-	for native_class: StringName in [&"GripSavedContactKernel",&"GripSliceKernel",&"GripTopologyKernel"]:
-		if not ClassDB.class_exists(native_class): return {"valid":false,"reason":"required_grip_extension_missing","class":native_class}
 	_anatomy=anatomy
 	_capture=capture.duplicate(true)
 	_config=config.duplicate(true)
-	# The production transaction always prepares every digit; tool selection
-	# options never silently reduce a live hand to a subset.
+	# One pose owner fits the four fingers, then Thumb at the established seat.
 	_config.erase("selected_digits")
 	_tree=host.get_tree()
 	_host=weakref(host)
 	_cancel_requested=false
-	_progress={"stage":"configured","running":false,"method":"saved_wrapper_contact_cpp"}
+	_progress={"stage":"configured","running":false,"method":"surface_contact_v6"}
 	_configured=true
 	return {"valid":true}
 
@@ -74,7 +71,7 @@ func solve() -> Dictionary:
 	if _running or not _configured: return {"valid":false,"reason":"acquisition_not_configured_or_running"}
 	_running=true
 	_progress_update({"stage":"preparing","running":true})
-	var span := Chronology.begin("saved_acquisition.solve",{"slot":_capture.slot,"digits":Context.DIGITS})
+	var span := Chronology.begin("saved_acquisition.solve",{"slot":_capture.slot,"digits":DIGITS})
 	_worker=Thread.new()
 	var active := _worker
 	var error := active.start(Callable(self,"_work"))
@@ -96,22 +93,18 @@ func solve() -> Dictionary:
 
 func _work() -> Dictionary:
 	var started := Time.get_ticks_usec()
-	var span := Chronology.begin("saved_acquisition.prepare",{"slot":_capture.slot})
-	var prepared := Context.new().prepare(_anatomy,_capture,_config)
-	Chronology.finish(span,{"valid":prepared.get("valid",false),"reason":prepared.get("reason","")})
 	if _is_cancelled(): return {"valid":false,"cancelled":true,"reason":"acquisition_cancelled"}
-	if not prepared.get("valid",false): return prepared
 	var solver := Solver.new()
 	solver.configure_lifecycle(Callable(self,"_is_cancelled"),Callable(self,"_progress_update"))
-	# No host: run's numerical path does not await or read a scene on this worker.
+	# Private prepared data only: no scene, exact slices or circle progression.
 	var solver_started := Time.get_ticks_usec()
-	var result: Dictionary=solver.run(prepared.context,prepared.saved,null)
+	var result: Dictionary=solver.run(_anatomy,_capture,_config)
 	var solver_elapsed_ms := float(Time.get_ticks_usec()-solver_started)/1000.0
 	result.merge(solver.diagnostic_snapshot(),true)
 	if not result.has("total_ms"): result["total_ms"]=solver_elapsed_ms
 	result["source_weapon_to_world"]=_capture.object.weapon_to_world
 	result["source_weapon_to_world_origin_id"]=ROOT
 	result["vectors_origin_id"]=ROOT
-	result["contact_backend"]="cpp_saved_contact_batch"
+	result["contact_backend"]="native_nearest_surface_bvh"
 	result["transaction_total_ms"]=float(Time.get_ticks_usec()-started)/1000.0
 	return result

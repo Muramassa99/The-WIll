@@ -2,6 +2,10 @@ extends SceneTree
 
 const Capture = preload("res://tools/grip_plane_proof/capture_grip_placement_stage.gd")
 const Origins = preload("res://core/models/combat_origin_record.gd")
+const SavedSource = preload("res://runtime/player/grip/saved_wrapper_grip_source.gd")
+const SurfaceQuery = preload("res://runtime/player/grip/grip_surface_query.gd")
+const HandlePacket = preload("res://core/resolvers/primary_grip_handle_mesh_packet.gd")
+const Wrapper = preload("res://core/models/prepared_grip_target_wrapper.gd")
 var _checks: int = 0
 var _failures: Array[String] = []
 
@@ -86,9 +90,9 @@ func _run() -> void:
 	malformed = _arrays(PackedVector3Array([Vector3(NAN,0,0),points[1],points[2]]))
 	_reject(extractor,malformed,Mesh.PRIMITIVE_TRIANGLES,0,"nonfinite vertices")
 	_capture_named_frames(extractor,mesh,expected)
-	var report := {"schema":"verify_grip_placement_mesh_capture_v1","ok":_failures.is_empty(),"checks":_checks,
-		"failures":_failures,"capture_sha256":FileAccess.get_sha256("res://tools/grip_plane_proof/capture_grip_placement_stage.gd"),
-		"production_pose_written":false,"frozen_captures_changed":false,"scope":"direct triangle copy and preserved capture coordinate metadata"}
+	var report := {"schema":"verify_grip_placement_mesh_capture_v2","ok":_failures.is_empty(),"checks":_checks,
+		"failures":_failures,"capture_sha256":FileAccess.get_sha256("res://runtime/player/grip/capture_grip_placement_stage.gd"),
+		"production_pose_written":false,"frozen_captures_changed":false,"scope":"strict rendered triangle capture and independent saved-surface capture with downstream validation"}
 	var path: String = "C:/WORKSPACE/test_artifacts/verify_grip_placement_mesh_capture_"+Time.get_datetime_string_from_system().replace(":","-")+".json"
 	if FileAccess.file_exists(path): push_error("Refusing to replace verifier report"); quit(1); return
 	var file := FileAccess.open(path,FileAccess.WRITE)
@@ -131,7 +135,99 @@ func _capture_named_frames(extractor: RefCounted, mesh: ArrayMesh, expected: Pac
 		_check(object.weapon_origin_record.transform_to_parent == machine_to_world.affine_inverse()*held.global_transform,"weapon affine frame unchanged")
 		_check(object.local_face_sources.size() == 3 and captured.object_triangle_count == 3,"capture preserves triangle provenance and count")
 		_check(held.global_transform == before and not captured.production_pose_written,"capture does not move the weapon")
+	_capture_saved_surface_mode(extractor,actor,held,visual,anatomy,stage,packet)
 	held.free(); actor.free()
+
+
+func _capture_saved_surface_mode(extractor: RefCounted, actor: Node3D, held: Node3D,
+		visual: MeshInstance3D, anatomy: Resource, stage: StringName, packet: Dictionary) -> void:
+	var source := _saved_source_fixture()
+	_check(SurfaceQuery.prepare(source).get("valid",false),"analytical saved handle and wrapper pass production validation")
+	held.set_meta(SavedSource.META,source)
+	held.set_meta("preview_primary_grip_seat_local",Vector3.ZERO)
+	held.set_meta("preview_primary_grip_seat_origin_id",Origins.ORIGIN_WEAPON_ROOT)
+	for endpoint: String in ["start","end"]:
+		held.set_meta("primary_grip_span_"+endpoint+"_local",Vector3(0,-0.01 if endpoint == "start" else 0.01,0))
+		held.set_meta("primary_grip_span_"+endpoint+"_origin_id",Origins.ORIGIN_WEAPON_ROOT)
+	var bad_visual := ArrayMesh.new()
+	bad_visual.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,
+		_arrays(PackedVector3Array([Vector3.ZERO,Vector3.RIGHT,Vector3.UP]),PackedInt32Array([0,0,1])))
+	visual.mesh = bad_visual
+	var strict: Dictionary = extractor.capture(actor,held,anatomy,&"hand_right",stage,2,0,packet)
+	_check(not strict.get("valid",false) and strict.get("reason") == "object_triangle_copy_failed"
+		and strict.get("details",{}).get("reason") == "degenerate_or_nonfinite_object_triangle",
+		"strict capture still rejects a degenerate rendered triangle")
+	var saved: Dictionary = extractor.capture(actor,held,anatomy,&"hand_right",stage,3,0,packet,{},false)
+	_check(saved.get("valid",false),"unused bad visual geometry does not block saved-surface capture")
+	if saved.get("valid",false):
+		_check(not saved.object.rendered_geometry_captured and saved.object.geometry_policy == Capture.SAVED_GEOMETRY_POLICY,
+			"saved-source policy explicitly says rendered geometry was not copied")
+		_check(not saved.object.has("local_faces") and not saved.object.has("local_face_sources")
+			and not saved.has("object_triangle_count"),"skipped rendered geometry has no pretend triangle data or count")
+		_check(saved.object.weapon_to_world == held.global_transform
+			and saved.object.mesh_to_world == visual.global_transform,"saved-surface capture preserves live coordinate frames")
+		_check(saved.object.grip_pivot_local == Vector3.ZERO
+			and saved.object.primary_grip_span_start_origin_id == Origins.ORIGIN_WEAPON_ROOT,
+			"saved-surface capture retains station metadata and lineage")
+		_check(SurfaceQuery.prepare(saved.saved_grip_source).get("valid",false),
+			"valid saved handle and wrapper remain usable despite malformed rendered mesh")
+		_check(not saved.production_pose_written and not saved.get("grip_accepted",false),
+			"successful input capture is not an accepted or applied grip")
+	var invalid_frame: Dictionary = packet.duplicate(true)
+	invalid_frame.machine_to_world = Transform3D(Basis.from_scale(Vector3.ZERO),Vector3.ZERO)
+	var frame_rejected: Dictionary = extractor.capture(actor,held,anatomy,&"hand_right",stage,4,0,invalid_frame,{},false)
+	_check(not frame_rejected.get("valid",false) and frame_rejected.get("reason") == "invalid_machine_frame",
+		"saved-surface mode retains frame validation")
+	held.set_meta(SavedSource.META,{"valid":false,"reason":"fixture_saved_source_invalid"})
+	var invalid_source: Dictionary = extractor.capture(actor,held,anatomy,&"hand_right",stage,5,0,packet,{},false)
+	_check(not invalid_source.get("valid",false) and invalid_source.get("reason") == "fixture_saved_source_invalid",
+		"invalid saved-source metadata cannot use rendered-geometry bypass")
+	for kind: String in ["handle","wrapper"]:
+		var malformed_source: Dictionary = source.duplicate(true)
+		if kind == "handle":
+			var bad_indices: PackedInt32Array = malformed_source.handle_packet.indices.duplicate()
+			bad_indices[0] = 999
+			malformed_source.handle_packet.indices = bad_indices
+			malformed_source.handle_packet.primary_grip_handle_indices = bad_indices
+		else:
+			malformed_source.wrapper = source.wrapper.duplicate(true)
+			var bad_indices: PackedInt32Array = malformed_source.wrapper.target_indices.duplicate()
+			bad_indices[0] = 999
+			malformed_source.wrapper.target_indices = bad_indices
+		held.set_meta(SavedSource.META,malformed_source)
+		var malformed: Dictionary = extractor.capture(actor,held,anatomy,&"hand_right",stage,6,0,packet,{},false)
+		_check(malformed.get("valid",false),kind+" topology is left for existing downstream validation")
+		_check(not SurfaceQuery.prepare(malformed.get("saved_grip_source",{})).get("valid",false),
+			"malformed saved "+kind+" is rejected by production surface validation")
+	_check(SurfaceQuery.prepare(source).get("valid",false),"failure fixtures do not mutate the valid saved source")
+
+
+func _saved_source_fixture() -> Dictionary:
+	var vertices := PackedVector3Array([Vector3(-0.01,-0.01,-0.01),Vector3(0.01,-0.01,-0.01),
+		Vector3(0.01,0.01,-0.01),Vector3(-0.01,0.01,-0.01),Vector3(-0.01,-0.01,0.01),
+		Vector3(0.01,-0.01,0.01),Vector3(0.01,0.01,0.01),Vector3(-0.01,0.01,0.01)])
+	var indices := PackedInt32Array([0,2,1,0,3,2,4,5,6,4,6,7,0,1,5,0,5,4,3,7,6,3,6,2,0,4,7,0,7,3,1,2,6,1,6,5])
+	var wrapper := Wrapper.new()
+	wrapper.schema_version = Wrapper.SCHEMA_VERSION
+	wrapper.construction_revision = Wrapper.CONSTRUCTION_REVISION
+	wrapper.source_body_signature = "capture_saved_cube"
+	wrapper.source_handle_vertices_m = vertices
+	wrapper.source_handle_indices = indices
+	wrapper.character_id = &"capture_fixture"
+	wrapper.anatomy_signature = "mesh_capture_verifier_fixture"
+	wrapper.inward_min_radius_m = 0.05
+	wrapper.guide_inward_target_offset_m = 0.001
+	wrapper.non_thumb_s1_guide_target_depth_m = 0.001
+	wrapper.palm_guide_target_depth_m = 0.001
+	var profile := PackedVector2Array([Vector2(-0.01,-0.01),Vector2(0.01,-0.01),Vector2(0.01,0.01),Vector2(-0.01,0.01)])
+	for field: String in ["source_profile_m","envelope_profile_m","target_profile_m","palm_target_profile_m","non_thumb_s1_target_profile_m"]:
+		wrapper.set(field,profile)
+	for prefix: String in ["target","palm_target","non_thumb_s1_target"]:
+		wrapper.set(prefix+"_vertices_m",vertices)
+		wrapper.set(prefix+"_indices",indices)
+	return {"valid":true,"wrapper":wrapper,"handle_packet":HandlePacket.build(vertices,indices,wrapper.source_body_signature),
+		"source_origin_id":SavedSource.SOURCE_ORIGIN,"source_parent_origin_id":Origins.ORIGIN_WEAPON_ROOT,
+		"metric_units":&"meters","source_to_weapon":Transform3D.IDENTITY}
 
 
 func _arrays(vertices: PackedVector3Array, indices: PackedInt32Array = PackedInt32Array()) -> Array:

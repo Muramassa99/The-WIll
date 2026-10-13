@@ -2,10 +2,12 @@ extends SceneTree
 
 ## Observe the natural Skill Crafter acquisition from real UI signal handlers.
 ## No solved fixture, geometry replacement, forced pose, or solver suppression.
-## Only the already isolated workspace user library is read; it is never saved.
+## Reads the isolated library or an explicit workspace copy; neither is saved.
 const Chronology = preload("res://runtime/player/grip/grip_chronology.gd")
 const UIScene = preload("res://scenes/ui/combat_animation_station_ui.tscn")
 const StationState = preload("res://core/models/combat_animation_station_state.gd")
+const GripData = preload("res://runtime/player/grip/character_grip_data.gd")
+const Capture = preload("res://runtime/player/grip/capture_grip_placement_stage.gd")
 const USER_LIBRARY := "user://forge/player_wip_library_state.tres"
 const OWNER_NAME := "PreparedGripAcquisition"
 const HEARTBEAT_USEC := 1000000
@@ -29,8 +31,13 @@ var _interval_maximum_usec := 0
 var _timeout_seconds := 1800.0
 var _after_seconds := 5.0
 var _library_sha256 := ""
+var _library_path := USER_LIBRARY
 var _classification := "setup_incomplete"
 var _terminal_first: Dictionary = {}
+var _context: Dictionary = {}
+var _actual_capture: Dictionary = {}
+var _weapon_name := ""
+var _source_body_signature := ""
 
 
 func _init() -> void:
@@ -52,26 +59,37 @@ func _run() -> void:
 		return
 	_timeout_seconds = _positive_env("THE_WILL_GRIP_TRACE_TIMEOUT_SECONDS", 1800.0)
 	_after_seconds = _positive_env("THE_WILL_GRIP_TRACE_AFTER_SECONDS", 5.0)
+	var library_override := OS.get_environment("THE_WILL_GRIP_TRACE_LIBRARY").strip_edges()
+	if not library_override.is_empty():
+		library_override = library_override.replace("\\", "/").simplify_path()
+		if not library_override.is_absolute_path() or not library_override.to_lower().begins_with("c:/workspace/"):
+			push_error("THE_WILL_GRIP_TRACE_LIBRARY must be an absolute path inside C:/WORKSPACE.")
+			await _finish("setup_failed_library_outside_workspace", 1)
+			return
+		_library_path = library_override
 	var weapon_name := OS.get_environment("THE_WILL_GRIP_TRACE_WEAPON_NAME").strip_edges()
 	if weapon_name.is_empty(): weapon_name = "Star_Handle_Testing"
+	_weapon_name = weapon_name
 	Chronology.event("runner.start", {
 		"scope": "real_ui_signal_handlers_not_synthetic_mouse_or_full_game_boot",
 		"weapon_action": "ItemList.item_activated (double-click handler)",
 		"skill_action": "Button.pressed (no separate skill double-click handler exists)",
 		"timeout_seconds": _timeout_seconds, "after_seconds": _after_seconds,
 		"configured_weapon_name": weapon_name,
+		"library_path": _library_path,
 		"user_root": actual, "persistence_disabled": true,
 		"fixture_pose_used": false, "solver_modified_by_runner": false,
 		"engine_version": Engine.get_version_info(), "engine_max_fps": Engine.max_fps,
 		"timeout_scope": "observed between main-thread frames; cancellation joins an active worker safely",
 	})
-	if not FileAccess.file_exists(USER_LIBRARY):
+	if not FileAccess.file_exists(_library_path):
 		await _finish("setup_failed_missing_isolated_library", 1)
 		return
-	_library_sha256 = FileAccess.get_sha256(USER_LIBRARY)
+	_library_sha256 = FileAccess.get_sha256(_library_path)
 	var span: int = Chronology.begin("runner.load_isolated_library", {"sha256": _library_sha256,
-		"modified_time_unix_seconds": FileAccess.get_modified_time(USER_LIBRARY), "configured_weapon_name": weapon_name})
-	var library: Resource = load(USER_LIBRARY)
+		"modified_time_unix_seconds": FileAccess.get_modified_time(_library_path), "configured_weapon_name": weapon_name,
+		"library_path": _library_path})
+	var library: Resource = load(_library_path)
 	Chronology.finish(span, {"loaded": library != null})
 	if library == null:
 		await _finish("setup_failed_library_load", 1)
@@ -96,6 +114,8 @@ func _run() -> void:
 		Chronology.event("runner.setup_rejected", {"reason": "weapon_not_found", "weapon_name": weapon_name})
 		await _finish("setup_failed_weapon_not_found", 1)
 		return
+	var saved_stage: Resource = chosen.get("stage2_item_state")
+	_source_body_signature = str(saved_stage.get("primary_grip_handle_body_signature")) if saved_stage != null else ""
 	span = Chronology.begin("runner.instantiate_ui", {"weapon_name": weapon_name, "wip_id": chosen.get("wip_id")})
 	_player = TracePlayer.new()
 	_player.library = library.duplicate(true)
@@ -144,6 +164,7 @@ func _run() -> void:
 	if context.is_empty() or not is_instance_valid(context.get("actor")):
 		await _finish("setup_failed_preview_context_missing", 1)
 		return
+	_context = context
 	_owner = context.actor.get_node_or_null(OWNER_NAME)
 	if _owner == null:
 		await _finish("setup_failed_acquisition_owner_missing", 1)
@@ -335,6 +356,9 @@ func _cancel_and_join() -> void:
 func _finish(classification: String, exit_code: int) -> void:
 	_classification = classification
 	Chronology.event("runner.observation_finished", {"classification": classification, "state": _snapshot(), "grip_success_asserted": false})
+	if OS.get_environment("THE_WILL_GRIP_TRACE_CAPTURE_POSE") == "1" and classification == "preview_applied":
+		await _capture_actual_pose()
+	var status_exported := _export_full_status(classification)
 	await _cancel_and_join()
 	var span: int = Chronology.begin("runner.cleanup", {})
 	if is_instance_valid(_ui):
@@ -342,15 +366,139 @@ func _finish(classification: String, exit_code: int) -> void:
 		_ui.queue_free()
 	if is_instance_valid(_player): _player.queue_free()
 	await process_frame
-	var library_unchanged := _library_sha256.is_empty() or FileAccess.get_sha256(USER_LIBRARY) == _library_sha256
+	var library_unchanged := _library_sha256.is_empty() or FileAccess.get_sha256(_library_path) == _library_sha256
 	Chronology.finish(span, {"library_unchanged": library_unchanged})
-	Chronology.event("runner.complete", {"classification": classification, "exit_code": exit_code if library_unchanged else 1,
+	var final_exit_code := exit_code if library_unchanged and status_exported else 1
+	Chronology.event("runner.complete", {"classification": classification, "exit_code": final_exit_code,
 		"elapsed_seconds": float(Time.get_ticks_usec() - _started_usec) / 1000000.0,
-		"library_unchanged": library_unchanged, "first_terminal": _terminal_first,
+		"library_unchanged": library_unchanged, "first_terminal": _terminal_first, "full_status_exported":status_exported,
 		"grip_success_asserted": false})
 	Chronology.close()
 	print("Grip chronology observation: %s; library unchanged: %s" % [classification, library_unchanged])
-	quit(exit_code if library_unchanged else 1)
+	quit(final_exit_code)
+
+
+func _export_full_status(classification: String) -> bool:
+	var trace_path := OS.get_environment("THE_WILL_GRIP_TRACE_PATH").replace("\\", "/").simplify_path()
+	var path := trace_path.get_basename() + "_status.json"
+	if not trace_path.is_absolute_path() or not path.to_lower().begins_with("c:/workspace/") or trace_path.get_extension().to_lower() != "jsonl":
+		push_error("Full grip status requires an absolute workspace .jsonl trace path.")
+		return false
+	if FileAccess.file_exists(path) or DirAccess.dir_exists_absolute(path):
+		push_error("Grip chronology refuses to overwrite an existing status export: " + path)
+		return false
+	var status: Dictionary = _owner.status() if is_instance_valid(_owner) else {}
+	var report := {"schema":"the_will_grip_full_owner_status", "version":1,
+		"captured_utc":Time.get_datetime_string_from_system(true) + "Z",
+		"captured_unix_seconds":Time.get_unix_time_from_system(), "engine_version":Engine.get_version_info(),
+		"library_path":ProjectSettings.globalize_path(_library_path), "library_sha256":_library_sha256,
+		"library_sha256_at_export":FileAccess.get_sha256(_library_path) if FileAccess.file_exists(_library_path) else "",
+		"classification":classification, "scope":"real_ui_signal_handlers_owner_status_before_cancel_and_cleanup",
+		"chronology_depth_or_item_truncation_applied":false, "grip_success_asserted":false,
+		"state":_snapshot(), "owner_status":status}
+	report.merge(_actual_capture)
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		push_error("Cannot write full grip status: " + error_string(FileAccess.get_open_error()))
+		return false
+	file.store_string(JSON.stringify(report, "\t"))
+	file.flush()
+	var write_error := file.get_error()
+	file.close()
+	if write_error != OK:
+		push_error("Full grip status write failed: " + error_string(write_error))
+		return false
+	Chronology.event("runner.full_status_exported", {"path":path, "classification":classification, "slot_count":status.size()})
+	return true
+
+
+## Optional observer used by a subsequent HTML export. This runs after the
+## timed natural acquisition, never writes a pose, and does not rerun a solver.
+## https://docs.godotengine.org/en/4.7/classes/class_skeleton3d.html#signals
+func _capture_actual_pose() -> void:
+	var span := Chronology.begin("runner.capture_actual_pose", {"solver_ran":false, "pose_writes":false})
+	_actual_capture = {"actual_capture_valid":false, "weapon_name":_weapon_name,
+		"source_library":ProjectSettings.globalize_path(_library_path), "source_library_sha256":_library_sha256,
+		"input_body_signature":_source_body_signature}
+	if not is_instance_valid(_owner) or not is_instance_valid(_context.get("actor")) or not is_instance_valid(_context.get("weapon")):
+		_actual_capture["actual_capture_error"] = "missing_live_context"
+		Chronology.finish(span, _actual_capture)
+		return
+	var requests: Dictionary = _owner.get("_requests")
+	var slot: StringName = &""
+	for candidate: StringName in requests:
+		if requests[candidate].get("dominant") == candidate:
+			slot = candidate
+			break
+	if slot == &"":
+		_actual_capture["actual_capture_error"] = "missing_primary_request"
+		Chronology.finish(span, _actual_capture)
+		return
+	var request: Dictionary = requests[slot].duplicate(true)
+	var data := GripData.load_for_actor(_context.actor)
+	if not data.get("valid", false):
+		_actual_capture["actual_capture_error"] = data
+		Chronology.finish(span, _actual_capture)
+		return
+	var pivot := {"point_local":_context.weapon.get_meta("preview_primary_grip_seat_local"),
+		"origin_id":_context.weapon.get_meta("preview_primary_grip_seat_origin_id"), "source":"preview_primary_grip_seat"}
+	var skeleton: Skeleton3D = _context.actor.get("skeleton")
+	var capture := {}
+	var receive := func() -> void:
+		if capture.is_empty() and _owner._is_current(slot, request):
+			capture.merge(Capture.new().capture(_context.actor, _context.weapon, data.anatomy, slot,
+				&"trace_natural_skeleton_observation", request.serial, 0, {}, pivot))
+			capture["verification_capture_policy"] = "natural_skeleton_updated_signal"
+	skeleton.skeleton_updated.connect(receive)
+	var stamp: PackedByteArray = _owner._realization_stamp()
+	var stable_frames := 0
+	for frame: int in 4:
+		await process_frame
+		if not capture.is_empty(): break
+		var next: PackedByteArray = _owner._realization_stamp()
+		stable_frames = stable_frames + 1 if stamp == next else 0
+		stamp = next
+	if skeleton.skeleton_updated.is_connected(receive): skeleton.skeleton_updated.disconnect(receive)
+	if not _owner._is_current(slot, request):
+		capture = {"valid":false, "reason":"request_replaced_during_capture"}
+	elif capture.is_empty():
+		var active_modifiers: Array = []
+		for child: Node in skeleton.find_children("*", "SkeletonModifier3D", true, false):
+			if child is SkeletonModifier3D and child.active and child.influence > 0.0:
+				if child is PhysicalBoneSimulator3D and not child.is_simulating_physics(): continue
+				active_modifiers.append(str(child.get_path()))
+		if not active_modifiers.is_empty() or stable_frames < 2 or stamp.is_empty():
+			capture = {"valid":false, "reason":"no_stable_naturally_completed_pose", "active_modifiers":active_modifiers}
+		else:
+			capture = Capture.new().capture(_context.actor, _context.weapon, data.anatomy, slot,
+				&"trace_stable_completed_frames", request.serial, 0, {}, pivot)
+			capture["verification_capture_policy"] = "stable_completed_frames_without_active_pose_modifiers"
+			if stamp != _owner._realization_stamp(): capture = {"valid":false, "reason":"pose_changed_during_capture"}
+	var dimensions: Dictionary = request.get("digit_dimension_reference", {})
+	if capture.get("valid", false) and dimensions.is_empty():
+		capture = {"valid":false, "reason":"missing_current_request_digit_dimensions"}
+	if not capture.get("valid", false):
+		_actual_capture["actual_capture_error"] = capture
+	else:
+		capture.posed_character["digit_dimension_reference"] = dimensions.duplicate(true)
+		var path := OS.get_environment("THE_WILL_GRIP_TRACE_PATH").replace("\\", "/").simplify_path().get_basename() + "_actual.bin"
+		if not path.to_lower().begins_with("c:/workspace/") or FileAccess.file_exists(path):
+			_actual_capture["actual_capture_error"] = "capture_path_outside_workspace_or_already_exists"
+		else:
+			var file := FileAccess.open(path, FileAccess.WRITE)
+			if file == null:
+				_actual_capture["actual_capture_error"] = "capture_file_cannot_open"
+			else:
+				file.store_var(capture, false)
+				file.flush()
+				var error := file.get_error()
+				file.close()
+				_actual_capture.merge({"actual_capture_valid":error == OK, "actual_capture_path":path,
+					"actual_capture_sha256":FileAccess.get_sha256(path), "slot":slot,
+					"actual_capture_policy":capture.get("verification_capture_policy", ""),
+					"actual_capture_write_error":error,
+					"actual_capture_is_observation_not_grip_certification":true}, true)
+	Chronology.finish(span, _actual_capture)
 
 
 func _positive_env(name: String, fallback: float) -> float:

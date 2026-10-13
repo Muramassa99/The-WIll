@@ -19,6 +19,9 @@ const Wip = preload("res://core/models/crafted_item_wip.gd")
 const Library = preload("res://core/models/player_forge_wip_library_state.gd")
 const Forge = preload("res://services/forge_service.gd")
 const Section = preload("res://runtime/player/grip/prepared_weapon_plane_section.gd")
+const Surface = preload("res://runtime/player/grip/grip_surface_query.gd")
+const SavedSource = preload("res://runtime/player/grip/saved_wrapper_grip_source.gd")
+const WrapperData = preload("res://core/models/prepared_grip_target_wrapper.gd")
 const CONFIG: Resource = preload("res://core/defs/characters/josie/grip_contact_config.tres")
 const RULES: Resource = preload("res://core/defs/forge/forge_rules_default.tres")
 const PROFILE_ID := "handle_profile_1787891232.544_14"
@@ -46,6 +49,9 @@ func _run() -> void:
 	if not _check(fixture.get("valid", false), "saved concave profile loads with frozen source hash"):
 		_finish(); return
 	var config: Dictionary = CONFIG.get("contact_config").duplicate(true)
+	_check(is_equal_approx(float(config.guide_inward_target_offset_m), 0.004), "shared digit attraction is saved at 4 mm")
+	_check(is_equal_approx(float(config.non_thumb_s1_guide_target_depth_m), 0.0055), "non-thumb S1 attraction remains 5.5 mm")
+	_check(is_equal_approx(float(config.palm_guide_target_depth_m), 0.004), "palm attraction remains 4 mm")
 	for case_name: String in ["straight", "curved"]:
 		await _test_case(case_name, fixture, config)
 	_check(FileAccess.get_sha256(Fixture.SOURCE_PATH) == Fixture.SOURCE_SHA256, "saved profile source remains unchanged")
@@ -91,10 +97,22 @@ func _test_case(case_name: String, fixture: Dictionary, config: Dictionary) -> v
 	_check(var_to_bytes(packet) == material_before, case_name + ": actual Handle packet is byte-for-byte unchanged")
 	_check(_valid(wrapper, packet, config), case_name + ": prepared wrapper validates against source and character parameters")
 	_check(wrapper.get("vertices_origin_id") == WEAPON_ORIGIN, case_name + ": target coordinates have the same explicit WeaponRoot origin as material")
+	for field: String in ["guide_inward_target_offset_m", "palm_guide_target_depth_m", "non_thumb_s1_guide_target_depth_m"]:
+		_check(is_equal_approx(float(wrapper.get(field)), float(config[field])),
+			case_name + ": freshly baked wrapper records current " + field)
 	_test_rejection(case_name, wrapper, packet, config)
 	var geometry_hash := _geometry_hash(wrapper)
 	var section_reports := _test_sections(case_name, body, packet, wrapper)
 	_test_profile_geometry(case_name, wrapper, config)
+	_test_section_queries(case_name, wrapper, packet, config)
+	if case_name == "straight":
+		var collapsed_config := config.duplicate(true)
+		collapsed_config.non_thumb_s1_guide_target_depth_m = 1.0
+		var collapsed: Dictionary = await Baker.new().bake(presenter, body, packet, collapsed_config)
+		_check(not collapsed.get("ok", false) and collapsed.get("reason") == "wrapper_non_thumb_s1_target_failed",
+			"collapsed S1 target fails explicitly before publishing a replacement wrapper")
+		_check(HandlePacket.build_body_signature(body) == source_body_signature and var_to_bytes(packet) == material_before,
+			"failed S1 inset leaves original authoring and material output unchanged")
 	_test_persistence(case_name, stage, built.state, packet, wrapper, config)
 	_check(_geometry_hash(wrapper) == geometry_hash, case_name + ": slicing and persistence do not modify wrapper geometry")
 	_cases.append({"name": case_name, "profile_id": PROFILE_ID, "profile_label": fixture.metadata.profile_label,
@@ -102,6 +120,7 @@ func _test_case(case_name: String, fixture: Dictionary, config: Dictionary) -> v
 		"bake_ms": bake_ms, "actual_triangles": packet.primary_grip_handle_indices.size() / 3,
 		"digit_target_triangles": wrapper.get("target_indices").size() / 3,
 		"palm_target_triangles": wrapper.get("palm_target_indices").size() / 3,
+		"non_thumb_s1_target_triangles": wrapper.get("non_thumb_s1_target_indices").size() / 3,
 		"sections": section_reports})
 	stage.free()
 	presenter.free()
@@ -157,6 +176,7 @@ func _test_sections(case_name: String, body: Resource, packet: Dictionary, wrapp
 	var actual := _faces(packet.primary_grip_handle_vertices, packet.primary_grip_handle_indices)
 	var target := _faces(wrapper.get("target_vertices_m"), wrapper.get("target_indices"))
 	var palm := _faces(wrapper.get("palm_target_vertices_m"), wrapper.get("palm_target_indices"))
+	var s1 := _faces(wrapper.get("non_thumb_s1_target_vertices_m"), wrapper.get("non_thumb_s1_target_indices"))
 	for segment: int in range(2):
 		var tangent: Vector3 = (paths[segment + 1] - paths[segment]).normalized()
 		var frame: Dictionary = Profiles.resolve_profile_path_frame(tangent, Vector3.UP,
@@ -168,19 +188,19 @@ func _test_sections(case_name: String, body: Resource, packet: Dictionary, wrapp
 			var label := "%s / span %d / %s" % [case_name, segment + 1, "35 degree oblique" if oblique else "perpendicular"]
 			var origin_id := StringName("GripTargetWrapperVerificationPlane_" + case_name + "_" + str(segment) + "_" + str(oblique))
 			var sections: Dictionary = {}
-			for kind: String in ["material", "digit_target", "palm_target"]:
-				var triangles: PackedVector3Array = actual if kind == "material" else (target if kind == "digit_target" else palm)
+			for kind: String in ["material", "digit_target", "palm_target", "non_thumb_s1_target"]:
+				var triangles: PackedVector3Array = actual if kind == "material" else (target if kind == "digit_target" else (palm if kind == "palm_target" else s1))
 				var helper := Section.new()
 				var prepared: Dictionary = helper.prepare({"valid": true, "triangles_world": triangles,
 					"surface_source_origin_id": WEAPON_ORIGIN, "resolved_world_origin_id": ROOT_ORIGIN}, plane, origin_id)
 				var section: Dictionary = helper.slice(prepared, plane)
 				_check(section.get("valid", false), label + ": complete " + kind + " slice: " + str(section.get("reason", "")))
 				sections[kind] = section
-			if not sections.material.get("valid", false) or not sections.digit_target.get("valid", false) or not sections.palm_target.get("valid", false):
+			if not sections.material.get("valid", false) or not sections.digit_target.get("valid", false) or not sections.palm_target.get("valid", false) or not sections.non_thumb_s1_target.get("valid", false):
 				continue
 			if case_name == "straight" and not oblique:
-				for check_kind: String in ["material", "digit_target", "palm_target"]:
-					var profile_key := "source_profile_m" if check_kind == "material" else ("target_profile_m" if check_kind == "digit_target" else "palm_target_profile_m")
+				for check_kind: String in ["material", "digit_target", "palm_target", "non_thumb_s1_target"]:
+					var profile_key := "source_profile_m" if check_kind == "material" else ("target_profile_m" if check_kind == "digit_target" else ("palm_target_profile_m" if check_kind == "palm_target" else "non_thumb_s1_target_profile_m"))
 					var maximum_error := 0.0
 					for point: Vector2 in wrapper.get(profile_key):
 						# Exact Handle CSG mapping mirrors authored X. This checks
@@ -201,8 +221,11 @@ func _test_profile_geometry(case_name: String, wrapper: Resource, config: Dictio
 	var envelope: PackedVector2Array = wrapper.get("envelope_profile_m")
 	var digit: PackedVector2Array = wrapper.get("target_profile_m")
 	var palm: PackedVector2Array = wrapper.get("palm_target_profile_m")
+	var s1: PackedVector2Array = wrapper.get("non_thumb_s1_target_profile_m")
+	_check(int(wrapper.get("schema_version")) == WrapperData.SCHEMA_VERSION,
+		case_name + ": new save stamps section-target schema explicitly")
 	_check(Profiles.calculate_polygon_area_meters_squared(envelope) > Profiles.calculate_polygon_area_meters_squared(source), case_name + ": concave recesses are bridged before inset")
-	for entry: Array in [["digit", digit, float(config.guide_inward_target_offset_m)], ["palm", palm, float(config.palm_guide_target_depth_m)]]:
+	for entry: Array in [["digit", digit, float(config.guide_inward_target_offset_m)], ["palm", palm, float(config.palm_guide_target_depth_m)], ["non_thumb_s1", s1, float(config.non_thumb_s1_guide_target_depth_m)]]:
 		var minimum_distance := INF
 		var all_inside := true
 		for point: Vector2 in entry[1]:
@@ -220,7 +243,7 @@ func _test_rejection(case_name: String, wrapper: Resource, packet: Dictionary, c
 	stale_source = packet.duplicate(true)
 	stale_source.primary_grip_handle_vertices[0] += Vector3(0.001, 0, 0)
 	_check(not _valid(wrapper, stale_source, config), case_name + ": changed actual Handle vertices rejected")
-	for field: String in ["envelope_radius_m", "guide_inward_target_offset_m", "palm_guide_target_depth_m"]:
+	for field: String in ["envelope_radius_m", "guide_inward_target_offset_m", "palm_guide_target_depth_m", "non_thumb_s1_guide_target_depth_m"]:
 		var changed: Dictionary = config.duplicate(true)
 		changed[field] = float(changed[field]) + 0.001
 		_check(not _valid(wrapper, packet, changed), case_name + ": stale " + field + " rejected")
@@ -230,6 +253,70 @@ func _test_rejection(case_name: String, wrapper: Resource, packet: Dictionary, c
 	var wrong_origin: Resource = wrapper.duplicate(true)
 	wrong_origin.set("vertices_origin_id", &"AnonymousWrongOrigin")
 	_check(not _valid(wrong_origin, packet, config), case_name + ": wrong target coordinate origin rejected")
+	var incomplete: Resource = wrapper.duplicate(true)
+	incomplete.set("non_thumb_s1_target_vertices_m", PackedVector3Array())
+	_check(not _valid(incomplete, packet, config), case_name + ": current-schema missing S1 geometry cannot silently reuse digit target")
+
+
+func _test_section_queries(case_name: String, wrapper: Resource, packet: Dictionary, config: Dictionary) -> void:
+	var source := {"valid": true, "source_origin_id": SavedSource.SOURCE_ORIGIN,
+		"metric_units": &"meters", "source_to_weapon": Transform3D.IDENTITY,
+		"wrapper": wrapper, "handle_packet": packet}
+	var exact := Surface.prepare(source, config)
+	if not _check(exact.get("valid", false), case_name + ": exact S1/digit/palm queries prepare"): return
+	_check(not exact.target_contract.local_normal_adaptation_used,
+		case_name + ": current saved targets require no runtime depth adaptation")
+	# A valid legacy fixture has the original shared digit surface for both roles.
+	# It must stay old data after preparation, not become a silently rewritten save.
+	var legacy: Resource = wrapper.duplicate(true)
+	legacy.set("schema_version", WrapperData.LEGACY_SCHEMA_VERSION)
+	legacy.set("construction_revision", WrapperData.LEGACY_CONSTRUCTION_REVISION)
+	legacy.set("non_thumb_s1_guide_target_depth_m", 0.0)
+	legacy.set("non_thumb_s1_target_profile_m", PackedVector2Array())
+	legacy.set("non_thumb_s1_target_vertices_m", PackedVector3Array())
+	legacy.set("non_thumb_s1_target_indices", PackedInt32Array())
+	legacy.set("palm_guide_target_depth_m", legacy.get("guide_inward_target_offset_m"))
+	legacy.set("palm_target_profile_m", legacy.get("target_profile_m"))
+	legacy.set("palm_target_vertices_m", legacy.get("target_vertices_m"))
+	legacy.set("palm_target_indices", legacy.get("target_indices"))
+	var legacy_hash := _geometry_hash(legacy)
+	_check(Resolver.validate(legacy, packet).get("valid", false), case_name + ": two-target legacy geometry stays readable")
+	_check(not _valid(legacy, packet, config), case_name + ": Forge save validation requires updated section targets")
+	source.wrapper = legacy
+	var adapted := Surface.prepare(source, config)
+	if not _check(adapted.get("valid", false), case_name + ": legacy runtime adaptation prepares without save mutation"): return
+	_check(adapted.target_contract.local_normal_adaptation_used and not adapted.target_contract.rebaked_geometry_equivalent,
+		case_name + ": legacy approximation is explicitly reported, never called a rebake")
+	var mesh: Dictionary = adapted.surfaces[&"digit"]
+	var ids: PackedInt32Array = mesh.indices
+	var vertices: PackedVector3Array = mesh.vertices_m
+	var center := (vertices[ids[0]] + vertices[ids[1]] + vertices[ids[2]]) / 3.0
+	var normal: Vector3 = mesh.outward_normals[0]
+	var frame := Transform3D(Basis(Vector3.UP, 0.41), Vector3(0.4, -0.2, 0.1))
+	var from := frame * (center + normal * 0.03)
+	var to := frame * (center - normal * 0.03)
+	for kind: StringName in [&"digit", &"palm", &"non_thumb_s1"]:
+		var raw := Surface.trace(adapted, kind, from, to, frame, ROOT_ORIGIN)
+		var adjusted := Surface.trace_attraction(adapted, kind, from, to, frame, ROOT_ORIGIN)
+		if not _check(raw.get("hit", false) and adjusted.get("hit", false), case_name + ": " + String(kind) + " controlled ray hits"): continue
+		var depth := float(adapted.attraction_depth_offsets_m[kind])
+		var expected: Vector3 = raw.position_m - raw.normal * depth
+		_check((adjusted.position_m as Vector3).distance_to(expected) <= OUTLINE_TOLERANCE_M,
+			case_name + ": " + String(kind) + " inward adjustment respects source-to-world transform")
+		if kind == &"digit":
+			_check(not adjusted.local_normal_adaptation_used and depth == 0.0,
+				case_name + ": shared S2/S3/Thumb target is unchanged")
+	var physical_before := Surface.trace(adapted, &"physical", from, to, frame, ROOT_ORIGIN)
+	var physical_after := Surface.trace(exact, &"physical", from, to, frame, ROOT_ORIGIN)
+	_check(physical_before == physical_after, case_name + ": attraction adaptation does not change physical queries")
+	_check(_geometry_hash(legacy) == legacy_hash and int(legacy.get("schema_version")) == 1,
+		case_name + ": legacy target meshes/schema remain unchanged")
+	var prior_config := config.duplicate(true)
+	prior_config.non_thumb_s1_guide_target_depth_m = legacy.get("guide_inward_target_offset_m")
+	prior_config.palm_guide_target_depth_m = legacy.get("palm_guide_target_depth_m")
+	var prior := Surface.prepare(source, prior_config)
+	_check(prior.get("valid", false) and prior.cache_hit and not prior.target_contract.local_normal_adaptation_used,
+		case_name + ": immutable BVH cache reuse does not leak another request's depth offsets")
 
 
 func _test_persistence(case_name: String, stage: Node, state: Resource, packet: Dictionary, wrapper: Resource, config: Dictionary) -> void:
@@ -292,7 +379,7 @@ func _valid(wrapper: Resource, packet: Dictionary, config: Dictionary) -> bool:
 
 func _geometry_hash(wrapper: Resource) -> String:
 	var values: Array = []
-	for field: String in ["target_vertices_m", "target_indices", "palm_target_vertices_m", "palm_target_indices"]:
+	for field: String in ["target_vertices_m", "target_indices", "palm_target_vertices_m", "palm_target_indices", "non_thumb_s1_target_vertices_m", "non_thumb_s1_target_indices"]:
 		values.append(wrapper.get(field))
 	return var_to_bytes(values).hex_encode().sha256_text()
 
@@ -354,7 +441,7 @@ func _finish() -> void:
 func _html(report: Dictionary) -> String:
 	var html := "<!doctype html><meta charset='utf-8'><title>Forge V2 prepared grip targets</title><style>body{font:16px system-ui;background:#eef1f5;color:#172a40;margin:24px}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:20px}article{background:white;padding:20px;border:1px solid #bcc8d5}svg{width:100%;height:auto}h2{font-size:18px}.material{color:#555}.digit{color:#bd0083}.palm{color:#008d83}</style>"
 	html += "<h1>Forge V2: prepared Handle target surfaces</h1><p>" + ("Checks passed." if report.ok else "Checks failed; see JSON report.") + " This compares saved 3D tube slices. No hand solve or live grip acceptance.</p>"
-	html += "<p><b class='material'>Grey: actual Handle material / overlap authority</b> · <b class='digit'>Magenta: digit attraction target (1.5 mm inset)</b> · <b class='palm'>Teal: palm attraction target (3 mm inset)</b>.</p><p>Each panel cuts all three surfaces with the same plane. Recess bridges can lie outside material; target surfaces are not collision limits. Equal X/Y scale; all dimensions in mm.</p><main>"
+	html += "<p><b class='material'>Grey: actual Handle material / overlap authority</b> · <b class='digit'>Magenta: digit attraction target (4 mm inset)</b> · <b class='palm'>Teal: palm attraction target (4 mm inset)</b>.</p><p>Each panel cuts all three displayed surfaces with the same plane; matching digit and palm outlines overlap. The separate 5.5 mm S1 surface is verified in JSON. Recess bridges can lie outside material; target surfaces are not collision limits. Equal X/Y scale; all dimensions in mm.</p><main>"
 	for section: Dictionary in _slices:
 		html += "<article><h2>" + section.label.xml_escape() + "</h2>" + _svg(section) + "<p>Origin: " + String(section.plane_origin_id).xml_escape() + "</p></article>"
 	return html + "</main>"

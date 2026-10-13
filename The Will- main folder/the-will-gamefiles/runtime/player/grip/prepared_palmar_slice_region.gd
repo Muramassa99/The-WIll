@@ -5,7 +5,7 @@ const Palmar = preload("res://runtime/player/grip/palmar_reference_geometry.gd")
 const Rules = preload("res://runtime/player/player_digit_hinge_rules.gd")
 const ROOT := &"RL_BoneRoot"
 const REVISION := &"clipped_reference_palmar_core_and_web_regions_v3"
-const PALM_CAP_M := 0.0025
+const PALM_CAP_M := 0.0035
 const EPSILON_M := 0.0000001
 const POLYGON_SCALE := 100000.0
 

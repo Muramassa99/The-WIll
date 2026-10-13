@@ -15,6 +15,7 @@ const CombatAnimationDraftValidatorScript = preload("res://core/resolvers/combat
 const CombatAnimationWeaponGeometryResolverScript = preload("res://core/resolvers/combat_animation_weapon_geometry_resolver.gd")
 const CombatAnimationRetargetResolverScript = preload("res://core/resolvers/combat_animation_retarget_resolver.gd")
 const CombatRuntimeClipBakerScript = preload("res://core/resolvers/combat_runtime_clip_baker.gd")
+const SurfaceGripSolverScript = preload("res://runtime/player/grip/surface_driven_grip_solver.gd")
 const CombatAnimationRuntimeChainCompilerScript = preload("res://core/resolvers/combat_animation_runtime_chain_compiler.gd")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const PrimaryGripSeatResolverScript = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
@@ -372,7 +373,21 @@ func _refresh_grip_acquisition_status() -> void:
 			"assessing": lines.append("%s grip: checking contact on the posed hand." % hand)
 			"cancelled": lines.append("%s grip: unfinished solve cancelled by Roll. Reacquire grip to try again." % hand)
 			"preview_applied":
-				if not state.get("actual_assessment_current", false) or not state.get("actual_material_query_valid", false):
+				if state.get("acquisition_method") == &"surface_contact_v6":
+					var thumb_enabled: bool = state.get("thumb_solve_enabled", false)
+					var totals: Dictionary = state.get("solver_totals", {})
+					var detail := "" if thumb_enabled else " Thumb paused."
+					if totals.has("physically_engaged_sections") and totals.has("maximum_depth_sections"):
+						var expected_sections := 14 if thumb_enabled else 12
+						detail += " Contact: %d/%d sections; maximum depth: %d/%d; palm: %s." % [
+							totals.physically_engaged_sections.size(), expected_sections,
+							totals.maximum_depth_sections.size(), expected_sections,
+							"in contact" if totals.get("palm_engaged", false) else "not in contact"]
+					else:
+						detail += " Contact details are unavailable."
+					lines.append("%s grip: %s pose applied (%.2f s).%s" % [hand,
+						"five-digit" if thumb_enabled else "four-finger", float(state.get("elapsed_seconds", 0.0)), detail])
+				elif not state.get("actual_assessment_current", false) or not state.get("actual_material_query_valid", false):
 					lines.append("%s grip: pose applied; current contact is unverified." % hand)
 				elif not state.get("contact_condition_met", false):
 					lines.append("%s grip: pose applied; contact still needs adjustment." % hand)
@@ -384,7 +399,17 @@ func _refresh_grip_acquisition_status() -> void:
 					lines.append("%s grip: partial; %s still need contact." % [hand,", ".join(digits)])
 				else:
 					lines.append("%s grip: pose applied; measured contact passed." % hand)
-			"unresolved", "unavailable": lines.append("%s grip: could not finish seating (%s)." % [hand, str(state.get("reason", "unresolved"))])
+			"unresolved", "unavailable":
+				var failure: Dictionary = state.get("failure_details", {})
+				var overlap_detail := ""
+				if failure.has("depth_m") and failure.has("cap_m"):
+					var region := str(failure.get("digit", ""))
+					if region.is_empty(): region = "palm" if failure.get("palm_owned", false) else "other skin"
+					var section := int(failure.get("section", 0))
+					if section > 0: region += " S%d" % section
+					var lower_bound := "at least " if failure.get("depth_is_lower_bound", false) else ""
+					overlap_detail = " %s: %s%.3f mm overlap, %.3f mm allowed." % [region, lower_bound, float(failure.depth_m) * 1000.0, float(failure.cap_m) * 1000.0]
+				lines.append("%s grip: could not finish seating (%s).%s" % [hand, str(state.get("reason", "unresolved")), overlap_detail])
 	grip_acquisition_label.text = "\n".join(lines)
 	grip_acquisition_label.visible = not lines.is_empty()
 	if grip_reacquire_button != null:
@@ -5054,6 +5079,9 @@ func _refresh_runtime_clip_cache_for_draft(draft: Resource) -> Dictionary:
 			)
 			result["solved_replay_track"] = true
 			return result
+	# A failed refresh must not leave an older solved track available to runtime.
+	# Authored nodes survive; only their derived pose cache is invalidated.
+	_mark_draft_runtime_clip_cache_dirty(draft)
 	var trajectory_volume_config: Dictionary = _resolve_preview_trajectory_volume_config()
 	var runtime_chain_result: Dictionary = {}
 	var playable_motion_node_chain: Array = motion_node_chain
@@ -5107,6 +5135,9 @@ func _refresh_runtime_clip_cache_for_draft(draft: Resource) -> Dictionary:
 		runtime_clip,
 		selected_node_index
 	)
+	if not bool(pose_track_result.get("baked", false)) or not bool(pose_track_result.get("solved_replay_track", false)):
+		result["reason"] = String(pose_track_result.get("reason", "solved_grip_replay_unavailable"))
+		return result
 	draft.set("baked_runtime_clip", runtime_clip)
 	_set_draft_runtime_cache_signature(draft, cache_signature)
 	result["cached"] = true
@@ -5122,7 +5153,9 @@ func _can_reuse_runtime_clip_cache(draft: Resource, runtime_clip, cache_signatur
 	if not runtime_clip.has_method("get_frame_count") or int(runtime_clip.call("get_frame_count")) <= 0:
 		return false
 	var stored_signature: String = _get_draft_runtime_cache_signature(draft)
-	if not stored_signature.is_empty() and stored_signature != cache_signature:
+	if stored_signature != cache_signature:
+		return false
+	if not _runtime_clip_has_solved_replay_track(runtime_clip):
 		return false
 	var source_weapon_wip_id: StringName = StringName(runtime_clip.get("source_weapon_wip_id"))
 	if (
@@ -5165,7 +5198,21 @@ func _active_draft_requires_manual_save(draft: Resource = null) -> bool:
 		return false
 	if editor_state_dirty:
 		return true
-	return not _active_draft_has_valid_preview_cache(active_draft)
+	if not _active_draft_has_valid_preview_cache(active_draft):
+		return true
+	if not _is_idle_draft(active_draft):
+		var combat_idle: Resource = _get_existing_combat_idle_draft()
+		return combat_idle == null or not _active_draft_has_valid_preview_cache(combat_idle)
+	return false
+
+func _get_existing_combat_idle_draft() -> Resource:
+	# The station's existing baseline factory owns idle creation and its pose.
+	var station: Resource = _get_active_station_state()
+	if station != null:
+		for idle: Resource in station.get("idle_drafts"):
+			if _is_combat_idle_draft(idle):
+				return idle
+	return null
 
 func _active_draft_has_valid_preview_cache(draft: Resource) -> bool:
 	if draft == null:
@@ -5267,10 +5314,10 @@ func _build_runtime_clip_cache_signature(draft: Resource) -> String:
 	if draft == null:
 		return ""
 	var parts := PackedStringArray()
-	# V6 invalidates replay poses that encoded grip-seat fields as signed relative
-	# offsets. Saved authoring values are normalized on load; only the derived
-	# Skill Crafter runtime track must be rebuilt with canonical 0..1 Handle data.
-	parts.append("runtime_cache_v6_normalized_handle_coordinates")
+	# Rebuild derived tracks that could capture pending/open fingers instead of
+	# the committed hand/weapon relationship. Authored motion is unchanged.
+	parts.append("runtime_cache_v8_committed_surface_grip")
+	parts.append(String(SurfaceGripSolverScript.REVISION))
 	parts.append(String(active_wip.wip_id) if active_wip != null else "")
 	parts.append(String(draft.get("draft_id")))
 	parts.append(String(draft.get("draft_kind")))
@@ -5470,19 +5517,38 @@ func _manual_save_active_editor_state() -> void:
 	active_wip.ensure_combat_animation_station_state()
 	_refresh_active_station_retarget_authoring_snapshot()
 	await get_tree().process_frame
+	var bake_selection_key := _grip_bake_selection_key()
+	var grip_bake_context: Dictionary = preview_presenter.capture_grip_before_bake(preview_subviewport, bake_selection_key)
 	_set_manual_save_progress(45.0, "Building preview cache...")
 	var cache_result: Dictionary = _refresh_active_draft_runtime_clip_cache()
+	var cache_ready: bool = bool(cache_result.get("cached", false))
+	var cache_reason: String = String(cache_result.get("reason", "unknown"))
+	if cache_ready and not _is_idle_draft(draft):
+		_set_manual_save_progress(65.0, "Preparing equipped combat idle...")
+		var combat_idle: Resource = _get_existing_combat_idle_draft()
+		var idle_result: Dictionary = _refresh_runtime_clip_cache_for_draft(combat_idle)
+		if not bool(idle_result.get("cached", false)):
+			cache_ready = false
+			cache_reason = "combat_idle: %s" % String(idle_result.get("reason", "unknown"))
+	# Baking visits other frames/drafts without changing the authored selection.
+	# Restore the visible selection even if a temporary bake context failed.
+	# Failed bakes use ordinary queued acquisition; only ready clips reuse a grip.
+	_refresh_preview_scene()
+	if bool(cache_result.get("cached", false)):
+		var restored: Dictionary = preview_presenter.restore_grip_after_bake(preview_subviewport, grip_bake_context, _grip_bake_selection_key())
+		if not bool(restored.get("valid", false)):
+			cache_ready = false
+			cache_reason = "preview_restore: %s" % String(restored.get("reason", "unknown"))
 	await get_tree().process_frame
 	_set_manual_save_progress(85.0, "Writing save file...")
 	_persist_active_wip("", PERSIST_RUNTIME_CACHE_KEEP, false)
 	await get_tree().process_frame
 	manual_save_in_progress = false
 	var elapsed_seconds: float = float(Time.get_ticks_msec() - manual_save_start_msec) / 1000.0
-	var cache_ready: bool = bool(cache_result.get("cached", false))
 	var completion_text: String = (
 		"Saved in %.2fs. Preview ready." % elapsed_seconds
 		if cache_ready
-		else "Saved in %.2fs. Preview cache needs review: %s" % [elapsed_seconds, String(cache_result.get("reason", "unknown"))]
+		else "Saved in %.2fs. Preview cache needs review: %s" % [elapsed_seconds, cache_reason]
 	)
 	_set_manual_save_progress(100.0, completion_text, true)
 	editor_state_dirty = false
@@ -5491,6 +5557,13 @@ func _manual_save_active_editor_state() -> void:
 	_refresh_summary(completion_text)
 	if footer_status_label != null:
 		footer_status_label.text = completion_text
+
+func _grip_bake_selection_key() -> String:
+	var draft: Resource = _get_active_draft()
+	if active_wip == null or draft == null: return ""
+	return var_to_bytes([active_wip.wip_id, draft.draft_id, draft.selected_motion_node_index,
+		_build_motion_node_runtime_cache_signature(_get_active_motion_node())]).hex_encode().sha256_text()
+
 
 func _set_manual_save_progress(percent: float, status_text: String = "", visible: bool = true) -> void:
 	if save_progress_bar != null:

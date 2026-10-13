@@ -647,7 +647,24 @@ func bake_runtime_clip_upper_body_pose_track(
 	runtime_clip,
 	selected_node_index: int = 0
 ) -> Dictionary:
-	cancel_grip_acquisition(preview_subviewport)
+	# Baking another draft or a hand-swap frame must not inherit the hand of
+	# the selected UI node. Restore presenter setup even when a frame fails.
+	var previous_slot := preview_dominant_slot_id
+	var previous_two_hand := preview_default_two_hand
+	var result := _bake_runtime_clip_pose_track_for_frame_hands(
+		preview_container, preview_subviewport, active_wip, active_draft,
+		runtime_clip, selected_node_index)
+	configure_preview_hand_setup(previous_slot, previous_two_hand)
+	return result
+
+func _bake_runtime_clip_pose_track_for_frame_hands(
+	preview_container: SubViewportContainer,
+	preview_subviewport: SubViewport,
+	active_wip: CraftedItemWIP,
+	active_draft: Resource,
+	runtime_clip,
+	selected_node_index: int
+) -> Dictionary:
 	var result := {
 		"baked": false,
 		"reason": "",
@@ -668,6 +685,10 @@ func bake_runtime_clip_upper_body_pose_track(
 	if _is_noncombat_idle_draft(active_draft):
 		result["reason"] = "noncombat_stow_does_not_use_hand_pose"
 		return result
+	for grip_state: Dictionary in get_grip_acquisition_status(preview_subviewport).values():
+		if grip_state.get("status", "") == "solving":
+			result["reason"] = "grip_acquisition_pending"
+			return result
 	if not runtime_clip.has_method("get_frame_count"):
 		result["reason"] = "runtime_clip_has_no_frames"
 		return result
@@ -689,7 +710,9 @@ func bake_runtime_clip_upper_body_pose_track(
 	if base_motion_node == null:
 		result["reason"] = "runtime_clip_has_invalid_motion_node"
 		return result
-	_refresh_actor_and_weapon(state, active_wip, base_motion_node, active_draft)
+	var initial_frame := _build_runtime_clip_frame_motion_node(runtime_clip, 0, base_motion_node)
+	configure_preview_hand_setup(initial_frame.primary_hand_slot, preview_default_two_hand)
+	_refresh_actor_and_weapon(state, active_wip, initial_frame, active_draft)
 	_prepare_trajectory_root_for_authoring(state)
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D
 	var actor_pivot: Node3D = state.get("actor_pivot", null) as Node3D
@@ -729,14 +752,26 @@ func bake_runtime_clip_upper_body_pose_track(
 			frame_index,
 			base_motion_node
 		)
+		var frame_slot := _normalize_preview_slot_id(frame_motion_node.primary_hand_slot)
+		if frame_slot != _resolve_preview_dominant_slot_id():
+			configure_preview_hand_setup(frame_slot, preview_default_two_hand)
+			_refresh_actor_and_weapon(state, active_wip, frame_motion_node, active_draft)
+			held_item = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
+			if held_item == null or not is_instance_valid(held_item):
+				result["reason"] = "missing_preview_weapon_after_hand_swap"
+				return result
+			if _resolve_solved_replay_anchor_node_paths(held_item) != solved_anchor_paths:
+				result["reason"] = "hand_swap_changes_replay_anchor_layout"
+				return result
 		var playback_state: Dictionary = _build_runtime_clip_frame_playback_state(
 			runtime_clip,
 			frame_index,
 			frame_motion_node
 		)
 		playback_state["runtime_clip_playback"] = true
-		# Baking is the deliberate offline solve stage. Live F playback consumes the
-		# captured digit track and must never run the exact Handle solver per frame.
+		playback_state["prepared_grip_bake"] = true
+		# Baking prepares missing grip relationships and reuses committed local
+		# poses. Live playback consumes the captured bones/weapon/anchors together.
 		_apply_runtime_clip_preview_pose(
 			state,
 			frame_motion_node,
@@ -744,6 +779,19 @@ func bake_runtime_clip_upper_body_pose_track(
 			active_draft,
 			true
 		)
+		if not _is_unarmed_preview_item(held_item):
+			var grip_owner: Node = actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
+			if grip_owner == null:
+				result["reason"] = "missing_prepared_grip_bake_owner"
+				return result
+			var grip_slots: Array[StringName] = [_resolve_preview_dominant_slot_id()]
+			if _should_preview_use_support_hand(held_item, frame_motion_node):
+				grip_slots.append(_resolve_preview_support_slot_id())
+			var grip_result: Dictionary = grip_owner.prepare_replay_grip(grip_slots, _resolve_preview_dominant_slot_id())
+			if not grip_result.get("valid", false):
+				result["reason"] = String(grip_result.get("reason", "prepared_grip_bake_failed"))
+				result["failed_frame"] = frame_index
+				return result
 		var frame_capture: Dictionary = actor.call(
 			"capture_runtime_upper_body_pose_frame",
 			requested_bone_names
@@ -2646,6 +2694,8 @@ func _refresh_actor_and_weapon(
 		preview_root.set_meta(PREVIEW_ACTIVE_SLOT_ID_META, target_slot_id)
 		_update_camera(preview_root, null)
 		return
+	# Select closure ownership before weapon setup can refresh the rig.
+	actor.set_meta("prepared_grip_preview_enabled", not _is_noncombat_idle_draft(active_draft))
 	if held_item == null or not is_instance_valid(held_item) or current_wip_id != active_wip.wip_id or current_slot_id != target_slot_id:
 		_clear_hand_authoring_slot_proxy_nodes(preview_root)
 		if held_item != null and is_instance_valid(held_item):
@@ -2655,7 +2705,6 @@ func _refresh_actor_and_weapon(
 		preview_root.set_meta("preview_wip_id", active_wip.wip_id)
 		preview_root.set_meta(PREVIEW_ACTIVE_SLOT_ID_META, target_slot_id)
 	var body_authored_motion_node: CombatAnimationMotionNode = null if _is_noncombat_idle_draft(active_draft) else selected_motion_node
-	actor.set_meta("prepared_grip_preview_enabled", not _is_noncombat_idle_draft(active_draft))
 	if _is_noncombat_idle_draft(active_draft):
 		_clear_prepared_preview_grip(actor)
 	_configure_preview_actor_authoring_mode(actor, held_item, body_authored_motion_node)
@@ -3571,6 +3620,27 @@ func get_grip_acquisition_status(preview_subviewport: SubViewport) -> Dictionary
 		return {}
 	var owner: Node = context.actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
 	return owner.status() if owner != null else {}
+
+func capture_grip_before_bake(preview_subviewport: SubViewport, selection_key: String) -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty(): return {}
+	var owner: Node = context.actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
+	return owner.capture_bake_context(selection_key) if owner != null else {}
+
+
+func restore_grip_after_bake(preview_subviewport: SubViewport, saved_context: Dictionary = {}, selection_key: String = "") -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty():
+		return {"valid": false, "reason": "missing_preview_context"}
+	if _is_unarmed_preview_item(context.weapon):
+		return {"valid": true}
+	var owner: Node = context.actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
+	if owner == null:
+		return {"valid": false, "reason": "missing_prepared_grip_owner"}
+	if not saved_context.is_empty():
+		var restored: Dictionary = owner.restore_bake_context(saved_context, selection_key)
+		if restored.get("valid", false): return restored
+	return owner.prepare_replay_grip(owner._slots.duplicate(), owner._dominant)
 
 func get_prepared_grip_display_state(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode) -> Dictionary:
 	var context: Dictionary = _weapon_roll_context(preview_subviewport)
@@ -4884,7 +4954,7 @@ func _clear_prepared_preview_grip(actor: Node3D) -> void:
 func _sync_prepared_preview_grip(actor: Node3D, held_item: Node3D, motion: CombatAnimationMotionNode, playback: Dictionary) -> void:
 	if actor == null or not actor.get_meta("prepared_grip_preview_enabled", false):
 		return
-	if _is_unarmed_preview_item(held_item) or bool(playback.get("active", false)):
+	if _is_unarmed_preview_item(held_item) or (bool(playback.get("active", false)) and not bool(playback.get("prepared_grip_bake", false))):
 		_clear_prepared_preview_grip(actor)
 		return
 	var owner: Node = actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
@@ -4896,8 +4966,10 @@ func _sync_prepared_preview_grip(actor: Node3D, held_item: Node3D, motion: Comba
 	if not owner.configure(actor, held_item):
 		return
 	var slots: Array[StringName] = [_resolve_preview_dominant_slot_id()]
-	# Support cutover follows the verified primary application. Its existing
-	# support-only driver remains in use during this bounded correction.
+	# Existing support macro IK still brings the joining hand to the weapon.
+	# The same V6 owner handles its finger closure, with weapon seating disabled.
+	if _should_preview_use_support_hand(held_item, motion):
+		slots.append(&"hand_left" if slots[0] == &"hand_right" else &"hand_right")
 	owner.synchronize(slots, _resolve_preview_dominant_slot_id(), StringName(playback.get("grip_resolve_reason", StringName())))
 
 func _publish_prepared_grip_motion_authority(preview_root: Node3D) -> void:
@@ -6159,10 +6231,6 @@ func _settle_preview_digits_on_resolved_weapon(
 	allow_exact_surface_solve: bool
 ) -> void:
 	var prepared_owner: Node = actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME) if actor != null else null
-	if prepared_owner != null and prepared_owner.owns(_resolve_preview_dominant_slot_id()):
-		prepared_owner.settle_ready()
-		# Primary fingers are protected by their single writer. The existing
-		# support-only sequence below retains ownership of the other hand.
 	if (
 		actor == null
 		or held_item == null
@@ -6178,6 +6246,15 @@ func _settle_preview_digits_on_resolved_weapon(
 		# The dominant hand and weapon were seated as one unit immediately before
 		# this stage. Converge only the support limb on that fixed relationship.
 		actor.call("settle_authoring_support_grip_macro_pose_now")
+	if actor.get_meta("prepared_grip_preview_enabled", false) and not _is_unarmed_preview_item(held_item):
+		# Macro IK may position support, but no legacy hand-seat/closure follows.
+		# Both hands now use the same surface-only acquisition owner.
+		if prepared_owner != null:
+			prepared_owner.settle_ready()
+		actor.call("apply_authoring_digit_grip_now", false)
+		if prepared_owner != null:
+			prepared_owner.retain_support_motion()
+		return
 	var support_grasp_needs_invalidation: bool = false
 	if support_active:
 		var support_seat_pass_count: int = (

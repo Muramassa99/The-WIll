@@ -4,13 +4,17 @@ extends Resource
 ## they do not create a rendered mesh, material, physics body, or runtime node.
 ## Skill Crafter slices them alongside the actual handle. The handle remains
 ## the authority for physical overlap limits; these surfaces provide targets.
-const SCHEMA_VERSION := 1
-const CONSTRUCTION_REVISION: StringName = &"forge_v2_profile_envelope_sweep_v1"
+const SCHEMA_VERSION := 2
+const CONSTRUCTION_REVISION: StringName = &"forge_v2_profile_envelope_section_targets_v2"
+const LEGACY_SCHEMA_VERSION := 1
+const LEGACY_CONSTRUCTION_REVISION: StringName = &"forge_v2_profile_envelope_sweep_v1"
 const PROFILE_ORIGIN_ID: StringName = &"ForgeV2HandleProfileOrigin"
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
-@export var schema_version: int = SCHEMA_VERSION
-@export var construction_revision: StringName = CONSTRUCTION_REVISION
+# Preserve omitted defaults in old serialized resources. The baker explicitly
+# stamps new output with the current schema; loading never upgrades saved data.
+@export var schema_version: int = LEGACY_SCHEMA_VERSION
+@export var construction_revision: StringName = LEGACY_CONSTRUCTION_REVISION
 
 ## All source and target 3D vertices are metres in the same named weapon frame.
 ## Existing equipment placement resolves WeaponRootOrigin back to RL_BoneRoot.
@@ -24,6 +28,7 @@ const CombatOriginRecordScript = preload("res://core/models/combat_origin_record
 @export var anatomy_signature: String = ""
 @export var inward_min_radius_m: float = 0.0
 @export var guide_inward_target_offset_m: float = 0.0
+@export var non_thumb_s1_guide_target_depth_m: float = 0.0
 @export var palm_guide_target_depth_m: float = 0.0
 
 ## Construction profiles in the source handle's authored 2D profile frame.
@@ -35,10 +40,13 @@ const CombatOriginRecordScript = preload("res://core/models/combat_origin_record
 @export var envelope_profile_m: PackedVector2Array = PackedVector2Array()
 @export var target_profile_m: PackedVector2Array = PackedVector2Array()
 @export var palm_target_profile_m: PackedVector2Array = PackedVector2Array()
+@export var non_thumb_s1_target_profile_m: PackedVector2Array = PackedVector2Array()
 
 ## Closed indexed triangle surfaces, both in vertices_origin_id.
 @export var target_vertices_m: PackedVector3Array = PackedVector3Array()
 @export var target_indices: PackedInt32Array = PackedInt32Array()
 @export var palm_target_vertices_m: PackedVector3Array = PackedVector3Array()
 @export var palm_target_indices: PackedInt32Array = PackedInt32Array()
+@export var non_thumb_s1_target_vertices_m: PackedVector3Array = PackedVector3Array()
+@export var non_thumb_s1_target_indices: PackedInt32Array = PackedInt32Array()
 @export var build_ms: float = 0.0

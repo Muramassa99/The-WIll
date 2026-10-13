@@ -39,7 +39,13 @@ func bake(presenter: Node3D, body: Resource, handle_packet: Dictionary, config: 
 	if not finger.get("valid", false): return _fail("wrapper_finger_target_failed", finger)
 	var palm: Dictionary = progression.inset_contact_target(guide, float(normalized.palm_guide_target_depth_m))
 	if not palm.get("valid", false): return _fail("wrapper_palm_target_failed", palm)
+	var s1: Dictionary = progression.inset_contact_target(guide, float(normalized.non_thumb_s1_guide_target_depth_m))
+	# A narrow or disconnected inset is a failed target preparation. Never enlarge
+	# the handle, silently reduce the depth, or publish an incomplete replacement.
+	if not s1.get("valid", false): return _fail("wrapper_non_thumb_s1_target_failed", s1)
 	var wrapper := Wrapper.new()
+	wrapper.schema_version = Wrapper.SCHEMA_VERSION
+	wrapper.construction_revision = Wrapper.CONSTRUCTION_REVISION
 	wrapper.source_body_signature = body_signature
 	wrapper.source_handle_vertices_m = physical.vertices.duplicate()
 	wrapper.source_handle_indices = physical.indices.duplicate()
@@ -47,11 +53,13 @@ func bake(presenter: Node3D, body: Resource, handle_packet: Dictionary, config: 
 	wrapper.anatomy_signature = String(normalized.anatomy_signature)
 	wrapper.inward_min_radius_m = float(normalized.inward_min_radius_m)
 	wrapper.guide_inward_target_offset_m = float(normalized.guide_inward_target_offset_m)
+	wrapper.non_thumb_s1_guide_target_depth_m = float(normalized.non_thumb_s1_guide_target_depth_m)
 	wrapper.palm_guide_target_depth_m = float(normalized.palm_guide_target_depth_m)
 	wrapper.source_profile_m = polygon.duplicate()
 	wrapper.envelope_profile_m = prepared.final_envelope_polygon_m.duplicate()
 	wrapper.target_profile_m = finger.polygon.duplicate()
 	wrapper.palm_target_profile_m = palm.polygon.duplicate()
+	wrapper.non_thumb_s1_target_profile_m = s1.polygon.duplicate()
 	var tree := presenter.get_tree()
 	var staging := Node3D.new()
 	staging.name = "InvisibleGripTargetBake"
@@ -62,7 +70,7 @@ func bake(presenter: Node3D, body: Resource, handle_packet: Dictionary, config: 
 	staging.top_level = true
 	staging.global_transform = Transform3D.IDENTITY
 	var shapes: Array[CSGCombiner3D] = []
-	for target_polygon: PackedVector2Array in [wrapper.target_profile_m, wrapper.palm_target_profile_m]:
+	for target_polygon: PackedVector2Array in [wrapper.target_profile_m, wrapper.palm_target_profile_m, wrapper.non_thumb_s1_target_profile_m]:
 		var clone: Resource = body.duplicate(true)
 		clone.set("profile_polygon_2d_meters", target_polygon.duplicate())
 		var shape := CSGCombiner3D.new()
@@ -104,6 +112,8 @@ func bake(presenter: Node3D, body: Resource, handle_packet: Dictionary, config: 
 	wrapper.target_indices = packets[0].indices
 	wrapper.palm_target_vertices_m = packets[1].vertices
 	wrapper.palm_target_indices = packets[1].indices
+	wrapper.non_thumb_s1_target_vertices_m = packets[2].vertices
+	wrapper.non_thumb_s1_target_indices = packets[2].indices
 	wrapper.build_ms = float(Time.get_ticks_usec() - started) / 1000.0
 	var verified: Dictionary = Validation.validate(wrapper, handle_packet, config)
 	if not verified.get("valid", false): return _fail("wrapper_validation_failed", verified)

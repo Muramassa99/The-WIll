@@ -148,6 +148,10 @@ add_library(grip_contact SHARED
     src/grip_slice_kernel.h
     src/grip_topology_kernel.cpp
     src/grip_topology_kernel.h
+    src/grip_pose_surface_kernel.cpp
+    src/grip_pose_surface_kernel.h
+    src/grip_skin_point_kernel.cpp
+    src/grip_skin_point_kernel.h
     src/register_types.cpp
     src/register_types.h
 )

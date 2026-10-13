@@ -5,14 +5,15 @@ extends Node
 const Acquisition = preload("res://runtime/player/grip/saved_wrapper_grip_acquisition.gd")
 const CharacterData = preload("res://runtime/player/grip/character_grip_data.gd")
 const Capture = preload("res://runtime/player/grip/capture_grip_placement_stage.gd")
-const Assessment = preload("res://runtime/player/grip/realized_grip_assessment.gd")
 const Origins = preload("res://core/models/combat_origin_record.gd")
 const Chronology = preload("res://runtime/player/grip/grip_chronology.gd")
+const HingeRules = preload("res://runtime/player/player_digit_hinge_rules.gd")
 const NODE_NAME := "PreparedGripAcquisition"
 const SEAT_AXIAL_GUARD_M := 0.00001
 const FRAME_GUARD_M := 0.000005
-const ACQUISITION_METHOD := &"saved_wrapper_contact_cpp"
-const GUIDED_DIGITS := [&"middle", &"thumb", &"index", &"ring", &"pinky"]
+const SEAT_IDENTITY_GRID_M := 0.0000001
+const ACQUISITION_METHOD := &"surface_contact_v6"
+const ACTIVE_DIGITS := [&"index", &"middle", &"ring", &"pinky"]
 signal primary_seat_applied(weapon: Node3D, actor: Node3D)
 
 var _actor: Node3D
@@ -36,6 +37,131 @@ var _dominant := StringName()
 var _pose_epoch := 0
 var _primary_seat: Dictionary = {}
 var _skeleton: Skeleton3D
+var _replay_pose_cache: Dictionary = {}
+var _support_motion_snapshot: Dictionary = {}
+var _restoring_support_motion := false
+var _support_motion_clamp_count := 0
+var _last_support_motion_clamp: Dictionary = {}
+
+## Offline clip baking uses the same acquisition and application contracts as
+## editing. Rigid motion reuses a committed local grip; changed stations solve
+## once per relationship instead of recording pending/open fingers.
+func prepare_replay_grip(slots: Array[StringName], dominant: StringName) -> Dictionary:
+	if _busy:
+		return {"valid": false, "reason": "grip_acquisition_pending"}
+	if not is_instance_valid(_actor) or not is_instance_valid(_weapon) or not _data.get("valid", false):
+		return {"valid": false, "reason": "missing_replay_grip_context"}
+	if slots.is_empty() or dominant not in slots:
+		return {"valid": false, "reason": "missing_replay_grip_slots"}
+	synchronize(slots, dominant)
+	_settle_ready = false
+	var ordered: Array[StringName] = [dominant]
+	for slot: StringName in slots:
+		if slot != dominant:
+			ordered.append(slot)
+	var solved_count := 0
+	var reused_count := 0
+	for slot: StringName in ordered:
+		if slot != dominant and _actor.has_method("settle_authoring_support_grip_macro_pose_now"):
+			_actor.settle_authoring_support_grip_macro_pose_now()
+			retain_support_motion()
+		var request: Dictionary = _requests.get(slot, {})
+		if request.is_empty():
+			return {"valid": false, "reason": "replay_grip_claim_unavailable", "slot": slot}
+		var cached: Dictionary = _replay_pose_cache.get(request.key, {})
+		Chronology.event("owner.replay_lookup", {"slot": slot, "cached": not cached.is_empty(),
+			"snapshot_available": not _support_motion_snapshot.is_empty(), "request_serial": request.serial,
+			"cached_support_matches": slot == dominant or (not cached.is_empty() and _replay_support_matches(slot, cached.packet))})
+		if not cached.is_empty() and cached.get("status", {}).get("status", "") != "preview_applied":
+			return {"valid": false, "reason": cached.get("status", {}).get("reason", "replay_cached_grip_unavailable"), "slot": slot}
+		var reused := false
+		if not cached.is_empty() and (slot == dominant or _replay_support_matches(slot, cached.packet)):
+			var applied: Dictionary = _actor.apply_planar_grip_pose(slot, _weapon, request.key, cached.packet)
+			if applied.get("reason", "") == "prepared_digit_dimensions_changed":
+				_replay_pose_cache.erase(request.key)
+			if applied.get("valid", false):
+				if slot == dominant:
+					_primary_seat = {"key": request.key, "slot": slot}
+					var seat := recompose_primary_seat()
+					if not seat.get("valid", false):
+						return seat
+				else:
+					_capture_support_motion_snapshot(slot)
+				_status[slot] = cached.status.duplicate(true)
+				_queue.erase(slot)
+				reused = true
+				reused_count += 1
+		if not reused:
+			_queue.erase(slot)
+			_queue.push_front(slot)
+			_run_next(true)
+			solved_count += 1
+		if _status.get(slot, {}).get("status", "") != "preview_applied" or not _actor.get_planar_grip_pose_state(slot).get("has_grip_pose", false):
+			return {"valid": false, "reason": _status.get(slot, {}).get("reason", "replay_grip_not_applied"), "slot": slot}
+		if not _actor.finger_grip_presenter.apply_planar_grip_rotations(_skeleton, slot):
+			return {"valid": false, "reason": "replay_grip_rotations_unavailable", "slot": slot}
+	_settle_ready = false
+	_publish()
+	Chronology.event("owner.replay_complete", {"solved_relationships": solved_count, "reused_relationships": reused_count})
+	return {"valid": true, "solved_relationships": solved_count, "reused_relationships": reused_count}
+
+func _replay_support_matches(slot: StringName, packet: Dictionary) -> bool:
+	var index := _skeleton.find_bone("CC_Base_R_Hand" if slot == &"hand_right" else "CC_Base_L_Hand")
+	if index < 0 or not packet.get("hand_in_weapon") is Transform3D:
+		return false
+	var actual: Transform3D = _weapon.global_transform.affine_inverse() * _skeleton.global_transform * _skeleton.get_bone_global_pose(index)
+	var expected: Transform3D = packet.hand_in_weapon
+	var relative := (actual.basis.orthonormalized().get_rotation_quaternion().inverse() * expected.basis.orthonormalized().get_rotation_quaternion()).normalized()
+	return (_weapon.global_basis * (actual.origin - expected.origin)).length() <= 0.00005 and 2.0 * atan2(Vector3(relative.x, relative.y, relative.z).length(), absf(relative.w)) <= 0.00005
+
+
+## Save visits other drafts. This token belongs only to its unchanged visible
+## selection; it never supplies a general cached body pose during editing.
+func capture_bake_context(selection_key: String) -> Dictionary:
+	if _busy or _support_motion_snapshot.is_empty() or selection_key.is_empty(): return {}
+	var packets: Dictionary = {}
+	var keys: Dictionary = {}
+	for slot: StringName in _slots:
+		var key: String = _requests.get(slot, {}).get("key", "")
+		if _status.get(slot, {}).get("status", "") != "preview_applied" or not _replay_pose_cache.has(key): return {}
+		keys[slot] = key
+		packets[slot] = _replay_pose_cache[key].packet.duplicate(true)
+	return {"selection_key": selection_key, "owner_id": get_instance_id(), "dominant": _dominant,
+		"keys": keys, "packets": packets, "status": _status.duplicate(true),
+		"snapshot": _support_motion_snapshot.duplicate(true)}
+
+
+func restore_bake_context(context: Dictionary, selection_key: String) -> Dictionary:
+	if context.is_empty() or _busy or context.selection_key != selection_key or context.owner_id != get_instance_id() or context.dominant != _dominant or context.keys.size() != _slots.size():
+		return {"valid": false, "reason": "bake_preview_context_changed"}
+	var saved: Dictionary = context.snapshot
+	if saved.geometry_epoch != _geometry_epoch or saved.skeleton_version != _skeleton.get_version():
+		return {"valid": false, "reason": "bake_preview_geometry_changed"}
+	var plans: Dictionary = {}
+	for slot: StringName in _slots:
+		if context.keys.get(slot, "") != _requests.get(slot, {}).get("key", ""):
+			return {"valid": false, "reason": "bake_preview_relationship_changed"}
+		var plan: Dictionary = _actor.planar_grip_pose_binding.prepare(_skeleton, slot, _weapon, context.keys[slot], context.packets[slot])
+		if not plan.get("valid", false): return plan
+		plans[slot] = plan
+	_restoring_support_motion = true
+	_write_support_motion_snapshot(saved)
+	for slot: StringName in _slots:
+		_actor.finger_grip_presenter.set_planar_grip_rotations(_skeleton, slot, plans[slot].rotations)
+		_actor.planar_grip_pose_binding.commit(slot, plans[slot])
+		_status[slot] = context.status[slot].duplicate(true)
+		_status[slot]["serial"] = _requests[slot].serial
+		_replay_pose_cache[context.keys[slot]] = {"packet": context.packets[slot].duplicate(true), "status": _status[slot].duplicate(true)}
+		_queue.erase(slot)
+	_primary_seat = {"slot": _dominant, "key": context.keys[_dominant], "last_applied_world": saved.weapon_world}
+	_support_motion_snapshot = saved
+	_settle_ready = false
+	_skeleton.force_update_all_bone_transforms()
+	_restoring_support_motion = false
+	_publish()
+	primary_seat_applied.emit(_weapon, _actor)
+	return {"valid": true, "restored_validated_bake_context": true, "solved_relationships": 0}
+
 
 func configure(actor: Node3D, weapon: Node3D) -> bool:
 	if _actor == actor and _weapon == weapon:
@@ -61,9 +187,9 @@ func synchronize(slots: Array[StringName], dominant: StringName, force_reason: S
 	if not is_instance_valid(_actor) or not is_instance_valid(_weapon) or not _data.get("valid", false):
 		return
 	var span := Chronology.begin("owner.synchronize", {"owner_id":str(get_instance_id()),"slots":slots,"dominant":dominant,"force_reason":force_reason})
-	# Primary application is the current cutover. Support keeps its existing
-	# driver until its separate integration is implemented and verified.
-	_slots.assign([dominant] if dominant in slots else [])
+	# One closure owner for both hands. Existing support IK positions its Hand;
+	# only primary acquisition can translate the weapon.
+	_slots.assign(slots)
 	_dominant = dominant
 	for old_slot: StringName in _requests.keys():
 		if old_slot not in _slots:
@@ -80,7 +206,16 @@ func synchronize(slots: Array[StringName], dominant: StringName, force_reason: S
 		var force_reacquire := force_reason not in [StringName(), &"handle_position_changed"]
 		if previous.get("key", "") == key and not force_reacquire:
 			continue
-		if _primary_seat.get("key", "") != key:
+		if Chronology.enabled() and not previous.is_empty():
+			var old_fields: Array = bytes_to_var(String(previous.key).hex_decode())
+			var new_fields: Array = bytes_to_var(key.hex_decode())
+			Chronology.event("owner.relationship_changed", {"slot": slot,
+				"previous_station": str(old_fields[5]), "current_station": str(new_fields[5]),
+				"station_delta_m": (old_fields[5] as Vector3).distance_to(new_fields[5]),
+				"previous_style": old_fields[7], "current_style": new_fields[7],
+				"geometry_equal": old_fields[8] == new_fields[8], "forced": force_reacquire})
+		_support_motion_snapshot.clear()
+		if slot == dominant and _primary_seat.get("key", "") != key:
 			_primary_seat.clear()
 		if _running_slot == slot and _job != null:
 			_job.cancel()
@@ -163,6 +298,10 @@ func clear() -> void:
 	_dominant = StringName()
 	_geometry_epoch = 0
 	_primary_seat.clear()
+	_replay_pose_cache.clear()
+	_support_motion_snapshot.clear()
+	_support_motion_clamp_count = 0
+	_last_support_motion_clamp.clear()
 	_data.clear()
 	_weapon = null
 
@@ -179,6 +318,7 @@ func _geometry_changed() -> void:
 	_settle_ready = true
 
 func _release(slot: StringName) -> void:
+	_support_motion_snapshot.clear()
 	_record_request("owner.release",slot,_requests.get(slot,{}))
 	if _running_slot == slot and _job != null:
 		_job.cancel()
@@ -212,7 +352,7 @@ func _process(_delta: float) -> void:
 	if _settle_ready and not _queue.is_empty() and Engine.get_process_frames() > _last_key_change_frame:
 		_run_next()
 
-func _run_next() -> void:
+func _run_next(synchronous: bool = false) -> void:
 	_busy = true
 	_running_slot = _queue.pop_front()
 	var slot: StringName = _running_slot
@@ -227,7 +367,7 @@ func _run_next() -> void:
 	var pivot := {"point_local": _weapon.get_meta(prefix + "_local"),
 		"origin_id": _weapon.get_meta(prefix + "_origin_id"), "source": prefix}
 	var capture_span := Chronology.begin("owner.capture_input", {"slot":slot,"request_serial":request.serial})
-	var stage: Dictionary = Capture.new().capture(_actor, _weapon, _data.anatomy, slot, &"live_grip_acquisition", request.serial, 0, {}, pivot)
+	var stage: Dictionary = Capture.new().capture(_actor, _weapon, _data.anatomy, slot, &"live_grip_acquisition", request.serial, 0, {}, pivot, false)
 	Chronology.finish(capture_span, {"valid":stage.get("valid",false),"reason":stage.get("reason","")})
 	if not stage.get("valid", false):
 		_finish_failure(slot, request, stage.get("reason", "capture_failed"), stage.get("details", {}))
@@ -243,7 +383,11 @@ func _run_next() -> void:
 	_requests[slot]["digit_dimension_reference"]=dimensions.duplicate(true)
 	var source_stamp := _realization_stamp()
 	_job = Acquisition.new()
-	var configured: Dictionary = _job.configure(_data.anatomy, stage, _data.config, self)
+	var solve_config: Dictionary = _data.config.duplicate(true)
+	# Both hands use the same fit. For support this weapon displacement is a
+	# virtual relative frame: application moves the joining Hand oppositely.
+	solve_config["seat_weapon"] = true
+	var configured: Dictionary = _job.configure(_data.anatomy, stage, solve_config, self)
 	if not configured.get("valid", false):
 		_finish_failure(slot, request, configured.get("reason", "configuration_failed"), configured.get("details", configured.get("detail", {})))
 		return
@@ -252,7 +396,11 @@ func _run_next() -> void:
 	_publish()
 	_record_request("owner.solve_started",slot,request)
 	var solve_span := Chronology.begin("owner.await_solve", {"slot":slot,"request_serial":request.serial,"job_id":str(_job.get_instance_id())})
-	var result: Dictionary = await _job.solve()
+	var result: Dictionary
+	if synchronous:
+		result = _job._work()
+	else:
+		result = await _job.solve()
 	Chronology.finish(solve_span, {"valid":result.get("valid",false),"reason":result.get("reason",result.get("termination","")),"cancelled":result.get("cancelled",false)})
 	_job = null
 	if _closing:
@@ -268,49 +416,27 @@ func _run_next() -> void:
 		_finish_failure(slot, request, result.get("reason", "acquisition_unresolved"), result.get("details", result.get("detail", {})))
 		return
 	var apply_span := Chronology.begin("owner.apply_result", {"slot":slot,"request_serial":request.serial})
-	var applied: Dictionary = apply_primary_result(slot, request, result, source_stamp)
+	var applied: Dictionary = apply_primary_result(slot, request, result, source_stamp) if slot == request.dominant else _apply_support_result(slot, request, result, source_stamp)
 	Chronology.finish(apply_span, {"valid":applied.get("valid",false),"reason":applied.get("reason",""),"status":applied.get("status","")})
 	if not applied.get("valid", false):
 		_finish_failure(slot, request, applied.get("reason", "pose_application_rejected"), applied.get("details", {}))
 		return
-	var realized: Dictionary = applied
-	_status[slot].merge({"status": "assessing", "serial": request.serial}, true)
-	Chronology.event("owner.assessment_started", {"slot":slot,"request_serial":request.serial})
-	var assessment_span := Chronology.begin("owner.assess_realized", {"slot":slot,"request_serial":request.serial})
-	var actual: Dictionary = await _capture_realized(slot, request, pivot)
-	var capture_epoch: int = actual.get("preview_pose_epoch", -1)
-	var capture_stamp: PackedByteArray = actual.get("preview_realization_stamp", PackedByteArray())
-	var assessed: Dictionary = actual
-	if _is_current(slot, request) and actual.get("valid", false):
-		actual.posed_character["digit_dimension_reference"]=dimensions.duplicate(true)
-		_job = Assessment.new()
-		assessed = await _job.assess(_data.anatomy, actual, _data.config, self)
-		_job = null
-	if _closing:
-		return
-	if not _is_current(slot, request):
-		_record_request("owner.assessment_discarded_stale",slot,request)
-		Chronology.finish(assessment_span, {"discarded":true,"reason":"stale_request"})
-		_busy = false
-		_running_slot = StringName()
-		return
-	var assessment_current: bool = capture_epoch == _pose_epoch and not capture_stamp.is_empty() and capture_stamp == _realization_stamp()
-	Chronology.finish(assessment_span, {"valid":assessed.get("valid",false),"reason":assessed.get("reason",""),"assessment_current":assessment_current,"contact_condition":assessed.get("planar_material_contact_condition",false)})
+	# Support application replaces proposal metrics with the assessment of the
+	# actual arm pose after its existing IK realizes the relative seat.
+	result_diagnostics = _solver_diagnostics(result)
+	# The V6 worker already evaluates its sampled physical caps. The old
+	# five-plane reslicing assessment is not part of this surface-only path.
+	# Application remains a prototype result, not a full skin certificate.
 	_status[slot] = result_diagnostics.merged({
 		"status": "preview_applied", "serial": request.serial,
 		"elapsed_seconds": float(Time.get_ticks_usec() - _started_usec) / 1000000.0,
-		"actual_3d_grip_verified": false, "realization": realized,
-		"actual_material_query_valid": assessed.get("material_query_valid", false),
-		"actual_material_safe": assessed.get("actual_material_safe", false),
-		"actual_material_contacts": assessed.get("actual_material_contacts", []),
-		"actual_articulation_valid": assessed.get("articulation_valid", false),
-		"actual_articulation": assessed.get("actual_articulation", {}),
-		"actual_assessment_reason": assessed.get("reason", ""),
-		"actual_assessment_current": assessment_current,
-		"contact_condition_met": assessment_current and assessed.get("articulation_valid", false) and assessed.get("planar_material_contact_condition", false),
-		"actual_pose_id": assessed.get("source_pose_id", StringName()),
-		"note": "Actual skin assessed on the five digit planes; whole-hand 3D contact is not certified.",
+		"actual_3d_grip_verified": false, "realization": applied,
+		"actual_assessment_current": false, "contact_condition_met": false,
+		"thumb_solve_enabled": bool(result.get("thumb_solve_enabled", false)),
+		"note": "Surface grip applied. Sampled physical caps; manual visual assessment pending.",
 	}, true)
+	if _replay_pose_cache.has(request.key):
+		_replay_pose_cache[request.key]["status"] = _status[slot].duplicate(true)
 	_busy = false
 	_running_slot = StringName()
 	_record_request("owner.preview_applied",slot,request)
@@ -324,12 +450,10 @@ func apply_primary_result(slot: StringName, request: Dictionary, result: Diction
 	if source_stamp.is_empty() or source_stamp != _realization_stamp():
 		return {"valid": false, "reason": "source_pose_changed_during_acquisition"}
 	if not result.get("valid", false) or not result.get("material_safe", false):
-		return {"valid": false, "reason": "no_pose_within_material_overlap_limits"}
-	# Safe material contact cannot replace the guide's position-driving proof.
-	# Reject before any actor/weapon write, including partial follower results.
-	var guidance := validate_guidance_result(result)
-	if not guidance.valid:
-		return guidance
+		return {"valid": false, "reason": "no_pose_within_material_overlap_limits", "details": result.get("material_validation", {})}
+	var surface_result := validate_surface_result(result)
+	if not surface_result.valid:
+		return surface_result
 	var candidate: Dictionary = result.get("candidate", {})
 	var selected: Dictionary = result.get("selected", {})
 	if not result.get("source_weapon_to_world") is Transform3D or result.get("vectors_origin_id") != Origins.ORIGIN_RL_BONE_ROOT or not selected.get("weapon_to_world") is Transform3D or selected.get("weapon_to_world_origin_id") != Origins.ORIGIN_RL_BONE_ROOT or not candidate.get("translation_world") is Vector3 or not candidate.get("hand_to_world") is Transform3D or not candidate.get("pose_packet") is Dictionary:
@@ -368,6 +492,7 @@ func apply_primary_result(slot: StringName, request: Dictionary, result: Diction
 	var applied: Dictionary = _actor.apply_planar_grip_pose(slot, _weapon, request.key, packet)
 	if not applied.get("valid", false):
 		return applied
+	_replay_pose_cache[request.key] = {"packet": packet.duplicate(true), "status": {}}
 	_primary_seat = {"key": request.key, "slot": slot,
 		"last_applied_world": final, "last_applied_world_origin_id": Origins.ORIGIN_RL_BONE_ROOT}
 	_weapon.global_transform = final
@@ -378,36 +503,145 @@ func apply_primary_result(slot: StringName, request: Dictionary, result: Diction
 	return report
 
 
-## Validate the worker's guide-following contract at the only pose-write seam.
-## This is sampled-state evidence, not continuous swept or whole-hand 3D proof.
-static func validate_guidance_result(result: Dictionary) -> Dictionary:
-	if result.get("guide_following_verified") != true:
-		return {"valid": false, "reason": "guide_following_unverified"}
-	if not result.get("per_digit_guidance") is Dictionary or not result.get("working_guides") is Dictionary:
-		return {"valid": false, "reason": "missing_per_digit_guidance"}
-	var guidance: Dictionary = result.per_digit_guidance
-	var guides: Dictionary = result.working_guides
-	for digit: StringName in GUIDED_DIGITS:
-		var state: Variant = guidance.get(digit)
-		var guide: Variant = guides.get(digit)
-		if not state is Dictionary or not guide is Dictionary:
-			return {"valid": false, "reason": "missing_digit_guidance", "details": {"digit": digit}}
-		if state.get("attached") != true:
-			return {"valid": false, "reason": "digit_guide_contact_not_attached", "details": {"digit": digit, "stop_reason": state.get("stop_reason", "")}}
-		for field: String in ["progress", "initial_radius_m"]:
-			var value: Variant = state.get(field)
-			if not (value is float or value is int) or not is_finite(float(value)):
-				return {"valid": false, "reason": "invalid_digit_guidance_value", "details": {"digit": digit, "field": field}}
-		for field: String in ["progress", "radius_m"]:
-			var value: Variant = guide.get(field)
-			if not (value is float or value is int) or not is_finite(float(value)):
-				return {"valid": false, "reason": "invalid_working_guide_value", "details": {"digit": digit, "field": field}}
-		if float(state.progress) < 0.0 or float(state.progress) > 1.0 or float(state.initial_radius_m) <= 0.0 or float(guide.radius_m) <= 0.0 or absf(float(state.progress) - float(guide.progress)) > 1.0e-9:
-			return {"valid": false, "reason": "inconsistent_digit_guidance", "details": {"digit": digit}}
-		if str(state.get("stop_reason", "")).is_empty():
-			return {"valid": false, "reason": "missing_digit_guidance_stop_reason", "details": {"digit": digit}}
+## One surface-only result contract; no circle flags or old Thumb fallback.
+static func validate_surface_result(result: Dictionary) -> Dictionary:
+	if StringName(result.get("method", StringName())) != ACQUISITION_METHOD:
+		return {"valid": false, "reason": "incorrect_surface_solver_contract"}
+	var states: Dictionary = result.get("candidate", {}).get("digit_states", {})
+	for digit: StringName in ACTIVE_DIGITS + [&"thumb"]:
+		if not states.get(digit) is Dictionary or not states[digit].get("angles_rad") is Array or states[digit].angles_rad.size() != 3:
+			return {"valid": false, "reason": "missing_owned_digit_state", "details": {"digit": digit}}
 	return {"valid": true}
 
+## Invert the numerical weapon displacement into a joining-Hand request.
+## Existing support IK realizes it; an actual-pose assessment owns acceptance.
+func _apply_support_result(slot: StringName, request: Dictionary, result: Dictionary, source_stamp: PackedByteArray) -> Dictionary:
+	if slot == _dominant or not _is_current(slot, request) or source_stamp.is_empty() or source_stamp != _realization_stamp():
+		return {"valid": false, "reason": "support_source_pose_changed"}
+	if not result.get("valid", false) or not result.get("material_safe", false):
+		return {"valid": false, "reason": "no_support_pose_within_overlap_limits", "details": result.get("material_validation", {})}
+	var checked := validate_surface_result(result)
+	if not checked.valid:
+		return checked
+	var candidate: Dictionary = result.get("candidate", {})
+	var selected: Dictionary = result.get("selected", {})
+	if result.get("vectors_origin_id") != Origins.ORIGIN_RL_BONE_ROOT or result.get("source_weapon_to_world") != _weapon.global_transform or not selected.get("weapon_to_world") is Transform3D or candidate.get("translation_world") != Vector3.ZERO:
+		return {"valid": false, "reason": "invalid_support_virtual_seat_frames"}
+	var fixed_weapon := _weapon.global_transform
+	var virtual_weapon: Transform3D = selected.weapon_to_world
+	if not virtual_weapon.is_finite() or virtual_weapon.basis != fixed_weapon.basis:
+		return {"valid": false, "reason": "support_virtual_seat_changes_weapon_orientation"}
+	var delta := virtual_weapon.origin - fixed_weapon.origin
+	for end: String in ["start", "end"]:
+		if not _weapon.get_meta("primary_grip_span_" + end + "_local", null) is Vector3 or _weapon.get_meta("primary_grip_span_" + end + "_origin_id", StringName()) != Origins.ORIGIN_WEAPON_ROOT:
+			return {"valid": false, "reason": "missing_named_support_weapon_axis"}
+	var axis: Vector3 = fixed_weapon.basis * ((_weapon.get_meta("primary_grip_span_end_local") as Vector3) - (_weapon.get_meta("primary_grip_span_start_local") as Vector3))
+	if axis.length_squared() < 1.0e-12 or absf(delta.dot(axis.normalized())) > SEAT_AXIAL_GUARD_M:
+		return {"valid": false, "reason": "support_virtual_seat_changes_longitudinal_station"}
+	var skeleton: Skeleton3D = _actor.get("skeleton")
+	var index := skeleton.find_bone("CC_Base_R_Hand" if slot == &"hand_right" else "CC_Base_L_Hand") if skeleton != null else -1
+	if index < 0 or not candidate.get("hand_to_world") is Transform3D:
+		return {"valid": false, "reason": "missing_support_hand_frame"}
+	var hand: Transform3D = skeleton.global_transform * skeleton.get_bone_global_pose(index)
+	var proposed: Transform3D = candidate.hand_to_world
+	if not hand.basis.is_equal_approx(proposed.basis) or hand.origin.distance_to(proposed.origin) > FRAME_GUARD_M:
+		return {"valid": false, "reason": "support_proposal_does_not_match_captured_hand"}
+	var primary_stamp := _primary_relationship_stamp()
+	proposed.origin -= delta
+	var realization_started := Time.get_ticks_usec()
+	var realized: Dictionary = _actor.begin_prepared_support_grip_seat(slot, _weapon, proposed)
+	realized["total_ms"] = float(Time.get_ticks_usec() - realization_started) / 1000.0
+	if not realized.get("valid", false):
+		_actor.finish_prepared_support_grip_seat(false)
+		return realized
+	var applied := _apply_realized_support_result(slot, request, result, fixed_weapon, primary_stamp, realized)
+	_actor.finish_prepared_support_grip_seat(applied.get("valid", false))
+	if applied.get("valid", false):
+		_capture_support_motion_snapshot(slot)
+	return applied
+
+func _primary_relationship_stamp() -> PackedByteArray:
+	if _skeleton == null: return PackedByteArray()
+	var hand_index := _skeleton.find_bone("CC_Base_R_Hand" if _dominant == &"hand_right" else "CC_Base_L_Hand")
+	if hand_index < 0: return PackedByteArray()
+	return var_to_bytes([_weapon.global_transform, _skeleton.global_transform * _skeleton.get_bone_global_pose(hand_index),
+		_actor.planar_grip_pose_binding.states.get(_dominant, {}).get("rotations", {})])
+
+func _apply_realized_support_result(slot: StringName, request: Dictionary, result: Dictionary, fixed_weapon: Transform3D, primary_stamp: PackedByteArray, realized: Dictionary) -> Dictionary:
+	if _weapon.global_transform != fixed_weapon or primary_stamp.is_empty() or _primary_relationship_stamp() != primary_stamp:
+		return {"valid": false, "reason": "support_ik_changed_established_primary_relationship"}
+	var pivot := {"point_local": _weapon.get_meta("preview_support_grip_seat_local"),
+		"origin_id": _weapon.get_meta("preview_support_grip_seat_origin_id"), "source": "preview_support_grip_seat"}
+	var stage: Dictionary = Capture.new().capture(_actor, _weapon, _data.anatomy, slot, &"support_seat_realized", request.serial, 0, {}, pivot, false)
+	if not stage.get("valid", false): return stage
+	stage.posed_character["digit_dimension_reference"] = _requests[slot].digit_dimension_reference.duplicate(true)
+	var assessor = Acquisition.Solver.new()
+	var assessed: Dictionary = assessor.assess_final_pose(_data.anatomy, stage, _data.config, result.candidate.digit_states)
+	# The existing arm/wrist limits can realize a different legal Hand frame.
+	# Refit the fingers once in that observed frame, keeping both the established
+	# weapon and the realized arm fixed. Reuse the same solver and skin guards.
+	if assessed.get("valid", false) and not assessed.get("material_safe", false):
+		var assessment_ms := float(assessed.get("total_ms", 0.0))
+		var fixed_config: Dictionary = _data.config.duplicate(true)
+		fixed_config["seat_weapon"] = false
+		fixed_config["seed_digit_states"] = result.candidate.digit_states
+		var fixed_fit: Dictionary = Acquisition.Solver.new().run(_data.anatomy, stage, fixed_config)
+		fixed_fit["total_ms"] = assessment_ms + float(fixed_fit.get("total_ms", 0.0))
+		fixed_fit["support_fixed_seat_refit"] = true
+		assessed = fixed_fit
+	if not assessed.get("valid", false) or not assessed.get("material_safe", false):
+		var fit_ms: float = result.get("total_ms", 0.0)
+		result["total_ms"] = fit_ms + float(assessed.get("total_ms", 0.0)) + float(realized.get("total_ms", 0.0))
+		result["totals"]["virtual_support_fit_ms"] = fit_ms
+		result["totals"]["realized_support_assessment_ms"] = assessed.get("total_ms", 0.0)
+		result["totals"]["support_arm_realization_ms"] = realized.get("total_ms", 0.0)
+		result["totals"]["total_ms"] = result.total_ms
+		# Failure status must describe the observed/refitted pose, not the safe
+		# virtual proposal that the arm could not realize.
+		assessed["total_ms"] = result.total_ms
+		if not assessed.has("totals"): assessed["totals"] = {}
+		assessed["totals"].merge({"virtual_support_fit_ms": fit_ms,
+			"support_arm_realization_ms": realized.get("total_ms", 0.0),
+			"total_ms": result.total_ms}, true)
+		_status[slot].merge(_solver_diagnostics(assessed), true)
+		# Status is copied each frame. Keep the actual failure evidence, not the
+		# candidate's complete anatomy/skin packet and numerical search history.
+		var evidence := {"valid": assessed.get("valid", false), "material_safe": assessed.get("material_safe", false),
+			"reason": assessed.get("reason", assessed.get("termination", "")),
+			"material_validation": assessed.get("material_validation", {}),
+			"section_assessment": assessed.get("totals", {}).get("section_assessment", {}),
+			"fixed_seat_refit": assessed.get("support_fixed_seat_refit", false),
+			"total_ms": assessed.get("total_ms", 0.0)}
+		return {"valid": false, "reason": "realized_support_pose_outside_overlap_limits",
+			"details": {"realization": realized, "assessment": evidence}}
+	var checked := validate_surface_result(assessed)
+	if not checked.valid: return checked
+	var candidate: Dictionary = assessed.candidate
+	var hand: Transform3D = candidate.hand_to_world
+	var virtual_totals: Dictionary = result.get("totals", {}).duplicate(true)
+	var virtual_ms: float = result.get("total_ms", 0.0)
+	result.merge(assessed, true)
+	result["total_ms"] = virtual_ms + float(assessed.get("total_ms", 0.0)) + float(realized.get("total_ms", 0.0))
+	result["totals"]["virtual_support_fit_ms"] = virtual_ms
+	result["totals"]["realized_support_assessment_ms"] = assessed.get("total_ms", 0.0)
+	result["totals"]["support_arm_realization_ms"] = realized.get("total_ms", 0.0)
+	result["totals"]["total_ms"] = result.total_ms
+	result["source_weapon_to_world"] = fixed_weapon
+	result["vectors_origin_id"] = Origins.ORIGIN_RL_BONE_ROOT
+	result["support_seat_realization"] = realized
+	result["virtual_support_fit_totals"] = virtual_totals
+	var packet := {
+		"hand_in_weapon": _weapon.global_transform.affine_inverse() * hand,
+		"hand_in_weapon_origin_id": Origins.ORIGIN_WEAPON_ROOT,
+		"anatomy_signature": _data.anatomy.get("source_signature"),
+		"source_pose_id": candidate.get("pose_packet", {}).get("pose_id", StringName()),
+		"digit_states": candidate.digit_states,
+	}
+	var applied: Dictionary = _actor.apply_planar_grip_pose(slot, _weapon, request.key, packet)
+	if applied.get("valid", false):
+		_replay_pose_cache[request.key] = {"packet": packet.duplicate(true), "status": {}}
+		applied["support_seat_realization"] = realized
+	return applied
 
 ## Controls request a pose; the existing arm/wrist solver limits that pose.
 ## Its realized Hand carries the complete immutable grip, not merely a cached
@@ -436,8 +670,92 @@ func recompose_primary_seat() -> Dictionary:
 func _retain_final_skeleton_grip() -> void:
 	# Godot emits this after modifiers finish. A deferred wrist update must not
 	# detach a grip that was correctly retained by the synchronous UI pass.
-	if not _primary_seat.is_empty() and not _closing:
+	if not _primary_seat.is_empty() and not _closing and not _restoring_support_motion:
 		recompose_primary_seat()
+		retain_support_motion()
+
+
+## A committed support grip may follow legal body motion, but an arm/wrist
+## clamp must not silently detach it. Keep the last realized body/weapon pose;
+## authored controls remain requests and are never rewritten by this guard.
+func retain_support_motion() -> Dictionary:
+	if _support_motion_snapshot.is_empty() or _restoring_support_motion or _busy or _closing:
+		return {"valid": true, "applied": false}
+	var saved: Dictionary = _support_motion_snapshot
+	var slot: StringName = saved.slot
+	if not owns(slot) or slot == _dominant or saved.key != _requests[slot].key or saved.geometry_epoch != _geometry_epoch or saved.skeleton_version != _skeleton.get_version():
+		_support_motion_snapshot.clear()
+		return {"valid": false, "reason": "support_relationship_changed"}
+	# A changed finger size invalidates the old safe skin pose. Its owner will
+	# reacquire it rather than restoring obsolete dimensions from this snapshot.
+	for bone: int in saved.digit_dimensions:
+		var dimensions: Dictionary = saved.digit_dimensions[bone]
+		if not _skeleton.get_bone_pose_position(bone).is_equal_approx(dimensions.position) or not _skeleton.get_bone_pose_scale(bone).is_equal_approx(dimensions.scale):
+			_support_motion_snapshot.clear()
+			_replay_pose_cache.clear()
+			reacquire()
+			return {"valid": false, "reason": "prepared_digit_dimensions_changed"}
+	var binding: Dictionary = _actor.planar_grip_pose_binding.relationship(slot, _weapon)
+	if binding.is_empty():
+		_support_motion_snapshot.clear()
+		return {"valid": false, "reason": "support_relationship_not_bound"}
+	var actual: Transform3D = _weapon.global_transform.affine_inverse() * _skeleton.global_transform * _skeleton.get_bone_global_pose(saved.hand_index)
+	var expected: Transform3D = binding.hand_in_weapon
+	var position_error := (_weapon.global_basis * (actual.origin - expected.origin)).length()
+	var relative_rotation := (actual.basis.orthonormalized().get_rotation_quaternion().inverse() * expected.basis.orthonormalized().get_rotation_quaternion()).normalized()
+	var orientation_error := 2.0 * atan2(Vector3(relative_rotation.x, relative_rotation.y, relative_rotation.z).length(), absf(relative_rotation.w))
+	if position_error <= 0.00005 and orientation_error <= 0.00005:
+		var moved: bool = not _weapon.global_transform.is_equal_approx(saved.weapon_world)
+		_capture_support_motion_snapshot(slot)
+		if moved and _status[slot].has("motion_retention"):
+			_status[slot]["motion_retention"] = {"valid": true, "motion_clamped": false}
+		return {"valid": true, "applied": false, "motion_clamped": false}
+	_restoring_support_motion = true
+	_write_support_motion_snapshot(saved)
+	_skeleton.force_update_all_bone_transforms()
+	_primary_seat["last_applied_world"] = saved.weapon_world
+	_restoring_support_motion = false
+	var report := {"valid": true, "applied": true, "motion_clamped": true,
+		"reason": "support_arm_or_wrist_limit_preserves_grip", "position_error_m": position_error,
+		"orientation_error_rad": orientation_error}
+	_status[slot]["motion_retention"] = report
+	_support_motion_clamp_count += 1
+	_last_support_motion_clamp = report.duplicate(true)
+	Chronology.event("owner.support_motion_clamped", report)
+	_publish()
+	primary_seat_applied.emit(_weapon, _actor)
+	return report
+
+
+func _write_support_motion_snapshot(saved: Dictionary) -> void:
+	_actor.global_transform = saved.actor_world
+	_skeleton.transform = saved.skeleton_local
+	_weapon.global_transform = saved.weapon_world
+	for index: int in saved.poses.size():
+		if not _skeleton.get_bone_pose(index).is_equal_approx(saved.poses[index]):
+			_skeleton.set_bone_pose(index, saved.poses[index])
+	for control: Dictionary in saved.controls:
+		if is_instance_valid(control.node): control.node.global_transform = control.world
+
+
+func _capture_support_motion_snapshot(slot: StringName) -> void:
+	var poses: Array[Transform3D] = []
+	var dimensions: Dictionary = {}
+	for index: int in _skeleton.get_bone_count():
+		poses.append(_skeleton.get_bone_pose(index))
+	for hand_slot: StringName in _slots:
+		for bone_name: StringName in HingeRules.get_finger_bone_names(hand_slot):
+			var index := _skeleton.find_bone(bone_name)
+			if index < 0: continue
+			dimensions[index] = {"position": _skeleton.get_bone_pose_position(index), "scale": _skeleton.get_bone_pose_scale(index)}
+	var controls: Array[Dictionary] = []
+	for name: String in ["left_hand_ik_target", "right_hand_ik_target", "left_hand_pole_target", "right_hand_pole_target"]:
+		var control: Node3D = _actor.get(name)
+		if is_instance_valid(control): controls.append({"node": control, "world": control.global_transform})
+	_support_motion_snapshot = {"slot": slot, "key": _requests[slot].key, "geometry_epoch": _geometry_epoch,
+		"skeleton_version": _skeleton.get_version(), "hand_index": _skeleton.find_bone("CC_Base_R_Hand" if slot == &"hand_right" else "CC_Base_L_Hand"),
+		"actor_world": _actor.global_transform, "skeleton_local": _skeleton.transform, "weapon_world": _weapon.global_transform,
+		"poses": poses, "controls": controls, "digit_dimensions": dimensions}
 
 
 func _seat_report(base: Transform3D, final: Transform3D) -> Dictionary:
@@ -462,25 +780,7 @@ func _seat_report(base: Transform3D, final: Transform3D) -> Dictionary:
 		"seat_correction_grip_local_origin_id": Origins.ORIGIN_WEAPON_ROOT}
 
 
-func _capture_realized(slot: StringName, request: Dictionary, pivot: Dictionary) -> Dictionary:
-	var skeleton: Skeleton3D = _actor.get("skeleton")
-	var captured: Dictionary = {}
-	var receive := func() -> void:
-		if _is_current(slot, request):
-			captured.merge(Capture.new().capture(_actor, _weapon, _data.anatomy, slot, &"live_grip_realized", request.serial, 0, {}, pivot))
-			captured["preview_pose_epoch"] = _pose_epoch
-			captured["preview_realization_stamp"] = _realization_stamp()
-		else:
-			captured.merge({"valid": false, "reason": "request_replaced_during_capture"})
-	skeleton.skeleton_updated.connect(receive, CONNECT_ONE_SHOT)
-	skeleton.advance(0.0)
-	for _frame: int in 3:
-		if not captured.is_empty() or _closing:
-			break
-		await get_tree().process_frame
-	if is_instance_valid(skeleton) and skeleton.skeleton_updated.is_connected(receive):
-		skeleton.skeleton_updated.disconnect(receive)
-	return captured if not captured.is_empty() else {"valid": false, "reason": "no_final_skin_signal"}
+
 
 func _realization_stamp() -> PackedByteArray:
 	if not is_instance_valid(_actor) or not is_instance_valid(_weapon):
@@ -491,7 +791,7 @@ func _realization_stamp() -> PackedByteArray:
 	var poses: Array[Transform3D] = []
 	for index: int in skeleton.get_bone_count():
 		poses.append(skeleton.get_bone_pose(index))
-	# Compare once across the asynchronous assessment, not per frame. An arm
+	# Compare once across the asynchronous solve, not per frame. An arm
 	# modifier can change skin without an explicit editor-change notification.
 	return var_to_bytes([skeleton.get_instance_id(), skeleton.get_version(),
 		skeleton.global_transform, poses, _weapon.global_transform, _geometry_epoch])
@@ -499,33 +799,21 @@ func _realization_stamp() -> PackedByteArray:
 func _is_current(slot: StringName, request: Dictionary) -> bool:
 	return is_instance_valid(_actor) and is_instance_valid(_weapon) and not _weapon.is_queued_for_deletion() and _requests.get(slot, {}).get("serial", -1) == request.get("serial", -2) and relationship_key(_weapon, slot, request.dominant, _data.anatomy.get("source_signature"), _geometry_epoch) == request.key
 
-## Predicted full-hand results remain separate from recaptured rig assessment.
-## A native backend or an applied pose alone is never a successful grip verdict.
+## Sampled solver evidence is not a whole-hand skin certificate.
 func _solver_diagnostics(result: Dictionary) -> Dictionary:
-	var totals: Dictionary = result.get("totals", {})
-	var contact: Dictionary = totals.get("saved_contact_cache_statistics", {})
-	var unresolved: Array=[]
-	for follower: Dictionary in result.get("followers",[]):
-		if not follower.get("accepted_contact_response",false): unresolved.append(follower.get("digit",&"unknown"))
 	return {"acquisition_method": ACQUISITION_METHOD,
-		"solver_revision": result.get("revision", StringName()),
+		"solver_revision": result.get("solver_revision", result.get("revision", StringName())),
 		"solver_termination": result.get("reason", result.get("termination", "")),
 		"solver_total_ms": result.get("total_ms", 0.0),
-		"solver_totals": totals.duplicate(true),
-		"contact_backend": result.get("contact_backend", contact.get("contact_backend", "unreported")),
-		"native_contact_batch_enabled": contact.get("native_batch_enabled", false),
+		"solver_totals": result.get("totals", {}).duplicate(true),
+		"contact_backend": result.get("contact_backend", "godot_triangle_mesh_bvh"),
 		"material_contacts": result.get("accepted_hand_material_contacts", []).duplicate(),
-		"planar_material_safe": result.get("material_safe", false),
+		"sampled_material_safe": result.get("material_safe", false),
+		"material_validation": result.get("material_validation", {}).duplicate(true),
 		"predicted_minimum_hand_contact_count_met": result.get("minimum_hand_contact_count_met", false),
-		"predicted_material_contact_scope": result.get("material_contact_scope", StringName()),
-		"follower_results": result.get("followers", []).duplicate(true),
-		"guide_following_verified": result.get("guide_following_verified", false),
-		"per_digit_guidance": result.get("per_digit_guidance", {}).duplicate(true),
-		"working_guides": result.get("working_guides", {}).duplicate(true),
-		"continuous_tangency_verified": false,
-		"unresolved_digits":unresolved,
+		"unresolved_digits": result.get("unresolved_digits", []).duplicate(),
 		"final_digit_assessments": result.get("final_digit_assessments", []).duplicate(true),
-		"grip_accepted": false}
+		"thumb_solve_enabled": bool(result.get("thumb_solve_enabled", false)), "grip_accepted": false}
 
 func _finish_failure(slot: StringName, request: Dictionary, reason: String, details: Dictionary = {}) -> void:
 	_record_request("owner.failure",slot,request)
@@ -561,7 +849,14 @@ static func relationship_key(weapon: Node3D, slot: StringName, dominant: StringN
 			geometry.append([child.get_instance_id(), child.mesh.get_instance_id(), child.transform])
 	if geometry.is_empty():
 		return ""
-	# Exact serialized identity; world movement and Roll are deliberately absent.
+	# Baking stores authored offsets as float32. A harmless round-trip tail at
+	# zero must not discard both committed hands. Canonicalize identity only,
+	# 500 times finer than the 0.05 mm contact tolerance; targets stay untouched.
+	var station: Vector3 = weapon.get_meta(prefix + "_local")
+	station = station.snapped(Vector3.ONE * SEAT_IDENTITY_GRID_M)
+	for axis: int in 3:
+		if station[axis] == 0.0: station[axis] = 0.0
+	# All other identity fields remain exact; world movement and Roll are absent.
 	return var_to_bytes([signature, weapon.get_instance_id(), slot, dominant, geometry_epoch,
-		weapon.get_meta(prefix + "_local"), weapon.get_meta(prefix + "_origin_id"),
+		station, weapon.get_meta(prefix + "_origin_id"),
 		weapon.get_meta("grip_style_mode", StringName()), geometry]).hex_encode()

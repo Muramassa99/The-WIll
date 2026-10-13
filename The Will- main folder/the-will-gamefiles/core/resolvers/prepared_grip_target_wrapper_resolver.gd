@@ -16,9 +16,12 @@ static func validate(
 ) -> Dictionary:
 	if wrapper == null or wrapper.get_script() != PreparedWrapperScript:
 		return _failure("prepared_wrapper_resource_type_invalid")
-	if int(wrapper.get("schema_version")) != PreparedWrapperScript.SCHEMA_VERSION:
+	var schema := int(wrapper.get("schema_version"))
+	var legacy := schema == PreparedWrapperScript.LEGACY_SCHEMA_VERSION
+	if schema != PreparedWrapperScript.SCHEMA_VERSION and not legacy:
 		return _failure("prepared_wrapper_schema_invalid")
-	if StringName(wrapper.get("construction_revision")) != PreparedWrapperScript.CONSTRUCTION_REVISION:
+	var revision: StringName = PreparedWrapperScript.LEGACY_CONSTRUCTION_REVISION if legacy else PreparedWrapperScript.CONSTRUCTION_REVISION
+	if StringName(wrapper.get("construction_revision")) != revision:
 		return _failure("prepared_wrapper_construction_revision_invalid")
 	if StringName(wrapper.get("vertices_origin_id")) != HandlePacketScript.VERTICES_ORIGIN_ID:
 		return _failure("prepared_wrapper_vertices_origin_invalid")
@@ -29,6 +32,7 @@ static func validate(
 		"anatomy_signature": wrapper.get("anatomy_signature"),
 		"inward_min_radius_m": wrapper.get("inward_min_radius_m"),
 		"guide_inward_target_offset_m": wrapper.get("guide_inward_target_offset_m"),
+		"non_thumb_s1_guide_target_depth_m": wrapper.get("guide_inward_target_offset_m") if legacy else wrapper.get("non_thumb_s1_guide_target_depth_m"),
 		"palm_guide_target_depth_m": wrapper.get("palm_guide_target_depth_m"),
 	})
 	if not bool(stored_config.get("valid", false)):
@@ -43,7 +47,7 @@ static func validate(
 			if stored[key] != expected[key]:
 				return _failure("prepared_wrapper_%s_mismatch" % key)
 		for key: String in [
-			"inward_min_radius_m", "guide_inward_target_offset_m", "palm_guide_target_depth_m",
+			"inward_min_radius_m", "guide_inward_target_offset_m", "non_thumb_s1_guide_target_depth_m", "palm_guide_target_depth_m",
 		]:
 			if absf(float(stored[key]) - float(expected[key])) > CONFIG_TOLERANCE:
 				return _failure("prepared_wrapper_%s_mismatch" % key)
@@ -82,10 +86,15 @@ static func validate(
 	)
 	if not bool(palm_result.get("valid", false)):
 		return palm_result
+	if not legacy:
+		var s1_profile := _validate_profile(wrapper.get("non_thumb_s1_target_profile_m"), "non_thumb_s1_target_profile_m")
+		if not s1_profile.get("valid", false): return s1_profile
+		var s1_mesh := _validate_closed_mesh(wrapper.get("non_thumb_s1_target_vertices_m"), wrapper.get("non_thumb_s1_target_indices"), "non_thumb_s1_target")
+		if not s1_mesh.get("valid", false): return s1_mesh
 	var build_ms := float(wrapper.get("build_ms"))
 	if not is_finite(build_ms) or build_ms < 0.0:
 		return _failure("prepared_wrapper_build_duration_invalid")
-	return {"valid": true, "error": ""}
+	return {"valid": true, "error": "", "legacy_shared_digit_target": legacy}
 
 
 ## Accept the current character contact_config radius name or the normalized
@@ -112,6 +121,11 @@ static func validate_config(config: Dictionary) -> Dictionary:
 	for key: String in ["guide_inward_target_offset_m", "palm_guide_target_depth_m"]:
 		if not _is_positive_number(config.get(key, null)):
 			return _failure("prepared_wrapper_%s_invalid" % key)
+	# Older explicit configurations used one digit target. Keeping that value as
+	# their S1 target is compatibility, not applying new tuning to unknown data.
+	var s1_depth: Variant = config.get("non_thumb_s1_guide_target_depth_m", config["guide_inward_target_offset_m"])
+	if not _is_positive_number(s1_depth):
+		return _failure("prepared_wrapper_non_thumb_s1_guide_target_depth_m_invalid")
 	return {
 		"valid": true,
 		"error": "",
@@ -120,6 +134,7 @@ static func validate_config(config: Dictionary) -> Dictionary:
 			"anatomy_signature": String(signature_variant),
 			"inward_min_radius_m": float(radius_variant),
 			"guide_inward_target_offset_m": float(config["guide_inward_target_offset_m"]),
+			"non_thumb_s1_guide_target_depth_m": float(s1_depth),
 			"palm_guide_target_depth_m": float(config["palm_guide_target_depth_m"]),
 		},
 	}

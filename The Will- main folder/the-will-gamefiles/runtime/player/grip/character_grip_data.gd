@@ -82,6 +82,9 @@ static func _load_once() -> Dictionary:
 	var palm_target: Variant = config.get("palm_guide_target_depth_m", 0.0)
 	if not (palm_target is float or palm_target is int) or not is_finite(float(palm_target)) or float(palm_target) < 0.0:
 		return _remember_failure("invalid_palm_guide_target_depth")
+	var s1_target: Variant = config.get("non_thumb_s1_guide_target_depth_m", 0.0)
+	if not (s1_target is float or s1_target is int) or not is_finite(float(s1_target)) or float(s1_target) <= 0.0:
+		return _remember_failure("invalid_non_thumb_s1_guide_target_depth")
 	return {"valid": true}
 
 

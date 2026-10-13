@@ -6,6 +6,7 @@ const SavedSource = preload("res://runtime/player/grip/saved_wrapper_grip_source
 const OWNER := &"grip_placement_capture"
 const OBJECT_ORIGIN := &"GripPlacementObjectMeshOrigin"
 const GEOMETRY_POLICY := &"unaltered_surface_vertex_index_arrays_no_triangle_mesh"
+const SAVED_GEOMETRY_POLICY := &"saved_handle_packet_and_wrapper_render_mesh_not_copied"
 
 ## Scene read only. Geometry is copied without BVH preparation,
 ## remeshing, anatomy baking, pose application, or advancing a scene frame.
@@ -13,7 +14,9 @@ const GEOMETRY_POLICY := &"unaltered_surface_vertex_index_arrays_no_triangle_mes
 ## just captured that same pose; it is not a fallback for an earlier stage.
 ## A support acquisition supplies its explicit weapon-root-local pivot; choosing
 ## a hand slot alone does not imply that it is the primary or support grip.
-func capture(actor: Node3D, held: Node3D, anatomy: Resource, slot: StringName, stage: StringName, serial: int, ordinal: int = 0, supplied_pose: Dictionary = {}, grip_pivot_override: Dictionary = {}) -> Dictionary:
+## Live saved-surface consumers do not use rendered weapon triangles. Their
+## explicit mode retains scene frames and saved-source validation downstream.
+func capture(actor: Node3D, held: Node3D, anatomy: Resource, slot: StringName, stage: StringName, serial: int, ordinal: int = 0, supplied_pose: Dictionary = {}, grip_pivot_override: Dictionary = {}, capture_rendered_geometry: bool = true) -> Dictionary:
 	var started := Time.get_ticks_usec()
 	var frame_id := Engine.get_process_frames()
 	var header := {"valid": false, "stage": stage, "slot": slot,
@@ -58,21 +61,22 @@ func capture(actor: Node3D, held: Node3D, anatomy: Resource, slot: StringName, s
 	var mesh_to_world := object_mesh.global_transform
 	if not _valid_frame(weapon_to_world) or not _valid_frame(mesh_to_world):
 		return _fail(header, "invalid_current_object_frame")
-	var extracted: Dictionary = extract_object_triangle_faces(object_mesh.mesh)
-	if not bool(extracted.get("valid", false)):
-		return _fail(header, "object_triangle_copy_failed", extracted)
-	var local_faces: PackedVector3Array = extracted.local_faces
-	var object := {"local_faces": local_faces,
-		"local_faces_origin_id": OBJECT_ORIGIN,
-		"local_face_sources": extracted.local_face_sources,
-		"source_surface_count": extracted.source_surface_count,
-		"origin_record": _record(OBJECT_ORIGIN, world_to_machine * mesh_to_world, Origins.SPACE_TYPE_PRESENTATION),
+	var extracted: Dictionary = {}
+	if capture_rendered_geometry:
+		extracted = extract_object_triangle_faces(object_mesh.mesh)
+		if not bool(extracted.get("valid", false)):
+			return _fail(header, "object_triangle_copy_failed", extracted)
+	var object := {"origin_record": _record(OBJECT_ORIGIN, world_to_machine * mesh_to_world, Origins.SPACE_TYPE_PRESENTATION),
 		"mesh_to_world": mesh_to_world, "mesh_to_world_origin_id": Origins.ORIGIN_RL_BONE_ROOT,
 		"weapon_to_world": weapon_to_world, "weapon_to_world_origin_id": Origins.ORIGIN_RL_BONE_ROOT,
 		"weapon_origin_record": _record(Origins.ORIGIN_WEAPON_ROOT, world_to_machine * weapon_to_world, Origins.SPACE_TYPE_WEAPON),
 		"mesh_instance_id": object_mesh.get_instance_id(), "mesh_resource_id": object_mesh.mesh.get_instance_id(),
 		"weapon_instance_id": held.get_instance_id(), "visual_mesh_source": &"editable_mesh",
-		"geometry_policy": GEOMETRY_POLICY, "missing_metadata": []}
+		"geometry_policy": GEOMETRY_POLICY if capture_rendered_geometry else SAVED_GEOMETRY_POLICY,
+		"rendered_geometry_captured": capture_rendered_geometry, "missing_metadata": []}
+	if capture_rendered_geometry:
+		object.merge({"local_faces": extracted.local_faces, "local_faces_origin_id": OBJECT_ORIGIN,
+			"local_face_sources": extracted.local_face_sources, "source_surface_count": extracted.source_surface_count})
 	var pivot_meta := "preview_primary_grip_seat_local"
 	var pivot_origin_meta := "preview_primary_grip_seat_origin_id"
 	if not held.has_meta(pivot_meta):
@@ -99,6 +103,8 @@ func capture(actor: Node3D, held: Node3D, anatomy: Resource, slot: StringName, s
 	# Already detached at equipped-item creation; numerical consumers read only.
 	# Keep absent/invalid wrapper explicit rather than rebuilding during a grip.
 	header["saved_grip_source"] = (held.get_meta(SavedSource.META, {}) as Dictionary).duplicate(true)
+	if not capture_rendered_geometry and not header.saved_grip_source.get("valid", false):
+		return _fail(header, header.saved_grip_source.get("reason", "missing_saved_wrapper_source"))
 	if not actor.has_method("resolve_hand_grip_alignment_world_position"):
 		return _fail(header, "missing_anatomical_reference_reader")
 	# This existing reader lazily prepares animation baselines when cold. A
@@ -130,9 +136,12 @@ func capture(actor: Node3D, held: Node3D, anatomy: Resource, slot: StringName, s
 	header["anatomical_reference_origin_id"] = Origins.ORIGIN_RL_BONE_ROOT
 	header["stage_reference_provenance"] = &"existing_derived_mount_target_not_measured_palm_center"
 	header["valid"] = true
-	header["object_triangle_count"] = local_faces.size() / 3
+	if capture_rendered_geometry:
+		header["object_triangle_count"] = extracted.local_faces.size() / 3
 	header["capture_ms"] = float(Time.get_ticks_usec() - started) / 1000.0
 	header["capture_timing_scope"] = &"diagnostic_scene_read_and_local_geometry_copy_excludes_reused_pose_capture" if not supplied_pose.is_empty() else &"diagnostic_scene_read_reference_validation_and_local_geometry_copy"
+	if not capture_rendered_geometry:
+		header["capture_timing_scope"] = &"scene_read_and_saved_grip_source_copy_excludes_reused_pose_capture" if not supplied_pose.is_empty() else &"scene_read_reference_validation_and_saved_grip_source_copy"
 	header["reused_synchronous_pose_capture"] = not supplied_pose.is_empty()
 	return header
 

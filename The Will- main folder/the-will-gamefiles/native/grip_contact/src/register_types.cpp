@@ -4,6 +4,8 @@
 #include "grip_saved_contact_kernel.h"
 #include "grip_slice_kernel.h"
 #include "grip_topology_kernel.h"
+#include "grip_pose_surface_kernel.h"
+#include "grip_skin_point_kernel.h"
 
 #include <godot_cpp/godot.hpp>
 #include <godot_cpp/variant/vector2.hpp>
@@ -22,6 +24,8 @@ void initialize_grip_contact(ModuleInitializationLevel level) {
     GDREGISTER_CLASS(GripSavedContactKernel);
     GDREGISTER_CLASS(GripSliceKernel);
     GDREGISTER_CLASS(GripTopologyKernel);
+    GDREGISTER_CLASS(GripPoseSurfaceKernel);
+    GDREGISTER_CLASS(GripSkinPointKernel);
 }
 
 void uninitialize_grip_contact(ModuleInitializationLevel level) {

@@ -763,7 +763,7 @@ func _verify_thumb_proximal_penetration_policy() -> Dictionary:
 	var thumb_serial_max_overlap: float = (
 		thumb_targets[1] + PlayerDigitHingeRulesScript.CONTACT_OVERLAP_TOLERANCE_METERS
 	)
-	var expected_finger_caps: Array[float] = [0.0005, 0.00048, 0.00038]
+	var expected_finger_caps: Array[float] = [0.005, 0.0035, 0.0035]
 	var expected_thumb_caps: Array[float] = [0.005, 0.00108, 0.00038]
 	var side_count := 0
 	var section_cap_probe_count := 0

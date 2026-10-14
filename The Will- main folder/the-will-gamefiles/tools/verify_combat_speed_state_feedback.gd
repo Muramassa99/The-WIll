@@ -109,14 +109,13 @@ func _append_fast_visible_node(ui) -> bool:
 	return true
 
 func _build_speed_state_test_wip() -> CraftedItemWIP:
-	var wip: CraftedItemWIP = CraftedItemWIPScript.new()
+	var wip: CraftedItemWIP = preload("res://tools/forge_v2_small_handle_fixture.gd").build(&"mat_wood_gray", {}, 0.35)
 	wip.forge_project_name = "Speed State Feedback Test"
 	CraftedItemWIPScript.apply_builder_path_defaults(
 		wip,
 		CraftedItemWIPScript.BUILDER_PATH_MELEE,
 		CraftedItemWIPScript.BUILDER_COMPONENT_PRIMARY
 	)
-	wip.layers = [_build_layer(20), _build_layer(21)]
 	var station_state: CombatAnimationStationState = wip.ensure_combat_animation_station_state() as CombatAnimationStationState
 	if station_state == null:
 		return wip
@@ -156,19 +155,6 @@ func _apply_motion_node(node: CombatAnimationMotionNode, tip: Vector3, pommel: V
 	node.preferred_grip_style_mode = &"grip_normal"
 	node.two_hand_state = CombatAnimationMotionNodeScript.TWO_HAND_STATE_ONE_HAND
 	node.normalize()
-
-func _build_layer(layer_index: int) -> LayerAtom:
-	var layer: LayerAtom = LayerAtom.new()
-	layer.layer_index = layer_index
-	layer.cells = []
-	for x in range(20, 48):
-		for y in range(10, 13):
-			var cell: CellAtom = CellAtom.new()
-			cell.grid_position = Vector3i(x, y, layer_index)
-			cell.layer_index = layer_index
-			cell.material_variant_id = &"mat_wood_gray"
-			layer.cells.append(cell)
-	return layer
 
 func _find_skill_draft(skill_drafts: Array, skill_id: StringName) -> CombatAnimationDraft:
 	for draft_variant: Variant in skill_drafts:

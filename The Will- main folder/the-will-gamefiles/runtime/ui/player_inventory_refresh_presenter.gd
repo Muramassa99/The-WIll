@@ -85,7 +85,6 @@ func _refresh_wip_page(page_presenter: PlayerInventoryPagePresenter, payload: Di
 		payload.get("selected_wip_id", StringName()),
 		payload.get("format_wip_label_callable", Callable()),
 		payload.get("get_wip_display_name_callable", Callable()),
-		payload.get("count_wip_cells_callable", Callable()),
 		payload.get("preview_wip_test_status_callable", Callable()),
 		payload.get("hands_are_empty_callable", Callable())
 	)

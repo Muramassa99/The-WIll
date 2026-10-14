@@ -6,6 +6,9 @@ const CraftingBenchUIV2Scene = preload(
 const ForgeV2StageControllerScript = preload(
 	"res://runtime/forge_v2/forge_v2_stage_controller.gd"
 )
+const ForgeV2AuthoringStateScript = preload(
+	"res://runtime/forge_v2/forge_v2_authoring_state.gd"
+)
 const ForgeV2KeybindingStateScript = preload(
 	"res://runtime/forge_v2/forge_v2_keybinding_state.gd"
 )
@@ -613,6 +616,11 @@ func _verify_persistence_failure_rollbacks() -> bool:
 	seed_wip.wip_id = &"rollback_seed_wip"
 	seed_wip.forge_project_name = "Rollback Source"
 	seed_wip.forge_project_notes = "must-survive-failed-persistence"
+	seed_wip.forge_v2_authoring_state = ForgeV2AuthoringStateScript.new()
+	seed_wip.forge_v2_authoring_state.call(
+		"reset_new_draft",
+		seed_wip.forge_project_name
+	)
 	var saved_seed := failure_library.save_wip(seed_wip)
 	if not _check(
 		saved_seed != null

@@ -54,18 +54,6 @@ const ACTION_DEFINITIONS: Array[Dictionary] = [
 	{"action": "toggle_hud", "display_name": "Toggle HUD", "category": "ui_menu", "binding": {"physical_keycode": KEY_F11, "keycode": KEY_F11, "ctrl": false, "shift": false, "alt": false, "meta": false}},
 	{"action": "screenshot", "display_name": "Screenshot", "category": "ui_menu", "binding": {"physical_keycode": KEY_F12, "keycode": KEY_F12, "ctrl": false, "shift": false, "alt": false, "meta": false}},
 	{"action": "runtime_debug_visuals", "display_name": "Runtime Debug Visuals", "category": "debug", "binding": {"physical_keycode": KEY_F9, "keycode": KEY_F9, "ctrl": false, "shift": false, "alt": false, "meta": false}},
-	{"action": "forge_bake", "display_name": "Bake Active WIP", "category": "forge", "binding": {"physical_keycode": KEY_ENTER, "keycode": KEY_ENTER, "ctrl": false, "shift": false, "alt": false, "meta": false}},
-	{"action": "forge_reset", "display_name": "Reset Active WIP", "category": "forge", "binding": {"physical_keycode": KEY_R, "keycode": KEY_R, "ctrl": false, "shift": false, "alt": false, "meta": false}},
-	{"action": "forge_save_wip", "display_name": "Save WIP", "category": "forge", "binding": {"physical_keycode": KEY_S, "keycode": KEY_S, "ctrl": true, "shift": false, "alt": false, "meta": false}},
-	{"action": "forge_toggle_grid", "display_name": "Toggle Grid", "category": "forge", "binding": {"physical_keycode": KEY_F, "keycode": KEY_F, "ctrl": false, "shift": false, "alt": false, "meta": false}},
-	{"action": "forge_toggle_ghost", "display_name": "Toggle Ghost Layer", "category": "forge", "binding": {"physical_keycode": KEY_G, "keycode": KEY_G, "ctrl": false, "shift": false, "alt": false, "meta": false}},
-	{"action": "forge_cycle_tool_category", "display_name": "Cycle Tool Category", "category": "forge", "binding": {"physical_keycode": KEY_T, "keycode": KEY_T, "ctrl": false, "shift": false, "alt": false, "meta": false}},
-	{"action": "forge_focus_cycle", "display_name": "Cycle Forge Focus Region", "category": "forge", "binding": {"physical_keycode": KEY_TAB, "keycode": KEY_TAB, "ctrl": false, "shift": false, "alt": false, "meta": false}},
-	{"action": "forge_layer_down", "display_name": "Layer Down", "category": "forge", "binding": {"physical_keycode": KEY_Q, "keycode": KEY_Q, "ctrl": false, "shift": false, "alt": false, "meta": false}},
-	{"action": "forge_layer_up", "display_name": "Layer Up", "category": "forge", "binding": {"physical_keycode": KEY_E, "keycode": KEY_E, "ctrl": false, "shift": false, "alt": false, "meta": false}},
-	{"action": "forge_plane_xy", "display_name": "Select XY Plane", "category": "forge", "binding": {"physical_keycode": KEY_1, "keycode": KEY_1, "ctrl": false, "shift": false, "alt": false, "meta": false}},
-	{"action": "forge_plane_zx", "display_name": "Select ZX Plane", "category": "forge", "binding": {"physical_keycode": KEY_2, "keycode": KEY_2, "ctrl": false, "shift": false, "alt": false, "meta": false}},
-	{"action": "forge_plane_zy", "display_name": "Select ZY Plane", "category": "forge", "binding": {"physical_keycode": KEY_3, "keycode": KEY_3, "ctrl": false, "shift": false, "alt": false, "meta": false}},
 	{"action": "skill_crafter_prev_motion_node", "display_name": "Previous Motion Node", "category": "skill_crafter", "binding": {"physical_keycode": KEY_Q, "keycode": KEY_Q, "ctrl": false, "shift": false, "alt": false, "meta": false}},
 	{"action": "skill_crafter_next_motion_node", "display_name": "Next Motion Node", "category": "skill_crafter", "binding": {"physical_keycode": KEY_E, "keycode": KEY_E, "ctrl": false, "shift": false, "alt": false, "meta": false}},
 	{"action": "skill_crafter_new_motion_node", "display_name": "Add Motion Node", "category": "skill_crafter", "binding": {"physical_keycode": KEY_R, "keycode": KEY_R, "ctrl": false, "shift": false, "alt": false, "meta": false}},
@@ -80,7 +68,6 @@ const CATEGORY_DISPLAY_NAMES := {
 	"camera": "Camera",
 	"ui_menu": "UI / Menu",
 	"debug": "Debug",
-	"forge": "Forge",
 	"skill_crafter": "Skill Crafter"
 }
 

@@ -27,15 +27,16 @@ const PreparedGripTargetWrapperResolverScript = preload(
 const MaterialMassResolverScript = preload(
 	"res://core/resolvers/material_mass_resolver.gd"
 )
+const HandleLengthPolicyScript = preload(
+	"res://core/resolvers/handle_length_policy.gd"
+)
 
 const DEFAULT_MATERIAL_CATALOG: Resource = preload(
 	"res://core/defs/forge/forge_material_catalog_default.tres"
 )
 
-const HANDLE_MIN_SPAN_METERS := 0.25
 const HANDLE_TWO_POINT_COUNT := 2
 const HANDLE_THREE_POINT_COUNT := 3
-const TWO_HAND_MIN_SPAN_CELLS := 26
 const CENTER_BALANCE_TOLERANCE_RATIO := 0.07
 const TWO_HAND_MAX_SPAN_USAGE_RATIO := 0.80
 const MAX_PROFILE_OFFSET_SAMPLES := 256
@@ -51,6 +52,43 @@ const HANDLE_GRIP_CURVE_BAKE_INTERVAL_METERS := 0.001
 # at the V2 compatibility boundary so legacy grip consumers receive collision
 # samples in the same space as the authoritative visible mesh.
 const HANDLE_FINAL_PROFILE_AXIS_X_SIGN := -1.0
+
+
+# Called for newly baked profiles and private copies of legacy V2 snapshots.
+# Legacy coordinates retain their serialization units; capacity uses exact metres.
+static func refresh_metric_handle_capacity(
+	profile: BakedProfile,
+	wip: CraftedItemWIP,
+	cell_size_meters: float
+) -> void:
+	if profile == null or wip == null:
+		return
+	var span_meters := profile.primary_grip_span_start.distance_to(
+		profile.primary_grip_span_end
+	) * cell_size_meters
+	var two_hand_branch := (
+		(wip.forge_intent == &"intent_melee" and wip.equipment_context == &"ctx_weapon")
+		or (wip.forge_intent == &"intent_magic" and wip.equipment_context == &"ctx_focus")
+	)
+	profile.primary_grip_two_hand_eligible = (
+		profile.primary_grip_valid
+		and two_hand_branch
+		and HandleLengthPolicyScript.allows_two_hands(span_meters)
+	)
+	profile.primary_grip_two_hand_negative_limit = 0.0
+	profile.primary_grip_two_hand_positive_limit = 0.0
+	if profile.primary_grip_two_hand_eligible and profile.primary_grip_center_balance_valid:
+		var center_ratio := clampf(
+			profile.weapon_intrinsic_center_of_mass_handle_axis_ratio_from_span_start_unclamped,
+			0.0,
+			1.0
+		)
+		profile.primary_grip_two_hand_negative_limit = -minf(
+			center_ratio / 0.5, TWO_HAND_MAX_SPAN_USAGE_RATIO
+		)
+		profile.primary_grip_two_hand_positive_limit = minf(
+			(1.0 - center_ratio) / 0.5, TWO_HAND_MAX_SPAN_USAGE_RATIO
+		)
 
 
 static func build_runtime_contract(
@@ -576,10 +614,10 @@ static func _resolve_valid_handle_body(authoring_state: Resource) -> Dictionary:
 	var endpoint_span_meters := path_points[0].distance_to(
 		path_points[endpoint_index]
 	)
-	if endpoint_span_meters + GEOMETRY_EPSILON < HANDLE_MIN_SPAN_METERS:
+	if not HandleLengthPolicyScript.meets_minimum(endpoint_span_meters):
 		return {
 			"valid": false,
-			"error": "forge_v2_primary_handle_span_below_0_25_meters",
+			"error": "forge_v2_primary_handle_span_below_0_1_meters",
 			"body": handle_body,
 		}
 	var profile_polygon: PackedVector2Array = handle_body.get(
@@ -1189,11 +1227,6 @@ static func _populate_primary_grip_profile(
 		)
 		/ span_length_squared
 	)
-	var weapon_intrinsic_com_handle_ratio_clamped := clampf(
-		weapon_intrinsic_com_handle_ratio_unclamped,
-		0.0,
-		1.0
-	)
 	profile.primary_grip_axis_ratio_from_span_start = contact_ratio
 	profile.weapon_intrinsic_center_of_mass_handle_axis_ratio_from_span_start_unclamped = (
 		weapon_intrinsic_com_handle_ratio_unclamped
@@ -1282,32 +1315,7 @@ static func _populate_primary_grip_profile(
 			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
 		)
 
-	var two_hand_branch := (
-		(
-			wip.forge_intent == &"intent_melee"
-			and wip.equipment_context == &"ctx_weapon"
-		)
-		or (
-			wip.forge_intent == &"intent_magic"
-			and wip.equipment_context == &"ctx_focus"
-		)
-	)
-	profile.primary_grip_two_hand_eligible = (
-		two_hand_branch
-		and profile.primary_grip_span_length_voxels >= TWO_HAND_MIN_SPAN_CELLS
-	)
-	if (
-		profile.primary_grip_two_hand_eligible
-		and profile.primary_grip_center_balance_valid
-	):
-		profile.primary_grip_two_hand_negative_limit = -minf(
-			weapon_intrinsic_com_handle_ratio_clamped / 0.5,
-			TWO_HAND_MAX_SPAN_USAGE_RATIO
-		)
-		profile.primary_grip_two_hand_positive_limit = minf(
-			(1.0 - weapon_intrinsic_com_handle_ratio_clamped) / 0.5,
-			TWO_HAND_MAX_SPAN_USAGE_RATIO
-		)
+	refresh_metric_handle_capacity(profile, wip, cell_size_meters)
 
 	var extremities := _resolve_weapon_extremities(
 		mesh_vertices_meters,

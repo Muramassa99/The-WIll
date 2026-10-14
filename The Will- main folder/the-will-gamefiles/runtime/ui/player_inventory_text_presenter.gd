@@ -48,13 +48,3 @@ func get_wip_display_name(saved_wip: CraftedItemWIP) -> String:
 	if not cleaned_name.is_empty():
 		return cleaned_name
 	return String(saved_wip.wip_id)
-
-func count_wip_cells(saved_wip: CraftedItemWIP) -> int:
-	if saved_wip == null:
-		return 0
-	var total_cells: int = 0
-	for layer_atom: LayerAtom in saved_wip.layers:
-		if layer_atom == null:
-			continue
-		total_cells += layer_atom.cells.size()
-	return total_cells

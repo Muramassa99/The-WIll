@@ -887,7 +887,6 @@ func _build_wip_from_state(
 	wip.forge_builder_component_id = CraftedItemWIPScript.BUILDER_COMPONENT_PRIMARY
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
-	wip.layers = []
 	wip.forge_v2_authoring_state = state.duplicate(true) as Resource
 	return wip
 

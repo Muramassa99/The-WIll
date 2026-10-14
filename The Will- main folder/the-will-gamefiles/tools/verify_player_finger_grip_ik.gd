@@ -1,5 +1,7 @@
 extends SceneTree
 
+const ForgeV2Fixture = preload("res://tools/forge_v2_small_handle_fixture.gd")
+
 const PlayerBodyInventoryStateScript = preload("res://core/models/player_body_inventory_state.gd")
 const PlayerPersonalStorageStateScript = preload("res://core/models/player_personal_storage_state.gd")
 const PlayerEquipmentStateScript = preload("res://core/models/player_equipment_state.gd")
@@ -183,32 +185,14 @@ func _run_verification() -> void:
 	quit()
 
 func _build_two_hand_grip_test_wip() -> CraftedItemWIP:
-	var wip: CraftedItemWIP = CraftedItemWIP.new()
+	var wip: CraftedItemWIP = ForgeV2Fixture.build(&"mat_wood_gray", ForgeV2Fixture.material_lookup())
 	wip.wip_id = &"verify_two_hand_finger_grip"
 	wip.forge_project_name = "Verify Two Hand Finger Grip"
 	wip.creator_id = &"verify"
 	wip.created_timestamp = Time.get_unix_time_from_system()
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
-	var layer_a: LayerAtom = LayerAtom.new()
-	layer_a.layer_index = 20
-	layer_a.cells = _build_handle_cells(20)
-	var layer_b: LayerAtom = LayerAtom.new()
-	layer_b.layer_index = 21
-	layer_b.cells = _build_handle_cells(21)
-	wip.layers = [layer_a, layer_b]
 	return wip
-
-func _build_handle_cells(layer_index: int) -> Array[CellAtom]:
-	var cells: Array[CellAtom] = []
-	for x in range(20, 48):
-		for y in range(10, 13):
-			var cell: CellAtom = CellAtom.new()
-			cell.grid_position = Vector3i(x, y, layer_index)
-			cell.layer_index = layer_index
-			cell.material_variant_id = &"mat_wood_gray"
-			cells.append(cell)
-	return cells
 
 func _get_bone_world_position(skeleton: Skeleton3D, bone_idx: int) -> Vector3:
 	if skeleton == null or bone_idx < 0:

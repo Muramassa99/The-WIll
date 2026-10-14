@@ -1,6 +1,7 @@
 extends SceneTree
 
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
+const ForgeV2AuthoringStateScript = preload("res://runtime/forge_v2/forge_v2_authoring_state.gd")
 const PlayerForgeWipLibraryStateScript = preload("res://core/models/player_forge_wip_library_state.gd")
 const PlayerEquipmentStateScript = preload("res://core/models/player_equipment_state.gd")
 const CombatAnimationStationStateScript = preload("res://core/models/combat_animation_station_state.gd")
@@ -43,6 +44,8 @@ func _run_verification() -> void:
 		CraftedItemWIPScript.BUILDER_PATH_MELEE,
 		CraftedItemWIPScript.BUILDER_COMPONENT_PRIMARY
 	)
+	source_wip.forge_v2_authoring_state = ForgeV2AuthoringStateScript.new()
+	source_wip.forge_v2_authoring_state.call("reset_new_draft", source_wip.forge_project_name)
 	var saved_wip: CraftedItemWIP = library_state.save_wip(source_wip)
 	var saved_wip_id: StringName = saved_wip.wip_id if saved_wip != null else StringName()
 	var persisted_wip: CraftedItemWIP = library_state.get_saved_wip(saved_wip_id)

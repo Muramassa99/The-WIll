@@ -4,6 +4,15 @@ These are standing user instructions for work in `C:\WORKSPACE`, recorded on
 2026-10-03. Read them at the start of a new session. Current explicit user
 instructions take precedence over older project documents.
 
+## Duplicate chat messages
+
+Standing user instruction, reaffirmed 2026-10-07: if an incoming user chat
+message exactly repeats either of the previous two user chat messages, treat it
+as a delivery glitch and ignore it silently. Do not repeat replies, tool calls,
+edits or other actions. Compare actual user messages, not tool results or injected
+context metadata. Changed wording or different attachments are not exact copies;
+do not extend this rule to merely similar requests.
+
 ## Required orientation
 
 Read all four files in `Agent law` completely before project work:

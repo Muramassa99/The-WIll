@@ -1,6 +1,7 @@
 extends SceneTree
 
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
+const ForgeV2AuthoringStateScript = preload("res://runtime/forge_v2/forge_v2_authoring_state.gd")
 const CombatAnimationDraftScript = preload("res://core/models/combat_animation_draft.gd")
 const PlayerForgeWipLibraryStateScript = preload("res://core/models/player_forge_wip_library_state.gd")
 const CombatAnimationStationUIScene = preload("res://scenes/ui/combat_animation_station_ui.tscn")
@@ -36,6 +37,8 @@ func _run_verification() -> void:
 		CraftedItemWIPScript.BUILDER_PATH_MELEE,
 		CraftedItemWIPScript.BUILDER_COMPONENT_PRIMARY
 	)
+	source_wip.forge_v2_authoring_state = ForgeV2AuthoringStateScript.new()
+	source_wip.forge_v2_authoring_state.call("reset_new_draft", source_wip.forge_project_name)
 	var station_state: Resource = source_wip.ensure_combat_animation_station_state()
 	var legacy_draft: Resource = CombatAnimationDraftScript.new()
 	if legacy_draft != null:

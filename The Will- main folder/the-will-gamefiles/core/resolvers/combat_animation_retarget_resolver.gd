@@ -147,6 +147,7 @@ func apply_retarget_node_to_motion_node(
 	)
 	if resolved_values.is_empty():
 		return false
+	_transport_grip_style_transition_frame(motion_node, resolved_values)
 	motion_node.tip_position_local = resolved_values.get("tip_position_local", motion_node.tip_position_local) as Vector3
 	motion_node.tip_position_origin_id = StringName(resolved_values.get("tip_position_origin_id", motion_node.tip_position_origin_id))
 	motion_node.pommel_position_local = resolved_values.get("pommel_position_local", motion_node.pommel_position_local) as Vector3
@@ -170,6 +171,34 @@ func apply_retarget_node_to_motion_node(
 	motion_node.retarget_node = retarget_node
 	motion_node.normalize()
 	return true
+
+func _transport_grip_style_transition_frame(motion_node, values: Dictionary) -> void:
+	if not motion_node.has_valid_grip_style_transition_frame():
+		return
+	if motion_node.grip_style_transition_origin_id != StringName(values.get("tip_position_origin_id", StringName())) or motion_node.grip_style_transition_origin_id != StringName(values.get("pommel_position_origin_id", StringName())):
+		motion_node.clear_grip_style_transition_frame()
+		return
+	var old_axis: Vector3 = motion_node.tip_position_local - motion_node.pommel_position_local
+	var new_axis: Vector3 = (values.tip_position_local as Vector3) - (values.pommel_position_local as Vector3)
+	if old_axis.length_squared() <= 0.00000001 or new_axis.length_squared() <= 0.00000001:
+		motion_node.clear_grip_style_transition_frame()
+		return
+	var old_forward := old_axis.normalized()
+	var old_up: Vector3 = motion_node.grip_style_transition_axis_local.normalized()
+	var old_basis := Basis(old_up.cross(old_forward).normalized(), old_up, old_forward)
+	var new_forward := new_axis.normalized()
+	var new_up := Basis.from_euler((values.weapon_orientation_degrees as Vector3) * (PI / 180.0)) * Vector3.UP
+	if absf(new_up.normalized().dot(new_forward)) > 0.999:
+		new_up = Vector3.UP
+	new_up = new_up.rotated(new_forward, deg_to_rad(float(values.weapon_roll_degrees)))
+	new_up = (new_up - new_forward * new_up.dot(new_forward)).normalized()
+	if new_up.length_squared() <= 0.00000001:
+		motion_node.clear_grip_style_transition_frame()
+		return
+	var new_basis := Basis(new_up.cross(new_forward).normalized(), new_up, new_forward)
+	var mapping_basis := (new_basis * old_basis.inverse()).scaled(Vector3.ONE * (new_axis.length() / old_axis.length()))
+	var mapping_origin: Vector3 = (values.pommel_position_local as Vector3) - mapping_basis * motion_node.pommel_position_local
+	motion_node.transform_grip_style_transition_frame(Transform3D(mapping_basis, mapping_origin))
 
 func seed_missing_retarget_nodes_for_motion_chain(
 	motion_node_chain: Array,

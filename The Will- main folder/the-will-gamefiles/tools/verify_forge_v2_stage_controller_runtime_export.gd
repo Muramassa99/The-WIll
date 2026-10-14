@@ -137,8 +137,22 @@ func _run_verification() -> void:
 		"PASS: native provider exported a nonempty ordinary/Handle final union"
 	)
 
+	# Runtime geometry alone is not a complete save packet: the current save
+	# sequence prepares and validates the grip wrapper before building the WIP.
+	var save_preparation: Dictionary = await _controller.call("prepare_pending_work_for_save")
+	if not _expect(
+		bool(save_preparation.get("ok", false)),
+		"StageController save preparation failed: %s" % str(save_preparation)
+	):
+		return
+	var prepared_packet: Dictionary = save_preparation.get("runtime_mesh_packet", {}) as Dictionary
+	if not _expect(
+		prepared_packet.get("primary_grip_target_wrapper") is Resource,
+		"prepared save packet lost its grip target wrapper"
+	):
+		return
 	var saved_wip: CraftedItemWIP = _controller.call(
-		"build_crafted_item_wip_for_save"
+		"build_crafted_item_wip_for_save", StringName(), "", prepared_packet
 	) as CraftedItemWIP
 	if not _expect(saved_wip != null, "StageController save builder returned null"):
 		return

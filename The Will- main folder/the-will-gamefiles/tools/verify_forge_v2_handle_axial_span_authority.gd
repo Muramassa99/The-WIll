@@ -18,9 +18,9 @@ const VolumePreviewPresenterScript = preload(
 
 const RESULT_PATH := (
 	"C:/WORKSPACE/godot_runs/"
-	+ "verify_forge_v2_handle_axial_span_authority_2026-08-22.txt"
+	+ "verify_forge_v2_handle_axial_span_authority_2026-10-14.txt"
 )
-const MIN_AXIAL_SPAN_METERS := 0.25
+const MIN_AXIAL_SPAN_METERS := 0.10
 var _folded_path := PackedVector3Array([
 	Vector3.ZERO,
 	Vector3(0.30, 0.0, 0.0),
@@ -28,8 +28,8 @@ var _folded_path := PackedVector3Array([
 ])
 var _valid_boundary_path := PackedVector3Array([
 	Vector3.ZERO,
-	Vector3(0.12, 0.05, 0.0),
-	Vector3(0.25, 0.0, 0.0),
+	Vector3(0.05, 0.025, 0.0),
+	Vector3(0.10, 0.0, 0.0),
 ])
 
 var _result_lines: PackedStringArray = []
@@ -76,16 +76,16 @@ func _verify_folded_handle_generation_is_rejected() -> bool:
 
 func _verify_handle_commit_gate_and_boundary() -> bool:
 	if not is_equal_approx(_endpoint_span(_valid_boundary_path), MIN_AXIAL_SPAN_METERS):
-		return _fail("valid boundary fixture is not exactly 0.25 m endpoint span")
+		return _fail("valid boundary fixture is not exactly 100 mm endpoint span")
 	var state := _build_handle_state()
 	_append_path(state, _valid_boundary_path)
 	if not bool(state.call("can_generate_profile_extrusion_from_spline")):
-		return _fail("Handle at exact 0.25 m endpoint span was not generation-ready")
+		return _fail("Handle at exact 100 mm endpoint span was not generation-ready")
 	var status := String(state.call("get_profile_extrusion_status_label"))
 	if not status.contains("ready") or not status.contains("axial span"):
 		return _fail("valid Handle status does not report ready axial span: %s" % status)
 	if not bool(state.call("generate_profile_extrusion_from_spline")):
-		return _fail("Handle at exact 0.25 m endpoint span did not generate")
+		return _fail("Handle at exact 100 mm endpoint span did not generate")
 	var body: Resource = state.call("get_selected_material_body") as Resource
 	if body == null:
 		return _fail("valid generated Handle body is missing")
@@ -104,12 +104,12 @@ func _verify_handle_commit_gate_and_boundary() -> bool:
 	body.set("path_points", _valid_boundary_path)
 	body.call("normalize")
 	if not bool(state.call("is_material_body_commit_ready", body_id)):
-		return _fail("commit gate rejected Handle restored to exact 0.25 m span")
+		return _fail("commit gate rejected Handle restored to exact 100 mm span")
 	var layer: Resource = state.call("commit_material_body_as_layer", body_id) as Resource
 	if layer == null:
 		return _fail("valid Handle did not commit after endpoint-span restoration")
 	_result_lines.append(
-		"PASS: commit gate rejects folded Handle and accepts exact 0.25 m boundary"
+		"PASS: commit gate rejects folded Handle and accepts exact 100 mm boundary"
 	)
 	_result_lines.append("boundary_status=%s" % status)
 	return true
@@ -158,10 +158,10 @@ func _verify_handle_span_preview_feedback() -> bool:
 		return _fail("incomplete two-point Handle preview was incorrectly red")
 	if not _normal_preview_contains_color(
 		presenter,
-		Color(0.18, 0.52, 1.0, 0.92)
+		VolumePreviewPresenterScript.HANDLE_LONG_LINE_COLOR
 	):
 		presenter.free()
-		return _fail("incomplete Handle lost its normal blue connection guide")
+		return _fail("incomplete 300 mm Handle lost its pink length guide")
 
 	var non_ranged_paths: Array[StringName] = [
 		CraftedItemWIPScript.BUILDER_PATH_MELEE,
@@ -219,11 +219,11 @@ func _verify_handle_span_preview_feedback() -> bool:
 			)
 		if not _normal_preview_contains_color(
 			presenter,
-			Color(0.18, 0.52, 1.0, 0.92)
+			VolumePreviewPresenterScript.HANDLE_SINGLE_HAND_LINE_COLOR
 		):
 			presenter.free()
 			return _fail(
-				"%s valid editing Handle did not restore the blue guide"
+				"%s valid 100 mm editing Handle did not restore the green guide"
 				% String(builder_path_id)
 			)
 		var scope_summary := valid_state.call(

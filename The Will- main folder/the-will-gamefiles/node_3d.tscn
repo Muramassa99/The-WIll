@@ -2,7 +2,6 @@
 
 [ext_resource type="PackedScene" uid="uid://c102ttk0cevu4" path="res://scenes/world/base_floor.tscn" id="1_base_floor"]
 [ext_resource type="PackedScene" path="res://scenes/player/player_character.tscn" id="2_player_character"]
-[ext_resource type="PackedScene" path="res://scenes/world/crafting_bench.tscn" id="3_crafting_bench"]
 [ext_resource type="PackedScene" path="res://scenes/world/disassembly_bench.tscn" id="4_disassembly_bench"]
 [ext_resource type="PackedScene" path="res://scenes/world/storage_box.tscn" id="5_storage_box"]
 [ext_resource type="PackedScene" path="res://scenes/world/combat_animation_station.tscn" id="6_combat_animation_station"]
@@ -17,9 +16,6 @@ physics_material_override = SubResource("PhysicsMaterial_a0tk4")
 
 [node name="PlayerCharacter" parent="." unique_id=2099834590 instance=ExtResource("2_player_character")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 6)
-
-[node name="CraftingBench" parent="." unique_id=1953969368 instance=ExtResource("3_crafting_bench")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.15511024, 0, -1.5)
 
 [node name="CraftingBenchV2" parent="." instance=ExtResource("7_crafting_bench_v2")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.05, 0, -1.5)

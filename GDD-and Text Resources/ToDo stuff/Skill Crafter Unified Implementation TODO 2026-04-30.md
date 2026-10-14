@@ -984,3 +984,30 @@ Future production hardening, separate from the contained diagnostic bug:
 - `PersistentResourceStateIO.load_or_create()` currently creates a fresh empty state when an existing resource fails to load. A subsequent legitimate save can then overwrite the unreadable original.
 - Add explicit load-failure reporting and a non-destructive quarantine/backup rule before allowing a fresh replacement to persist at the same live path.
 - Do not make this guard restore or merge old WIP archives automatically. Its purpose is preventing silent overwrite and exposing the failure clearly.
+
+## Deferred UI Overhaul: Grip Position Controls - 2026-10-14
+
+User-requested future UI work. Record now; do not implement the interface
+overhaul as part of the current metric hand-space/capacity work.
+
+- [ ] Make dragging/sliders the primary way to edit hand positions, with less
+  reliance on numeric entry.
+- [ ] Show the hand-occupancy dead zone and available handle regions visually,
+  using the shared measured hand-space rule. Respect both hands' full padded
+  extents and handle-end clearances.
+- [ ] Stop a dragged support-hand position at the dead-zone boundary on its
+  current side; do not automatically jump across the main hand.
+- [ ] Use Tip -> main -> support -> Pommel as the default arrangement.
+- [ ] Preserve deliberate Tip -> support -> main -> Pommel placement when
+  explicitly selected and valid. Numeric entry is the agreed way to select
+  that alternative for now; refine the deliberate side-switch interaction
+  during the future UI pass. Neither input method bypasses overlap/reach rules.
+- [ ] Provide a confirmation/Apply button for position changes. Exact preview
+  behavior and how staged changes are presented remain for that UI pass.
+- [ ] Keep accepted positions consistent with saved motion data and F replay,
+  and integrate with the existing planned Skill Crafter Undo/Redo contract.
+
+Related measurement, placement and persistence plan:
+[Grip Overhaul Consolidation 2026-09-18.md](<Grip Overhaul Consolidation 2026-09-18.md>),
+October 14 sections. This entry records intended UI behavior only; no UI code
+or runtime behavior was changed when it was added.

@@ -22,8 +22,6 @@ const PlayerForgeWipLibraryStateScript = preload(
 const CombatAnimationStationUIScene = preload(
 	"res://scenes/ui/combat_animation_station_ui.tscn"
 )
-const LayerAtomScript = preload("res://core/atoms/layer_atom.gd")
-const CellAtomScript = preload("res://core/atoms/cell_atom.gd")
 const PlayerRigFingerGripPresenterScript = preload(
 	"res://runtime/player/player_rig_finger_grip_presenter.gd"
 )
@@ -71,7 +69,6 @@ const TEMP_LIBRARY_PATH := (
 const CELL_SIZE_METERS := 0.0125
 const HANDLE_HALF_LENGTH_METERS := 0.1625
 const POSITION_EPSILON_METERS := 0.00025
-const LEGACY_AXIAL_QUANTIZATION_EPSILON_METERS := CELL_SIZE_METERS * 0.11
 const EXACT_RAY_HIT_EPSILON_METERS := 0.00008
 const EXACT_VERTEX_EPSILON_METERS := 0.000001
 # Public setters consume the canonical normalized Pommel-to-Tip coordinate.
@@ -97,8 +94,6 @@ const WEAPON_SEAT_MOTION_SOURCE_FIELDS: Array[String] = [
 	"two_hand_state",
 	"primary_hand_slot",
 ]
-const BASIS_EPSILON_DEGREES := 1.0
-const THUMB_EPSILON_DEGREES := 2.0
 const WOOD_MATERIAL_ID := &"mat_wood_gray"
 
 # The centered 2x3 authored profile becomes a 3x2 physical slice after the
@@ -193,7 +188,7 @@ func _run_verification() -> void:
 	if OS.get_cmdline_user_args().has(LIFECYCLE_ONLY_ARGUMENT):
 		await _run_surface_grasp_lifecycle_only()
 		return
-	result_lines.append("scope=adapter_side_v1_v2_skill_crafter_grip_parity")
+	result_lines.append("scope=forge_v2_skill_crafter_exact_grip_contract")
 	result_lines.append("skill_crafter_and_grip_solver_modified=false")
 	result_lines.append(
 		"expected_final_profile_mapping=mirror_x_then_arithmetic_mean_center"
@@ -227,20 +222,11 @@ func _run_verification() -> void:
 	if not _fixture_is_valid(decoy_v2, "non-Handle decoy V2"):
 		_finish()
 		return
-	var baseline_v1: CraftedItemWIP = _build_v1_visible_oracle_wip(
-		BASELINE_AUTHORED_ROWS,
-		&"verify_v1_skill_crafter_grip_oracle"
-	)
-	if baseline_v1 == null:
-		_record_failure("could not build the V1 visible/collision oracle")
-		_finish()
-		return
 
 	var library: PlayerForgeWipLibraryState = PlayerForgeWipLibraryStateScript.new()
 	library.save_file_path = TEMP_LIBRARY_PATH
 	library.saved_wips.clear()
 	library.selected_wip_id = StringName()
-	var saved_v1: CraftedItemWIP = library.save_wip(baseline_v1)
 	var saved_v2: CraftedItemWIP = library.save_wip(
 		baseline_v2.get("wip") as CraftedItemWIP
 	)
@@ -251,8 +237,7 @@ func _run_verification() -> void:
 		decoy_v2.get("wip") as CraftedItemWIP
 	)
 	if (
-		saved_v1 == null
-		or saved_v2 == null
+		saved_v2 == null
 		or saved_asymmetric == null
 		or saved_decoy == null
 	):
@@ -260,12 +245,6 @@ func _run_verification() -> void:
 		_finish()
 		return
 
-	var v1_snapshot: Dictionary = await _capture_skill_crafter_snapshot(
-		library,
-		saved_v1.wip_id,
-		"v1_oracle",
-		{}
-	)
 	var v2_snapshot: Dictionary = await _capture_skill_crafter_snapshot(
 		library,
 		saved_v2.wip_id,
@@ -285,11 +264,9 @@ func _run_verification() -> void:
 		decoy_v2
 	)
 
-	_append_snapshot_summary("v1", v1_snapshot)
 	_append_snapshot_summary("v2", v2_snapshot)
 	_append_snapshot_summary("asymmetric", asymmetric_snapshot)
 	_append_snapshot_summary("decoy", decoy_snapshot)
-	_evaluate_baseline_parity(v1_snapshot, v2_snapshot)
 	_evaluate_asymmetric_surface_alignment(asymmetric_v2, asymmetric_snapshot)
 	_evaluate_v2_exact_surface_contract(
 		baseline_v2,
@@ -946,69 +923,9 @@ func _build_v2_wip_from_state(
 	wip.forge_builder_component_id = CraftedItemWIPScript.BUILDER_COMPONENT_PRIMARY
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
-	wip.layers = []
 	wip.forge_v2_authoring_state = authoring_state.duplicate(true) as Resource
 	wip.ensure_combat_animation_station_state()
 	return wip
-
-
-func _build_v1_visible_oracle_wip(
-	authored_rows: Array[String],
-	wip_id: StringName
-) -> CraftedItemWIP:
-	var wip: CraftedItemWIP = CraftedItemWIPScript.new()
-	wip.wip_id = wip_id
-	wip.forge_project_name = "V1 Skill Crafter Grip Oracle"
-	CraftedItemWIPScript.apply_builder_path_defaults(
-		wip,
-		CraftedItemWIPScript.BUILDER_PATH_MELEE,
-		CraftedItemWIPScript.BUILDER_COMPONENT_PRIMARY
-	)
-	var row_count := authored_rows.size()
-	var column_count := _max_row_width(authored_rows)
-	var layer_map: Dictionary = {}
-	for axial_index in range(26):
-		for row_index in range(row_count):
-			var row_text := authored_rows[row_index]
-			for column_index in range(row_text.length()):
-				if row_text.substr(column_index, 1) != "1":
-					continue
-				# This maps the authored V2 profile through the established final
-				# mirror_x and into V1's (+Y, FORWARD/-Z) slice convention.
-				# Authored profile X maps to V1 +Y and authored profile Y maps
-				# to V1 FORWARD/-Z. Keep those two extents distinct so a
-				# non-square centered profile catches a transposed oracle.
-				var legacy_y := 4 + (column_count - 1 - column_index)
-				var legacy_z := 4 + row_index
-				_add_v1_cell(
-					layer_map,
-					Vector3i(axial_index, legacy_y, legacy_z),
-					WOOD_MATERIAL_ID
-				)
-	var ordered_layers: Array = layer_map.keys()
-	ordered_layers.sort()
-	for layer_key: Variant in ordered_layers:
-		wip.layers.append(layer_map[layer_key])
-	wip.ensure_combat_animation_station_state()
-	return wip
-
-
-func _add_v1_cell(
-	layer_map: Dictionary,
-	grid_position: Vector3i,
-	material_variant_id: StringName
-) -> void:
-	if not layer_map.has(grid_position.z):
-		var layer: LayerAtom = LayerAtomScript.new()
-		layer.layer_index = grid_position.z
-		layer.cells = []
-		layer_map[grid_position.z] = layer
-	var cell: CellAtom = CellAtomScript.new()
-	cell.grid_position = grid_position
-	cell.layer_index = grid_position.z
-	cell.material_variant_id = material_variant_id
-	var target_layer: LayerAtom = layer_map[grid_position.z]
-	target_layer.cells.append(cell)
 
 
 func _capture_skill_crafter_snapshot(
@@ -1047,7 +964,7 @@ func _capture_skill_crafter_snapshot(
 	)
 	await _wait_process_frames(10)
 	await _wait_physics_frames(3)
-	# Preserve the original authored pose for the legitimate V1/V2 macro-grip
+	# Preserve the original authored pose for the V2 macro-grip
 	# parity assertions before deliberately exercising later seat edits.
 	var snapshot := _read_skill_crafter_snapshot(ui, label)
 	snapshot["open_ok"] = open_ok
@@ -4696,277 +4613,6 @@ func _read_skill_crafter_snapshot(ui: Node, label: String) -> Dictionary:
 		"_mesh_instance": mesh_instance,
 	}, true)
 	return snapshot
-
-
-func _evaluate_baseline_parity(v1: Dictionary, v2: Dictionary) -> void:
-	var snapshots_valid := (
-		bool(v1.get("valid", false))
-		and bool(v2.get("valid", false))
-		and bool(v1.get("open_ok", false))
-		and bool(v2.get("open_ok", false))
-		and bool(v1.get("authored_pose_ok", false))
-		and bool(v2.get("authored_pose_ok", false))
-	)
-	if not snapshots_valid:
-		_check(false, "baseline_skill_crafter_snapshots_valid", "V1/V2 Skill Crafter snapshot failed")
-		return
-	var v1_aabb: AABB = v1.get("mesh_aabb_grip_local", AABB()) as AABB
-	var v2_aabb: AABB = v2.get("mesh_aabb_grip_local", AABB()) as AABB
-	var visual_bounds_match := (
-		absf(v1_aabb.position.x - v2_aabb.position.x)
-			<= LEGACY_AXIAL_QUANTIZATION_EPSILON_METERS
-		and absf(v1_aabb.position.y - v2_aabb.position.y) <= POSITION_EPSILON_METERS
-		and absf(v1_aabb.position.z - v2_aabb.position.z) <= POSITION_EPSILON_METERS
-		and v1_aabb.size.distance_to(v2_aabb.size) <= POSITION_EPSILON_METERS
-	)
-	var cell_size_match := absf(
-		float(v1.get("cell_world_size", 0.0))
-		- float(v2.get("cell_world_size", 0.0))
-	) <= 0.000001
-	var v1_legacy_boxes_valid := (
-		int(v1.get("collision_shape_count", 0)) > 0
-		and int(v1.get("collision_shape_count", 0)) == int(v1.get(
-			"box_shape_count",
-			0
-		))
-		and int(v1.get("concave_shape_count", 0)) == 0
-	)
-	var v2_exact_surface_valid := (
-		int(v2.get("collision_shape_count", 0)) == 1
-		and int(v2.get("box_shape_count", 0)) == 0
-		and int(v2.get("concave_shape_count", 0)) == 1
-	)
-	result_lines.append("baseline_v1_legacy_boxes_valid=%s" % str(
-		v1_legacy_boxes_valid
-	))
-	result_lines.append("baseline_v2_exact_surface_valid=%s" % str(
-		v2_exact_surface_valid
-	))
-	result_lines.append("baseline_visual_bounds_match=%s" % str(visual_bounds_match))
-	result_lines.append("baseline_cell_size_match=%s" % str(cell_size_match))
-	result_lines.append("baseline_axial_origin_delta_meters=%.6f" % absf(
-		v1_aabb.position.x - v2_aabb.position.x
-	))
-	_check(
-		visual_bounds_match
-		and cell_size_match
-		and v1_legacy_boxes_valid
-		and v2_exact_surface_valid,
-		"baseline_v1_legacy_v2_exact_geometry_contract",
-		"equivalent handles lost visual parity or published the wrong V1/V2 contact shape authority"
-	)
-
-	var all_runtime_evidence_present := true
-	var max_finger_target_delta := 0.0
-	var v1_targets: Dictionary = v1.get(
-		"finger_target_positions_grip_local",
-		{}
-	) as Dictionary
-	var v2_targets: Dictionary = v2.get(
-		"finger_target_positions_grip_local",
-		{}
-	) as Dictionary
-	var v1_ray_counts: Dictionary = v1.get("finger_ray_counts", {}) as Dictionary
-	var v2_ray_counts: Dictionary = v2.get("finger_ray_counts", {}) as Dictionary
-	var v1_hit_counts: Dictionary = v1.get("finger_ray_hit_counts", {}) as Dictionary
-	var v2_hit_counts: Dictionary = v2.get("finger_ray_hit_counts", {}) as Dictionary
-	for finger_id: String in FINGER_IDS:
-		if (
-			not v1_targets.has(finger_id)
-			or not v2_targets.has(finger_id)
-			or int(v1_ray_counts.get(finger_id, 0)) <= 0
-			or int(v2_ray_counts.get(finger_id, 0)) <= 0
-			or int(v1_hit_counts.get(finger_id, 0)) <= 0
-			or int(v2_hit_counts.get(finger_id, 0)) <= 0
-		):
-			all_runtime_evidence_present = false
-			continue
-		max_finger_target_delta = maxf(
-			max_finger_target_delta,
-			(v1_targets[finger_id] as Vector3).distance_to(
-				v2_targets[finger_id] as Vector3
-			)
-		)
-		result_lines.append("baseline_%s_target_delta_meters=%.6f" % [
-			finger_id,
-			(v1_targets[finger_id] as Vector3).distance_to(
-				v2_targets[finger_id] as Vector3
-			),
-		])
-	result_lines.append("baseline_max_finger_target_delta_meters=%.6f" % max_finger_target_delta)
-	_check(
-		all_runtime_evidence_present,
-		"all_finger_runtime_evidence_present_ok",
-		"unchanged Skill Crafter did not expose a contact target and ray hit for all five fingers"
-	)
-	result_lines.append("baseline_all_finger_target_parity_ok=%s" % str(
-		max_finger_target_delta <= POSITION_EPSILON_METERS
-	))
-	var baseline_ray_probe: Dictionary = v2.get("ray_probe", {}) as Dictionary
-	result_lines.append("baseline_v2_ray_probe_attempt_count=%d" % int(
-		baseline_ray_probe.get("attempt_count", 0)
-	))
-	result_lines.append("baseline_v2_ray_probe_hit_count=%d" % int(
-		baseline_ray_probe.get("grip_area_hit_count", 0)
-	))
-	result_lines.append("baseline_v2_ray_probe_aligned_count=%d" % int(
-		baseline_ray_probe.get("aligned_hit_count", 0)
-	))
-	result_lines.append("baseline_v2_ray_probe_max_error_meters=%s" % str(float(
-		baseline_ray_probe.get("max_alignment_error_meters", INF)
-	)))
-
-	var held_basis_delta := _basis_delta_degrees(
-		v1.get("held_basis_local", Basis.IDENTITY) as Basis,
-		v2.get("held_basis_local", Basis.IDENTITY) as Basis
-	)
-	var current_held_basis_delta := _basis_delta_degrees(
-		v1.get("current_held_basis_preview_local", Basis.IDENTITY) as Basis,
-		v2.get("current_held_basis_preview_local", Basis.IDENTITY) as Basis
-	)
-	var grip_basis_delta := _basis_delta_degrees(
-		v1.get("grip_basis_local", Basis.IDENTITY) as Basis,
-		v2.get("grip_basis_local", Basis.IDENTITY) as Basis
-	)
-	var v1_major: Vector3 = v1.get("grip_major_axis_local", Vector3.ZERO) as Vector3
-	var v2_major: Vector3 = v2.get("grip_major_axis_local", Vector3.ZERO) as Vector3
-	var v1_minor_a: Vector3 = v1.get("grip_minor_axis_a_local", Vector3.ZERO) as Vector3
-	var v2_minor_a: Vector3 = v2.get("grip_minor_axis_a_local", Vector3.ZERO) as Vector3
-	var v1_minor_b: Vector3 = v1.get("grip_minor_axis_b_local", Vector3.ZERO) as Vector3
-	var v2_minor_b: Vector3 = v2.get("grip_minor_axis_b_local", Vector3.ZERO) as Vector3
-	var v1_effective_minor_a: Vector3 = v1.get(
-		"effective_minor_axis_a_local",
-		Vector3.ZERO
-	) as Vector3
-	var v2_effective_minor_a: Vector3 = v2.get(
-		"effective_minor_axis_a_local",
-		Vector3.ZERO
-	) as Vector3
-	var v1_effective_minor_b: Vector3 = v1.get(
-		"effective_minor_axis_b_local",
-		Vector3.ZERO
-	) as Vector3
-	var v2_effective_minor_b: Vector3 = v2.get(
-		"effective_minor_axis_b_local",
-		Vector3.ZERO
-	) as Vector3
-	var major_dot := (
-		v1_major.normalized().dot(v2_major.normalized())
-		if v1_major.length_squared() > 0.000001 and v2_major.length_squared() > 0.000001
-		else -1.0
-	)
-	var minor_a_dot := (
-		v1_minor_a.normalized().dot(v2_minor_a.normalized())
-		if v1_minor_a.length_squared() > 0.000001 and v2_minor_a.length_squared() > 0.000001
-		else -1.0
-	)
-	var minor_b_dot := (
-		v1_minor_b.normalized().dot(v2_minor_b.normalized())
-		if v1_minor_b.length_squared() > 0.000001 and v2_minor_b.length_squared() > 0.000001
-		else -1.0
-	)
-	var effective_minor_a_dot := (
-		v1_effective_minor_a.normalized().dot(v2_effective_minor_a.normalized())
-		if (
-			v1_effective_minor_a.length_squared() > 0.000001
-			and v2_effective_minor_a.length_squared() > 0.000001
-		)
-		else -1.0
-	)
-	var effective_minor_b_dot := (
-		v1_effective_minor_b.normalized().dot(v2_effective_minor_b.normalized())
-		if (
-			v1_effective_minor_b.length_squared() > 0.000001
-			and v2_effective_minor_b.length_squared() > 0.000001
-		)
-		else -1.0
-	)
-	result_lines.append("baseline_held_basis_delta_degrees=%.4f" % held_basis_delta)
-	result_lines.append("baseline_current_held_basis_delta_degrees=%.4f" % current_held_basis_delta)
-	result_lines.append("baseline_grip_basis_delta_degrees=%.4f" % grip_basis_delta)
-	result_lines.append("baseline_major_axis_dot=%.6f" % major_dot)
-	result_lines.append("baseline_minor_axis_a_dot=%.6f" % minor_a_dot)
-	result_lines.append("baseline_minor_axis_b_dot=%.6f" % minor_b_dot)
-	result_lines.append("baseline_effective_minor_axis_a_dot=%.6f" % effective_minor_a_dot)
-	result_lines.append("baseline_effective_minor_axis_b_dot=%.6f" % effective_minor_b_dot)
-	result_lines.append("baseline_v1_grip_axes=%s|%s|%s" % [
-		str(v1_major),
-		str(v1_minor_a),
-		str(v1_minor_b),
-	])
-	result_lines.append("baseline_v2_grip_axes=%s|%s|%s" % [
-		str(v2_major),
-		str(v2_minor_a),
-		str(v2_minor_b),
-	])
-	result_lines.append("baseline_v1_effective_finger_axes=%s|%s" % [
-		str(v1_effective_minor_a),
-		str(v1_effective_minor_b),
-	])
-	result_lines.append("baseline_v2_effective_finger_axes=%s|%s" % [
-		str(v2_effective_minor_a),
-		str(v2_effective_minor_b),
-	])
-	_check(
-		held_basis_delta <= BASIS_EPSILON_DEGREES
-		and current_held_basis_delta <= BASIS_EPSILON_DEGREES
-		and grip_basis_delta <= BASIS_EPSILON_DEGREES
-		and major_dot >= 0.9999
-		and effective_minor_a_dot >= 0.9999
-		and effective_minor_b_dot >= 0.9999,
-		"weapon_grip_basis_orientation_ok",
-		"V2 adapter output changes the effective weapon/finger-contact frame consumed by existing IK"
-	)
-	var max_finger_pose_delta := 0.0
-	var all_finger_poses_present := true
-	var v1_rotations: Dictionary = v1.get("bone_rotations", {}) as Dictionary
-	var v2_rotations: Dictionary = v2.get("bone_rotations", {}) as Dictionary
-	for bone_name: String in RIGHT_FINGER_BONES:
-		if not v1_rotations.has(bone_name) or not v2_rotations.has(bone_name):
-			all_finger_poses_present = false
-			continue
-		max_finger_pose_delta = maxf(
-			max_finger_pose_delta,
-			_quaternion_delta_degrees(
-				v1_rotations[bone_name] as Quaternion,
-				v2_rotations[bone_name] as Quaternion
-			)
-		)
-	result_lines.append("baseline_all_finger_pose_max_delta_degrees=%s" % str(
-		max_finger_pose_delta
-	))
-	_check(
-		all_finger_poses_present and max_finger_pose_delta <= THUMB_EPSILON_DEGREES,
-		"all_finger_pose_matches_v1_ok",
-		"the unchanged Skill Crafter direct curl pose differs between equivalent V1/V2 handles"
-	)
-
-	var max_thumb_delta := 0.0
-	for bone_name in [
-		"CC_Base_R_Thumb1",
-		"CC_Base_R_Thumb2",
-		"CC_Base_R_Thumb3",
-	]:
-		if not v1_rotations.has(bone_name) or not v2_rotations.has(bone_name):
-			max_thumb_delta = INF
-			continue
-		max_thumb_delta = maxf(
-			max_thumb_delta,
-			_quaternion_delta_degrees(
-				v1_rotations[bone_name] as Quaternion,
-				v2_rotations[bone_name] as Quaternion
-			)
-		)
-	result_lines.append("baseline_thumb_pose_max_delta_degrees=%s" % str(max_thumb_delta))
-	result_lines.append("baseline_v1_thumb_ray_hit_count=%d" % int(v1.get("thumb_ray_hit_count", 0)))
-	result_lines.append("baseline_v2_thumb_ray_hit_count=%d" % int(v2.get("thumb_ray_hit_count", 0)))
-	_check(
-		max_thumb_delta <= THUMB_EPSILON_DEGREES
-		and int(v1.get("thumb_ray_hit_count", 0)) > 0
-		and int(v1.get("thumb_ray_hit_count", 0)) == int(v2.get("thumb_ray_hit_count", 0)),
-		"thumb_engagement_matches_v1_ok",
-		"unchanged Skill Crafter produces a different thumb pose/contact result for equivalent V2 geometry"
-	)
 
 
 func _evaluate_asymmetric_surface_alignment(

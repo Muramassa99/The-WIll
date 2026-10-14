@@ -339,11 +339,10 @@ func start_playback(
 
 	active_runtime_skill_result = slot_activation_result.duplicate(true)
 	_store_runtime_compile_debug(active_runtime_skill_result, compile_result)
-	var prepared_chain_result: Dictionary = _build_runtime_chain_with_entry(
+	var prepared_chain_result: Dictionary = _build_runtime_skill_chain_with_entry(
 		motion_node_chain,
 		inherited_start_node,
-		ENTRY_BRIDGE_DURATION_SECONDS,
-		1
+		cached_authored_runtime_clip
 	)
 	active_motion_node_chain = prepared_chain_result.get("motion_node_chain", []) as Array
 	if active_motion_node_chain.size() < 2:
@@ -956,7 +955,6 @@ func _apply_contact_group_runtime_clip_pose(
 	var resolved_playback_state: Dictionary = playback_state.duplicate(true)
 	if humanoid_rig == null or held_item == null or not is_instance_valid(held_item) or effective_motion_node == null:
 		return resolved_playback_state
-	_claim_runtime_endpoint_authority(humanoid_rig, held_item)
 	var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
 	var local_pommel: Vector3 = _get_weapon_pommel_meta(held_item)
 	if local_tip.is_equal_approx(local_pommel):
@@ -977,6 +975,15 @@ func _apply_contact_group_runtime_clip_pose(
 	):
 		live_pose_presenter.configure_preview_hand_setup(previous_slot_id, previous_default_two_hand)
 		return resolved_playback_state
+	if bool(resolved_playback_state.get("grip_endcap_replay_invalid", false)):
+		# The baked bones, anchors and weapon are one pose. Preserve the last
+		# applied pose rather than falling through to a differently seated solve.
+		live_pose_presenter.configure_preview_hand_setup(previous_slot_id, previous_default_two_hand)
+		resolved_playback_state["solved_replay_applied"] = false
+		resolved_playback_state["status"] = &"saved_grip_refresh_required"
+		resolved_playback_state["message"] = "Saved grip needs refresh for the handle end bounds. Open this weapon in Skill Crafter and Save."
+		return resolved_playback_state
+	_claim_runtime_endpoint_authority(humanoid_rig, held_item)
 	_clear_runtime_solved_replay_pose(humanoid_rig)
 	live_pose_presenter._apply_preview_motion_grip_state(
 		held_item,
@@ -1133,6 +1140,16 @@ func _apply_solved_runtime_replay_frame(
 		return false
 	if not bool(playback_state.get("solved_replay_available", false)):
 		return false
+	if humanoid_rig.has_method("get_hand_grip_spans_meters"):
+		held_item.set_meta("hand_grip_spans_meters", humanoid_rig.call("get_hand_grip_spans_meters"))
+	var end_bounds := live_pose_presenter.validate_solved_replay_hand_end_bounds(
+		held_item,
+		playback_state
+	)
+	if not bool(end_bounds.get("valid", false)):
+		playback_state["grip_endcap_replay_invalid"] = true
+		playback_state["grip_endcap_replay_reason"] = end_bounds.get("reason", &"saved_grip_outside_handle_end_bounds")
+		return false
 	if not humanoid_rig.has_method("apply_runtime_solved_upper_body_pose_frame"):
 		return false
 	var bone_names: Array = playback_state.get("solved_upper_body_bone_names", []) as Array
@@ -1141,6 +1158,7 @@ func _apply_solved_runtime_replay_frame(
 	var bone_scales: Array = playback_state.get("solved_upper_body_pose_scales", []) as Array
 	if bone_names.is_empty() or bone_positions.is_empty() or bone_rotations.is_empty() or bone_scales.is_empty():
 		return false
+	_claim_runtime_endpoint_authority(humanoid_rig, held_item)
 	if humanoid_rig.has_method("clear_upper_body_authoring_state"):
 		humanoid_rig.call("clear_upper_body_authoring_state")
 	if humanoid_rig.has_method("clear_authoring_contact_anchor_bases"):
@@ -1782,12 +1800,10 @@ func _resolve_support_hand_requested_from_values(
 	held_item_nodes: Dictionary,
 	support_slot_id: StringName,
 	default_two_hand: bool,
-	preferred_grip_style_mode: StringName,
+	_preferred_grip_style_mode: StringName,
 	two_hand_state: StringName
 ) -> bool:
 	if held_item == null or not bool(held_item.get_meta("two_hand_character_eligible", false)):
-		return false
-	if preferred_grip_style_mode == CraftedItemWIPScript.GRIP_REVERSE:
 		return false
 	if support_slot_id == StringName():
 		return false
@@ -2065,6 +2081,13 @@ func _build_motion_node_from_pose_state(
 	snapshot.node_index = 0
 	snapshot.normalize()
 	return snapshot
+
+func _build_runtime_skill_chain_with_entry(authored_chain: Array, entry_node: CombatAnimationMotionNode, cached_clip) -> Dictionary:
+	# Saved replay starts at authored node 0. Entry bridges into that sample;
+	# skipping to node 1 would discard its first segment (the entire body of a
+	# two-node skill) while cached-track copying still assumes the full body.
+	var first_authored_index := 0 if cached_clip != null and cached_clip.has_solved_replay_track() else 1
+	return _build_runtime_chain_with_entry(authored_chain, entry_node, ENTRY_BRIDGE_DURATION_SECONDS, first_authored_index)
 
 func _build_runtime_chain_with_entry(
 	authored_motion_node_chain: Array,

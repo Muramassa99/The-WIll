@@ -451,7 +451,6 @@ func build_crafted_item_wip_for_save(
 		)
 		if wip.forge_v2_authoring_state.has_method("normalize"):
 			wip.forge_v2_authoring_state.call("normalize")
-	wip.layers = []
 	var runtime_contract: Dictionary = (
 		ForgeV2WipCompatibilityAdapterScript.build_runtime_contract(
 			wip,
@@ -562,11 +561,6 @@ func _copy_saved_wip_sidecar_authoring(
 	if target_wip == null:
 		return
 	if source_wip != null:
-		target_wip.builder_marker_positions = (
-			source_wip.builder_marker_positions.duplicate(true)
-			if source_wip.builder_marker_positions != null
-			else {}
-		)
 		target_wip.combat_animation_station_state = (
 			source_wip.combat_animation_station_state.duplicate(true) as Resource
 			if source_wip.combat_animation_station_state != null
@@ -617,7 +611,7 @@ func load_saved_wip(
 	saved_wip: CraftedItemWIP,
 	preserve_action_history: bool = false
 ) -> bool:
-	if saved_wip == null or saved_wip.forge_v2_authoring_state == null:
+	if not CraftedItemWIP.is_forge_v2_authoring_wip(saved_wip):
 		return false
 	_prepared_grip_target_wrapper = (
 		saved_wip.stage2_item_state.get("primary_grip_target_wrapper") as Resource

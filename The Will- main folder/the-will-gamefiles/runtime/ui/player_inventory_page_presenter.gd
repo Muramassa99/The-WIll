@@ -149,7 +149,6 @@ func refresh_wip_page(
 	selected_wip_id: StringName,
 	format_wip_label_callable: Callable,
 	get_wip_display_name_callable: Callable,
-	count_wip_cells_callable: Callable,
 	preview_wip_test_status_callable: Callable,
 	hands_are_empty_callable: Callable
 ) -> void:
@@ -178,7 +177,6 @@ func refresh_wip_page(
 	detail_lines.append("WIP id: %s" % String(selected_wip.wip_id))
 	detail_lines.append("Intent: %s" % String(selected_wip.forge_intent))
 	detail_lines.append("Equipment context: %s" % String(selected_wip.equipment_context))
-	detail_lines.append("Cell count: %d" % count_wip_cells_callable.call(selected_wip))
 	detail_lines.append("Forge test valid now: %s" % str(bool(status_preview.get("valid", false))))
 	detail_lines.append("Gate detail: %s" % String(status_preview.get("message", "No preview available.")))
 	wip_detail_label.text = "\n".join(detail_lines)

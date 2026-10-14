@@ -60,7 +60,12 @@ func _run() -> void:
 	var primary_serial: int = primary.get("serial", -1)
 	var initial_relative := _primary_relative(context)
 	var initial_rotations := _finger_rotations(context.actor, HAND)
-	_report["support_station_ratio"] = motion.secondary_grip_seat_slide_offset
+	var station_override := OS.get_environment("THE_WILL_GRIP_SUPPORT_STATION").strip_edges()
+	if not station_override.is_empty():
+		if not _check(station_override.is_valid_float() and _ui.set_selected_motion_node_secondary_grip_seat_slide(float(station_override), false), "explicit diagnostic support station is applied through UI"):
+			_finish(); return
+		_report["explicit_support_station_request"] = float(station_override)
+	_report["support_station_slide_offset"] = motion.secondary_grip_seat_slide_offset
 	_report["grip_style"] = motion.preferred_grip_style_mode
 	if not _check(_ui.set_selected_motion_node_two_hand_state(Motion.TWO_HAND_STATE_TWO_HAND, false), "existing UI activates Two Hand"):
 		_finish(); return
@@ -69,6 +74,7 @@ func _run() -> void:
 	_check(support.get("status", "") == "preview_applied", "joining support receives new solver pose")
 	context = _ui.preview_presenter._weapon_roll_context(_ui.preview_subviewport)
 	owner = context.actor.get_node("PreparedGripAcquisition")
+	_report["support_station_ratio"] = context.weapon.get_meta("preview_support_grip_seat_axis_ratio_from_span_start", -1.0)
 	if support.get("status", "") == "preview_applied":
 		await _verify_support_refresh_and_capture(context, owner)
 	_check(owner._requests.get(HAND, {}).get("key", "") == primary_key and owner._status.get(HAND, {}).get("serial", -2) == primary_serial, "support addition does not reacquire primary")
@@ -110,18 +116,52 @@ func _verify_support_refresh_and_capture(context: Dictionary, owner: Node) -> vo
 	var motion: Resource = _ui._get_active_motion_node()
 	var tip_before: Vector3 = motion.tip_position_local
 	var pommel_before: Vector3 = motion.pommel_position_local
-	var weapon_before: Transform3D = context.weapon.global_transform
-	motion.tip_position_local += Vector3(0.015, 0.0, 0.0)
-	motion.pommel_position_local += Vector3(0.015, 0.0, 0.0)
+	var movements: Array[Dictionary] = []
+	var xy_direction := OS.get_environment("THE_WILL_GRIP_SUPPORT_MOTION_XY").strip_edges()
+	if xy_direction.is_empty(): xy_direction = "negative"
+	if not _check(xy_direction in ["negative", "positive"], "diagnostic reachable XY direction is explicitly valid"): return
+	var xy_sign := 1.0 if xy_direction == "positive" else -1.0
+	_report["requested_reachable_xy_direction"] = xy_direction
+	for offset: Vector3 in [Vector3(xy_sign * 0.015, 0.0, 0.0), Vector3(0.0, xy_sign * 0.015, 0.0), Vector3(0.0, 0.0, 0.015), Vector3(0.0, 0.0, -0.015)]:
+		var weapon_before: Transform3D = context.weapon.global_transform
+		motion.tip_position_local = tip_before + offset
+		motion.pommel_position_local = pommel_before + offset
+		var started := Time.get_ticks_usec()
+		_ui._sync_preview_pose_only()
+		await process_frame
+		var after_edit: Transform3D = context.weapon.global_transform.affine_inverse() * skeleton.global_transform * skeleton.get_bone_global_pose(hand_index)
+		var realized_translation := weapon_before.origin.distance_to(context.weapon.global_position)
+		var error := _frame_error(before, after_edit)
+		var retained: Dictionary = owner._status[SUPPORT].get("motion_retention", {}).duplicate(true)
+		movements.append({"offset_m": [offset.x, offset.y, offset.z], "realized_translation_m": realized_translation,
+			"support_relationship_error_m_or_rad": error, "retention": retained,
+			"elapsed_ms": float(Time.get_ticks_usec() - started) / 1000.0})
+		_check(realized_translation > 0.0001 and not retained.get("motion_clamped", false), "reachable %s edit produces actual weapon motion" % offset)
+		_check(error <= 0.00005 and owner._status[SUPPORT].serial == serial, "requested %s edit retains support without reacquisition" % offset)
+		_check(motion.tip_position_local == tip_before + offset and motion.pommel_position_local == pommel_before + offset, "motion owner preserves authored control intent for %s" % offset)
+		motion.tip_position_local = tip_before
+		motion.pommel_position_local = pommel_before
+		_ui._sync_preview_pose_only()
+		await process_frame
+	_report["reachable_motion_cases"] = movements
+	var retained_weapon: Transform3D = context.weapon.global_transform
+	var retained_body: Array[Transform3D] = []
+	for index: int in skeleton.get_bone_count(): retained_body.append(skeleton.get_bone_pose(index))
+	var clamps_before: int = owner._support_motion_clamp_count
+	motion.tip_position_local = tip_before + Vector3(10.0, 0.0, 0.0)
+	motion.pommel_position_local = pommel_before + Vector3(10.0, 0.0, 0.0)
 	_ui._sync_preview_pose_only()
 	await process_frame
-	var after_edit: Transform3D = context.weapon.global_transform.affine_inverse() * skeleton.global_transform * skeleton.get_bone_global_pose(hand_index)
-	var retained: Dictionary = owner._status[SUPPORT].get("motion_retention", {}).duplicate(true)
-	_report["modest_edit"] = {"requested_translation_m": 0.015,
-		"realized_weapon_movement_m_or_rad": _frame_error(weapon_before, context.weapon.global_transform),
-		"support_relationship_error_m_or_rad": _frame_error(before, after_edit), "retention": retained}
-	_check(_frame_error(before, after_edit) <= 0.00005, "modest edit preserves support relationship or explicitly clamps motion")
-	_check(motion.tip_position_local == tip_before + Vector3(0.015, 0.0, 0.0) and motion.pommel_position_local == pommel_before + Vector3(0.015, 0.0, 0.0), "motion guard preserves authored control intent")
+	var stopped: Dictionary = owner._status[SUPPORT].get("motion_retention", {}).duplicate(true)
+	var body_restored := true
+	for index: int in retained_body.size():
+		if not skeleton.get_bone_pose(index).is_equal_approx(retained_body[index]): body_restored = false
+	var weapon_restored := _frame_error(retained_weapon, context.weapon.global_transform) <= 0.00005
+	_report["unreachable_ui_motion"] = {"requested_translation_m": 10.0, "retention": stopped,
+		"body_restored": body_restored, "weapon_restored": weapon_restored,
+		"new_clamp_count": owner._support_motion_clamp_count - clamps_before}
+	_check(stopped.get("motion_clamped", false) and owner._support_motion_clamp_count > clamps_before, "unreachable ordinary UI movement reports its actual clamp")
+	_check(body_restored and weapon_restored, "unreachable ordinary UI movement restores prior accepted body and weapon")
 	motion.tip_position_local = tip_before
 	motion.pommel_position_local = pommel_before
 	_ui._sync_preview_pose_only()
@@ -129,7 +169,7 @@ func _verify_support_refresh_and_capture(context: Dictionary, owner: Node) -> vo
 	var pivot := {"point_local": context.weapon.get_meta("preview_support_grip_seat_local"),
 		"origin_id": context.weapon.get_meta("preview_support_grip_seat_origin_id"), "source": "preview_support_grip_seat"}
 	var capture := Capture.new().capture(context.actor, context.weapon, owner._data.anatomy, SUPPORT,
-		&"support_post_refresh_observation", serial, 0, {}, pivot)
+		&"support_post_refresh_observation", serial, 0, {}, pivot, false)
 	if not _check(capture.get("valid", false), "actual support skin capture succeeds"): return
 	capture.posed_character["digit_dimension_reference"] = owner._requests[SUPPORT].digit_dimension_reference.duplicate(true)
 	var packet: Dictionary = owner._replay_pose_cache[owner._requests[SUPPORT].key].packet

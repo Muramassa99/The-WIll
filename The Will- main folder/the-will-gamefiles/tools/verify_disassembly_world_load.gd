@@ -14,7 +14,8 @@ func _run_verification() -> void:
 	await process_frame
 
 	var disassembly_bench: Node = root_scene.get_node_or_null("DisassemblyBench")
-	var crafting_bench: Node = root_scene.get_node_or_null("CraftingBench")
+	var crafting_bench: Node = root_scene.get_node_or_null("CraftingBenchV2")
+	var retired_crafting_bench: Node = root_scene.get_node_or_null("CraftingBench")
 	var combat_animation_station: Node = root_scene.get_node_or_null("CombatAnimationStation")
 	var disassembly_ui: Node = root_scene.get_node_or_null("DisassemblyBench/DisassemblyBenchUI")
 	var combat_animation_ui: Node = root_scene.get_node_or_null("CombatAnimationStation/CombatAnimationStationUI")
@@ -30,6 +31,7 @@ func _run_verification() -> void:
 	var lines: PackedStringArray = []
 	lines.append("main_scene_loaded=%s" % str(root_scene != null))
 	lines.append("crafting_bench_present=%s" % str(crafting_bench != null))
+	lines.append("retired_forge_v1_absent=%s" % str(retired_crafting_bench == null))
 	lines.append("disassembly_bench_present=%s" % str(disassembly_bench != null))
 	lines.append("combat_animation_station_present=%s" % str(combat_animation_station != null))
 	lines.append("disassembly_ui_present=%s" % str(disassembly_ui != null))
@@ -41,4 +43,4 @@ func _run_verification() -> void:
 		file.store_string("\n".join(lines))
 		file.close()
 
-	quit()
+	quit(0 if crafting_bench != null and retired_crafting_bench == null and disassembly_bench != null else 1)

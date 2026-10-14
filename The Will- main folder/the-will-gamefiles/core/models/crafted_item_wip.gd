@@ -35,7 +35,6 @@ const EQUIPMENT_CONTEXT_UNARMED := &"ctx_unarmed"
 @export var created_timestamp: float = 0.0
 @export var forge_builder_path_id: StringName = BUILDER_PATH_MELEE
 @export var forge_builder_component_id: StringName = BUILDER_COMPONENT_PRIMARY
-@export var builder_marker_positions: Dictionary = {}
 @export var stage2_item_state: Resource
 @export var combat_animation_station_state: Resource
 @export var forge_v2_authoring_state: Resource
@@ -43,7 +42,6 @@ const EQUIPMENT_CONTEXT_UNARMED := &"ctx_unarmed"
 @export var equipment_context: StringName = &""
 @export var stow_position_mode: StringName = STOW_SHOULDER_HANGING
 @export var grip_style_mode: StringName = GRIP_NORMAL
-@export var layers: Array[LayerAtom] = []
 @export var latest_baked_profile_snapshot: BakedProfile
 
 static func get_builder_path_ids() -> Array[StringName]:
@@ -210,183 +208,10 @@ static func get_builder_marker_catalog_entries(builder_path_id: StringName, buil
 			})
 	return entries
 
-static func collect_builder_marker_positions(wip: CraftedItemWIP) -> Dictionary:
-	var positions: Dictionary = {}
-	if wip == null:
-		return positions
-	if wip.builder_marker_positions == null:
-		wip.builder_marker_positions = {}
-	for marker_id: StringName in _collect_builder_marker_ids():
-		var storage_key: String = _build_builder_marker_storage_key(marker_id)
-		var position_variant: Variant = wip.builder_marker_positions.get(storage_key, wip.builder_marker_positions.get(marker_id))
-		if position_variant is Vector3i:
-			positions[marker_id] = position_variant
-	return positions
-
-static func find_builder_marker_id_at_grid_position(wip: CraftedItemWIP, grid_position: Vector3i) -> StringName:
-	var marker_positions: Dictionary = collect_builder_marker_positions(wip)
-	for marker_id: StringName in marker_positions.keys():
-		var marker_position: Variant = marker_positions.get(marker_id)
-		if marker_position is Vector3i and marker_position == grid_position:
-			return marker_id
-	return StringName()
-
-static func get_builder_marker_position(wip: CraftedItemWIP, material_id: StringName) -> Variant:
-	if wip == null or not is_builder_marker_material_id(material_id):
-		return null
-	return collect_builder_marker_positions(wip).get(material_id)
-
-static func set_builder_marker_position(wip: CraftedItemWIP, material_id: StringName, grid_position: Vector3i) -> bool:
-	if wip == null or not is_builder_marker_material_id(material_id):
-		return false
-	var storage: Dictionary = wip.builder_marker_positions if wip.builder_marker_positions != null else {}
-	var existing_positions: Dictionary = collect_builder_marker_positions(wip)
-	var existing_position_variant: Variant = existing_positions.get(material_id)
-	if existing_position_variant is Vector3i and existing_position_variant == grid_position:
-		return false
-	var conflicting_marker_id: StringName = find_builder_marker_id_at_grid_position(wip, grid_position)
-	if conflicting_marker_id != StringName() and conflicting_marker_id != material_id:
-		storage.erase(_build_builder_marker_storage_key(conflicting_marker_id))
-		storage.erase(conflicting_marker_id)
-	if storage.has(material_id):
-		storage.erase(material_id)
-	storage[_build_builder_marker_storage_key(material_id)] = grid_position
-	wip.builder_marker_positions = storage
-	return true
-
-static func clear_builder_marker_position(wip: CraftedItemWIP, material_id: StringName) -> bool:
-	if wip == null or not is_builder_marker_material_id(material_id) or wip.builder_marker_positions == null:
-		return false
-	var storage: Dictionary = wip.builder_marker_positions
-	var removed: bool = false
-	var storage_key: String = _build_builder_marker_storage_key(material_id)
-	if storage.has(storage_key):
-		storage.erase(storage_key)
-		removed = true
-	if storage.has(material_id):
-		storage.erase(material_id)
-		removed = true
-	if removed:
-		wip.builder_marker_positions = storage
-	return removed
-
-static func migrate_builder_marker_cells_to_positions(wip: CraftedItemWIP) -> bool:
-	if wip == null:
-		return false
-	var migration_changed: bool = false
-	var empty_layers: Array[LayerAtom] = []
-	for layer_atom: LayerAtom in wip.layers:
-		if layer_atom == null:
-			continue
-		var cells_to_remove: Array[CellAtom] = []
-		for cell: CellAtom in layer_atom.cells:
-			if cell == null or not is_builder_marker_material_id(cell.material_variant_id):
-				continue
-			set_builder_marker_position(wip, cell.material_variant_id, cell.grid_position)
-			cells_to_remove.append(cell)
-			migration_changed = true
-		for cell: CellAtom in cells_to_remove:
-			layer_atom.cells.erase(cell)
-		if layer_atom.cells.is_empty():
-			empty_layers.append(layer_atom)
-	for empty_layer: LayerAtom in empty_layers:
-		wip.layers.erase(empty_layer)
-	if migration_changed:
-		wip.latest_baked_profile_snapshot = null
-	return migration_changed
-
-static func collect_cells(wip: CraftedItemWIP, include_builder_markers: bool = true) -> Array[CellAtom]:
-	var cells: Array[CellAtom] = []
-	if wip == null:
-		return cells
-	for layer in wip.layers:
-		if layer == null:
-			continue
-		for cell in layer.cells:
-			if cell == null:
-				continue
-			cells.append(cell)
-	if include_builder_markers:
-		cells.append_array(collect_builder_marker_cells(wip))
-	return cells
-
-static func collect_bake_cells(wip: CraftedItemWIP) -> Array[CellAtom]:
-	return collect_cells(wip, false)
-
-static func collect_builder_marker_cells(wip: CraftedItemWIP) -> Array[CellAtom]:
-	var cells: Array[CellAtom] = []
-	var marker_positions: Dictionary = collect_builder_marker_positions(wip)
-	for pair_id: StringName in get_string_anchor_pair_ids():
-		for endpoint_index in [1, 2]:
-			var marker_id: StringName = get_string_anchor_builder_marker_id(pair_id, endpoint_index)
-			var grid_position_variant: Variant = marker_positions.get(marker_id)
-			if grid_position_variant is not Vector3i:
-				continue
-			cells.append(_build_builder_marker_cell(marker_id, grid_position_variant))
-	return cells
-
-static func find_first_cell_by_material_id(wip: CraftedItemWIP, material_id: StringName) -> CellAtom:
-	if is_builder_marker_material_id(material_id):
-		var marker_position_variant: Variant = get_builder_marker_position(wip, material_id)
-		if marker_position_variant is Vector3i:
-			return _build_builder_marker_cell(material_id, marker_position_variant)
-		return null
-	for cell: CellAtom in collect_cells(wip, true):
-		if cell != null and cell.material_variant_id == material_id:
-			return cell
-	return null
-
-static func resolve_first_complete_string_anchor_pair(cells: Array[CellAtom]) -> Dictionary:
-	for pair_id: StringName in get_string_anchor_pair_ids():
-		var endpoint_one_id: StringName = get_string_anchor_builder_marker_id(pair_id, 1)
-		var endpoint_two_id: StringName = get_string_anchor_builder_marker_id(pair_id, 2)
-		var endpoint_one_cell: CellAtom = null
-		var endpoint_two_cell: CellAtom = null
-		for cell: CellAtom in cells:
-			if cell == null:
-				continue
-			if cell.material_variant_id == endpoint_one_id:
-				endpoint_one_cell = cell
-			elif cell.material_variant_id == endpoint_two_id:
-				endpoint_two_cell = cell
-		if endpoint_one_cell == null or endpoint_two_cell == null:
-			continue
-		if endpoint_one_cell.grid_position == endpoint_two_cell.grid_position:
-			continue
-		return {
-			"valid": true,
-			"pair_id": pair_id,
-			"endpoint_one_cell": endpoint_one_cell,
-			"endpoint_two_cell": endpoint_two_cell,
-		}
-	return {
-		"valid": false,
-		"pair_id": StringName(),
-		"endpoint_one_cell": null,
-		"endpoint_two_cell": null,
-	}
-
 static func _normalize_string_anchor_pair_id(pair_id: StringName) -> StringName:
 	if get_string_anchor_pair_ids().has(pair_id):
 		return pair_id
 	return STRING_ANCHOR_PAIR_A
-
-static func _collect_builder_marker_ids() -> Array[StringName]:
-	var marker_ids: Array[StringName] = []
-	for pair_id: StringName in get_string_anchor_pair_ids():
-		for endpoint_index in [1, 2]:
-			marker_ids.append(get_string_anchor_builder_marker_id(pair_id, endpoint_index))
-	return marker_ids
-
-static func _build_builder_marker_cell(material_id: StringName, grid_position: Vector3i) -> CellAtom:
-	var cell: CellAtom = CellAtom.new()
-	cell.grid_position = grid_position
-	cell.layer_index = grid_position.z
-	cell.material_variant_id = material_id
-	return cell
-
-static func _build_builder_marker_storage_key(material_id: StringName) -> String:
-	return String(material_id)
 
 static func infer_builder_path_id_from_intent_and_context(
 	resolved_forge_intent: StringName,
@@ -419,6 +244,13 @@ static func get_default_equipment_context_for_builder_path(builder_path_id: Stri
 			return &"ctx_focus"
 		_:
 			return &"ctx_weapon"
+
+static func is_forge_v2_authoring_wip(wip: CraftedItemWIP) -> bool:
+	return (
+		wip != null
+		and wip.forge_v2_authoring_state != null
+		and not is_unarmed_authoring_wip(wip)
+	)
 
 static func is_unarmed_authoring_wip(wip: CraftedItemWIP) -> bool:
 	return (
@@ -533,6 +365,6 @@ static func get_grip_style_label(grip_mode: StringName) -> String:
 static func get_grip_style_note(grip_mode: StringName) -> String:
 	match normalize_grip_style_mode(grip_mode):
 		GRIP_REVERSE:
-			return "Reverse grip shortens the weapon's effective reach significantly and disables two-handed weapon techniques, but grants +25% attack speed."
+			return "Reverse grip shortens the weapon's effective reach significantly, but grants +25% attack speed."
 		_:
 			return "Standard forward-facing hold. Supports normal one-handed and two-handed weapon use when available."

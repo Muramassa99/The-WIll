@@ -53,7 +53,6 @@ static func build_fixture_wip(operation_count: int = MAX_OPERATION_COUNT) -> Cra
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
 	wip.forge_v2_authoring_state = authoring_state
-	wip.layers = []
 	wip.latest_baked_profile_snapshot = null
 	return wip
 

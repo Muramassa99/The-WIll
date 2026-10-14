@@ -518,7 +518,6 @@ func _build_contract(
 	wip.forge_builder_component_id = CraftedItemWIPScript.BUILDER_COMPONENT_PRIMARY
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
-	wip.layers = []
 	wip.forge_v2_authoring_state = state.duplicate(true) as Resource
 	var handle_body := fixture.get("handle_body", null) as Resource
 	var authorized_mesh_packet := mesh_packet.duplicate(true)

@@ -1,5 +1,11 @@
 extends SceneTree
 
+# Historical live-compile diagnostic. This V2 fixture has no saved solved replay
+# clip: current runtime correctly rejects it. Use the saved replay authority and
+# bridge-offset verifiers for replay plumbing; this is not full-grip certification.
+
+const ForgeV2Fixture = preload("res://tools/forge_v2_small_handle_fixture.gd")
+
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
 const PlayerEquipmentStateScript = preload("res://core/models/player_equipment_state.gd")
 const PlayerForgeWipLibraryStateScript = preload("res://core/models/player_forge_wip_library_state.gd")
@@ -103,6 +109,8 @@ func _run_verification() -> void:
 	)
 
 	var lines: PackedStringArray = []
+	lines.append("fixture_scope=historical_live_compile_without_saved_solved_replay")
+	lines.append("activation_message=%s" % String(activation_result.get("message", "")))
 	lines.append("activation_success=%s" % str(bool(activation_result.get("success", false))))
 	lines.append("runtime_started=%s" % str(bool(activation_result.get("runtime_playback_started", false))))
 	lines.append("runtime_message=%s" % String(activation_result.get("runtime_playback_message", "")))
@@ -146,20 +154,13 @@ func _run_verification() -> void:
 	quit(0 if all_checks_passed else 1)
 
 func _build_authored_skill_test_wip(project_name: String, slot_id: StringName, skill_name: String) -> CraftedItemWIP:
-	var wip: CraftedItemWIP = CraftedItemWIP.new()
+	var wip: CraftedItemWIP = ForgeV2Fixture.build(&"mat_wood_gray", ForgeV2Fixture.material_lookup())
 	wip.wip_id = StringName(project_name.to_snake_case())
 	wip.forge_project_name = project_name
 	wip.creator_id = &"verify"
 	wip.created_timestamp = Time.get_unix_time_from_system()
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
-	var layer_a: LayerAtom = LayerAtom.new()
-	layer_a.layer_index = 20
-	layer_a.cells = _build_handle_cells(20)
-	var layer_b: LayerAtom = LayerAtom.new()
-	layer_b.layer_index = 21
-	layer_b.cells = _build_handle_cells(21)
-	wip.layers = [layer_a, layer_b]
 	var station_state: CombatAnimationStationState = wip.ensure_combat_animation_station_state() as CombatAnimationStationState
 	if station_state == null:
 		return wip
@@ -172,14 +173,3 @@ func _build_authored_skill_test_wip(project_name: String, slot_id: StringName, s
 	if draft != null:
 		draft.skill_name = skill_name
 	return wip
-
-func _build_handle_cells(layer_index: int) -> Array[CellAtom]:
-	var cells: Array[CellAtom] = []
-	for x in range(20, 48):
-		for y in range(10, 13):
-			var cell: CellAtom = CellAtom.new()
-			cell.grid_position = Vector3i(x, y, layer_index)
-			cell.layer_index = layer_index
-			cell.material_variant_id = &"mat_wood_gray"
-			cells.append(cell)
-	return cells

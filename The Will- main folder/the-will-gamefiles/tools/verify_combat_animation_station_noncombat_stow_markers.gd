@@ -6,8 +6,6 @@ const CombatAnimationDraftScript = preload("res://core/models/combat_animation_d
 const CombatAnimationStationStateScript = preload("res://core/models/combat_animation_station_state.gd")
 const CombatAnimationStationUIScene = preload("res://scenes/ui/combat_animation_station_ui.tscn")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
-const LayerAtomScript = preload("res://core/atoms/layer_atom.gd")
-const CellAtomScript = preload("res://core/atoms/cell_atom.gd")
 
 const RESULT_FILE_PATH := "C:/WORKSPACE/DEBUG-LOGS/combat_animation_station_noncombat_stow_marker_results.txt"
 const TEMP_SAVE_FILE_PATH := "C:/WORKSPACE/test_artifacts/verify_combat_animation_station_noncombat_stow_marker_library.tres"
@@ -283,7 +281,7 @@ func _write_result_lines(lines: PackedStringArray) -> void:
 		file.close()
 
 func _build_preview_test_wip() -> CraftedItemWIP:
-	var wip: CraftedItemWIP = CraftedItemWIPScript.new()
+	var wip: CraftedItemWIP = preload("res://tools/forge_v2_small_handle_fixture.gd").build(WOOD_MATERIAL_ID, {}, 0.325)
 	wip.wip_id = &"noncombat_stow_marker_test_wip"
 	wip.forge_project_name = "Noncombat Stow Marker Verifier"
 	CraftedItemWIPScript.apply_builder_path_defaults(
@@ -291,54 +289,4 @@ func _build_preview_test_wip() -> CraftedItemWIP:
 		CraftedItemWIPScript.BUILDER_PATH_MELEE,
 		CraftedItemWIPScript.BUILDER_COMPONENT_PRIMARY
 	)
-	var layer_map: Dictionary = {}
-	for slice_index: int in range(26):
-		for y in range(4, 6):
-			for z in range(4, 7):
-				_add_cell(layer_map, Vector3i(slice_index, y, z), WOOD_MATERIAL_ID)
-	var ordered_layers: Array = layer_map.keys()
-	ordered_layers.sort()
-	for layer_index_value: Variant in ordered_layers:
-		wip.layers.append(layer_map[layer_index_value])
-	wip.latest_baked_profile_snapshot = _build_preview_test_baked_profile()
 	return wip
-
-func _build_preview_test_baked_profile() -> BakedProfile:
-	var profile := BakedProfile.new()
-	profile.profile_id = &"noncombat_stow_marker_test_profile"
-	profile.primary_grip_valid = true
-	profile.primary_grip_contact_position = Vector3(13.0, 4.5, 5.0)
-	profile.primary_grip_axis_ratio_from_span_start = 0.5
-	profile.primary_grip_contact_percent = 50.0
-	profile.primary_grip_span_start = Vector3(0.0, 4.5, 5.0)
-	profile.primary_grip_span_end = Vector3(26.0, 4.5, 5.0)
-	profile.primary_grip_span_length_voxels = 26
-	profile.primary_grip_slide_axis = Vector3.RIGHT
-	profile.primary_grip_slice_axis_ratios_from_span_start = PackedFloat32Array([
-		0.0,
-		1.0,
-	])
-	profile.primary_grip_slice_centers = PackedVector3Array([
-		profile.primary_grip_span_start,
-		profile.primary_grip_span_end,
-	])
-	profile.primary_grip_center_balance_valid = true
-	profile.weapon_pommel_point = Vector3(0.0, 4.5, 5.0)
-	profile.weapon_tip_point = Vector3(26.0, 4.5, 5.0)
-	profile.weapon_total_length_meters = 0.325
-	profile.weapon_pommel_distance_meters = 0.1625
-	profile.weapon_tip_distance_meters = 0.1625
-	return profile
-
-func _add_cell(layer_map: Dictionary, grid_position: Vector3i, material_variant_id: StringName) -> void:
-	if not layer_map.has(grid_position.z):
-		var layer: LayerAtom = LayerAtomScript.new()
-		layer.layer_index = grid_position.z
-		layer.cells = []
-		layer_map[grid_position.z] = layer
-	var cell: CellAtom = CellAtomScript.new()
-	cell.grid_position = grid_position
-	cell.layer_index = grid_position.z
-	cell.material_variant_id = material_variant_id
-	var target_layer: LayerAtom = layer_map[grid_position.z]
-	target_layer.cells.append(cell)

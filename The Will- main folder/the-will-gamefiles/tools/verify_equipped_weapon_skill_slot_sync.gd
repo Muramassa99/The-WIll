@@ -30,6 +30,10 @@ func _run_verification() -> void:
 	})
 	var saved_right_wip: CraftedItemWIP = library_state.save_wip(right_wip)
 	var saved_left_wip: CraftedItemWIP = library_state.save_wip(left_wip)
+	if saved_right_wip == null or saved_left_wip == null:
+		push_error("Both independent V2 weapon fixtures must save")
+		quit(1)
+		return
 	var right_slot_6_draft: CombatAnimationDraft = _get_skill_draft_for_slot(saved_right_wip, &"skill_slot_6")
 	var right_slot_6_motion_nodes: Array = right_slot_6_draft.motion_node_chain if right_slot_6_draft != null else []
 
@@ -82,15 +86,37 @@ func _run_verification() -> void:
 	lines.append("slot_1_after_clear_display_name=%s" % String(slot_1_after_clear.get("display_name") if slot_1_after_clear != null else ""))
 	lines.append("slot_1_after_clear_source_weapon=%s" % String(slot_1_after_clear.get("source_weapon_wip_id") if slot_1_after_clear != null else StringName()))
 	lines.append("reloaded_slot_6_display_name=%s" % String(reloaded_slot_6_assignment.get("display_name") if reloaded_slot_6_assignment != null else ""))
+	var checks := {
+		"independent_weapon_ids": saved_right_wip.wip_id != saved_left_wip.wip_id,
+		"right_hand_slot_has_priority": slot_1_assignment != null
+			and String(slot_1_assignment.get("display_name")) == "Right Slash"
+			and StringName(slot_1_assignment.get("source_weapon_wip_id")) == saved_right_wip.wip_id,
+		"left_hand_fills_available_slot": slot_6_assignment != null
+			and String(slot_6_assignment.get("display_name")) == "Left Guard"
+			and StringName(slot_6_assignment.get("source_weapon_wip_id")) == saved_left_wip.wip_id,
+		"untouched_slot_unassigned": slot_2_assignment == null,
+		"clearing_right_reveals_left": slot_1_after_clear != null
+			and String(slot_1_after_clear.get("display_name")) == "Left Slash"
+			and StringName(slot_1_after_clear.get("source_weapon_wip_id")) == saved_left_wip.wip_id,
+		"left_slot_survives_reload": reloaded_slot_6_assignment != null
+			and String(reloaded_slot_6_assignment.get("display_name")) == "Left Guard",
+	}
+	var failed := false
+	for key: String in checks:
+		lines.append("%s=%s" % [key, checks[key]])
+		if not bool(checks[key]):
+			failed = true
+			push_error(key)
 
 	var file: FileAccess = FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)
 	if file != null:
 		file.store_string("\n".join(lines))
 		file.close()
-	quit()
+	quit(1 if failed else 0)
 
 func _build_skill_test_wip(project_name: String, authored_slot_names: Dictionary) -> CraftedItemWIP:
-	var wip: CraftedItemWIP = CraftedItemWIPScript.new()
+	var wip: CraftedItemWIP = preload("res://tools/forge_v2_small_handle_fixture.gd").build()
+	wip.wip_id = StringName("draft_%s" % project_name.to_snake_case())
 	wip.forge_project_name = project_name
 	CraftedItemWIPScript.apply_builder_path_defaults(
 		wip,

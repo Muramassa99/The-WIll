@@ -11,7 +11,10 @@ const PersistentResourceStateIOScript = preload("res://core/models/persistent_re
 @export var wip_id_generation_sequence: int = 0
 
 static func load_or_create(save_path: String = DEFAULT_SAVE_FILE_PATH):
-	return PersistentResourceStateIOScript.load_or_create(save_path, "res://core/models/player_forge_wip_library_state.gd")
+	var library = PersistentResourceStateIOScript.load_or_create(save_path, "res://core/models/player_forge_wip_library_state.gd")
+	if library != null:
+		library._discard_retired_wips()
+	return library
 
 func has_saved_wips() -> bool:
 	return not saved_wips.is_empty()
@@ -100,6 +103,9 @@ func save_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 		return null
 	if CraftedItemWIP.is_unarmed_authoring_wip(source_wip):
 		return save_unarmed_authoring_wip(source_wip)
+	if not CraftedItemWIP.is_forge_v2_authoring_wip(source_wip):
+		return null
+	_discard_retired_wips()
 	var saved_clone: CraftedItemWIP = source_wip.duplicate(true) as CraftedItemWIP
 	var resolved_wip_id: StringName = _resolve_saved_wip_id(saved_clone)
 	saved_clone.wip_id = resolved_wip_id
@@ -137,6 +143,7 @@ func save_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 func save_unarmed_authoring_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 	if source_wip == null:
 		return null
+	_discard_retired_wips()
 	var saved_clone: CraftedItemWIP = source_wip.duplicate(true) as CraftedItemWIP
 	saved_clone.wip_id = CraftedItemWIP.UNARMED_AUTHORING_WIP_ID
 	saved_clone.forge_project_name = "- Unarmed"
@@ -146,7 +153,6 @@ func save_unarmed_authoring_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 	saved_clone.forge_builder_component_id = CraftedItemWIP.BUILDER_COMPONENT_PRIMARY
 	saved_clone.grip_style_mode = CraftedItemWIP.GRIP_NORMAL
 	saved_clone.latest_baked_profile_snapshot = null
-	saved_clone.layers.clear()
 	if saved_clone.has_method("ensure_combat_animation_station_state"):
 		saved_clone.call("ensure_combat_animation_station_state")
 	var previous_unarmed_wip := unarmed_authoring_wip
@@ -160,6 +166,7 @@ func save_unarmed_authoring_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 	return saved_clone.duplicate(true) as CraftedItemWIP
 
 func duplicate_saved_wip(saved_wip_id: StringName) -> CraftedItemWIP:
+	_discard_retired_wips()
 	var source_wip: CraftedItemWIP = get_saved_wip(saved_wip_id)
 	if source_wip == null:
 		return null
@@ -188,6 +195,7 @@ func rename_saved_wip(
 	saved_wip_id: StringName,
 	requested_name: String
 ) -> CraftedItemWIP:
+	_discard_retired_wips()
 	var saved_index: int = _find_saved_wip_index(saved_wip_id)
 	var cleaned_name := requested_name.strip_edges()
 	if saved_index < 0 or cleaned_name.is_empty():
@@ -213,6 +221,7 @@ func delete_saved_wip(
 	saved_wip_id: StringName,
 	select_fallback: bool = true
 ) -> bool:
+	_discard_retired_wips()
 	var saved_index: int = _find_saved_wip_index(saved_wip_id)
 	if saved_index < 0:
 		return false
@@ -243,7 +252,26 @@ func set_selected_wip_id(saved_wip_id: StringName, persist_selection: bool = tru
 		persist()
 
 func persist() -> bool:
+	_discard_retired_wips()
 	return PersistentResourceStateIOScript.persist_resource(self, save_file_path)
+
+func _discard_retired_wips() -> void:
+	var retained_wips: Array[CraftedItemWIP] = []
+	var retired_selection := false
+	for saved_wip: CraftedItemWIP in saved_wips:
+		if saved_wip == null:
+			continue
+		if (
+			CraftedItemWIP.is_forge_v2_authoring_wip(saved_wip)
+			or CraftedItemWIP.is_unarmed_authoring_wip(saved_wip)
+		):
+			retained_wips.append(saved_wip)
+		elif saved_wip.wip_id == selected_wip_id:
+			retired_selection = true
+	if retained_wips.size() != saved_wips.size():
+		saved_wips = retained_wips
+	if retired_selection and get_saved_wip(selected_wip_id) == null:
+		selected_wip_id = StringName()
 
 func _duplicate_wip_for_reader(source_wip: CraftedItemWIP, include_runtime_caches: bool) -> CraftedItemWIP:
 	if source_wip == null:

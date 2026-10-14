@@ -22,6 +22,10 @@ func _run_verification() -> void:
 
 	var centered_pole: CraftedItemWIP = wip_library.save_wip(_build_centered_pole_wip())
 	var front_heavy_staff: CraftedItemWIP = wip_library.save_wip(_build_front_heavy_staff_wip())
+	if centered_pole == null or front_heavy_staff == null:
+		push_error("Both V2 grip-layout fixtures must export and save")
+		quit(1)
+		return
 
 	var centered_layout: Dictionary = player.preview_saved_wip_grip_hold_layout(centered_pole.wip_id, &"hand_right")
 	var front_heavy_layout: Dictionary = player.preview_saved_wip_grip_hold_layout(front_heavy_staff.wip_id, &"hand_right")
@@ -55,62 +59,78 @@ func _run_verification() -> void:
 		file.store_string("\n".join(lines))
 		file.close()
 
-	quit()
+	var valid := bool(centered_layout.get("valid", false)) \
+		and bool(front_heavy_layout.get("valid", false)) \
+		and bool(centered_layout.get("two_hand_weapon_eligible", false)) \
+		and bool(centered_layout.get("two_hand_character_eligible", false)) \
+		and is_equal_approx(float(centered_layout.get("effective_two_hand_span_meters", 0.0)), character_span_meters) \
+		and bool(front_heavy_layout.get("two_hand_weapon_eligible", false)) \
+		and not bool(front_heavy_layout.get("center_balance_valid", true)) \
+		and float(front_heavy_layout.get("support_hand_contact_percent", 0.0)) < float(front_heavy_layout.get("dominant_hand_contact_percent", 0.0))
+	quit(0 if valid else 1)
 
 func _build_centered_pole_wip() -> CraftedItemWIP:
-	var wip: CraftedItemWIP = CraftedItemWIP.new()
-	wip.wip_id = &"verify_player_centered_pole_layout"
-	wip.forge_project_name = "Verify Player Centered Pole Layout"
-	wip.creator_id = &"verify"
-	wip.forge_intent = &"intent_melee"
-	wip.equipment_context = &"ctx_weapon"
-
-	var layer_map: Dictionary = {}
-	for x: int in range(30, 110):
-		for y: int in range(24, 27):
-			for z: int in range(18, 20):
-				_add_cell(layer_map, Vector3i(x, y, z), &"mat_wood_gray")
-
-	var ordered_layers: Array = layer_map.keys()
-	ordered_layers.sort()
-	for layer_index_value in ordered_layers:
-		wip.layers.append(layer_map[layer_index_value])
+	var fixture = preload("res://tools/forge_v2_small_handle_fixture.gd")
+	var wip: CraftedItemWIP = fixture.build(&"mat_wood_gray", fixture.material_lookup(), 2.0)
+	if wip != null:
+		wip.wip_id = &"verify_player_centered_pole_layout"
+		wip.forge_project_name = "Verify V2 Centered Pole Layout"
 	return wip
 
 func _build_front_heavy_staff_wip() -> CraftedItemWIP:
-	var wip: CraftedItemWIP = CraftedItemWIP.new()
+	var fixture = preload("res://tools/forge_v2_small_handle_fixture.gd")
+	var lookup: Dictionary = fixture.material_lookup()
+	var wip: CraftedItemWIP = fixture.build(&"mat_wood_gray", lookup, 0.75)
+	if wip == null:
+		return null
 	wip.wip_id = &"verify_player_front_heavy_layout"
-	wip.forge_project_name = "Verify Player Front Heavy Layout"
-	wip.creator_id = &"verify"
-	wip.forge_intent = &"intent_melee"
-	wip.equipment_context = &"ctx_weapon"
-
-	var layer_map: Dictionary = {}
-	for x: int in range(30, 90):
-		for y: int in range(24, 27):
-			for z: int in range(18, 20):
-				_add_cell(layer_map, Vector3i(x, y, z), &"mat_wood_gray")
-
-	for x: int in range(90, 106):
-		for y: int in range(21, 30):
-			for z: int in range(16, 22):
-				_add_cell(layer_map, Vector3i(x, y, z), &"mat_iron_gray")
-
-	var ordered_layers: Array = layer_map.keys()
-	ordered_layers.sort()
-	for layer_index_value in ordered_layers:
-		wip.layers.append(layer_map[layer_index_value])
+	wip.forge_project_name = "Verify V2 Front Heavy Layout"
+	# A real V2 iron deposit moves the computed COM; no cached profile override.
+	var state: Resource = wip.forge_v2_authoring_state
+	state.set("bounded_history_suspended_reason", &"mixed_material_fallback")
+	state.call("set_active_tool_id", preload("res://runtime/forge_v2/forge_v2_authoring_state.gd").TOOL_VOLUME_STROKE)
+	state.call("set_active_material_variant_id", &"mat_iron_gray")
+	var head := state.call("append_point_material_body", Vector3(0.70, 0.0, 0.0),
+		0.075, 1.0, Vector3.UP, Vector3.ZERO) as Resource
+	if head == null:
+		return null
+	var body_id := StringName(head.get("body_id"))
+	if not bool(state.call("append_point_to_material_body", body_id, Vector3(1.0, 0.0, 0.0),
+		0.0, true, Vector3.UP, Vector3.ZERO)):
+		return null
+	if state.call("commit_material_body_as_layer", body_id) == null:
+		return null
+	# Closed connected stepped prism, with the separately protected Handle mesh.
+	var vertices := PackedVector3Array()
+	for ring: Vector2 in [Vector2(0.0, 0.025), Vector2(0.70, 0.025), Vector2(0.70, 0.075), Vector2(1.0, 0.075)]:
+		vertices.append_array(PackedVector3Array([
+			Vector3(ring.x, -ring.y, -ring.y), Vector3(ring.x, ring.y, -ring.y),
+			Vector3(ring.x, ring.y, ring.y), Vector3(ring.x, -ring.y, ring.y),
+		]))
+	var indices := PackedInt32Array([0, 2, 1, 0, 3, 2, 12, 13, 14, 12, 14, 15])
+	for ring_index: int in range(3):
+		for corner: int in range(4):
+			var a := ring_index * 4 + corner
+			var b := ring_index * 4 + (corner + 1) % 4
+			indices.append_array(PackedInt32Array([a, b, b + 4, a, b + 4, a + 4]))
+	var prepared := wip.stage2_item_state
+	var protected_mesh := prepared.get("primary_grip_handle_mesh_state") as Resource
+	var protected_arrays: Array = protected_mesh.get("surface_arrays") as Array
+	var protected_vertices := PackedVector3Array()
+	for vertex: Vector3 in protected_arrays[Mesh.ARRAY_VERTEX]:
+		protected_vertices.append(vertex * 0.0125)
+	var packet := {
+		"ok": true, "vertices": vertices, "indices": indices, "watertight": true,
+		"primary_grip_handle_vertices": protected_vertices,
+		"primary_grip_handle_indices": protected_arrays[Mesh.ARRAY_INDEX],
+		"primary_grip_handle_mesh_source": prepared.get("primary_grip_handle_mesh_source"),
+		"primary_grip_handle_body_signature": prepared.get("primary_grip_handle_body_signature"),
+		"primary_grip_handle_vertices_origin_id": prepared.get("primary_grip_handle_mesh_origin_id"),
+	}
+	var contract: Dictionary = preload("res://runtime/forge_v2/forge_v2_wip_compatibility_adapter.gd").build_runtime_contract(wip, packet, 0.0125, lookup)
+	if not bool(contract.get("valid", false)):
+		push_error("V2 weighted layout fixture failed: %s" % String(contract.get("error", "unknown")))
+		return null
+	wip.stage2_item_state = contract.get("stage2_item_state") as Resource
+	wip.latest_baked_profile_snapshot = contract.get("baked_profile") as BakedProfile
 	return wip
-
-func _add_cell(layer_map: Dictionary, grid_position: Vector3i, material_variant_id: StringName) -> void:
-	if not layer_map.has(grid_position.z):
-		var layer: LayerAtom = LayerAtom.new()
-		layer.layer_index = grid_position.z
-		layer.cells = []
-		layer_map[grid_position.z] = layer
-	var cell: CellAtom = CellAtom.new()
-	cell.grid_position = grid_position
-	cell.layer_index = grid_position.z
-	cell.material_variant_id = material_variant_id
-	var target_layer: LayerAtom = layer_map[grid_position.z]
-	target_layer.cells.append(cell)

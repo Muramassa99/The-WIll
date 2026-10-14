@@ -1,6 +1,7 @@
 extends SceneTree
 
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
+const ForgeV2AuthoringStateScript = preload("res://runtime/forge_v2/forge_v2_authoring_state.gd")
 const PlayerForgeWipLibraryStateScript = preload("res://core/models/player_forge_wip_library_state.gd")
 const CombatAnimationStationStateScript = preload("res://core/models/combat_animation_station_state.gd")
 const CombatAnimationDraftScript = preload("res://core/models/combat_animation_draft.gd")
@@ -24,6 +25,8 @@ func _run_verification() -> void:
 		CraftedItemWIPScript.BUILDER_PATH_MELEE,
 		CraftedItemWIPScript.BUILDER_COMPONENT_PRIMARY
 	)
+	wip.forge_v2_authoring_state = ForgeV2AuthoringStateScript.new()
+	wip.forge_v2_authoring_state.call("reset_new_draft", wip.forge_project_name)
 	var station_state: Resource = wip.ensure_combat_animation_station_state()
 	var combat_idle_draft: Resource = station_state.call(
 		"get_or_create_idle_draft",

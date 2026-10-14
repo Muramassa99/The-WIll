@@ -24,6 +24,7 @@ const CombatOriginRecordScript = preload("res://core/models/combat_origin_record
 const WeaponRollManipulatorScript = preload("res://runtime/combat/combat_animation_weapon_roll_manipulator.gd")
 var weapon_roll_manipulator = WeaponRollManipulatorScript.new()
 const PreviewGripAcquisition = preload("res://runtime/player/grip/preview_grip_acquisition.gd")
+const GripChronology = preload("res://runtime/player/grip/grip_chronology.gd")
 const PrimaryGripSeatResolverScript = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
 const PlayerHandSurfaceSeatSolverScript = preload(
 	"res://runtime/player/player_hand_surface_seat_solver.gd"
@@ -612,6 +613,9 @@ func sync_playback_pose(
 	_sync_preview_size(preview_container, preview_subviewport)
 	if bool(playback_state.get("runtime_clip_playback", false)) and bool(playback_state.get("solved_replay_available", false)):
 		var fast_playback_state: Dictionary = _apply_solved_runtime_clip_preview_pose(state, active_wip, playback_state)
+		if fast_playback_state.get("grip_endcap_replay_invalid", false):
+			state.preview_root.set_meta("resolved_playback_state", fast_playback_state)
+			return
 		if bool(fast_playback_state.get("solved_replay_applied", false)):
 			_resolve_debugger_view_enabled(state, fast_playback_state)
 			_refresh_live_playback_markers(state, fast_playback_state)
@@ -770,6 +774,11 @@ func _bake_runtime_clip_pose_track_for_frame_hands(
 		)
 		playback_state["runtime_clip_playback"] = true
 		playback_state["prepared_grip_bake"] = true
+		if GripChronology.enabled():
+			playback_state["_grip_trace_frame_index"] = frame_index
+			playback_state["_grip_trace_time_s"] = float(runtime_clip.baked_frame_times[frame_index])
+			playback_state["_grip_trace_clip_id"] = str(runtime_clip.get_instance_id())
+		_trace_bake_pose_stage(state, playback_state, "frame_before_authored_pose")
 		# Baking prepares missing grip relationships and reuses committed local
 		# poses. Live playback consumes the captured bones/weapon/anchors together.
 		_apply_runtime_clip_preview_pose(
@@ -792,6 +801,7 @@ func _bake_runtime_clip_pose_track_for_frame_hands(
 				result["reason"] = String(grip_result.get("reason", "prepared_grip_bake_failed"))
 				result["failed_frame"] = frame_index
 				return result
+		_trace_bake_pose_stage(state, playback_state, "frame_after_prepare_replay_grip")
 		var frame_capture: Dictionary = actor.call(
 			"capture_runtime_upper_body_pose_frame",
 			requested_bone_names
@@ -2390,37 +2400,54 @@ func reseat_motion_node_grip_to_occupied_contact(
 		"grip_seat_reseat_error_meters": grip_error,
 	}
 
-func resolve_motion_node_primary_grip_seat_local(
-	preview_subviewport: SubViewport,
-	motion_node: CombatAnimationMotionNode
-) -> Variant:
-	var preview_root: Node3D = _get_preview_root(preview_subviewport)
-	if preview_root == null or motion_node == null:
+func resolve_motion_node_primary_grip_seat_local(preview_subviewport: SubViewport,
+		motion_node: CombatAnimationMotionNode) -> Variant:
+	# Query the current realized preview using this node's handle coordinates.
+	# This is not a reconstruction of an arbitrary non-selected authored frame.
+	var context := _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or motion_node == null:
 		return null
-	var actor: Node3D = preview_root.get_node_or_null(PREVIEW_ACTOR_PIVOT_NAME + "/" + PREVIEW_ACTOR_NAME) as Node3D
-	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
-	var trajectory_root: Node3D = preview_root.find_child(TRAJECTORY_ROOT_NAME, true, false) as Node3D
-	if held_item == null or not is_instance_valid(held_item) or trajectory_root == null:
+	var station := _resolve_primary_grip_seat_state_from_offsets(
+		context.weapon, motion_node.grip_seat_slide_offset, motion_node.axial_reposition_offset)
+	if not station.get("valid", false):
 		return null
-	var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
-	var local_pommel: Vector3 = _get_weapon_pommel_meta(held_item)
-	if local_tip.is_equal_approx(local_pommel):
-		return null
-	_apply_preview_motion_grip_state(held_item, motion_node, {}, actor)
-	var requested_grip_local: Vector3 = _get_preview_primary_grip_seat_meta(held_item)
-	var authored_tip_world: Vector3 = trajectory_root.to_global(motion_node.tip_position_local)
-	var authored_pommel_world: Vector3 = trajectory_root.to_global(motion_node.pommel_position_local)
-	var solved_transform: Transform3D = _solve_weapon_segment_transform(
-		held_item,
-		trajectory_root,
-		motion_node,
-		local_tip,
-		local_pommel,
-		authored_tip_world,
-		authored_pommel_world,
-		_resolve_motion_node_weapon_orientation_degrees(motion_node)
-	)
-	return trajectory_root.to_local(solved_transform * requested_grip_local)
+	return context.trajectory.to_local(context.weapon.global_transform * (station.position as Vector3))
+
+func resolve_grip_style_transition_seed(preview_subviewport: SubViewport,
+		motion_node: CombatAnimationMotionNode, target_grip_mode: StringName) -> Dictionary:
+	var context := _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or motion_node == null:
+		return {"available": false, "reason": "missing_preview_grip_frame"}
+	var weapon: Node3D = context.weapon
+	var station := _resolve_primary_grip_seat_state_from_offsets(
+		weapon, motion_node.grip_seat_slide_offset, motion_node.axial_reposition_offset)
+	if not station.get("valid", false):
+		return {"available": false, "reason": "missing_selected_handle_station"}
+	var tip: Vector3 = _get_weapon_tip_meta(weapon)
+	var pommel: Vector3 = _get_weapon_pommel_meta(weapon)
+	if tip.distance_squared_to(pommel) <= 0.00000001:
+		return {"available": false, "reason": "degenerate_weapon_segment"}
+	var local_up := _resolve_weapon_local_up_reference(weapon, (tip - pommel).normalized())
+	var frame := weapon.global_transform
+	var source_frame := frame
+	var pivot: Vector3 = frame * (station.position as Vector3)
+	var flip_axis := (frame.basis * local_up).normalized()
+	if target_grip_mode != motion_node.preferred_grip_style_mode:
+		# Rotate the realized seated frame about its selected station. Rebuilding
+		# from authored endpoints would discard the solved transverse seat.
+		var flip := Basis(flip_axis, PI)
+		frame.basis = flip * frame.basis
+		frame.origin = pivot - frame.basis * (station.position as Vector3)
+	var encoded := weapon_frame_solver.encode_transform_for_authoring(frame, tip, pommel,
+		local_up, context.trajectory.global_transform, motion_node.weapon_roll_degrees,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	if encoded.get("available", false):
+		var to_authoring: Transform3D = context.trajectory.global_transform.affine_inverse()
+		encoded["grip_style_transition_pivot_local"] = to_authoring * pivot
+		encoded["grip_style_transition_axis_local"] = (to_authoring.basis * flip_axis).normalized()
+		encoded["grip_style_transition_source_tip_local"] = to_authoring * (source_frame * tip)
+		encoded["grip_style_transition_source_pommel_local"] = to_authoring * (source_frame * pommel)
+	return encoded
 
 func orbit_camera(preview_subviewport: SubViewport, drag_delta: Vector2) -> bool:
 	var preview_root: Node3D = _get_preview_root(preview_subviewport)
@@ -2482,7 +2509,7 @@ func ensure_baked_profile_snapshot(active_wip: CraftedItemWIP) -> BakedProfile:
 		active_wip.latest_baked_profile_snapshot != null
 		and not _cached_profile_requires_runtime_bake(active_wip)
 	):
-		return active_wip.latest_baked_profile_snapshot
+		return forge_service.get_cached_profile_for_runtime(active_wip, _get_material_lookup())
 	return forge_service.bake_wip(active_wip, _get_material_lookup())
 
 func _cached_profile_requires_runtime_bake(
@@ -2497,10 +2524,7 @@ func _cached_profile_requires_runtime_bake(
 		)
 	):
 		return true
-	if (
-		active_wip.forge_v2_authoring_state != null
-		and active_wip.layers.is_empty()
-	):
+	if CraftedItemWIP.is_forge_v2_authoring_wip(active_wip):
 		var cached_profile := active_wip.latest_baked_profile_snapshot
 		if (
 			not cached_profile
@@ -2533,8 +2557,7 @@ func _cached_profile_requires_runtime_bake(
 			):
 				return true
 	return (
-		active_wip.forge_v2_authoring_state != null
-		and active_wip.layers.is_empty()
+		CraftedItemWIP.is_forge_v2_authoring_wip(active_wip)
 		and not active_wip.latest_baked_profile_snapshot.material_runtime_data_resolved
 	)
 
@@ -3428,17 +3451,86 @@ func _apply_runtime_clip_preview_pose(
 	active_draft: Resource = null,
 	allow_exact_surface_solve: bool = false
 ) -> Dictionary:
+	# Prepared clips use the same endpoint authority as ordinary authoring.
+	# The limited macro pose, committed grip and support guard still decide the
+	# realized frame; legacy anchor/body reseating must not rewrite the path first.
+	var preview_root: Node3D = state.get("preview_root") as Node3D
+	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D if preview_root != null else null
+	var preserve_prepared_endpoints := bool(playback_state.get("prepared_grip_bake", false)) \
+		and held_item != null and not _is_unarmed_preview_item(held_item)
 	return _apply_authored_weapon_pose(
 		state,
 		selected_motion_node,
 		playback_state,
 		false,
 		AUTHORING_PREVIEW_DOMINANT_SEAT_LOCK_STRENGTH,
-		false,
+		preserve_prepared_endpoints,
 		active_draft,
 		false,
 		allow_exact_surface_solve
 	)
+
+func _trace_bake_pose_stage(state: Dictionary, playback: Dictionary, stage: String) -> void:
+	if not playback.has("_grip_trace_frame_index") or not GripChronology.enabled():
+		return
+	var frame_filter := OS.get_environment("THE_WILL_GRIP_TRACE_BAKE_FRAMES").split(":")
+	if frame_filter.size() == 2 and frame_filter[0].is_valid_int() and frame_filter[1].is_valid_int():
+		if int(playback._grip_trace_frame_index) < int(frame_filter[0]) or int(playback._grip_trace_frame_index) > int(frame_filter[1]):
+			return
+	var root_node: Node3D = state.get("preview_root")
+	var actor_pivot: Node3D = state.get("actor_pivot")
+	var actor: Node3D = actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) if actor_pivot != null else null
+	var weapon: Node3D = root_node.get_meta("preview_held_item", null) if root_node != null else null
+	if actor == null or weapon == null:
+		return
+	var reference := _resolve_trajectory_authoring_transform(actor)
+	var owner: Node = actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
+	var skeleton: Skeleton3D = actor.get_node_or_null("JosieModel/Josie/Skeleton3D")
+	var hands: Dictionary = {}
+	for slot: StringName in [&"hand_right", &"hand_left"]:
+		if skeleton == null:
+			continue
+		var index := skeleton.find_bone("CC_Base_R_Hand" if slot == &"hand_right" else "CC_Base_L_Hand")
+		if index < 0:
+			continue
+		var world: Transform3D = skeleton.global_transform * skeleton.get_bone_global_pose(index)
+		var relative := weapon.global_transform.affine_inverse() * world
+		var hand := {"world": _trace_grip_transform(world), "in_weapon": _trace_grip_transform(relative)}
+		var binding: Dictionary = actor.planar_grip_pose_binding.relationship(slot, weapon)
+		if not binding.is_empty():
+			var expected: Transform3D = binding.hand_in_weapon
+			var delta := (relative.basis.orthonormalized().get_rotation_quaternion().inverse() * expected.basis.orthonormalized().get_rotation_quaternion()).normalized()
+			hand["binding_position_error_m"] = (weapon.global_basis * (relative.origin - expected.origin)).length()
+			hand["binding_rotation_error_rad"] = 2.0 * atan2(Vector3(delta.x,delta.y,delta.z).length(),absf(delta.w))
+			hand["binding_key_hash"] = String(binding.relationship_key).sha256_text()
+		hands[String(slot)] = hand
+	var owner_state: Dictionary = {}
+	if owner != null:
+		owner_state["clamp_count"] = owner._support_motion_clamp_count
+		owner_state["last_clamp"] = owner._last_support_motion_clamp.duplicate(true)
+		for slot: StringName in [&"hand_right", &"hand_left"]:
+			var status: Dictionary = owner._status.get(slot,{})
+			var request: Dictionary = owner._requests.get(slot,{})
+			owner_state[String(slot)] = {"status":status.get("status",""),"reason":status.get("reason",""),
+				"serial":request.get("serial",-1),"key_hash":String(request.get("key","")).sha256_text()}
+	GripChronology.event("bake.pose_stage", {"clip_id":playback._grip_trace_clip_id,
+		"frame":playback._grip_trace_frame_index,"time_s":playback._grip_trace_time_s,"stage":stage,
+		"primary":_resolve_preview_dominant_slot_id(),"style":String(playback.get("preferred_grip_style_mode",&"")),
+		"two_hand_state":String(playback.get("two_hand_state",&"")),"station":playback.get("grip_seat_slide_offset",0.0),
+		"support_station":playback.get("secondary_grip_seat_slide_offset",0.0),"roll":playback.get("weapon_roll_degrees",0.0),
+		"requested_tip":_trace_grip_vector(playback.get("tip_position_local",Vector3.ZERO)),
+		"requested_pommel":_trace_grip_vector(playback.get("pommel_position_local",Vector3.ZERO)),
+		"weapon_world":_trace_grip_transform(weapon.global_transform),
+		"weapon_reference":_trace_grip_transform(reference.affine_inverse()*weapon.global_transform),
+		"reference_world":_trace_grip_transform(reference),"hands":hands,"owner":owner_state})
+
+func _trace_grip_vector(value: Vector3) -> Array:
+	return [value.x,value.y,value.z]
+
+func _trace_grip_transform(value: Transform3D) -> Dictionary:
+	var rotation := value.basis.orthonormalized().get_rotation_quaternion()
+	return {"position":_trace_grip_vector(value.origin),"rotation":[rotation.x,rotation.y,rotation.z,rotation.w],
+		"scale":_trace_grip_vector(value.basis.get_scale())}
 
 func _apply_solved_runtime_clip_preview_pose(
 	state: Dictionary,
@@ -3466,6 +3558,14 @@ func _apply_solved_runtime_clip_preview_pose(
 	var bone_rotations: Array = playback_state.get("solved_upper_body_pose_rotations", []) as Array
 	var bone_scales: Array = playback_state.get("solved_upper_body_pose_scales", []) as Array
 	if bone_names.is_empty() or bone_positions.is_empty() or bone_rotations.is_empty() or bone_scales.is_empty():
+		return resolved_playback_state
+	if actor.has_method("get_hand_grip_spans_meters"):
+		held_item.set_meta("hand_grip_spans_meters", actor.get_hand_grip_spans_meters())
+	var end_bounds_check := validate_solved_replay_hand_end_bounds(held_item, playback_state)
+	if not end_bounds_check.get("valid", false):
+		resolved_playback_state["solved_replay_applied"] = false
+		resolved_playback_state["grip_endcap_replay_invalid"] = true
+		resolved_playback_state["grip_endcap_replay_reason"] = end_bounds_check.get("reason", "saved_grip_outside_handle_end_bounds")
 		return resolved_playback_state
 	if not bool(preview_root.get_meta("preview_runtime_solved_replay_fast_path_active", false)):
 		_clear_preview_actor_weapon_coupling(actor)
@@ -3675,7 +3775,7 @@ func _weapon_roll_context(preview_subviewport: SubViewport) -> Dictionary:
 	if preview_subviewport == null:
 		return {}
 	var preview_root: Node3D = preview_subviewport.get_node_or_null(PREVIEW_ROOT_NAME) as Node3D
-	if preview_root == null:
+	if preview_root == null or not preview_root.has_meta("preview_held_item"):
 		return {}
 	var actor: Node3D = preview_root.get_node_or_null(NodePath(PREVIEW_ACTOR_PIVOT_NAME + "/" + PREVIEW_ACTOR_NAME)) as Node3D
 	var weapon: Node3D = preview_root.get_meta("preview_held_item", null) as Node3D
@@ -3799,6 +3899,7 @@ func _apply_authored_weapon_pose(
 			# SupportGripAnchor at the candidate authored transform. Without this,
 			# legality mixed prior-frame guidance with current-frame endpoints.
 			held_item.global_transform = authored_pose_transform
+			_trace_bake_pose_stage(state, playback_state, "authored_weapon_request")
 			_apply_preview_resolved_grip_state(held_item, actor)
 			_apply_two_hand_preview_state(
 				actor,
@@ -3816,6 +3917,7 @@ func _apply_authored_weapon_pose(
 				true
 			)
 			_apply_preview_actor_upper_body_pose_now(actor, authoring_drag_active)
+			_trace_bake_pose_stage(state, playback_state, "after_initial_macro_body")
 		if authoring_drag_lightweight:
 			var deferred_legality_result: Dictionary = {
 				"legal": true,
@@ -3855,6 +3957,7 @@ func _apply_authored_weapon_pose(
 				authored_pommel_local,
 				dominant_seat_lock_strength
 			)
+			_trace_bake_pose_stage(state, playback_state, "after_constrained_segment_solver")
 			authored_tip_local = _get_origin_tracked_vector3_state(
 				constrained_segment_state,
 				"tip_position_local",
@@ -3887,6 +3990,7 @@ func _apply_authored_weapon_pose(
 		)
 	held_item.global_transform = solved_transform
 	_apply_preview_resolved_grip_state(held_item, actor)
+	_trace_bake_pose_stage(state, playback_state, "after_constrained_weapon_frame")
 	var solved_tip_world: Vector3 = held_item.to_global(local_tip)
 	var solved_pommel_world: Vector3 = held_item.to_global(local_pommel)
 	preview_root.set_meta("weapon_tip_alignment_error_meters", solved_tip_world.distance_to(authored_tip_world))
@@ -3951,10 +4055,12 @@ func _apply_authored_weapon_pose(
 			})
 			preview_root.set_meta("resolved_playback_state", resolved_playback_state)
 			_settle_preview_contact_group_on_resolved_weapon(actor, held_item, selected_motion_node, resolved_playback_state)
+			_trace_bake_pose_stage(state, playback_state, "after_endpoint_contact_group")
 		else:
 			_apply_two_hand_preview_state(actor, held_item, selected_motion_node)
 			_apply_preview_upper_body_authoring_state(actor, held_item, selected_motion_node, resolved_playback_state)
 			_apply_preview_actor_upper_body_pose_now(actor, bool(resolved_playback_state.get("authoring_drag_active", false)))
+			_trace_bake_pose_stage(state, playback_state, "after_second_macro_body")
 			var final_primary_local: Vector3 = _get_preview_primary_grip_seat_meta(held_item)
 			held_item.global_transform = _lock_preview_transform_to_dominant_grip_target(
 				held_item.global_transform,
@@ -3969,6 +4075,7 @@ func _apply_authored_weapon_pose(
 				held_item.global_transform,
 				dominant_seat_lock_strength
 			)
+			_trace_bake_pose_stage(state, playback_state, "after_anchor_and_support_coupling")
 			var playback_coupled_result: Dictionary = _apply_preview_grip_contact_coupling(
 				actor,
 				held_item,
@@ -3978,6 +4085,7 @@ func _apply_authored_weapon_pose(
 			)
 			held_item.global_transform = playback_coupled_result.get("transform", held_item.global_transform) as Transform3D
 			_apply_preview_resolved_grip_state(held_item, actor)
+			_trace_bake_pose_stage(state, playback_state, "after_grip_contact_coupling")
 			solved_tip_world = held_item.to_global(local_tip)
 			solved_pommel_world = held_item.to_global(local_pommel)
 			_set_tip_pommel_position_state(
@@ -3992,6 +4100,7 @@ func _apply_authored_weapon_pose(
 			preview_root.set_meta("contact_coupling_metrics", playback_coupled_result.get("metrics", {}))
 			preview_root.set_meta("resolved_playback_state", resolved_playback_state)
 			_settle_preview_contact_group_on_resolved_weapon(actor, held_item, selected_motion_node, resolved_playback_state)
+			_trace_bake_pose_stage(state, playback_state, "after_contact_group_settle")
 			var contact_clearance_result: Dictionary = _settle_preview_contact_and_body_clearance(
 				actor,
 				held_item,
@@ -4002,6 +4111,7 @@ func _apply_authored_weapon_pose(
 				local_pommel,
 				resolved_weapon_orientation_degrees
 			)
+			_trace_bake_pose_stage(state, playback_state, "after_body_clearance_settle")
 			resolved_playback_state = contact_clearance_result.get("playback_state", resolved_playback_state) as Dictionary
 			preview_root.set_meta("contact_clearance_settle_metrics", contact_clearance_result.get("metrics", {}))
 			preview_root.set_meta("resolved_playback_state", resolved_playback_state)
@@ -4020,11 +4130,13 @@ func _apply_authored_weapon_pose(
 			preview_root.set_meta("resolved_playback_state", resolved_playback_state)
 			# The hand is already finalized by the macro pass above. Seat only the
 			# weapon about C0, then solve digits without reopening the body/arm chain.
+			_trace_bake_pose_stage(state, playback_state, "before_endpoint_prepared_seat")
 			var free_endpoint_seat_result: Dictionary = _apply_preview_weapon_surface_seat(
 				actor,
 				held_item,
 				allow_exact_surface_solve
 			)
+			_trace_bake_pose_stage(state, playback_state, "after_endpoint_prepared_seat")
 			if free_endpoint_seat_result.get("solved_relationship_retained", false):
 				_publish_prepared_grip_motion_authority(preview_root)
 				resolved_playback_state = _resolve_playback_state_from_held_item_transform(resolved_playback_state, held_item, trajectory_root, local_tip, local_pommel, resolved_weapon_orientation_degrees, true)
@@ -4040,6 +4152,7 @@ func _apply_authored_weapon_pose(
 					held_item,
 					true
 				)
+			_trace_bake_pose_stage(state, playback_state, "after_endpoint_digit_settle_and_support_guard")
 			collision_pose_result = _evaluate_preview_collision_pose(
 				actor,
 				held_item,
@@ -4063,6 +4176,7 @@ func _apply_authored_weapon_pose(
 			local_pommel,
 			resolved_weapon_orientation_degrees
 		)
+		_trace_bake_pose_stage(state, playback_state, "after_final_anchor_reseat")
 		resolved_playback_state = final_anchor_result.get("playback_state", resolved_playback_state) as Dictionary
 		var final_anchor_metrics: Dictionary = final_anchor_result.get("metrics", {}) as Dictionary
 		var post_anchor_separation_delta: float = 0.0
@@ -4089,11 +4203,13 @@ func _apply_authored_weapon_pose(
 		# All macro/collision writes are complete. The final local layer keeps the
 		# hand fixed, seats only the weapon at the selected C0 ratio, and then
 		# closes the digits.
+		_trace_bake_pose_stage(state, playback_state, "before_final_prepared_seat")
 		var constrained_seat_result: Dictionary = _apply_preview_weapon_surface_seat(
 			actor,
 			held_item,
 			allow_exact_surface_solve
 		)
+		_trace_bake_pose_stage(state, playback_state, "after_final_prepared_seat")
 		if constrained_seat_result.get("solved_relationship_retained", false):
 			resolved_playback_state = _resolve_playback_state_from_held_item_transform(resolved_playback_state, held_item, trajectory_root, local_tip, local_pommel, resolved_weapon_orientation_degrees, true)
 		if _preview_surface_seat_allows_digit_settle(
@@ -4105,6 +4221,7 @@ func _apply_authored_weapon_pose(
 				held_item,
 				true
 			)
+		_trace_bake_pose_stage(state, playback_state, "after_digit_settle_and_support_guard")
 		final_anchor_metrics["pre_anchor_grip_error_meters"] = pre_anchor_grip_error
 		final_anchor_metrics["post_anchor_separation_delta_meters"] = post_anchor_separation_delta
 		final_anchor_metrics["grip_error_after_post_separation_meters"] = _resolve_preview_grip_alignment_error(actor, held_item, _resolve_preview_dominant_slot_id())
@@ -4835,6 +4952,8 @@ func _apply_preview_motion_grip_state(
 	if held_item == null:
 		return
 	var unarmed_proxy: bool = _is_unarmed_preview_item(held_item)
+	if not unarmed_proxy and actor != null and actor.has_method("get_hand_grip_spans_meters"):
+		held_item.set_meta("hand_grip_spans_meters", actor.get_hand_grip_spans_meters())
 	var requested_grip_style: StringName = StringName(playback_state.get(
 		"preferred_grip_style_mode",
 		motion_node.preferred_grip_style_mode if motion_node != null else held_item.get_meta("grip_style_mode", CraftedItemWIP.GRIP_NORMAL)
@@ -4867,6 +4986,11 @@ func _apply_preview_motion_grip_state(
 			requested_slide,
 			requested_axial
 		)
+		if not requested_primary_seat.get("valid", false):
+			held_item.set_meta("grip_end_bounds_failure", requested_primary_seat.get("reason", "handle_end_bounds_unavailable"))
+			_clear_prepared_preview_grip(actor)
+			return
+		held_item.remove_meta("grip_end_bounds_failure")
 		if bool(requested_primary_seat.get("valid", false)):
 			requested_primary_local = requested_primary_seat.get(
 				"position",
@@ -4901,6 +5025,7 @@ func _apply_preview_motion_grip_state(
 				)
 			)
 			if bool(requested_support_seat.get("valid", false)):
+				held_item.remove_meta("grip_support_end_bounds_failure")
 				requested_support_local = requested_support_seat.get(
 					"position",
 					requested_support_local
@@ -4917,6 +5042,7 @@ func _apply_preview_motion_grip_state(
 					))
 				)
 			else:
+				held_item.set_meta("grip_support_end_bounds_failure", requested_support_seat.get("reason", "handle_end_bounds_unavailable"))
 				held_item.remove_meta(PREVIEW_SUPPORT_GRIP_SEAT_RATIO_META)
 				held_item.remove_meta(PREVIEW_SUPPORT_GRIP_SEAT_RATIO_ORIGIN_META)
 		else:
@@ -4971,6 +5097,8 @@ func _sync_prepared_preview_grip(actor: Node3D, held_item: Node3D, motion: Comba
 	if _should_preview_use_support_hand(held_item, motion):
 		slots.append(&"hand_left" if slots[0] == &"hand_right" else &"hand_right")
 	owner.synchronize(slots, _resolve_preview_dominant_slot_id(), StringName(playback.get("grip_resolve_reason", StringName())))
+	if bool(playback.get("prepared_grip_bake", false)):
+		owner.restore_cached_primary_binding_for_replay()
 
 func _publish_prepared_grip_motion_authority(preview_root: Node3D) -> void:
 	for key: String in ["contact_coupling_metrics", "contact_clearance_settle_metrics", "final_anchor_reseat_metrics"]:
@@ -5249,7 +5377,8 @@ func _resolve_primary_grip_seat_state_from_offsets(
 		held_item,
 		fallback_local,
 		slide_offset,
-		axial_offset
+		axial_offset,
+		_resolve_preview_dominant_slot_id()
 	)
 
 func _resolve_secondary_grip_seat_local_from_offsets(
@@ -5277,7 +5406,8 @@ func _resolve_secondary_grip_seat_state_from_offsets(
 		held_item,
 		base_local,
 		slide_offset,
-		0.0
+		0.0,
+		_resolve_preview_support_slot_id()
 	)
 
 func _resolve_grip_seat_local_from_offsets(
@@ -5298,10 +5428,15 @@ func _resolve_grip_seat_state_from_offsets(
 	held_item: Node3D,
 	fallback_local: Vector3,
 	handle_coordinate_normalized: float,
-	axial_offset: float
+	axial_offset: float,
+	slot_id: StringName = StringName()
 ) -> Dictionary:
 	if held_item == null:
 		return {"valid": false}
+	var bounds := get_held_item_hand_end_bounds(held_item,
+		slot_id if slot_id != StringName() else _resolve_preview_dominant_slot_id())
+	if not bounds.get("valid", false):
+		return bounds
 	var span_start: Vector3 = _get_origin_tracked_vector3_meta(
 		held_item,
 		"primary_grip_span_start_local",
@@ -5336,8 +5471,8 @@ func _resolve_grip_seat_state_from_offsets(
 	var tipward_axis_sign := 1.0 if tip_side_ratio >= 0.5 else -1.0
 	target_ratio = clampf(
 		target_ratio + clamped_axial * 0.5 * tipward_axis_sign,
-		0.0,
-		1.0
+		float(bounds.min_ratio),
+		float(bounds.max_ratio)
 	)
 	var seat_state := _resolve_held_item_grip_slice_center(
 		held_item,
@@ -5347,6 +5482,67 @@ func _resolve_grip_seat_state_from_offsets(
 		push_error("Skill Crafter grip seat is missing its authoritative Handle slice-center path.")
 		return {"valid": false}
 	return seat_state
+
+
+## Lengths are measured in world metres; the saved Handle path remains complete.
+## Both display modes and both hands consume this same physical end clearance.
+func get_held_item_hand_end_bounds(held_item: Node3D, slot_id: StringName) -> Dictionary:
+	if not is_instance_valid(held_item):
+		return {"valid": false, "reason": "missing_handle"}
+	var spans: Dictionary = held_item.get_meta("hand_grip_spans_meters", {})
+	var start: Vector3 = _get_origin_tracked_vector3_meta(held_item,
+		"primary_grip_span_start_local", "primary_grip_span_start_origin_id",
+		Vector3.ZERO, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	var end: Vector3 = _get_origin_tracked_vector3_meta(held_item,
+		"primary_grip_span_end_local", "primary_grip_span_end_origin_id",
+		Vector3.ZERO, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	var world_basis := held_item.global_basis if held_item.is_inside_tree() else held_item.basis
+	return PrimaryGripSeatResolverScript.resolve_hand_end_bounds(
+		(world_basis * (end - start)).length(), float(spans.get(slot_id, 0.0)))
+
+
+func get_preview_hand_end_bounds(preview_subviewport: SubViewport, support: bool = false) -> Dictionary:
+	var preview_root := _get_preview_root(preview_subviewport)
+	if preview_root == null:
+		return {"valid": false, "reason": "missing_preview_handle"}
+	var held_item := _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
+	return get_held_item_hand_end_bounds(held_item,
+		_resolve_preview_support_slot_id() if support else _resolve_preview_dominant_slot_id())
+
+
+## Baked anchor positions are authoritative. Never clamp a cached weapon away
+## from its already-solved fingers; an incompatible frame needs authoring again.
+func validate_solved_replay_hand_end_bounds(held_item: Node3D, playback: Dictionary) -> Dictionary:
+	if _is_unarmed_preview_item(held_item):
+		return {"valid": true}
+	var paths: Array = playback.get("solved_anchor_node_paths", [])
+	var positions: Array = playback.get("solved_anchor_positions_weapon_local", [])
+	var main_slot := _normalize_preview_slot_id(StringName(playback.get("primary_hand_slot", _resolve_preview_dominant_slot_id())))
+	var required := {"PrimaryGripAnchor": main_slot}
+	var two_hand_state := StringName(playback.get("two_hand_state", CombatAnimationMotionNodeScript.TWO_HAND_STATE_AUTO))
+	var support_requested := two_hand_state == CombatAnimationMotionNodeScript.TWO_HAND_STATE_TWO_HAND or (
+		two_hand_state == CombatAnimationMotionNodeScript.TWO_HAND_STATE_AUTO and preview_default_two_hand)
+	if support_requested:
+		required["SupportGripAnchor"] = &"hand_left" if main_slot == &"hand_right" else &"hand_right"
+	var start: Vector3 = _get_origin_tracked_vector3_meta(held_item,
+		"primary_grip_span_start_local", "primary_grip_span_start_origin_id",
+		Vector3.ZERO, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	var end: Vector3 = _get_origin_tracked_vector3_meta(held_item,
+		"primary_grip_span_end_local", "primary_grip_span_end_origin_id",
+		Vector3.ZERO, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	for path: String in required:
+		var bounds := get_held_item_hand_end_bounds(held_item, required[path])
+		if not bounds.get("valid", false):
+			return bounds
+		var anchor_index := paths.find(StringName(path))
+		if anchor_index < 0:
+			anchor_index = paths.find(path)
+		if anchor_index < 0 or anchor_index >= positions.size() or not positions[anchor_index] is Vector3:
+			return {"valid": false, "reason": "saved_grip_end_bounds_anchor_missing"}
+		var ratio: float = ((positions[anchor_index] as Vector3) - start).dot(end - start) / (end - start).length_squared()
+		if not is_finite(ratio) or ratio < float(bounds.min_ratio) - 0.000001 or ratio > float(bounds.max_ratio) + 0.000001:
+			return {"valid": false, "reason": "saved_grip_outside_handle_end_bounds", "slot": required[path]}
+	return {"valid": true}
 
 
 func _resolve_held_item_grip_slice_center(
@@ -6250,7 +6446,7 @@ func _settle_preview_digits_on_resolved_weapon(
 		# Macro IK may position support, but no legacy hand-seat/closure follows.
 		# Both hands now use the same surface-only acquisition owner.
 		if prepared_owner != null:
-			prepared_owner.settle_ready()
+			prepared_owner.settle_ready(support_active and can_settle_support_macro)
 		actor.call("apply_authoring_digit_grip_now", false)
 		if prepared_owner != null:
 			prepared_owner.retain_support_motion()
@@ -8165,6 +8361,15 @@ func _resolve_preview_support_grip_seat_local_for_target(
 ) -> Vector3:
 	if held_item == null:
 		return current_support_grip_local
+	var support_bounds := get_held_item_hand_end_bounds(held_item, _resolve_preview_support_slot_id())
+	if not support_bounds.get("valid", false):
+		return current_support_grip_local
+	var current_ratio := _project_grip_span_ratio_for_local(held_item, current_support_grip_local, 0.5)
+	var bounded_current := _resolve_held_item_grip_slice_center(held_item,
+		clampf(current_ratio, float(support_bounds.min_ratio), float(support_bounds.max_ratio)))
+	if not bounded_current.get("valid", false):
+		return current_support_grip_local
+	current_support_grip_local = bounded_current.position
 	var resolved_dominant_grip_origin_id: StringName = _normalize_combat_origin_id(
 		dominant_grip_origin_id,
 		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
@@ -8230,6 +8435,12 @@ func _resolve_preview_support_grip_seat_local_for_target(
 		current_support_grip_local,
 		current_support_grip_origin_id_fallback
 	)
+	var safe_start := _resolve_held_item_grip_slice_center(held_item, float(support_bounds.min_ratio))
+	var safe_end := _resolve_held_item_grip_slice_center(held_item, float(support_bounds.max_ratio))
+	if not safe_start.get("valid", false) or not safe_end.get("valid", false):
+		return current_support_grip_local
+	span_start_local = safe_start.position
+	span_end_local = safe_end.position
 	var candidates: Array[Dictionary] = [
 		{
 			"candidate_local": current_support_grip_local,
@@ -8339,7 +8550,11 @@ func _project_world_target_to_held_item_grip_span(
 	var span_length_squared: float = span_vector_world.length_squared()
 	if span_length_squared <= 0.000001:
 		return {}
-	var ratio: float = clampf((target_world - span_start_world).dot(span_vector_world) / span_length_squared, 0.0, 1.0)
+	var bounds := get_held_item_hand_end_bounds(held_item, _resolve_preview_support_slot_id())
+	if not bounds.get("valid", false):
+		return {}
+	var ratio: float = clampf((target_world - span_start_world).dot(span_vector_world) / span_length_squared,
+		float(bounds.min_ratio), float(bounds.max_ratio))
 	var projected_seat_state := _resolve_held_item_grip_slice_center(
 		held_item,
 		ratio
@@ -8758,7 +8973,7 @@ func _apply_preview_hand_mounted_transform(actor: Node3D, held_item: Node3D) -> 
 func _should_preview_use_support_hand(held_item: Node3D, motion_node: CombatAnimationMotionNode) -> bool:
 	if held_item == null:
 		return false
-	if motion_node != null and motion_node.preferred_grip_style_mode == CraftedItemWIP.GRIP_REVERSE:
+	if held_item.has_meta("grip_support_end_bounds_failure"):
 		return false
 	if not bool(held_item.get_meta("two_hand_character_eligible", false)):
 		return false

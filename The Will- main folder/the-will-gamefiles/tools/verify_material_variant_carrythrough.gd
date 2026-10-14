@@ -1,6 +1,6 @@
 extends SceneTree
 
-const ForgeGridControllerScript = preload("res://runtime/forge/forge_grid_controller.gd")
+const Fixture = preload("res://tools/forge_v2_small_handle_fixture.gd")
 const ForgeServiceScript = preload("res://services/forge_service.gd")
 const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_runtime_resolver.gd")
 
@@ -11,15 +11,19 @@ const GreenTier: TierDef = preload("res://core/defs/materials/tiers/tier_green.t
 func _init() -> void:
 	var forge_service: ForgeService = ForgeServiceScript.new()
 	var material_runtime_resolver = MaterialRuntimeResolverScript.new()
-	var controller: ForgeGridController = ForgeGridControllerScript.new()
-	var material_lookup: Dictionary = controller.build_default_material_lookup()
+	var material_lookup: Dictionary = Fixture.material_lookup()
 	var gray_variant: MaterialVariantDef = forge_service.build_material_variant(WoodBaseMaterial, GrayTier)
 	var green_variant: MaterialVariantDef = forge_service.build_material_variant(WoodBaseMaterial, GreenTier)
 	material_lookup[gray_variant.variant_id] = gray_variant
 	material_lookup[green_variant.variant_id] = green_variant
 
-	var gray_profile: BakedProfile = forge_service.bake_wip(_build_single_cell_wip(&"verify_gray", gray_variant.variant_id), material_lookup)
-	var green_profile: BakedProfile = forge_service.bake_wip(_build_single_cell_wip(&"verify_green", green_variant.variant_id), material_lookup)
+	var gray_wip := Fixture.build(gray_variant.variant_id, material_lookup)
+	var green_wip := Fixture.build(green_variant.variant_id, material_lookup)
+	if gray_wip == null or green_wip == null:
+		quit(1)
+		return
+	var gray_profile: BakedProfile = forge_service.bake_wip(gray_wip, material_lookup)
+	var green_profile: BakedProfile = forge_service.bake_wip(green_wip, material_lookup)
 
 	var lines: PackedStringArray = []
 	lines.append("gray_variant_id=%s" % String(gray_variant.variant_id))
@@ -62,39 +66,27 @@ func _init() -> void:
 		_get_stat_line_value(green_profile.resolved_capability_bias_lines, &"cap_flex")
 		> _get_stat_line_value(gray_profile.resolved_capability_bias_lines, &"cap_flex")
 	))
-	lines.append("green_profile_flex_capability_gt_gray=%s" % str(
-		float(green_profile.capability_scores.get(&"cap_flex", 0.0))
-		> float(gray_profile.capability_scores.get(&"cap_flex", 0.0))
+	# Unlike the retired one-cell fixture, this usable 200 mm V2 Handle has
+	# 256 cell-equivalents. Both flex totals exceed CapabilityResolver's 1 cap.
+	# The strict tier gain is checked above on the unsaturated material totals.
+	lines.append("profile_flex_capability_saturation_preserved=%s" % str(
+		is_equal_approx(float(green_profile.capability_scores.get(&"cap_flex", 0.0)), 1.0)
+		and is_equal_approx(float(gray_profile.capability_scores.get(&"cap_flex", 0.0)), 1.0)
 	))
-	lines.append("green_profile_mix_contains_green=%s" % str(int(green_profile.material_variant_mix.get(green_variant.variant_id, 0)) == 1))
-	lines.append("gray_profile_mix_contains_gray=%s" % str(int(gray_profile.material_variant_mix.get(gray_variant.variant_id, 0)) == 1))
+	lines.append("green_profile_mix_contains_green=%s" % str(int(green_profile.material_variant_mix.get(green_variant.variant_id, 0)) > 0))
+	lines.append("gray_profile_mix_contains_gray=%s" % str(int(gray_profile.material_variant_mix.get(gray_variant.variant_id, 0)) > 0))
 
 	var file: FileAccess = FileAccess.open("c:/WORKSPACE/material_variant_carrythrough_results.txt", FileAccess.WRITE)
 	if file != null:
 		file.store_string("\n".join(lines))
 		file.close()
-	controller.free()
-	quit()
-
-func _build_single_cell_wip(wip_id: StringName, material_variant_id: StringName) -> CraftedItemWIP:
-	var wip: CraftedItemWIP = CraftedItemWIP.new()
-	wip.wip_id = wip_id
-	wip.forge_project_name = String(wip_id)
-	wip.forge_intent = &"intent_melee"
-	wip.equipment_context = &"ctx_weapon"
-
-	var layer: LayerAtom = LayerAtom.new()
-	layer.layer_index = 20
-	layer.cells = []
-
-	var cell: CellAtom = CellAtom.new()
-	cell.grid_position = Vector3i(0, 0, 20)
-	cell.layer_index = 20
-	cell.material_variant_id = material_variant_id
-	layer.cells.append(cell)
-
-	wip.layers = [layer]
-	return wip
+	var failed := false
+	for line: String in lines:
+		if line.ends_with("=false"):
+			push_error(line)
+			failed = true
+	print("Material variant carrythrough: %s" % ("FAIL" if failed else "PASS"))
+	quit(1 if failed else 0)
 
 func _get_stat_line_value(stat_lines: Array[StatLine], stat_id: StringName) -> float:
 	for stat_line: StatLine in stat_lines:

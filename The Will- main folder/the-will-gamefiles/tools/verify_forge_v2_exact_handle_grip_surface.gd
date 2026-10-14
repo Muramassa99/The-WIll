@@ -374,7 +374,7 @@ func _run_verification() -> void:
 		profile.primary_grip_contact_position,
 		expected_signature
 	)
-	await _verify_invalid_shell_keeps_fingers_open(
+	await _verify_invalid_shell_preserves_prepared_owner(
 		equipped_presenter,
 		primary_grip_guide,
 		grip_center
@@ -544,7 +544,7 @@ func _verify_exact_surface_invalidation_and_retry(
 	)
 
 
-func _verify_invalid_shell_keeps_fingers_open(
+func _verify_invalid_shell_preserves_prepared_owner(
 	equipped_presenter: RefCounted,
 	grip_guide: Node3D,
 	grip_center: Node3D
@@ -557,12 +557,15 @@ func _verify_invalid_shell_keeps_fingers_open(
 	var index_bone_index := (
 		skeleton.find_bone("CC_Base_R_Index1") if skeleton != null else -1
 	)
-	_check(
-		skeleton != null and index_bone_index >= 0,
-		"invalid_shell_open_pose_fixture_has_finger_bone",
-		"invalid-shell finger regression could not resolve Josie's right index bone"
+	var index_end_bone_index := (
+		skeleton.find_bone("CC_Base_R_Index3") if skeleton != null else -1
 	)
-	if skeleton == null or index_bone_index < 0:
+	_check(
+		skeleton != null and index_bone_index >= 0 and index_end_bone_index >= 0,
+		"invalid_shell_prepared_owner_fixture_has_finger_bones",
+		"invalid-shell regression could not resolve Josie's right index bones"
+	)
+	if skeleton == null or index_bone_index < 0 or index_end_bone_index < 0:
 		josie_root.free()
 		return
 	var finger_presenter: RefCounted = PlayerRigFingerGripPresenterScript.new()
@@ -584,6 +587,13 @@ func _verify_invalid_shell_keeps_fingers_open(
 		).normalized()
 	)
 	skeleton.force_update_all_bone_transforms()
+	# Prepared acquisition/replay superseded serial fallback closure. Even when
+	# its collision surface is invalid, the serial updater must not reopen or
+	# recurl the owner's pose. The old open-pose expectation tested that fallback.
+	var expected_owned_rotation := skeleton.get_bone_pose_rotation(index_bone_index).normalized()
+	var expected_target_world := skeleton.to_global(
+		skeleton.get_bone_global_pose(index_end_bone_index).origin
+	)
 	var hand_bone_index := skeleton.find_bone("CC_Base_R_Hand")
 	if hand_bone_index >= 0:
 		grip_guide.global_position = skeleton.to_global(
@@ -606,17 +616,30 @@ func _verify_invalid_shell_keeps_fingers_open(
 	var resolved_rotation := skeleton.get_bone_pose_rotation(
 		index_bone_index
 	).normalized()
-	var open_rotation_error := maxf(
-		1.0 - absf(expected_open_rotation.dot(resolved_rotation)),
+	var owned_rotation_error := maxf(
+		1.0 - absf(expected_owned_rotation.dot(resolved_rotation)),
 		0.0
 	)
 	result_lines.append(
-		"invalid_shell_open_pose_quaternion_error=%.9f" % open_rotation_error
+		"invalid_shell_prepared_pose_quaternion_error=%.9f" % owned_rotation_error
 	)
 	_check(
-		open_rotation_error <= 0.000001,
-		"invalid_grip_shell_keeps_finger_in_open_pose",
-		"invalid grip shell applied contact curl instead of leaving the finger in its open pose"
+		owned_rotation_error <= 0.000001,
+		"invalid_grip_shell_preserves_prepared_owner_pose",
+		"serial updater overwrote the prepared owner's finger pose after exact-surface invalidation"
+	)
+	_check(
+		index_target.global_position.distance_to(expected_target_world) <= TRANSFORM_EPSILON_METERS,
+		"invalid_grip_shell_syncs_target_to_owned_pose",
+		"serial updater failed to synchronize the target to the retained prepared finger pose"
+	)
+	_check(
+		(finger_presenter.get("surface_grasp_state_lookup") as Dictionary).is_empty()
+		and (finger_presenter.get("weapon_surface_seat_state_lookup") as Dictionary).is_empty()
+		and (finger_presenter.get("active_grip_execution_path_lookup") as Dictionary).is_empty()
+		and not bool(grip_center.get_meta("grip_shell_valid", true)),
+		"invalid_grip_shell_does_not_launch_serial_solve",
+		"invalid prepared surface started a serial solve or revalidated the grip shell"
 	)
 	index_target.free()
 	josie_root.free()
@@ -773,7 +796,6 @@ func _build_wip_from_state(authoring_state: Resource) -> CraftedItemWIP:
 	wip.forge_builder_component_id = CraftedItemWIPScript.BUILDER_COMPONENT_PRIMARY
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
-	wip.layers = []
 	wip.forge_v2_authoring_state = authoring_state.duplicate(true) as Resource
 	wip.ensure_combat_animation_station_state()
 	return wip

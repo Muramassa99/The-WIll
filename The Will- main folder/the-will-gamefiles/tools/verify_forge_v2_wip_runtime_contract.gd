@@ -147,7 +147,7 @@ func _run_verification() -> void:
 	if not _verify_skill_crafter_cached_profile_refresh(wip):
 		return
 	result_lines.append(
-		"PASS: Skill Crafter refreshed V2 material data once and preserved V1 cache behavior"
+		"PASS: Skill Crafter refreshed V2 material data, reused private cached profiles, and rejected V1"
 	)
 
 	var forge_service: ForgeService = ForgeServiceScript.new(DEFAULT_FORGE_RULES)
@@ -378,7 +378,6 @@ func _build_wip_from_state(
 	wip.forge_builder_component_id = CraftedItemWIPScript.BUILDER_COMPONENT_PRIMARY
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
-	wip.layers = []
 	wip.forge_v2_authoring_state = (
 		authoring_state.duplicate(true) as Resource
 		if authoring_state != null
@@ -1052,12 +1051,17 @@ func _verify_skill_crafter_cached_profile_refresh(
 	):
 		return false
 	var enriched_snapshot_instance_id := enriched_snapshot.get_instance_id()
+	var prepared_mesh_before: Resource = wip.stage2_item_state
 	var cached_profile: BakedProfile = station_presenter.ensure_baked_profile_snapshot(wip)
 	if not _expect(
-		cached_profile == enriched_snapshot
+		cached_profile != null and cached_profile != enriched_snapshot
+		and cached_profile.primary_grip_valid == enriched_snapshot.primary_grip_valid
+		and cached_profile.capability_scores == enriched_snapshot.capability_scores
+		and _stat_lines_equal(cached_profile.resolved_material_stat_lines, enriched_snapshot.resolved_material_stat_lines)
 		and wip.latest_baked_profile_snapshot.get_instance_id()
-		== enriched_snapshot_instance_id,
-		"Skill Crafter rebaked an already enriched V2 cached profile"
+		== enriched_snapshot_instance_id
+		and wip.stage2_item_state == prepared_mesh_before,
+		"Skill Crafter did not reuse the prepared V2 state through a private profile copy"
 	):
 		return false
 
@@ -1072,12 +1076,30 @@ func _verify_skill_crafter_cached_profile_refresh(
 		station_presenter.ensure_baked_profile_snapshot(legacy_wip)
 	)
 	if not _expect(
-		resolved_legacy_profile == legacy_cached_profile
+		resolved_legacy_profile != null
+		and not resolved_legacy_profile.primary_grip_valid
+		and resolved_legacy_profile.validation_error == "forge_v1_authoring_removed"
 		and legacy_wip.latest_baked_profile_snapshot == legacy_cached_profile
 		and legacy_cached_profile.validation_error == "v1_cached_profile_sentinel",
-		"Skill Crafter changed the existing V1 cached-profile fast path"
+		"Skill Crafter must reject V1 without mutating its saved profile"
 	):
 		return false
+	return true
+
+
+func _stat_lines_equal(first: Array[StatLine], second: Array[StatLine]) -> bool:
+	if first.size() != second.size():
+		return false
+	for index: int in range(first.size()):
+		var left := first[index]
+		var right := second[index]
+		if left == null or right == null:
+			if left != right:
+				return false
+			continue
+		if left.stat_id != right.stat_id or left.value_kind != right.value_kind \
+			or left.enum_value != right.enum_value or not is_equal_approx(left.value, right.value):
+			return false
 	return true
 
 

@@ -5,6 +5,38 @@ const RATIO_EPSILON := 0.00001
 const SLICE_DISTANCE_EPSILON_METERS := 0.000001
 const SLICE_POINT_MERGE_EPSILON_METERS := 0.000005
 const SLICE_AREA_EPSILON_SQUARED_METERS := 0.000000000001
+const HAND_END_PADDING_RATIO := 0.10
+
+
+static func resolve_hand_end_bounds(
+	handle_length_meters: float,
+	index_pinky_span_meters: float
+) -> Dictionary:
+	# The grip anchor is the Index-Pinky midpoint. Reserve half of that span
+	# plus the same configurable padding at each Handle end, in physical units.
+	if not is_finite(handle_length_meters) or handle_length_meters <= 0.0:
+		return {"valid": false, "reason": &"invalid_handle_length"}
+	if not is_finite(index_pinky_span_meters) or index_pinky_span_meters <= 0.0:
+		return {"valid": false, "reason": &"missing_hand_grip_span"}
+	var padding := index_pinky_span_meters * HAND_END_PADDING_RATIO
+	var half_extent := index_pinky_span_meters * 0.5 + padding
+	var reserved_width := half_extent * 2.0
+	var result := {
+		"valid": false,
+		"reason": &"handle_shorter_than_hand_footprint",
+		"handle_length_meters": handle_length_meters,
+		"index_pinky_span_meters": index_pinky_span_meters,
+		"padding_per_end_meters": padding,
+		"half_extent_meters": half_extent,
+		"reserved_width_meters": reserved_width,
+	}
+	if handle_length_meters < reserved_width:
+		return result
+	result["valid"] = true
+	result["reason"] = StringName()
+	result["min_ratio"] = half_extent / handle_length_meters
+	result["max_ratio"] = 1.0 - float(result.min_ratio)
+	return result
 
 
 static func build_axis_ratios_from_centers(

@@ -113,7 +113,6 @@ func build_refresh_payloads(
 			"selected_wip_id": selected_wip_id,
 			"format_wip_label_callable": Callable(self, "_format_wip_label"),
 			"get_wip_display_name_callable": Callable(self, "_get_wip_display_name"),
-			"count_wip_cells_callable": Callable(self, "_count_wip_cells"),
 			"preview_wip_test_status_callable": Callable(self, "_preview_wip_test_status"),
 			"hands_are_empty_callable": Callable(self, "_hands_are_empty"),
 		},
@@ -286,6 +285,3 @@ func _format_wip_label(saved_wip: CraftedItemWIP, is_selected_for_forge: bool) -
 
 func _get_wip_display_name(saved_wip: CraftedItemWIP) -> String:
 	return text_presenter.get_wip_display_name(saved_wip) if text_presenter != null else "Unnamed WIP"
-
-func _count_wip_cells(saved_wip: CraftedItemWIP) -> int:
-	return text_presenter.count_wip_cells(saved_wip) if text_presenter != null else 0

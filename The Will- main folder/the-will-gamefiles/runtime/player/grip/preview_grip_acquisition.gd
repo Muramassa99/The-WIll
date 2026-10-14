@@ -25,6 +25,7 @@ var _job
 var _busy := false
 var _serial := 0
 var _settle_ready := false
+var _support_macro_primary_serial := -1
 var _closing := false
 var _last_key_change_frame := 0
 var _running_slot := StringName()
@@ -42,6 +43,37 @@ var _support_motion_snapshot: Dictionary = {}
 var _restoring_support_motion := false
 var _support_motion_clamp_count := 0
 var _last_support_motion_clamp: Dictionary = {}
+
+## A cached primary relationship must be visible to the macro pose on the same
+## frame that changes style/station. Restore only its validated local binding;
+## neither weapon seating nor a fresh acquisition belongs before the macro pass.
+func restore_cached_primary_binding_for_replay() -> Dictionary:
+	if _busy or _closing or not is_instance_valid(_actor) or not is_instance_valid(_weapon) or not _data.get("valid", false):
+		return {"valid": false, "restored": false, "reason": "replay_context_not_ready"}
+	var request: Dictionary = _requests.get(_dominant, {})
+	if request.is_empty():
+		return {"valid": false, "restored": false, "reason": "missing_primary_replay_request"}
+	var bound: Dictionary = _actor.planar_grip_pose_binding.relationship(_dominant, _weapon)
+	if bound.get("relationship_key", "") == request.key:
+		return {"valid": true, "restored": false, "reason": "primary_already_bound"}
+	var cached: Dictionary = _replay_pose_cache.get(request.key, {})
+	if cached.get("status", {}).get("status", "") != "preview_applied":
+		return {"valid": true, "restored": false, "reason": "primary_cache_miss"}
+	# This existing application preflights the current claim, packet provenance,
+	# all fifteen hinge limits and digit dimensions before committing rotations.
+	var applied: Dictionary = _actor.apply_planar_grip_pose(_dominant, _weapon, request.key, cached.packet)
+	if not applied.get("valid", false):
+		if applied.get("reason", "") == "prepared_digit_dimensions_changed":
+			_replay_pose_cache.erase(request.key)
+		return applied.merged({"restored": false})
+	_primary_seat = {"key": request.key, "slot": _dominant}
+	_status[_dominant] = cached.status.duplicate(true)
+	_status[_dominant]["serial"] = request.serial
+	_queue.erase(_dominant)
+	_settle_ready = false
+	Chronology.event("owner.replay_primary_binding_restored", {"slot": _dominant,
+		"request_serial": request.serial, "key_hash": String(request.key).sha256_text()})
+	return {"valid": true, "restored": true}
 
 ## Offline clip baking uses the same acquisition and application contracts as
 ## editing. Rigid motion reuses a committed local grip; changed stations solve
@@ -62,9 +94,9 @@ func prepare_replay_grip(slots: Array[StringName], dominant: StringName) -> Dict
 	var solved_count := 0
 	var reused_count := 0
 	for slot: StringName in ordered:
-		if slot != dominant and _actor.has_method("settle_authoring_support_grip_macro_pose_now"):
-			_actor.settle_authoring_support_grip_macro_pose_now()
-			retain_support_motion()
+		if slot != dominant:
+			var prepared := _prepare_support_acquisition()
+			if not prepared.get("valid", false): return prepared.merged({"slot": slot})
 		var request: Dictionary = _requests.get(slot, {})
 		if request.is_empty():
 			return {"valid": false, "reason": "replay_grip_claim_unavailable", "slot": slot}
@@ -88,6 +120,7 @@ func prepare_replay_grip(slots: Array[StringName], dominant: StringName) -> Dict
 				else:
 					_capture_support_motion_snapshot(slot)
 				_status[slot] = cached.status.duplicate(true)
+				_status[slot]["serial"] = request.serial
 				_queue.erase(slot)
 				reused = true
 				reused_count += 1
@@ -149,6 +182,7 @@ func restore_bake_context(context: Dictionary, selection_key: String) -> Diction
 	for slot: StringName in _slots:
 		_actor.finger_grip_presenter.set_planar_grip_rotations(_skeleton, slot, plans[slot].rotations)
 		_actor.planar_grip_pose_binding.commit(slot, plans[slot])
+		if slot != _dominant: _actor.remember_prepared_support_wrist_posture(slot, context.keys[slot])
 		_status[slot] = context.status[slot].duplicate(true)
 		_status[slot]["serial"] = _requests[slot].serial
 		_replay_pose_cache[context.keys[slot]] = {"packet": context.packets[slot].duplicate(true), "status": _status[slot].duplicate(true)}
@@ -200,9 +234,9 @@ func synchronize(slots: Array[StringName], dominant: StringName, force_reason: S
 			_release(slot)
 			continue
 		var previous: Dictionary = _requests.get(slot, {})
-		# A position-change notification concerns the hand whose exact station
-		# changed. It must not reacquire an unchanged primary hand when only the
-		# support slider moved. Other explicit reasons can request reacquisition.
+		# Support identity includes the primary station it joins. A main slider
+		# edit therefore renews both requests; a support edit renews only support.
+		# Other explicit reasons can request reacquisition of unchanged stations.
 		var force_reacquire := force_reason not in [StringName(), &"handle_position_changed"]
 		if previous.get("key", "") == key and not force_reacquire:
 			continue
@@ -215,6 +249,7 @@ func synchronize(slots: Array[StringName], dominant: StringName, force_reason: S
 				"previous_style": old_fields[7], "current_style": new_fields[7],
 				"geometry_equal": old_fields[8] == new_fields[8], "forced": force_reacquire})
 		_support_motion_snapshot.clear()
+		_support_macro_primary_serial = -1
 		if slot == dominant and _primary_seat.get("key", "") != key:
 			_primary_seat.clear()
 		if _running_slot == slot and _job != null:
@@ -249,9 +284,13 @@ func _record_request(label: String, slot: StringName, request: Dictionary) -> vo
 func owns(slot: StringName) -> bool:
 	return _requests.has(slot) and is_instance_valid(_weapon) and not _weapon.is_queued_for_deletion()
 
-func settle_ready() -> void:
+func settle_ready(support_aligned: bool = false) -> void:
 	_pose_changed()
 	_settle_ready = true
+	if support_aligned:
+		# The UI already aligned support after this committed primary. A later
+		# async primary commit has a new serial and requires one fresh alignment.
+		_support_macro_primary_serial = int(_requests[_dominant].serial) if _primary_ready_for_support() else -1
 
 func retain_roll() -> void:
 	_pose_changed()
@@ -289,6 +328,7 @@ func clear() -> void:
 		_release(slot)
 	_queue.clear()
 	_settle_ready = false
+	_support_macro_primary_serial = -1
 	_status.clear()
 	for mesh: Mesh in _meshes:
 		if mesh.changed.is_connected(_geometry_changed):
@@ -319,6 +359,7 @@ func _geometry_changed() -> void:
 
 func _release(slot: StringName) -> void:
 	_support_motion_snapshot.clear()
+	_support_macro_primary_serial = -1
 	_record_request("owner.release",slot,_requests.get(slot,{}))
 	if _running_slot == slot and _job != null:
 		_job.cancel()
@@ -353,13 +394,31 @@ func _process(_delta: float) -> void:
 		_run_next()
 
 func _run_next(synchronous: bool = false) -> void:
+	if _busy or _queue.is_empty(): return
+	# Rapid edits can leave an older support request ahead of the new primary.
+	# Always establish the current primary seat before capturing its support.
+	if _dominant in _queue:
+		_queue.erase(_dominant)
+		_queue.push_front(_dominant)
 	_busy = true
 	_running_slot = _queue.pop_front()
 	var slot: StringName = _running_slot
 	var request: Dictionary = _requests.get(slot, {}).duplicate()
 	if request.is_empty():
 		_busy = false
+		_running_slot = StringName()
 		return
+	if slot != _dominant:
+		if not _primary_ready_for_support():
+			_finish_failure(slot, request, "primary_grip_not_ready", {"primary_status": _status.get(_dominant, {}).get("status", "unavailable")})
+			return
+		# Replay prepares support before its cache lookup. Live acquisition must
+		# also align the joining arm AFTER the async primary seat has committed.
+		if not synchronous and _support_macro_primary_serial != int(_requests[_dominant].serial):
+			var prepared := _prepare_support_acquisition()
+			if not prepared.get("valid", false):
+				_finish_failure(slot, request, prepared.get("reason", "support_preparation_failed"))
+				return
 	_record_request("owner.job_start",slot,request)
 	# Macro positioning is finished. Numerical work keeps the captured Hand fixed
 	# and returns the final weapon frame after transverse seating.
@@ -441,6 +500,29 @@ func _run_next(synchronous: bool = false) -> void:
 	_running_slot = StringName()
 	_record_request("owner.preview_applied",slot,request)
 	_publish()
+
+func _primary_ready_for_support() -> bool:
+	var request: Dictionary = _requests.get(_dominant, {})
+	if request.is_empty() or not _is_current(_dominant, request): return false
+	if _status.get(_dominant, {}).get("status", "") != "preview_applied" or _primary_seat.get("key", "") != request.key: return false
+	var bound: Dictionary = _actor.planar_grip_pose_binding.relationship(_dominant, _weapon)
+	return bound.get("relationship_key", "") == request.key
+
+func _prepare_support_acquisition() -> Dictionary:
+	if not _primary_ready_for_support():
+		return {"valid": false, "reason": "primary_grip_not_ready"}
+	var primary_stamp := _primary_relationship_stamp()
+	var span := Chronology.begin("owner.prepare_support", {"primary_serial": _requests[_dominant].serial,
+		"primary_key_sha256": String(_requests[_dominant].key).sha256_text()})
+	if _actor.has_method("settle_authoring_support_grip_macro_pose_now"):
+		_actor.settle_authoring_support_grip_macro_pose_now()
+		retain_support_motion()
+	var preserved := not primary_stamp.is_empty() and primary_stamp == _primary_relationship_stamp()
+	Chronology.finish(span, {"primary_preserved": preserved})
+	if not preserved:
+		return {"valid": false, "reason": "support_preparation_changed_primary_relationship"}
+	_support_macro_primary_serial = int(_requests[_dominant].serial)
+	return {"valid": true}
 
 ## Atomic primary application: only fifteen digit rotations and one transverse
 ## weapon translation. No arm target, wrist write, modifier advance or await.
@@ -704,6 +786,14 @@ func retain_support_motion() -> Dictionary:
 	var position_error := (_weapon.global_basis * (actual.origin - expected.origin)).length()
 	var relative_rotation := (actual.basis.orthonormalized().get_rotation_quaternion().inverse() * expected.basis.orthonormalized().get_rotation_quaternion()).normalized()
 	var orientation_error := 2.0 * atan2(Vector3(relative_rotation.x, relative_rotation.y, relative_rotation.z).length(), absf(relative_rotation.w))
+	var frame_realization: Dictionary = {}
+	if position_error > 0.00005 or orientation_error > 0.00005:
+		_restoring_support_motion = true
+		frame_realization = _actor.realize_prepared_support_hand_frame(slot, _weapon.global_transform * expected, saved.poses[saved.hand_index])
+		_restoring_support_motion = false
+		if frame_realization.get("valid", false):
+			position_error = frame_realization.position_error_m
+			orientation_error = frame_realization.orientation_error_rad
 	if position_error <= 0.00005 and orientation_error <= 0.00005:
 		var moved: bool = not _weapon.global_transform.is_equal_approx(saved.weapon_world)
 		_capture_support_motion_snapshot(slot)
@@ -717,7 +807,7 @@ func retain_support_motion() -> Dictionary:
 	_restoring_support_motion = false
 	var report := {"valid": true, "applied": true, "motion_clamped": true,
 		"reason": "support_arm_or_wrist_limit_preserves_grip", "position_error_m": position_error,
-		"orientation_error_rad": orientation_error}
+		"orientation_error_rad": orientation_error, "complete_frame_realization": frame_realization}
 	_status[slot]["motion_retention"] = report
 	_support_motion_clamp_count += 1
 	_last_support_motion_clamp = report.duplicate(true)
@@ -852,11 +942,22 @@ static func relationship_key(weapon: Node3D, slot: StringName, dominant: StringN
 	# Baking stores authored offsets as float32. A harmless round-trip tail at
 	# zero must not discard both committed hands. Canonicalize identity only,
 	# 500 times finer than the 0.05 mm contact tolerance; targets stay untouched.
-	var station: Vector3 = weapon.get_meta(prefix + "_local")
+	var station := _station_identity(weapon.get_meta(prefix + "_local"))
+	# All other identity fields remain exact; world movement and Roll are absent.
+	var identity: Array = [signature, weapon.get_instance_id(), slot, dominant, geometry_epoch,
+		station, weapon.get_meta(prefix + "_origin_id"),
+		weapon.get_meta("grip_style_mode", StringName()), geometry]
+	if slot != dominant:
+		# The joining hand depends on the station that establishes weapon seating.
+		# Do not include world pose or request serial: rigid motion still reuses it.
+		var primary_station: Variant = weapon.get_meta("preview_primary_grip_seat_local", null)
+		var primary_origin: StringName = weapon.get_meta("preview_primary_grip_seat_origin_id", StringName())
+		if not primary_station is Vector3 or primary_origin != Origins.ORIGIN_WEAPON_ROOT: return ""
+		identity.append([_station_identity(primary_station), primary_origin])
+	return var_to_bytes(identity).hex_encode()
+
+static func _station_identity(station: Vector3) -> Vector3:
 	station = station.snapped(Vector3.ONE * SEAT_IDENTITY_GRID_M)
 	for axis: int in 3:
 		if station[axis] == 0.0: station[axis] = 0.0
-	# All other identity fields remain exact; world movement and Roll are absent.
-	return var_to_bytes([signature, weapon.get_instance_id(), slot, dominant, geometry_epoch,
-		station, weapon.get_meta(prefix + "_origin_id"),
-		weapon.get_meta("grip_style_mode", StringName()), geometry]).hex_encode()
+	return station

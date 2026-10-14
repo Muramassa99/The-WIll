@@ -8,6 +8,69 @@ func resolve_grip_hold_layout(
 	baked_profile: BakedProfile,
 	dominant_slot_id: StringName,
 	cell_world_size_meters: float,
+	max_model_arm_reach_combat_meters: float,
+	hand_grip_spans_meters: Dictionary = {}
+) -> Dictionary:
+	var layout := _resolve_unbounded_grip_hold_layout(
+		baked_profile,
+		dominant_slot_id,
+		cell_world_size_meters,
+		max_model_arm_reach_combat_meters
+	)
+	if not bool(layout.get("valid", false)):
+		return layout
+	var handle_length_meters: float = (
+		baked_profile.primary_grip_span_start.distance_to(baked_profile.primary_grip_span_end)
+		* cell_world_size_meters
+	)
+	for role: String in ["dominant", "support"]:
+		if role == "support" and not bool(layout.two_hand_character_eligible):
+			continue
+		var slot_id := StringName(layout[role + "_slot_id"])
+		var bounds := PrimaryGripSeatResolverScript.resolve_hand_end_bounds(
+			handle_length_meters,
+			float(hand_grip_spans_meters.get(slot_id, 0.0))
+		)
+		layout[role + "_hand_end_bounds"] = bounds
+		if not bool(bounds.get("valid", false)):
+			if role == "support":
+				layout["two_hand_character_eligible"] = false
+				layout["support_hand_unavailable_reason"] = bounds.get("reason", &"invalid_hand_end_bounds")
+				layout["effective_two_hand_span_meters"] = 0.0
+				return layout
+			layout["valid"] = false
+			layout["reason"] = bounds.get("reason", &"invalid_hand_end_bounds")
+			return layout
+		var ratio := clampf(
+			float(layout[role + "_hand_axis_ratio_from_span_start"]),
+			float(bounds.min_ratio),
+			float(bounds.max_ratio)
+		)
+		var seat := PrimaryGripSeatResolverScript.resolve_profile_seat(baked_profile, ratio)
+		if not bool(seat.get("valid", false)):
+			if role == "support":
+				layout["two_hand_character_eligible"] = false
+				layout["support_hand_unavailable_reason"] = &"missing_handle_seat_path"
+				layout["effective_two_hand_span_meters"] = 0.0
+				return layout
+			layout["valid"] = false
+			layout["reason"] = &"missing_handle_seat_path"
+			return layout
+		layout[role + "_hand_local_position"] = seat.position
+		layout[role + "_hand_position_origin_id"] = seat.position_origin_id
+		layout[role + "_hand_axis_ratio_from_span_start"] = ratio
+		layout[role + "_hand_contact_percent"] = resolve_profile_contact_percent(ratio, baked_profile)
+	if bool(layout.two_hand_character_eligible):
+		layout["effective_two_hand_span_meters"] = absf(
+			float(layout.dominant_hand_axis_ratio_from_span_start)
+			- float(layout.support_hand_axis_ratio_from_span_start)
+		) * handle_length_meters
+	return layout
+
+func _resolve_unbounded_grip_hold_layout(
+	baked_profile: BakedProfile,
+	dominant_slot_id: StringName,
+	cell_world_size_meters: float,
 	max_model_arm_reach_combat_meters: float
 ) -> Dictionary:
 	var resolved_dominant_slot_id: StringName = normalize_hand_slot_id(dominant_slot_id)

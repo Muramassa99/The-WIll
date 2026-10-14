@@ -4,167 +4,157 @@ const PlayerBodyInventoryStateScript = preload("res://core/models/player_body_in
 const PlayerPersonalStorageStateScript = preload("res://core/models/player_personal_storage_state.gd")
 const PlayerEquipmentStateScript = preload("res://core/models/player_equipment_state.gd")
 const PlayerForgeWipLibraryStateScript = preload("res://core/models/player_forge_wip_library_state.gd")
-
+const Fixture = preload("res://tools/forge_v2_small_handle_fixture.gd")
+const MaterialResolver = preload("res://core/resolvers/material_runtime_resolver.gd")
 const RESULT_FILE_PATH := "C:/WORKSPACE/player_held_item_materials_results.txt"
-const TEMP_STATE_DIR := "C:/WORKSPACE/test_artifacts"
+const TEMP_STATE_DIR := "user://verification/held_item_materials"
+var _failures := PackedStringArray()
+var _lines := PackedStringArray()
+
 
 func _init() -> void:
 	call_deferred("_run_verification")
 
+
 func _run_verification() -> void:
-	var player_scene: PackedScene = load("res://scenes/player/player_character.tscn") as PackedScene
-	var player_root: Node = player_scene.instantiate()
+	var player_scene := load("res://scenes/player/player_character.tscn") as PackedScene
+	var player_root := player_scene.instantiate()
 	root.add_child(player_root)
 	await process_frame
 	await process_frame
-
 	var player := player_root as PlayerController3D
-	var body_state = PlayerBodyInventoryStateScript.new()
-	body_state.save_file_path = "%s/verify_materials_body_inventory_state.tres" % TEMP_STATE_DIR
-	var personal_state = PlayerPersonalStorageStateScript.new()
-	personal_state.save_file_path = "%s/verify_materials_personal_storage_state.tres" % TEMP_STATE_DIR
-	var equipment_state = PlayerEquipmentStateScript.new()
-	equipment_state.save_file_path = "%s/verify_materials_player_equipment_state.tres" % TEMP_STATE_DIR
-	var wip_library = PlayerForgeWipLibraryStateScript.new()
-	wip_library.save_file_path = "%s/verify_materials_player_wip_library_state.tres" % TEMP_STATE_DIR
-
+	var body_state := PlayerBodyInventoryStateScript.new()
+	body_state.save_file_path = TEMP_STATE_DIR.path_join("body.tres")
+	var personal_state := PlayerPersonalStorageStateScript.new()
+	personal_state.save_file_path = TEMP_STATE_DIR.path_join("personal.tres")
+	var equipment_state := PlayerEquipmentStateScript.new()
+	equipment_state.save_file_path = TEMP_STATE_DIR.path_join("equipment.tres")
+	var library := PlayerForgeWipLibraryStateScript.new()
+	library.save_file_path = TEMP_STATE_DIR.path_join("library.tres")
 	player.body_inventory_state = body_state
 	player.personal_storage_state = personal_state
 	player.equipment_state = equipment_state
-	player.forge_wip_library_state = wip_library
+	player.forge_wip_library_state = library
 	player._sync_equipped_test_meshes()
-
-	var saved_wip: CraftedItemWIP = wip_library.save_wip(_build_mixed_material_wip())
-	var runtime_wip: CraftedItemWIP = saved_wip.duplicate(true) as CraftedItemWIP
-	var runtime_stage2_missing_before_build: bool = runtime_wip != null and runtime_wip.stage2_item_state == null
-	var runtime_test_print: TestPrintInstance = player.forge_service.build_test_print_from_wip(runtime_wip, {})
-	var equip_result: Dictionary = player.equip_saved_wip_to_hand(saved_wip.wip_id, &"hand_right")
+	var source := _build_prepared_color_wip()
+	if not _expect(source != null, "V2 fixture exports"):
+		_finish()
+		return
+	var saved: CraftedItemWIP = library.save_wip(source)
+	if not _expect(saved != null, "V2 colored mesh saves"):
+		_finish()
+		return
+	var runtime_wip := saved.duplicate(true) as CraftedItemWIP
+	var prepared_before: Resource = runtime_wip.stage2_item_state
+	var test_print: TestPrintInstance = player.forge_service.build_test_print_from_wip(
+		runtime_wip, Fixture.material_lookup(), {}, {}, {}, true
+	)
+	_expect(runtime_wip.stage2_item_state == prepared_before, "runtime uses existing prepared state without rebuilding it")
+	_expect(test_print != null and test_print.visual_mesh_source == &"editable_mesh",
+		"runtime mesh authority is prepared editable mesh")
+	var mesh: ArrayMesh = player.held_item_mesh_builder.build_mesh_from_test_print(test_print)
+	_expect(_unique_colors(mesh).size() == 2, "prepared wood and iron colors survive TestPrint creation")
+	var cached_node: Node3D = player.equipped_item_presenter.build_equipped_item_node(
+		saved.duplicate(true) as CraftedItemWIP, &"hand_right", player.forge_service,
+		Fixture.material_lookup(), player.held_item_mesh_builder, player.humanoid_rig,
+		PlayerController3D.DEFAULT_FORGE_RULES_RESOURCE,
+		PlayerController3D.DEFAULT_FORGE_VIEW_TUNING_RESOURCE, true
+	)
+	var cached_visual := _resolve_first_child_mesh_instance(cached_node)
+	_expect(cached_visual != null and _unique_colors(cached_visual.mesh as ArrayMesh) == _unique_colors(mesh),
+		"cached equipped-node construction preserves prepared colors")
+	if cached_node != null:
+		cached_node.free()
+	var equip: Dictionary = player.equip_saved_wip_to_hand(saved.wip_id, &"hand_right")
 	await process_frame
 	await process_frame
-
-	var held_item: Node3D = player.held_item_nodes.get(&"hand_right") as Node3D
-	var mesh_instance: MeshInstance3D = _resolve_first_child_mesh_instance(held_item)
-	var override_material: StandardMaterial3D = mesh_instance.material_override as StandardMaterial3D if mesh_instance != null else null
-	var mesh: ArrayMesh = mesh_instance.mesh as ArrayMesh if mesh_instance != null else null
-	var unique_colors: Dictionary = {}
-	var vertex_color_count: int = 0
-	if mesh != null and mesh.get_surface_count() > 0:
-		var surface_arrays: Array = mesh.surface_get_arrays(0)
-		var colors: PackedColorArray = surface_arrays[Mesh.ARRAY_COLOR]
-		vertex_color_count = colors.size()
-		for color: Color in colors:
-			unique_colors[_color_key(color)] = true
-	var canonical_mesh: ArrayMesh = (
-		player.held_item_mesh_builder.build_mesh_from_canonical_geometry(runtime_test_print.canonical_geometry, player._get_material_lookup())
-		if runtime_test_print != null and runtime_test_print.canonical_geometry != null
-		else null
+	var held := player.held_item_nodes.get(&"hand_right") as Node3D
+	var visual := _resolve_first_child_mesh_instance(held)
+	var material := visual.material_override as StandardMaterial3D if visual != null else null
+	var held_mesh := visual.mesh as ArrayMesh if visual != null else null
+	_expect(bool(equip.get("success", false)), "V2 saved weapon equips")
+	_expect(visual != null, "equipped visual exists")
+	_expect(material != null and material.vertex_color_use_as_albedo, "equipped material uses saved vertex colors")
+	_expect(material != null and material.cull_mode == BaseMaterial3D.CULL_DISABLED, "equipped material remains double sided")
+	# The Forge test-equip action deliberately rebakes a private clone. The current
+	# V2 adapter initializes its output colors; it does not transport edited paint.
+	# Check that branch against its refreshed export, without treating it as cache reuse.
+	var refreshed: TestPrintInstance = player.forge_service.build_test_print_from_wip(
+		saved.duplicate(true) as CraftedItemWIP, Fixture.material_lookup()
 	)
-	var canonical_unique_colors: Dictionary = {}
-	var canonical_vertex_color_count: int = 0
-	if canonical_mesh != null and canonical_mesh.get_surface_count() > 0:
-		var canonical_surface_arrays: Array = canonical_mesh.surface_get_arrays(0)
-		var canonical_colors: PackedColorArray = canonical_surface_arrays[Mesh.ARRAY_COLOR]
-		canonical_vertex_color_count = canonical_colors.size()
-		for color: Color in canonical_colors:
-			canonical_unique_colors[_color_key(color)] = true
-	var runtime_stage2_exists_after_build: bool = runtime_wip != null and runtime_wip.stage2_item_state != null
-	var runtime_unified_shell_quad_count: int = (
-		runtime_wip.stage2_item_state.get_unified_shell_quad_count()
-		if runtime_wip != null and runtime_wip.stage2_item_state != null
-		else 0
+	var refreshed_mesh: ArrayMesh = player.held_item_mesh_builder.build_mesh_from_test_print(refreshed)
+	_expect(held_mesh != null and _unique_colors(held_mesh) == _unique_colors(refreshed_mesh),
+		"Forge test equip matches its deliberate V2 export refresh")
+	var unchanged: TestPrintInstance = player.forge_service.build_test_print_from_wip(
+		library.get_saved_wip_clone(saved.wip_id), Fixture.material_lookup(), {}, {}, {}, true
 	)
-	var runtime_patch_count: int = (
-		runtime_wip.stage2_item_state.get_patch_count()
-		if runtime_wip != null and runtime_wip.stage2_item_state != null
-		else 0
-	)
+	_expect(_unique_colors(player.held_item_mesh_builder.build_mesh_from_test_print(unchanged)) == _unique_colors(mesh),
+		"Forge test equip leaves saved prepared colors unchanged")
+	var missing := saved.duplicate(true) as CraftedItemWIP
+	missing.stage2_item_state = null
+	var missing_print: TestPrintInstance = player.forge_service.build_test_print_from_wip(missing)
+	_expect(missing.stage2_item_state == null, "missing prepared mesh is never regenerated from retired cell data")
+	_expect(player.held_item_mesh_builder.build_mesh_from_test_print(missing_print).get_surface_count() == 0,
+		"missing prepared mesh has no fallback visual")
+	player_root.queue_free()
+	await process_frame
+	_finish()
 
-	var lines: PackedStringArray = []
-	lines.append("runtime_stage2_missing_before_build=%s" % str(runtime_stage2_missing_before_build))
-	lines.append("runtime_stage2_exists_after_build=%s" % str(runtime_stage2_exists_after_build))
-	lines.append("runtime_stage2_unified_shell_quad_count=%d" % runtime_unified_shell_quad_count)
-	lines.append("runtime_stage2_patch_count=%d" % runtime_patch_count)
-	lines.append("runtime_stage2_unified_shell_simpler_than_patch_grid=%s" % str(
-		runtime_unified_shell_quad_count > 0 and runtime_unified_shell_quad_count < runtime_patch_count
-	))
-	lines.append("runtime_test_print_exists=%s" % str(runtime_test_print != null))
-	lines.append("runtime_test_print_visual_mesh_source=%s" % str(
-		runtime_test_print.visual_mesh_source if runtime_test_print != null else StringName()
-	))
-	lines.append("runtime_test_print_uses_stage2_geometry=%s" % str(
-		runtime_test_print != null
-		and runtime_test_print.stage2_item_state != null
-		and runtime_test_print.canonical_geometry != null
-		and runtime_test_print.stage2_item_state.get_unified_shell_quad_count() == runtime_test_print.canonical_geometry.get_quad_count()
-	))
-	lines.append("equip_success=%s" % str(bool(equip_result.get("success", false))))
-	lines.append("held_item_exists=%s" % str(held_item != null))
-	lines.append("mesh_instance_exists=%s" % str(mesh_instance != null))
-	lines.append("mesh_instance_visual_mesh_source=%s" % str(
-		mesh_instance.get_meta("visual_mesh_source", StringName()) if mesh_instance != null else StringName()
-	))
-	lines.append("material_override_exists=%s" % str(override_material != null))
-	lines.append("material_override_uses_vertex_color=%s" % str(override_material != null and override_material.vertex_color_use_as_albedo))
-	lines.append("material_override_cull_disabled=%s" % str(override_material != null and override_material.cull_mode == BaseMaterial3D.CULL_DISABLED))
-	lines.append("vertex_color_count=%d" % vertex_color_count)
-	lines.append("unique_vertex_color_count=%d" % unique_colors.size())
-	lines.append("multiple_visible_material_colors=%s" % str(unique_colors.size() > 1))
-	lines.append("canonical_vertex_color_count=%d" % canonical_vertex_color_count)
-	lines.append("canonical_unique_vertex_color_count=%d" % canonical_unique_colors.size())
-	lines.append("canonical_multiple_visible_material_colors=%s" % str(canonical_unique_colors.size() > 1))
 
-	var file := FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)
-	if file != null:
-		file.store_string("\n".join(lines))
-		file.close()
-
-	quit()
-
-func _build_mixed_material_wip() -> CraftedItemWIP:
-	var wip := CraftedItemWIP.new()
+func _build_prepared_color_wip() -> CraftedItemWIP:
+	# This verifies saved editable-color transport, not retired voxel color reconstruction.
+	# Material stat/occupancy ownership has its own V2 export verifier.
+	var lookup := Fixture.material_lookup()
+	var wip := Fixture.build(&"mat_wood_gray", lookup)
+	if wip == null:
+		return null
 	wip.wip_id = &"verify_player_held_item_materials"
-	wip.forge_project_name = "Verify Player Held Item Materials"
-	wip.creator_id = &"verify"
-	wip.forge_intent = &"intent_melee"
-	wip.equipment_context = &"ctx_weapon"
-
-	var layer_map: Dictionary = {}
-	for x: int in range(20, 44):
-		for y: int in range(10, 13):
-			for z: int in range(20, 22):
-				_add_cell(layer_map, Vector3i(x, y, z), &"mat_wood_gray")
-
-	for x: int in range(44, 52):
-		for y: int in range(8, 15):
-			for z: int in range(19, 23):
-				_add_cell(layer_map, Vector3i(x, y, z), &"mat_iron_gray")
-
-	var ordered_layers: Array = layer_map.keys()
-	ordered_layers.sort()
-	for layer_index_value in ordered_layers:
-		wip.layers.append(layer_map[layer_index_value])
+	wip.forge_project_name = "Verify V2 Prepared Material Colors"
+	var editable := wip.stage2_item_state.get("current_editable_mesh_state") as Resource
+	var arrays: Array = editable.get("surface_arrays") as Array
+	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var resolver := MaterialResolver.new()
+	var wood := resolver.resolve_material_color(&"mat_wood_gray", lookup, Color.WHITE)
+	var iron := resolver.resolve_material_color(&"mat_iron_gray", lookup, Color.WHITE)
+	var colors := PackedColorArray()
+	for vertex: Vector3 in vertices:
+		colors.append(wood if vertex.x < 8.0 else iron)
+	arrays[Mesh.ARRAY_COLOR] = colors
+	editable.set("surface_arrays", arrays)
 	return wip
 
-func _add_cell(layer_map: Dictionary, grid_position: Vector3i, material_variant_id: StringName) -> void:
-	if not layer_map.has(grid_position.z):
-		var layer := LayerAtom.new()
-		layer.layer_index = grid_position.z
-		layer.cells = []
-		layer_map[grid_position.z] = layer
-	var cell := CellAtom.new()
-	cell.grid_position = grid_position
-	cell.layer_index = grid_position.z
-	cell.material_variant_id = material_variant_id
-	var target_layer: LayerAtom = layer_map[grid_position.z]
-	target_layer.cells.append(cell)
 
-func _resolve_first_child_mesh_instance(parent_node: Node) -> MeshInstance3D:
-	if parent_node == null:
-		return null
-	for child_node: Node in parent_node.get_children():
-		if child_node is MeshInstance3D:
-			return child_node as MeshInstance3D
+func _unique_colors(mesh: ArrayMesh) -> Dictionary:
+	var colors: Dictionary = {}
+	if mesh == null:
+		return colors
+	for surface_index: int in range(mesh.get_surface_count()):
+		var arrays: Array = mesh.surface_get_arrays(surface_index)
+		var values: PackedColorArray = arrays[Mesh.ARRAY_COLOR]
+		for color: Color in values:
+			colors["%.4f|%.4f|%.4f|%.4f" % [color.r, color.g, color.b, color.a]] = true
+	return colors
+
+
+func _resolve_first_child_mesh_instance(parent: Node) -> MeshInstance3D:
+	if parent != null:
+		for child: Node in parent.get_children():
+			if child is MeshInstance3D:
+				return child as MeshInstance3D
 	return null
 
-func _color_key(color: Color) -> String:
-	return "%0.4f|%0.4f|%0.4f|%0.4f" % [color.r, color.g, color.b, color.a]
+
+func _expect(condition: bool, label: String) -> bool:
+	_lines.append("%s=%s" % [label, condition])
+	if not condition:
+		_failures.append(label)
+	return condition
+
+
+func _finish() -> void:
+	var file := FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)
+	if file != null:
+		file.store_string("\n".join(_lines))
+	for failure: String in _failures:
+		push_error(failure)
+	quit(0 if _failures.is_empty() else 1)

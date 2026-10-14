@@ -116,7 +116,7 @@ func _build_candidate_basis(reverse_grip: bool, correction_axis: Vector3) -> Bas
 	return final_basis.orthonormalized()
 
 func _build_valid_test_wip(wip_id: StringName, grip_style_mode: StringName) -> CraftedItemWIP:
-	var wip: CraftedItemWIP = CraftedItemWIP.new()
+	var wip: CraftedItemWIP = preload("res://tools/forge_v2_small_handle_fixture.gd").build(&"mat_wood_gray")
 	wip.wip_id = wip_id
 	wip.forge_project_name = String(wip_id)
 	wip.creator_id = &"verify"
@@ -124,22 +124,4 @@ func _build_valid_test_wip(wip_id: StringName, grip_style_mode: StringName) -> C
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
 	wip.grip_style_mode = grip_style_mode
-	var layer_a: LayerAtom = LayerAtom.new()
-	layer_a.layer_index = 20
-	layer_a.cells = _build_handle_cells(20)
-	var layer_b: LayerAtom = LayerAtom.new()
-	layer_b.layer_index = 21
-	layer_b.cells = _build_handle_cells(21)
-	wip.layers = [layer_a, layer_b]
 	return wip
-
-func _build_handle_cells(layer_index: int) -> Array[CellAtom]:
-	var cells: Array[CellAtom] = []
-	for x in range(20, 32):
-		for y in range(10, 13):
-			var cell: CellAtom = CellAtom.new()
-			cell.grid_position = Vector3i(x, y, layer_index)
-			cell.layer_index = layer_index
-			cell.material_variant_id = &"mat_wood_gray"
-			cells.append(cell)
-	return cells

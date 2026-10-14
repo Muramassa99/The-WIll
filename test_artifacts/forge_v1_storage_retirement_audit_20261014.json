@@ -1,0 +1,18 @@
+﻿{
+    "task":  "Forge V1 storage and runtime fallback retirement",
+    "date":  "2026-10-14",
+    "new_deleted_files":  [
+                              "The Will- main folder/the-will-gamefiles/core/models/crafted_item_canonical_solid.gd",
+                              "The Will- main folder/the-will-gamefiles/core/models/crafted_item_canonical_solid.gd.uid",
+                              "The Will- main folder/the-will-gamefiles/core/resolvers/crafted_item_canonical_geometry_resolver.gd",
+                              "The Will- main folder/the-will-gamefiles/core/resolvers/crafted_item_canonical_geometry_resolver.gd.uid",
+                              "The Will- main folder/the-will-gamefiles/core/resolvers/crafted_item_canonical_solid_resolver.gd",
+                              "The Will- main folder/the-will-gamefiles/core/resolvers/crafted_item_canonical_solid_resolver.gd.uid",
+                              "The Will- main folder/the-will-gamefiles/tools/verify_crafted_item_mesh_foundation.gd",
+                              "The Will- main folder/the-will-gamefiles/tools/verify_crafted_item_mesh_foundation.gd.uid"
+                          ],
+    "new_deleted_file_count":  8,
+    "remaining_deleted_path_references":  [
+
+                                          ]
+}

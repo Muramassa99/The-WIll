@@ -1,0 +1,371 @@
+﻿{
+    "scope":  "Parse changed verifier scripts; no execution",
+    "count":  52,
+    "failed":  0,
+    "results":  [
+                    {
+                        "script":  "tools/diagnose_bridge_origin_replay_comparator.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5297.3996000000006,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_diagnose_bridge_origin_replay_comparator_20261014.log"
+                    },
+                    {
+                        "script":  "tools/diagnose_extensive_testing_1_geometry.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  1257.2589,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_diagnose_extensive_testing_1_geometry_20261014.log"
+                    },
+                    {
+                        "script":  "tools/diagnose_left_grip_correction_axis.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5191.5869,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_diagnose_left_grip_correction_axis_20261014.log"
+                    },
+                    {
+                        "script":  "tools/forge_v2_small_handle_fixture.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  1728.5653,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_forge_v2_small_handle_fixture_20261014.log"
+                    },
+                    {
+                        "script":  "tools/forge_v2_workpiece_benchmark_fixture.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  1289.7867,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_forge_v2_workpiece_benchmark_fixture_20261014.log"
+                    },
+                    {
+                        "script":  "tools/grip_plane_proof/verify_prepared_grip_cache_ownership.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5954.2699,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_grip_plane_proof_verify_prepared_grip_cache_ownership_20261014.log"
+                    },
+                    {
+                        "script":  "tools/grip_plane_proof/verify_surface_grip_save_playback.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5670.474,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_grip_plane_proof_verify_surface_grip_save_playback_20261014.log"
+                    },
+                    {
+                        "script":  "tools/grip_plane_proof/verify_surface_grip_support.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5507.0323,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_grip_plane_proof_verify_surface_grip_support_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_combat_animation_station_baseline_reset.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5148.8833,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_combat_animation_station_baseline_reset_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_combat_animation_station_foundation.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  1169.0879,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_combat_animation_station_foundation_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_combat_animation_station_noncombat_stow_markers.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5072.8241,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_combat_animation_station_noncombat_stow_markers_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_combat_animation_station_open_modes.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  4802.9094000000005,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_combat_animation_station_open_modes_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_combat_animation_station_preview.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5369.2654,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_combat_animation_station_preview_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_combat_animation_station_slot_selector.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  4827.8745,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_combat_animation_station_slot_selector_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_combat_animation_station_timeline.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5010.6288,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_combat_animation_station_timeline_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_combat_animation_station_workflow.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  4913.2797,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_combat_animation_station_workflow_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_combat_idle_single_node_authority.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5138.7405,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_combat_idle_single_node_authority_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_combat_origin_annotations.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  518.9829,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_combat_origin_annotations_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_combat_speed_state_feedback.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  4981.0783,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_combat_speed_state_feedback_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_disassembly_world_load.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  7220.953,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_disassembly_world_load_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_equipped_weapon_skill_slot_sync.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5306.9810000000007,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_equipped_weapon_skill_slot_sync_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_forge_v1_retirement.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  7234.8164000000006,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_forge_v1_retirement_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_forge_v2_exact_handle_grip_surface.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  2649.0923000000003,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_forge_v2_exact_handle_grip_surface_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_forge_v2_grip_order_balance_contract.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  1718.6231,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_forge_v2_grip_order_balance_contract_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_forge_v2_grip_target_wrapper.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  2752.3936000000003,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_forge_v2_grip_target_wrapper_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_forge_v2_handle_axial_span_authority.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  1529.2098,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_forge_v2_handle_axial_span_authority_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_forge_v2_handle_length_bands.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  1995.6635,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_forge_v2_handle_length_bands_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_forge_v2_project_save_as_rename.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  3504.4272,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_forge_v2_project_save_as_rename_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_forge_v2_runtime_contract_fallback_load.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  6366.9619,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_forge_v2_runtime_contract_fallback_load_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_forge_v2_skill_crafter_grip_parity.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5373.9895000000006,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_forge_v2_skill_crafter_grip_parity_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_forge_v2_stage_controller_runtime_export.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  2465.9148,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_forge_v2_stage_controller_runtime_export_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_forge_v2_weighted_mass_orientation_contract.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  1932.586,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_forge_v2_weighted_mass_orientation_contract_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_forge_v2_wip_runtime_contract.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  4961.2629000000006,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_forge_v2_wip_runtime_contract_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_forge_wip_library.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  1627.1390000000001,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_forge_wip_library_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_handle_coordinate_contract.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  3852.6949,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_handle_coordinate_contract_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_material_variant_carrythrough.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  1567.8298,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_material_variant_carrythrough_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_mochi_vertical_slice.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  1616.555,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_mochi_vertical_slice_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_player_finger_grip_ik.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  4864.6442000000006,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_player_finger_grip_ik_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_player_grip_hold_layout.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5465.8976,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_player_grip_hold_layout_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_player_hand_mount_orientation.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  6256.8691,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_player_hand_mount_orientation_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_player_held_item_materials.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  4928.314,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_player_held_item_materials_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_player_inventory_slice.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5030.1425,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_player_inventory_slice_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_player_runtime_idle_pose.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5288.0842,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_player_runtime_idle_pose_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_player_runtime_skill_activation.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5396.3639,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_player_runtime_skill_activation_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_player_runtime_skill_entry_recovery.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5210.5093000000006,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_player_runtime_skill_entry_recovery_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_player_runtime_skill_playback.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  6134.0848000000005,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_player_runtime_skill_playback_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_player_weapon_grip_orientation.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5111.7908000000007,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_player_weapon_grip_orientation_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_player_weapon_guidance.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5014.9760000000006,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_player_weapon_guidance_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_primary_grip_slice_center_follower.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  4233.6265,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_primary_grip_slice_center_follower_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_runtime_solved_replay_track_bridge_offset.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  4321.5448000000006,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_runtime_solved_replay_track_bridge_offset_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_skill_crafter_space_button_focus_guard.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5072.2401,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_skill_crafter_space_button_focus_guard_20261014.log"
+                    },
+                    {
+                        "script":  "tools/verify_weapon_stow_positions.gd",
+                        "passed":  true,
+                        "exit_code":  0,
+                        "duration_ms":  5496.9671,
+                        "log":  "C:\\WORKSPACE\\godot_runs\\forge_v1_storage_parse_tools_verify_weapon_stow_positions_20261014.log"
+                    }
+                ]
+}

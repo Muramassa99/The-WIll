@@ -1,5 +1,8 @@
 extends SceneTree
 
+const ForgeV2Fixture = preload("res://tools/forge_v2_small_handle_fixture.gd")
+const GripSeat = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
+
 const PlayerBodyInventoryStateScript = preload("res://core/models/player_body_inventory_state.gd")
 const PlayerPersonalStorageStateScript = preload("res://core/models/player_personal_storage_state.gd")
 const PlayerEquipmentStateScript = preload("res://core/models/player_equipment_state.gd")
@@ -8,8 +11,6 @@ const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_
 
 const RESULT_FILE_PATH := "C:/WORKSPACE/player_weapon_grip_orientation_results.txt"
 const TEMP_STATE_DIR := "C:/WORKSPACE/test_artifacts"
-const TEST_GRIP_LAYER_START := 20
-const TEST_GRIP_SLICE_COUNT := 20
 
 func _init() -> void:
 	call_deferred("_run_verification")
@@ -67,15 +68,27 @@ func _run_verification() -> void:
 	lines.append("right_reverse_tip_axis_matches_reverse_contact_axis=%s" % str(float(right_reverse_data.get("tip_axis_score", 2.0)) > 0.95))
 	lines.append("left_normal_tip_axis_matches_contact_axis=%s" % str(float(left_normal_data.get("tip_axis_score", -2.0)) > 0.95))
 	lines.append("left_reverse_tip_axis_matches_reverse_contact_axis=%s" % str(float(left_reverse_data.get("tip_axis_score", 2.0)) > 0.95))
-	lines.append("right_reverse_support_guide_absent=%s" % str(not bool(right_reverse_data.get("has_secondary_guide", true))))
-	lines.append("left_reverse_support_guide_absent=%s" % str(not bool(left_reverse_data.get("has_secondary_guide", true))))
+	lines.append("right_reverse_support_guide_matches_eligibility=%s" % str(bool(right_reverse_data.get("support_guide_matches_eligibility", false))))
+	lines.append("left_reverse_support_guide_matches_eligibility=%s" % str(bool(left_reverse_data.get("support_guide_matches_eligibility", false))))
+
+	var all_checks_passed := true
+	for capture: Dictionary in [right_normal_data, right_reverse_data, left_normal_data, left_reverse_data]:
+		all_checks_passed = all_checks_passed and (
+			bool(capture.get("exists", false))
+			and bool(capture.get("mounted_to_hand", false))
+			and bool(capture.get("source_path_valid", false))
+			and bool(capture.get("support_guide_matches_eligibility", false))
+			and float(capture.get("tip_axis_score", -2.0)) > 0.95
+		)
+	lines.append("fixture_scope=V2_saved_handle_axis_hand_mount")
+	lines.append("all_checks_passed=%s" % str(all_checks_passed))
 
 	var file := FileAccess.open(RESULT_FILE_PATH, FileAccess.WRITE)
 	if file != null:
 		file.store_string("\n".join(lines))
 		file.close()
 
-	quit()
+	quit(0 if all_checks_passed else 1)
 
 func _equip_and_measure(
 	player: PlayerController3D,
@@ -85,6 +98,7 @@ func _equip_and_measure(
 ) -> Dictionary:
 	player.clear_equipment_slot(&"hand_right")
 	player.clear_equipment_slot(&"hand_left")
+	player.set_weapons_drawn(true)
 	await process_frame
 	await process_frame
 	player.equip_saved_wip_to_hand(saved_wip_id, slot_id)
@@ -106,16 +120,23 @@ func _equip_and_measure(
 	)
 	player.equipped_item_presenter.apply_hand_mount_transform(held_item)
 	await process_frame
-	var local_tip: Vector3 = held_item.get_meta("weapon_tip_local", Vector3.ZERO) as Vector3
-	var local_grip: Vector3 = held_item.get_meta("primary_grip_contact_local", Vector3.ZERO) as Vector3
-	var local_tip_axis: Vector3 = local_tip - local_grip
+	var saved_wip: CraftedItemWIP = player.get_forge_wip_library_state().get_saved_wip(saved_wip_id)
+	var profile: BakedProfile = saved_wip.latest_baked_profile_snapshot if saved_wip != null else null
+	var source_path_valid := profile != null and GripSeat.profile_has_authoritative_path(profile)
+	var local_tip_axis := Vector3.ZERO
+	if source_path_valid:
+		# V2 saved path endpoints share the mesh frame; mounting only rebases its origin.
+		local_tip_axis = profile.primary_grip_span_end - profile.primary_grip_span_start
+		if GripSeat.resolve_profile_handle_tip_side_axis_ratio_from_span_start(profile) < 0.5:
+			local_tip_axis = -local_tip_axis
+	var hand_anchor: Node3D = player._get_hand_anchor(slot_id)
+	var mounted_to_hand := hand_anchor != null and held_item.get_parent() == hand_anchor
 	var tip_axis_score: float = -2.0
 	if local_tip_axis.length_squared() > 0.000001:
 		var expected_contact_axis: Vector3 = _resolve_contact_axis_local(player, slot_id)
 		var grip_style_mode: StringName = held_item.get_meta("grip_style_mode", CraftedItemWIP.GRIP_NORMAL) as StringName
 		if grip_style_mode == CraftedItemWIP.GRIP_REVERSE:
 			expected_contact_axis = -expected_contact_axis
-		var hand_anchor: Node3D = held_item.get_parent() as Node3D
 		var expected_anchor_axis: Vector3 = expected_contact_axis
 		if hand_anchor != null:
 			expected_anchor_axis = (hand_anchor.transform.basis.inverse() * expected_contact_axis).normalized()
@@ -123,6 +144,12 @@ func _equip_and_measure(
 		tip_axis_score = tip_axis_in_anchor.dot(expected_anchor_axis.normalized())
 	return {
 		"exists": true,
+		"mounted_to_hand": mounted_to_hand,
+		"source_path_valid": source_path_valid,
+		"support_guide_matches_eligibility": (
+			(held_item.get_node_or_null("SecondaryGripGuide") != null)
+			== bool(held_item.get_meta("two_hand_character_eligible", false))
+		),
 		"tip_axis_score": tip_axis_score,
 		"grip_style_mode": held_item.get_meta("grip_style_mode", StringName()),
 		"has_secondary_guide": held_item.get_node_or_null("SecondaryGripGuide") != null
@@ -137,7 +164,7 @@ func _resolve_contact_axis_local(player: PlayerController3D, slot_id: StringName
 	return Vector3.RIGHT
 
 func _build_valid_test_wip(wip_id: StringName, grip_style_mode: StringName) -> CraftedItemWIP:
-	var wip: CraftedItemWIP = CraftedItemWIP.new()
+	var wip: CraftedItemWIP = ForgeV2Fixture.build(&"mat_wood_gray", ForgeV2Fixture.material_lookup())
 	wip.wip_id = wip_id
 	wip.forge_project_name = String(wip_id)
 	wip.creator_id = &"verify"
@@ -145,22 +172,4 @@ func _build_valid_test_wip(wip_id: StringName, grip_style_mode: StringName) -> C
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
 	wip.grip_style_mode = grip_style_mode
-	var layers: Array[LayerAtom] = []
-	for layer_index: int in range(TEST_GRIP_LAYER_START, TEST_GRIP_LAYER_START + TEST_GRIP_SLICE_COUNT):
-		var layer := LayerAtom.new()
-		layer.layer_index = layer_index
-		layer.cells = _build_handle_cells(layer_index)
-		layers.append(layer)
-	wip.layers = layers
 	return wip
-
-func _build_handle_cells(layer_index: int) -> Array[CellAtom]:
-	var cells: Array[CellAtom] = []
-	for x in range(20, 23):
-		for y in range(10, 13):
-			var cell: CellAtom = CellAtom.new()
-			cell.grid_position = Vector3i(x, y, layer_index)
-			cell.layer_index = layer_index
-			cell.material_variant_id = &"mat_wood_gray"
-			cells.append(cell)
-	return cells

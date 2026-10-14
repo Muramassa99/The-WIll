@@ -53,6 +53,8 @@ func _run_verification() -> void:
 	snapshot_chain_player.advance(0.11)
 	var snapshot_weapon_position_after_bridge: Vector3 = snapshot_chain_player.current_solved_weapon_position_reference_local
 
+	# At 0.21 s, subtract the 0.20 s bridge: source time is 0.01 s.
+	# Source X moves 0.1 m over 0.1 s, so interpolated X is 0.01 m.
 	var all_checks_passed: bool = (
 		copied
 		and solved_track_known
@@ -62,13 +64,13 @@ func _run_verification() -> void:
 		and solved_available_after_bridge
 		and solved_bone_count_after_bridge == 2
 		and solved_anchor_count_after_bridge == 2
-		and weapon_position_after_bridge.distance_to(Vector3(0.0, 0.2, 0.3)) < 0.0001
+		and weapon_position_after_bridge.distance_to(Vector3(0.01, 0.2, 0.3)) < 0.0001
 		and copied_with_snapshot
 		and snapshot_bridge_frames_available
 		and solved_available_with_snapshot_at_start
 		and snapshot_weapon_position_at_start.distance_to(Vector3(-0.2, 0.1, 0.0)) < 0.0001
 		and snapshot_weapon_position_mid_bridge.distance_to(Vector3(-0.1, 0.15, 0.15)) < 0.0001
-		and snapshot_weapon_position_after_bridge.distance_to(Vector3(0.0, 0.2, 0.3)) < 0.0001
+		and snapshot_weapon_position_after_bridge.distance_to(Vector3(0.01, 0.2, 0.3)) < 0.0001
 	)
 
 	var lines: PackedStringArray = []

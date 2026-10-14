@@ -1,0 +1,49 @@
+﻿{
+    "time":  "2026-10-14T04:13:39",
+    "deleted_sources":  102,
+    "removed_classes":  51,
+    "scanned_files":  679,
+    "hits":  [
+                 {
+                     "path":  "tools\\benchmark_forge_v2_live_stroke_spm.gd",
+                     "line":  276,
+                     "tokens":  [
+                                    "CraftingBench"
+                                ],
+                     "text":  "\"actual StageController + full CraftingBench UI/own-world WorkspacePreview + \""
+                 },
+                 {
+                     "path":  "tools\\verify_disassembly_world_load.gd",
+                     "line":  18,
+                     "tokens":  [
+                                    "CraftingBench"
+                                ],
+                     "text":  "var retired_crafting_bench: Node = root_scene.get_node_or_null(\"CraftingBench\")"
+                 },
+                 {
+                     "path":  "tools\\verify_forge_v1_retirement.gd",
+                     "line":  19,
+                     "tokens":  [
+                                    "CraftingBench"
+                                ],
+                     "text":  "_expect(world.get_node_or_null(\"CraftingBench\") == null, \"retired V1 bench absent\")"
+                 },
+                 {
+                     "path":  "tools\\verify_m2_presets.gd",
+                     "line":  4,
+                     "tokens":  [
+                                    "ForgeGridController",
+                                    "ForgeGridController"
+                                ],
+                     "text":  "var controller: ForgeGridController = ForgeGridController.new()"
+                 }
+             ],
+    "followup":  {
+                     "time":  "2026-10-14T04:14:45",
+                     "m2_fixture_exists":  false,
+                     "m2_fixture_uid_exists":  false,
+                     "remaining_unintended_references":  0,
+                     "retained_shared_v2_preloads_verified_present":  true,
+                     "note":  "Tools agent removed last remaining broken ForgeGridController fixture; other hits are two deliberate absent-bench assertions and benchmark prose."
+                 }
+}

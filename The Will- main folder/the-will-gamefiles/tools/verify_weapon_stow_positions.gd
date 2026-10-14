@@ -1,5 +1,7 @@
 extends SceneTree
 
+const ForgeV2Fixture = preload("res://tools/forge_v2_small_handle_fixture.gd")
+
 const PlayerBodyInventoryStateScript = preload("res://core/models/player_body_inventory_state.gd")
 const PlayerPersonalStorageStateScript = preload("res://core/models/player_personal_storage_state.gd")
 const PlayerEquipmentStateScript = preload("res://core/models/player_equipment_state.gd")
@@ -153,7 +155,7 @@ func _equip_and_stow(player: PlayerController3D, saved_wip_id: StringName, slot_
 	return bool(equip_result.get("success", false))
 
 func _build_stow_test_wip(wip_id: StringName, stow_mode: StringName) -> CraftedItemWIP:
-	var wip: CraftedItemWIP = CraftedItemWIP.new()
+	var wip: CraftedItemWIP = ForgeV2Fixture.build(&"mat_wood_gray", ForgeV2Fixture.material_lookup())
 	wip.wip_id = wip_id
 	wip.forge_project_name = "%s Test" % String(wip_id)
 	wip.creator_id = &"verify"
@@ -161,13 +163,6 @@ func _build_stow_test_wip(wip_id: StringName, stow_mode: StringName) -> CraftedI
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
 	wip.stow_position_mode = stow_mode
-	var layer_a: LayerAtom = LayerAtom.new()
-	layer_a.layer_index = 20
-	layer_a.cells = _build_handle_cells(20)
-	var layer_b: LayerAtom = LayerAtom.new()
-	layer_b.layer_index = 21
-	layer_b.cells = _build_handle_cells(21)
-	wip.layers = [layer_a, layer_b]
 	_seed_station_stow_authoring(wip, stow_mode)
 	return wip
 
@@ -265,14 +260,3 @@ func _resolve_side_hip_anchor_error(rig: PlayerHumanoidRig, anchor: Node3D) -> f
 		HIP_SIDE_STOW_OFFSET_METERS
 	)
 	return minf(plus_error, minus_error)
-
-func _build_handle_cells(layer_index: int) -> Array[CellAtom]:
-	var cells: Array[CellAtom] = []
-	for x in range(20, 48):
-		for y in range(10, 13):
-			var cell: CellAtom = CellAtom.new()
-			cell.grid_position = Vector3i(x, y, layer_index)
-			cell.layer_index = layer_index
-			cell.material_variant_id = &"mat_wood_gray"
-			cells.append(cell)
-	return cells

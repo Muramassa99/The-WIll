@@ -363,22 +363,6 @@ func get_forge_wip_library_state() -> PlayerForgeWipLibraryState:
 func ensure_body_inventory_seeded(seed_def: Resource = null) -> void:
 	state_presenter.ensure_body_inventory_seeded(get_body_inventory_state(), seed_def)
 
-func ensure_forge_inventory_seeded(
-		material_lookup: Dictionary,
-		inventory_seed_def: Resource = null,
-		fallback_quantity: int = 0,
-		debug_bonus_quantity: int = 0
-	) -> void:
-	if material_lookup.is_empty():
-		return
-	state_presenter.ensure_forge_inventory_seeded(
-		get_forge_inventory_state(),
-		material_lookup,
-		inventory_seed_def,
-		fallback_quantity,
-		debug_bonus_quantity
-	)
-
 func set_selected_forge_wip_id(saved_wip_id: StringName) -> void:
 	state_presenter.set_selected_forge_wip_id(get_forge_wip_library_state(), saved_wip_id)
 

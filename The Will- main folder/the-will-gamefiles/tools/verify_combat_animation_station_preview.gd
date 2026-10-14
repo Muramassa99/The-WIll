@@ -6,8 +6,6 @@ const CombatAnimationStationUIScene = preload("res://scenes/ui/combat_animation_
 const CombatAnimationMotionNodeEditorScript = preload("res://runtime/combat/combat_animation_motion_node_editor.gd")
 const CombatAnimationSessionStateScript = preload("res://core/models/combat_animation_session_state.gd")
 const PlayerDigitHingeRulesScript = preload("res://runtime/player/player_digit_hinge_rules.gd")
-const LayerAtomScript = preload("res://core/atoms/layer_atom.gd")
-const CellAtomScript = preload("res://core/atoms/cell_atom.gd")
 
 const RESULT_FILE_PATH := "C:/WORKSPACE/combat_animation_station_preview_results.txt"
 const TEMP_SAVE_FILE_PATH := "C:/WORKSPACE/test_artifacts/verify_combat_animation_station_preview_library.tres"
@@ -862,7 +860,7 @@ func _guardrail_has_code(guardrail_state: Dictionary, code: StringName) -> bool:
 	return false
 
 func _build_preview_test_wip() -> CraftedItemWIP:
-	var wip: CraftedItemWIP = CraftedItemWIPScript.new()
+	var wip: CraftedItemWIP = preload("res://tools/forge_v2_small_handle_fixture.gd").build(WOOD_MATERIAL_ID, {}, 0.325)
 	wip.wip_id = &"combat_preview_test_wip"
 	wip.forge_project_name = "Combat Preview Test WIP"
 	CraftedItemWIPScript.apply_builder_path_defaults(
@@ -870,26 +868,4 @@ func _build_preview_test_wip() -> CraftedItemWIP:
 		CraftedItemWIPScript.BUILDER_PATH_MELEE,
 		CraftedItemWIPScript.BUILDER_COMPONENT_PRIMARY
 	)
-	var layer_map: Dictionary = {}
-	for slice_index: int in range(26):
-		for y in range(4, 6):
-			for z in range(4, 7):
-				_add_cell(layer_map, Vector3i(slice_index, y, z), WOOD_MATERIAL_ID)
-	var ordered_layers: Array = layer_map.keys()
-	ordered_layers.sort()
-	for layer_index_value: Variant in ordered_layers:
-		wip.layers.append(layer_map[layer_index_value])
 	return wip
-
-func _add_cell(layer_map: Dictionary, grid_position: Vector3i, material_variant_id: StringName) -> void:
-	if not layer_map.has(grid_position.z):
-		var layer: LayerAtom = LayerAtomScript.new()
-		layer.layer_index = grid_position.z
-		layer.cells = []
-		layer_map[grid_position.z] = layer
-	var cell: CellAtom = CellAtomScript.new()
-	cell.grid_position = grid_position
-	cell.layer_index = grid_position.z
-	cell.material_variant_id = material_variant_id
-	var target_layer: LayerAtom = layer_map[grid_position.z]
-	target_layer.cells.append(cell)

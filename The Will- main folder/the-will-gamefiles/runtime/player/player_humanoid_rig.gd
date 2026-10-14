@@ -278,6 +278,10 @@ var runtime_solved_replay_modifier: SkeletonModifier3D = null
 var runtime_body_restriction_sync_modifier: SkeletonModifier3D = null
 var runtime_bone_debug_modifier: SkeletonModifier3D = null
 var bone_index_cache: Dictionary = {}
+var _hand_grip_span_skeleton: Skeleton3D = null
+var _hand_grip_span_skeleton_version: int = -1
+var _hand_grip_span_scale_metric: Basis = Basis.IDENTITY
+var _hand_grip_spans_meters: Dictionary = {}
 var rig_model_presenter = PlayerRigModelPresenterScript.new()
 var guidance_state_presenter = PlayerRigGuidanceStatePresenterScript.new()
 var locomotion_presenter = PlayerRigLocomotionPresenterScript.new()
@@ -309,6 +313,7 @@ var runtime_locomotion_state_machine_playback: AnimationNodeStateMachinePlayback
 var upper_body_authoring_state: Dictionary = {}
 var authoring_contact_anchor_basis_lookup: Dictionary = {}
 var _prepared_support_grip_seat: Dictionary = {}
+var _prepared_support_wrist_postures: Dictionary = {}
 var authoring_limb_twist_neutral_rotation_lookup: Dictionary = {}
 var authoring_digit_hinge_neutral_rotation_lookup: Dictionary = {}
 var authoring_limb_twist_distribution_state: Dictionary = {}
@@ -486,8 +491,40 @@ func resolve_grip_hold_layout(
 		baked_profile,
 		dominant_slot_id,
 		cell_world_size_meters,
-		max_model_arm_reach_combat_meters
+		max_model_arm_reach_combat_meters,
+		get_hand_grip_spans_meters()
 	)
+
+func get_hand_grip_spans_meters() -> Dictionary:
+	# A tiny runtime measurement of the two fixed base joints, cached per model.
+	# This does not rebake skin or reload/hash the prepared anatomy on UI edits.
+	if not is_instance_valid(skeleton) or not skeleton.is_inside_tree():
+		return {&"hand_right": 0.0, &"hand_left": 0.0}
+	if _hand_grip_span_skeleton != skeleton:
+		if is_instance_valid(_hand_grip_span_skeleton):
+			_hand_grip_span_skeleton.rest_updated.disconnect(_invalidate_hand_grip_spans)
+		_hand_grip_span_skeleton = skeleton
+		skeleton.rest_updated.connect(_invalidate_hand_grip_spans)
+		_invalidate_hand_grip_spans()
+	var world_basis: Basis = skeleton.global_basis
+	var scale_metric: Basis = world_basis.transposed() * world_basis
+	var skeleton_version: int = skeleton.get_version()
+	if (
+		_hand_grip_spans_meters.is_empty()
+		or _hand_grip_span_skeleton_version != skeleton_version
+		or not _hand_grip_span_scale_metric.is_equal_approx(scale_metric)
+	):
+		_hand_grip_spans_meters = {
+			&"hand_right": _resolve_hand_index_pinky_contact_span_meters(&"hand_right"),
+			&"hand_left": _resolve_hand_index_pinky_contact_span_meters(&"hand_left"),
+		}
+		_hand_grip_span_skeleton_version = skeleton_version
+		_hand_grip_span_scale_metric = scale_metric
+	return _hand_grip_spans_meters.duplicate()
+
+func _invalidate_hand_grip_spans() -> void:
+	_hand_grip_spans_meters.clear()
+	_hand_grip_span_skeleton_version = -1
 
 func get_current_animation_name() -> StringName:
 	return locomotion_presenter.get_current_animation_name()
@@ -1108,6 +1145,7 @@ func release_planar_grip_pose(slot_id: StringName) -> void:
 	if _prepared_support_grip_seat.get("slot") == slot_id:
 		finish_prepared_support_grip_seat(false)
 	planar_grip_pose_binding.release(slot_id)
+	_prepared_support_wrist_postures.erase(slot_id)
 	finger_grip_presenter.release_planar_grip_pose(slot_id)
 
 
@@ -1125,6 +1163,8 @@ func apply_planar_grip_pose(slot_id: StringName, weapon: Node3D, relationship_ke
 			finger_grip_presenter.set_planar_grip_rotations(skeleton, slot_id, previous_rotations)
 			return {"valid": false, "reason": "digit_dimensions_changed_during_rotation_application", "grip_accepted": false}
 	planar_grip_pose_binding.commit(slot_id, plan)
+	if slot_id != dominant_grip_slot_id:
+		remember_prepared_support_wrist_posture(slot_id, relationship_key)
 	return {"valid": true, "status": &"planar_grip_pose_bound", "state": get_planar_grip_pose_state(slot_id),
 		"prepared_geometry_matches_live": plan.prepared_geometry_matches_live,
 		"geometry_checks": plan.geometry_checks, "digit_dimensions_preserved": true, "grip_accepted": false}
@@ -1132,6 +1172,12 @@ func apply_planar_grip_pose(slot_id: StringName, weapon: Node3D, relationship_ke
 
 func get_planar_grip_pose_state(slot_id: StringName) -> Dictionary:
 	return planar_grip_pose_binding.state(slot_id)
+
+
+func remember_prepared_support_wrist_posture(slot_id: StringName, relationship_key: String) -> void:
+	var bone := skeleton.find_bone(LEFT_HAND_BONE if slot_id == &"hand_left" else RIGHT_HAND_BONE)
+	if bone >= 0:
+		_prepared_support_wrist_postures[slot_id] = {"key": relationship_key, "local": skeleton.get_bone_pose(bone)}
 
 ## Movement reads the acquired relationship through the existing weapon
 ## guidance owner. Pending acquisition and open/unarmed hands use their old
@@ -1191,19 +1237,171 @@ func begin_prepared_support_grip_seat(slot_id: StringName, weapon: Node3D, reque
 		"hand_in_weapon": weapon.global_transform.affine_inverse() * requested_hand,
 		"target": target, "target_transform": target.global_transform if is_instance_valid(target) else Transform3D.IDENTITY,
 		"pole": pole, "pole_transform": pole.global_transform if is_instance_valid(pole) else Transform3D.IDENTITY}
-	settle_authoring_support_grip_macro_pose_now(0.00005)
+	var frame_realization := realize_prepared_support_hand_frame(slot_id, requested_hand, poses[hand_index])
+	var reach_state := _resolve_usable_arm_target_world(slot_id, requested_hand.origin)
+	if not frame_realization.get("valid", false):
+		settle_authoring_support_grip_macro_pose_now(0.00005)
 	var actual: Transform3D = skeleton.global_transform * skeleton.get_bone_global_pose(hand_index)
 	var arm_diagnostics: Dictionary = last_two_hand_solve_result.get(slot_id, {}).duplicate(true)
-	var within_reach := not bool(arm_diagnostics.get("arm_reach_clamped", false))
+	var within_reach := not bool(reach_state.get("clamped", false))
 	return {"valid": actual.is_finite() and within_reach,
 		"reason": "support_seat_outside_arm_reach" if not within_reach else "",
 		"requested_hand_to_world": requested_hand,
 		"actual_hand_to_world": actual, "origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
 		"previous_hand_to_world": before,
 		"arm_target_diagnostics": arm_diagnostics,
+		"complete_frame_realization": frame_realization,
 		"arm_stage_trace": _prepared_support_grip_seat.arm_stage_trace.duplicate(true),
 		"position_error_m": actual.origin.distance_to(requested_hand.origin),
 		"orientation_error_rad": actual.basis.orthonormalized().get_rotation_quaternion().angle_to(requested_hand.basis.orthonormalized().get_rotation_quaternion())}
+
+
+## A bound grip supplies a complete Hand frame. Use its accepted wrist posture
+## as a preference, derive the Forearm frame, and solve the preceding two links
+## to that elbow. Wrist swing may adapt while its measured twist is preserved;
+## locking wrist-local swing would falsely reject otherwise reachable motion.
+## Bone dimensions, finger rotations and the complete Hand target stay unchanged.
+func realize_prepared_support_hand_frame(slot_id: StringName, requested_hand: Transform3D, accepted_hand_local: Transform3D) -> Dictionary:
+	if skeleton == null or slot_id == dominant_grip_slot_id or not is_support_hand_active(slot_id) or not requested_hand.is_finite():
+		return {"valid": false, "reason": "requires_active_support_frame"}
+	var left := slot_id == &"hand_left"
+	var clavicle_name: StringName = LEFT_CLAVICLE_BONE if left else RIGHT_CLAVICLE_BONE
+	var upperarm_name: StringName = LEFT_UPPERARM_BONE if left else RIGHT_UPPERARM_BONE
+	var forearm_name: StringName = LEFT_FOREARM_BONE if left else RIGHT_FOREARM_BONE
+	var hand_name: StringName = LEFT_HAND_BONE if left else RIGHT_HAND_BONE
+	var indices: Array[int] = [skeleton.find_bone(clavicle_name), skeleton.find_bone(upperarm_name), skeleton.find_bone(forearm_name), skeleton.find_bone(hand_name)]
+	for index: int in indices:
+		if index < 0: return {"valid": false, "reason": "missing_support_frame_bone"}
+	for index: int in range(1, 4):
+		if skeleton.get_bone_parent(indices[index]) != indices[index - 1]:
+			return {"valid": false, "reason": "unexpected_support_frame_hierarchy"}
+	var hand_local := skeleton.get_bone_pose(indices[3])
+	if not hand_local.origin.is_equal_approx(accepted_hand_local.origin) or not hand_local.basis.get_scale().is_equal_approx(accepted_hand_local.basis.get_scale()):
+		return {"valid": false, "reason": "support_wrist_dimensions_changed"}
+	if _resolve_usable_arm_target_world(slot_id, requested_hand.origin).get("clamped", true):
+		return {"valid": false, "reason": "support_seat_outside_arm_reach"}
+	var desired_forearm := requested_hand * accepted_hand_local.affine_inverse()
+	var original_axis := (requested_hand.origin - desired_forearm.origin).normalized()
+	var original_neutral := (desired_forearm.basis.orthonormalized() * skeleton.get_bone_rest(indices[3]).basis.orthonormalized()).get_rotation_quaternion()
+	var original_delta := (requested_hand.basis.orthonormalized().get_rotation_quaternion() * original_neutral.inverse()).normalized()
+	var wrist_twist_reference := _resolve_signed_twist_angle(_extract_quaternion_twist(original_delta, original_axis), original_axis)
+	var root_world := _get_bone_world_position(clavicle_name)
+	var shoulder_world := _get_bone_world_position(upperarm_name)
+	var elbow_world := _get_bone_world_position(forearm_name)
+	var first_length := root_world.distance_to(shoulder_world)
+	var second_length := shoulder_world.distance_to(elbow_world)
+	var wrist_swing_used := false
+	if first_length > 0.000001 and second_length > 0.000001:
+		# Choose the nearest feasible elbow on the fixed forearm-length sphere;
+		# the shoulder range supplies the other sphere's radius. This freedom
+		# belongs to acquisition and following, with the same final constraints.
+		var forearm_length := desired_forearm.origin.distance_to(requested_hand.origin)
+		var root_to_hand := requested_hand.origin - root_world
+		var hand_distance := root_to_hand.length()
+		var min_distance := sqrt(maxf(first_length * first_length + second_length * second_length - 2.0 * first_length * second_length * cos(deg_to_rad(authoring_shoulder_min_plane_angle_degrees)), 0.0))
+		var max_distance := sqrt(maxf(first_length * first_length + second_length * second_length - 2.0 * first_length * second_length * cos(deg_to_rad(authoring_shoulder_max_plane_angle_degrees)), 0.0))
+		min_distance = maxf(min_distance, absf(hand_distance - forearm_length))
+		max_distance = minf(max_distance, hand_distance + forearm_length)
+		var current_distance := root_world.distance_to(desired_forearm.origin)
+		if hand_distance > 0.000001 and min_distance <= max_distance and (current_distance < min_distance or current_distance > max_distance):
+			var chosen_distance := clampf(current_distance, min_distance, max_distance)
+			var hand_axis := root_to_hand / hand_distance
+			var center_distance := (chosen_distance * chosen_distance - forearm_length * forearm_length + hand_distance * hand_distance) / (2.0 * hand_distance)
+			var circle_radius := sqrt(maxf(chosen_distance * chosen_distance - center_distance * center_distance, 0.0))
+			var elbow_radial := desired_forearm.origin - root_world
+			elbow_radial -= hand_axis * elbow_radial.dot(hand_axis)
+			if elbow_radial.length_squared() <= 0.00000001: elbow_radial = _resolve_perpendicular_axis(hand_axis, global_basis.y)
+			var adjusted_elbow := root_world + hand_axis * center_distance + elbow_radial.normalized() * circle_radius
+			var old_axis := (requested_hand.origin - desired_forearm.origin).normalized()
+			var new_axis := (requested_hand.origin - adjusted_elbow).normalized()
+			var rest_basis := skeleton.get_bone_rest(indices[3]).basis.orthonormalized()
+			var desired_rotation := requested_hand.basis.orthonormalized().get_rotation_quaternion()
+			var old_neutral := (desired_forearm.basis.orthonormalized() * rest_basis).get_rotation_quaternion()
+			var old_delta := (desired_rotation * old_neutral.inverse()).normalized()
+			var old_twist := _resolve_signed_twist_angle(_extract_quaternion_twist(old_delta, old_axis), old_axis)
+			desired_forearm.basis = Basis(Quaternion(old_axis, new_axis)) * desired_forearm.basis
+			var new_neutral := (desired_forearm.basis.orthonormalized() * rest_basis).get_rotation_quaternion()
+			var new_delta := (desired_rotation * new_neutral.inverse()).normalized()
+			var new_twist := _resolve_signed_twist_angle(_extract_quaternion_twist(new_delta, new_axis), new_axis)
+			desired_forearm.basis = Basis(new_axis, _wrap_angle_radians(new_twist - old_twist)) * desired_forearm.basis
+			desired_forearm.origin = adjusted_elbow
+			accepted_hand_local.basis = (desired_forearm.basis.inverse() * requested_hand.basis).orthonormalized().scaled(hand_local.basis.get_scale())
+			wrist_swing_used = true
+	var chord := desired_forearm.origin - root_world
+	var distance := chord.length()
+	if distance <= 0.000001 or first_length <= 0.000001 or second_length <= 0.000001 or distance > first_length + second_length or distance < absf(first_length - second_length):
+		return {"valid": false, "reason": "support_elbow_frame_outside_reach"}
+	var shoulder_angle := rad_to_deg(acos(clampf((first_length * first_length + second_length * second_length - distance * distance) / (2.0 * first_length * second_length), -1.0, 1.0)))
+	if shoulder_angle < authoring_shoulder_min_plane_angle_degrees - AUTHORING_JOINT_RANGE_EPSILON_DEGREES or shoulder_angle > authoring_shoulder_max_plane_angle_degrees + AUTHORING_JOINT_RANGE_EPSILON_DEGREES:
+		return {"valid": false, "reason": "support_shoulder_range", "shoulder_angle_degrees": shoulder_angle}
+	var axis := chord / distance
+	var along := (first_length * first_length - second_length * second_length + distance * distance) / (2.0 * distance)
+	var radius := sqrt(maxf(first_length * first_length - along * along, 0.0))
+	var radial := shoulder_world - root_world
+	radial -= axis * radial.dot(axis)
+	if radial.length_squared() <= 0.00000001: radial = _resolve_perpendicular_axis(axis, global_basis.y)
+	var desired_shoulder := root_world + axis * along + radial.normalized() * radius
+	var elbow_angle := rad_to_deg((desired_shoulder - desired_forearm.origin).angle_to(requested_hand.origin - desired_forearm.origin))
+	if elbow_angle < authoring_elbow_min_plane_angle_degrees - AUTHORING_JOINT_RANGE_EPSILON_DEGREES or elbow_angle > authoring_elbow_max_plane_angle_degrees + AUTHORING_JOINT_RANGE_EPSILON_DEGREES:
+		# Shoulder position still has one freedom on the two-link intersection
+		# circle. Solve its projection onto the forearm direction for the nearest
+		# allowed elbow angle, rather than rejecting a reachable complete frame.
+		var forearm_axis := (requested_hand.origin - desired_forearm.origin).normalized()
+		var projected_axis := forearm_axis - axis * forearm_axis.dot(axis)
+		var circle_center := root_world + axis * along
+		var denominator := radius * projected_axis.length()
+		if denominator <= 0.000000001:
+			return {"valid": false, "reason": "support_elbow_circle_has_no_range_freedom", "elbow_angle_degrees": elbow_angle}
+		var target_angle := clampf(elbow_angle, authoring_elbow_min_plane_angle_degrees, authoring_elbow_max_plane_angle_degrees)
+		var ratio := (second_length * cos(deg_to_rad(target_angle)) - (circle_center - desired_forearm.origin).dot(forearm_axis)) / denominator
+		if absf(ratio) > 1.000001:
+			return {"valid": false, "reason": "support_elbow_range_has_no_circle_solution", "elbow_angle_degrees": elbow_angle}
+		ratio = clampf(ratio, -1.0, 1.0)
+		var toward := projected_axis.normalized()
+		var sideways := axis.cross(toward).normalized()
+		if radial.dot(sideways) < 0.0: sideways = -sideways
+		var allowed_radial := toward * ratio + sideways * sqrt(maxf(1.0 - ratio * ratio, 0.0))
+		desired_shoulder = circle_center + allowed_radial * radius
+		elbow_angle = rad_to_deg((desired_shoulder - desired_forearm.origin).angle_to(requested_hand.origin - desired_forearm.origin))
+	# Dedicated twist bones retain their accepted local rotations. Check their
+	# existing per-chain limits before changing the arm that carries them.
+	for chain: Array in [_get_slot_forearm_twist_bones(slot_id), _get_slot_upperarm_twist_bones(slot_id)]:
+		var count := _count_existing_bones(chain)
+		for bone_name: StringName in chain:
+			var bone := skeleton.find_bone(bone_name)
+			if bone < 0 or not authoring_limb_twist_neutral_rotation_lookup.has(bone_name): continue
+			var delta: Quaternion = (authoring_limb_twist_neutral_rotation_lookup[bone_name].inverse() * skeleton.get_bone_pose_rotation(bone)).normalized()
+			var twist := _resolve_signed_twist_angle(_extract_quaternion_twist(delta, AUTHORING_LIMB_TWIST_LOCAL_AXIS), AUTHORING_LIMB_TWIST_LOCAL_AXIS)
+			if absf(twist) > AUTHORING_LIMB_TWIST_LIMIT_RADIANS / maxf(count, 1) + deg_to_rad(AUTHORING_JOINT_RANGE_EPSILON_DEGREES):
+				return {"valid": false, "reason": "support_twist_range", "bone": bone_name}
+	var previous: Array[Quaternion] = []
+	for index: int in indices: previous.append(skeleton.get_bone_pose_rotation(index))
+	_rotate_bone_toward_end_target(clavicle_name, upperarm_name, skeleton.to_local(desired_shoulder), 1.0)
+	_rotate_bone_toward_end_target(upperarm_name, forearm_name, skeleton.to_local(desired_forearm.origin), 1.0)
+	_apply_bone_world_basis(forearm_name, desired_forearm.basis, 1.0)
+	skeleton.set_bone_pose_rotation(indices[3], accepted_hand_local.basis.orthonormalized().get_rotation_quaternion())
+	_enforce_authoring_upperarm_swing_authority(slot_id, clavicle_name, upperarm_name, forearm_name, hand_name)
+	skeleton.force_update_all_bone_transforms()
+	var actual := skeleton.global_transform * skeleton.get_bone_global_pose(indices[3])
+	var relative := (actual.basis.orthonormalized().get_rotation_quaternion().inverse() * requested_hand.basis.orthonormalized().get_rotation_quaternion()).normalized()
+	var position_error := actual.origin.distance_to(requested_hand.origin)
+	var orientation_error := 2.0 * atan2(Vector3(relative.x, relative.y, relative.z).length(), absf(relative.w))
+	var wrist_twist_error := absf(_wrap_angle_radians(_resolve_authoring_contact_wrist_twist_angle(hand_name, forearm_name, actual.basis) - wrist_twist_reference))
+	var actual_shoulder := _get_bone_world_position(upperarm_name)
+	var actual_elbow := _get_bone_world_position(forearm_name)
+	shoulder_angle = rad_to_deg((root_world - actual_shoulder).angle_to(actual_elbow - actual_shoulder))
+	elbow_angle = rad_to_deg((actual_shoulder - actual_elbow).angle_to(actual.origin - actual_elbow))
+	var valid := position_error <= 0.00005 and orientation_error <= 0.00005 and wrist_twist_error <= 0.00005 and shoulder_angle >= authoring_shoulder_min_plane_angle_degrees - AUTHORING_JOINT_RANGE_EPSILON_DEGREES and shoulder_angle <= authoring_shoulder_max_plane_angle_degrees + AUTHORING_JOINT_RANGE_EPSILON_DEGREES and elbow_angle >= authoring_elbow_min_plane_angle_degrees - AUTHORING_JOINT_RANGE_EPSILON_DEGREES and elbow_angle <= authoring_elbow_max_plane_angle_degrees + AUTHORING_JOINT_RANGE_EPSILON_DEGREES
+	if not valid:
+		for index: int in indices.size(): skeleton.set_bone_pose_rotation(indices[index], previous[index])
+		skeleton.force_update_all_bone_transforms()
+	return {"valid": valid, "reason": "" if valid else "support_complete_frame_residual",
+		"position_error_m": position_error, "orientation_error_rad": orientation_error,
+		"wrist_twist_change_rad": wrist_twist_error,
+		"shoulder_angle_degrees": shoulder_angle, "elbow_angle_degrees": elbow_angle,
+		"wrist_posture_preserved": valid and not wrist_swing_used, "wrist_swing_used": wrist_swing_used,
+		"bone_lengths_preserved": true,
+		"forearm_axial_range_rule": "inherited_no_separate_main_forearm_limit"}
 
 
 func finish_prepared_support_grip_seat(commit: bool) -> void:
@@ -2129,6 +2327,13 @@ func _apply_authoring_contact_wrist_basis_for_slot(
 	var bound_frame: Dictionary = resolve_planar_grip_motion_frame(slot_id)
 	var desired_hand_basis_world: Basis
 	if bound_frame.get("valid", false):
+		var posture: Dictionary = _prepared_support_wrist_postures.get(slot_id, {})
+		if slot_id != dominant_grip_slot_id and not posture.is_empty() and posture.key == planar_grip_pose_binding.states.get(slot_id, {}).get("relationship_key", ""):
+			# A committed support frame includes its accepted wrist preference.
+			# Its arm owns following that frame; generic wrist projection must not
+			# immediately rotate it away from the established weapon contact.
+			realize_prepared_support_hand_frame(slot_id, bound_frame.hand_to_world, posture.local)
+			return
 		# Preserve the acquired orientation instead of deriving a different grip
 		# from forearm direction. The existing twist limits below still apply.
 		desired_hand_basis_world = (bound_frame.hand_to_world as Transform3D).basis.orthonormalized()

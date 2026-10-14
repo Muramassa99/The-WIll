@@ -57,36 +57,6 @@ func ensure_body_inventory_seeded(body_state, seed_def: Resource = null) -> void
 		stored_item.is_disassemblable = seed_entry.is_disassemblable
 		body_state.add_item(stored_item)
 
-func ensure_forge_inventory_seeded(
-	inventory_state: PlayerForgeInventoryState,
-	material_lookup: Dictionary,
-	inventory_seed_def: Resource = null,
-	fallback_quantity: int = 0,
-	debug_bonus_quantity: int = 0
-) -> void:
-	if inventory_state == null or material_lookup.is_empty():
-		return
-	if inventory_seed_def != null and not inventory_seed_def.is_empty():
-		var applied_seed_floor: bool = false
-		for seed_entry in inventory_seed_def.entries:
-			if seed_entry == null or seed_entry.material_id == StringName() or seed_entry.quantity <= 0:
-				continue
-			if not material_lookup.has(seed_entry.material_id):
-				continue
-			var target_quantity: int = seed_entry.quantity + maxi(debug_bonus_quantity, 0)
-			if inventory_state.get_quantity(seed_entry.material_id) < target_quantity:
-				inventory_state.set_quantity(seed_entry.material_id, target_quantity)
-			applied_seed_floor = true
-		if applied_seed_floor:
-			return
-	if fallback_quantity <= 0:
-		return
-	var resolved_fallback_quantity: int = fallback_quantity + maxi(debug_bonus_quantity, 0)
-	for material_id_value in material_lookup.keys():
-		var material_id: StringName = material_id_value
-		if inventory_state.get_quantity(material_id) < resolved_fallback_quantity:
-			inventory_state.set_quantity(material_id, resolved_fallback_quantity)
-
 func set_selected_forge_wip_id(wip_library: PlayerForgeWipLibraryState, saved_wip_id: StringName) -> void:
 	if wip_library != null:
 		wip_library.set_selected_wip_id(saved_wip_id)

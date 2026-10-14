@@ -1,6 +1,884 @@
 # Grip overhaul: working plan, ownership and replacement boundary
 
-Date: 2026-09-18, chat 14. Current implementation/evidence: October 13 resumed final-pose redesign. Older dated sections below retain their history.
+Date: 2026-09-18, chat 14. Current implementation/evidence: October 14 Forge V1 storage/runtime retirement and sanity pass, Forge metric length bands and measured Handle end bounds. Older dated sections below retain their history.
+
+## October 14 implemented: retire V1 saved representation and runtime fallbacks
+
+User confirmed V1 exports are disposable and authorized this surgical follow-up.
+Then requested a full sanity check at the end. This section supersedes the older
+retirement section's retained-WIP-fields/hybrid-rejection descriptions only.
+
+`CraftedItemWIP` no longer exports `layers` or `builder_marker_positions`; their
+grid-marker/cell helpers are removed. One V2 identity helper is shared by Forge,
+equipment and Skill Crafter. V2 drafts remain valid library records even without
+a completed Handle/mesh/grip. Unarmed authoring stays separate. The library drops
+V1 records in memory on load and before ordinary persistence, rejects new V1
+saves, clears selection only when its actual record was retired, and protects
+operation rollback after filtering. Loading does not rewrite the user's file.
+Current V2 schema and saved skill-coordinate migrations remain.
+
+V2 controller and inventory readers no longer copy old marker data or show cell
+counts. TestPrint no longer carries display cells/canonical solid. Mesh building
+requires the prepared editable mesh; missing data produces no substitute mesh.
+Equipped guides use authored metadata followed by the existing exact Handle
+triangle collider directly. Removed temporary grip-cell boxes, cell-mask fallback
+and display-cell proxy sampling. Whole-weapon bounds and mesh-based proxies remain.
+Deleted eight more files: two cell-to-solid/geometry resolvers, the dead solid
+model, the old voxel-mesh verifier, and their UID companions. No remaining
+references to these deleted paths; scoped diff check passes.
+
+Retained shared editable/canonical geometry models and material helpers. CellAtom
+still carries material data; LayerAtom remains loadable so old serialized mixed
+libraries can hydrate before V1 entries are discarded. This does not restore V1
+authoring. Saved-coordinate scale and cell-equivalent material accounting are
+unchanged. No closure, Thumb, overlap, orientation or body-IK production edits.
+No Git staging/commit/push or writes to actual user libraries.
+
+Fresh sanity evidence (isolated user data; sequential Godot 4.7 processes):
+
+- Project editor import: clean. Retirement: 19 checks, zero failures.
+- Library: 45 checks, zero failures, including mixed old serialized fields,
+  V2 draft/unarmed retention, no load-time write, next-save purge and rollback.
+- Handle length bands: 298 checks, zero failures; coordinate contract passes.
+- Material carrythrough and Mochi V2: pass (Mochi 15 checks).
+- Final changed-script parse pass: 52 scripts, zero failures; both-hand
+  normal/reverse mounting, solved-replay modifier/bridge interpolation and
+  origin assertions pass. Prepared cache ownership: 19 checks, zero failures,
+  including rejection when current Handle end bounds invalidate a cached clip.
+- Exact Handle contacts: triangles, main/support colliders, physics rays,
+  origins, invalidation/retry and prepared ownership pass; no grip-cell boxes.
+- V2 runtime contract, actual pending-profile Save/reload, stage-controller
+  prepared-wrapper export and Save As/rename/rollback pass. The last deliberately
+  emits save errors for its invalid-destination negative tests.
+- Prepared material colors survive cached paths; normal Forge test equip still
+  deliberately rebakes V2, matching a fresh export without altering the saved
+  source. Slot sync preserves independent weapon IDs and priority. Inventory,
+  stow, grip-layout, baseline/open-mode/slot UI and Space-focus checks pass.
+- A real copied `Handle 1` passes acquisition -> Skill Crafter Save -> reload ->
+  equipped playback: 30 checks, zero failures. Report:
+  `test_artifacts/grip_save_playback_2026-10-14T04-53-07_report.json`.
+
+**Sanity is not fully green:** the matching real two-hand run passes 71 of 73
+checks. Both hands acquire, Save restores the preview, serialization and recorded
+pose application pass, but the baked/replayed motion fails to retain the original
+Hand-to-weapon relationships at both preview endpoints and equipped playback.
+Report: `test_artifacts/grip_save_playback_2026-10-14T04-54-39_report.json`.
+Its combined position/quaternion error is about 1.473; this is neither a distance
+nor an exact angle. The report's first equipped mismatch identifies the support
+hand: 103.26 mm positional error and 1.5085 rad (86.43 degrees) orientation error;
+the main hand is within 0.0025 mm. Recorded-pose application error is
+about 5.5e-7, while restored preview relationships differ by only 2.9e-7. Legacy
+serial-solve counts remain zero. The older October 13 07:56 run passed 73/73;
+do not call this new failure harmless or assign a root cause without evidence.
+No visual certification was performed. The real two-hand failure is the next
+narrow investigation before further hand-placement work.
+
+Localized lead, not proven cause: `prepare_replay_grip()` in
+`runtime/player/grip/preview_grip_acquisition.gd`, called immediately before capture
+at `combat_animation_station_preview_presenter.gd:799`. Save restores the visible
+selection afterward in the UI. The support station shifted about 44.5 mm along
+the weapon versus the prior passing report; new measured end bounds affect this
+placement. Trace support key/cache invalidation and realization during baking,
+comparing each captured frame with the retained pre-Save relationship. No evidence
+currently attributes the mismatch to removal of V1 contact fallbacks.
+
+Verifier maintenance: shared V1 fixtures now use V2. Updated only superseded
+expectations (prepared pose ownership, actual save preparation, duplicated
+Resource value comparisons, stow-vs-hand coordinate frames, retired source
+writers and interpolation). The old runtime playback/idle/entry diagnostics
+still lack saved solved tracks and therefore cannot certify successful playback;
+they are explicitly labelled. Do not weaken the current saved-replay guard to
+make those historical tests pass. Use the real saved-weapon proof above.
+
+Logs: `godot_runs/forge_v1_storage_sanity_*_20261014.log`.
+Deletion/reference audit: `test_artifacts/forge_v1_storage_retirement_audit_20261014.json`.
+Final parser/remaining sanity outcomes are recorded in the newest SPS and
+`test_artifacts/forge_v1_storage_sanity_parse_20261014.json`.
+Official Godot 4.7 Resource and ResourceLoader documentation reviewed for the
+save/load work. Older failed intermediate logs are not pass evidence.
+
+## October 14 implemented: retire Forge V1 authoring and bake path
+
+After asking whether block-era dependencies remain, user explicitly authorized
+pruning Forge V1. Current code, not an assumed historical clean break, determined
+the boundary. The main world still instantiated both benches before this work.
+
+Removed 201 V1-only files (27,265 lines in deleted files): 33 runtime authoring
+scripts, 13 algorithm/service scripts, five authoring/seed definition scripts,
+47 dedicated V1 tools, their 98 UID files, three scenes and two obsolete resources.
+The main world now contains only CraftingBenchV2. Removed 12 V1 input action
+registrations/category and the orphan V1 inventory-seeding player entry points.
+Generic material inventory and body inventory initialization remain.
+
+ForgeService now bakes V2 prepared mesh data only. Removed V1 segment, anchor,
+joint, bow and profile construction plus the cell-to-Stage2 fallback. Both direct
+bake and cached TestPrint paths explicitly reject V1 and hybrid V1/V2 inputs
+with `forge_v1_authoring_removed` / `forge_v2_mixed_legacy_layers_unsupported`.
+They do not rewrite the saved snapshot on rejection. Old saved library files
+were not deleted, converted or written; old V1 entries cannot be rebuilt/equipped
+through this service. New V2 material enrichment and cache refresh remain.
+
+ForgeRulesDef retains its identity and shared saved-coordinate scale only;
+unused V1 workspace/grid, 20/26-block grip, joint, bow and refinement settings
+and obsolete default-resource assignments are removed.
+
+Retained deliberately: TestPrintMeshBuilder, editable-mesh and canonical models,
+serialization atoms/fields, shared material/capability functions, profile Hex-24
+boundary library and view tuning. V2 still has cell-equivalent material
+accounting and cell-scaled mesh/anchor storage. The runtime temporary box-contact
+construction followed by exact-mesh replacement and older default support-layout
+policy were observed but not redesigned in this authoring retirement. This is
+not a claim that the whole project is free of block-derived representation.
+
+Verification and audit evidence:
+
+- Godot 4.7 editor import: exit 0, no script/resource errors.
+- `verify_forge_v1_retirement.gd`: 13 checks, zero failures; real scene topology,
+  retired inputs, V1/hybrid rejection, cache rejection and valid V2 fixture.
+- `verify_forge_v2_handle_length_bands.gd`: 298 checks, zero failures after
+  service pruning. Metric bands, export and cached migration remain valid.
+- `verify_material_variant_carrythrough.gd`: PASS, migrated to V2 fixtures.
+- `verify_mochi_vertical_slice.gd`: 15 checks, zero failures; material processing,
+  mass/bias, V2 bake, mesh dimensions and library Save/reload.
+- `verify_disassembly_world_load.gd`: main world, V2, disassembly and Skill
+  Crafter present, V1 absent; Skill Crafter opens successfully.
+- `verify_combat_origin_annotations.gd`: all checks passed; only assertions
+  naming deleted V1 writer owners were retired.
+- Remaining project reference scan: no unintended references to deleted owners;
+  missing-old-bench assertions remain intentionally. Scoped diff check passed.
+
+Logs: `godot_runs/forge_v1_prune_*_20261014*.log` and
+`godot_runs/forge_v1_retirement_20261014.log`. Reports/manifests:
+`test_artifacts/forge_v1_retirement_manifest_20261014.json`,
+`test_artifacts/forge_v1_authoring_prune_manifest_20261014.json`,
+`test_artifacts/forge_v1_remaining_reference_scan_20261014.json` and
+`godot_runs/verify_forge_v1_retirement_2026-10-14.json`.
+
+Intermediate failures were corrected: a shared V2 material helper was restored
+after over-pruning; migrated tests now account for intentional capability score
+saturation and the shared mesh coordinate scale. Failed intermediate logs are
+not successful proof. No visual completed-grip or full skill-playback rerun in
+this slice. No Git staging, commit, push, branch change or cleanup of user data.
+
+## October 14 implemented: Forge V2 metric Handle lengths and guide colors
+
+User selected Forge-related changes after the endpoint work. One pure policy,
+`core/resolvers/handle_length_policy.gd`, now owns reference-character authoring
+length bands: below 100 mm invalid/red; 100 to below 200 mm single-hand/green;
+200 to below 250 mm two-hand/purple; 250 mm and above long-handle/pink, still
+two-hand eligible. Exact thresholds enter the new band. A 0.0001 mm tolerance
+only absorbs floating-point serialization noise; 99.99 and 199.99 stay below
+their respective thresholds. Ordinary spline guides are mint both before and
+after finishing. Other geometry/profile failures retain their red feedback.
+
+Length continues to mean first-to-last axial endpoint distance, not curved path
+length. These rounded authoring gates do not replace anatomical L, measured hand
+end clearances, reach, material validity or future inter-hand exclusion.
+
+Implemented owners:
+
+- `forge_v2_authoring_state.gd`: generation, existing Handle edits, commit and
+  status share the 100 mm metric minimum; status reports mm and length category.
+- `forge_v2_volume_preview_presenter.gd`: live Handle line colors use the same
+  bands; ordinary spline is mint. Guide material uses unshaded vertex colors,
+  removing the old blue emission tint without changing solid weapon materials.
+- `forge_v2_wip_compatibility_adapter.gd`: export and equipped Handle validation
+  use the shared minimum; two-hand eligibility uses exact endpoint distance in
+  metres, replacing the active V2 26-cell gate. Existing melee/focus intent
+  restrictions remain. The legacy voxel count remains serialized for legacy
+  consumers, but no longer determines V2 hand capacity.
+- `ForgeService.get_cached_profile_for_runtime` supplies a private refreshed
+  profile at cached TestPrint and Skill Crafter profile entrances. It updates
+  capacity and existing balanced-layout limits without rebuilding valid geometry
+  or wrappers. Only the specific former below-250-mm rejection takes the existing
+  saved mesh-contract rebuild path. It copies a saved wrapper if present and
+  never prepares a missing one; old invalid saves can therefore still need a
+  Forge re-Save. Other errors are not reclassified as successful.
+
+Fresh isolated, sequential Godot 4.7 verification:
+
+- `tools/verify_forge_v2_handle_length_bands.gd`: 298 checks, zero failures;
+  policy inputs, seven boundary lengths across three Handle path modes, actual
+  draft/finished guide mesh colors, generation/commit, export, save/reload,
+  two serialization cell scales and old-cache migration/source preservation.
+  Report: `godot_runs/verify_forge_v2_handle_length_bands_2026-10-14.json`.
+- `tools/verify_forge_v2_handle_axial_span_authority.gd`: PASS; folded paths
+  cannot substitute arc length for axial span; commit/edit boundary checks and
+  ordinary spline behavior remain covered.
+- `tools/verify_handle_coordinate_contract.gd`: PASS; prior end bounds and
+  coordinate behavior remain covered. Log:
+  `godot_runs/forge_length_handle_coordinate_20261014.log`.
+
+Not claimed: fresh visual Forge/game inspection, a completed grip on a new
+100/200-mm Handle, or full skill Save/equipped playback. Headless checks inspect
+guide color data, not a screenshot. No closure, Thumb, overlap or orientation
+change. No Git staging/commit/push. Official Godot 4.7 Resource, SurfaceTool,
+Mesh and BaseMaterial3D documentation informed the implementation and checks.
+
+Remaining: measured inter-hand exclusion, default support placement and manual
+boundary behavior. The existing balanced two-hand 80% initial-layout convention
+is still separate from the new capacity gates and needs review in that slice.
+Read-only audit also found that equipped mesh/layout conversion still takes the
+current Forge-rule cell scale while cached capacity honors saved Stage2 scale;
+default saves agree at 12.5 mm. Alternate-scale adapter/cache tests pass, but
+alternate-scale equipped use is not certified and remains a follow-up seam.
+
+The older sections below retain their stage-specific results and plans; this
+section supersedes their statement that Forge length/color work is still pending.
+
+## October 14 implemented: measured Handle end dead zones
+
+User confirmed the existing Index-Pinky midpoint grip anchor must remain. New
+placement law: the anchor stays at least `0.6 * L` from either physical Handle
+end, where L is that character hand's Index1-Pinky1 base-joint span. This reserves
+the measured span plus 10% L beyond each joint. One constant owns the padding:
+`PrimaryGripSeatResolver.HAND_END_PADDING_RATIO = 0.10`. For the saved reference
+L = 78.771524 mm, each end clearance is 47.2629144 mm; on a 100 mm handle the
+safe anchor interval is 47.2629144-52.7370856%, or -5.4741712 to +5.4741712 in
+the signed display. UI boundaries round inward to the 0.0001 display grid.
+
+Audit distinction: the old voxel endpoint checks validate anchor-capable material
+on first/last slices, and voxel slice clearance checks transverse neighboring
+material. Neither was an anatomical hand-width end dead zone. Those geometry
+checks remain. The old balanced two-hand 80% layout/capacity policy and Forge
+minimum/color changes belong to the remaining shared-hand-space migration below;
+they are not claimed replaced by this endpoint-only slice.
+
+Implemented owners:
+
+- `core/resolvers/primary_grip_seat_resolver.gd`: pure metric bounds; invalid
+  missing/nonfinite dimensions and Handle spans shorter than the padded hand.
+- `runtime/player/player_humanoid_rig.gd`: `get_hand_grip_spans_meters()` reuses
+  the existing two-base-joint world-distance measurement and caches it by skeleton
+  identity/version, rest change and scale metric. No skin scanning, wrapper solve
+  or prepared-data rebake. This is a small live-model measurement cache, not a new
+  copy of the prepared anatomy resource. Future character replacement/scaling has
+  an invalidation seam. No skeletal positioning or grip anchor change.
+- `player_rig_grip_layout_presenter.gd` clamps default main/support stations using
+  these bounds after existing layout selection. Invalid support space disables
+  support without rejecting a fitting main hand. `player_equipped_item_presenter.gd`
+  propagates per-hand measurements into the held instance; saved profile units
+  convert once into metres, not a second voxel gameplay limit.
+- Skill Crafter preview uses the same bounds for both hands, final combined
+  Handle coordinate plus half-span axial offset, automatic support projection
+  and boundary candidates. Complete Handle geometry/path endpoints stay intact.
+- Skill Crafter UI clamps accepted edits and updates number-control limits for
+  both display modes. Old authored out-of-bounds values remain visible with an
+  explanatory tooltip until edited; a refresh does not silently rewrite them or
+  independently display two incompatible clamped coordinate components.
+- Preview/equipped solved replay validates participating actual baked anchor
+  positions before applying a pose. Rejected frames cannot fall through to a
+  differently seated live pose. UI cache admission checks all available saved
+  frames, so an incompatible old clip requires Save/rebake; compliant clips can
+  remain reusable. No blanket solver/schema revision bump or authored-node rewrite.
+
+Fresh verification (Godot 4.7, isolated workspace user data, sequential runs):
+
+- `tools/verify_handle_coordinate_contract.gd`: PASS; metric limits, exact fit,
+  too-short/missing/nonfinite inputs, combined axial adjustment, reversed path,
+  signed mapping, different hand sizes, scale transforms, initial equipment
+  layout and saved-anchor validation. Log:
+  `godot_runs/handle_end_bounds_20261014_final.log`.
+- `tools/grip_plane_proof/verify_handle_end_bounds_ui.gd`: 95 checks, zero failures
+  using the actual saved `Stage 1 V2 Draft Copy`, real UI handlers and live rig.
+  Report: `test_artifacts/handle_end_bounds_ui_2026-10-14T03-21-26_report.json`.
+  Source library SHA256 remains
+  `d0486f9c7b469a82e0202c712dad66606a1ca389c64e5329f837b574fb65330d`.
+  Acquisition was deliberately cancelled; no weapon Save or closure proof.
+  Actual live L was 78.77558 mm right / 78.78200 mm left (within 0.011 mm of the
+  prepared reference); the 596.58360 mm test Handle yields about 7.923%-92.077%
+  legal main-hand coordinates. Both hand cache scale invalidation and selectively
+  rejecting a later invalid cached frame were checked.
+- Scoped `git diff --check` passed. An intermediate compile error in a new helper
+  call was corrected before the successful final runs. No Git mutation.
+
+Not verified this slice: a newly completed visual closure at the end boundaries,
+full saved-clip rebake/reload/equipped animation playback, or live user testing.
+The new rules preserve an axial padded footprint, not proof of every possible
+outer-skin pose on arbitrary handle geometry. Finger closure, Thumb, material
+overlap limits, weapon orientation and the main-to-support solve queue are unchanged.
+
+Next remaining work is the previously discussed common metric one-/two-hand
+capacity and inter-hand exclusion, then Forge's 100/200/250 mm guide colors and
+gates. Do not reintroduce the old circle/slice closure solver for this work.
+
+## October 14: character-sized equipment and shared hand-space rules
+
+Status: remaining user-defined future direction, recorded during discussion.
+Only the measured endpoint restriction in the section above is implemented;
+the wider Forge/export, two-hand capacity/exclusion and scaling plan below is
+not yet claimed implemented.
+
+### Measured baseline and next implementation plan
+
+October 14 follow-up: user requests a recap and an implementation plan beginning
+with actual 1.2L measurements, then Forge V2 touchups and Skill Crafter two-hand
+gates. Replace cube-derived hand-capacity decisions with the same metric rules
+for one and two hands. This is a plan and read-only audit, not a runtime change.
+
+The current profile `core/defs/characters/josie/grip_contact_config.tres` already
+references prepared anatomy containing `character_measurements.hands` with
+`index_to_pinky_root_span_m` for BOTH hands. No new heavy skin bake is needed to
+obtain L. Source: `hand_anatomy_4935fa57cf6cc689121ae6077987b0985fc1fa7d0d3d8718f096418ea3c5b702.tres`,
+lines 4425-4440, under that same character directory; prepared visual height 2 m.
+
+| Metric | Right hand | Left hand |
+| --- | --- | --- |
+| Saved Index-Pinky S1-root span L | 78.771524 mm | 78.771524 mm |
+| Initial 10% extension at each end | 7.8771524 mm | 7.8771524 mm |
+| Padded single-hand span 1.2L | 94.5258288 mm | 94.5258288 mm |
+
+Combined padded length is 189.0516576 mm. User-facing figures may be displayed
+as 78.77 mm, 7.88 mm, 94.53 mm and 189.05 mm. These are bone-axis-based values
+with the proposed clearance, not a newly measured outer-skin width or proof that
+10% clears every hand pose. Keep the padding adjustable as previously requested.
+
+Latest user-selected authoring allowance and colors: for the present reference
+character, round the 94.5258288 mm padded hand requirement up to a 100 mm handle
+minimum, and use 200 mm for two-hand length eligibility. This gives some spare
+handle length and simple numbers. Keep the measured padded hand footprint for
+occupancy/exclusion; do not silently replace the character measurement with
+100 mm or add this authoring allowance again to each exclusion endpoint.
+
+| Usable Handle length H | Handle guide color | Length classification |
+| --- | --- | --- |
+| H < 100 mm | Red | Invalid: below handle minimum |
+| 100 mm <= H < 200 mm | Green | Single-hand length |
+| 200 mm <= H < 250 mm | Purple | Two-hand length available |
+| H >= 250 mm | Pink | Longer handle; still two-hand eligible |
+
+The lower endpoints 100, 200 and 250 mm enter their new bands; no gaps at the
+user's illustrative 99.99/199.99/249.99 display boundaries. Pink is a length
+indicator, not a new hand count or automatically assigned weapon class. Keep
+mint for ordinary spline creation; Handle coloring is a separate semantic
+indicator. Exact RGB shades have not been specified. Other geometry validity,
+hand-space and reach checks continue to apply. Future other-character rounding
+and scaling must use declared reference-size data rather than interpreting
+100 mm as a universal anatomical hand width.
+
+Fresh read-only arithmetic independently recomputed endpoint distance using
+the saved source bone origins and character metric Gram matrix, rather than
+mistaking unscaled model coordinates for metres. Recomputed spans were
+78.771556214753332 mm right and 78.771532587954184 mm left, agreeing with saved
+values within 0.000033 mm (serialization/float precision). The bake owner is
+`tools/grip_plane_proof/bake_character_hand_anatomy.gd:155-167`; it stores world
+distances. This was a PowerShell data check, not a fresh live rig/engine run.
+
+Implementation order:
+
+1. Expose the existing character measurements through a small validated data
+   view. Reuse source identity, scale validation and cached reference origins;
+   retain endpoint offsets relative to the established grip reference so reverse
+   and asymmetric hands remain correct. The raw dimensions belong to character
+   data; 10% padding belongs to one shared tunable policy. Do not bake the policy
+   independently into several consumers or repeat skin measurement on load.
+2. Introduce one pure metric capacity/interval resolver used for both hands.
+   Proposed owner: `core/resolvers/hand_grip_space_resolver.gd` (not created yet).
+   Inputs: actual usable Handle span, character hand extents, direction and
+   current/requested stations. Outputs: one-/two-hand length capacity, legal
+   stations respecting handle ends, support exclusion, and explicit no-space
+   reasons. Reuse `primary_grip_seat_resolver.gd` for existing path/direction
+   mapping; metres inside the rule and normalized percentages at the UI boundary.
+3. Retain precise metric Handle length in the export/provider contract. V2
+   already calculates it but currently reduces eligibility to a rounded cell
+   count. Replace generation, existing-handle edits, export and equip validation
+   gates together; the old 250/325 mm rules must no longer veto the V2 path.
+   Existing saved profiles may contain cell-coordinate endpoints and cached
+   booleans. Convert their declared coordinate units once at the read boundary,
+   then feed the same metric rule. Do not use rounded voxel counts as a second
+   gameplay rule or delete required old-coordinate conversion. Saved booleans
+   and zeroed two-hand limits must not override fresh character capacity.
+4. Connect Forge's indicator/status to that same result and the rounded
+   authoring allowance above: red below 100 mm, green from 100 to below 200 mm,
+   purple from 200 to below 250 mm, pink at/above 250 mm for the present reference
+   character. Ordinary spline creation keeps its mint coloring. Preserve clear
+   reasons for other generation failures; valid length does not validate shape.
+5. Make two-hand mode reuse the main-hand Handle definition, station mapping and
+   closure owner. Preserve the selected main seat; replace old support layout
+   heuristics that select a far side or reposition both hands around COM. Default
+   support placement uses the Pommel side of main by default, choosing the
+   closest viable Pommel-side station when the default cannot fit. Latest user
+   clarification permits deliberate Tip-side support through explicit numeric
+   entry. Preserve that valid authored choice; do not normalize it back to the
+   default ordering. No automatic fallback crosses main to the Tip side.
+   Character reach/contact remain separate checks.
+   User explicitly chose: manual support-% dragging STOPS at the occupied-zone
+   boundary; it does not jump to the opposite side. Also respect handle ends.
+   If no Pommel-side support space exists, the creator may adjust main placement,
+   handle design, or deliberately enter a valid Tip-side support station. Do not
+   reposition main automatically to force support.
+6. Connect the same capacity result to Skill Crafter controls, equipped-item
+   preparation and playback. Primary-% changes already invalidate/reacquire
+   support; reuse that dependency. Persist accepted authoring adjustments and
+   invalidate relevant prepared caches so F replay, saved skills and equipped
+   playback use the same resolved coordinates. Do not silently rewrite older
+   authored motion chains on load; report invalid placements/migrate explicitly.
+7. Verify cheap numeric boundaries, asymmetric/reversed extents, both hand roles,
+   default fallback/manual clamp, deliberate Tip-side entry and its persistence,
+   and old-save conversion first. Then run focused
+   Forge generation/save/reopen and Skill Crafter normal/reverse support tests,
+   including primary-% edits and saved replay. One substantive Godot run at a
+   time. Preserve current closure, Thumb and weapon-facing behavior.
+
+Files identified for the implementation wiring review (not all necessarily
+require changes): existing `core/models/character_hand_anatomy_def.gd`,
+`character_grip_data_def.gd`, `baked_profile.gd`;
+`runtime/player/grip/character_grip_data.gd` and `character_hand_anatomy_store.gd`;
+`runtime/forge_v2/forge_v2_authoring_state.gd`, `forge_v2_volume_preview_presenter.gd`,
+`forge_v2_wip_compatibility_adapter.gd`, `forge_v2_stage_controller.gd`;
+`services/forge_service.gd`; `runtime/player/player_rig_grip_layout_presenter.gd`,
+`player_humanoid_rig.gd`, `player_equipped_item_presenter.gd`,
+`player_runtime_skill_playback_presenter.gd`; and
+`runtime/combat/combat_animation_station_ui.gd` plus
+`combat_animation_station_preview_presenter.gd`. Keep lower metric/data owners
+independent of runtime UI/actor objects. Do not expand this grip-policy migration
+into deletion of unrelated V1 geometry/material authoring or saved data.
+
+Read-only findings behind the plan: both hands already share the authoritative
+sampled Handle path. Layout trusts `primary_grip_two_hand_eligible`; equipped
+metadata forwards that decision to preview/playback. UI currently exposes Two
+handed more broadly than runtime accepts. Existing controls clamp only target
+centers to 0..1, without either hand's footprint. Saved defaults are main 0.2 and
+support 0.0. Existing profiles and prepared caches require explicit migration
+handling; changing a Forge color or one eligibility boolean is insufficient.
+
+Future wearer scaling and Engraving remain deferred. Preserve metric units,
+reference-character identity and coordinate provenance now so those future
+steps can reuse the same package without implementing them in this slice.
+
+### Equipment scaling intent
+
+- Keep character hand geometry broadly consistent, while allowing future larger
+  and smaller character/species models. The user wants existing, traded and
+  market weapons to remain usable across proportional size differences and
+  future character-model revisions. Commercial versus custom-sized builds are
+  possible future design considerations, not additional mechanics to build now.
+- Fit an equipped weapon with one uniform scale in all three dimensions. The
+  user's example is a reference hand measurement of 100 mm becoming 200 mm:
+  scale factor 2, and a 500 mm Tip-to-Pommel weapon becomes 1000 mm.
+- Scale the complete spatial package coherently: visible mesh, invisible handle
+  target/wrapper geometry, collision shapes, handle bounds, Tip/Pommel and grip
+  anchors, and their correlated local positional data. Do not resize only the
+  visible mesh while leaving contact or collision data at the original size.
+- Preserve canonical authored item dimensions and reference-fit information.
+  Derive a wearer-specific instance scale from that baseline; do not overwrite
+  the shared item or compound scaling each time it changes owners. Normalized
+  handle positions remain normalized; geometry-derived distances scale together.
+- A larger equipped weapon can have longer actual reach. The user explicitly
+  accepts that gameplay difference in preference to making existing two-handed
+  builds unusable for larger characters. Arm/wrist reach and anatomical limits
+  still govern the maneuvers each character can perform.
+- Visual/geometric scaling must not create additional authored material or
+  automatically increase saved item stats. Volume and material density are
+  distinct; do not infer more matter from the enlarged rendered/collision volume.
+  The future weapon-stat model is still undecided and separate from this policy.
+- The same complete-package fitting principle is intended for future armor and
+  potentially accessories, using the relevant body fit data when those systems
+  are selected. This is not authorization to implement them now.
+
+Implementation decisions still open: the exact character reference measurement
+used to choose the single weapon scale, how unequal hand ratios are reconciled,
+and how absolute millimetre contact/overlap tolerances relate to wearer size.
+Geometry-derived offsets must remain coherent, but existing character-side
+joint limits and safety tolerances must not be multiplied indiscriminately.
+Uniform scale preserves proportional layout; altered hand/body proportions
+still require character-specific fit validation and grip acquisition.
+
+### Engraving finalization and prepared gameplay playback
+
+User clarification: the eventual finished product passes through these distinct
+authoring responsibilities before final save/export:
+
+1. Forge V2: geometry, composition/material and combat-characteristic data.
+2. Skill Crafter: authored skill visuals/movement and their prepared results.
+3. Engraving: final documentation, including skill descriptions, item
+   descriptions, notes and lore, followed by the final save/export.
+
+The engraved article is the completed creation, whether weapon, armor or another
+supported item type. Once engraved, its authored skills, composition,
+descriptions and visuals can no longer be edited. Do not collapse mutable
+authoring drafts/testing with this finalized product. The user explicitly places
+the eventual production wearer-scaling behavior on this finalized item package.
+
+The engraved item is a coherent logical bundle of prepared data, described by
+the user as a group of files within a pseudo-folder. It must contain or reference
+the geometry, material/characteristic data, prepared skills, documentation and
+correlated targeting/collision/coordinate data needed to reproduce its behavior.
+Exact file layout and final serialization/export schema are not decided here.
+Preserve reference size and coordinate metadata so wearer adaptation can be
+derived from a stable original. Fitting the runtime instance does not rewrite
+the immutable engraved design.
+
+Intended cost split: creation/preparation performs the expensive work; ordinary
+gameplay reuses the prepared result. Do not rebuild Forge geometry, repeat grip
+searches, or rerun authoring-quality animation solves on each skill activation.
+The user's F replay is an essential fidelity target: the equipped user's skill
+must reproduce the saved prepared result, not depend on extra creator-only
+processing absent from the final playback path. Preview and gameplay should
+consume the same authoritative prepared playback data/behavior.
+
+Technical clarification: this means no repeated creation-time solving, not
+literally zero runtime computation. Reading/sampling animation, interpolation,
+transforms, skinning/rendering and applicable live gameplay/contact checks still
+require work. Load required data when needed and reuse it for playback, rather
+than treating every attack or frame as another disk read. The exact handling of
+different skeletal proportions, and any allowed one-time fit/adaptation before
+playback, remains to be decided; do not silently introduce per-attack grip work.
+
+The requested magnification/reduction is spatial and coherent across weapon and
+attack motion. It does not by itself authorize retiming attacks, changing saved
+stats or adding material. Animation timing/stat policies remain their own data.
+Uniform scaling alone cannot guarantee identical fit after arbitrary skeletal
+proportion/topology changes; keep that compatibility boundary explicit.
+
+Expected future scale: potentially millions of authored items, including unused,
+scrapped and widely reused designs. Record this as a storage/loading design
+constraint, not a requirement to keep all items resident or duplicate every
+shared resource. Packaging, indexing and resource-sharing details are deferred.
+No Engraving implementation, exporter, runtime scaling, storage overhaul or
+playback-performance certification is claimed by this documentation update.
+
+### Related hand-space and Forge length direction
+
+- Prepare each hand's Index-Pinky length and reference-to-endpoint offsets once
+  with its character data. Reuse until source geometry or relevant scale changes.
+- Initial clearance proposal: extend each end by 10% of that hand's Index-Pinky
+  length L, making a padded occupied length of 1.2L. The 10% remains tunable.
+- A support target must leave room for both facing hand extents. Example: main
+  target 0.20 with extents 0.04 toward one end and 0.03 toward the other occupies
+  0.16-0.23; matching support target boundaries are 0.13 and 0.27. The latter
+  interval excludes support target positions, not merely main-hand skin. Do not
+  add the support width again after constructing that combined exclusion.
+- For matching hand dimensions and orientation, excluded support targets are
+  X +/- (1.2L / handle_length). Use the actual facing endpoint offsets for
+  unequal hands or different orientations. Physical and normalized units must
+  not be mixed. User accepts percentage precision of about 0.01 percentage
+  points; rounding must not reduce the required separation.
+- Latest October 14 correction supersedes the earlier hard-order interpretation:
+  user confirmed "Pommel" and defined Tip -> main -> support -> Pommel as the
+  DEFAULT, not an absolute prohibition on alternate placement. Tip -> support
+  -> main -> Pommel is permitted through deliberate numeric position entry.
+  Support usually supplies counterbalancing; no damage/force mechanic is
+  introduced by this placement rule.
+- Automatic support engagement uses the default Pommel-side station, or the
+  closest viable Pommel-side station if that cannot fit. No automatic crossover
+  to Tip-side support is required. An explicitly authored valid Tip-side station
+  must remain valid on save/reload and later recalculation; do not replace it
+  merely because it differs from the default. If the default side has no space,
+  the creator can adjust placement/design or explicitly choose the other side.
+- Manual support-% dragging stops at the dead-zone boundary on its current
+  side; numeric entry may select a valid interval on the other side. Neither
+  input method permits overlapping hand footprints. Check usable handle space
+  and arm reach/orientation for either arrangement. Main-position edits refresh
+  exclusion and support validity while preserving main ownership. Anatomical
+  reach failure remains distinct from finger-contact failure.
+- Future interface overhaul: prefer dragging/sliders over numeric input, show
+  the dead zone visually and provide confirmation to apply changes. Exact
+  interaction for deliberate side changes will be refined then. This is deferred
+  interface direction, not part of the current metric-capacity implementation.
+  Tracked in [Skill Crafter Unified Implementation TODO 2026-04-30.md](<Skill Crafter Unified Implementation TODO 2026-04-30.md>)
+  under "Deferred UI Overhaul: Grip Position Controls - 2026-10-14".
+- Measured occupancy remains 1.2L per hand, or 1.2L_left + 1.2L_right for both.
+  Latest user direction adds rounded authoring allowances: current reference
+  model minimum 100 mm for one hand and 200 mm for two. These supersede using
+  94.5258288/189.0516576 mm as the exact generation/eligibility cutoffs. Extra
+  length supports spacing/long-handle designs; it does not assign a weapon class
+  or guarantee an anatomically reachable grip.
+- User-selected Handle colors: red below 100 mm; green [100,200) mm; purple
+  [200,250) mm; pink from 250 mm upward. Ordinary spline creation keeps mint.
+  Generation, export eligibility, Skill Crafter and the indicator must share
+  the measurement/allowance policy rather than retain conflicting legacy gates.
+- Read-only code inspection on October 14 found existing V1/V2 defaults of
+  250 mm minimum and nominal 325 mm two-hand length (20/26 cells at 12.5 mm).
+  V2 export rounds span into cells before the two-hand check. The existing V2
+  guide is red for invalid generation, otherwise blue unfinished/mint finished;
+  it does not yet show character-based one-/two-hand capacity bands. These were
+  source observations only; no engine test or implementation was performed.
+
+## October 13: support dependency after primary handle-percent edits
+
+Latest manual feedback supersedes the earlier transition failure report below:
+right-main reverse grip now positions correctly, and reverse two-handed engages.
+One Thumb pose on a particular geometry/station looks unusual; changing station
+resolves it. User explicitly requests no Thumb retuning for that example.
+
+Remaining reported defect: changing primary handle percentage in two-hand mode
+refreshes primary but leaves support stale. Toggling normal/reverse refreshes
+both. Current code confirms support relationship identity omitted the primary
+station, and live async acquisition did not settle support again after primary's
+final numerical seating translation.
+
+Correction in `runtime/player/grip/preview_grip_acquisition.gd`:
+
+- Include canonical primary station/origin in support identity. Main station
+  edits invalidate both hands; support-only edits leave primary intact. World
+  motion and Roll remain outside relationship identity.
+- Prioritize primary in the existing serial queue, including after rapid edits.
+  Support cannot start without the current committed primary relationship. A
+  failed primary reports a dependency failure instead of fitting stale support.
+- Reuse support-only macro alignment after primary seating and before support
+  capture. Preserve the established primary/weapon relationship, existing stale
+  result rejection, cancellation and support removal. No second closure solver.
+- The presenter's existing post-support-macro `settle_ready(true)` acknowledges
+  which committed primary the UI aligned against. Avoid repeating that macro on
+  support-only edits/addition; a new async primary commit requires fresh support
+  preparation. Renewing either request or removing support clears acknowledgment.
+- Replay uses the same preparation guard; reused status records current serial.
+
+Fresh verification on actual saved `Stage 1 V2 Draft Copy`:
+
+- Owner lifecycle/key checks: **54/54**, both hand roles, zero surface solves,
+  including acknowledgment renewal, queue priority, cancellation and removal.
+  `godot_runs/grip_primary_support_dependency_final_20261013.log`.
+- Reverse UI dependency test: **36/36**,
+  `test_artifacts/primary_station_support_refresh_2026-10-13T09-09-36_report.json`.
+  Primary 63% -> 58% commits main around 3.47 s and both hands in 8.98 s;
+  support 20% -> 22% alone takes 3.64 s. Chronology confirms main commit precedes
+  support capture. Capture error, main-frame/finger drift and weapon movement
+  during support are all zero in the measured fixture.
+- Normal existing support add/remove/motion proof: **39/39**,
+  `test_artifacts/grip_support_2026-10-13T09-04-45_report.json`.
+- Normal UI main 20% -> 25% with support at 20%: both hands apply in 7.94 s,
+  correct order and zero measured primary/weapon drift during support. The full
+  **34-check run has one failure**: its later support-only 20% -> 22% refit is
+  rejected as `realized_support_pose_outside_overlap_limits`. This is a newly
+  evaluated, unresolved pose, not stale support. Preserve the failure:
+  `test_artifacts/primary_station_support_refresh_2026-10-13T09-07-36_report.json`.
+- Source library remains byte-for-byte unchanged; no legacy solves in actual UI
+  cases. These are headless acquisition/ownership checks, not a full strict skin
+  contact certificate or new rendered manual validation. Left-main actual
+  weapon behavior, whole saved/equipped playback and anatomy were not rerun here.
+
+The first diagnostic logged a blank EOF JSON parse warning; its reader now skips
+blank lines. Prior reverse evidence at 08:53 predates acknowledgment refinement;
+use 09:09 above for the final path.
+
+Inherited untested interaction, not changed in this fix: moving only support
+while a primary solve is already running can invalidate its whole-skeleton
+snapshot. Its stale-pose rejection currently does not retry automatically.
+
+Official Godot 4.7 [Signal](https://docs.godotengine.org/en/4.7/classes/class_signal.html)
+and [Object](https://docs.godotengine.org/en/4.7/classes/class_object.html)
+documentation was checked for connection/lifecycle behavior; the fix remains in
+the current owner and queue.
+
+Separate orientation concern: one-hand Weapon Roll rotates
+the held Hand/weapon pair, not the handle face relative to the palm. Reset's
+mounted seed rewrites endpoints but retains fallback orientation/roll. The same
+actual weapon probe measures 42.318 degrees of reconstructed orientation error
+and 19.628 mm selected-station displacement relative to the intended mount;
+the existing full-frame encoder, retaining the same roll, reconstructs zero
+angular/station error. This demonstrates a frame inconsistency, not that the
+user's screenshot has no other contributing factors.
+
+**Orientation implementation is deferred.** A candidate handheld-only conversion
+through that encoder passed its isolated frame tests but changed the normal
+starting pose enough that support at 20% failed actual overlap acceptance, with
+primary at both 20% and 63%. Removing only the candidate conversion restored
+normal support at 20%, including the primary 20% -> 25% test above. The candidate
+production block and its candidate-only verifier were removed; the read-only
+`diagnose_grip_mounted_seed.gd` probe remains. Optional
+`THE_WILL_GRIP_VERIFY_MOUNTED_SEED=1` makes the actual UI diagnostic assert full
+frame agreement when a future correction is intentionally under test; default
+is observation only. Do not describe the withdrawn encoder correction as live.
+
+Next orientation discussion: establish the intended handle face relative to the
+palm separately from whole-hand Weapon Roll. Determine Forge default versus
+per-skill adjustment before adding a control. Preserve the existing mount/handle
+axes; do not silently replace Tip-to-primary mount alignment with span alignment.
+
+## October 13: deferred game resource-usage investigation
+
+Status: user-requested future TODO, with no scheduled date. Recording only;
+current work is the focused grip follow-up documented above. Do not start profiling,
+launch another game instance or change performance settings for this note.
+
+User reports that running the current small game through Godot drives GPU usage
+close to capacity, despite good framerate and no observed throttling. It feels
+unrestrained in its hardware demand, sometimes heavier than AAA games on the same
+PC. Concern: adding assets, maps and the wider world could exhaust available
+headroom and cause a sharp performance drop. Cause is unknown; optimization is
+possible future work, not an established diagnosis.
+
+User-defined performance baseline: the current PC must be able to play the game.
+Hardware upgrades are not an available solution. Use this machine as the baseline
+benchmark throughout development, including representative future world content,
+not just the current small scenes. Aim for equal or better performance and more
+headroom on stronger systems; verify that expectation rather than assuming all
+hardware combinations scale identically. Exact component specifications, target
+resolution, quality settings, frame rate and frame-time budget remain to be
+recorded/agreed when this investigation starts. Do not invent a minimum-spec list
+or treat an upgrade as a substitute for meeting the baseline.
+
+Future testing options, clarified by the user: compiled game builds can be sent
+to other people for testing, but external testing is not needed now. Later, when
+multiplayer and server creation are in scope, a headless server build can be
+deployed to a third-party server host. Testers on different PC configurations can
+then play on the same server at the same time to compare client performance under
+shared gameplay conditions, alongside server-side performance measurements.
+The current PC remains the baseline. These are deferred testing opportunities,
+not instructions to distribute builds, arrange hosting or implement multiplayer
+at this stage; no date or hosting provider has been selected.
+
+When this TODO is selected:
+
+- Establish reproducible measurements and hardware/rendering settings: frame rate,
+  CPU/GPU frame times, GPU utilization, VRAM, resolution and renderer.
+- Compare editor-plus-game, standalone/debug and exported builds, including idle,
+  ordinary gameplay and the Forge/Skill Crafter views.
+- Check frame-rate limits, VSync and continuously rendered viewports. Determine
+  whether load reflects rendering extra frames or expensive work per frame.
+- Measure headroom at a defined target frame rate/resolution, then compare
+  representative increases in scene/world content rather than extrapolating from
+  utilization alone. The target performance budget is still to be decided.
+- Identify the measured bottlenecks before choosing optimizations or settings
+  changes; retain visual quality and interaction responsiveness as explicit goals.
+
+## October 13: right-main transition and support-motion corrections
+
+User's manual tests cover RIGHT MAIN HAND ONLY. Normal single-hand gripping works
+visually for that case. Left-main variants have not been tested by the user.
+Switching right-main normal to reverse detaches the weapon, appears to pivot near
+the pommel, does not maintain the relevant handle percentage, and disables hand
+reposition/manipulation controls. Adding support from normal right-main produces
+suboptimal engagement and locks all positional weapon manipulation. Manual tests
+stopped there; later playback/equipped cases are not user-verified.
+
+User clarified during investigation: reverse and two-handed behavior had not
+been exercised for a long time while the default grip was being established.
+These are newly observed failures, not proven regressions caused by the new
+grip implementation. Existing anatomical/arm/wrist constraints may contribute.
+Now that default grip is viable, the arm/body following and grip variants need
+to be integrated and assessed together. Correct existing constraint defects
+first; do not claim that deferred elbow behavior has been diagnosed or fixed.
+
+Current work: repair grip-style transition frame/station ownership and editable
+continuation, and make bound support follow reachable movement before refusing
+an unreachable pose. Preserve grip geometry, joint limits, primary-hand ownership
+and authored weapon roll/orientation. User's requested matrix explicitly
+includes reverse plus support for either main hand, superseding older blanket
+reverse-specific support suppression. Preserve genuine reach/eligibility checks.
+
+The faulty UI inserted/selected a locked generated grip-swap bridge and overwrote
+its orientation from a baseline seed. It now reverses the realized seated frame
+around the selected handle station, preserves roll, retains the generated bridge,
+and selects an ordinary editable continuation. Reverse-specific support bans are
+removed; actual availability and reach checks remain. The support's old full-pose
+rollback clamped even tested modest movement; that was a usability defect, not
+evidence that all requested motion was unreachable.
+Fresh verification must demonstrate nonzero reachable movement, not merely pass
+because the frozen pose retains contact. No wrist/arm ROM retuning or deferred
+spine/elbow redesign is part of this fix.
+
+Current findings: the ordinary support path solves position and then separately
+reclamps Hand orientation; the retention guard mistakes residual orientation
+error for a hard arm/wrist limit. Even an unchanged request showed about four
+degrees of orientation drift. The shared wrist clamp is non-idempotent: its final
+contact-axis reconstruction reintroduces twist. A global clamp correction changed
+the working primary pose and did not solve support following, so that attempt
+was withdrawn. Current correction instead carries the acquired support wrist
+frame through a complete arm realization. The support wrist may flex while the
+Hand-to-weapon relationship stays fixed; preserving its local wrist posture had
+unnecessarily rejected reachable movement. Measured wrist twist, existing
+shoulder/elbow limits, finger dimensions and material guards remain enforced.
+Anatomical range calibration and the shared clamp defect remain separate
+findings, not claimed fixes.
+
+Fresh ordinary-guard proof on saved `Handle 1`:
+`test_artifacts/grip_support_2026-10-13T07-33-37_report.json`, 38/38 checks.
+Four requested directions produce 12.665/13.689/5.709/4.846 mm actual movement,
+without reacquisition or clamping; Hand-frame error stays below 0.0383 mm.
+An extreme request triggers one atomic rollback; support removal releases it.
+Sampled material remains safe. This is motion/retention evidence, not strict
+full-depth grip certification. The strengthened two-hand Save/reload/equipped
+test had separately failed before this final correction (07-27-38 report);
+repeat it before treating saved playback as fixed.
+
+Confirmed generated-reversal playback defect: the chain player derives its pivot
+from authored endpoint midpoints and normalizes interpolated segment directions.
+The real saved default bridge has a 179.9999-degree adjacent-frame jump and a
+0.48635 m weapon-origin displacement at 0.2667 -> 0.2833 s. Endpoint Save/reload/
+equipped checks passed but did not prove path continuity. Evidence:
+`test_artifacts/grip_transition_continuity_2026-10-13T07-12-49_report.json`.
+Current narrow repair: explicit actual pivot/flip frame for an unshaped generated
+bridge and continuous rigid-arc sampling. Preserve existing authored Bezier
+semantics; include new data in cache signatures and coordinate/retarget transport.
+
+The repaired default arc passed the actual saved-weapon Save/reload/equipped
+endpoint proof (54/54, 07-22-00 report), but the continuity diagnostic exposed a
+separate bake path. Stage tracing of a 10 mm two-hand edit showed legacy segment,
+anchor and body-clearance passes moving/rotating the weapon by hundreds of mm
+before support retention ran. Prepared handheld-grip baking now uses the same
+endpoint-preserving path as ordinary editing; unarmed and non-prepared behavior
+are unchanged. Macro limits, full-frame seating and support rollback still run.
+The isolated saved-clip rebake passes 20 preservation/capture checks (07-42-07
+report); continuity is measured separately and is not certified by those checks.
+
+Equipped Idle-to-skill entry had another discrete-state defect: interpolation
+cleared the solved-replay bridge flag, treating unfinished entry frames as
+completed grip frames. Interpolation now retains bridge state until the exact
+non-bridge endpoint. Focused contract: 44/44,
+`test_artifacts/solved_replay_bridge_status_2026-10-13T07-41-15.json`.
+The strengthened two-hand proof now checks the initial seated frame, requested
+translation path and rotation, not just nonzero movement or retained contact.
+Raw requested-path differences are metrics, not a new 50-microradian macro-motion
+requirement: the existing body projection can alter the realized path. The
+50-micrometre/radian tests apply to preserving the established grip relationships.
+
+Further actual equipped evidence found cached entry construction skipped source
+node 0, truncating a two-node skill to its entry transition. The validated cached
+replay route now bridges into node 0 and retains the complete saved body; the
+historical uncached, Idle and recovery routes are unchanged. Non-loop completion
+selects the exact last frame, avoiding float64 duration versus PackedFloat32 time
+rounding that left terminal bridge state active. Focused contract is now 82/82:
+`test_artifacts/solved_replay_bridge_status_2026-10-13T07-52-27.json`.
+Final actual Save/reload/equipped proof: 73/73,
+`test_artifacts/grip_save_playback_2026-10-13T07-56-39_report.json`, with 0.3 s entry
+plus the complete 0.3 s saved body. Every observed active non-bridge body sample
+retains both grip relationships; maximum combined metre/radian error is 4.19e-5,
+within the 0.05 mm positional and 50-microradian rotational limits. Skill
+completion and exact non-bridge terminal state are verified. Baked displacement
+is 8.453 mm, observed equipped body movement 7.519 mm (sampling begins after entry),
+zero bake clamps, Save 3.720 s for this short two-node fixture. This does not certify
+all possible trajectories or the more expensive reverse/multi-station bake.
+
+Cached primary bindings now restore before macro evaluation on style switches.
+Existing claim/key, dimensions and all 15 hinge checks remain authoritative;
+this prepass does not move the weapon or arm or run a new acquisition. The real
+reverse rebake (07-49-33, 20/20 structural/preservation checks) reduced the first
+identical-input follow-on shift from 47.44 mm/2.31 degrees to 7.25 mm/0.064 degrees.
+It did not remove inherited macro/wrist settling: later identical frames drift
+about 0.44-0.49 mm and 0.26-0.28 degrees per frame. Full animation smoothness is
+not certified. No anatomy tuning or brute-force settling loop was added.
+
+Final support guard on the user's new weapon at UI support 20% also passes 39/39:
+`test_artifacts/grip_support_2026-10-13T07-38-30_report.json`. Four requested
+directions move 6.8-14.3 mm with zero reacquisition, under 0.039 mm frame error,
+and sampled material safety. Its default support station still refuses the
+selected constrained seat. Left-main runtime and reverse-plus-support variants
+have not been certified by these runs; strict full-depth grip remains partial.
+Current saved animation cache header: `runtime_cache_v9_grip_transition_motion`.
+Re-save existing skills to regenerate earlier cached animation tracks.
+
+Final real new-weapon reverse insertion/Save/reload/equipped proof passes 54/54:
+`test_artifacts/grip_transition_playback_2026-10-13T07-54-06_report.json`.
+It uses right main, handle station 63% and roll 23 degrees, preserves editable
+follow-on and source-file hash, and observes both normal and reverse saved replay.
+Save took 40.915 s for this multi-station/transition fixture; this is not a claim
+that full skill baking is optimized. The separate whole-hand fitter is unchanged.
+Timeline UI checks and final cache ownership checks also pass. User visual testing
+of the corrected variants is still required; no left-main runtime claim is made.
+
+Checkpoint before these changes: `d1701224497aea78414a85e50f3681d55cb5fe4e`,
+`hand overhault v6.1 - coupled grip and saved-handle capture`, pushed and remote
+verified. No new Git operation has been requested for the transition corrections.
+
+Future architectural decision, not current implementation scope: the user is
+considering rebuilding the proven game in a clean folder structure to remove
+unused, redundant and conflicting code/variables, versus a multi-pass audit of
+the existing project. Decide later. Suggested first step is an ownership and
+dependency audit with behavior checks around active paths; do not begin a broad
+rewrite or reorganization as part of the current grip/arm corrections.
 
 ## October 13: new weapon blocked by unused full-render triangle validation
 

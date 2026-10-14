@@ -329,7 +329,6 @@ func _test_persistence(case_name: String, stage: Node, state: Resource, packet: 
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
 	wip.forge_v2_authoring_state = state.duplicate(true)
-	wip.layers = []
 	wip.ensure_combat_animation_station_state()
 	var prepared_packet: Dictionary = packet.duplicate(true)
 	prepared_packet["primary_grip_target_wrapper"] = wrapper

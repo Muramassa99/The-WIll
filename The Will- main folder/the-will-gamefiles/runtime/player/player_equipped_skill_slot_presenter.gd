@@ -225,7 +225,7 @@ func _validate_prepared_grip_replay(result: Dictionary, weapon: CraftedItemWIP, 
 	var fields := draft.runtime_cache_signature.split("|", false, 2)
 	var current_revision := (
 		fields.size() >= 2
-		and fields[0] == "runtime_cache_v8_committed_surface_grip"
+		and fields[0] == "runtime_cache_v9_grip_transition_motion"
 		and fields[1] == String(SurfaceGripSolver.REVISION)
 	)
 	var clip = result.get("baked_runtime_clip")

@@ -175,20 +175,13 @@ func _run_diagnostic() -> void:
 	quit(0)
 
 func _build_authored_comparator_wip() -> CraftedItemWIP:
-	var wip: CraftedItemWIP = CraftedItemWIPScript.new()
+	var wip: CraftedItemWIP = preload("res://tools/forge_v2_small_handle_fixture.gd").build(&"mat_wood_gray")
 	wip.wip_id = &"bridge_origin_replay_comparator_weapon"
 	wip.forge_project_name = "Bridge Origin Replay Comparator Weapon"
 	wip.creator_id = &"diagnostic"
 	wip.created_timestamp = Time.get_unix_time_from_system()
 	wip.forge_intent = &"intent_melee"
 	wip.equipment_context = &"ctx_weapon"
-	var layer_a: LayerAtom = LayerAtom.new()
-	layer_a.layer_index = 20
-	layer_a.cells = _build_handle_cells(20)
-	var layer_b: LayerAtom = LayerAtom.new()
-	layer_b.layer_index = 21
-	layer_b.cells = _build_handle_cells(21)
-	wip.layers = [layer_a, layer_b]
 	var station_state: CombatAnimationStationState = wip.ensure_combat_animation_station_state() as CombatAnimationStationState
 	var draft: CombatAnimationDraft = station_state.get_or_create_skill_draft(
 		SKILL_SLOT_ID,
@@ -673,17 +666,6 @@ func _resolve_weapon_length_from_draft(draft: CombatAnimationDraft) -> float:
 				continue
 			longest = maxf(longest, motion_node.tip_position_local.distance_to(motion_node.pommel_position_local))
 	return maxf(longest, 0.24)
-
-func _build_handle_cells(layer_index: int) -> Array[CellAtom]:
-	var cells: Array[CellAtom] = []
-	for x in range(20, 48):
-		for y in range(10, 13):
-			var cell: CellAtom = CellAtom.new()
-			cell.grid_position = Vector3i(x, y, layer_index)
-			cell.layer_index = layer_index
-			cell.material_variant_id = &"mat_wood_gray"
-			cells.append(cell)
-	return cells
 
 func _clip_has_solved_replay(clip) -> bool:
 	return clip != null and clip.has_method("has_solved_replay_track") and bool(clip.call("has_solved_replay_track"))

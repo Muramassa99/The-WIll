@@ -2,6 +2,7 @@ extends Resource
 class_name ForgeV2AuthoringState
 
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
+const HandleLengthPolicyScript = preload("res://core/resolvers/handle_length_policy.gd")
 const ForgeV2LayerDataScript = preload("res://runtime/forge_v2/forge_v2_layer_data.gd")
 const ForgeV2HistoryCheckpointScript = preload(
 	"res://runtime/forge_v2/forge_v2_history_checkpoint.gd"
@@ -48,7 +49,7 @@ const HANDLE_PATH_MODE_TWO_POINT_LINEAR := &"handle_path_2_point_linear"
 const HANDLE_THREE_POINT_COUNT := 3
 const HANDLE_TWO_POINT_COUNT := 2
 const HANDLE_MIN_AXIAL_SPAN_METERS := (
-	ForgeV2ProfileShapeLibraryScript.DEFAULT_CELL_WORLD_SIZE_METERS * 20.0
+	HandleLengthPolicyScript.MIN_HANDLE_LENGTH_METERS
 )
 const PROFILE_SIZE_MIN_METERS := ForgeV2ProfileShapeLibraryScript.DEFAULT_CELL_WORLD_SIZE_METERS
 const PROFILE_SIZE_MAX_METERS := 4.0
@@ -2622,9 +2623,9 @@ func get_profile_extrusion_status_label() -> String:
 		return "Handle: too many points"
 	var endpoint_span := _calculate_handle_endpoint_span(spline_line_points)
 	if not _handle_endpoint_span_meets_minimum(spline_line_points):
-		return "Handle: needs %.3f m axial span (currently %.3f m)" % [
-			HANDLE_MIN_AXIAL_SPAN_METERS,
-			endpoint_span,
+		return "Handle: needs %.2f mm axial span (currently %.2f mm)" % [
+			HANDLE_MIN_AXIAL_SPAN_METERS * 1000.0,
+			endpoint_span * 1000.0,
 		]
 	var compiled_handle_profile: Dictionary = (
 		build_active_tool_profile_preset_data("Handle Runtime")
@@ -2635,7 +2636,16 @@ func get_profile_extrusion_status_label() -> String:
 	) as Dictionary
 	if not bool(handle_runtime.get("valid", false)):
 		return "Handle: red anchor needs a valid 0.5 mm profile inset"
-	return "Handle: ready, %.3f m axial span" % endpoint_span
+	var length_label := "single-hand length"
+	match HandleLengthPolicyScript.classify_length(endpoint_span):
+		HandleLengthPolicyScript.BAND_TWO_HAND:
+			length_label = "two-hand length"
+		HandleLengthPolicyScript.BAND_LONG_HANDLE:
+			length_label = "long handle / two-hand length"
+	return "Handle: ready, %.2f mm axial span (%s)" % [
+		endpoint_span * 1000.0,
+		length_label,
+	]
 
 func get_detailing_brush_status_label() -> String:
 	if active_tool_id != TOOL_DETAILING_BRUSH:
@@ -7280,9 +7290,8 @@ func _calculate_handle_endpoint_span(path_points: PackedVector3Array) -> float:
 func _handle_endpoint_span_meets_minimum(
 	path_points: PackedVector3Array
 ) -> bool:
-	return (
-		_calculate_handle_endpoint_span(path_points) + 0.000001
-		>= HANDLE_MIN_AXIAL_SPAN_METERS
+	return HandleLengthPolicyScript.meets_minimum(
+		_calculate_handle_endpoint_span(path_points)
 	)
 
 func _build_sample_stroke_points(stroke_index: int) -> PackedVector3Array:

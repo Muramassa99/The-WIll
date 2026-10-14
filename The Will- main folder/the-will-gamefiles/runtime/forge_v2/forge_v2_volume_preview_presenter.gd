@@ -11,6 +11,7 @@ const ForgeV2ProfileShapeLibraryScript = preload("res://runtime/forge_v2/forge_v
 const ForgeV2SplinePathSamplerScript = preload(
 	"res://runtime/forge_v2/forge_v2_spline_path_sampler.gd"
 )
+const HandleLengthPolicyScript = preload("res://core/resolvers/handle_length_policy.gd")
 const PrimaryGripHandleMeshPacketScript = preload(
 	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
 )
@@ -31,6 +32,10 @@ const MATERIAL_SURFACE_COLLISION_LAYER := 1 << 20
 const DETAILING_BRUSH_TOOL_ID := &"tool_detailing_brush"
 const HANDLE_TOOL_ID := &"tool_handles"
 const DETAILING_INVALID_LINE_COLOR := Color(1.0, 0.08, 0.04, 0.98)
+const SPLINE_LINE_COLOR := Color(0.42, 0.92, 0.78, 0.94)
+const HANDLE_SINGLE_HAND_LINE_COLOR := Color(0.2, 0.9, 0.25, 0.96)
+const HANDLE_TWO_HAND_LINE_COLOR := Color(0.62, 0.3, 0.95, 0.96)
+const HANDLE_LONG_LINE_COLOR := Color(1.0, 0.28, 0.68, 0.96)
 const NATIVE_STATIC_LIFECYCLE_UNOBSERVED := "unobserved"
 const NATIVE_STATIC_LIFECYCLE_ARMED_EMPTY := "armed_empty"
 const NATIVE_STATIC_LIFECYCLE_ACTIVE := "active"
@@ -434,6 +439,7 @@ func _sync_spline_preview_mesh(authoring_state: Resource) -> void:
 		authoring_state,
 		spline_points
 	)
+	var line_color := _resolve_spline_preview_line_color(authoring_state, spline_points)
 	if handle_span_invalid:
 		var point_marker_mesh: ArrayMesh = _build_spline_preview_mesh(
 			spline_points,
@@ -442,7 +448,8 @@ func _sync_spline_preview_mesh(authoring_state: Resource) -> void:
 			false,
 			true,
 			false,
-			handle_uses_linear_path
+			handle_uses_linear_path,
+			line_color
 		)
 		var invalid_line_mesh: ArrayMesh = _build_spline_preview_mesh(
 			spline_points,
@@ -451,7 +458,8 @@ func _sync_spline_preview_mesh(authoring_state: Resource) -> void:
 			true,
 			false,
 			true,
-			handle_uses_linear_path
+			handle_uses_linear_path,
+			line_color
 		)
 		spline_preview_mesh_instance.mesh = point_marker_mesh
 		spline_preview_mesh_instance.material_override = (
@@ -479,7 +487,8 @@ func _sync_spline_preview_mesh(authoring_state: Resource) -> void:
 		true,
 		true,
 		false,
-		handle_uses_linear_path
+		handle_uses_linear_path,
+		line_color
 	)
 	if spline_mesh == null or spline_mesh.get_surface_count() <= 0:
 		spline_preview_mesh_instance.visible = false
@@ -488,6 +497,27 @@ func _sync_spline_preview_mesh(authoring_state: Resource) -> void:
 	spline_preview_mesh_instance.mesh = spline_mesh
 	spline_preview_mesh_instance.material_override = _build_spline_preview_material()
 	spline_preview_mesh_instance.visible = true
+
+func _resolve_spline_preview_line_color(
+	authoring_state: Resource,
+	spline_points: PackedVector3Array
+) -> Color:
+	if (
+		authoring_state == null
+		or StringName(authoring_state.get("active_tool_id")) != HANDLE_TOOL_ID
+	):
+		return SPLINE_LINE_COLOR
+	var axial_span := 0.0
+	if spline_points.size() >= 2:
+		axial_span = spline_points[0].distance_to(spline_points[spline_points.size() - 1])
+	match HandleLengthPolicyScript.classify_length(axial_span):
+		HandleLengthPolicyScript.BAND_SINGLE_HAND:
+			return HANDLE_SINGLE_HAND_LINE_COLOR
+		HandleLengthPolicyScript.BAND_TWO_HAND:
+			return HANDLE_TWO_HAND_LINE_COLOR
+		HandleLengthPolicyScript.BAND_LONG_HANDLE:
+			return HANDLE_LONG_LINE_COLOR
+	return DETAILING_INVALID_LINE_COLOR
 
 func _is_handle_span_preview_invalid(
 	authoring_state: Resource,
@@ -8940,24 +8970,20 @@ func _build_preview_mesh(volume_strokes: Array) -> ArrayMesh:
 func _build_spline_preview_mesh(
 	spline_points: PackedVector3Array,
 	selected_point_index: int,
-	spline_finished: bool,
+	_spline_finished: bool,
 	draw_line: bool = true,
 	draw_points: bool = true,
 	invalid_line: bool = false,
-	use_linear_path: bool = false
+	use_linear_path: bool = false,
+	line_color: Color = SPLINE_LINE_COLOR
 ) -> ArrayMesh:
 	if spline_points.is_empty():
 		return ArrayMesh.new()
 	var surface_tool := SurfaceTool.new()
 	surface_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var added_vertices := 0
-	var line_color := (
-		DETAILING_INVALID_LINE_COLOR
-		if invalid_line
-		else Color(0.18, 0.52, 1.0, 0.92)
-		if not spline_finished
-		else Color(0.42, 0.92, 0.78, 0.94)
-	)
+	if invalid_line:
+		line_color = DETAILING_INVALID_LINE_COLOR
 	var point_color := Color(0.76, 0.9, 1.0, 1.0)
 	var selected_color := Color(1.0, 0.88, 0.22, 1.0)
 	if draw_line and spline_points.size() >= 2:
@@ -9472,8 +9498,7 @@ func _build_placement_cursor_material() -> StandardMaterial3D:
 func _build_spline_preview_material() -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()
 	material.vertex_color_use_as_albedo = true
-	material.emission_enabled = true
-	material.emission = Color(0.12, 0.36, 0.9, 1.0)
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	material.roughness = 0.52

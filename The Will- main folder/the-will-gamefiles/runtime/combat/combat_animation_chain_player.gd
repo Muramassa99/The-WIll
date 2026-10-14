@@ -196,7 +196,10 @@ func _advance_runtime_clip(delta: float) -> void:
 			node_reached.emit(0)
 		else:
 			_clip_elapsed = _clip_total_duration
-			_apply_runtime_clip_sample(_clip_elapsed)
+			# Frame timestamps are PackedFloat32; declared duration is float64.
+			# At completion take the actual terminal sample, not a near-end blend
+			# that can retain entry/exit bridge authority after playback stops.
+			_apply_runtime_clip_frame(int(runtime_clip.call("get_frame_count")) - 1)
 			_playing = false
 			playback_finished.emit()
 			return
@@ -694,6 +697,12 @@ func _interpolate_runtime_clip_solved_replay_frames(from_index: int, to_index: i
 		"baked_solved_anchor_origin_id",
 		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 	)
+	# An interpolated entry/exit is still a bridge while either bridge endpoint
+	# contributes. Exact completed endpoints must regain ordinary replay rules.
+	current_solved_replay_bridge_frame = (
+		(clean_ratio < 1.0 and _is_runtime_clip_solved_replay_bridge_frame(from_index))
+		or (clean_ratio > 0.0 and _is_runtime_clip_solved_replay_bridge_frame(to_index))
+	)
 	current_solved_replay_available = true
 
 func _decode_runtime_clip_vector3_frame(frame_data: Variant, expected_count: int) -> Array[Vector3]:
@@ -899,6 +908,8 @@ func _interpolate_between_nodes(from_index: int, to_index: int, ratio: float) ->
 		_resolve_effective_weapon_orientation_degrees(to_node),
 		ratio
 	)
+	if resolved_segment.has("weapon_orientation_degrees"):
+		current_weapon_orientation_degrees = resolved_segment.weapon_orientation_degrees
 	current_weapon_roll = lerpf(from_node.weapon_roll_degrees, to_node.weapon_roll_degrees, ratio)
 	current_axial_reposition = lerpf(from_node.axial_reposition_offset, to_node.axial_reposition_offset, ratio)
 	current_grip_seat_slide = lerpf(from_node.grip_seat_slide_offset, to_node.grip_seat_slide_offset, ratio)
@@ -1094,6 +1105,9 @@ func _resolve_rigid_segment_sample(
 			"pommel_position": sampled_pommel_position,
 		}
 	if _is_grip_style_swap_segment(from_node, to_node):
+		var arc := _resolve_unshaped_grip_swap_arc(from_node, to_node, ratio)
+		if not arc.is_empty():
+			return arc
 		return _resolve_fixed_pivot_grip_swap_sample(from_node, to_node, sampled_tip_position, sampled_pommel_position, target_length)
 	return _resolve_length_locked_segment_sample(from_node, to_node, sampled_tip_position, sampled_pommel_position, target_length)
 
@@ -1112,6 +1126,45 @@ func _is_grip_style_swap_segment(from_node: CombatAnimationMotionNode, to_node: 
 		and to_node.generated_transition_kind == CombatAnimationMotionNodeScript.TRANSITION_KIND_GRIP_STYLE_SWAP
 		and from_node.preferred_grip_style_mode != to_node.preferred_grip_style_mode
 	)
+
+func _resolve_unshaped_grip_swap_arc(from_node: CombatAnimationMotionNode,
+		to_node: CombatAnimationMotionNode, ratio: float) -> Dictionary:
+	# Explicit curve edits retain their existing sampling. Auto-generated curve
+	# handles are not authored edits and must not collapse a default 180-degree arc.
+	if not from_node.tip_curve_out_handle.is_zero_approx() or not from_node.pommel_curve_out_handle.is_zero_approx() or not to_node.tip_curve_in_handle.is_zero_approx() or not to_node.pommel_curve_in_handle.is_zero_approx():
+		return {}
+	var source_tip: Vector3 = from_node.tip_position_local
+	var source_pommel: Vector3 = from_node.pommel_position_local
+	var pivot: Vector3
+	var flip_axis: Vector3
+	if to_node.has_valid_grip_style_transition_frame():
+		pivot = to_node.grip_style_transition_pivot_local
+		flip_axis = to_node.grip_style_transition_axis_local.normalized()
+		source_tip = to_node.grip_style_transition_source_tip_local
+		source_pommel = to_node.grip_style_transition_source_pommel_local
+	else:
+		# Old bridges have no realized-frame packet. Use the historical inferred
+		# pivot only when it really describes a half-turn of their authored frame.
+		pivot = _resolve_grip_swap_fixed_pivot(from_node, to_node)
+		var source_axis := (source_tip - source_pommel).normalized()
+		flip_axis = Basis.from_euler(_resolve_effective_weapon_orientation_degrees(from_node) * (PI / 180.0)) * Vector3.UP
+		flip_axis -= source_axis * flip_axis.dot(source_axis)
+		if flip_axis.length_squared() <= 0.00000001:
+			return {}
+		flip_axis = flip_axis.normalized().rotated(source_axis, deg_to_rad(from_node.weapon_roll_degrees))
+		var end_rotation := Basis(flip_axis, PI)
+		if (pivot + end_rotation * (source_tip - pivot)).distance_to(to_node.tip_position_local) > 0.00005 or (pivot + end_rotation * (source_pommel - pivot)).distance_to(to_node.pommel_position_local) > 0.00005:
+			return {}
+	var progress := clampf(ratio, 0.0, 1.0)
+	var rotation := Basis(flip_axis, PI * progress)
+	var tip := pivot + rotation * (source_tip - pivot)
+	var pommel := pivot + rotation * (source_pommel - pivot)
+	var forward := (tip - pommel).normalized()
+	var roll := lerpf(from_node.weapon_roll_degrees, to_node.weapon_roll_degrees, progress)
+	var unrolled_up := flip_axis.rotated(forward, -deg_to_rad(roll))
+	return {"tip_position": tip, "pommel_position": pommel,
+		"weapon_orientation_degrees": Quaternion(Vector3.UP, unrolled_up.normalized()).get_euler() * (180.0 / PI),
+		"fixed_pivot": pivot}
 
 func _resolve_fixed_pivot_grip_swap_sample(
 	from_node: CombatAnimationMotionNode,
@@ -1177,6 +1230,10 @@ func _resolve_pivot_ratio_from_pommel(motion_node: CombatAnimationMotionNode, pi
 func _resolve_grip_swap_source_contact_axis(from_node: CombatAnimationMotionNode, to_node: CombatAnimationMotionNode) -> Vector3:
 	if from_node == null:
 		return Vector3.ZERO
+	if to_node != null:
+		var arc := _resolve_unshaped_grip_swap_arc(from_node, to_node, 0.0)
+		if not arc.is_empty():
+			return _resolve_axis_between_positions(arc.pommel_position, arc.tip_position)
 	var fixed_pivot: Vector3 = _resolve_grip_swap_fixed_pivot(from_node, to_node) if to_node != null else from_node.pommel_position_local
 	return _resolve_axis_between_positions(fixed_pivot, from_node.tip_position_local)
 
@@ -1200,6 +1257,9 @@ func _apply_trajectory_volume_to_current_segment(from_node: CombatAnimationMotio
 	var resolved_config: Dictionary = trajectory_volume_config.duplicate(true)
 	if _is_grip_style_swap_segment(from_node, to_node):
 		var fixed_pivot: Vector3 = _resolve_grip_swap_fixed_pivot(from_node, to_node)
+		var arc := _resolve_unshaped_grip_swap_arc(from_node, to_node, 0.0)
+		if not arc.is_empty():
+			fixed_pivot = arc.fixed_pivot
 		resolved_config["pivot_ratio_from_pommel"] = _resolve_pivot_ratio_from_pommel(from_node, fixed_pivot)
 	var volume_result: Dictionary = trajectory_volume_resolver.project_segment_to_valid_volume(
 		current_tip_position,

@@ -1,6 +1,7 @@
 extends SceneTree
 
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
+const ForgeV2AuthoringStateScript = preload("res://runtime/forge_v2/forge_v2_authoring_state.gd")
 const PlayerEquipmentStateScript = preload("res://core/models/player_equipment_state.gd")
 const PlayerForgeWipLibraryStateScript = preload("res://core/models/player_forge_wip_library_state.gd")
 const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_state.gd")
@@ -72,6 +73,8 @@ func _build_authored_skill_test_wip(project_name: String, slot_id: StringName, s
 		CraftedItemWIPScript.BUILDER_PATH_MELEE,
 		CraftedItemWIPScript.BUILDER_COMPONENT_PRIMARY
 	)
+	wip.forge_v2_authoring_state = ForgeV2AuthoringStateScript.new()
+	wip.forge_v2_authoring_state.call("reset_new_draft", wip.forge_project_name)
 	var station_state: CombatAnimationStationState = wip.ensure_combat_animation_station_state() as CombatAnimationStationState
 	if station_state == null:
 		return wip

@@ -1291,35 +1291,47 @@ func _insert_generated_grip_style_transition_after_selection(
 	var bridge_node: CombatAnimationMotionNode = source_node.duplicate_node()
 	if bridge_node == null:
 		return false
-	var pivot_local: Vector3 = _resolve_primary_grip_pivot_for_motion_node(source_node)
-	bridge_node.tip_position_local = _reflect_point_across_pivot(source_node.tip_position_local, pivot_local)
-	bridge_node.pommel_position_local = _reflect_point_across_pivot(source_node.pommel_position_local, pivot_local)
+	if not _apply_grip_style_bridge_weapon_frame(bridge_node, source_node, target_grip_mode):
+		return false
 	bridge_node.tip_curve_in_handle = Vector3.ZERO
 	bridge_node.tip_curve_out_handle = Vector3.ZERO
 	bridge_node.pommel_curve_in_handle = Vector3.ZERO
 	bridge_node.pommel_curve_out_handle = Vector3.ZERO
 	bridge_node.preferred_grip_style_mode = target_grip_mode
-	_apply_grip_style_bridge_weapon_frame(bridge_node, target_grip_mode)
 	bridge_node.generated_transition_node = true
 	bridge_node.generated_transition_kind = CombatAnimationMotionNodeScript.TRANSITION_KIND_GRIP_STYLE_SWAP
 	bridge_node.locked_for_authoring = true
 	bridge_node.draft_notes = "Generated grip-style swap bridge. Endpoints stay locked; Bezier path handles can be shaped."
 	bridge_node.normalize()
+	var authored_node: CombatAnimationMotionNode = _duplicate_or_build_motion_node(bridge_node)
+	authored_node.draft_notes = source_node.draft_notes
+	_prepare_inserted_motion_node_identity(bridge_node)
+	_prepare_inserted_motion_node_identity(authored_node)
 	var insert_index: int = int(draft.get("selected_motion_node_index")) + 1
 	var typed_draft: CombatAnimationDraft = draft as CombatAnimationDraft
 	if typed_draft != null:
+		var previous_selected: int = typed_draft.selected_motion_node_index
+		var previous_continuity: int = typed_draft.continuity_motion_node_index
 		var insert_result: Dictionary = typed_draft.insert_motion_node_after_selected(bridge_node)
 		if not bool(insert_result.get("inserted", false)):
 			return false
 		insert_index = int(insert_result.get("inserted_index", insert_index))
+		var authored_result: Dictionary = typed_draft.insert_motion_node_after_selected(authored_node)
+		if not bool(authored_result.get("inserted", false)):
+			typed_draft.motion_node_chain.remove_at(insert_index)
+			typed_draft.selected_motion_node_index = previous_selected
+			typed_draft.continuity_motion_node_index = previous_continuity
+			typed_draft.normalize()
+			return false
 	else:
 		var motion_node_chain: Array = draft.get("motion_node_chain") as Array
 		insert_index = clampi(int(draft.get("selected_motion_node_index")), 0, maxi(motion_node_chain.size() - 1, 0)) + 1
 		motion_node_chain.insert(insert_index, bridge_node)
-		draft.set("selected_motion_node_index", insert_index)
+		motion_node_chain.insert(insert_index + 1, authored_node)
+		draft.set("selected_motion_node_index", insert_index + 1)
 	_normalize_draft(draft)
 	_apply_motion_node_change(
-		"Generated %s grip-swap bridge at motion node %d." % [
+		"Generated %s grip-swap bridge at motion node %d; editing its following pose." % [
 			CraftedItemWIPScript.get_grip_style_label(target_grip_mode),
 			insert_index,
 		],
@@ -1331,39 +1343,34 @@ func _insert_generated_grip_style_transition_after_selection(
 	)
 	return true
 
-func _apply_grip_style_bridge_weapon_frame(bridge_node: CombatAnimationMotionNode, target_grip_mode: StringName) -> void:
-	if bridge_node == null:
-		return
-	var target_seed: Dictionary = _resolve_active_weapon_motion_seed(false, target_grip_mode)
-	if target_seed.is_empty():
-		return
-	bridge_node.weapon_orientation_degrees = target_seed.get(
-		"weapon_orientation_degrees",
-		bridge_node.weapon_orientation_degrees
-	) as Vector3
-	bridge_node.weapon_orientation_authored = bool(target_seed.get("weapon_orientation_authored", true))
-	bridge_node.weapon_roll_degrees = float(target_seed.get("weapon_roll_degrees", bridge_node.weapon_roll_degrees))
+func _apply_grip_style_bridge_weapon_frame(bridge_node: CombatAnimationMotionNode,
+		source_node: CombatAnimationMotionNode, target_grip_mode: StringName) -> bool:
+	var target_seed: Dictionary = preview_presenter.resolve_grip_style_transition_seed(
+		preview_subviewport, source_node, target_grip_mode)
+	if not target_seed.get("available", false):
+		if footer_status_label != null:
+			footer_status_label.text = "Grip-style change needs a valid weapon preview: %s" % target_seed.get("reason", "unavailable")
+		return false
+	# Only the rigid frame changes. The duplicated source retains its handle
+	# coordinates, primary hand, stance and authored roll instead of reseeding.
+	bridge_node.tip_position_local = target_seed.tip_position_local
+	bridge_node.pommel_position_local = target_seed.pommel_position_local
+	bridge_node.tip_position_origin_id = target_seed.tip_position_origin_id
+	bridge_node.pommel_position_origin_id = target_seed.pommel_position_origin_id
+	bridge_node.weapon_orientation_degrees = target_seed.weapon_orientation_degrees
+	bridge_node.weapon_orientation_authored = true
+	bridge_node.weapon_roll_degrees = target_seed.weapon_roll_degrees
+	bridge_node.grip_style_transition_frame_available = true
+	bridge_node.grip_style_transition_pivot_local = target_seed.grip_style_transition_pivot_local
+	bridge_node.grip_style_transition_axis_local = target_seed.grip_style_transition_axis_local
+	bridge_node.grip_style_transition_source_tip_local = target_seed.grip_style_transition_source_tip_local
+	bridge_node.grip_style_transition_source_pommel_local = target_seed.grip_style_transition_source_pommel_local
+	bridge_node.grip_style_transition_origin_id = target_seed.tip_position_origin_id
+	return true
 
 func _resolve_primary_grip_pivot_for_motion_node(motion_node: CombatAnimationMotionNode) -> Vector3:
-	if motion_node == null:
-		return Vector3.ZERO
-	var preview_pivot: Variant = preview_presenter.resolve_motion_node_primary_grip_seat_local(
-		preview_subviewport,
-		motion_node
-	)
-	if preview_pivot != null:
-		return preview_pivot as Vector3
-	var geometry_seed: Dictionary = _resolve_active_weapon_geometry_seed_base()
-	var seed_tip: Vector3 = geometry_seed.get("tip_position_local", motion_node.tip_position_local) as Vector3
-	var seed_pommel: Vector3 = geometry_seed.get("pommel_position_local", motion_node.pommel_position_local) as Vector3
-	var seed_axis: Vector3 = seed_tip - seed_pommel
-	if seed_axis.length_squared() <= 0.000001:
-		return motion_node.pommel_position_local.lerp(motion_node.tip_position_local, 0.5)
-	var grip_ratio_from_pommel: float = clampf((-seed_pommel).dot(seed_axis) / seed_axis.length_squared(), 0.0, 1.0)
-	return motion_node.pommel_position_local.lerp(motion_node.tip_position_local, grip_ratio_from_pommel)
-
-func _reflect_point_across_pivot(point_local: Vector3, pivot_local: Vector3) -> Vector3:
-	return pivot_local + (pivot_local - point_local)
+	var pivot: Variant = preview_presenter.resolve_motion_node_primary_grip_seat_local(preview_subviewport, motion_node)
+	return pivot as Vector3 if pivot is Vector3 else Vector3.ZERO
 
 func set_selected_motion_node_tip_curve_in(
 	curve_in_handle: Vector3,
@@ -2207,9 +2214,9 @@ func _build_right_inspector(parent: HBoxContainer) -> void:
 	weapon_rotation_y_spin_box = weapon_plane[1]
 	weapon_rotation_z_spin_box = weapon_plane[2]
 	weapon_roll_spin_box = _build_labeled_spinbox(orientation_content, "Weapon Roll (deg)", -120.0, 120.0, 1.0)
-	axial_reposition_spin_box = _build_labeled_spinbox(orientation_content, "Axial Reposition", -1.0, 1.0, 0.01)
-	grip_seat_slide_spin_box = _build_labeled_spinbox(orientation_content, "Primary Handle Position", 0.0, 1.0, 0.01)
-	secondary_grip_seat_slide_spin_box = _build_labeled_spinbox(orientation_content, "Support Handle Position", 0.0, 1.0, 0.01)
+	axial_reposition_spin_box = _build_labeled_spinbox(orientation_content, "Axial Reposition", -1.0, 1.0, 0.0001)
+	grip_seat_slide_spin_box = _build_labeled_spinbox(orientation_content, "Primary Handle Position", 0.0, 1.0, 0.0001)
+	secondary_grip_seat_slide_spin_box = _build_labeled_spinbox(orientation_content, "Support Handle Position", 0.0, 1.0, 0.0001)
 	var timing_section: Dictionary = _build_foldable_section(vbox, "TIMING & BEHAVIOR", true)
 	var timing_content: VBoxContainer = timing_section.get("content", null) as VBoxContainer
 	_build_helper_text(timing_content, "Transition time is the travel time from the previous motion node into the selected node. Node 01 is the starting baseline, so its transition value is not used during preview.")
@@ -3032,6 +3039,7 @@ func _refresh_editor_fields() -> void:
 	axial_reposition_spin_box.editable = motion_node_editable
 	grip_seat_slide_spin_box.editable = motion_node_editable
 	secondary_grip_seat_slide_spin_box.editable = motion_node_editable
+	_refresh_handle_end_controls(motion_node, motion_node_editable)
 	right_upperarm_roll_spin_box.editable = motion_node_editable
 	left_upperarm_roll_spin_box.editable = motion_node_editable
 	draft_notes_edit.editable = has_draft
@@ -3221,14 +3229,6 @@ func _append_stance_guardrails(entries: Array[Dictionary], preview_debug_state: 
 		return
 	var selected_index: int = get_selected_motion_node_index()
 	var wants_two_hand: bool = motion_node.two_hand_state == CombatAnimationMotionNodeScript.TWO_HAND_STATE_TWO_HAND
-	if wants_two_hand and motion_node.preferred_grip_style_mode == CraftedItemWIPScript.GRIP_REVERSE:
-		_append_guardrail_entry(
-			entries,
-			GUARDRAIL_SEVERITY_WARNING,
-			&"reverse_grip_two_hand_unsupported",
-			"Reverse grip suppresses two-hand support for this weapon state.",
-			selected_index
-		)
 	if wants_two_hand and int(preview_debug_state.get("secondary_grip_debug_count", 0)) <= 0:
 		_append_guardrail_entry(
 			entries,
@@ -4295,7 +4295,6 @@ func _normalize_unarmed_authoring_wip(unarmed_wip: CraftedItemWIP) -> void:
 	unarmed_wip.equipment_context = CraftedItemWIPScript.EQUIPMENT_CONTEXT_UNARMED
 	unarmed_wip.grip_style_mode = CraftedItemWIPScript.GRIP_NORMAL
 	unarmed_wip.latest_baked_profile_snapshot = null
-	unarmed_wip.layers.clear()
 	var station_state: Resource = unarmed_wip.combat_animation_station_state
 	if station_state == null or not station_state.has_method("ensure_default_baseline_content"):
 		station_state = CombatAnimationStationStateScript.new()
@@ -5157,6 +5156,8 @@ func _can_reuse_runtime_clip_cache(draft: Resource, runtime_clip, cache_signatur
 		return false
 	if not _runtime_clip_has_solved_replay_track(runtime_clip):
 		return false
+	if not _runtime_clip_respects_handle_ends(runtime_clip):
+		return false
 	var source_weapon_wip_id: StringName = StringName(runtime_clip.get("source_weapon_wip_id"))
 	if (
 		active_wip != null
@@ -5175,6 +5176,36 @@ func _can_reuse_runtime_clip_cache(draft: Resource, runtime_clip, cache_signatur
 	var slot_id: StringName = _resolve_draft_skill_slot_id_for_runtime_cache(draft)
 	var clip_slot_id: StringName = StringName(runtime_clip.get("source_skill_slot_id"))
 	return clip_slot_id == StringName() or slot_id == StringName() or clip_slot_id == slot_id
+
+func _runtime_clip_respects_handle_ends(runtime_clip: Resource) -> bool:
+	if _is_active_unarmed_authoring_wip():
+		return true
+	var context: Dictionary = preview_presenter._weapon_roll_context(preview_subviewport)
+	if context.is_empty():
+		return false
+	var paths: Array = runtime_clip.get("baked_solved_anchor_node_paths")
+	var frames: Array = runtime_clip.get("baked_solved_anchor_positions_weapon_local")
+	var available: Array = runtime_clip.get("baked_solved_replay_frame_available")
+	var hand_states: Array = runtime_clip.get("baked_two_hand_states")
+	var main_slots: Array = runtime_clip.get("baked_primary_hand_slots")
+	var frame_count: int = runtime_clip.get_frame_count()
+	if frames.size() != frame_count or available.size() != frame_count:
+		return false
+	for frame_index: int in range(frame_count):
+		if not bool(available[frame_index]):
+			continue
+		if not (frames[frame_index] is Array or frames[frame_index] is PackedVector3Array):
+			return false
+		var frame := {"solved_anchor_node_paths": paths,
+			"solved_anchor_positions_weapon_local": Array(frames[frame_index])}
+		if frame_index < hand_states.size():
+			frame["two_hand_state"] = hand_states[frame_index]
+		if frame_index < main_slots.size():
+			frame["primary_hand_slot"] = main_slots[frame_index]
+		if not preview_presenter.validate_solved_replay_hand_end_bounds(context.weapon, frame).get("valid", false):
+			return false
+	return true
+
 
 func _refresh_manual_save_controls(draft: Resource = null) -> void:
 	var active_draft: Resource = draft if draft != null else _get_active_draft()
@@ -5316,7 +5347,7 @@ func _build_runtime_clip_cache_signature(draft: Resource) -> String:
 	var parts := PackedStringArray()
 	# Rebuild derived tracks that could capture pending/open fingers instead of
 	# the committed hand/weapon relationship. Authored motion is unchanged.
-	parts.append("runtime_cache_v8_committed_surface_grip")
+	parts.append("runtime_cache_v9_grip_transition_motion")
 	parts.append(String(SurfaceGripSolverScript.REVISION))
 	parts.append(String(active_wip.wip_id) if active_wip != null else "")
 	parts.append(String(draft.get("draft_id")))
@@ -5403,6 +5434,12 @@ func _build_motion_node_runtime_cache_signature(motion_node: CombatAnimationMoti
 	parts.append(str(motion_node.generated_transition_node))
 	parts.append(String(motion_node.generated_transition_kind))
 	parts.append(str(motion_node.locked_for_authoring))
+	parts.append(str(motion_node.grip_style_transition_frame_available))
+	parts.append(str(motion_node.grip_style_transition_pivot_local))
+	parts.append(str(motion_node.grip_style_transition_axis_local))
+	parts.append(str(motion_node.grip_style_transition_source_tip_local))
+	parts.append(str(motion_node.grip_style_transition_source_pommel_local))
+	parts.append(String(motion_node.grip_style_transition_origin_id))
 	parts.append(_build_retarget_node_runtime_cache_signature(motion_node.retarget_node))
 	return ",".join(parts)
 
@@ -6755,8 +6792,6 @@ func _resolve_available_hand_proxy_slots(motion_node: CombatAnimationMotionNode)
 func _motion_node_uses_two_hand(motion_node: CombatAnimationMotionNode) -> bool:
 	if motion_node == null or _is_active_unarmed_authoring_wip():
 		return false
-	if motion_node.preferred_grip_style_mode == CraftedItemWIPScript.GRIP_REVERSE:
-		return false
 	if motion_node.two_hand_state == CombatAnimationMotionNodeScript.TWO_HAND_STATE_TWO_HAND:
 		return true
 	if motion_node.two_hand_state == CombatAnimationMotionNodeScript.TWO_HAND_STATE_ONE_HAND:
@@ -7054,6 +7089,10 @@ func set_selected_motion_node_axial_reposition(
 	if _is_motion_node_authoring_locked(motion_node):
 		_reject_locked_motion_node_edit()
 		return false
+	var limits := _get_handle_edit_limits(motion_node, false, true)
+	if not limits.get("valid", false):
+		return false
+	reposition_value = clampf(reposition_value, float(limits.minimum), float(limits.maximum))
 	if is_equal_approx(motion_node.axial_reposition_offset, reposition_value):
 		return false
 	# The static preview actor does not receive a fresh animation base every frame.
@@ -7102,6 +7141,10 @@ func set_selected_motion_node_grip_seat_slide(
 		0.0,
 		1.0
 	)
+	var limits := _get_handle_edit_limits(motion_node)
+	if not limits.get("valid", false):
+		return false
+	resolved_handle_coordinate = clampf(resolved_handle_coordinate, float(limits.minimum), float(limits.maximum))
 	if (
 		motion_node.grip_seat_coordinate_schema_version
 		>= CombatAnimationMotionNodeScript
@@ -7153,6 +7196,10 @@ func set_selected_motion_node_secondary_grip_seat_slide(
 		0.0,
 		1.0
 	)
+	var limits := _get_handle_edit_limits(motion_node, true)
+	if not limits.get("valid", false):
+		return false
+	resolved_handle_coordinate = clampf(resolved_handle_coordinate, float(limits.minimum), float(limits.maximum))
 	if (
 		motion_node.grip_seat_coordinate_schema_version
 		>= CombatAnimationMotionNodeScript
@@ -7179,6 +7226,66 @@ func set_selected_motion_node_secondary_grip_seat_slide(
 		PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION
 	)
 	return true
+
+## Bound the edited component after accounting for the other axial component.
+## This preserves saved 0..1 coordinates and the existing +/- half-span control.
+func _get_handle_edit_limits(motion_node: CombatAnimationMotionNode, support: bool = false, axial: bool = false) -> Dictionary:
+	if _is_active_unarmed_authoring_wip():
+		return {"valid": true, "minimum": -1.0 if axial else 0.0, "maximum": 1.0}
+	var bounds: Dictionary = preview_presenter.get_preview_hand_end_bounds(preview_subviewport, support)
+	if not bounds.get("valid", false) or motion_node == null:
+		return {"valid": false}
+	var minimum := float(bounds.min_ratio)
+	var maximum := float(bounds.max_ratio)
+	if axial:
+		minimum = maxf(-1.0, 2.0 * (minimum - motion_node.grip_seat_slide_offset))
+		maximum = minf(1.0, 2.0 * (maximum - motion_node.grip_seat_slide_offset))
+	elif not support:
+		minimum = maxf(0.0, minimum - 0.5 * motion_node.axial_reposition_offset)
+		maximum = minf(1.0, maximum - 0.5 * motion_node.axial_reposition_offset)
+	return {"valid": minimum <= maximum, "minimum": minimum, "maximum": maximum}
+
+
+func _refresh_handle_end_controls(motion_node: CombatAnimationMotionNode, editable: bool) -> void:
+	for entry: Dictionary in [
+		{"control": grip_seat_slide_spin_box, "support": false, "axial": false},
+		{"control": secondary_grip_seat_slide_spin_box, "support": true, "axial": false},
+		{"control": axial_reposition_spin_box, "support": false, "axial": true}]:
+		var control: SpinBox = entry.control
+		var limits := _get_handle_edit_limits(motion_node, entry.support, entry.axial)
+		control.editable = editable and bool(limits.get("valid", false))
+		if not limits.get("valid", false):
+			control.tooltip_text = "Handle space or character hand measurement is unavailable."
+			continue
+		var minimum := float(limits.minimum)
+		var maximum := float(limits.maximum)
+		if not entry.axial:
+			minimum = PrimaryGripSeatResolverScript.handle_coordinate_to_display_value(minimum, active_handle_coordinate_display_mode)
+			maximum = PrimaryGripSeatResolverScript.handle_coordinate_to_display_value(maximum, active_handle_coordinate_display_mode)
+		# Keep the displayed boundary on the same grid as the number control.
+		# Round inward only; never let rounding put a hand beyond the physical end.
+		var grid_min := ceilf(minimum / control.step) * control.step
+		var grid_max := floorf(maximum / control.step) * control.step
+		if grid_min <= grid_max:
+			minimum = grid_min
+			maximum = grid_max
+		var authored: float = motion_node.axial_reposition_offset if entry.axial else (
+			motion_node.secondary_grip_seat_slide_offset if entry.support else motion_node.grip_seat_slide_offset)
+		if not entry.axial:
+			authored = PrimaryGripSeatResolverScript.handle_coordinate_to_display_value(authored, active_handle_coordinate_display_mode)
+		# Show old authored values honestly instead of independently clamping two
+		# controls into a different combined station. All user edits use the bounded
+		# setters; loading/refreshing never silently rewrites an authored motion.
+		control.allow_lesser = authored < minimum
+		control.allow_greater = authored > maximum
+		# Updating Range bounds may clamp its value. The surrounding field refresh
+		# already suppresses edit handlers; this never rewrites a saved motion node.
+		control.min_value = minimum
+		control.max_value = maximum
+		control.tooltip_text = "Handle end clearance: allowed %.4f to %.4f." % [minimum, maximum]
+		if authored < minimum or authored > maximum:
+			control.tooltip_text += " Saved value is outside this range; edit to accept a bounded position."
+
 
 func _on_skill_name_submitted(new_text: String) -> void:
 	if refreshing_controls:

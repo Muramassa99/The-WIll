@@ -1,0 +1,44 @@
+{
+  "scope": "Forge V1 storage/runtime fallback retirement and broad integration sanity",
+  "date": "2026-10-14",
+  "status": "completed_with_two_hand_bake_retention_failure",
+  "code_prune_complete": true,
+  "project_import_clean": true,
+  "changed_script_parse": {"count": 52, "failures": 0, "report": "forge_v1_storage_sanity_parse_20261014.json"},
+  "focused_checks": {
+    "forge_v1_retirement": [19, 0],
+    "forge_wip_library": [45, 0],
+    "forge_v2_handle_length_bands": [298, 0],
+    "mochi_vertical_slice": [15, 0],
+    "prepared_grip_cache_ownership": [19, 0]
+  },
+  "integration_passes": [
+    "material variant carrythrough", "exact main and support Handle triangles and rays",
+    "prepared material color transport and refreshed Forge test equip",
+    "V2 WIP runtime contract", "pending-profile Save and reload",
+    "prepared-wrapper StageController export", "Save As rename and failed-write rollback",
+    "main world and Skill Crafter load", "inventory", "stow", "grip layout",
+    "normal and reverse hand mounting on both hands", "weapon slot identity and priority",
+    "baseline reset", "station open modes", "slot selector", "Space focus guard",
+    "handle coordinate contract", "origin annotations",
+    "solved replay modifier authority", "solved replay bridge interpolation"
+  ],
+  "real_saved_weapon": "Handle 1",
+  "single_hand": {"checks": 30, "failures": [], "report": "grip_save_playback_2026-10-14T04-53-07_report.json"},
+  "two_hand": {
+    "checks": 73,
+    "failures": ["both recorded preview endpoints retain both established grips", "equipped motion preserves both established Hand-to-weapon relationships"],
+    "report": "grip_save_playback_2026-10-14T04-54-39_report.json",
+    "first_support_position_error_m": 0.10325863212347,
+    "first_support_rotation_error_rad": 1.50851555655389,
+    "interpretation": "Saved visible preview restores correctly; captured motion has a changed support relationship; runtime reproduces the captured pose accurately. Cause not established."
+  },
+  "known_verifier_gaps": ["Historical runtime playback, idle and entry fixtures lack saved solved replay tracks; their results do not certify modern playback."],
+  "visual_grip_certified": false,
+  "new_deleted_files": 8,
+  "deleted_path_references": 0,
+  "diff_check_passed": true,
+  "actual_user_libraries_written": false,
+  "git_index_or_history_changed": false,
+  "next_focus": "Trace support frame and cache keys through prepare_replay_grip and bake capture; compare current measured-end-bound placement with retained pre-Save relationship."
+}

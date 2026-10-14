@@ -1,0 +1,345 @@
+﻿{
+    "scope":  "Forge V1 runtime/scene/authoring-definition deletions",
+    "total_deleted":  81,
+    "runtime_scripts":  33,
+    "runtime_script_uids":  33,
+    "scenes":  3,
+    "definition_scripts":  5,
+    "definition_script_uids":  5,
+    "definition_resources":  2,
+    "retained":  [
+                     "runtime/forge/test_print_mesh_builder.gd",
+                     "runtime/forge/test_print_mesh_builder.gd.uid"
+                 ],
+    "source_manifests":  [
+                             "C:\\WORKSPACE\\test_artifacts\\forge_v1_runtime_deleted_20261014.json",
+                             "C:\\WORKSPACE\\test_artifacts\\forge_v1_authoring_defs_deleted_20261014.json",
+                             "C:\\WORKSPACE\\test_artifacts\\forge_v1_seed_defs_deleted_20261014.json"
+                         ],
+    "files":  [
+                  {
+                      "path":  "runtime/forge/crafting_bench.gd",
+                      "sha256":  "77e3adfd13970e18e744f9b80418ac4fecb30f753c99cca7719acbc43e7b36b1"
+                  },
+                  {
+                      "path":  "runtime/forge/crafting_bench.gd.uid",
+                      "sha256":  "570bd7212df4d5bfc06221f2d59588eb392e9321e30d5f93434c5e1d96d48d68"
+                  },
+                  {
+                      "path":  "runtime/forge/crafting_bench_ui.gd",
+                      "sha256":  "88a2de7380e51e6e6c684a5d53f6f8c9d12c029f0be78b05be2b2f1ac1800d59"
+                  },
+                  {
+                      "path":  "runtime/forge/crafting_bench_ui.gd.uid",
+                      "sha256":  "81928b78e880492f6ec8e827b2573c8826c12d068cecd826025fcec320c8c6f8"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_authoring_sandbox_presenter.gd",
+                      "sha256":  "7863950c1403f89d7f6439f6f5e88dff12b6b6a4af4204cf5cb06e2df68c343b"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_authoring_sandbox_presenter.gd.uid",
+                      "sha256":  "4862602cee7104e78550590f38fdd6d457a390b40547d06d0f845b8fac18bfc6"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_bench_debug_presenter.gd",
+                      "sha256":  "ed7ea46ed88dd136e8cfee96828e0726f4bc04ea4a9ea3d3a28c2d10e391e9e7"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_bench_debug_presenter.gd.uid",
+                      "sha256":  "8c756b947863fcca60af9920effbbece5ee5a1d25f1d5902a89c654cec8ee26a"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_bench_material_state_presenter.gd",
+                      "sha256":  "c35ca5c6d3de7b951b9514c5125b6b1459cf246746a2ccb48b826fb6b9660f7d"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_bench_material_state_presenter.gd.uid",
+                      "sha256":  "38953aa1a8db06168fd7fb162ec7733af18864912c519ab15ca733ad267148c0"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_bench_menu_presenter.gd",
+                      "sha256":  "f37ae27b107fcf18cd9efd7267adf931c9b4a14ab8cb1cdc04797fe779bc4dcf"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_bench_menu_presenter.gd.uid",
+                      "sha256":  "ddc915d97ccd65bf4fb14a4e35cf32990d951e183559003386778da4a389446b"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_bench_panel_presenter.gd",
+                      "sha256":  "6ca23ff701912cf64982483ff1886c290eb744d95323203dc0d06fe69caa5bac"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_bench_panel_presenter.gd.uid",
+                      "sha256":  "54bd99d7a0cbddcc7f42ceb288c1618d9e28189c28530eb029e5f2934f734223"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_bench_refresh_presenter.gd",
+                      "sha256":  "b7f82a0ea6765b2700468fcf45ee1a64034ec97f72ac04175f68027b7ea4b960"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_bench_refresh_presenter.gd.uid",
+                      "sha256":  "62610137d5ac609f66e4ae61cd50082aa02fc9a2cd144fca09ccffba6d63b111"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_bench_session_presenter.gd",
+                      "sha256":  "9dd41cf4dbe23ac68ae366d5bd7ebb4409c785c08eeab108d5ae0f01e96c4d10"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_bench_session_presenter.gd.uid",
+                      "sha256":  "7cb80dd722100fd0f20bc8cdc3035545cff8dc9b7179559b4a5994b08ef4833a"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_bench_start_menu_presenter.gd",
+                      "sha256":  "c4507c30e3ddef0fe0cef88f0e55863b035cee350a1ea714138f1b214a9f5d02"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_bench_start_menu_presenter.gd.uid",
+                      "sha256":  "0eaedc538ba2854ca972d8c67d6dcb3f11774be75aed62847f6d0359c58fbc8a"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_grid_controller.gd",
+                      "sha256":  "1e62f7a08f8150313249ecc6150076708e1259edfe41f67c9de6ebac1e6823c7"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_grid_controller.gd.uid",
+                      "sha256":  "39f0e5784cbba3e29aac8a0f6410f07b9cb7914a0d4f139e49e93ab59c96a30c"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_material_catalog_presenter.gd",
+                      "sha256":  "f09668586563eb1411266146dba1b7be9e645bd26cfb76a582bc0c894e030834"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_material_catalog_presenter.gd.uid",
+                      "sha256":  "43d7afabfddf3c016a7ea5f3c41de674da8b66df67240a75b8551c84d5adecbd"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_material_lookup_presenter.gd",
+                      "sha256":  "b14408c2425b800c726c7408f0cef19d1c858739d2f1f78c1707413c7cbdc63a"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_material_lookup_presenter.gd.uid",
+                      "sha256":  "15106ec974259ac0ea34f69e04d15694f54933bc5f2ae925009152e4f1c316c6"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_plane_viewport.gd",
+                      "sha256":  "17d278c3742b8cffa15b135d9dc112bd4486dc35bbc8db6447b3fe25fa516566"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_plane_viewport.gd.uid",
+                      "sha256":  "9617dba68574fd995ff8bc317357641d20adfbcd3a49a85eb5f4ab1283692c2b"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_project_action_presenter.gd",
+                      "sha256":  "eb4a6d0a6d948b652696653e7bd72c5fd324e06b84f7036b2c9f1dd65e198a61"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_project_action_presenter.gd.uid",
+                      "sha256":  "63fbfabb88d7ec114cd28420fc933d4a54b0d60546896c74b599f73453d2c559"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_project_panel_presenter.gd",
+                      "sha256":  "81374c9ecf9eb4ae42865c3ea1fbcd9cea57ddc6bde06339d320256e12783c59"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_project_panel_presenter.gd.uid",
+                      "sha256":  "d2fc0f907de6671b1f5446860c3379a4b95549927d1544f836bb30bae223adfd"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_project_workflow.gd",
+                      "sha256":  "8ea3901d78b30a24e6f9baede1d44461dd8a430b0cca754f57d76d59f49d0d78"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_project_workflow.gd.uid",
+                      "sha256":  "13fa5522fd3c8a5e30699af89fe3a3478500e62111b766c422051668c2f102d3"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_stage2_brush_presenter.gd",
+                      "sha256":  "8e32c7ed89d1cac8517405e5f0c46f41d925415eff8bba814be6061d7e14a1ec"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_stage2_brush_presenter.gd.uid",
+                      "sha256":  "b87876ba792c1a0ddb36ed6edbaacd9c48a7f3e892a12827352cd48fd399e93d"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_stage2_preview_presenter.gd",
+                      "sha256":  "c007c4b53ff1b3fcbbfb56680140a4dcfdf0357b804eb3e176aa7f6400b796e5"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_stage2_preview_presenter.gd.uid",
+                      "sha256":  "55e9943b916370aca7920d02a61a6625a6f0c8c5785c133864d7b26a1c314e7e"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_stage2_selection_presenter.gd",
+                      "sha256":  "2daac0d6f9e45a4b809bcaff7d87f3fd4b55de8c44912b40577803f5533b872d"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_stage2_selection_presenter.gd.uid",
+                      "sha256":  "303e3ac2e7235c936ac0af0a5e624cecf4d2e3a1f2652e2de8f1e1ff227499e3"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_test_print_preview_presenter.gd",
+                      "sha256":  "7e36659c1793af4ea9cf6a93074f12ba87108189ddb8cded8ab6c18e36528094"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_test_print_preview_presenter.gd.uid",
+                      "sha256":  "72edc68ba8be83ba67b918ca2446b701750e180565f9abc3a27dcf41d493e4be"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_wip_builder.gd",
+                      "sha256":  "416e3075257d09d529a4111593360822713c2b20274c274e257f1b4d53bcc669"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_wip_builder.gd.uid",
+                      "sha256":  "f8de7aa902142bf7f78b65bc382b8539bd713e0400659abf046a59c1650569db"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_wip_cell_state_presenter.gd",
+                      "sha256":  "5979cdd5e5d80b31f2bd5503dd05a7da2bf73ab501267c732321a7db1773171b"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_wip_cell_state_presenter.gd.uid",
+                      "sha256":  "608033e20c45fc90dbcce1bfec8d505113493f63f2f577a73d6bc2c672d15a43"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_axis_indicator.gd",
+                      "sha256":  "46bbd2ac785620ee671812861d1d4a4d0169d5f14b5dcddbd6b69d12dbdb838a"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_axis_indicator.gd.uid",
+                      "sha256":  "4db17fb4d9f370d2a2921a4acc5567195618da936f33115d29dbdf84d0451627"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_edit_action_presenter.gd",
+                      "sha256":  "8a9c98489af030298f7be06b9ecdd5d8068a403cefd398b6b86e78faa9b49802"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_edit_action_presenter.gd.uid",
+                      "sha256":  "04ea6c4e1e84508db98012ec98903a2857b80463d9cab894f86d94103bf6d549"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_edit_flow.gd",
+                      "sha256":  "d17effdaeb07bb005528c69ece10d28bc8e11e53e96a9beb1cb25358ae15040b"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_edit_flow.gd.uid",
+                      "sha256":  "401ac1d66ee90b8c3a73f23ddc0f4201088f2f90e6361f423ca2e79571d94f41"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_geometry_presenter.gd",
+                      "sha256":  "1d3c195797ba48bb64aecbb78ee0ede20c5b66fcd3bd9f1f04eebd304d86decc"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_geometry_presenter.gd.uid",
+                      "sha256":  "d54871e8ef6250c9d404fe02fa3bd874b3d0d3cd206f87a2812233834bb7a1bf"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_interaction_presenter.gd",
+                      "sha256":  "436c2243e3bd99ac8587dbc19eea6fcd54d3f5962ea1be6627f1471beff025e2"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_interaction_presenter.gd.uid",
+                      "sha256":  "3243c2ef72584673591547d85f094455308b779fee26a12c1e938e5f9187c5ee"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_layout_presenter.gd",
+                      "sha256":  "97acb5b29396069e80b3d89715660e77a18c003dc39c8fef94367c0edfca59e9"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_layout_presenter.gd.uid",
+                      "sha256":  "a5a79a897fc782525316240050473ec4df5d0c3c2d7f8003ee318a21cece3f4c"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_plane_presenter.gd",
+                      "sha256":  "c8904f394b48be3ab810be277910cbc54024a59acbbaed995b00e4d5c2cad9e9"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_plane_presenter.gd.uid",
+                      "sha256":  "8b4342663d195b989979c34d95033cf7c45a63f1be92fabd99a740eb5c1cd1dc"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_presentation.gd",
+                      "sha256":  "2c41b944f3772f56001ac88b616a43a14b804ce47721f0542ee4d8bf8cbe8125"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_presentation.gd.uid",
+                      "sha256":  "fd63dd3b3d8d3a49e0430ec8210492eddad78af7ed282704be3f89c587d20e9e"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_preview.gd",
+                      "sha256":  "e8d389d950d84e7d022fb88ebaefef7df3c839bfb8308242a08c8ed375f368f1"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_preview.gd.uid",
+                      "sha256":  "8f2be802c05650f45dadf1781b598b36e8fc994b5b9bbab5d9a64010d7c93130"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_shape_tool_presenter.gd",
+                      "sha256":  "207f8e7a320f38c6b31f95cfb883a42b1f30fe765ae8935712fcaec92841b430"
+                  },
+                  {
+                      "path":  "runtime/forge/forge_workspace_shape_tool_presenter.gd.uid",
+                      "sha256":  "7575400cf56c5f6c1a1149bf6b72b84865edc03c70a53b4c6f7e6b7534365758"
+                  },
+                  {
+                      "path":  "scenes/world/crafting_bench.tscn",
+                      "sha256":  "d65e8abab46cb201d8f662e305ae433ac8e26d71aa51788720aa430f5fc7f207"
+                  },
+                  {
+                      "path":  "scenes/ui/crafting_bench_ui.tscn",
+                      "sha256":  "716ab62aaba37f331fa58ce6bf08d84e819f91455fdaa19508fbf3b747bf7183"
+                  },
+                  {
+                      "path":  "scenes/test/forge_sandbox.tscn",
+                      "sha256":  "5b705b386c3cc6e863f4d72dbd5a57e628a4357190aa56117e9ae434c83b2209"
+                  },
+                  {
+                      "path":  "core/defs/forge/forge_authoring_sandbox_def.gd",
+                      "sha256":  "1572ddbb70e82106b9f0b0b5b82f5dfeba5e2dbc9f546f98398d59b9d3a0dc5e"
+                  },
+                  {
+                      "path":  "core/defs/forge/forge_authoring_sandbox_def.gd.uid",
+                      "sha256":  "b6232be2eba7dc49f8e18a3383c9cd215be5e8027e6c8bc720c839280512a586"
+                  },
+                  {
+                      "path":  "core/defs/forge/forge_authoring_sandbox_default.tres",
+                      "sha256":  "4d65e076a27a98bb6c67f84b88afab14fb0faee5a7b021f4b6313e03c62556b4"
+                  },
+                  {
+                      "path":  "core/defs/forge/forge_sample_brush_def.gd",
+                      "sha256":  "3ca632a7b9bea6295ca6a81c8908cbddf9171037bc37c72662d2978723b5f883"
+                  },
+                  {
+                      "path":  "core/defs/forge/forge_sample_brush_def.gd.uid",
+                      "sha256":  "8f9036f84c9133e2ab12ab1c8c6bb094d019188b0bf82c5ab62e395bc9bb774b"
+                  },
+                  {
+                      "path":  "core/defs/forge/forge_sample_preset_def.gd",
+                      "sha256":  "7bb55072b5cbbce8034f9dcf5d7093d0afb89c50eb704fa6253a2149c6ee463d"
+                  },
+                  {
+                      "path":  "core/defs/forge/forge_sample_preset_def.gd.uid",
+                      "sha256":  "b48d23cdf163b619716d72f7a29fa4e9b8d54cca2f2701376c70c9ef2d9f8367"
+                  },
+                  {
+                      "path":  "core/defs/forge/forge_inventory_seed_def.gd",
+                      "sha256":  "f1e09b796b798e88e204863ff8c8b1009659327d8e32ba7fa50ab6ca10321c6d"
+                  },
+                  {
+                      "path":  "core/defs/forge/forge_inventory_seed_def.gd.uid",
+                      "sha256":  "8de60d9798cf444c566979213f1fa28efcced5dfd3805593d8d5161046164af3"
+                  },
+                  {
+                      "path":  "core/defs/forge/forge_inventory_seed_entry_def.gd",
+                      "sha256":  "fdb589d809acf95c97cdb53a5996b3aff1068eb9d16932594fafd971611565ff"
+                  },
+                  {
+                      "path":  "core/defs/forge/forge_inventory_seed_entry_def.gd.uid",
+                      "sha256":  "1d61c5efe8e8c86e0e43a01a3f25acceccbb6b05b14b44ec63efa6f29ccbb045"
+                  },
+                  {
+                      "path":  "core/defs/forge/forge_inventory_seed_default.tres",
+                      "sha256":  "b10684e9535e393278a4d4fe3c999d8d8b999f2d214f60fecc6a8c9f2d92aca1"
+                  }
+              ]
+}

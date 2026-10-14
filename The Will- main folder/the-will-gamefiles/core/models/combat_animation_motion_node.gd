@@ -85,6 +85,14 @@ const GRIP_SEAT_COORDINATE_SCHEMA_VERSION := (
 @export var generated_transition_node: bool = false
 @export var generated_transition_kind: StringName = TRANSITION_KIND_NONE
 @export var locked_for_authoring: bool = false
+## Realized source frame for a generated, unshaped 180-degree grip reversal.
+## Points and axis use the declared trajectory authoring frame, not WeaponRoot.
+@export var grip_style_transition_frame_available: bool = false
+@export var grip_style_transition_pivot_local: Vector3 = Vector3.ZERO
+@export var grip_style_transition_axis_local: Vector3 = Vector3.ZERO
+@export var grip_style_transition_source_tip_local: Vector3 = Vector3.ZERO
+@export var grip_style_transition_source_pommel_local: Vector3 = Vector3.ZERO
+@export var grip_style_transition_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 @export_multiline var draft_notes: String = ""
 
 static func get_two_hand_state_ids() -> Array[StringName]:
@@ -177,6 +185,38 @@ func normalize() -> void:
 		locked_for_authoring = true
 	elif generated_transition_kind == TRANSITION_KIND_NONE:
 		locked_for_authoring = false
+	if not has_valid_grip_style_transition_frame():
+		clear_grip_style_transition_frame()
+
+func has_valid_grip_style_transition_frame() -> bool:
+	if not grip_style_transition_frame_available or not generated_transition_node or generated_transition_kind != TRANSITION_KIND_GRIP_STYLE_SWAP:
+		return false
+	if grip_style_transition_origin_id != tip_position_origin_id or grip_style_transition_origin_id != pommel_position_origin_id:
+		return false
+	if not grip_style_transition_pivot_local.is_finite() or not grip_style_transition_axis_local.is_finite() or not grip_style_transition_source_tip_local.is_finite() or not grip_style_transition_source_pommel_local.is_finite():
+		return false
+	var source_axis := grip_style_transition_source_tip_local - grip_style_transition_source_pommel_local
+	if source_axis.length_squared() <= 0.00000001 or grip_style_transition_axis_local.length_squared() <= 0.00000001:
+		return false
+	var axis := grip_style_transition_axis_local.normalized()
+	if absf(axis.dot(source_axis.normalized())) > 0.0001:
+		return false
+	var rotation := Basis(axis, PI)
+	return (grip_style_transition_pivot_local + rotation * (grip_style_transition_source_tip_local - grip_style_transition_pivot_local)).distance_to(tip_position_local) <= 0.00005 and (grip_style_transition_pivot_local + rotation * (grip_style_transition_source_pommel_local - grip_style_transition_pivot_local)).distance_to(pommel_position_local) <= 0.00005
+
+func clear_grip_style_transition_frame() -> void:
+	grip_style_transition_frame_available = false
+	grip_style_transition_pivot_local = Vector3.ZERO
+	grip_style_transition_axis_local = Vector3.ZERO
+	grip_style_transition_source_tip_local = Vector3.ZERO
+	grip_style_transition_source_pommel_local = Vector3.ZERO
+	grip_style_transition_origin_id = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+
+func transform_grip_style_transition_frame(mapping: Transform3D) -> void:
+	grip_style_transition_pivot_local = mapping * grip_style_transition_pivot_local
+	grip_style_transition_source_tip_local = mapping * grip_style_transition_source_tip_local
+	grip_style_transition_source_pommel_local = mapping * grip_style_transition_source_pommel_local
+	grip_style_transition_axis_local = (mapping.basis * grip_style_transition_axis_local).normalized()
 
 func duplicate_node() -> CombatAnimationMotionNode:
 	return duplicate(true) as CombatAnimationMotionNode

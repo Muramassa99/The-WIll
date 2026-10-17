@@ -1090,6 +1090,7 @@ func _build_body_cache_tokens(bodies: Array) -> Array[Dictionary]:
 		if body == null:
 			continue
 		tokens.append({
+			"sweep_revision": ForgeV2PathRollScript.SWEEP_REVISION,
 			"body_id": _read_body_string_name(body, "body_id"),
 			"created_timestamp": _read_body_float(body, "created_timestamp"),
 			"updated_timestamp": _read_body_float(body, "updated_timestamp"),
@@ -1489,7 +1490,7 @@ func _mark_profile_path_cells(
 	amount_ratio: float,
 	sample_cell_size_meters: float
 ) -> void:
-	if ForgeV2PathRollScript.has_roll(body):
+	if ForgeV2PathRollScript.uses_shared_sweep(body):
 		_mark_rolled_profile_path_cells(occupied_cells, body, amount_ratio, sample_cell_size_meters)
 		return
 	var body_points: PackedVector3Array = _resolve_body_sample_points(body, sample_cell_size_meters)

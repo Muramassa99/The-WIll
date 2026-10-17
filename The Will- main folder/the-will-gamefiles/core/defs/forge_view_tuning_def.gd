@@ -18,6 +18,7 @@ class_name ForgeViewTuningDef
 
 @export_group("Workspace Preview")
 @export var workspace_camera_fov_degrees: float = 55.0
+@export_range(30.0, 720.0, 1.0) var workspace_axis_view_speed_degrees: float = 180.0
 @export var workspace_camera_near: float = 0.01
 @export var workspace_camera_far: float = 50.0
 @export var workspace_default_yaw_degrees: float = -34.0

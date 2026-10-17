@@ -121,7 +121,12 @@ All source paths below are under The Will- main folder/the-will-gamefiles/.
    geometric proof from manual visual confirmation. Do not claim the latter from
    a parser or metadata-only test.
 
-## Later camera task (recorded only)
+## Camera task (activated in a separate follow-up)
+
+October 17 follow-up: see `Forge V2 Guided Planes And View Radial 2026-10-17.md`
+for the approved predecessor-on-placement / self-on-adjustment rule, nearest-axis
+RMB double-click, continuous camera travel, and V-held view radial. That note
+supersedes the earlier rotation-lock proposal below: RMB orbit remains available.
 
 Orthographic projection with front/back/left/right/top/bottom face views,
 rotation lock/unlock and pan/zoom while locked. Orthographic free orbit is also
@@ -216,3 +221,203 @@ multi-turn dragging, undo/redo and point cycling. Report:
 visually inspected for the thinner traces, resized markers and lighter active
 green knob. Scoped diff check passes. No full geometry/grip rerun was needed for
 this display-only change; earlier geometric evidence remains historical.
+
+## Smoothness audit after user authoring feedback - October 17
+
+User reports sharp transitions at spline dots in the new traces, including an
+apparently untwisted path, and wants the guides to depict the smooth material
+shape. A dot must be a smooth pass-through, not an apparent exit/re-entry seam.
+The earlier implementation assumption permitting abrupt angular-rate changes at
+dots does not meet this intent. Analysis only in this follow-up: no production
+geometry code changed and no replacement interpolation is yet implemented.
+
+Compared live source to pre-twist commit ec978c57. Ordinary all-zero CSG still
+uses the prior native spline route; the centerline sampler is unchanged. Ruby
+rails always use ForgeV2PathRoll.build_body_curve, whereas generated profile
+geometry uses that custom sweep when any roll is nonzero. Roll is currently
+linear separately along each span, so the twist rate may abruptly reverse or
+change at an interior dot even though the orientation itself stays continuous.
+
+Fresh isolated Godot 4.7 audit loaded the old presenter source in memory alongside
+the current presenter, without checkout or live-file replacement. Three ordinary
+profile spline zero-roll fixtures produced exactly matching vertex/index arrays
+(284, 96 and 196 vertices). A straight 0/90/0-degree fixture then produced a
+21.38-degree turn in an outer guide trace at the middle point. This confirms a
+twist-rate continuity defect, not an end cap inserted at every authored dot.
+
+The unchanged sampler also drops auto Bezier handles shorter than 25 mm. The
+compact (0,0), (50,50), (100,0) mm fixture loses all smoothing handles and forms
+a polyline even at zero roll, identically before and after twist. This is a
+pre-existing compact-curve limitation; do not mislabel it as a new regression.
+The earlier curved verifier uses larger handles and compares current zero versus
+uniform360 surfaces/end sections, not internal tangent continuity or old source.
+
+Evidence: test_artifacts/forge_v2_twist_continuity_audit_20261017.json and
+godot_runs/twist_continuity_audit_20261017.log. Diagnostic and archived-source text
+are confined to test_artifacts. User's exact zero-roll example is not reproduced;
+clarification remains pending on whether the generated solid is affected or only
+the ruby guides. Static audit also found a smaller orientation-threshold change
+in exported Handle framing; do not conflate that with proven spline results.
+
+Recommended next correction: preserve the smooth centerline, make the unwrapped
+roll field smooth through interior dots, and sample the same surface definition
+for guides and generated material. Retain the 5 mm/turn density cap over the
+whole interpolation, not merely endpoint differences, since easing can increase
+the peak twist rate. Diagnose compact-curve smoothing separately. A live CSG
+preview alone would not repair the underlying continuity; its need remains a
+user choice after the shared geometry is correct.
+
+## Actual TWIST TEST save audit - October 18
+
+Follow-up supersedes the pending reproduction/clarification status above. User
+provided matched-camera undo/redo screenshots and named saved draft TWIST TEST.
+Treat preview disagreement and pass-through smoothness as separate defects.
+This remains diagnosis only; no production geometry changes made.
+
+Read the actual user library directly with ResourceLoader and duplicated the
+authoring state in memory. TWIST TEST contains a pending 15-point spline, all
+authored rolls zero, with the saved asymmetric eight-point "2 edge" profile,
+25 by 118.75 mm. Placement normals are +Z for points 1-5, +X for 6-9, then +Z
+for 10-15. Its nonzero smoothing handles are 56.63-145.93 mm. Therefore the old
+25 mm handle cutoff does NOT explain this example. The saved file has no
+committed material bodies; Generate was reproduced on the in-memory clone.
+Source SHA256 remained unchanged throughout the successful diagnostic.
+
+The immediate white pending-body preview and ruby guides have different frame
+owners. At zero roll, _resolve_active_material_body_sweep_path plus
+_build_profile_sweep_ring recompute profile frames from sampled placement
+normals. Ruby guides always use ForgeV2PathRoll's transported Curve3D frames
+and control-point tilts, corresponding to the native CSG path. These disagree
+on the saved multi-plane path. A corresponding profile vertex can differ by
+125 mm between frame constructions at the same center; this is a vertex
+correspondence metric, NOT nearest-surface distance or claimed visible gap.
+Any nonzero authored roll also selects a different pending-preview branch.
+
+Fresh old-source/current-source comparison on this exact body, using the same
+current workspace sampling contract, produced identical zero-roll pending mesh
+vertices, indices AND normals. Native CSG vertices/indices likewise matched.
+Thus this save does not demonstrate a regression in the untwisted generated
+geometry between ec978c57 and current code. It does demonstrate a new guide
+that disagrees with the pending preview and exposes pre-existing native-frame
+problems. Earlier simple fixtures missed this combination and preview route.
+
+Smoothness is independently confirmed. The analytic Bezier in/out tangents
+match at every interior authored dot. Nevertheless automatic base tilts change
+substantially: approximately 28.07, 170.54, 350.54 degrees at dots 5, 6, 7,
+despite zero user roll. Base tilt comes from placement orientation and uses
+per-span interpolation with no matching angular derivative through dots. The
+tilt calculation also references a fresh world-up/right basis while Curve3D
+uses transported up vectors. The outer guide at dot 7 turns about 56.11 degrees;
+reducing sampling interval from 6.781 mm to 0.5 mm still gives 56.09 degrees,
+while the fine centerline turn there is only 0.18 degrees. This is not merely
+coarse tessellation, and no per-dot end caps are being inserted.
+
+Official versioned source reference for tilt interpolation:
+https://github.com/godotengine/godot/blob/4.7/scene/resources/curve.cpp#L1542-L1563
+
+Next proposed correction: preserve the smooth centerline, consolidate guide,
+pending preview and generated sweep onto one profile-frame definition, and
+ensure orientation/twist rate stays smooth through interior dots. Include
+automatic base orientation as well as authored roll, retaining the 5 mm/turn
+density limit. A renderer-only replacement cannot fix the orientation rule.
+No fix has been implemented or visually accepted in this audit.
+
+Evidence: test_artifacts/diagnose_twist_test_saved_draft.gd,
+test_artifacts/twist_test_saved_draft_audit_20261018.json,
+godot_runs/twist_test_saved_draft_audit_20261018_verified.log. Focused headless
+Godot 4.7 diagnostic completed with exit 0, no engine errors. An initial
+diagnostic-only bool/Dictionary return-type mistake was corrected before this
+successful run. No user saves, production geometry or Git index were changed.
+
+## Smooth shared sweep implemented - October 18
+
+User authorized fixing the diagnosed mismatch and knot smoothness. The shared
+sweep now anchors the profile's initial facing once, then transports that frame
+around the original smooth centreline. Later placement/view-plane normals guide
+point placement without imposing hidden twist. Handle profile handedness is
+retained separately. Authored unwrapped roll uses shape-preserving cubic Hermite
+interpolation (PCHIP) with matching angular rate at interior dots; full turns and
+the clockwise convention remain intact.
+
+Guide traces, pending mesh, generated CSGMesh3D, material occupancy and Handle
+authority curves use that shared sweep for both zero and nonzero roll. Surface
+contact frames for Volume Stroke/Detailing Brush remain on their explicit path.
+The rotation knob uses the same transported baseline. The Handle compatibility
+shell cancels its existing legacy X reflection when consuming physical shared
+frames, verified with an asymmetric profile rather than a symmetric rectangle.
+
+The 5 mm/turn limit is checked against the maximum local cubic derivative,
+including interior extrema. Input bounds are tightened against the complete
+profile before whole-degree acceptance. A uniform two-point 100 mm twist still
+allows 20 turns. A 0/peak/0 reversal on two 100 mm spans now permits a 10-turn
+peak with the endpoint slopes of this interpolation; the previous 20-turn peak
+would violate the local density limit when smoothed. This is intentional, not
+loss of unwrapped turns. Sampling accounts for peak rate and profile radius.
+Zero-length stations and nonfinite intermediate rates fail validation. All
+consumers share the same centre-curve distance scale; arbitrary frame samples
+interpolate rotations so the axes stay perpendicular.
+
+Geometry signatures now invalidate old calculated results during regeneration:
+exact Handle signature v3, shared sweep revision 2 in native-body and volume
+cache tokens. Packet and wrapper format schemas are unchanged. Already baked
+history checkpoints remain authoritative materialized geometry and are preserved.
+Existing saved final mesh/target pairs are not rewritten by this change.
+
+Production owners changed: forge_v2_path_roll.gd,
+forge_v2_volume_preview_presenter.gd, forge_v2_material_volume_resolver.gd,
+forge_v2_wip_compatibility_adapter.gd, and
+core/resolvers/primary_grip_handle_mesh_packet.gd. Tests and this task note are
+the remaining changes for this fix. No camera, gizmo styling or player-save
+changes were needed.
+
+Official Godot 4.7 workflows consulted before implementation:
+- https://docs.godotengine.org/en/4.7/classes/class_curve3d.html
+- https://docs.godotengine.org/en/4.7/classes/class_quaternion.html
+- https://docs.godotengine.org/en/4.7/classes/class_csgmesh3d.html
+
+Fresh verification (serialized Godot runs, editor allowed to remain open):
+- Point twist/material/three wrapper targets/save-load and smooth-rate checks:
+  57 passed. Existing quarter-span expectations were updated from linear45 to
+  cubic67.5 degrees; source vertices, wrapper vertices and bias direction agree.
+- Authoring lifecycle/mode conversion/undo-redo: 45 passed. Its dense monotone
+  mode-conversion fixture is now seeded as a valid complete profile, avoiding an
+  unrelated transient saturated reversal while creating that test fixture.
+- Curved ordinary/Handle uniform360 and unchanged end sections: 12 passed.
+- Asymmetric physical public export, stale v2 rejection and explicit surface
+  contact preservation: 32 passed. An initial test-only Vector2.DOWN/Y-up seed
+  error was corrected; tolerances/assertions were retained.
+- Rendered point-twist UI controls/drag/Space cycling: 44 passed.
+- Actual TWIST TEST saved draft, generated guide parity, smoothness, no hidden
+  placement-normal twist and Generate/Undo/Redo: 10 passed, also rendered.
+
+Total: 200 passed, zero remaining failures. Current focused logs are
+godot_runs/twist_fix_geometry_20261018.log,
+twist_lifecycle_fix_20261018.log, twist_curved_fix_20261018.log,
+twist_export_fix_20261018.log, twist_ui_fix_20261018.log and
+twist_saved_fix_rendered_20261018.log. Older verifier report filenames remain
+fixed by those tools; the listed logs establish this fresh run date.
+
+Actual-save evidence: test_artifacts/forge_v2_twist_saved_smoothness_20261018.json
+and .png. The rendered generated solid plus actual ruby guide edges was visually
+inspected. Guide-to-CSG corresponding-vertex error is 0.0002384 mm. The former
+56.09-degree fine-sampled outer corner at dot 7 is now 0.248 degrees under the
+same test. The largest checked fine-sampled outer-dot turn is 3.78 degrees;
+rendered geometry remains discretized rather than mathematically infinite.
+Asymmetric export: forge_v2_twist_export_frames_20261018.json; maximum checked
+physical cross-section error 0.01482 mm, within the existing 0.05 mm tolerance.
+
+TWIST TEST was loaded read-only and duplicated for Generate/Undo/Redo. Its
+library SHA256 remains dc68f27c00d8385c483b8b84ceb58906f6150417849c24288ea15f8026a991a1.
+No Git staging/commit/push performed. User's live in-game aesthetic acceptance
+is pending; no claim that this authoring fix prevents arbitrary self-intersection
+where a wide profile is swept around a very tight user-authored bend.
+
+## User acceptance and pre-editing savepoint - October 18
+
+After live examination the user confirmed the spline result: "smooth nice . good."
+This supersedes the pending visual-acceptance status above. The user subsequently
+requested a Git savepoint named along the lines of "Forge v2 additions" before
+work on reopening retained spline geometry. Selection tints, ordinary-spline
+reopening and a unified Handle editing entry remain proposed work; access modes
+and keybindings are to be discussed after the savepoint. No such editing feature
+is included in this savepoint.

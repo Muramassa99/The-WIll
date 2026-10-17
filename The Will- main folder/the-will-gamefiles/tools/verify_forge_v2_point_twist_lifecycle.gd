@@ -98,9 +98,10 @@ func _test_handle_mode_conversion() -> void:
 	var dense := _state()
 	for point: Vector3 in [Vector3(-0.1, 0, 0), Vector3(0, 0.2, 0), Vector3(0.1, 0, 0)]:
 		dense.call("append_spline_line_point", point, Vector3.UP)
-	dense.call("set_spline_line_point_roll_degrees", 1, 15000.0)
-	dense.call("set_spline_line_point_roll_degrees", 2, 30000.0)
-	_check(_rolls(dense) == PackedFloat64Array([0, 15000, 30000]), "long angled path allows dense fixture")
+	# Seed a valid monotone profile directly. Setting the middle first would
+	# transiently create a reversal with a stricter local-rate limit.
+	dense.set("spline_line_roll_degrees", PackedFloat64Array([0, 15000, 30000]))
+	_check(bool((dense.call("get_spline_line_roll_status") as Dictionary).get("valid", false)), "long angled path allows dense monotone fixture")
 	var before := dense.call("capture_editor_transient_snapshot") as Dictionary
 	_check(not bool(dense.call("set_active_handle_path_mode_id", Authoring.HANDLE_PATH_MODE_TWO_POINT_LINEAR)), "shorter mode cannot silently discard excessive twist density")
 	_check((dense.call("capture_editor_transient_snapshot") as Dictionary) == before, "rejected mode restores exact authoring snapshot")

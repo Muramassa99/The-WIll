@@ -1716,26 +1716,9 @@ static func _resolve_handle_grip_geometry(
 
 static func _build_handle_authority_curve(
 	handle_body: Resource,
-	handle_path: PackedVector3Array
+	_handle_path: PackedVector3Array
 ) -> Curve3D:
-	if ForgeV2PathRollScript.has_roll(handle_body):
-		return ForgeV2PathRollScript.build_body_curve(handle_body, HANDLE_GRIP_CURVE_BAKE_INTERVAL_METERS)
-	var curve: Curve3D
-	if StringName(handle_body.get("shape_kind")) == (
-		ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
-	):
-		curve = ForgeV2SplinePathSamplerScript.build_auto_curve(
-			handle_path,
-			HANDLE_GRIP_CURVE_BAKE_INTERVAL_METERS,
-			true
-		)
-	else:
-		curve = Curve3D.new()
-		curve.bake_interval = HANDLE_GRIP_CURVE_BAKE_INTERVAL_METERS
-		for point: Vector3 in handle_path:
-			curve.add_point(point)
-	_apply_handle_curve_orientation(curve, handle_body, handle_path)
-	return curve
+	return ForgeV2PathRollScript.build_body_curve(handle_body, HANDLE_GRIP_CURVE_BAKE_INTERVAL_METERS)
 
 
 static func _apply_handle_curve_orientation(
@@ -1753,7 +1736,11 @@ static func _resolve_handle_csg_profile_frame(
 	curve_offset: float
 ) -> Dictionary:
 	if curve.has_meta(ForgeV2PathRollScript.FRAME_METADATA):
-		return ForgeV2PathRollScript.sample_frame(curve, curve_offset)
+		var frame := ForgeV2PathRollScript.sample_frame(curve, curve_offset)
+		# Compatibility shell points already reflect profile X. Cancel it here
+		# so they describe the same physical surface as the shared Handle sweep.
+		frame["axis_x"] = -(frame.axis_x as Vector3)
+		return frame
 	var safe_offset := clampf(curve_offset, 0.0, curve.get_baked_length())
 	var pose := curve.sample_baked_with_rotation(safe_offset, false, false)
 	var tangent := (pose.basis * Vector3.FORWARD).normalized()

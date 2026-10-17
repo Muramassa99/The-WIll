@@ -1,6 +1,8 @@
 extends Node3D
 class_name ForgeV2WorkspacePreview
 
+signal view_state_changed
+
 const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://core/defs/forge/forge_view_tuning_default.tres")
 const ForgeV2PlacementTargetResolverScript = preload("res://runtime/forge_v2/forge_v2_placement_target_resolver.gd")
 const ForgeV2WorkspaceContractScript = preload("res://runtime/forge_v2/forge_v2_workspace_contract.gd")
@@ -25,6 +27,10 @@ var workspace_axes_instance: MeshInstance3D = null
 var workspace_bounds_instance: MeshInstance3D = null
 var volume_preview_presenter: Node3D = null
 var view_initialized := false
+var _axis_face: StringName = &""
+var _view_tween: Tween
+var _spline_work_plane_enabled := false
+var _spline_work_plane_origin := Vector3.ZERO
 
 func _ready() -> void:
 	_build_scene()
@@ -48,14 +54,24 @@ func clear_stage_controller() -> bool:
 func orbit_by(delta: Vector2) -> void:
 	if camera_pivot == null or camera_pitch == null:
 		return
+	if delta.is_zero_approx():
+		return
+	_cancel_view_transition()
+	_axis_face = &""
 	var tuning: ForgeViewTuningDef = _get_view_tuning()
-	camera_pivot.rotation.y -= delta.x * tuning.workspace_orbit_sensitivity
-	camera_pitch.rotation.x = clampf(
-		camera_pitch.rotation.x - (delta.y * tuning.workspace_orbit_sensitivity),
-		deg_to_rad(tuning.workspace_pitch_min_degrees),
-		deg_to_rad(tuning.workspace_pitch_max_degrees)
-	)
+	var orientation := camera_pivot.basis * camera_pitch.basis
+	orientation = Basis(Vector3.UP, -delta.x * tuning.workspace_orbit_sensitivity) * orientation
+	var pitch := asin(clampf(-orientation.z.y, -1.0, 1.0))
+	# Starting from a pole view must not jump to the old +/-80-degree orbit bound.
+	var next_pitch := clampf(pitch - delta.y * tuning.workspace_orbit_sensitivity,
+		minf(pitch, deg_to_rad(tuning.workspace_pitch_min_degrees)),
+		maxf(pitch, deg_to_rad(tuning.workspace_pitch_max_degrees)))
+	camera_pivot.basis = (orientation * Basis(Vector3.RIGHT, next_pitch - pitch)).orthonormalized()
+	camera_pitch.basis = Basis.IDENTITY
+	camera.projection = Camera3D.PROJECTION_PERSPECTIVE
 	_sync_light_anchor()
+	_refresh_spline_work_plane_visuals()
+	view_state_changed.emit()
 	view_initialized = true
 
 func pan_by(delta: Vector2) -> void:
@@ -80,6 +96,7 @@ func zoom_by(amount: float) -> void:
 		tuning.workspace_zoom_min_distance,
 		tuning.workspace_zoom_max_distance
 	)
+	_sync_orthographic_size()
 	view_initialized = true
 
 func fit_view() -> void:
@@ -97,11 +114,130 @@ func fit_view() -> void:
 			tuning.workspace_fit_max_distance
 		)
 	)
+	_sync_orthographic_size()
 	view_initialized = true
 
 func reset_view() -> void:
 	_apply_view_defaults()
 	view_initialized = true
+
+func set_axis_view(face: StringName) -> void:
+	var orientation: Basis
+	match face:
+		&"front": orientation = Basis.IDENTITY
+		&"back": orientation = Basis(Vector3.UP, PI)
+		&"right": orientation = Basis(Vector3.UP, PI * 0.5)
+		&"left": orientation = Basis(Vector3.UP, -PI * 0.5)
+		&"top": orientation = Basis(Vector3.RIGHT, -PI * 0.5)
+		&"bottom": orientation = Basis(Vector3.RIGHT, PI * 0.5)
+		_: return
+	if camera == null:
+		return
+	_cancel_view_transition()
+	var start := (camera_pivot.basis * camera_pitch.basis).get_rotation_quaternion().normalized()
+	var target := orientation.get_rotation_quaternion().normalized()
+	camera_pivot.quaternion = start
+	camera_pitch.basis = Basis.IDENTITY
+	_axis_face = face
+	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	_sync_orthographic_size()
+	var angle := start.angle_to(target)
+	if angle < 0.00001:
+		_finish_axis_view(target)
+		return
+	var duration := angle / deg_to_rad(maxf(_get_view_tuning().workspace_axis_view_speed_degrees, 1.0))
+	_view_tween = create_tween()
+	_view_tween.set_trans(Tween.TRANS_LINEAR)
+	_view_tween.tween_method(_interpolate_axis_view.bind(start, target), 0.0, 1.0, duration)
+	_view_tween.tween_callback(_finish_axis_view.bind(target))
+	view_state_changed.emit()
+
+func align_to_nearest_axis() -> void:
+	if camera == null:
+		return
+	var direction := (global_basis.inverse() * camera.global_basis.z).normalized()
+	var axis := direction.abs().max_axis_index()
+	var faces := [[&"left", &"right"], [&"bottom", &"top"], [&"back", &"front"]]
+	set_axis_view(faces[axis][1 if direction[axis] >= 0.0 else 0])
+
+func is_view_transitioning() -> bool:
+	return _view_tween != null and _view_tween.is_running()
+
+func get_view_state() -> Dictionary:
+	var plane_name := "Free plane"
+	match _axis_face:
+		&"front", &"back": plane_name = "XY"
+		&"right", &"left": plane_name = "YZ"
+		&"top", &"bottom": plane_name = "XZ"
+	var orthographic := camera != null and camera.projection == Camera3D.PROJECTION_ORTHOGONAL
+	var label := "%s | %s | %s" % [String(_axis_face).capitalize() if _axis_face != &"" else "Free view",
+		"Orthographic" if orthographic else "Perspective", plane_name]
+	if is_view_transitioning():
+		label += " | Moving..."
+	return {"face_id": _axis_face, "orthographic": orthographic,
+		"transitioning": is_view_transitioning(), "status_label": label}
+
+func _interpolate_axis_view(weight: float, start: Quaternion, target: Quaternion) -> void:
+	camera_pivot.quaternion = start.slerp(target, weight)
+	_refresh_spline_work_plane_visuals()
+
+func _finish_axis_view(target: Quaternion) -> void:
+	camera_pivot.quaternion = target
+	_view_tween = null
+	_sync_light_anchor()
+	_refresh_spline_work_plane_visuals()
+	view_initialized = true
+	view_state_changed.emit()
+
+func _cancel_view_transition() -> void:
+	if _view_tween != null:
+		_view_tween.kill()
+		_view_tween = null
+
+func _sync_orthographic_size() -> void:
+	if camera != null:
+		camera.size = maxf(0.001, 2.0 * camera.position.z * tan(deg_to_rad(camera.fov) * 0.5))
+
+func build_spline_point_drag_plane(local_origin: Vector3) -> Dictionary:
+	if is_view_transitioning():
+		return {"valid": false}
+	return build_camera_facing_drag_plane(local_origin)
+
+func resolve_spline_placement_target(screen_position: Vector2, points: PackedVector3Array) -> Dictionary:
+	if is_view_transitioning():
+		return {"valid": false, "reject_reason": &"view_transition"}
+	if points.is_empty() and _axis_face == &"":
+		return resolve_placement_target(screen_position)
+	var origin: Vector3 = points[points.size() - 1] if not points.is_empty() else _get_workspace_contract().get_placement_plane_origin_local()
+	var plane := build_spline_point_drag_plane(origin)
+	if not bool(plane.get("valid", false)):
+		return plane
+	return screen_to_workspace_local_on_spline_plane(screen_position, origin, plane["normal_local"])
+
+func screen_to_workspace_local_on_spline_plane(screen_position: Vector2, origin: Vector3, normal: Vector3) -> Dictionary:
+	if is_view_transitioning():
+		return {"valid": false, "reject_reason": &"view_transition"}
+	var result := screen_to_workspace_local_on_drag_plane(screen_position, origin, normal)
+	if bool(result.get("valid", false)):
+		# Independent XYZ clamping would move an oblique hit off its guide plane.
+		if not _get_workspace_contract().contains_local_position(result["raw_local_position"]):
+			result["valid"] = false
+			result["reject_reason"] = &"outside_build_area"
+		else:
+			result["local_position"] = result["raw_local_position"]
+			result["local_normal"] = normal.normalized()
+			result["target_kind"] = &"spline_guide_plane"
+	return result
+
+func set_spline_work_plane_context(enabled: bool, origin: Vector3) -> void:
+	if _spline_work_plane_enabled == enabled and _spline_work_plane_origin.is_equal_approx(origin):
+		return
+	_spline_work_plane_enabled = enabled
+	_spline_work_plane_origin = origin
+	if enabled:
+		_refresh_spline_work_plane_visuals()
+	else:
+		_refresh_workspace_contract_visuals()
 
 func resolve_placement_target(screen_position: Vector2) -> Dictionary:
 	return _get_placement_target_resolver().resolve_from_camera(
@@ -338,12 +474,19 @@ func _build_scene() -> void:
 func _apply_view_defaults() -> void:
 	if camera_pivot == null or camera_pitch == null:
 		return
+	_cancel_view_transition()
+	_axis_face = &""
+	camera.projection = Camera3D.PROJECTION_PERSPECTIVE
+	camera_pivot.basis = Basis.IDENTITY
+	camera_pitch.basis = Basis.IDENTITY
 	var tuning: ForgeViewTuningDef = _get_view_tuning()
 	camera_pivot.position = Vector3.ZERO
 	camera_pivot.rotation_degrees.y = tuning.workspace_default_yaw_degrees
 	camera_pitch.rotation_degrees.x = tuning.workspace_default_pitch_degrees
 	_sync_light_anchor()
 	fit_view()
+	_refresh_spline_work_plane_visuals()
+	view_state_changed.emit()
 
 func _apply_view_tuning() -> void:
 	var tuning: ForgeViewTuningDef = _get_view_tuning()
@@ -395,6 +538,7 @@ func _sync_workspace_contract_from_controller() -> void:
 func _refresh_workspace_contract_visuals() -> void:
 	var contract = _get_workspace_contract()
 	if workspace_plane_instance != null:
+		workspace_plane_instance.visible = true
 		workspace_plane_instance.mesh = _build_workspace_plane_mesh()
 		workspace_plane_instance.position.z = contract.plane_visual_z_offset
 	if workspace_grid_instance != null:
@@ -406,6 +550,52 @@ func _refresh_workspace_contract_visuals() -> void:
 	if workspace_bounds_instance != null:
 		workspace_bounds_instance.mesh = _build_workspace_bounds_mesh()
 		workspace_bounds_instance.visible = contract.show_bounds_box
+	_refresh_spline_work_plane_visuals()
+
+func _refresh_spline_work_plane_visuals() -> void:
+	if not _spline_work_plane_enabled or camera == null or workspace_grid_instance == null:
+		return
+	# The guide is clipped to the real box, including oblique free placement planes.
+	# Keep the world axes fixed; only the work grid follows the point reference.
+	workspace_plane_instance.visible = false
+	workspace_grid_instance.position = Vector3.ZERO
+	var contract = _get_workspace_contract()
+	var orientation := (global_basis.inverse() * camera.global_basis).orthonormalized()
+	var origin := _spline_work_plane_origin
+	var extent: float = contract.get_local_size().length()
+	var spacing: float = contract.grid_step_meters
+	var mesh := ImmediateMesh.new()
+	var segments: Array[PackedVector3Array] = []
+	for step in range(-int(ceil(extent / spacing)), int(ceil(extent / spacing)) + 1):
+		for direction_index in range(2):
+			var along: Vector3 = orientation.x if direction_index == 0 else orientation.y
+			var across: Vector3 = orientation.y if direction_index == 0 else orientation.x
+			var start := origin + across * float(step) * spacing - along * extent
+			var segment := _clip_grid_segment(start, along * extent * 2.0, contract)
+			if not segment.is_empty():
+				segments.append(segment)
+	if not segments.is_empty():
+		mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+		for segment: PackedVector3Array in segments:
+			_add_line(mesh, segment[0], segment[1], Color(0.42, 0.58, 0.62, 0.32))
+		mesh.surface_end()
+	workspace_grid_instance.mesh = mesh
+
+func _clip_grid_segment(start: Vector3, delta: Vector3, contract: Resource) -> PackedVector3Array:
+	var enter := 0.0
+	var leave := 1.0
+	for axis in range(3):
+		if absf(delta[axis]) < 0.000001:
+			if start[axis] < contract.local_min[axis] or start[axis] > contract.local_max[axis]:
+				return PackedVector3Array()
+			continue
+		var first: float = (contract.local_min[axis] - start[axis]) / delta[axis]
+		var last: float = (contract.local_max[axis] - start[axis]) / delta[axis]
+		enter = maxf(enter, minf(first, last))
+		leave = minf(leave, maxf(first, last))
+		if leave <= enter:
+			return PackedVector3Array()
+	return PackedVector3Array([start + delta * enter, start + delta * leave])
 
 func _build_workspace_plane_mesh() -> QuadMesh:
 	var mesh := QuadMesh.new()

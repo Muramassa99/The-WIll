@@ -15,7 +15,7 @@ static func build_body_signature(body: Resource) -> String:
 	if body == null:
 		return ""
 	var exact_geometry := [
-		"handle_exact_signature_schema_2",
+		"handle_exact_signature_schema_3_transport_smooth_roll",
 		String(StringName(body.get("body_kind"))),
 		String(StringName(body.get("shape_kind"))),
 		String(StringName(body.get("profile_id"))),
@@ -65,7 +65,7 @@ static func build_body_signature(body: Resource) -> String:
 			DEGREE_SIGNATURE_STEP
 		),
 	]
-	# Keep existing zero-roll signatures stable. Authored complete turns must
+	# Empty and explicit zero arrays describe the same geometry. Complete turns must
 	# invalidate the exact Handle packet and its derived saved targets even when
 	# the endpoint orientations happen to coincide after a full revolution.
 	var authored_roll: Variant = body.get("path_roll_degrees")
@@ -79,7 +79,7 @@ static func build_body_signature(body: Resource) -> String:
 		if has_authored_roll:
 			exact_geometry.append("unwrapped_path_roll_v1")
 			exact_geometry.append(quantized_roll)
-	return "handle_exact_v2:%s" % (
+	return "handle_exact_v3:%s" % (
 		var_to_bytes(exact_geometry).hex_encode().sha256_text()
 	)
 

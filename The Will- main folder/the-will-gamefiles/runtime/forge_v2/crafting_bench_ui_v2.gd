@@ -4,6 +4,8 @@ class_name CraftingBenchUIV2
 signal closed
 
 const ForgeV2WorkspacePreviewScript = preload("res://runtime/forge_v2/forge_v2_workspace_preview.gd")
+const ForgeV2WorkspaceAxisIndicatorScript = preload("res://runtime/forge_v2/forge_v2_workspace_axis_indicator.gd")
+const ForgeV2RadialMenuScript = preload("res://runtime/forge_v2/forge_v2_radial_menu.gd")
 const ForgeV2KeybindingStateScript = preload("res://runtime/forge_v2/forge_v2_keybinding_state.gd")
 const ForgeV2ProfileShapeLibraryScript = preload("res://runtime/forge_v2/forge_v2_profile_shape_library.gd")
 const ForgeV2FreehandInputStabilizerScript = preload("res://runtime/forge_v2/forge_v2_freehand_input_stabilizer.gd")
@@ -872,6 +874,14 @@ const WORKSPACE_VIEWPORT_ASPECT := 16.0 / 9.0
 const MENU_ID_BASE := 1000
 const PROFILE_BUILDER_MENU_ID_BASE := 50000
 const WORKSPACE_ZOOM_STEP := 0.1
+const WORKSPACE_AXIS_VIEW_OPTIONS: Array[Dictionary] = [
+	{"id": &"top", "label": "Top", "normal": Vector3.UP},
+	{"id": &"right", "label": "Right", "normal": Vector3.RIGHT},
+	{"id": &"back", "label": "Back", "normal": Vector3.FORWARD},
+	{"id": &"bottom", "label": "Bottom", "normal": Vector3.DOWN},
+	{"id": &"left", "label": "Left", "normal": Vector3.LEFT},
+	{"id": &"front", "label": "Front", "normal": Vector3.BACK},
+]
 const SPLINE_POINT_SCREEN_PICK_RADIUS_PIXELS := 26.0
 const SPLINE_ROLL_SCREEN_PICK_RADIUS_PIXELS := 12.0
 const DETAILING_SURFACE_FLATNESS_TOLERANCE_METERS := 0.0002
@@ -997,6 +1007,10 @@ var profile_builder_action_lookup: Dictionary = {}
 var profile_builder_next_id: int = PROFILE_BUILDER_MENU_ID_BASE
 var last_ui_fit_scale := 1.0
 var workspace_frame_host: Control = null
+var workspace_axis_indicator: Control = null
+var workspace_view_radial: Control = null
+var workspace_view_radial_active := false
+var workspace_view_radial_binding: Dictionary = {}
 var workspace_drag_active := false
 var workspace_drag_pan_mode := false
 var workspace_brush_stroke_active := false
@@ -1022,6 +1036,7 @@ var workspace_action_transaction_active := false
 var workspace_spline_drag_point_index := -1
 var workspace_spline_drag_plane_origin_local: Vector3 = Vector3.ZERO
 var workspace_spline_drag_plane_normal_local: Vector3 = Vector3.FORWARD
+var workspace_spline_drag_screen_offset := Vector2.ZERO
 var action_history_hold_action := StringName()
 var action_history_hold_binding: Dictionary = {}
 var action_history_hold_elapsed_seconds := 0.0
@@ -1111,6 +1126,8 @@ func _process(delta: float) -> void:
 	_append_stabilized_workspace_brush_samples(catch_up_samples)
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_cancel_workspace_view_radial()
 	if (
 		what == NOTIFICATION_APPLICATION_FOCUS_OUT
 		and action_history_hold_action != StringName()
@@ -1140,6 +1157,7 @@ func _finish_workspace_input_after_focus_loss() -> void:
 
 func close_ui() -> void:
 	_end_action_history_hold()
+	_cancel_workspace_view_radial()
 	if not is_open():
 		return
 	if workspace_brush_stroke_active:
@@ -1479,7 +1497,7 @@ func _apply_v2_action_bar_layout(compact_layout: bool, ultra_compact_layout: boo
 
 func _apply_v2_workspace_chrome_layout(compact_layout: bool) -> void:
 	if workspace_title_label != null:
-		workspace_title_label.visible = false
+		workspace_title_label.visible = true
 	if workspace_status_label != null:
 		workspace_status_label.visible = not compact_layout
 	if workspace_vbox != null:
@@ -4739,7 +4757,17 @@ func _rebuild_v2_view_menu() -> void:
 	var popup: PopupMenu = view_menu_button.get_popup()
 	popup.clear()
 	_add_v2_menu_action(popup, "Fit View", &"view_fit", null, workspace_preview == null)
-	_add_v2_menu_action(popup, "Reset View", &"view_reset", null, workspace_preview == null)
+	_add_v2_menu_action(popup, "Reset to Free View", &"view_reset", null, workspace_preview == null)
+	popup.add_separator("Perpendicular Views")
+	var view_state := _get_workspace_view_state()
+	var face_id := StringName(view_state.get("face_id", StringName()))
+	for option: Dictionary in WORKSPACE_AXIS_VIEW_OPTIONS:
+		popup.add_radio_check_item(
+			String(option.get("label", "")),
+			_register_v2_menu_action(&"view_axis", option.get("id", StringName()))
+		)
+		popup.set_item_checked(popup.get_item_count() - 1, option.get("id") == face_id)
+		popup.set_item_disabled(popup.get_item_count() - 1, workspace_preview == null)
 	popup.add_separator()
 	_add_v2_menu_action(popup, "Zoom In", &"view_zoom_in", null, workspace_preview == null)
 	_add_v2_menu_action(popup, "Zoom Out", &"view_zoom_out", null, workspace_preview == null)
@@ -4800,6 +4828,7 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 			&"view_reset",
 			&"view_zoom_in",
 			&"view_zoom_out",
+			&"view_axis",
 		]
 	):
 		_set_v2_action_status_text("Save in progress")
@@ -4881,6 +4910,8 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 			_call_workspace_preview_action(&"fit_view")
 		&"view_reset":
 			_call_workspace_preview_action(&"reset_view")
+		&"view_axis":
+			_call_workspace_preview_action(&"set_axis_view", StringName(action_value))
 		&"view_zoom_in":
 			_call_workspace_preview_action(&"zoom_by", -WORKSPACE_ZOOM_STEP)
 		&"view_zoom_out":
@@ -4959,10 +4990,117 @@ func _call_workspace_preview_action(method_name: StringName, argument: Variant =
 	_ensure_workspace_preview()
 	if workspace_preview == null or not workspace_preview.has_method(method_name):
 		return
+	_finish_workspace_edit_before_view_change()
 	if argument == null:
 		workspace_preview.call(method_name)
 	else:
 		workspace_preview.call(method_name, argument)
+	_refresh_workspace_view_status()
+
+func _finish_workspace_edit_before_view_change() -> void:
+	if workspace_brush_stroke_active:
+		_finish_workspace_brush_stroke(Vector2.ZERO, false)
+	_finish_workspace_spline_point_drag()
+	workspace_drag_active = false
+	if active_stage_controller != null and active_stage_controller.has_method("clear_placement_cursor"):
+		active_stage_controller.call("clear_placement_cursor")
+
+func _get_workspace_view_state() -> Dictionary:
+	if workspace_preview == null or not workspace_preview.has_method("get_view_state"):
+		return {}
+	return workspace_preview.call("get_view_state") as Dictionary
+
+func _is_workspace_view_transitioning() -> bool:
+	return (
+		workspace_preview != null
+		and workspace_preview.has_method("is_view_transitioning")
+		and bool(workspace_preview.call("is_view_transitioning"))
+	)
+
+func _refresh_workspace_view_status() -> void:
+	if workspace_title_label == null:
+		return
+	var view_state := _get_workspace_view_state()
+	workspace_title_label.text = String(view_state.get("status_label", "Free View"))
+	workspace_title_label.visible = true
+
+func _on_workspace_view_state_changed() -> void:
+	_sync_workspace_spline_work_plane_context()
+	_refresh_workspace_view_status()
+	_refresh_spline_roll_controls()
+
+func _ensure_workspace_view_radial() -> void:
+	if workspace_view_radial != null or workspace_frame_host == null:
+		return
+	workspace_view_radial = ForgeV2RadialMenuScript.new()
+	workspace_view_radial.name = "WorkspaceViewRadial"
+	workspace_frame_host.add_child(workspace_view_radial)
+	workspace_view_radial.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+func _cancel_workspace_view_radial() -> void:
+	workspace_view_radial_active = false
+	workspace_view_radial_binding.clear()
+	if is_instance_valid(workspace_view_radial):
+		workspace_view_radial.call("close_menu")
+
+func _handle_workspace_view_radial_input(event: InputEvent) -> bool:
+	if workspace_view_radial_active:
+		if event is InputEventMouseMotion:
+			var mouse_position: Vector2 = (event as InputEventMouseMotion).position
+			var local_position := workspace_frame_host.get_global_transform_with_canvas().affine_inverse() * mouse_position
+			workspace_view_radial.call("update_pointer", local_position)
+		if event is InputEventKey:
+			var key_event := event as InputEventKey
+			if key_event.pressed and (key_event.keycode == KEY_ESCAPE or key_event.physical_keycode == KEY_ESCAPE):
+				_cancel_workspace_view_radial()
+				return true
+		if ForgeV2KeybindingStateScript.event_releases_binding(workspace_view_radial_binding, event):
+			var face_id := StringName(workspace_view_radial.call("get_selected_id"))
+			_cancel_workspace_view_radial()
+			if face_id != StringName():
+				_call_workspace_preview_action(&"set_axis_view", face_id)
+		return true
+	if (
+		not _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_VIEW_RADIAL, event)
+		or _is_text_entry_focused()
+	):
+		return false
+	if (
+		workspace_view_container == null
+		or not Rect2(Vector2.ZERO, workspace_view_container.size).has_point(
+			workspace_view_container.get_local_mouse_position()
+		)
+	):
+		return false
+	for node: Node in find_children("*", "Window", true, false):
+		var popup := node as Window
+		if popup != null and popup.visible:
+			return false
+	_ensure_workspace_view_radial()
+	if workspace_view_radial == null:
+		return false
+	_finish_workspace_edit_before_view_change()
+	workspace_view_radial_binding = keybinding_state.call(
+		"get_binding_data", ForgeV2KeybindingStateScript.ACTION_VIEW_RADIAL
+	) as Dictionary
+	workspace_view_radial_active = true
+	workspace_view_radial.call("open_at", workspace_frame_host.get_local_mouse_position(), WORKSPACE_AXIS_VIEW_OPTIONS)
+	return true
+
+func _sync_workspace_spline_work_plane_context() -> void:
+	if workspace_preview == null or not workspace_preview.has_method("set_spline_work_plane_context"):
+		return
+	var enabled := _is_spline_roll_tool_active()
+	var origin := Vector3.ZERO
+	if enabled:
+		var points := _get_spline_points()
+		if workspace_spline_point_drag_active:
+			origin = workspace_spline_drag_plane_origin_local
+		elif not points.is_empty():
+			origin = points[points.size() - 1]
+		elif StringName(_get_workspace_view_state().get("face_id", StringName())) == StringName():
+			enabled = false
+	workspace_preview.call("set_spline_work_plane_context", enabled, origin)
 
 func _set_active_v2_tool(tool_id: StringName) -> void:
 	if active_stage_controller == null:
@@ -5572,6 +5710,9 @@ func _refresh_spline_roll_controls() -> void:
 	]
 	spline_roll_degrees_spin_box.editable = has_selected_point and not v2_save_in_progress
 	spline_roll_twist_spin_box.editable = has_selected_point and not v2_save_in_progress
+	if _is_workspace_view_transitioning():
+		spline_roll_degrees_spin_box.editable = false
+		spline_roll_twist_spin_box.editable = false
 	if not has_selected_point:
 		return
 	var roll_degrees := float(state.call("get_spline_line_point_roll_degrees", selected_index))
@@ -5609,7 +5750,7 @@ func _on_spline_roll_twist_changed(value: float) -> void:
 	_apply_selected_spline_roll_degrees(value * 360.0)
 
 func _apply_selected_spline_roll_degrees(value: float) -> void:
-	if is_refreshing_spline_roll_ui or v2_save_in_progress or not _is_spline_roll_tool_active():
+	if is_refreshing_spline_roll_ui or v2_save_in_progress or _is_workspace_view_transitioning() or not _is_spline_roll_tool_active():
 		return
 	var state := _get_spline_roll_authoring_state()
 	var selected_index := int(state.get("selected_spline_point_index"))
@@ -5631,6 +5772,7 @@ func _try_handle_spline_point_cycle_input(event: InputEvent) -> bool:
 		or workspace_spline_roll_drag_active
 		or workspace_brush_stroke_active
 		or workspace_drag_active
+		or _is_workspace_view_transitioning()
 	):
 		return false
 	# The 2D editor owns Space recentering; menus and dialogs retain their keys.
@@ -5650,6 +5792,10 @@ func _try_handle_spline_point_cycle_input(event: InputEvent) -> bool:
 func _input(event: InputEvent) -> void:
 	if not is_open():
 		return
+	if workspace_view_radial_active:
+		_handle_workspace_view_radial_input(event)
+		get_viewport().set_input_as_handled()
+		return
 	if _is_keybinding_capture_active():
 		if (
 			is_instance_valid(keybindings_popup)
@@ -5663,6 +5809,9 @@ func _input(event: InputEvent) -> void:
 			or not keybindings_popup.visible
 		):
 			_cancel_keybinding_capture()
+	if _handle_workspace_view_radial_input(event):
+		get_viewport().set_input_as_handled()
+		return
 	if (
 		(event is InputEventMouseButton or event is InputEventKey)
 		and _try_handle_action_history_binding(event)
@@ -6208,6 +6357,8 @@ func _configure_option_button(option_button: OptionButton, options: Array[Dictio
 		option_button.set_item_metadata(item_index, option.get("id", StringName()))
 
 func _refresh_from_controller() -> void:
+	_sync_workspace_spline_work_plane_context()
+	_refresh_workspace_view_status()
 	_refresh_spline_roll_controls()
 	if active_stage_controller == null:
 		last_refreshed_active_tool_id = StringName()
@@ -6635,8 +6786,22 @@ func _ensure_workspace_preview() -> void:
 	workspace_preview = ForgeV2WorkspacePreviewScript.new()
 	workspace_preview.name = "ForgeV2WorkspacePreview"
 	workspace_subviewport.add_child(workspace_preview)
+	if workspace_axis_indicator == null:
+		workspace_axis_indicator = ForgeV2WorkspaceAxisIndicatorScript.new()
+		workspace_axis_indicator.name = "WorkspaceAxisIndicator"
+		workspace_view_container.add_child(workspace_axis_indicator)
+		workspace_axis_indicator.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+		workspace_axis_indicator.offset_left = -98.0
+		workspace_axis_indicator.offset_top = -98.0
+		workspace_axis_indicator.offset_right = -12.0
+		workspace_axis_indicator.offset_bottom = -12.0
+	workspace_axis_indicator.bind_workspace(workspace_preview, workspace_preview.camera)
+	if workspace_preview.has_signal("view_state_changed"):
+		workspace_preview.connect("view_state_changed", _on_workspace_view_state_changed)
 	if active_stage_controller != null and workspace_preview.has_method("bind_stage_controller"):
 		workspace_preview.call("bind_stage_controller", active_stage_controller)
+	_sync_workspace_spline_work_plane_context()
+	_refresh_workspace_view_status()
 
 func _sync_workspace_subviewport_size() -> void:
 	if workspace_view_container == null or workspace_subviewport == null:
@@ -6651,6 +6816,9 @@ func _sync_workspace_subviewport_size() -> void:
 func _on_workspace_view_gui_input(event: InputEvent) -> void:
 	if active_stage_controller == null:
 		return
+	if workspace_view_radial_active:
+		workspace_view_container.accept_event()
+		return
 	_ensure_workspace_preview()
 	if workspace_preview == null:
 		return
@@ -6661,23 +6829,15 @@ func _on_workspace_view_gui_input(event: InputEvent) -> void:
 		_handle_workspace_mouse_motion(event as InputEventMouseMotion)
 
 func _handle_workspace_mouse_button(mouse_button_event: InputEventMouseButton) -> void:
-	if workspace_spline_roll_drag_active:
-		if (
-			not mouse_button_event.pressed
-			and mouse_button_event.button_index == _get_v2_binding_mouse_button(
-				ForgeV2KeybindingStateScript.ACTION_PAINT_MATERIAL
-			)
-		):
-			_update_workspace_spline_roll_drag(mouse_button_event.position)
-			_finish_workspace_spline_point_drag()
+	if workspace_view_radial_active:
 		workspace_view_container.accept_event()
 		return
 	if _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_VIEW_ZOOM_IN, mouse_button_event):
-		workspace_preview.call("zoom_by", -WORKSPACE_ZOOM_STEP)
+		_call_workspace_preview_action(&"zoom_by", -WORKSPACE_ZOOM_STEP)
 		workspace_view_container.accept_event()
 		return
 	if _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_VIEW_ZOOM_OUT, mouse_button_event):
-		workspace_preview.call("zoom_by", WORKSPACE_ZOOM_STEP)
+		_call_workspace_preview_action(&"zoom_by", WORKSPACE_ZOOM_STEP)
 		workspace_view_container.accept_event()
 		return
 	var orbit_mouse_button := _get_v2_binding_mouse_button(ForgeV2KeybindingStateScript.ACTION_VIEW_ORBIT)
@@ -6689,16 +6849,34 @@ func _handle_workspace_mouse_button(mouse_button_event: InputEventMouseButton) -
 		or mouse_button_event.button_index == pan_mouse_button
 		or mouse_button_event.button_index == pan_secondary_mouse_button
 	):
-		workspace_drag_active = mouse_button_event.pressed
-		workspace_drag_pan_mode = (
+		var is_pan := (
 			_v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_VIEW_PAN, mouse_button_event)
 			or _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_VIEW_PAN_SECONDARY, mouse_button_event)
 		)
+		if (
+			mouse_button_event.pressed
+			and mouse_button_event.double_click
+			and not is_pan
+			and _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_VIEW_ORBIT, mouse_button_event)
+		):
+			_call_workspace_preview_action(&"align_to_nearest_axis")
+			workspace_view_container.accept_event()
+			return
+		if mouse_button_event.pressed:
+			_finish_workspace_edit_before_view_change()
+		workspace_drag_active = mouse_button_event.pressed
+		workspace_drag_pan_mode = is_pan
 		workspace_view_container.accept_event()
 		return
 	if mouse_button_event.button_index != paint_mouse_button:
 		return
-	if v2_save_in_progress:
+	if v2_save_in_progress or _is_workspace_view_transitioning():
+		workspace_view_container.accept_event()
+		return
+	if workspace_spline_roll_drag_active:
+		if not mouse_button_event.pressed:
+			_update_workspace_spline_roll_drag(mouse_button_event.position)
+			_finish_workspace_spline_point_drag()
 		workspace_view_container.accept_event()
 		return
 	if mouse_button_event.pressed:
@@ -6719,6 +6897,9 @@ func _handle_workspace_mouse_button(mouse_button_event: InputEventMouseButton) -
 	workspace_view_container.accept_event()
 
 func _handle_workspace_mouse_motion(motion_event: InputEventMouseMotion) -> void:
+	if workspace_view_radial_active:
+		workspace_view_container.accept_event()
+		return
 	if workspace_spline_roll_drag_active:
 		_update_workspace_spline_roll_drag(motion_event.position)
 		workspace_view_container.accept_event()
@@ -6749,15 +6930,16 @@ func _on_workspace_view_mouse_exited() -> void:
 		active_stage_controller.call("clear_placement_cursor")
 
 func _begin_workspace_spline_input(screen_position: Vector2) -> void:
+	if _is_workspace_view_transitioning():
+		return
 	if _is_v2_detailing_brush_active():
 		_begin_workspace_detailing_brush_input(screen_position)
 		return
 	var nearest_point_index := _find_nearest_spline_point_at_screen(screen_position)
 	if nearest_point_index >= 0:
-		_begin_workspace_spline_point_drag(nearest_point_index, Vector3.ZERO)
-		_update_workspace_spline_point_drag(screen_position)
+		_begin_workspace_spline_point_drag(nearest_point_index, Vector3.ZERO, screen_position)
 		return
-	var placement_result: Dictionary = _resolve_workspace_local_position(screen_position)
+	var placement_result: Dictionary = _resolve_workspace_spline_position(screen_position)
 	if not bool(placement_result.get("valid", false)):
 		return
 	var local_position: Vector3 = placement_result.get("local_position", Vector3.ZERO) as Vector3
@@ -6775,6 +6957,7 @@ func _begin_workspace_spline_input(screen_position: Vector2) -> void:
 func _try_begin_workspace_spline_roll_drag(screen_position: Vector2) -> bool:
 	if (
 		not _is_spline_roll_tool_active()
+		or _is_workspace_view_transitioning()
 		or workspace_preview == null
 		or not workspace_preview.has_method("get_spline_roll_gizmo")
 	):
@@ -6883,7 +7066,13 @@ func _begin_workspace_detailing_brush_input(
 		return
 	_apply_detailing_brush_control_candidate(screen_position, -1)
 
-func _begin_workspace_spline_point_drag(point_index: int, fallback_local_position: Vector3) -> void:
+func _begin_workspace_spline_point_drag(
+	point_index: int,
+	fallback_local_position: Vector3,
+	pick_screen_position: Vector2 = Vector2(INF, INF)
+) -> void:
+	if _is_workspace_view_transitioning():
+		return
 	_settle_profile_builder_edit_gesture()
 	if workspace_action_transaction_active:
 		_finish_workspace_spline_point_drag()
@@ -6899,16 +7088,30 @@ func _begin_workspace_spline_point_drag(point_index: int, fallback_local_positio
 				"Move Detailing Path Point"
 			))
 		return
-	if workspace_preview == null or not workspace_preview.has_method("build_camera_facing_drag_plane"):
+	if workspace_preview == null or not workspace_preview.has_method("build_spline_point_drag_plane"):
 		return
 	var point_origin: Vector3 = _get_spline_point_local_position(point_index, fallback_local_position)
-	var drag_plane: Dictionary = workspace_preview.call("build_camera_facing_drag_plane", point_origin) as Dictionary
+	var drag_plane: Dictionary = workspace_preview.call("build_spline_point_drag_plane", point_origin) as Dictionary
 	if not bool(drag_plane.get("valid", false)):
 		return
 	workspace_spline_point_drag_active = true
 	workspace_spline_drag_point_index = point_index
 	workspace_spline_drag_plane_origin_local = drag_plane.get("origin_local", point_origin) as Vector3
 	workspace_spline_drag_plane_normal_local = drag_plane.get("normal_local", Vector3.FORWARD) as Vector3
+	workspace_spline_drag_screen_offset = Vector2.ZERO
+	if pick_screen_position.is_finite():
+		var projected_point: Dictionary = workspace_preview.call(
+			"project_workspace_local_to_screen", point_origin
+		) as Dictionary
+		if bool(projected_point.get("valid", false)):
+			workspace_spline_drag_screen_offset = (
+				(projected_point.get("screen_position", pick_screen_position) as Vector2)
+				- pick_screen_position
+			)
+	_sync_workspace_spline_work_plane_context()
+	# Selection is not an authored movement and must not create an undo entry.
+	if active_stage_controller != null and active_stage_controller.has_method("select_spline_line_point"):
+		active_stage_controller.call("select_spline_line_point", point_index)
 	if (
 		active_stage_controller != null
 		and active_stage_controller.has_method("begin_editor_action_transaction")
@@ -6917,11 +7120,8 @@ func _begin_workspace_spline_point_drag(point_index: int, fallback_local_positio
 			"begin_editor_action_transaction",
 			"Move Path Point"
 		))
-	if active_stage_controller != null and active_stage_controller.has_method("select_spline_line_point"):
-		active_stage_controller.call("select_spline_line_point", point_index)
-
 func _update_workspace_spline_point_drag(screen_position: Vector2) -> void:
-	if not workspace_spline_point_drag_active:
+	if not workspace_spline_point_drag_active or _is_workspace_view_transitioning():
 		return
 	if _is_v2_detailing_brush_active():
 		_apply_detailing_brush_control_candidate(
@@ -6929,11 +7129,11 @@ func _update_workspace_spline_point_drag(screen_position: Vector2) -> void:
 			workspace_spline_drag_point_index
 		)
 		return
-	if workspace_preview == null or not workspace_preview.has_method("screen_to_workspace_local_on_drag_plane"):
+	if workspace_preview == null or not workspace_preview.has_method("screen_to_workspace_local_on_spline_plane"):
 		return
 	var drag_result: Dictionary = workspace_preview.call(
-		"screen_to_workspace_local_on_drag_plane",
-		screen_position,
+		"screen_to_workspace_local_on_spline_plane",
+		screen_position + workspace_spline_drag_screen_offset,
 		workspace_spline_drag_plane_origin_local,
 		workspace_spline_drag_plane_normal_local
 	) as Dictionary
@@ -6954,6 +7154,8 @@ func _finish_workspace_spline_point_drag() -> void:
 	workspace_spline_drag_point_index = -1
 	workspace_spline_drag_plane_origin_local = Vector3.ZERO
 	workspace_spline_drag_plane_normal_local = Vector3.FORWARD
+	workspace_spline_drag_screen_offset = Vector2.ZERO
+	_sync_workspace_spline_work_plane_context()
 	var owns_action_transaction := workspace_action_transaction_active
 	workspace_action_transaction_active = false
 	if (
@@ -7228,6 +7430,8 @@ func _get_detailing_brush_sample_spacing_meters() -> float:
 	return fallback_spacing
 
 func _begin_workspace_brush_stroke(screen_position: Vector2) -> void:
+	if _is_workspace_view_transitioning():
+		return
 	var placement_result: Dictionary = _resolve_workspace_local_position(screen_position)
 	if not bool(placement_result.get("valid", false)):
 		return
@@ -7468,11 +7672,16 @@ func _reset_workspace_brush_input_stabilizer() -> void:
 func _update_placement_cursor_from_workspace_position(screen_position: Vector2) -> void:
 	if active_stage_controller == null or not active_stage_controller.has_method("set_placement_cursor_local_position"):
 		return
+	if _is_workspace_view_transitioning():
+		active_stage_controller.call("clear_placement_cursor")
+		return
 	var placement_result: Dictionary
 	if _is_v2_detailing_brush_active():
 		placement_result = _resolve_detailing_brush_cursor_target(
 			screen_position
 		)
+	elif _is_spline_roll_tool_active():
+		placement_result = _resolve_workspace_spline_position(screen_position)
 	else:
 		placement_result = _resolve_workspace_local_position(screen_position)
 	if not bool(placement_result.get("valid", false)):
@@ -7529,6 +7738,16 @@ func _resolve_detailing_brush_cursor_target(
 	):
 		return {"valid": false}
 	return target
+
+func _resolve_workspace_spline_position(screen_position: Vector2) -> Dictionary:
+	_ensure_workspace_preview()
+	if (
+		workspace_preview == null
+		or _is_workspace_view_transitioning()
+		or not workspace_preview.has_method("resolve_spline_placement_target")
+	):
+		return {"valid": false}
+	return workspace_preview.call("resolve_spline_placement_target", screen_position, _get_spline_points()) as Dictionary
 
 func _resolve_workspace_local_position(screen_position: Vector2) -> Dictionary:
 	_ensure_workspace_preview()

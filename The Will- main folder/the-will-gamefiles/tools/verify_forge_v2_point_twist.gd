@@ -29,6 +29,7 @@ func _run() -> void:
 	_test_state()
 	_test_history()
 	_test_roll_geometry()
+	_test_smooth_roll_constraints()
 	await _test_actual_handle_and_wrapper()
 	var report := {"ok": failures.is_empty(), "checks": checks,
 		"failures": failures, "evidence": evidence,
@@ -63,9 +64,9 @@ func _test_state() -> void:
 	_check(_roll_at(state, 1) == 3600.0 and _roll_at(state, 0) == 0.0 and _roll_at(state, 2) == 0.0,
 		"ten turns retained without moving neighbor rolls")
 	state.call("set_spline_line_point_roll_degrees", 1, 144000.0)
-	_check(_roll_at(state, 1) == 7200.0, "100mm span clamps400 turns to20 turns")
+	_check(_roll_at(state, 1) == 3600.0, "smooth middle reversal clamps peak to keep local pitch at least5mm")
 	state.call("set_spline_line_point_roll_degrees", 1, -144000.0)
-	_check(_roll_at(state, 1) == -7200.0, "negative density bound is symmetric")
+	_check(_roll_at(state, 1) == -3600.0, "negative density bound is symmetric")
 	state.call("set_spline_line_point_roll_degrees", 1, 89.7)
 	_check(_roll_at(state, 1) == 90.0, "wholedegree input retains quarterturn")
 	var before := state.get("spline_line_roll_degrees") as PackedFloat64Array
@@ -74,7 +75,7 @@ func _test_state() -> void:
 	state.call("set_spline_line_point_roll_degrees", 1, 7200.0)
 	var original_points := (state.get("spline_line_points") as PackedVector3Array).duplicate()
 	_check(not bool(state.call("set_spline_line_point", 1, Vector3(-0.05, 0, 0))), "shortening maxdensity span is rejected")
-	_check(state.get("spline_line_points") == original_points and _roll_at(state, 1) == 7200.0,
+	_check(state.get("spline_line_points") == original_points and _roll_at(state, 1) == 3600.0,
 		"rejected move preserves geometry and fullturns")
 	state.call("select_spline_line_point", 2)
 	state.call("select_next_spline_line_point", 1)
@@ -167,14 +168,35 @@ func _test_roll_geometry() -> void:
 	if zero_curve != null and signed_curve != null:
 		var base := Roll.sample_frame(zero_curve, 0.05)
 		var turned := Roll.sample_frame(signed_curve, 0.05)
-		var expected: Vector3 = (base.axis_y as Vector3).rotated(Vector3.RIGHT, -PI / 4.0)
+		var expected: Vector3 = (base.axis_y as Vector3).rotated(Vector3.RIGHT, -3.0 * PI / 8.0)
 		_check((turned.axis_y as Vector3).distance_to(expected) < 0.0001,
-			"positive45degrees isclockwise viewed downstream towardupstream")
+			"positive smooth67.5degrees isclockwise viewed downstream towardupstream")
 	var curved := _body(90.0)
 	curved.set("path_points", PackedVector3Array([Vector3(-0.1, 0, 0), Vector3(0, 0.03, 0), Vector3(0.1, 0, 0)]))
 	curved.set("shape_kind", &"shape_kind_spline_profile_path")
 	var curved_curve := Roll.build_body_curve(curved, 0.003)
 	_check(curved_curve != null, "curved/uneven geometry supports roll sampling")
+
+
+func _test_smooth_roll_constraints() -> void:
+	var points := PackedVector3Array([Vector3.ZERO, Vector3(0.1, 0, 0)])
+	_check(Roll.validate_roll_profile(points, PackedFloat64Array([0, 7200]), true).valid, "uniform twist still permits20turns per100mm")
+	_check(not Roll.validate_roll_profile(points, PackedFloat64Array([0, 7201]), true).valid, "uniform twist cannot exceed20turns per100mm")
+	points.append(Vector3(0.2, 0, 0))
+	_check(not Roll.validate_roll_profile(points, PackedFloat64Array([0, 7200, 0]), true).valid, "interior-rate overshoot of a saturated reversal is rejected")
+	_check(Roll.validate_roll_profile(points, PackedFloat64Array([0, 3600, 0]), true).valid, "bounded smooth reversal remains available")
+	_check(not Roll.validate_roll_profile(points, PackedFloat64Array([-1e308, 1e308, 0]), true).valid, "overflowing finite angle deltas are rejected")
+	_check(not Roll.validate_roll_profile(PackedVector3Array([Vector3.ZERO, Vector3.ZERO]), PackedFloat64Array([0, 0]), false).valid, "duplicate spline stations are rejected instead of deduplicating only one authority")
+	var body := _body(90.0)
+	body.set("path_points", PackedVector3Array([Vector3(-0.1, 0, 0), Vector3.ZERO, Vector3(0.2, 0, 0)]))
+	body.set("path_roll_degrees", PackedFloat64Array([0, 90, 300]))
+	var curve := Roll.build_body_curve(body, 0.0005)
+	var data: Dictionary = curve.get_meta(Roll.FRAME_METADATA)
+	var s := float(data.source_offsets[1])
+	var left_rate := (float(Roll.sample_frame(curve, s).roll_degrees) - float(Roll.sample_frame(curve, s - 0.0001).roll_degrees)) / 0.0001
+	var right_rate := (float(Roll.sample_frame(curve, s + 0.0001).roll_degrees) - float(Roll.sample_frame(curve, s).roll_degrees)) / 0.0001
+	_check(absf(left_rate - right_rate) < 5.0, "uneven monotone roll has continuous rate through the interior dot")
+	evidence["smooth_roll_knot_rates"] = {"left_degrees_per_m": left_rate, "right_degrees_per_m": right_rate}
 
 
 func _packet(presenter: Node3D, body: Resource) -> Dictionary:
@@ -199,8 +221,8 @@ func _test_actual_handle_and_wrapper() -> void:
 	var neutral_slice := _section(neutral.primary_grip_handle_vertices, neutral.primary_grip_handle_indices, -0.05)
 	var rolled_slice := _section(packet.primary_grip_handle_vertices, packet.primary_grip_handle_indices, -0.05)
 	_check(neutral_slice.size() >= 3 and rolled_slice.size() >= 3, "actual material sections have polygons")
-	var max_material_error := _rotated_error(neutral_slice, rolled_slice, -PI / 4.0)
-	_check(max_material_error < 0.00015, "physical section isclockwise45degrees fromzero-roll section; error=" + str(max_material_error))
+	var max_material_error := _rotated_error(neutral_slice, rolled_slice, -3.0 * PI / 8.0)
+	_check(max_material_error < 0.00015, "physical section matches smooth67.5degree roll; error=" + str(max_material_error))
 	var config: Dictionary = CONFIG.get("contact_config").duplicate(true)
 	var neutral_result: Dictionary = await Baker.new().bake(presenter, neutral_body, neutral, config)
 	var result: Dictionary = await Baker.new().bake(presenter, body, packet, config)
@@ -215,9 +237,9 @@ func _test_actual_handle_and_wrapper() -> void:
 		_check(_closed(vertices, indices), prefix + " mesh isclosed")
 		var baseline := _section(neutral_result.wrapper.get(prefix + "_vertices_m"), neutral_result.wrapper.get(prefix + "_indices"), -0.05)
 		var transformed := _section(vertices, indices, -0.05)
-		var error := _rotated_error(baseline, transformed, -PI / 4.0)
+		var error := _rotated_error(baseline, transformed, -3.0 * PI / 8.0)
 		max_target_error = maxf(max_target_error, error)
-		_check(error < 0.00015, prefix + " uses same45degree twist asactual Handle; error=" + str(error))
+		_check(error < 0.00015, prefix + " uses same smooth67.5degree twist asactual Handle; error=" + str(error))
 	var wip: CraftedItemWIP = Wip.new()
 	var state := _state()
 	state.call("set_spline_line_point_roll_degrees", 1, 90.0)

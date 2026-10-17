@@ -14,6 +14,7 @@ const ACTION_REDO := &"forge_v2_redo"
 const ACTION_SAVE_DRAFT := &"forge_v2_save_draft"
 const ACTION_VIEW_FIT := &"forge_v2_view_fit"
 const ACTION_VIEW_RESET := &"forge_v2_view_reset"
+const ACTION_VIEW_RADIAL := &"forge_v2_view_radial"
 const ACTION_TOOL_VOLUME_STROKE := &"forge_v2_tool_volume_stroke"
 const ACTION_TOOL_SPLINE_LINE := &"forge_v2_tool_spline_line"
 const ACTION_TOOL_HANDLES := &"forge_v2_tool_handles"
@@ -78,6 +79,11 @@ const ACTION_DEFINITIONS: Array[Dictionary] = [
 		"action": ACTION_VIEW_RESET,
 		"display_name": "Reset View",
 		"binding": {"physical_keycode": KEY_HOME, "keycode": KEY_HOME},
+	},
+	{
+		"action": ACTION_VIEW_RADIAL,
+		"display_name": "Hold Perpendicular View Wheel",
+		"binding": {"physical_keycode": KEY_V, "keycode": KEY_V},
 	},
 	{
 		"action": ACTION_TOOL_VOLUME_STROKE,

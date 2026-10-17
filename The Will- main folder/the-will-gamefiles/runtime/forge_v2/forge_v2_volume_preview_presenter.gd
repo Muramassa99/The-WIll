@@ -8346,6 +8346,7 @@ func _build_csg_body_signature(body: Resource) -> String:
 		"profile_contact_point_relative_2d_meters"
 	)
 	return "|".join([
+		"sweep_revision_%d" % ForgeV2PathRollScript.SWEEP_REVISION,
 		String(body.get("body_id")),
 		String(body.get("body_kind")),
 		String(body.get("material_variant_id")),
@@ -8551,6 +8552,10 @@ func _append_csg_body_shape(
 	var path_interval_meters := _resolve_spline_csg_path_interval(
 		path_sampling_radius_meters
 	)
+	if ForgeV2PathRollScript.uses_shared_sweep(body):
+		return _append_csg_body_explicit_surface_sweep(
+			parent, body, material_variant_id, is_subtraction, operation, body_shape_index
+		)
 	if _is_profile_shape_kind(shape_kind):
 		var profile_polygon := _resolve_body_profile_polygon(body)
 		if _uses_explicit_surface_profile_frame(body) or ForgeV2PathRollScript.has_roll(body):
@@ -8776,7 +8781,7 @@ func _build_active_material_body_sweep_mesh(body: Resource) -> ArrayMesh:
 	surface_tool.index()
 	surface_tool.generate_normals()
 	var mesh := surface_tool.commit()
-	if ForgeV2PathRollScript.has_roll(body) and StringName(body.get("body_kind")) == ForgeV2MaterialBodyScript.BODY_KIND_HANDLE_PROFILE:
+	if ForgeV2PathRollScript.uses_shared_sweep(body) and StringName(body.get("body_kind")) == ForgeV2MaterialBodyScript.BODY_KIND_HANDLE_PROFILE:
 		var arrays := mesh.surface_get_arrays(0)
 		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
 		for index in range(0, indices.size(), 3):
@@ -8795,7 +8800,7 @@ func _build_active_material_body_sweep_mesh(body: Resource) -> ArrayMesh:
 func _resolve_active_material_body_sweep_path(body: Resource) -> Dictionary:
 	if body == null:
 		return {}
-	if ForgeV2PathRollScript.has_roll(body):
+	if ForgeV2PathRollScript.uses_shared_sweep(body):
 		var roll_curve := ForgeV2PathRollScript.build_body_curve(
 			body, _resolve_body_path_sampling_interval(body)
 		)

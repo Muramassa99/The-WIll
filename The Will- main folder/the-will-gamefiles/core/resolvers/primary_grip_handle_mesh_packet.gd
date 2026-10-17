@@ -65,6 +65,20 @@ static func build_body_signature(body: Resource) -> String:
 			DEGREE_SIGNATURE_STEP
 		),
 	]
+	# Keep existing zero-roll signatures stable. Authored complete turns must
+	# invalidate the exact Handle packet and its derived saved targets even when
+	# the endpoint orientations happen to coincide after a full revolution.
+	var authored_roll: Variant = body.get("path_roll_degrees")
+	if authored_roll is PackedFloat64Array:
+		var quantized_roll := PackedInt64Array()
+		var has_authored_roll := false
+		for degrees: float in authored_roll:
+			var quantized := _quantize_scalar(degrees, DEGREE_SIGNATURE_STEP)
+			quantized_roll.append(quantized)
+			has_authored_roll = has_authored_roll or quantized != 0
+		if has_authored_roll:
+			exact_geometry.append("unwrapped_path_roll_v1")
+			exact_geometry.append(quantized_roll)
 	return "handle_exact_v2:%s" % (
 		var_to_bytes(exact_geometry).hex_encode().sha256_text()
 	)

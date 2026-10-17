@@ -1,6 +1,7 @@
 extends RefCounted
 class_name ForgeV2MaterialVolumeResolver
 
+const ForgeV2PathRollScript = preload("res://runtime/forge_v2/forge_v2_path_roll.gd")
 const ForgeV2MaterialBodyScript = preload("res://runtime/forge_v2/forge_v2_material_body.gd")
 const ForgeV2MaterialCompositionPolicyScript = preload(
 	"res://runtime/forge_v2/forge_v2_material_composition_policy.gd"
@@ -1126,6 +1127,7 @@ func _build_body_cache_tokens(bodies: Array) -> Array[Dictionary]:
 				"profile_twist_degrees_per_meter"
 			),
 			"path_point_count": _read_body_path_points(body).size(),
+			"path_roll_degrees": _read_body_variant(body, "path_roll_degrees", PackedFloat64Array()),
 			"path_contact_direction_count": _read_body_vector3_array(
 				body,
 				"path_contact_directions"
@@ -1487,6 +1489,9 @@ func _mark_profile_path_cells(
 	amount_ratio: float,
 	sample_cell_size_meters: float
 ) -> void:
+	if ForgeV2PathRollScript.has_roll(body):
+		_mark_rolled_profile_path_cells(occupied_cells, body, amount_ratio, sample_cell_size_meters)
+		return
 	var body_points: PackedVector3Array = _resolve_body_sample_points(body, sample_cell_size_meters)
 	if body_points.size() < 2:
 		return
@@ -1652,6 +1657,29 @@ func _mark_profile_path_cells(
 			explicit_to_axis_x,
 			explicit_to_axis_y
 		)
+
+func _mark_rolled_profile_path_cells(
+	occupied_cells: Dictionary,
+	body: Variant,
+	amount_ratio: float,
+	sample_cell_size_meters: float
+) -> void:
+	var curve := ForgeV2PathRollScript.build_body_curve(body, sample_cell_size_meters)
+	if curve == null:
+		return
+	var data: Dictionary = curve.get_meta(ForgeV2PathRollScript.FRAME_METADATA)
+	var points: PackedVector3Array = data.get("points")
+	var axes_x: PackedVector3Array = data.get("axis_x")
+	var axes_y: PackedVector3Array = data.get("axis_y")
+	var polygon := _resolve_body_profile_polygon(body)
+	for index in range(points.size() - 1):
+		_mark_profile_segment_cells(
+			occupied_cells, points[index], points[index + 1], polygon,
+			amount_ratio, sample_cell_size_meters, Vector3.FORWARD,
+			Vector2.DOWN, Vector2.ZERO, Vector3.ZERO, 0.0, false, true,
+			axes_x[index], axes_y[index], axes_x[index + 1], axes_y[index + 1]
+		)
+
 
 func _mark_profile_segment_cells(
 	occupied_cells: Dictionary,

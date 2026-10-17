@@ -873,6 +873,7 @@ const MENU_ID_BASE := 1000
 const PROFILE_BUILDER_MENU_ID_BASE := 50000
 const WORKSPACE_ZOOM_STEP := 0.1
 const SPLINE_POINT_SCREEN_PICK_RADIUS_PIXELS := 26.0
+const SPLINE_ROLL_SCREEN_PICK_RADIUS_PIXELS := 12.0
 const DETAILING_SURFACE_FLATNESS_TOLERANCE_METERS := 0.0002
 const DETAILING_SURFACE_MAX_SUBDIVISION_DEPTH := 10
 const DETAILING_SURFACE_MAX_SAMPLES_PER_SPAN := 257
@@ -1007,6 +1008,16 @@ var workspace_brush_locked_target_kind := StringName()
 var workspace_brush_previous_accumulated_input := true
 var workspace_brush_owns_accumulated_input := false
 var workspace_spline_point_drag_active := false
+var workspace_spline_roll_drag_active := false
+var workspace_spline_roll_drag_frame: Dictionary = {}
+var workspace_spline_roll_drag_previous_angle := 0.0
+var workspace_spline_roll_drag_total_degrees := 0.0
+var spline_roll_controls: HFlowContainer = null
+var spline_roll_point_label: Label = null
+var spline_roll_degrees_spin_box: SpinBox = null
+var spline_roll_twist_spin_box: SpinBox = null
+var spline_roll_shortcut_label: Label = null
+var is_refreshing_spline_roll_ui := false
 var workspace_action_transaction_active := false
 var workspace_spline_drag_point_index := -1
 var workspace_spline_drag_plane_origin_local: Vector3 = Vector3.ZERO
@@ -1027,6 +1038,7 @@ func _ready() -> void:
 	_ensure_tool_profile_library_state()
 	_ensure_top_action_bar()
 	_ensure_workspace_frame_host()
+	_ensure_spline_roll_controls()
 	_ensure_fullscreen_workspace_layout()
 	new_draft_button.pressed.connect(_on_new_draft_pressed)
 	clear_strokes_button.pressed.connect(_on_clear_strokes_pressed)
@@ -1109,6 +1121,7 @@ func _notification(what: int) -> void:
 		and (
 			workspace_brush_stroke_active
 			or workspace_spline_point_drag_active
+			or workspace_spline_roll_drag_active
 			or profile_builder_action_transaction_active
 			or (
 				profile_builder_preview != null
@@ -5485,6 +5498,155 @@ func _apply_fullscreen_workspace_layout() -> void:
 	_apply_v2_fit_scale(viewport_size)
 	call_deferred("_sync_workspace_frame_layout")
 
+func _ensure_spline_roll_controls() -> void:
+	if spline_roll_controls != null or workspace_vbox == null:
+		return
+	spline_roll_controls = HFlowContainer.new()
+	spline_roll_controls.name = "SplineRollControls"
+	spline_roll_controls.add_theme_constant_override("h_separation", 8)
+	spline_roll_controls.visible = false
+	workspace_vbox.add_child(spline_roll_controls)
+	if workspace_status_label != null:
+		workspace_vbox.move_child(spline_roll_controls, workspace_status_label.get_index())
+	spline_roll_point_label = Label.new()
+	spline_roll_controls.add_child(spline_roll_point_label)
+	var degrees_label := Label.new()
+	degrees_label.text = "Degrees"
+	spline_roll_controls.add_child(degrees_label)
+	spline_roll_degrees_spin_box = SpinBox.new()
+	spline_roll_degrees_spin_box.name = "SplineRollDegrees"
+	spline_roll_degrees_spin_box.custom_minimum_size.x = 128.0
+	spline_roll_degrees_spin_box.step = 1.0
+	spline_roll_degrees_spin_box.rounded = true
+	spline_roll_controls.add_child(spline_roll_degrees_spin_box)
+	spline_roll_degrees_spin_box.value_changed.connect(_on_spline_roll_degrees_changed)
+	var twist_label := Label.new()
+	twist_label.text = "Twist"
+	spline_roll_controls.add_child(twist_label)
+	spline_roll_twist_spin_box = SpinBox.new()
+	spline_roll_twist_spin_box.name = "SplineRollTwist"
+	spline_roll_twist_spin_box.custom_minimum_size.x = 128.0
+	# Fractional turns display the same total as the whole-degree field.
+	spline_roll_twist_spin_box.step = 1.0 / 360.0
+	spline_roll_controls.add_child(spline_roll_twist_spin_box)
+	spline_roll_twist_spin_box.value_changed.connect(_on_spline_roll_twist_changed)
+	spline_roll_shortcut_label = Label.new()
+	spline_roll_controls.add_child(spline_roll_shortcut_label)
+
+func _get_spline_roll_authoring_state() -> Resource:
+	if (
+		active_stage_controller == null
+		or not active_stage_controller.has_method("get_active_authoring_state")
+	):
+		return null
+	return active_stage_controller.call("get_active_authoring_state") as Resource
+
+func _is_spline_roll_tool_active() -> bool:
+	var state := _get_spline_roll_authoring_state()
+	if state == null:
+		return false
+	var active_tool := StringName(state.get("active_tool_id"))
+	return active_tool == &"tool_spline_line" or active_tool == &"tool_handles"
+
+func _refresh_spline_roll_controls() -> void:
+	_ensure_spline_roll_controls()
+	if spline_roll_controls == null:
+		return
+	var state := _get_spline_roll_authoring_state()
+	var points: PackedVector3Array = (
+		state.get("spline_line_points") as PackedVector3Array
+		if state != null else PackedVector3Array()
+	)
+	spline_roll_controls.visible = _is_spline_roll_tool_active() and not points.is_empty()
+	if not spline_roll_controls.visible:
+		return
+	var selected_index := int(state.get("selected_spline_point_index"))
+	var has_selected_point := selected_index >= 0 and selected_index < points.size()
+	spline_roll_point_label.text = (
+		"Point %d / %d" % [selected_index + 1, points.size()]
+		if has_selected_point else "Select a point"
+	)
+	spline_roll_shortcut_label.text = "%s next | %s previous | 1 Twist = 360 degrees" % [
+		_get_v2_binding_label(ForgeV2KeybindingStateScript.ACTION_SPLINE_POINT_NEXT),
+		_get_v2_binding_label(ForgeV2KeybindingStateScript.ACTION_SPLINE_POINT_PREVIOUS),
+	]
+	spline_roll_degrees_spin_box.editable = has_selected_point and not v2_save_in_progress
+	spline_roll_twist_spin_box.editable = has_selected_point and not v2_save_in_progress
+	if not has_selected_point:
+		return
+	var roll_degrees := float(state.call("get_spline_line_point_roll_degrees", selected_index))
+	var limits: Vector2 = state.call("get_spline_line_point_roll_limits", selected_index) as Vector2
+	is_refreshing_spline_roll_ui = true
+	# A lone point has no span-density bound. Range needs finite display limits;
+	# allow values beyond that display range until a neighbouring span exists.
+	var bounded_minimum := is_finite(limits.x)
+	var bounded_maximum := is_finite(limits.y)
+	var display_minimum := float(limits.x) if bounded_minimum else -360.0
+	var display_maximum := float(limits.y) if bounded_maximum else 360.0
+	for spin_box: SpinBox in [spline_roll_degrees_spin_box, spline_roll_twist_spin_box]:
+		spin_box.allow_lesser = not bounded_minimum
+		spin_box.allow_greater = not bounded_maximum
+	spline_roll_degrees_spin_box.min_value = display_minimum
+	spline_roll_degrees_spin_box.max_value = display_maximum
+	spline_roll_twist_spin_box.min_value = display_minimum / 360.0
+	spline_roll_twist_spin_box.max_value = display_maximum / 360.0
+	spline_roll_degrees_spin_box.set_value_no_signal(roll_degrees)
+	spline_roll_twist_spin_box.set_value_no_signal(roll_degrees / 360.0)
+	var minimum_text := str(roundi(limits.x)) if bounded_minimum else "unbounded"
+	var maximum_text := str(roundi(limits.y)) if bounded_maximum else "unbounded"
+	var roll_tooltip := (
+		"Positive: clockwise viewed from the later point toward the earlier point. "
+		+ "Whole degrees; limited by neighbouring point spacing. Allowed: %s to %s degrees."
+	) % [minimum_text, maximum_text]
+	spline_roll_degrees_spin_box.tooltip_text = roll_tooltip
+	spline_roll_twist_spin_box.tooltip_text = roll_tooltip + " Twist arrows adjust one degree (1/360 turn)."
+	is_refreshing_spline_roll_ui = false
+
+func _on_spline_roll_degrees_changed(value: float) -> void:
+	_apply_selected_spline_roll_degrees(value)
+
+func _on_spline_roll_twist_changed(value: float) -> void:
+	_apply_selected_spline_roll_degrees(value * 360.0)
+
+func _apply_selected_spline_roll_degrees(value: float) -> void:
+	if is_refreshing_spline_roll_ui or v2_save_in_progress or not _is_spline_roll_tool_active():
+		return
+	var state := _get_spline_roll_authoring_state()
+	var selected_index := int(state.get("selected_spline_point_index"))
+	if selected_index < 0:
+		return
+	active_stage_controller.call("set_spline_line_point_roll_degrees", selected_index, value)
+	_refresh_spline_roll_controls()
+	var actual := float(state.call("get_spline_line_point_roll_degrees", selected_index))
+	if not is_equal_approx(actual, roundf(value)):
+		_set_v2_action_status_text("Twist limited by adjacent point spacing: %d degrees." % roundi(actual))
+
+func _try_handle_spline_point_cycle_input(event: InputEvent) -> bool:
+	if (
+		not event is InputEventKey
+		or v2_save_in_progress
+		or _is_text_entry_focused()
+		or not _is_spline_roll_tool_active()
+		or workspace_spline_point_drag_active
+		or workspace_spline_roll_drag_active
+		or workspace_brush_stroke_active
+		or workspace_drag_active
+	):
+		return false
+	# The 2D editor owns Space recentering; menus and dialogs retain their keys.
+	for node: Node in find_children("*", "Window", true, false):
+		var popup := node as Window
+		if popup != null and popup.visible:
+			return false
+	var direction := 0
+	if _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_SPLINE_POINT_NEXT, event):
+		direction = 1
+	elif _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_SPLINE_POINT_PREVIOUS, event):
+		direction = -1
+	if direction == 0:
+		return false
+	return bool(active_stage_controller.call("select_next_spline_line_point", direction))
+
 func _input(event: InputEvent) -> void:
 	if not is_open():
 		return
@@ -5511,6 +5673,9 @@ func _input(event: InputEvent) -> void:
 		event,
 		profile_builder_preview.get_local_mouse_position() if profile_builder_preview != null else Vector2.ZERO
 	):
+		get_viewport().set_input_as_handled()
+		return
+	if _try_handle_spline_point_cycle_input(event):
 		get_viewport().set_input_as_handled()
 
 func _is_text_entry_focused() -> bool:
@@ -6043,6 +6208,7 @@ func _configure_option_button(option_button: OptionButton, options: Array[Dictio
 		option_button.set_item_metadata(item_index, option.get("id", StringName()))
 
 func _refresh_from_controller() -> void:
+	_refresh_spline_roll_controls()
 	if active_stage_controller == null:
 		last_refreshed_active_tool_id = StringName()
 		status_label.text = "No V2 stage controller is attached."
@@ -6495,6 +6661,17 @@ func _on_workspace_view_gui_input(event: InputEvent) -> void:
 		_handle_workspace_mouse_motion(event as InputEventMouseMotion)
 
 func _handle_workspace_mouse_button(mouse_button_event: InputEventMouseButton) -> void:
+	if workspace_spline_roll_drag_active:
+		if (
+			not mouse_button_event.pressed
+			and mouse_button_event.button_index == _get_v2_binding_mouse_button(
+				ForgeV2KeybindingStateScript.ACTION_PAINT_MATERIAL
+			)
+		):
+			_update_workspace_spline_roll_drag(mouse_button_event.position)
+			_finish_workspace_spline_point_drag()
+		workspace_view_container.accept_event()
+		return
 	if _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_VIEW_ZOOM_IN, mouse_button_event):
 		workspace_preview.call("zoom_by", -WORKSPACE_ZOOM_STEP)
 		workspace_view_container.accept_event()
@@ -6526,7 +6703,8 @@ func _handle_workspace_mouse_button(mouse_button_event: InputEventMouseButton) -
 		return
 	if mouse_button_event.pressed:
 		if _is_v2_path_point_tool_active():
-			_begin_workspace_spline_input(mouse_button_event.position)
+			if not _try_begin_workspace_spline_roll_drag(mouse_button_event.position):
+				_begin_workspace_spline_input(mouse_button_event.position)
 		else:
 			_begin_workspace_brush_stroke(mouse_button_event.position)
 	else:
@@ -6541,6 +6719,10 @@ func _handle_workspace_mouse_button(mouse_button_event: InputEventMouseButton) -
 	workspace_view_container.accept_event()
 
 func _handle_workspace_mouse_motion(motion_event: InputEventMouseMotion) -> void:
+	if workspace_spline_roll_drag_active:
+		_update_workspace_spline_roll_drag(motion_event.position)
+		workspace_view_container.accept_event()
+		return
 	if workspace_spline_point_drag_active:
 		_update_workspace_spline_point_drag(motion_event.position)
 		workspace_view_container.accept_event()
@@ -6589,6 +6771,99 @@ func _begin_workspace_spline_input(screen_position: Vector2) -> void:
 			local_position,
 			local_surface_normal
 		)
+
+func _try_begin_workspace_spline_roll_drag(screen_position: Vector2) -> bool:
+	if (
+		not _is_spline_roll_tool_active()
+		or workspace_preview == null
+		or not workspace_preview.has_method("get_spline_roll_gizmo")
+	):
+		return false
+	var frame: Dictionary = workspace_preview.call("get_spline_roll_gizmo") as Dictionary
+	if not bool(frame.get("valid", false)):
+		return false
+	var center: Vector3 = frame.get("center", Vector3.ZERO) as Vector3
+	var handle_position: Vector3 = frame.get("handle_position", Vector3.ZERO) as Vector3
+	var projected_handle: Dictionary = workspace_preview.call(
+		"project_workspace_local_to_screen", handle_position
+	) as Dictionary
+	var projected_center: Dictionary = workspace_preview.call(
+		"project_workspace_local_to_screen", center
+	) as Dictionary
+	if not bool(projected_handle.get("valid", false)) or not bool(projected_center.get("valid", false)):
+		return false
+	var handle_screen: Vector2 = projected_handle.get("screen_position", Vector2.ZERO) as Vector2
+	var center_screen: Vector2 = projected_center.get("screen_position", Vector2.ZERO) as Vector2
+	var handle_distance := screen_position.distance_to(handle_screen)
+	if (
+		handle_distance > SPLINE_ROLL_SCREEN_PICK_RADIUS_PIXELS
+		or handle_distance >= screen_position.distance_to(center_screen)
+	):
+		return false
+	var pointer_angle := _resolve_spline_roll_pointer_angle(screen_position, frame)
+	if not bool(pointer_angle.get("valid", false)):
+		_set_v2_action_status_text("View the twist rod more face-on, or enter Degrees / Twist.")
+		return true
+	_settle_profile_builder_edit_gesture()
+	_finish_workspace_spline_point_drag()
+	var state := _get_spline_roll_authoring_state()
+	workspace_spline_drag_point_index = int(state.get("selected_spline_point_index"))
+	workspace_spline_roll_drag_frame = frame
+	workspace_spline_roll_drag_previous_angle = float(pointer_angle.get("angle", 0.0))
+	workspace_spline_roll_drag_total_degrees = float(state.call(
+		"get_spline_line_point_roll_degrees", workspace_spline_drag_point_index
+	))
+	workspace_spline_roll_drag_active = true
+	workspace_preview.call("set_spline_roll_gizmo_active", true)
+	workspace_action_transaction_active = bool(active_stage_controller.call(
+		"begin_editor_action_transaction", "Twist Path Point"
+	))
+	return true
+
+func _resolve_spline_roll_pointer_angle(screen_position: Vector2, frame: Dictionary) -> Dictionary:
+	var center: Vector3 = frame.get("center", Vector3.ZERO) as Vector3
+	var tangent: Vector3 = frame.get("tangent", Vector3.ZERO) as Vector3
+	var hit: Dictionary = workspace_preview.call(
+		"screen_to_workspace_local_on_drag_plane", screen_position, center, tangent
+	) as Dictionary
+	if not bool(hit.get("valid", false)):
+		return {"valid": false}
+	# A rotation plane can extend outside the build box: do not clamp its ray hit.
+	var radial: Vector3 = (hit.get("raw_local_position", center) as Vector3) - center
+	if radial.length_squared() < 0.00000001:
+		return {"valid": false}
+	var axis_x: Vector3 = frame.get("axis_x", Vector3.RIGHT) as Vector3
+	var axis_y: Vector3 = frame.get("axis_y", Vector3.UP) as Vector3
+	return {"valid": true, "angle": atan2(radial.dot(axis_y), radial.dot(axis_x))}
+
+func _update_workspace_spline_roll_drag(screen_position: Vector2) -> void:
+	if not workspace_spline_roll_drag_active:
+		return
+	var state := _get_spline_roll_authoring_state()
+	if state == null or int(state.get("selected_spline_point_index")) != workspace_spline_drag_point_index:
+		_finish_workspace_spline_point_drag()
+		return
+	var pointer_angle := _resolve_spline_roll_pointer_angle(screen_position, workspace_spline_roll_drag_frame)
+	if not bool(pointer_angle.get("valid", false)):
+		return
+	var current_angle := float(pointer_angle.get("angle", 0.0))
+	# Unwrap pointer motion, rather than replacing the authored total with atan2.
+	# Positive authored rotation is clockwise viewed back down the path tangent.
+	workspace_spline_roll_drag_total_degrees -= rad_to_deg(wrapf(
+		current_angle - workspace_spline_roll_drag_previous_angle, -PI, PI
+	))
+	workspace_spline_roll_drag_previous_angle = current_angle
+	var limits: Vector2 = state.call(
+		"get_spline_line_point_roll_limits", workspace_spline_drag_point_index
+	) as Vector2
+	workspace_spline_roll_drag_total_degrees = clampf(
+		workspace_spline_roll_drag_total_degrees, limits.x, limits.y
+	)
+	active_stage_controller.call(
+		"set_spline_line_point_roll_degrees",
+		workspace_spline_drag_point_index,
+		workspace_spline_roll_drag_total_degrees
+	)
 
 func _begin_workspace_detailing_brush_input(
 	screen_position: Vector2
@@ -6670,6 +6945,12 @@ func _update_workspace_spline_point_drag(screen_position: Vector2) -> void:
 
 func _finish_workspace_spline_point_drag() -> void:
 	workspace_spline_point_drag_active = false
+	workspace_spline_roll_drag_active = false
+	if workspace_preview != null:
+		workspace_preview.call("set_spline_roll_gizmo_active", false)
+	workspace_spline_roll_drag_frame.clear()
+	workspace_spline_roll_drag_previous_angle = 0.0
+	workspace_spline_roll_drag_total_degrees = 0.0
 	workspace_spline_drag_point_index = -1
 	workspace_spline_drag_plane_origin_local = Vector3.ZERO
 	workspace_spline_drag_plane_normal_local = Vector3.FORWARD

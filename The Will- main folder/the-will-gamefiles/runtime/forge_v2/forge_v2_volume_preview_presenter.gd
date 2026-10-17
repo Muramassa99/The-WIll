@@ -11,6 +11,7 @@ const ForgeV2ProfileShapeLibraryScript = preload("res://runtime/forge_v2/forge_v
 const ForgeV2SplinePathSamplerScript = preload(
 	"res://runtime/forge_v2/forge_v2_spline_path_sampler.gd"
 )
+const ForgeV2PathRollScript = preload("res://runtime/forge_v2/forge_v2_path_roll.gd")
 const HandleLengthPolicyScript = preload("res://core/resolvers/handle_length_policy.gd")
 const PrimaryGripHandleMeshPacketScript = preload(
 	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
@@ -21,9 +22,18 @@ const PREVIEW_TUBE_SIDES := 12
 const PREVIEW_SPHERE_RINGS := 6
 const PREVIEW_SPHERE_SIDES := 12
 const DEFAULT_PREVIEW_RADIUS_METERS := 0.06
-const SPLINE_PREVIEW_RADIUS_METERS := 0.014
-const SPLINE_POINT_RADIUS_METERS := 0.028
-const SPLINE_SELECTED_POINT_RADIUS_METERS := 0.038
+# Whole-millimetre diameters: line/rod 5, trace 3, dots 37/50, knob 26.
+const SPLINE_PREVIEW_RADIUS_METERS := 0.0025
+const SPLINE_POINT_RADIUS_METERS := 0.0185
+const SPLINE_SELECTED_POINT_RADIUS_METERS := 0.025
+const SPLINE_ROLL_TRACE_RADIUS_METERS := 0.0015
+const SPLINE_ROLL_KNOB_RADIUS_METERS := 0.013
+# Rod reach is independent of marker size; preserve its existing length.
+const SPLINE_ROLL_MIN_REACH_METERS := 0.095
+const SPLINE_ROLL_TRACE_COLOR := Color("b5123b")
+const SPLINE_ROLL_ROD_COLOR := Color("8b5a2b")
+const SPLINE_ROLL_KNOB_COLOR := Color("35984a")
+const SPLINE_ROLL_KNOB_ACTIVE_COLOR := Color("7bc66d")
 const SPLINE_PREVIEW_BAKE_INTERVAL_METERS := 0.015
 const SPLINE_CSG_CIRCLE_SIDES := 24
 const SPLINE_CSG_PATH_INTERVAL_RADIUS_RATIO_FALLBACK := 0.55
@@ -51,6 +61,8 @@ const NATIVE_PROTECTED_HANDLE_BOOTSTRAP_NODE_NAME := (
 var active_stage_controller: Node = null
 var preview_mesh_instance: MeshInstance3D = null
 var spline_preview_mesh_instance: MeshInstance3D = null
+var spline_roll_preview_mesh_instance: MeshInstance3D = null
+var spline_roll_gizmo_active := false
 var spline_invalid_preview_mesh_instance: MeshInstance3D = null
 var spline_invalid_preview_material: StandardMaterial3D = null
 var spline_csg_path: Path3D = null
@@ -250,6 +262,7 @@ func bind_stage_controller(stage_controller: Node) -> void:
 	_clear_bounded_checkpoint_export_provider()
 	_discard_csg_static_zone_cache()
 	active_stage_controller = stage_controller
+	spline_roll_gizmo_active = false
 	_connect_stage_controller()
 	_sync_from_controller()
 
@@ -263,6 +276,7 @@ func clear_stage_controller() -> bool:
 	_disconnect_stage_controller()
 	_clear_bounded_checkpoint_export_provider()
 	active_stage_controller = null
+	spline_roll_gizmo_active = false
 	_sync_preview_mesh(null)
 	_sync_spline_preview_mesh(null)
 	_sync_spline_csg_noodle(null)
@@ -378,6 +392,7 @@ func _sync_preview_mesh(authoring_state: Resource) -> void:
 	preview_mesh_instance.visible = true
 
 func _sync_spline_preview_mesh(authoring_state: Resource) -> void:
+	_sync_spline_roll_preview(authoring_state)
 	_ensure_spline_preview_mesh_instance()
 	_ensure_spline_invalid_preview_mesh_instance()
 	if (
@@ -497,6 +512,104 @@ func _sync_spline_preview_mesh(authoring_state: Resource) -> void:
 	spline_preview_mesh_instance.mesh = spline_mesh
 	spline_preview_mesh_instance.material_override = _build_spline_preview_material()
 	spline_preview_mesh_instance.visible = true
+
+func set_spline_roll_gizmo_active(active: bool) -> void:
+	if spline_roll_gizmo_active == active:
+		return
+	spline_roll_gizmo_active = active
+	var state: Resource = null
+	if active_stage_controller != null:
+		state = active_stage_controller.call("get_active_authoring_state") as Resource
+	_sync_spline_roll_preview(state)
+
+
+func get_spline_roll_gizmo(authoring_state: Resource = null) -> Dictionary:
+	if authoring_state == null and active_stage_controller != null:
+		authoring_state = active_stage_controller.call("get_active_authoring_state") as Resource
+	if authoring_state == null or not authoring_state.has_method("build_spline_roll_preview_body"):
+		return {"valid": false}
+	var body := authoring_state.call("build_spline_roll_preview_body") as Resource
+	return _spline_roll_gizmo_for_body(body, int(authoring_state.get("selected_spline_point_index")))
+
+
+func _spline_roll_gizmo_for_body(body: Resource, selected_index: int) -> Dictionary:
+	if body == null:
+		return {"valid": false}
+	var points: PackedVector3Array = body.get("path_points")
+	if selected_index < 0 or selected_index >= points.size() or points.size() < 2:
+		return {"valid": false}
+	var base_curve := ForgeV2PathRollScript.build_base_curve(body, _resolve_body_path_sampling_interval(body))
+	var offsets := ForgeV2PathRollScript.control_offsets(body, base_curve)
+	var frame := ForgeV2PathRollScript.sample_base_frame(base_curve, offsets[selected_index], false)
+	var tangent: Vector3 = frame.get("tangent")
+	var axes_x: Vector3 = frame.get("axis_x")
+	var axes_y: Vector3 = frame.get("axis_y")
+	var rolls := ForgeV2PathRollScript.normalize_roll_degrees(body.get("path_roll_degrees") as PackedFloat64Array, points.size())
+	var angle := -deg_to_rad(rolls[selected_index])
+	var radius := maxf(ForgeV2ProfileShapeLibraryScript.calculate_polygon_max_radius_meters(_resolve_active_body_sweep_polygon(body)) * 1.4, SPLINE_ROLL_MIN_REACH_METERS)
+	return {
+		"valid": true, "center": points[selected_index], "tangent": tangent,
+		"axis_x": axes_x, "axis_y": axes_y, "radius_meters": radius,
+		"roll_degrees": rolls[selected_index],
+		"handle_position": points[selected_index] + radius * (axes_x * cos(angle) + axes_y * sin(angle)),
+	}
+
+
+func _sync_spline_roll_preview(authoring_state: Resource) -> void:
+	if spline_roll_preview_mesh_instance == null:
+		spline_roll_preview_mesh_instance = MeshInstance3D.new()
+		spline_roll_preview_mesh_instance.name = "SplineRollPreviewMesh"
+		add_child(spline_roll_preview_mesh_instance)
+		spline_roll_preview_mesh_instance.material_override = _build_spline_preview_material()
+		spline_roll_preview_mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var instance := spline_roll_preview_mesh_instance
+	instance.visible = false
+	instance.mesh = null
+	if authoring_state == null or not authoring_state.has_method("build_spline_roll_preview_body"):
+		return
+	var body := authoring_state.call("build_spline_roll_preview_body") as Resource
+	if body == null:
+		return
+	var curve := ForgeV2PathRollScript.build_body_curve(body, _resolve_body_path_sampling_interval(body))
+	if curve == null:
+		return
+	var data: Dictionary = curve.get_meta(ForgeV2PathRollScript.FRAME_METADATA)
+	var points: PackedVector3Array = data.get("points")
+	var axes_x: PackedVector3Array = data.get("axis_x")
+	var axes_y: PackedVector3Array = data.get("axis_y")
+	var polygon := _resolve_active_body_sweep_polygon(body)
+	if polygon.is_empty():
+		return
+	var outer := polygon[0]
+	for point: Vector2 in polygon:
+		if point.length_squared() > outer.length_squared():
+			outer = point
+	var opposite := polygon[0]
+	for point: Vector2 in polygon:
+		if point.dot(outer) < opposite.dot(outer):
+			opposite = point
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var vertex_count := 0
+	for edge_point: Vector2 in [outer, opposite]:
+		for index in range(points.size() - 1):
+			var from := points[index] + axes_x[index] * edge_point.x + axes_y[index] * edge_point.y
+			var to := points[index + 1] + axes_x[index + 1] * edge_point.x + axes_y[index + 1] * edge_point.y
+			vertex_count += _append_tube_segment(surface, from, to, SPLINE_ROLL_TRACE_RADIUS_METERS, SPLINE_ROLL_TRACE_COLOR)
+	var gizmo := _spline_roll_gizmo_for_body(body, int(authoring_state.get("selected_spline_point_index")))
+	if bool(gizmo.get("valid", false)):
+		var center: Vector3 = gizmo.get("center")
+		var handle: Vector3 = gizmo.get("handle_position")
+		vertex_count += _append_tube_segment(surface, center, handle, SPLINE_PREVIEW_RADIUS_METERS, SPLINE_ROLL_ROD_COLOR)
+		var knob_color := SPLINE_ROLL_KNOB_ACTIVE_COLOR if spline_roll_gizmo_active else SPLINE_ROLL_KNOB_COLOR
+		vertex_count += _append_sphere(surface, handle, SPLINE_ROLL_KNOB_RADIUS_METERS, knob_color)
+	if vertex_count <= 0:
+		return
+	surface.index()
+	surface.generate_normals()
+	instance.mesh = surface.commit()
+	instance.visible = true
+
 
 func _resolve_spline_preview_line_color(
 	authoring_state: Resource,
@@ -3118,6 +3231,7 @@ func _build_native_static_body_signature(body: Resource) -> String:
 		body.get("radius_meters"),
 		body.get("profile_rotation_bias_degrees"),
 		body.get("profile_twist_degrees_per_meter"),
+		body.get("path_roll_degrees"),
 	]
 	var exact_hash := var_to_bytes(exact_geometry).hex_encode().sha256_text()
 	return "%s|exact:%s" % [_build_csg_body_signature(body), exact_hash]
@@ -8253,6 +8367,7 @@ func _build_csg_body_signature(body: Resource) -> String:
 		str(int(body.get("profile_runtime_schema_version"))),
 		str(float(body.get("profile_rotation_bias_degrees"))),
 		str(float(body.get("profile_twist_degrees_per_meter"))),
+		var_to_bytes(body.get("path_roll_degrees")).hex_encode(),
 		str(StringName(body.get("committed_layer_id"))),
 		str(bool(body.get("layer_active"))),
 		str(float(body.get("updated_timestamp"))),
@@ -8438,7 +8553,7 @@ func _append_csg_body_shape(
 	)
 	if _is_profile_shape_kind(shape_kind):
 		var profile_polygon := _resolve_body_profile_polygon(body)
-		if _uses_explicit_surface_profile_frame(body):
+		if _uses_explicit_surface_profile_frame(body) or ForgeV2PathRollScript.has_roll(body):
 			return _append_csg_body_explicit_surface_sweep(
 				parent,
 				body,
@@ -8653,17 +8768,45 @@ func _build_active_material_body_sweep_mesh(body: Resource) -> ArrayMesh:
 			profile_polygon,
 			preview_color,
 			path_points,
-			path_surface_normals
+			path_surface_normals,
+			sweep_path.get("roll_curve") as Curve3D
 		)
 	if added_vertices <= 0:
 		return ArrayMesh.new()
 	surface_tool.index()
 	surface_tool.generate_normals()
-	return surface_tool.commit()
+	var mesh := surface_tool.commit()
+	if ForgeV2PathRollScript.has_roll(body) and StringName(body.get("body_kind")) == ForgeV2MaterialBodyScript.BODY_KIND_HANDLE_PROFILE:
+		var arrays := mesh.surface_get_arrays(0)
+		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+		for index in range(0, indices.size(), 3):
+			var swap := indices[index + 1]
+			indices[index + 1] = indices[index + 2]
+			indices[index + 2] = swap
+		arrays[Mesh.ARRAY_INDEX] = indices
+		var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+		for index in range(normals.size()):
+			normals[index] = -normals[index]
+		arrays[Mesh.ARRAY_NORMAL] = normals
+		mesh = ArrayMesh.new()
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
 
 func _resolve_active_material_body_sweep_path(body: Resource) -> Dictionary:
 	if body == null:
 		return {}
+	if ForgeV2PathRollScript.has_roll(body):
+		var roll_curve := ForgeV2PathRollScript.build_body_curve(
+			body, _resolve_body_path_sampling_interval(body)
+		)
+		if roll_curve == null:
+			return {}
+		var roll_data: Dictionary = roll_curve.get_meta(ForgeV2PathRollScript.FRAME_METADATA)
+		return {
+			"path_points": roll_data.get("points"),
+			"path_surface_normals": PackedVector3Array(),
+			"roll_curve": roll_curve,
+		}
 	var authored_points: PackedVector3Array = body.get("path_points")
 	var authored_surface_normals: PackedVector3Array = body.get(
 		"path_surface_normals"
@@ -8776,11 +8919,15 @@ func _append_linear_profile_sweep_preview(
 	profile_polygon: PackedVector2Array,
 	color: Color,
 	path_points: PackedVector3Array,
-	path_surface_normals: PackedVector3Array
+	path_surface_normals: PackedVector3Array,
+	roll_curve: Curve3D = null
 ) -> int:
 	if path_points.size() < 2:
 		return 0
 	var rings: Array[PackedVector3Array] = []
+	var roll_distances := PackedFloat64Array()
+	if roll_curve != null:
+		roll_distances = (roll_curve.get_meta(ForgeV2PathRollScript.FRAME_METADATA) as Dictionary).get("distances")
 	for point_index in range(path_points.size()):
 		rings.append(_build_profile_sweep_ring(
 			body,
@@ -8788,7 +8935,8 @@ func _append_linear_profile_sweep_preview(
 			point_index,
 			_resolve_linear_path_point_tangent(path_points, point_index),
 			path_points,
-			path_surface_normals
+			path_surface_normals,
+			ForgeV2PathRollScript.sample_frame(roll_curve, roll_distances[point_index]) if roll_curve != null else {}
 		))
 	var cap_indices := Geometry2D.triangulate_polygon(profile_polygon)
 	var added_vertices := 0
@@ -8837,13 +8985,16 @@ func _build_profile_sweep_ring(
 	point_index: int,
 	path_tangent: Vector3,
 	path_points: PackedVector3Array,
-	path_surface_normals: PackedVector3Array
+	path_surface_normals: PackedVector3Array,
+	roll_frame: Dictionary = {}
 ) -> PackedVector3Array:
 	var surface_normal := Vector3.FORWARD
 	if point_index >= 0 and point_index < path_surface_normals.size():
 		surface_normal = path_surface_normals[point_index]
 	var frame: Dictionary
-	if _uses_explicit_surface_profile_frame(body):
+	if not roll_frame.is_empty():
+		frame = roll_frame
+	elif _uses_explicit_surface_profile_frame(body):
 		var path_contact_directions: PackedVector3Array = body.get(
 			"path_contact_directions"
 		)
@@ -9207,69 +9358,15 @@ func _apply_profile_curve_orientation(
 	contact_direction_2d: Vector2,
 	rotation_bias_degrees: float
 ) -> void:
-	if curve == null or curve.point_count < 2:
-		return
-	var previous_tilt := 0.0
-	var has_previous_tilt := false
-	var has_aligned_point_normals := (
-		curve.point_count == source_points.size()
-		and source_surface_normals.size() >= source_points.size()
-	)
-	for point_index in range(curve.point_count):
-		var tangent := _resolve_curve_point_tangent(curve, point_index)
-		var point_position := curve.get_point_position(point_index)
-		var use_aligned_normal := (
-			has_aligned_point_normals
-			and point_position.is_equal_approx(source_points[point_index])
-		)
-		var surface_normal := Vector3.FORWARD
-		if use_aligned_normal:
-			surface_normal = (
-				ForgeV2ProfileShapeLibraryScript.interpolate_path_surface_normal(
-					source_surface_normals,
-					point_index,
-					0.0
-				)
-			)
-		else:
-			surface_normal = (
-				ForgeV2ProfileShapeLibraryScript.resolve_path_surface_normal(
-					point_position,
-					source_points,
-					source_surface_normals
-				)
-			)
-		var frame := ForgeV2ProfileShapeLibraryScript.resolve_profile_path_frame(
-			tangent,
-			surface_normal,
-			contact_direction_2d,
-			rotation_bias_degrees
-		)
-		var tilt := float(frame.get("tilt_radians", 0.0))
-		if has_previous_tilt:
-			while tilt - previous_tilt > PI:
-				tilt -= TAU
-			while tilt - previous_tilt < -PI:
-				tilt += TAU
-		curve.set_point_tilt(point_index, tilt)
-		previous_tilt = tilt
-		has_previous_tilt = true
+	ForgeV2PathRollScript.apply_base_orientation(curve, source_points,
+		source_surface_normals, contact_direction_2d, rotation_bias_degrees)
 
-func _resolve_curve_point_tangent(
-	curve: Curve3D,
-	point_index: int
-) -> Vector3:
-	if curve == null or curve.point_count < 2:
-		return Vector3.RIGHT
-	var current_position := curve.get_point_position(point_index)
-	var tangent := Vector3.ZERO
-	if point_index > 0:
-		tangent += current_position - curve.get_point_position(point_index - 1)
-	if point_index < curve.point_count - 1:
-		tangent += curve.get_point_position(point_index + 1) - current_position
-	if tangent.length_squared() <= 0.000001:
-		return Vector3.RIGHT
-	return tangent.normalized()
+func _resolve_body_path_sampling_interval(body: Resource) -> float:
+	var sampling_radius := maxf(float(body.get("radius_meters")), 0.001)
+	if int(body.get("profile_runtime_schema_version")) > 0:
+		sampling_radius = maxf(float(body.get("profile_contact_distance_meters")), ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_ANCHOR_CLEARANCE_METERS)
+	return _resolve_spline_csg_path_interval(sampling_radius)
+
 
 func _resolve_spline_csg_path_interval(radius_meters: float) -> float:
 	if active_stage_controller != null and active_stage_controller.has_method("get_workspace_contract"):

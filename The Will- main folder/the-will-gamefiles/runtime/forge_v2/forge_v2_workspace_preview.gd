@@ -199,6 +199,18 @@ func project_workspace_local_to_screen(local_position: Vector3) -> Dictionary:
 func screen_to_workspace_local(screen_position: Vector2) -> Dictionary:
 	return resolve_placement_target(screen_position)
 
+func set_spline_roll_gizmo_active(active: bool) -> void:
+	if volume_preview_presenter != null:
+		volume_preview_presenter.call("set_spline_roll_gizmo_active", active)
+
+func get_spline_roll_gizmo() -> Dictionary:
+	if (
+		volume_preview_presenter == null
+		or not volume_preview_presenter.has_method("get_spline_roll_gizmo")
+	):
+		return {}
+	return volume_preview_presenter.call("get_spline_roll_gizmo") as Dictionary
+
 func _build_strict_surface_rejection(
 	resolved_result: Dictionary,
 	reject_reason: StringName,

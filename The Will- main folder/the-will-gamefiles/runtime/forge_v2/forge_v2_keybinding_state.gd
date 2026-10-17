@@ -19,6 +19,8 @@ const ACTION_TOOL_SPLINE_LINE := &"forge_v2_tool_spline_line"
 const ACTION_TOOL_HANDLES := &"forge_v2_tool_handles"
 const ACTION_SPLINE_FINISH := &"forge_v2_spline_finish"
 const ACTION_SPLINE_CANCEL := &"forge_v2_spline_cancel"
+const ACTION_SPLINE_POINT_NEXT := &"forge_v2_spline_point_next"
+const ACTION_SPLINE_POINT_PREVIOUS := &"forge_v2_spline_point_previous"
 const ACTION_SPLINE_GENERATE_CSG_NOODLE := &"forge_v2_spline_generate_csg_noodle"
 
 const ACTION_DEFINITIONS: Array[Dictionary] = [
@@ -101,6 +103,16 @@ const ACTION_DEFINITIONS: Array[Dictionary] = [
 		"action": ACTION_SPLINE_CANCEL,
 		"display_name": "Cancel Spline Line",
 		"binding": {},
+	},
+	{
+		"action": ACTION_SPLINE_POINT_NEXT,
+		"display_name": "Select Next Spline / Handle Point",
+		"binding": {"physical_keycode": KEY_SPACE, "keycode": KEY_SPACE},
+	},
+	{
+		"action": ACTION_SPLINE_POINT_PREVIOUS,
+		"display_name": "Select Previous Spline / Handle Point",
+		"binding": {"physical_keycode": KEY_SPACE, "keycode": KEY_SPACE, "shift": true},
 	},
 	{
 		"action": ACTION_SPLINE_GENERATE_CSG_NOODLE,

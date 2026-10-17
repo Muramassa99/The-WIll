@@ -404,6 +404,12 @@ Later polish idea:
 
 ## Parked Handle Sweep Transforms: Three-Shape Family And Twist
 
+October 17 continuation: per-dot Spline Line and Handle twist is now authorized
+under [Forge V2 Point Twist And CAD View Work Scope 2026-10-17.md](<Forge V2 Point Twist And CAD View Work Scope 2026-10-17.md>).
+That note owns the clarified controls, 5mm-per-turn initial pitch limit,
+persistence/export contract and implementation evidence. Longitudinal size
+shaping remains parked. Camera work is a separate subsequent task.
+
 This is a future Forge V2 Handle-authoring feature. It is recorded now, but it
 must not be mixed into the current mass/center-of-mass or Skill Crafter grip
 passes.

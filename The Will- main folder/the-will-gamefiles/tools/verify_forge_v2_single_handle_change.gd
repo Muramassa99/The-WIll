@@ -12,10 +12,19 @@ const ForgeV2StageControllerScript = preload(
 const ForgeV2ProfileShapeLibraryScript = preload(
 	"res://runtime/forge_v2/forge_v2_profile_shape_library.gd"
 )
+const ForgeV2VolumePreviewPresenterScript = preload(
+	"res://runtime/forge_v2/forge_v2_volume_preview_presenter.gd"
+)
+const ForgeV2GripTargetWrapperBakerScript = preload(
+	"res://runtime/forge_v2/forge_v2_grip_target_wrapper_baker.gd"
+)
+const ForgeV2WipCompatibilityAdapterScript = preload(
+	"res://runtime/forge_v2/forge_v2_wip_compatibility_adapter.gd"
+)
 
 const RESULT_PATH := (
 	"C:/WORKSPACE/godot_runs/"
-	+ "verify_forge_v2_single_handle_change_2026-08-28.txt"
+	+ "verify_forge_v2_single_handle_change_20261017.txt"
 )
 const EPSILON := 0.00001
 const ORIGINAL_HANDLE_POINTS: Array[Vector3] = [
@@ -332,10 +341,16 @@ func _verify_save_preparation_auto_applies_handle_change(
 	):
 		controller.queue_free()
 		return false
-	state.call(
-		"set_runtime_contract_mesh_export_provider",
-		Callable(self, "_build_valid_runtime_mesh_packet")
+	# Save now requires the exact current Handle packet and its derived wrapper.
+	# Resolve after Save applies Change Handle, rather than capturing stale geometry.
+	var presenter: Node3D = ForgeV2VolumePreviewPresenterScript.new()
+	root.add_child(presenter)
+	var mesh_provider := Callable(self, "_build_actual_runtime_mesh_packet").bind(
+		state, presenter
 	)
+	var wrapper_provider := Callable(self, "_bake_actual_wrapper").bind(presenter)
+	state.call("set_runtime_contract_mesh_export_provider", mesh_provider)
+	controller.call("set_grip_target_wrapper_export_provider", wrapper_provider)
 	var save_result: Dictionary = await controller.call(
 		"prepare_pending_work_for_save",
 		1000
@@ -364,26 +379,31 @@ func _verify_save_preparation_auto_applies_handle_change(
 			+ "protected Handle: %s" % str(save_result)
 		)
 	)
+	state.call("clear_runtime_contract_mesh_export_provider", mesh_provider)
+	controller.call("clear_grip_target_wrapper_export_provider", wrapper_provider)
+	presenter.queue_free()
 	controller.queue_free()
 	return valid
 
 
-func _build_valid_runtime_mesh_packet() -> Dictionary:
-	return {
-		"ok": true,
-		"vertices": PackedVector3Array([
-			Vector3(0.0, 0.0, 0.0),
-			Vector3(0.1, 0.0, 0.0),
-			Vector3(0.0, 0.1, 0.0),
-			Vector3(0.0, 0.0, 0.1),
-		]),
-		"indices": PackedInt32Array([
-			0, 2, 1,
-			0, 1, 3,
-			0, 3, 2,
-			1, 2, 3,
-		]),
-	}
+func _build_actual_runtime_mesh_packet(state: Resource, presenter: Node3D) -> Dictionary:
+	var handle := ForgeV2WipCompatibilityAdapterScript.resolve_valid_handle_body(state)
+	if not bool(handle.get("valid", false)):
+		return {"ok": false, "reason": "verification_handle_not_ready"}
+	return presenter.call(
+		"_resolve_authoritative_protected_handle_packet", handle.body
+	) as Dictionary
+
+
+func _bake_actual_wrapper(
+	body: Resource,
+	packet: Dictionary,
+	config: Dictionary,
+	presenter: Node3D
+) -> Dictionary:
+	return await ForgeV2GripTargetWrapperBakerScript.new().bake(
+		presenter, body, packet, config
+	)
 
 
 func _author_handle(state: Resource, path_points: Array[Vector3]) -> bool:

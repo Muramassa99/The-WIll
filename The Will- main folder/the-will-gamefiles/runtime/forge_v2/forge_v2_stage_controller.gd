@@ -1510,6 +1510,9 @@ func append_spline_line_point(
 	var before_normal_count := (
 		state.get("spline_line_surface_normals") as PackedVector3Array
 	).size()
+	var before_roll_count := (
+		state.get("spline_line_roll_degrees") as PackedFloat64Array
+	).size()
 	var before_selected_index := int(state.get("selected_spline_point_index"))
 	var point_index: int = int(state.call(
 		"append_spline_line_point",
@@ -1524,6 +1527,7 @@ func append_spline_line_point(
 			var after_normals := state.get(
 				"spline_line_surface_normals"
 			) as PackedVector3Array
+			var after_rolls := state.get("spline_line_roll_degrees") as PackedFloat64Array
 			var changes := {
 				"spline_line_points": _build_known_action_sequence_splice(
 					TYPE_PACKED_VECTOR3_ARRAY,
@@ -1550,8 +1554,17 @@ func append_spline_line_point(
 					"before": before_selected_index,
 					"after": point_index,
 				},
+				"spline_line_roll_degrees": _build_known_action_sequence_splice(
+					TYPE_PACKED_FLOAT64_ARRAY,
+					before_roll_count, after_rolls.size(), before_roll_count, 0,
+					[], [after_rolls[point_index]]
+				),
 			}
 			_record_known_transient_delta("Place Path Point", changes)
+		_emit_state_changed()
+	elif StringName((state.call("get_spline_line_roll_status") as Dictionary).get(
+		"last_edit_reason", StringName()
+	)) != StringName():
 		_emit_state_changed()
 	_emit_placement_cursor_changed()
 	return point_index
@@ -1632,6 +1645,10 @@ func set_spline_line_point(point_index: int, local_position: Vector3) -> bool:
 			}
 			_record_known_transient_delta("Move Path Point", changes)
 		_emit_state_changed()
+	elif StringName((state.call("get_spline_line_roll_status") as Dictionary).get(
+		"last_edit_reason", StringName()
+	)) != StringName():
+		_emit_state_changed()
 	_emit_placement_cursor_changed()
 	return changed
 
@@ -1639,6 +1656,27 @@ func select_spline_line_point(point_index: int) -> bool:
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var changed: bool = bool(state.call("select_spline_line_point", point_index))
 	if changed:
+		_emit_state_changed()
+	return changed
+
+func select_next_spline_line_point(step_count: int = 1) -> bool:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var changed := bool(state.call("select_next_spline_line_point", step_count))
+	if changed:
+		_emit_state_changed()
+	return changed
+
+func set_spline_line_point_roll_degrees(
+	point_index: int,
+	value_degrees: float
+) -> bool:
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
+	var changed := bool(state.call(
+		"set_spline_line_point_roll_degrees", point_index, value_degrees
+	))
+	if changed:
+		_record_transient_action("Twist Path Point", action_before)
 		_emit_state_changed()
 	return changed
 
@@ -2852,6 +2890,7 @@ func _action_delta_sequences_are_compatible(
 		TYPE_PACKED_VECTOR2_ARRAY,
 		TYPE_PACKED_VECTOR3_ARRAY,
 		TYPE_PACKED_INT32_ARRAY,
+		TYPE_PACKED_FLOAT64_ARRAY,
 	]
 
 
@@ -2865,6 +2904,8 @@ func _action_sequence_size(sequence: Variant) -> int:
 			return (sequence as PackedVector3Array).size()
 		TYPE_PACKED_INT32_ARRAY:
 			return (sequence as PackedInt32Array).size()
+		TYPE_PACKED_FLOAT64_ARRAY:
+			return (sequence as PackedFloat64Array).size()
 	return -1
 
 
@@ -2878,6 +2919,8 @@ func _action_sequence_value(sequence: Variant, index: int) -> Variant:
 			return (sequence as PackedVector3Array)[index]
 		TYPE_PACKED_INT32_ARRAY:
 			return (sequence as PackedInt32Array)[index]
+		TYPE_PACKED_FLOAT64_ARRAY:
+			return (sequence as PackedFloat64Array)[index]
 	return null
 
 
@@ -2934,6 +2977,11 @@ func _build_action_sequence_value(
 			for value: Variant in values:
 				int_values.append(int(value))
 			return int_values
+		TYPE_PACKED_FLOAT64_ARRAY:
+			var float_values := PackedFloat64Array()
+			for value: Variant in values:
+				float_values.append(float(value))
+			return float_values
 	return null
 
 
@@ -2949,6 +2997,8 @@ func _duplicate_action_value(value: Variant) -> Variant:
 			return (value as PackedVector3Array).duplicate()
 		TYPE_PACKED_INT32_ARRAY:
 			return (value as PackedInt32Array).duplicate()
+		TYPE_PACKED_FLOAT64_ARRAY:
+			return (value as PackedFloat64Array).duplicate()
 	return value
 
 

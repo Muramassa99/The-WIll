@@ -1,6 +1,7 @@
 extends RefCounted
 class_name ForgeV2WipCompatibilityAdapter
 
+const ForgeV2PathRollScript = preload("res://runtime/forge_v2/forge_v2_path_roll.gd")
 const Stage2EditableMeshStateScript = preload(
 	"res://core/models/stage2_editable_mesh_state.gd"
 )
@@ -603,6 +604,16 @@ static func _resolve_valid_handle_body(authoring_state: Resource) -> Dictionary:
 			"error": path_configuration_error,
 			"body": handle_body,
 		}
+	var roll_validation := ForgeV2PathRollScript.validate_roll_profile(
+		path_points, handle_body.get("path_roll_degrees") as PackedFloat64Array,
+		ForgeV2PathRollScript.uses_linear_path(handle_body)
+	)
+	if not bool(roll_validation.get("valid", false)):
+		return {
+			"valid": false,
+			"error": "forge_v2_primary_handle_%s" % String(roll_validation.get("reason", "roll_invalid")),
+			"body": handle_body,
+		}
 	for point: Vector3 in path_points:
 		if not _vector3_is_finite(point):
 			return {
@@ -1111,12 +1122,18 @@ static func _resolve_handle_profile_frame(
 	var rotation_bias := float(handle_body.get("profile_rotation_bias_degrees"))
 	if not is_finite(rotation_bias):
 		rotation_bias = 0.0
+	var point_rolls := ForgeV2PathRollScript.normalize_roll_degrees(
+		handle_body.get("path_roll_degrees") as PackedFloat64Array, handle_path.size()
+	)
+	rotation_bias -= point_rolls[resolved_point_index]
 	var frame: Dictionary = ForgeV2ProfileShapeLibraryScript.resolve_profile_path_frame(
 		tangent,
 		surface_normal,
 		contact_direction,
 		rotation_bias
 	)
+	if ForgeV2PathRollScript.has_roll(handle_body):
+		frame["axis_x"] = -(frame.get("axis_x") as Vector3)
 	var axis_x: Vector3 = frame.get("axis_x", Vector3.ZERO)
 	var axis_y: Vector3 = frame.get("axis_y", Vector3.ZERO)
 	if (
@@ -1701,6 +1718,8 @@ static func _build_handle_authority_curve(
 	handle_body: Resource,
 	handle_path: PackedVector3Array
 ) -> Curve3D:
+	if ForgeV2PathRollScript.has_roll(handle_body):
+		return ForgeV2PathRollScript.build_body_curve(handle_body, HANDLE_GRIP_CURVE_BAKE_INTERVAL_METERS)
 	var curve: Curve3D
 	if StringName(handle_body.get("shape_kind")) == (
 		ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
@@ -1724,79 +1743,17 @@ static func _apply_handle_curve_orientation(
 	handle_body: Resource,
 	handle_path: PackedVector3Array
 ) -> void:
-	if curve == null or curve.point_count < 2:
-		return
-	var path_normals: PackedVector3Array = handle_body.get("path_surface_normals")
-	var contact_direction: Vector2 = handle_body.get(
-		"profile_contact_direction_2d"
-	)
-	var rotation_bias := float(handle_body.get("profile_rotation_bias_degrees"))
-	var previous_tilt := 0.0
-	var has_previous_tilt := false
-	var normals_align := (
-		curve.point_count == handle_path.size()
-		and path_normals.size() >= handle_path.size()
-	)
-	for point_index: int in range(curve.point_count):
-		var tangent := _resolve_curve_control_tangent(curve, point_index)
-		var point_position := curve.get_point_position(point_index)
-		var surface_normal := Vector3.FORWARD
-		if normals_align and point_position.is_equal_approx(handle_path[point_index]):
-			surface_normal = (
-				ForgeV2ProfileShapeLibraryScript.interpolate_path_surface_normal(
-					path_normals,
-					point_index,
-					0.0
-				)
-			)
-		else:
-			surface_normal = (
-				ForgeV2ProfileShapeLibraryScript.resolve_path_surface_normal(
-					point_position,
-					handle_path,
-					path_normals
-				)
-			)
-		var frame := ForgeV2ProfileShapeLibraryScript.resolve_profile_path_frame(
-			tangent,
-			surface_normal,
-			contact_direction,
-			rotation_bias
-		)
-		var tilt := float(frame.get("tilt_radians", 0.0))
-		if has_previous_tilt:
-			while tilt - previous_tilt > PI:
-				tilt -= TAU
-			while tilt - previous_tilt < -PI:
-				tilt += TAU
-		curve.set_point_tilt(point_index, tilt)
-		previous_tilt = tilt
-		has_previous_tilt = true
-
-
-static func _resolve_curve_control_tangent(
-	curve: Curve3D,
-	point_index: int
-) -> Vector3:
-	if curve == null or curve.point_count < 2:
-		return Vector3.RIGHT
-	var current_position := curve.get_point_position(point_index)
-	var tangent := Vector3.ZERO
-	if point_index > 0:
-		tangent += current_position - curve.get_point_position(point_index - 1)
-	if point_index < curve.point_count - 1:
-		tangent += curve.get_point_position(point_index + 1) - current_position
-	return (
-		tangent.normalized()
-		if tangent.length_squared() > GEOMETRY_EPSILON * GEOMETRY_EPSILON
-		else Vector3.RIGHT
-	)
-
+	ForgeV2PathRollScript.apply_base_orientation(curve, handle_path,
+		handle_body.get("path_surface_normals") as PackedVector3Array,
+		handle_body.get("profile_contact_direction_2d") as Vector2,
+		float(handle_body.get("profile_rotation_bias_degrees")))
 
 static func _resolve_handle_csg_profile_frame(
 	curve: Curve3D,
 	curve_offset: float
 ) -> Dictionary:
+	if curve.has_meta(ForgeV2PathRollScript.FRAME_METADATA):
+		return ForgeV2PathRollScript.sample_frame(curve, curve_offset)
 	var safe_offset := clampf(curve_offset, 0.0, curve.get_baked_length())
 	var pose := curve.sample_baked_with_rotation(safe_offset, false, false)
 	var tangent := (pose.basis * Vector3.FORWARD).normalized()

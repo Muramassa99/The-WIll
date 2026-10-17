@@ -19,6 +19,7 @@ const ForgeV2MaterialVolumeResolverScript = preload("res://runtime/forge_v2/forg
 const ForgeV2PlatformContractScript = preload("res://runtime/forge_v2/forge_v2_platform_contract.gd")
 const ForgeV2PrimitiveCatalogScript = preload("res://runtime/forge_v2/forge_v2_primitive_catalog.gd")
 const ForgeV2VolumeStrokeScript = preload("res://runtime/forge_v2/forge_v2_volume_stroke.gd")
+const ForgeV2PathRollScript = preload("res://runtime/forge_v2/forge_v2_path_roll.gd")
 
 const SCHEMA_VERSION := 6
 const SCHEMA_ID := &"forge_stage1_v2"
@@ -123,9 +124,11 @@ const PROTECTED_HANDLE_SNAPSHOT_SCHEMA_ID := (
 @export var volume_strokes: Array[Resource] = []
 @export var spline_line_points: PackedVector3Array = PackedVector3Array()
 @export var spline_line_surface_normals: PackedVector3Array = PackedVector3Array()
+@export var spline_line_roll_degrees: PackedFloat64Array = PackedFloat64Array()
 @export var spline_line_finished: bool = false
 @export var selected_spline_point_index: int = -1
 @export var spline_line_csg_noodle_enabled: bool = false
+var _spline_roll_last_edit_reason: StringName = StringName()
 @export var detailing_surface_target_kind: StringName = StringName()
 @export var detailing_surface_target_id: StringName = StringName()
 @export var detailing_control_contact_directions: PackedVector3Array = PackedVector3Array()
@@ -216,9 +219,11 @@ func reset_new_draft(next_project_name: String = "Stage 1 V2 Draft") -> void:
 	volume_strokes = []
 	spline_line_points = PackedVector3Array()
 	spline_line_surface_normals = PackedVector3Array()
+	spline_line_roll_degrees = PackedFloat64Array()
 	spline_line_finished = false
 	selected_spline_point_index = -1
 	spline_line_csg_noodle_enabled = false
+	_spline_roll_last_edit_reason = StringName()
 	_clear_detailing_brush_solution()
 	forge_layers = []
 	undone_forge_layers = []
@@ -340,6 +345,7 @@ func capture_editor_transient_snapshot() -> Dictionary:
 			active_basic_grid_snapping_enabled
 		),
 		"spline_line_points": spline_line_points.duplicate(),
+		"spline_line_roll_degrees": spline_line_roll_degrees.duplicate(),
 		"spline_line_surface_normals": (
 			spline_line_surface_normals.duplicate()
 		),
@@ -498,6 +504,10 @@ func restore_editor_transient_snapshot(snapshot: Dictionary) -> bool:
 		as PackedVector3Array).duplicate()
 	)
 	spline_line_finished = bool(snapshot.get("spline_line_finished", false))
+	spline_line_roll_degrees = (
+		(snapshot.get("spline_line_roll_degrees", PackedFloat64Array())
+		as PackedFloat64Array).duplicate()
+	)
 	selected_spline_point_index = int(snapshot.get(
 		"selected_spline_point_index",
 		-1
@@ -560,6 +570,7 @@ func restore_editor_transient_snapshot(snapshot: Dictionary) -> bool:
 	)
 	_normalize_active_profile_settings()
 	_normalize_spline_line()
+	_spline_roll_last_edit_reason = StringName()
 	mark_updated()
 	return true
 
@@ -818,12 +829,27 @@ func set_active_handle_path_mode_id(next_mode_id: StringName) -> bool:
 	if active_handle_path_mode_id == resolved_mode_id:
 		return false
 	var previous_required_point_count := get_active_handle_required_point_count()
+	var previous_mode_id := active_handle_path_mode_id
+	var previous_points := spline_line_points.duplicate()
+	var previous_normals := spline_line_surface_normals.duplicate()
+	var previous_rolls := spline_line_roll_degrees.duplicate()
+	var previous_selection := selected_spline_point_index
 	active_handle_path_mode_id = resolved_mode_id
 	_convert_handle_path_point_count(
 		previous_required_point_count,
 		get_active_handle_required_point_count()
 	)
 	_normalize_spline_line()
+	var roll_validation := get_spline_line_roll_status()
+	if not bool(roll_validation.get("valid", false)):
+		active_handle_path_mode_id = previous_mode_id
+		spline_line_points = previous_points
+		spline_line_surface_normals = previous_normals
+		spline_line_roll_degrees = previous_rolls
+		selected_spline_point_index = previous_selection
+		_spline_roll_last_edit_reason = StringName(roll_validation.get("reason", StringName()))
+		return false
+	_spline_roll_last_edit_reason = StringName()
 	mark_updated()
 	return true
 
@@ -1908,6 +1934,10 @@ func apply_handle_change() -> Dictionary:
 			"handle_change_active": false,
 		}
 	_normalize_spline_line()
+	var roll_validation := get_spline_line_roll_status()
+	if not bool(roll_validation.get("valid", false)):
+		_handle_change_last_reason = StringName(roll_validation.get("reason", StringName()))
+		return {"ok": false, "reason": _handle_change_last_reason, "handle_change_active": true}
 	var required_point_count := get_active_handle_required_point_count()
 	if spline_line_points.size() != required_point_count:
 		_handle_change_last_reason = &"handle_path_point_count_incomplete"
@@ -1958,6 +1988,7 @@ func apply_handle_change() -> Dictionary:
 				get_active_handle_path_shape_kind()
 			)
 			replacement_body.set("path_points", spline_line_points)
+			replacement_body.set("path_roll_degrees", spline_line_roll_degrees.duplicate())
 			replacement_body.set(
 				"path_surface_normals",
 				spline_line_surface_normals
@@ -2370,7 +2401,19 @@ func append_spline_line_point(
 		and spline_line_points.size() >= get_active_handle_required_point_count()
 	):
 		return -1
-	spline_line_points.append(local_position)
+	var candidate_points := spline_line_points.duplicate()
+	candidate_points.append(local_position)
+	var candidate_rolls := spline_line_roll_degrees.duplicate()
+	candidate_rolls.append(0.0)
+	var roll_validation := ForgeV2PathRollScript.validate_roll_profile(
+		candidate_points, candidate_rolls, _spline_roll_uses_linear_path()
+	)
+	if not bool(roll_validation.get("valid", false)):
+		_spline_roll_last_edit_reason = StringName(roll_validation.get("reason", StringName()))
+		return -1
+	spline_line_points = candidate_points
+	spline_line_roll_degrees = candidate_rolls
+	_spline_roll_last_edit_reason = StringName()
 	spline_line_surface_normals.append(
 		_normalize_path_surface_normal(local_surface_normal)
 	)
@@ -2384,7 +2427,16 @@ func set_spline_line_point(point_index: int, local_position: Vector3) -> bool:
 	_normalize_spline_line()
 	if point_index < 0 or point_index >= spline_line_points.size():
 		return false
-	spline_line_points[point_index] = local_position
+	var candidate_points := spline_line_points.duplicate()
+	candidate_points[point_index] = local_position
+	var roll_validation := ForgeV2PathRollScript.validate_roll_profile(
+		candidate_points, spline_line_roll_degrees, _spline_roll_uses_linear_path()
+	)
+	if not bool(roll_validation.get("valid", false)):
+		_spline_roll_last_edit_reason = StringName(roll_validation.get("reason", StringName()))
+		return false
+	spline_line_points = candidate_points
+	_spline_roll_last_edit_reason = StringName()
 	selected_spline_point_index = point_index
 	mark_updated()
 	return true
@@ -2396,6 +2448,104 @@ func select_spline_line_point(point_index: int) -> bool:
 	selected_spline_point_index = point_index
 	mark_updated()
 	return true
+
+func select_next_spline_line_point(step_count: int = 1) -> bool:
+	if (
+		active_tool_id not in [TOOL_SPLINE_LINE, TOOL_HANDLES]
+		or spline_line_points.is_empty()
+	):
+		return false
+	var current_index := selected_spline_point_index
+	if current_index < 0:
+		current_index = -1 if step_count >= 0 else 0
+	return select_spline_line_point(
+		posmod(current_index + step_count, spline_line_points.size())
+	)
+
+func get_spline_line_point_roll_degrees(point_index: int) -> float:
+	if point_index < 0 or point_index >= spline_line_roll_degrees.size():
+		return 0.0
+	return spline_line_roll_degrees[point_index]
+
+func get_spline_line_point_roll_limits(point_index: int) -> Vector2:
+	return ForgeV2PathRollScript.point_roll_bounds_degrees(
+		spline_line_points, spline_line_roll_degrees, point_index,
+		_spline_roll_uses_linear_path()
+	)
+
+func set_spline_line_point_roll_degrees(
+	point_index: int,
+	value_degrees: float
+) -> bool:
+	if (
+		active_tool_id not in [TOOL_SPLINE_LINE, TOOL_HANDLES]
+		or not is_finite(value_degrees)
+	):
+		return false
+	_normalize_spline_line()
+	if point_index < 0 or point_index >= spline_line_points.size():
+		return false
+	if spline_line_roll_degrees.size() != spline_line_points.size():
+		_spline_roll_last_edit_reason = &"roll_point_count_mismatch"
+		return false
+	var bounds := get_spline_line_point_roll_limits(point_index)
+	if bounds.x > bounds.y:
+		_spline_roll_last_edit_reason = &"roll_density_no_valid_point_range"
+		return false
+	var accepted_degrees := clampf(roundf(value_degrees), bounds.x, bounds.y)
+	var candidate_rolls := spline_line_roll_degrees.duplicate()
+	candidate_rolls[point_index] = accepted_degrees
+	var roll_validation := ForgeV2PathRollScript.validate_roll_profile(
+		spline_line_points, candidate_rolls, _spline_roll_uses_linear_path()
+	)
+	if not bool(roll_validation.get("valid", false)):
+		_spline_roll_last_edit_reason = StringName(roll_validation.get("reason", StringName()))
+		return false
+	_spline_roll_last_edit_reason = (
+		&"roll_density_clamped" if accepted_degrees != roundf(value_degrees) else StringName()
+	)
+	if spline_line_roll_degrees[point_index] == accepted_degrees:
+		return false
+	spline_line_roll_degrees = candidate_rolls
+	selected_spline_point_index = point_index
+	mark_updated()
+	return true
+
+func get_spline_line_roll_status() -> Dictionary:
+	var result := ForgeV2PathRollScript.validate_roll_profile(
+		spline_line_points, spline_line_roll_degrees, _spline_roll_uses_linear_path()
+	)
+	result["last_edit_reason"] = _spline_roll_last_edit_reason
+	return result
+
+func _spline_roll_uses_linear_path() -> bool:
+	return (
+		active_tool_id == TOOL_HANDLES
+		and get_active_handle_path_shape_kind()
+		== ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
+	)
+
+func build_spline_roll_preview_body() -> Resource:
+	if (
+		active_tool_id not in [TOOL_SPLINE_LINE, TOOL_HANDLES]
+		or spline_line_points.size() < 2
+	):
+		return null
+	if active_tool_id == TOOL_HANDLES:
+		if (
+			is_handle_change_active()
+			and _build_active_handle_profile_signature()
+			== _handle_change_initial_profile_signature
+		):
+			var preserved_body := _handle_change_original_body.duplicate(true) as Resource
+			preserved_body.set("path_points", spline_line_points.duplicate())
+			preserved_body.set("path_surface_normals", spline_line_surface_normals.duplicate())
+			preserved_body.set("path_roll_degrees", spline_line_roll_degrees.duplicate())
+			preserved_body.set("shape_kind", get_active_handle_path_shape_kind())
+			preserved_body.call("normalize")
+			return preserved_body
+		return _append_profile_extrusion_material_body(true, false)
+	return _append_spline_line_material_body(false)
 
 func find_nearest_spline_line_point(local_position: Vector3, max_distance_meters: float) -> int:
 	_normalize_spline_line()
@@ -2444,6 +2594,7 @@ func can_generate_spline_line_csg_noodle() -> bool:
 	return (
 		spline_line_points.size() >= 2
 		and _calculate_spline_line_path_length() > 0.000001
+		and bool(get_spline_line_roll_status().get("valid", false))
 	)
 
 func can_generate_profile_extrusion_from_spline() -> bool:
@@ -2455,6 +2606,8 @@ func can_generate_profile_extrusion_from_spline() -> bool:
 	if spline_line_points.size() != get_active_handle_required_point_count():
 		return false
 	if not _handle_endpoint_span_meets_minimum(spline_line_points):
+		return false
+	if not bool(get_spline_line_roll_status().get("valid", false)):
 		return false
 	var compiled_handle_profile: Dictionary = (
 		build_active_tool_profile_preset_data("Handle Runtime")
@@ -2469,13 +2622,14 @@ func generate_spline_line_csg_noodle() -> bool:
 	_normalize_spline_line()
 	if active_tool_id == TOOL_DETAILING_BRUSH:
 		return generate_detailing_brush()
-	if spline_line_points.size() < 2:
+	if not can_generate_spline_line_csg_noodle():
 		return false
 	var body: Resource = _append_spline_line_material_body()
 	if body == null:
 		return false
 	spline_line_points = PackedVector3Array()
 	spline_line_surface_normals = PackedVector3Array()
+	spline_line_roll_degrees = PackedFloat64Array()
 	spline_line_finished = false
 	selected_spline_point_index = -1
 	spline_line_csg_noodle_enabled = false
@@ -2568,6 +2722,7 @@ func generate_profile_extrusion_from_spline() -> bool:
 		return false
 	spline_line_points = PackedVector3Array()
 	spline_line_surface_normals = PackedVector3Array()
+	spline_line_roll_degrees = PackedFloat64Array()
 	spline_line_finished = false
 	selected_spline_point_index = -1
 	spline_line_csg_noodle_enabled = false
@@ -2588,6 +2743,8 @@ func get_spline_line_point_count() -> int:
 func get_spline_line_status_label() -> String:
 	if active_tool_id == TOOL_DETAILING_BRUSH:
 		return get_detailing_brush_status_label()
+	if _spline_roll_last_edit_reason not in [StringName(), &"roll_density_clamped"]:
+		return "Path edit rejected: increase spacing or reduce Twist."
 	var point_count := get_spline_line_point_count()
 	if point_count <= 0:
 		return "Spline: no points"
@@ -2601,6 +2758,8 @@ func get_spline_line_csg_noodle_status_label() -> String:
 		return "CSG noodle: needs 2 points"
 	if _calculate_spline_line_path_length() <= 0.000001:
 		return "CSG noodle: needs nonzero path length"
+	if not bool(get_spline_line_roll_status().get("valid", false)):
+		return "CSG noodle: increase spacing or reduce Twist."
 	var shape_label := (
 		get_active_basic_shape_size_label()
 		if active_tool_id != TOOL_HANDLES
@@ -2621,6 +2780,8 @@ func get_profile_extrusion_status_label() -> String:
 		return "Handle: needs %d points" % required_point_count
 	if point_count > required_point_count:
 		return "Handle: too many points"
+	if not bool(get_spline_line_roll_status().get("valid", false)):
+		return "Handle: increase spacing or reduce Twist."
 	var endpoint_span := _calculate_handle_endpoint_span(spline_line_points)
 	if not _handle_endpoint_span_meets_minimum(spline_line_points):
 		return "Handle: needs %.2f mm axial span (currently %.2f mm)" % [
@@ -2717,6 +2878,7 @@ func get_spline_line_summary() -> Dictionary:
 	return {
 		"points": spline_line_points,
 		"surface_normals": spline_line_surface_normals,
+		"roll_degrees": spline_line_roll_degrees,
 		"point_count": spline_line_points.size(),
 		"finished": spline_line_finished,
 		"selected_point_index": selected_spline_point_index,
@@ -4145,7 +4307,8 @@ func _append_material_body_record(
 	profile_rotation_bias_degrees: float = 0.0,
 	surface_target_kind: StringName = StringName(),
 	surface_target_id: StringName = StringName(),
-	path_contact_directions: PackedVector3Array = PackedVector3Array()
+	path_contact_directions: PackedVector3Array = PackedVector3Array(),
+	publish_to_state: bool = true
 ) -> Resource:
 	var body: Resource = ForgeV2MaterialBodyScript.new()
 	body.set("source_record_id", StringName("%s_%s" % [source_prefix, str(Time.get_ticks_usec())]))
@@ -4207,9 +4370,10 @@ func _append_material_body_record(
 	body.set("created_timestamp", Time.get_unix_time_from_system())
 	if body.has_method("normalize"):
 		body.call("normalize")
-	material_bodies.append(body)
-	selected_material_body_id = StringName(body.get("body_id"))
-	_mark_material_usage_summary_dirty()
+	if publish_to_state:
+		material_bodies.append(body)
+		selected_material_body_id = StringName(body.get("body_id"))
+		_mark_material_usage_summary_dirty()
 	return body
 
 func _append_active_saved_basic_profile_material_body(
@@ -4220,7 +4384,8 @@ func _append_active_saved_basic_profile_material_body(
 	body_kind: StringName = ForgeV2MaterialBodyScript.BODY_KIND_PROFILE_EXTRUSION,
 	surface_target_kind: StringName = StringName(),
 	surface_target_id: StringName = StringName(),
-	path_contact_directions: PackedVector3Array = PackedVector3Array()
+	path_contact_directions: PackedVector3Array = PackedVector3Array(),
+	publish_to_state: bool = true
 ) -> Resource:
 	if not is_saved_basic_profile_shape_active():
 		return null
@@ -4271,7 +4436,8 @@ func _append_active_saved_basic_profile_material_body(
 		)),
 		surface_target_kind,
 		surface_target_id,
-		path_contact_directions
+		path_contact_directions,
+		publish_to_state
 	)
 	if body != null:
 		body.set(
@@ -4306,15 +4472,20 @@ func _build_material_body_from_stroke(stroke: Resource) -> Resource:
 		body.call("normalize")
 	return body
 
-func _append_spline_line_material_body() -> Resource:
+func _append_spline_line_material_body(publish_to_state: bool = true) -> Resource:
 	if active_tool_id != TOOL_HANDLES and is_saved_basic_profile_shape_active():
-		return _append_active_saved_basic_profile_material_body(
+		var profile_body := _append_active_saved_basic_profile_material_body(
 			spline_line_points,
 			spline_line_surface_normals,
 			ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH,
-			"v2_saved_profile_spline"
+			"v2_saved_profile_spline",
+			ForgeV2MaterialBodyScript.BODY_KIND_PROFILE_EXTRUSION,
+			StringName(), StringName(), PackedVector3Array(), publish_to_state
 		)
-	return _append_material_body_record(
+		if profile_body != null:
+			profile_body.set("path_roll_degrees", spline_line_roll_degrees.duplicate())
+		return profile_body
+	var body := _append_material_body_record(
 		spline_line_points,
 		active_brush_radius_meters,
 		DEFAULT_AMOUNT_RATIO,
@@ -4326,10 +4497,20 @@ func _append_spline_line_material_body() -> Resource:
 		PackedVector2Array(),
 		Vector2.ZERO,
 		0.0,
-		spline_line_surface_normals
+		spline_line_surface_normals,
+		Vector2.ZERO,
+		ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_LOCAL_SIX,
+		0.0, 0, 0.0, StringName(), StringName(), PackedVector3Array(),
+		publish_to_state
 	)
+	if body != null:
+		body.set("path_roll_degrees", spline_line_roll_degrees.duplicate())
+	return body
 
-func _append_profile_extrusion_material_body(is_handle_profile: bool) -> Resource:
+func _append_profile_extrusion_material_body(
+	is_handle_profile: bool,
+	publish_to_state: bool = true
+) -> Resource:
 	var required_family := (
 		ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_HANDLE
 		if is_handle_profile
@@ -4423,8 +4604,11 @@ func _append_profile_extrusion_material_body(is_handle_profile: bool) -> Resourc
 		profile_contact_direction,
 		profile_contact_distance,
 		profile_runtime_schema_version,
-		profile_rotation_bias_degrees
+		profile_rotation_bias_degrees,
+		StringName(), StringName(), PackedVector3Array(), publish_to_state
 	)
+	if body != null:
+		body.set("path_roll_degrees", spline_line_roll_degrees.duplicate())
 	if body != null and is_handle_profile:
 		body.set("profile_display_name", active_profile_display_name)
 		body.set(
@@ -4586,6 +4770,7 @@ func _build_material_body_export_snapshot(body: Resource) -> Dictionary:
 		"shape_kind": StringName(body.get("shape_kind")),
 		"path_points": body.get("path_points"),
 		"path_surface_normals": body.get("path_surface_normals"),
+		"path_roll_degrees": body.get("path_roll_degrees"),
 		"path_contact_directions": body.get("path_contact_directions"),
 		"surface_target_kind": StringName(body.get("surface_target_kind")),
 		"surface_target_id": StringName(body.get("surface_target_id")),
@@ -4902,6 +5087,9 @@ func _seed_handle_editor_from_body(body: Resource) -> void:
 	).duplicate()
 	spline_line_surface_normals = (
 		body.get("path_surface_normals") as PackedVector3Array
+	).duplicate()
+	spline_line_roll_degrees = (
+		body.get("path_roll_degrees") as PackedFloat64Array
 	).duplicate()
 	_normalize_spline_line()
 	spline_line_finished = false
@@ -6938,8 +7126,13 @@ func _convert_handle_path_point_count(
 				spline_line_points.size() - 1
 			),
 		])
+		var reduced_rolls := PackedFloat64Array([
+			get_spline_line_point_roll_degrees(0),
+			get_spline_line_point_roll_degrees(spline_line_points.size() - 1),
+		])
 		spline_line_points = reduced_points
 		spline_line_surface_normals = reduced_normals
+		spline_line_roll_degrees = reduced_rolls
 		selected_spline_point_index = -1
 		return
 	if (
@@ -6951,6 +7144,8 @@ func _convert_handle_path_point_count(
 		var end_point := spline_line_points[1]
 		var start_normal := _resolve_spline_line_surface_normal(0)
 		var end_normal := _resolve_spline_line_surface_normal(1)
+		var start_roll := get_spline_line_point_roll_degrees(0)
+		var end_roll := get_spline_line_point_roll_degrees(1)
 		spline_line_points = PackedVector3Array([
 			start_point,
 			start_point.lerp(end_point, 0.5),
@@ -6960,6 +7155,9 @@ func _convert_handle_path_point_count(
 			start_normal,
 			_normalize_path_surface_normal(start_normal.lerp(end_normal, 0.5)),
 			end_normal,
+		])
+		spline_line_roll_degrees = PackedFloat64Array([
+			start_roll, lerpf(start_roll, end_roll, 0.5), end_roll,
 		])
 		selected_spline_point_index = -1
 
@@ -6986,6 +7184,8 @@ func _normalize_spline_line() -> void:
 			capped_normals.append(
 				_normalize_path_surface_normal(point_normal)
 			)
+		if spline_line_roll_degrees.size() == spline_line_points.size():
+			spline_line_roll_degrees.resize(required_handle_point_count)
 		spline_line_points = capped_points
 		spline_line_surface_normals = capped_normals
 	var normalized_surface_normals := PackedVector3Array()
@@ -6997,6 +7197,11 @@ func _normalize_spline_line() -> void:
 			_normalize_path_surface_normal(point_normal)
 		)
 	spline_line_surface_normals = normalized_surface_normals
+	if active_tool_id == TOOL_DETAILING_BRUSH:
+		spline_line_roll_degrees = PackedFloat64Array()
+	spline_line_roll_degrees = ForgeV2PathRollScript.normalize_roll_degrees(
+		spline_line_roll_degrees, spline_line_points.size()
+	)
 	if selected_spline_point_index >= spline_line_points.size():
 		selected_spline_point_index = -1
 	if selected_spline_point_index < -1:
@@ -7215,6 +7420,8 @@ func _normalized_detailing_normals(normals: PackedVector3Array) -> PackedVector3
 func _clear_spline_transient_state() -> void:
 	spline_line_points = PackedVector3Array()
 	spline_line_surface_normals = PackedVector3Array()
+	spline_line_roll_degrees = PackedFloat64Array()
+	_spline_roll_last_edit_reason = StringName()
 	spline_line_finished = false
 	selected_spline_point_index = -1
 	spline_line_csg_noodle_enabled = false

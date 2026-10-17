@@ -4,6 +4,7 @@ class_name ForgeV2MaterialBody
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
 const ForgeV2ProfileShapeLibraryScript = preload("res://runtime/forge_v2/forge_v2_profile_shape_library.gd")
 const ForgeV2VolumeStrokeScript = preload("res://runtime/forge_v2/forge_v2_volume_stroke.gd")
+const ForgeV2PathRollScript = preload("res://runtime/forge_v2/forge_v2_path_roll.gd")
 
 const BODY_KIND_VOLUME_STROKE := &"body_kind_volume_stroke"
 const BODY_KIND_PLATFORM_SEED := &"body_kind_platform_seed"
@@ -39,6 +40,7 @@ const MATERIAL_UNIT_SCALE := 100
 @export var shape_kind: StringName = SHAPE_KIND_CAPSULE_PATH
 @export var path_points: PackedVector3Array = PackedVector3Array()
 @export var path_surface_normals: PackedVector3Array = PackedVector3Array()
+@export var path_roll_degrees: PackedFloat64Array = PackedFloat64Array()
 @export var path_contact_directions: PackedVector3Array = PackedVector3Array()
 @export var surface_target_kind: StringName = StringName()
 @export var surface_target_id: StringName = StringName()
@@ -109,6 +111,13 @@ func normalize() -> void:
 		placement_policy = ForgeV2VolumeStrokeScript.PLACEMENT_EMPTY_ONLY
 	shape_kind = _normalize_shape_kind(shape_kind)
 	_normalize_path_surface_normals()
+	if body_kind == BODY_KIND_HANDLE_PROFILE or shape_kind in [
+		SHAPE_KIND_SPLINE_CAPSULE_PATH, SHAPE_KIND_SPLINE_PROFILE_PATH,
+	]:
+		path_roll_degrees = ForgeV2PathRollScript.normalize_roll_degrees(
+			path_roll_degrees,
+			path_points.size()
+		)
 	_normalize_path_contact_directions()
 	if _is_profile_shape_kind():
 		_ensure_profile_data()

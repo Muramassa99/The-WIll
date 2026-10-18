@@ -1,0 +1,70 @@
+{
+  "image": "forge_icons.png",
+  "width": 1536,
+  "height": 1024,
+  "tile_size": 512,
+  "columns": 3,
+  "rows": 2,
+  "icons": [
+    {
+      "name": "forge_manual_hand",
+      "file": "forge_manual_hand.png",
+      "region": [
+        0,
+        0,
+        512,
+        512
+      ]
+    },
+    {
+      "name": "forge_node_path",
+      "file": "forge_node_path.png",
+      "region": [
+        512,
+        0,
+        512,
+        512
+      ]
+    },
+    {
+      "name": "forge_extruded_profile",
+      "file": "forge_extruded_profile.png",
+      "region": [
+        1024,
+        0,
+        512,
+        512
+      ]
+    },
+    {
+      "name": "forge_wrapped_handle",
+      "file": "forge_wrapped_handle.png",
+      "region": [
+        0,
+        512,
+        512,
+        512
+      ]
+    },
+    {
+      "name": "forge_draw_tool",
+      "file": "forge_draw_tool.png",
+      "region": [
+        512,
+        512,
+        512,
+        512
+      ]
+    },
+    {
+      "name": "forge_eraser",
+      "file": "forge_eraser.png",
+      "region": [
+        1024,
+        512,
+        512,
+        512
+      ]
+    }
+  ]
+}

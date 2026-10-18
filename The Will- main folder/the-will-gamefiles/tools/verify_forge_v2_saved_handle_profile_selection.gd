@@ -6,6 +6,7 @@ extends SceneTree
 const UiScene = preload("res://scenes/ui_v2/crafting_bench_ui_v2.tscn")
 const Stage = preload("res://runtime/forge_v2/forge_v2_stage_controller.gd")
 const Profiles = preload("res://runtime/forge_v2/forge_v2_profile_shape_library.gd")
+const Body = preload("res://runtime/forge_v2/forge_v2_material_body.gd")
 const ProfileLibrary = preload("res://core/models/player_tool_profile_library_state.gd")
 const WipLibrary = preload("res://core/models/player_forge_wip_library_state.gd")
 const Keybindings = preload("res://runtime/forge_v2/forge_v2_keybinding_state.gd")
@@ -86,10 +87,18 @@ func _run() -> void:
 			_finish(); return
 	_ui.call("_generate_active_profile_extrusion")
 	var state := _stage.call("get_active_authoring_state") as Resource
-	var handle: Dictionary = Adapter.resolve_valid_handle_body(state)
-	if not _check(handle.get("valid", false), "initial: generated Handle resolves"):
+	# Generation leaves a pending Handle. The export adapter requires a committed
+	# Handle, so validate that contract only after the real UI Save below.
+	var pending_handle := state.call("get_selected_material_body") as Resource
+	if not _check(
+		pending_handle != null
+		and bool(state.call("has_handle_material_body"))
+		and StringName(pending_handle.get("body_kind")) == Body.BODY_KIND_HANDLE_PROFILE
+		and StringName(pending_handle.get("committed_layer_id")) == StringName(),
+		"initial: generated pending Handle exists and is uncommitted"
+	):
 		_finish(); return
-	_check_body(handle.body, first, "initial pending")
+	_check_body(pending_handle, first, "initial pending")
 	if not await _save_and_inspect(first, "initial"):
 		_finish(); return
 	_check(FileAccess.get_sha256(Fixture.SOURCE_PATH) == Fixture.SOURCE_SHA256, "frozen source library remains unchanged")
@@ -162,7 +171,8 @@ func _save_and_inspect(profile: Dictionary, phase: String) -> bool:
 
 func _inspect_saved(saved: CraftedItemWIP, profile: Dictionary, label: String) -> void:
 	var resolved: Dictionary = Adapter.resolve_valid_handle_body(saved.forge_v2_authoring_state)
-	if not _check(resolved.get("valid", false), label + ": saved authored Handle resolves"):
+	if not _check(resolved.get("valid", false), label + ": saved authored Handle resolves",
+		{"adapter_error": String(resolved.get("error", ""))}):
 		return
 	var body: Resource = resolved.body
 	_check_body(body, profile, label)

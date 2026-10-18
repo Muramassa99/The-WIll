@@ -111,6 +111,34 @@ func normalize() -> void:
 	if input_shape_type == StringName():
 		input_shape_type = INPUT_SHAPE_MATERIAL_BODY_BUNDLE
 
+## Rebuild source/accounting after an in-place retained operation edit. A normal
+## configure creates a new operation; replacement must retain its original age.
+func reconfigure_preserving_identity(
+	material_bodies: Array[Resource],
+	existing_material_bodies: Array[Resource],
+	existing_usage_summary: Dictionary,
+	authoritative_usage_after: Dictionary
+) -> Dictionary:
+	var original_id := layer_id
+	var original_created_timestamp := created_timestamp
+	var original_order := order_index
+	var original_undoable := undoable
+	var result := configure_from_material_bodies(
+		original_order, material_bodies, existing_material_bodies,
+		existing_usage_summary, authoritative_usage_after
+	)
+	layer_id = original_id
+	created_timestamp = original_created_timestamp
+	order_index = original_order
+	undoable = original_undoable
+	for material_key: Variant in ledger_delta:
+		var entry: Dictionary = ledger_delta[material_key]
+		var owner_ids: Array[StringName] = [original_id]
+		entry["layer_ids"] = owner_ids
+	for record: Dictionary in removed_material_records:
+		record["layer_id"] = original_id
+	return result
+
 func get_material_delta_units(material_variant_id: StringName) -> float:
 	var delta_entry: Dictionary = ledger_delta.get(material_variant_id, {}) as Dictionary
 	if delta_entry.is_empty():
@@ -167,6 +195,34 @@ func is_bounded_add_history_eligible(
 		PackedVector3Array()
 	)
 	var shape_kind := StringName(record.get("shape_kind", StringName()))
+	if (
+		shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
+		and StringName(record.get("body_kind", StringName()))
+		== ForgeV2MaterialBodyScript.BODY_KIND_PROFILE_EXTRUSION
+	):
+		var polygon: PackedVector2Array = record.get(
+			"profile_polygon_2d_meters", PackedVector2Array()
+		)
+		if (
+			StringName(record.get("operation_mode", StringName()))
+			!= SOURCE_OPERATION_ADD_MATERIAL
+			or StringName(record.get("placement_policy", StringName()))
+			!= SOURCE_PLACEMENT_REPLACE_EXISTING
+			or polygon.size() < 3 or path_points.size() < 2
+			or path_normals.size() != path_points.size()
+			or not path_contacts.is_empty()
+		):
+			return false
+		for point: Vector2 in polygon:
+			if not point.is_finite():
+				return false
+		for point: Vector3 in path_points:
+			if not point.is_finite():
+				return false
+		for normal: Vector3 in path_normals:
+			if not normal.is_finite() or normal.length_squared() <= 0.000001:
+				return false
+		return true
 	if shape_kind in [
 		ForgeV2MaterialBodyScript.SHAPE_KIND_CAPSULE_PATH,
 		ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH,

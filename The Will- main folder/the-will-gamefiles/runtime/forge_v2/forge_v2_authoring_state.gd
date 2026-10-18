@@ -90,6 +90,9 @@ const PROTECTED_HANDLE_SNAPSHOT_SCHEMA_ID := (
 @export var equipment_context: StringName = &"ctx_weapon"
 @export var authoring_space_id: StringName = AUTHORING_SPACE_WORLD_3D
 @export var active_tool_id: StringName = TOOL_VOLUME_STROKE
+# WIP-local last profile for each tool. Paths, material and operation stay outside
+# this memory; unfinished work is resolved before an ordinary tool switch.
+@export var tool_profile_memory: Dictionary = {}
 @export var active_primitive_id: StringName = DEFAULT_ACTIVE_PRIMITIVE_ID
 @export var active_basic_shape_source_id: StringName = BASIC_SHAPE_SOURCE_PRIMITIVE
 @export var active_saved_basic_profile_id: StringName = StringName()
@@ -169,8 +172,441 @@ var _handle_change_original_protected_layer_index: int = -1
 var _handle_change_initial_profile_signature: String = ""
 var _handle_change_source_profile_id: StringName = StringName()
 var _handle_change_last_reason: StringName = &"none"
+var _retained_spline_change: Dictionary = {}
+var _retained_candidate_token: StringName = StringName()
+
+## E operates on the bounded authored tail. Committed geometry is never removed
+## while its detached source is being edited or a replacement is being baked.
+func get_retained_spline_editable_entries() -> Array[Dictionary]:
+	var entries: Array[Dictionary] = []
+	if not _is_bounded_history_active() or has_pending_bounded_history_promotion():
+		return entries
+	for layer_index in range(forge_layers.size() - 1, -1, -1):
+		var layer: Resource = forge_layers[layer_index]
+		var bodies := _get_layer_material_bodies(layer)
+		if bodies.size() != 1:
+			continue
+		var body: Resource = bodies[0]
+		if (
+			StringName(body.get("shape_kind")) not in [
+				ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH,
+				ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH,
+			]
+			or StringName(body.get("body_kind")) not in [
+				ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE,
+				ForgeV2MaterialBodyScript.BODY_KIND_PROFILE_EXTRUSION,
+			]
+			or not _is_body_bounded_add_history_eligible(
+				body, _get_bounded_history_material_id()
+			)
+		):
+			continue
+		entries.append({
+			"body_id": StringName(body.get("body_id")),
+			"layer_id": StringName(layer.get("layer_id")),
+			"body": body, "editable": true, "is_handle": false,
+			"age_index": forge_layers.size() - 1 - layer_index,
+		})
+	return entries
+
+func get_retained_spline_edit_candidates() -> Array[Dictionary]:
+	return get_retained_spline_editable_entries()
+
+func get_retained_spline_edit_status() -> Dictionary:
+	if not _is_bounded_history_active():
+		return {
+			"available": false, "reason": bounded_history_suspended_reason,
+			"label": "Spline editing unavailable for this saved material history; Handle editing is separate.",
+		}
+	if has_pending_bounded_history_promotion():
+		return {"available": false, "reason": &"material_history_busy", "label": "Finishing material history."}
+	var count := get_retained_spline_editable_entries().size()
+	return {
+		"available": count > 0, "reason": &"ready" if count > 0 else &"no_retained_splines",
+		"editable_count": count,
+		"label": "%d retained spline operations can be edited." % count,
+	}
+
+func is_retained_spline_body_editable(body_id: StringName) -> bool:
+	for entry: Dictionary in get_retained_spline_editable_entries():
+		if StringName(entry["body_id"]) == body_id:
+			return true
+	return false
+
+func is_retained_spline_change_active() -> bool:
+	return not _retained_spline_change.is_empty()
+
+func get_retained_spline_change_info() -> Dictionary:
+	return _retained_spline_change.duplicate(true)
+
+func begin_retained_spline_change(body_id: StringName) -> Dictionary:
+	if is_retained_spline_change_active() or is_handle_change_active():
+		return {"ok": false, "reason": &"another_edit_active"}
+	if not is_retained_spline_body_editable(body_id):
+		return {"ok": false, "reason": &"body_not_retained_editable_spline"}
+	var body := _find_material_body_by_id(body_id)
+	_retained_spline_change = {
+		"source_body_id": body_id,
+		"source_layer_id": StringName(body.get("committed_layer_id")),
+		"before_source": body.duplicate(true),
+		"before_editor_context": capture_editor_transient_snapshot(),
+		"before_material": active_material_variant_id,
+		"before_operation": active_operation_mode,
+		"before_placement_policy": placement_policy,
+		"before_selected_body_id": selected_material_body_id,
+		"baseline_transition_revision": bounded_history_transition_revision,
+	}
+	# Direct assignment avoids profile setters changing the committed source or
+	# another tool's remembered profile. Source geometry is authoritative here.
+	active_tool_id = TOOL_SPLINE_LINE
+	_clear_spline_transient_state()
+	active_material_variant_id = StringName(body.get("material_variant_id"))
+	active_operation_mode = StringName(body.get("operation_mode"))
+	placement_policy = StringName(body.get("placement_policy"))
+	active_brush_radius_meters = float(body.get("radius_meters"))
+	active_basic_shape_source_id = BASIC_SHAPE_SOURCE_PRIMITIVE
+	active_saved_basic_profile_id = StringName()
+	active_saved_basic_profile_data = {}
+	if StringName(body.get("shape_kind")) == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH:
+		_seed_retained_spline_profile(body)
+	spline_line_points = (body.get("path_points") as PackedVector3Array).duplicate()
+	spline_line_surface_normals = (body.get("path_surface_normals") as PackedVector3Array).duplicate()
+	spline_line_roll_degrees = (body.get("path_roll_degrees") as PackedFloat64Array).duplicate()
+	selected_spline_point_index = 0 if not spline_line_points.is_empty() else -1
+	selected_material_body_id = body_id
+	_retained_spline_change["initial_profile"] = _capture_active_tool_profile()
+	return {"ok": true, "reason": &"editing_retained_spline", "body_id": body_id}
+
+func _seed_retained_spline_profile(body: Resource) -> void:
+	var polygon: PackedVector2Array = body.get("profile_polygon_2d_meters")
+	var anchor: Vector2 = body.get("profile_anchor_2d_meters")
+	var base_polygon := PackedVector2Array()
+	for point: Vector2 in polygon:
+		base_polygon.append(point + anchor)
+	var contact: Vector2 = body.get("profile_contact_point_relative_2d_meters")
+	active_basic_shape_source_id = BASIC_SHAPE_SOURCE_SAVED_PROFILE
+	active_saved_basic_profile_id = StringName(body.get("profile_id"))
+	active_profile_display_name = String(body.get("profile_display_name"))
+	active_saved_basic_profile_data = {
+		"profile_id": active_saved_basic_profile_id,
+		"label": active_profile_display_name,
+		"family": ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_BASIC,
+		"record_schema_version": ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_RECORD_SCHEMA_VERSION,
+		"base_polygon_2d_meters": base_polygon,
+		"rotation_degrees": float(body.get("profile_rotation_bias_degrees")),
+		"compiled_profile": {
+			"valid": true,
+			"schema_version": int(body.get("profile_runtime_schema_version")),
+			"rule_id": ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_CONTACT_RULE_ID,
+			"coordinate_space": ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_COORDINATE_SPACE,
+			"anchor_clearance_meters": ForgeV2ProfileShapeLibraryScript.BASIC_PROFILE_ANCHOR_CLEARANCE_METERS,
+			"deposition_polygon_2d_meters": polygon.duplicate(),
+			"anchor_2d_meters": anchor,
+			"contact_point_2d_meters": anchor + contact,
+			"contact_point_relative_2d_meters": contact,
+			"contact_direction_2d": body.get("profile_contact_direction_2d"),
+			"contact_distance_meters": float(body.get("profile_contact_distance_meters")),
+		},
+	}
+
+func _build_retained_spline_working_source() -> Resource:
+	if not is_retained_spline_change_active() or spline_line_points.size() < 2:
+		return null
+	var original: Resource = _retained_spline_change["before_source"]
+	var source: Resource = null
+	if _capture_active_tool_profile() == _retained_spline_change.get("initial_profile", {}):
+		source = original.duplicate(true)
+	else:
+		source = _append_spline_line_material_body(false)
+	if source == null:
+		return null
+	for field: StringName in [
+		&"body_id", &"source_record_id", &"committed_layer_id", &"created_timestamp",
+		&"material_variant_id", &"operation_mode", &"placement_policy",
+		&"builder_path_id", &"builder_component_id", &"forge_intent", &"equipment_context",
+	]:
+		source.set(field, original.get(field))
+	source.set("path_points", spline_line_points.duplicate())
+	source.set("path_surface_normals", spline_line_surface_normals.duplicate())
+	source.set("path_roll_degrees", spline_line_roll_degrees.duplicate())
+	source.set("updated_timestamp", Time.get_unix_time_from_system())
+	source.call("normalize")
+	return source
+
+func build_retained_spline_change_candidate() -> Dictionary:
+	if not is_retained_spline_change_active():
+		return {"ok": false, "reason": &"retained_spline_change_not_active"}
+	if int(_retained_spline_change["baseline_transition_revision"]) != bounded_history_transition_revision:
+		return {"ok": false, "reason": &"retained_spline_change_stale"}
+	if not bool(get_spline_line_roll_status().get("valid", false)):
+		return {"ok": false, "reason": &"retained_spline_roll_invalid"}
+	var source := _build_retained_spline_working_source()
+	if source == null:
+		return {"ok": false, "reason": &"retained_spline_source_invalid"}
+	var candidate := build_retained_spline_replacement_candidate(
+		StringName(_retained_spline_change["source_body_id"]), source, &"apply"
+	)
+	if bool(candidate.get("ok", false)):
+		candidate["before_editor_context"] = (_retained_spline_change["before_editor_context"] as Dictionary).duplicate(true)
+		candidate["finish_edit_session"] = true
+	return candidate
+
+func build_retained_spline_replacement_candidate(
+	body_id: StringName, replacement_source: Resource, reason: StringName = &"apply"
+) -> Dictionary:
+	if replacement_source == null or not is_retained_spline_body_editable(body_id):
+		return {"ok": false, "reason": &"body_not_retained_editable_spline"}
+	var original := _find_material_body_by_id(body_id)
+	var replacement := replacement_source.duplicate(true) as Resource
+	for field: StringName in [
+		&"body_id", &"source_record_id", &"committed_layer_id", &"created_timestamp",
+		&"material_variant_id", &"operation_mode", &"placement_policy", &"layer_active",
+	]:
+		replacement.set(field, original.get(field))
+	replacement.call("normalize")
+	if (
+		StringName(replacement.get("shape_kind")) not in [
+			ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH,
+			ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH,
+		]
+		or not _is_body_bounded_add_history_eligible(replacement, _get_bounded_history_material_id())
+	):
+		return {"ok": false, "reason": &"retained_replacement_unsupported"}
+	var staged: Resource = _clone_retained_history_state()
+	var staged_bodies: Array[Resource] = staged.get("material_bodies")
+	var source_body_index := material_bodies.find(original)
+	staged_bodies[source_body_index] = replacement
+	staged.set("material_bodies", staged_bodies)
+	if reason == &"apply":
+		staged.call("_discard_abandoned_redo_layers")
+	var accounting: Dictionary = staged.call("_recompute_retained_history_accounting")
+	if not bool(accounting.get("ok", false)):
+		return accounting
+	var candidate := _build_retained_install_packet(staged, reason)
+	candidate.merge({
+		"source_body_id": body_id,
+		"source_layer_id": StringName(original.get("committed_layer_id")),
+		"source_body_index": source_body_index,
+		"layer_index": _layer_ids(forge_layers).find(StringName(original.get("committed_layer_id"))),
+		"before_source": original.duplicate(true),
+		"after_source": replacement.duplicate(true),
+	})
+	return candidate
+
+## A held history gesture works on this isolated bounded state, then publishes
+## the whole result once. A failed final build cannot move the live cursor.
+func create_retained_history_replay_state() -> Resource:
+	if has_pending_bounded_history_promotion():
+		return null
+	var staged := _clone_retained_history_state()
+	var accounting: Dictionary = staged.call("_recompute_retained_history_accounting")
+	return staged if bool(accounting.get("ok", false)) else null
+
+func _clone_retained_history_state() -> Resource:
+	var staged := duplicate(false) as Resource
+	for field: StringName in [
+		&"material_bodies", &"volume_strokes", &"forge_layers",
+		&"undone_forge_layers", &"protected_forge_layers",
+	]:
+		var copies: Array[Resource] = []
+		for item: Resource in get(field):
+			copies.append(item.duplicate(true) if item != null else null)
+		staged.set(field, copies)
+	staged.set("material_ledger", material_ledger.duplicate(true) if material_ledger != null else null)
+	# Checkpoint source is immutable during preparation. In particular, do not
+	# export/rebake S0 or retain historical operands to clone a bounded tail.
+	staged.set("bounded_history_checkpoint", bounded_history_checkpoint)
+	staged.set("_bounded_history_normalized_once", true)
+	staged.call("restore_editor_transient_snapshot", capture_editor_transient_snapshot())
+	return staged
+
+func build_retained_history_install_candidate(
+	target_state: Resource, reason: StringName
+) -> Dictionary:
+	if (
+		target_state == null or target_state == self
+		or not target_state.has_method("get_bounded_presentation_descriptor")
+		or has_pending_bounded_history_promotion()
+	):
+		return {"ok": false, "reason": &"retained_history_target_invalid"}
+	var target_descriptor: Dictionary = target_state.call("get_bounded_presentation_descriptor")
+	if (
+		target_descriptor.get("checkpoint_identity", {}) != _get_bounded_history_checkpoint_identity()
+		or (target_descriptor.get("active_tail_layers", []) as Array).size()
+			+ (target_descriptor.get("redo_tail_layers", []) as Array).size() > BOUNDED_HISTORY_TAIL_CAPACITY
+	):
+		return {"ok": false, "reason": &"retained_history_checkpoint_mismatch"}
+	var staged: Resource = target_state.call("_clone_retained_history_state")
+	var accounting: Dictionary = staged.call("_recompute_retained_history_accounting")
+	if not bool(accounting.get("ok", false)):
+		return accounting
+	var candidate := _build_retained_install_packet(staged, reason)
+	candidate["restore_editor_context"] = staged.call("capture_editor_transient_snapshot")
+	return candidate
+
+func _build_retained_install_packet(staged: Resource, reason: StringName) -> Dictionary:
+	_retained_candidate_token = StringName("retained_%s_%s" % [get_instance_id(), Time.get_ticks_usec()])
+	var descriptor: Dictionary = staged.call("get_bounded_presentation_descriptor")
+	return {
+		"ok": true, "reason": reason, "candidate_token": _retained_candidate_token,
+		"state_instance_id": get_instance_id(),
+		"baseline_transition_revision": bounded_history_transition_revision,
+		"checkpoint_identity": _get_bounded_history_checkpoint_identity().duplicate(true),
+		"candidate_state": staged,
+		"candidate_descriptor": descriptor,
+		"candidate_tail_bodies": descriptor["active_tail_bodies"],
+		"candidate_tail_layers": descriptor["active_tail_layers"],
+		"candidate_redo_bodies": descriptor["redo_tail_bodies"],
+		"candidate_redo_layers": descriptor["redo_tail_layers"],
+		"candidate_ledger": staged.get("material_ledger"),
+		"candidate_resolver": staged.get("committed_volume_resolver"),
+	}
+
+func is_retained_spline_change_candidate_current(candidate: Dictionary) -> bool:
+	return (
+		bool(candidate.get("ok", false))
+		and _retained_candidate_token != StringName()
+		and StringName(candidate.get("candidate_token", StringName())) == _retained_candidate_token
+		and int(candidate.get("state_instance_id", 0)) == get_instance_id()
+		and int(candidate.get("baseline_transition_revision", -1)) == bounded_history_transition_revision
+		and candidate.get("checkpoint_identity", {}) == _get_bounded_history_checkpoint_identity()
+		and candidate.get("candidate_state") is Resource
+		and not has_pending_bounded_history_promotion()
+	)
+
+func accept_retained_spline_change_candidate(candidate: Dictionary) -> bool:
+	if not is_retained_spline_change_candidate_current(candidate):
+		return false
+	var staged: Resource = candidate["candidate_state"]
+	for field: StringName in [
+		&"material_bodies", &"volume_strokes", &"forge_layers", &"undone_forge_layers",
+		&"protected_forge_layers", &"material_ledger", &"committed_volume_resolver",
+		&"committed_volume_cache_diagnostics", &"material_usage_summary_cache",
+		&"material_usage_summary_cache_dirty", &"bounded_history_lifetime_operation_count",
+		&"bounded_history_enabled", &"bounded_history_suspended_reason",
+		&"bounded_history_recovery_blocked_reason",
+	]:
+		set(field, staged.get(field))
+	_retained_candidate_token = StringName()
+	if bool(candidate.get("finish_edit_session", false)):
+		_restore_retained_spline_editor_context()
+	elif candidate.has("restore_editor_context"):
+		restore_editor_transient_snapshot(candidate["restore_editor_context"] as Dictionary)
+		selected_material_body_id = StringName(staged.get("selected_material_body_id"))
+		if _find_material_body_by_id(selected_material_body_id) == null:
+			selected_material_body_id = StringName()
+	_publish_bounded_history_transition(&"retained_replace", null, [], {
+		"replacement_body_id": candidate.get("source_body_id", StringName()),
+		"replacement_candidate_token": candidate.get("candidate_token", StringName()),
+	})
+	mark_updated()
+	return true
+
+func cancel_retained_spline_change() -> bool:
+	if not is_retained_spline_change_active():
+		return false
+	_retained_candidate_token = StringName()
+	_restore_retained_spline_editor_context()
+	return true
+
+func _restore_retained_spline_editor_context() -> void:
+	if _retained_spline_change.is_empty():
+		return
+	var session := _retained_spline_change
+	_retained_spline_change = {}
+	restore_editor_transient_snapshot(session["before_editor_context"] as Dictionary)
+	active_material_variant_id = StringName(session["before_material"])
+	active_operation_mode = StringName(session["before_operation"])
+	placement_policy = StringName(session["before_placement_policy"])
+	selected_material_body_id = StringName(session["before_selected_body_id"])
+
+func _recompute_retained_history_accounting() -> Dictionary:
+	var resolver: RefCounted = ForgeV2MaterialVolumeResolverScript.new()
+	var checkpoint_token := _get_bounded_history_checkpoint_token()
+	var previous_bodies: Array[Resource] = []
+	var before_summary: Dictionary = {"materials": {}}
+	if _has_bounded_history_checkpoint():
+		var restored: Dictionary = resolver.call(
+			"restore_incremental_committed_cache_from_checkpoint", checkpoint_token, []
+		)
+		if not bool(restored.get("ok", false)):
+			return {"ok": false, "reason": &"retained_checkpoint_accounting_unavailable"}
+		before_summary = restored["summary"] as Dictionary
+	var active_layers: Array[Resource] = []
+	active_layers.append_array(protected_forge_layers)
+	active_layers.append_array(forge_layers)
+	for layer: Resource in active_layers:
+		var bodies := _get_layer_material_bodies(layer)
+		var resolved: Dictionary = resolver.call(
+			"build_incremental_committed_usage_summary", previous_bodies, bodies, checkpoint_token
+		)
+		var after_summary: Dictionary = resolved.get("summary", {}) as Dictionary
+		if not after_summary.has("materials"):
+			return {"ok": false, "reason": &"retained_accounting_rebuild_failed"}
+		layer.call("reconfigure_preserving_identity", bodies, previous_bodies, before_summary, after_summary)
+		previous_bodies.append_array(bodies)
+		before_summary = after_summary
+	# Recompute dormant redo deltas against the new active prefix on a separate
+	# cache. Keep the active cache exactly at the published cursor.
+	if not undone_forge_layers.is_empty():
+		var redo_resolver: RefCounted = ForgeV2MaterialVolumeResolverScript.new()
+		if _has_bounded_history_checkpoint():
+			var restored: Dictionary = redo_resolver.call(
+				"restore_incremental_committed_cache_from_checkpoint", checkpoint_token, previous_bodies
+			)
+			if not bool(restored.get("ok", false)):
+				return {"ok": false, "reason": &"retained_redo_accounting_unavailable"}
+		var redo_previous := previous_bodies.duplicate()
+		var redo_before := before_summary.duplicate(true)
+		for layer_index in range(undone_forge_layers.size() - 1, -1, -1):
+			var layer: Resource = undone_forge_layers[layer_index]
+			var bodies := _get_layer_material_bodies(layer)
+			for body: Resource in bodies:
+				body.set("layer_active", true)
+			var resolved: Dictionary = redo_resolver.call(
+				"build_incremental_committed_usage_summary", redo_previous, bodies, checkpoint_token
+			)
+			var after_summary: Dictionary = resolved.get("summary", {}) as Dictionary
+			if not after_summary.has("materials"):
+				for body: Resource in bodies:
+					body.set("layer_active", false)
+				return {"ok": false, "reason": &"retained_redo_accounting_rebuild_failed"}
+			layer.call("reconfigure_preserving_identity", bodies, redo_previous, redo_before, after_summary)
+			redo_previous.append_array(bodies)
+			redo_before = after_summary
+		for layer: Resource in undone_forge_layers:
+			_set_layer_bodies_active(layer, false)
+	material_ledger = ForgeV2MaterialLedgerScript.new()
+	var checkpoint_summary: Dictionary = (
+		bounded_history_checkpoint.call("get_material_ledger_summary")
+		if _has_bounded_history_checkpoint() else {"materials": {}}
+	)
+	material_ledger.call("rebuild_from_checkpoint_and_layers", checkpoint_summary, protected_forge_layers, forge_layers)
+	# Native protection evaluates Handle first, while the normal commit cache
+	# identifies bodies in document order. Restore that exact token order before
+	# handing the candidate back to the incremental append lane.
+	var committed_bodies := _collect_committed_active_user_material_bodies()
+	if committed_bodies != previous_bodies:
+		var ordered_result: Dictionary = {}
+		if _has_bounded_history_checkpoint():
+			ordered_result = resolver.call(
+				"restore_incremental_committed_cache_from_checkpoint", checkpoint_token, committed_bodies
+			)
+		else:
+			ordered_result = resolver.call(
+				"build_incremental_committed_usage_summary", [], committed_bodies
+			)
+		if not (ordered_result.get("summary", {}) as Dictionary).has("materials"):
+			return {"ok": false, "reason": &"retained_cache_order_restore_failed"}
+	committed_volume_resolver = resolver
+	committed_volume_cache_diagnostics = resolver.call("get_incremental_committed_cache_diagnostics")
+	material_usage_summary_cache = before_summary.duplicate(true)
+	material_usage_summary_cache_dirty = false
+	return {"ok": true}
 
 func reset_new_draft(next_project_name: String = "Stage 1 V2 Draft") -> void:
+	_retained_spline_change = {}
+	_retained_candidate_token = StringName()
 	_reset_committed_volume_cache(&"new_draft")
 	schema_version = SCHEMA_VERSION
 	schema_id = SCHEMA_ID
@@ -187,6 +623,7 @@ func reset_new_draft(next_project_name: String = "Stage 1 V2 Draft") -> void:
 	equipment_context = &"ctx_weapon"
 	authoring_space_id = AUTHORING_SPACE_WORLD_3D
 	active_tool_id = TOOL_VOLUME_STROKE
+	tool_profile_memory = {}
 	active_primitive_id = DEFAULT_ACTIVE_PRIMITIVE_ID
 	active_basic_shape_source_id = BASIC_SHAPE_SOURCE_PRIMITIVE
 	active_saved_basic_profile_id = StringName()
@@ -279,6 +716,7 @@ func normalize() -> void:
 		placement_policy = PLACEMENT_REPLACE_EXISTING
 	active_material_variant_id = ForgeV2MaterialPaletteScript.normalize_material_variant_id(active_material_variant_id)
 	active_brush_radius_meters = _normalize_brush_radius(active_brush_radius_meters)
+	_normalize_tool_profile_memory()
 	active_amount_ratio = _normalize_amount_ratio(active_amount_ratio)
 	_migrate_legacy_surface_contact_authority(loaded_schema_version)
 	_normalize_material_bodies()
@@ -311,6 +749,9 @@ func capture_editor_transient_snapshot() -> Dictionary:
 		"schema_id": EDITOR_TRANSIENT_SNAPSHOT_SCHEMA_ID,
 		"schema_version": 1,
 		"active_tool_id": active_tool_id,
+		"tool_profile_memory": _capture_tool_profile_memory(),
+		"active_primitive_id": active_primitive_id,
+		"active_brush_radius_meters": active_brush_radius_meters,
 		"active_basic_shape_source_id": active_basic_shape_source_id,
 		"active_saved_basic_profile_id": active_saved_basic_profile_id,
 		"active_saved_basic_profile_data": (
@@ -408,6 +849,15 @@ func restore_editor_transient_snapshot(snapshot: Dictionary) -> bool:
 	active_tool_id = StringName(snapshot.get("active_tool_id", TOOL_VOLUME_STROKE))
 	if not _is_valid_tool_id(active_tool_id):
 		active_tool_id = TOOL_VOLUME_STROKE
+	tool_profile_memory = (
+		(snapshot.get("tool_profile_memory", {}) as Dictionary).duplicate(true)
+	)
+	active_primitive_id = ForgeV2PrimitiveCatalogScript.normalize_primitive_id(
+		StringName(snapshot.get("active_primitive_id", active_primitive_id))
+	)
+	active_brush_radius_meters = _normalize_brush_radius(float(snapshot.get(
+		"active_brush_radius_meters", active_brush_radius_meters
+	)))
 	active_basic_shape_source_id = StringName(snapshot.get(
 		"active_basic_shape_source_id",
 		BASIC_SHAPE_SOURCE_PRIMITIVE
@@ -571,6 +1021,7 @@ func restore_editor_transient_snapshot(snapshot: Dictionary) -> bool:
 	_normalize_active_profile_settings()
 	_normalize_spline_line()
 	_spline_roll_last_edit_reason = StringName()
+	_normalize_tool_profile_memory()
 	mark_updated()
 	return true
 
@@ -813,12 +1264,8 @@ func select_active_saved_basic_profile(profile_data: Dictionary) -> bool:
 	return true
 
 func set_active_tool_id(next_tool_id: StringName) -> void:
-	var previous_profile_id := active_profile_id
-	_assign_active_tool_id(next_tool_id)
+	_assign_active_tool_id(next_tool_id, true)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.normalize_profile_id(active_profile_id, _get_active_profile_family())
-	if active_profile_id != previous_profile_id:
-		active_profile_display_name = ""
-		_reset_active_profile_dimensions_to_natural()
 	_normalize_active_profile_settings()
 	_normalize_spline_line()
 	mark_updated()
@@ -924,7 +1371,8 @@ func reset_active_handle_profile_builder() -> void:
 	mark_updated()
 
 func reset_active_basic_profile_builder() -> void:
-	_assign_active_tool_id(TOOL_VOLUME_STROKE)
+	if active_tool_id == TOOL_HANDLES:
+		_assign_active_tool_id(TOOL_VOLUME_STROKE)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_2D_BUILDER
 	active_profile_display_name = ""
 	active_profile_width_meters = ForgeV2ProfileShapeLibraryScript.BASIC_BUILDER_DEFAULT_WIDTH_METERS
@@ -1071,7 +1519,8 @@ func set_active_handle_grid_snapping_enabled(is_enabled: bool) -> void:
 	mark_updated()
 
 func set_active_basic_control_point_2d_meters(point_index: int, point_position_meters: Vector2) -> bool:
-	_assign_active_tool_id(TOOL_VOLUME_STROKE)
+	if active_tool_id == TOOL_HANDLES:
+		_assign_active_tool_id(TOOL_VOLUME_STROKE)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_2D_BUILDER
 	_normalize_active_profile_settings()
 	if point_index < 0 or point_index >= active_basic_control_points_2d_meters.size():
@@ -1257,7 +1706,8 @@ func get_active_basic_corner_fillet_settings(corner_id: StringName) -> Dictionar
 	}
 
 func set_active_basic_grid_snapping_enabled(is_enabled: bool) -> void:
-	_assign_active_tool_id(TOOL_VOLUME_STROKE)
+	if active_tool_id == TOOL_HANDLES:
+		_assign_active_tool_id(TOOL_VOLUME_STROKE)
 	active_profile_id = ForgeV2ProfileShapeLibraryScript.PROFILE_2D_BUILDER
 	active_basic_grid_snapping_enabled = is_enabled
 	_normalize_active_profile_settings()
@@ -2545,6 +2995,8 @@ func build_spline_roll_preview_body() -> Resource:
 			preserved_body.call("normalize")
 			return preserved_body
 		return _append_profile_extrusion_material_body(true, false)
+	if is_retained_spline_change_active():
+		return _build_retained_spline_working_source()
 	return _append_spline_line_material_body(false)
 
 func find_nearest_spline_line_point(local_position: Vector3, max_distance_meters: float) -> int:
@@ -4235,6 +4687,7 @@ func build_authoring_export_snapshot() -> Dictionary:
 		"equipment_context": equipment_context,
 		"authoring_space_id": authoring_space_id,
 		"active_tool_id": active_tool_id,
+		"tool_profile_memory": _capture_tool_profile_memory(),
 		"active_primitive_id": active_primitive_id,
 		"active_basic_shape_source_id": active_basic_shape_source_id,
 		"active_saved_basic_profile_id": active_saved_basic_profile_id,
@@ -5247,12 +5700,82 @@ func _normalize_bounded_history(loaded_schema_version: int) -> void:
 	):
 		_suspend_bounded_history(&"invalid_tail_capacity")
 	if not _bounded_history_normalized_once:
+		_try_resume_supported_saved_profile_history()
 		_bounded_history_normalized_once = true
 		_publish_bounded_history_transition(
 			BOUNDED_HISTORY_TRANSITION_RESTORE,
 			null,
 			[]
 		)
+
+## Older small WIPs marked free-space saved-profile splines unsupported. Their
+## exact sources now have a native operand route. Resume only an already-bounded
+## complete timeline; never truncate/replay an unbounded historical document or
+## clear a failure that was unrelated to this specific newly supported shape.
+func _try_resume_supported_saved_profile_history() -> bool:
+	if (
+		not bounded_history_enabled
+		or bounded_history_suspended_reason not in [&"unsupported_committed_layer", &"unsupported_operation"]
+		or bounded_history_recovery_blocked_reason != StringName()
+		or forge_layers.size() + undone_forge_layers.size() > BOUNDED_HISTORY_TAIL_CAPACITY
+		or forge_layers.size() + undone_forge_layers.size() == 0
+	):
+		return false
+	var expected_material := _get_bounded_history_material_id()
+	var owner_body_ids: Dictionary = {}
+	var owner_layer_ids: Dictionary = {}
+	var has_saved_profile_spline := false
+	for group: Array[Resource] in [forge_layers, undone_forge_layers]:
+		for layer: Resource in group:
+			if layer == null:
+				return false
+			if expected_material == StringName():
+				expected_material = StringName(layer.get("operation_material_id"))
+			if not bool(layer.call("is_bounded_add_history_eligible", expected_material)):
+				return false
+			var bodies := _get_layer_material_bodies(layer)
+			if bodies.size() != 1 or not _is_body_bounded_add_history_eligible(bodies[0], expected_material):
+				return false
+			var body: Resource = bodies[0]
+			var body_id := StringName(body.get("body_id"))
+			var layer_id := StringName(layer.get("layer_id"))
+			if (
+				owner_body_ids.has(body_id) or owner_layer_ids.has(layer_id)
+				or StringName(body.get("committed_layer_id")) != layer_id
+			):
+				return false
+			var record: Dictionary = (layer.get("input_shape_records") as Array)[0]
+			for field: StringName in [
+				&"source_record_id", &"body_kind", &"shape_kind", &"path_points",
+				&"path_surface_normals", &"profile_polygon_2d_meters",
+			]:
+				if record.get(field) != body.get(field):
+					return false
+			owner_body_ids[body_id] = true
+			owner_layer_ids[layer_id] = true
+			has_saved_profile_spline = has_saved_profile_spline or (
+				StringName(body.get("body_kind")) == ForgeV2MaterialBodyScript.BODY_KIND_PROFILE_EXTRUSION
+				and StringName(body.get("shape_kind")) == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
+			)
+	if not has_saved_profile_spline:
+		return false
+	for body: Resource in material_bodies:
+		if body == null or _is_history_protected_body(body) or not _is_material_body_committed(body):
+			continue
+		if not owner_body_ids.has(StringName(body.get("body_id"))):
+			return false
+	if _has_bounded_history_checkpoint():
+		if not bool(bounded_history_checkpoint.call("is_restore_ready")):
+			return false
+		var resolver: RefCounted = ForgeV2MaterialVolumeResolverScript.new()
+		var validation: Dictionary = resolver.call(
+			"restore_incremental_committed_cache_from_checkpoint",
+			_get_bounded_history_checkpoint_token(), []
+		)
+		if not bool(validation.get("ok", false)):
+			return false
+	bounded_history_suspended_reason = BOUNDED_HISTORY_SUSPENDED_NONE
+	return true
 
 func _ensure_bounded_history_checkpoint() -> void:
 	if (
@@ -5475,6 +5998,31 @@ func _is_body_bounded_add_history_eligible(
 	var path_normals: PackedVector3Array = body.get("path_surface_normals")
 	var path_contacts: PackedVector3Array = body.get("path_contact_directions")
 	var shape_kind := StringName(body.get("shape_kind"))
+	if (
+		shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
+		and body_kind == ForgeV2MaterialBodyScript.BODY_KIND_PROFILE_EXTRUSION
+	):
+		var polygon: PackedVector2Array = body.get("profile_polygon_2d_meters")
+		if (
+			material_variant_id == StringName()
+			or (expected_material_variant_id != StringName() and material_variant_id != expected_material_variant_id)
+			or StringName(body.get("operation_mode")) != OPERATION_ADD_MATERIAL
+			or StringName(body.get("placement_policy")) != PLACEMENT_REPLACE_EXISTING
+			or polygon.size() < 3 or path_points.size() < 2
+			or path_normals.size() != path_points.size()
+			or not path_contacts.is_empty()
+		):
+			return false
+		for point: Vector2 in polygon:
+			if not point.is_finite():
+				return false
+		for point: Vector3 in path_points:
+			if not point.is_finite():
+				return false
+		for normal: Vector3 in path_normals:
+			if not normal.is_finite() or normal.length_squared() <= 0.000001:
+				return false
+		return true
 	if shape_kind in [
 		ForgeV2MaterialBodyScript.SHAPE_KIND_CAPSULE_PATH,
 		ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH,
@@ -6170,12 +6718,18 @@ func _is_valid_tool_id(tool_id: StringName) -> bool:
 		or tool_id == TOOL_DETAILING_BRUSH
 	)
 
-func _assign_active_tool_id(next_tool_id: StringName) -> void:
+func _assign_active_tool_id(
+	next_tool_id: StringName,
+	restore_profile: bool = false
+) -> void:
 	var resolved_tool_id := (
 		next_tool_id
 		if _is_valid_tool_id(next_tool_id)
 		else TOOL_VOLUME_STROKE
 	)
+	if active_tool_id == resolved_tool_id:
+		return
+	tool_profile_memory[active_tool_id] = _capture_active_tool_profile()
 	if (
 		active_tool_id != resolved_tool_id
 		and is_handle_change_active()
@@ -6191,6 +6745,93 @@ func _assign_active_tool_id(next_tool_id: StringName) -> void:
 	):
 		_clear_spline_transient_state()
 	active_tool_id = resolved_tool_id
+	# Explicit profile loading/editing retains its supplied profile. Only ordinary
+	# tool selection recalls the tool's previous profile.
+	if restore_profile:
+		_restore_active_tool_profile()
+
+func _build_default_tool_profile(tool_id: StringName) -> Dictionary:
+	var profile := {
+		"active_profile_id": (
+			ForgeV2ProfileShapeLibraryScript.PROFILE_HANDLE_BUILDER
+			if tool_id == TOOL_HANDLES
+			else ForgeV2ProfileShapeLibraryScript.get_default_profile_id()
+		),
+		"active_profile_width_meters": 0.0,
+		"active_profile_height_meters": 0.0,
+		"active_profile_anchor_x_meters": 0.0,
+		"active_profile_anchor_y_meters": 0.0,
+		"active_profile_rotation_degrees": 0.0,
+		"active_profile_display_name": "",
+	}
+	if tool_id == TOOL_HANDLES:
+		profile.merge({
+			"active_handle_source_profile_id": StringName(),
+			"active_handle_face_count": ForgeV2ProfileShapeLibraryScript.HANDLE_FACE_COUNT_RECTANGLE,
+			"active_handle_rounding_enabled": true,
+			"active_handle_corner_radius_meters": ForgeV2ProfileShapeLibraryScript.HANDLE_DEFAULT_CORNER_RADIUS_METERS,
+			"active_handle_control_points_2d_meters": PackedVector2Array(),
+			"active_handle_grid_snapping_enabled": false,
+		})
+	else:
+		var empty_corner_metadata: Array[Dictionary] = []
+		profile.merge({
+			"active_primitive_id": DEFAULT_ACTIVE_PRIMITIVE_ID,
+			"active_brush_radius_meters": DEFAULT_POINT_PLACEMENT_RADIUS_METERS,
+			"active_basic_shape_source_id": BASIC_SHAPE_SOURCE_PRIMITIVE,
+			"active_saved_basic_profile_id": StringName(),
+			"active_saved_basic_profile_data": {},
+			"active_basic_control_points_2d_meters": PackedVector2Array(),
+			"active_basic_corner_metadata": empty_corner_metadata,
+			"active_basic_next_corner_serial": 1,
+			"active_basic_grid_snapping_enabled": false,
+		})
+	return profile
+
+func _capture_active_tool_profile() -> Dictionary:
+	var profile := _build_default_tool_profile(active_tool_id)
+	for property_name: String in profile:
+		profile[property_name] = get(property_name)
+	return profile.duplicate(true)
+
+func _capture_tool_profile_memory() -> Dictionary:
+	var memory := tool_profile_memory.duplicate(true)
+	memory[active_tool_id] = _capture_active_tool_profile()
+	return memory
+
+func _normalize_tool_profile_memory() -> void:
+	var normalized: Dictionary = {}
+	for tool_id: StringName in [
+		TOOL_VOLUME_STROKE, TOOL_SPLINE_LINE, TOOL_HANDLES, TOOL_DETAILING_BRUSH
+	]:
+		var profile := _build_default_tool_profile(tool_id)
+		var remembered: Variant = tool_profile_memory.get(tool_id, {})
+		if remembered is Dictionary:
+			for property_name: String in profile:
+				if (remembered as Dictionary).has(property_name):
+					profile[property_name] = remembered[property_name]
+		normalized[tool_id] = profile.duplicate(true)
+	# The active fields are authoritative, including older WIPs without memory.
+	normalized[active_tool_id] = _capture_active_tool_profile()
+	tool_profile_memory = normalized
+
+func _restore_active_tool_profile() -> void:
+	var profile := _build_default_tool_profile(active_tool_id)
+	var remembered: Variant = tool_profile_memory.get(active_tool_id, {})
+	if remembered is Dictionary:
+		for property_name: String in profile:
+			if (remembered as Dictionary).has(property_name):
+				profile[property_name] = remembered[property_name]
+	profile = profile.duplicate(true)
+	for property_name: String in profile:
+		set(property_name, profile[property_name])
+	active_primitive_id = ForgeV2PrimitiveCatalogScript.normalize_primitive_id(active_primitive_id)
+	active_brush_radius_meters = _normalize_brush_radius(active_brush_radius_meters)
+	_normalize_active_basic_shape_authority()
+	active_profile_id = ForgeV2ProfileShapeLibraryScript.normalize_profile_id(
+		active_profile_id, _get_active_profile_family()
+	)
+	_normalize_active_profile_settings()
 
 func _normalize_active_basic_shape_authority() -> void:
 	if active_basic_shape_source_id != BASIC_SHAPE_SOURCE_SAVED_PROFILE:

@@ -4,8 +4,9 @@ class_name ForgeV2WorkspaceContract
 const CONTRACT_ID := &"forge_v2_workspace_contract_v1"
 const AUTHORING_SPACE_DIEGETIC_BOX := &"authoring_space_diegetic_box"
 const PLACEMENT_MODE_PLANE := &"placement_mode_plane"
-const FREEHAND_SMOOTHING_MIN := 0
-const FREEHAND_SMOOTHING_MAX := 10
+const EditorSettingsScript = preload("res://core/models/forge_v2_editor_settings_state.gd")
+const FREEHAND_SMOOTHING_MIN := EditorSettingsScript.FREEHAND_SMOOTHING_MIN
+const FREEHAND_SMOOTHING_MAX := EditorSettingsScript.FREEHAND_SMOOTHING_MAX
 
 @export var contract_id: StringName = CONTRACT_ID
 @export var authoring_space_id: StringName = AUTHORING_SPACE_DIEGETIC_BOX
@@ -20,7 +21,7 @@ const FREEHAND_SMOOTHING_MAX := 10
 @export var fit_size_meters: float = 6.0
 @export var stroke_sample_spacing_radius_ratio: float = 0.55
 @export var stroke_sample_spacing_min_meters: float = 0.00625
-@export_range(0, 10, 1) var freehand_smoothing_steps: int = 0
+@export_range(0, 10, 1) var freehand_smoothing_steps: int = EditorSettingsScript.FREEHAND_SMOOTHING_DEFAULT
 @export var show_bounds_box: bool = true
 @export var world_prop_anchor_id: StringName = &"forge_v2_authoring_box"
 

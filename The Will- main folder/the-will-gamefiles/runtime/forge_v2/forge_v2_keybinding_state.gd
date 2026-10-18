@@ -15,6 +15,17 @@ const ACTION_SAVE_DRAFT := &"forge_v2_save_draft"
 const ACTION_VIEW_FIT := &"forge_v2_view_fit"
 const ACTION_VIEW_RESET := &"forge_v2_view_reset"
 const ACTION_VIEW_RADIAL := &"forge_v2_view_radial"
+const ACTION_TOOL_RADIAL := &"forge_v2_tool_radial"
+const ACTION_CONTEXT_ACTIONS := &"forge_v2_context_actions"
+const ACTION_RETAINED_EDIT := &"forge_v2_retained_edit"
+const ACTION_PROFILE_SLOT_1 := &"forge_v2_profile_slot_1"
+const ACTION_PROFILE_SLOT_2 := &"forge_v2_profile_slot_2"
+const ACTION_PROFILE_SLOT_3 := &"forge_v2_profile_slot_3"
+const ACTION_PROFILE_SLOT_4 := &"forge_v2_profile_slot_4"
+const ACTION_PROFILE_SLOT_5 := &"forge_v2_profile_slot_5"
+const ACTION_PROFILE_SLOT_6 := &"forge_v2_profile_slot_6"
+const PROFILE_SLOT_ACTIONS := [ACTION_PROFILE_SLOT_1, ACTION_PROFILE_SLOT_2,
+	ACTION_PROFILE_SLOT_3, ACTION_PROFILE_SLOT_4, ACTION_PROFILE_SLOT_5, ACTION_PROFILE_SLOT_6]
 const ACTION_TOOL_VOLUME_STROKE := &"forge_v2_tool_volume_stroke"
 const ACTION_TOOL_SPLINE_LINE := &"forge_v2_tool_spline_line"
 const ACTION_TOOL_HANDLES := &"forge_v2_tool_handles"
@@ -88,18 +99,45 @@ const ACTION_DEFINITIONS: Array[Dictionary] = [
 	{
 		"action": ACTION_TOOL_VOLUME_STROKE,
 		"display_name": "Select CSG Material Stroke Tool",
-		"binding": {"physical_keycode": KEY_B, "keycode": KEY_B},
+		"binding": {},
 	},
 	{
 		"action": ACTION_TOOL_SPLINE_LINE,
 		"display_name": "Select Spline Line Tool",
-		"binding": {"physical_keycode": KEY_L, "keycode": KEY_L},
+		"binding": {},
 	},
 	{
 		"action": ACTION_TOOL_HANDLES,
 		"display_name": "Select Handles Tool",
-		"binding": {"physical_keycode": KEY_H, "keycode": KEY_H},
+		"binding": {},
 	},
+	{
+		"action": ACTION_TOOL_RADIAL,
+		"display_name": "Hold Tool Wheel",
+		"binding": {"physical_keycode": KEY_Q, "keycode": KEY_Q},
+	},
+	{
+		"action": ACTION_CONTEXT_ACTIONS,
+		"display_name": "Apply / Cancel Current Operation",
+		"binding": {"physical_keycode": KEY_S, "keycode": KEY_S},
+	},
+	{
+		"action": ACTION_RETAINED_EDIT,
+		"display_name": "Toggle Retained Shape Editing",
+		"binding": {"physical_keycode": KEY_E, "keycode": KEY_E},
+	},
+	{"action": ACTION_PROFILE_SLOT_1, "display_name": "Profile Slot 1 (Reserved)",
+		"binding": {"physical_keycode": KEY_1, "keycode": KEY_1}},
+	{"action": ACTION_PROFILE_SLOT_2, "display_name": "Profile Slot 2 (Reserved)",
+		"binding": {"physical_keycode": KEY_2, "keycode": KEY_2}},
+	{"action": ACTION_PROFILE_SLOT_3, "display_name": "Profile Slot 3 (Reserved)",
+		"binding": {"physical_keycode": KEY_3, "keycode": KEY_3}},
+	{"action": ACTION_PROFILE_SLOT_4, "display_name": "Profile Slot 4 (Reserved)",
+		"binding": {"physical_keycode": KEY_4, "keycode": KEY_4}},
+	{"action": ACTION_PROFILE_SLOT_5, "display_name": "Profile Slot 5 (Reserved)",
+		"binding": {"physical_keycode": KEY_5, "keycode": KEY_5}},
+	{"action": ACTION_PROFILE_SLOT_6, "display_name": "Profile Slot 6 (Reserved)",
+		"binding": {"physical_keycode": KEY_6, "keycode": KEY_6}},
 	{
 		"action": ACTION_SPLINE_FINISH,
 		"display_name": "Finish Spline Line",

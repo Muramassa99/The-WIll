@@ -6,6 +6,7 @@ signal closed
 const ForgeV2WorkspacePreviewScript = preload("res://runtime/forge_v2/forge_v2_workspace_preview.gd")
 const ForgeV2WorkspaceAxisIndicatorScript = preload("res://runtime/forge_v2/forge_v2_workspace_axis_indicator.gd")
 const ForgeV2RadialMenuScript = preload("res://runtime/forge_v2/forge_v2_radial_menu.gd")
+const ForgeV2WorkspaceActionMenuScript = preload("res://runtime/forge_v2/forge_v2_workspace_action_menu.gd")
 const ForgeV2KeybindingStateScript = preload("res://runtime/forge_v2/forge_v2_keybinding_state.gd")
 const ForgeV2ProfileShapeLibraryScript = preload("res://runtime/forge_v2/forge_v2_profile_shape_library.gd")
 const ForgeV2FreehandInputStabilizerScript = preload("res://runtime/forge_v2/forge_v2_freehand_input_stabilizer.gd")
@@ -1009,6 +1010,10 @@ var last_ui_fit_scale := 1.0
 var workspace_frame_host: Control = null
 var workspace_axis_indicator: Control = null
 var workspace_view_radial: Control = null
+var workspace_action_menu: Node = null
+var retained_edit_mode := false
+var retained_edit_handle_active := false
+var retained_edit_hover_body := StringName()
 var workspace_view_radial_active := false
 var workspace_view_radial_binding: Dictionary = {}
 var workspace_drag_active := false
@@ -1076,6 +1081,10 @@ func _ready() -> void:
 	close_button.pressed.connect(close_ui)
 	_ensure_workspace_preview()
 	get_viewport().size_changed.connect(_apply_fullscreen_workspace_layout)
+	workspace_action_menu = ForgeV2WorkspaceActionMenuScript.new()
+	workspace_action_menu.name = "WorkspaceActionMenu"
+	add_child(workspace_action_menu)
+	workspace_action_menu.call("configure", self)
 	call_deferred("_sync_workspace_subviewport_size")
 
 func toggle_start_menu_for(player, stage_controller: Node, bench_name: String, placement_space: Node3D = null) -> void:
@@ -1156,8 +1165,16 @@ func _finish_workspace_input_after_focus_loss() -> void:
 	_settle_profile_builder_edit_gesture()
 
 func close_ui() -> void:
+	if _is_retained_edit_pending():
+		_set_v2_action_status_text("Finishing the shape edit before closing Forge.")
+		return
+	if retained_edit_mode and _is_retained_edit_session_active() and workspace_action_menu != null:
+		workspace_action_menu.call("open_context_popup", StringName(), close_ui)
+		return
 	_end_action_history_hold()
 	_cancel_workspace_view_radial()
+	if workspace_action_menu != null:
+		workspace_action_menu.call("dismiss")
 	if not is_open():
 		return
 	if workspace_brush_stroke_active:
@@ -1176,6 +1193,7 @@ func close_ui() -> void:
 	if workspace_preview != null and workspace_preview.has_method("clear_stage_controller"):
 		if not bool(workspace_preview.call("clear_stage_controller")):
 			return
+	_set_retained_edit_mode(false)
 	panel.visible = false
 	visible = false
 	_cancel_v2_save_feedback()
@@ -3606,7 +3624,8 @@ func _on_freehand_smoothing_value_changed(value: float) -> void:
 		freehand_smoothing_value_label.text = str(smoothing_steps)
 	is_refreshing_settings_ui = false
 	if active_stage_controller != null and active_stage_controller.has_method("set_freehand_smoothing_steps"):
-		active_stage_controller.call("set_freehand_smoothing_steps", smoothing_steps)
+		if not bool(active_stage_controller.call("set_freehand_smoothing_steps", smoothing_steps)):
+			_set_v2_action_status_text("Smoothing changed for this session; could not save the preference.")
 
 func _refresh_profile_builder_popup() -> void:
 	_ensure_profile_builder_popup()
@@ -3867,6 +3886,8 @@ func _on_profile_handles_button_pressed() -> void:
 func _select_profile_builder_basic_builder() -> void:
 	if active_stage_controller == null:
 		return
+	if _defer_unfinished_profile_tool_change(&"tool_volume_stroke", _select_profile_builder_basic_builder, true):
+		return
 	_settle_profile_builder_edit_gesture()
 	editor_loaded_saved_profile_id = StringName()
 	if active_stage_controller.has_method("reset_active_basic_profile_builder"):
@@ -3935,6 +3956,8 @@ func _on_profile_anchor_point_reset_requested() -> void:
 func _select_profile_builder_handle_builder() -> void:
 	if active_stage_controller == null:
 		return
+	if _defer_unfinished_profile_tool_change(&"tool_handles", _select_profile_builder_handle_builder):
+		return
 	_settle_profile_builder_edit_gesture()
 	editor_loaded_saved_profile_id = StringName()
 	if active_stage_controller.has_method("reset_active_handle_profile_builder"):
@@ -3958,6 +3981,12 @@ func _load_saved_tool_profile_into_editor(profile_id: StringName) -> bool:
 		return false
 	var saved_profile: Dictionary = profile_library.call("get_saved_profile", profile_id) as Dictionary
 	if saved_profile.is_empty():
+		return false
+	var is_basic := StringName(saved_profile.get("family", StringName())) == ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_BASIC
+	if _defer_unfinished_profile_tool_change(
+		&"tool_volume_stroke" if is_basic else &"tool_handles",
+		_load_saved_tool_profile_into_editor.bind(profile_id), is_basic
+	):
 		return false
 	var loaded := bool(active_stage_controller.call("apply_tool_profile_preset", saved_profile))
 	if not loaded:
@@ -3989,6 +4018,8 @@ func _select_saved_basic_profile_for_shape(profile_id: StringName) -> bool:
 		or StringName(saved_profile.get("family", StringName()))
 		!= ForgeV2ProfileShapeLibraryScript.PROFILE_FAMILY_BASIC
 	):
+		return false
+	if _defer_unfinished_profile_tool_change(&"tool_volume_stroke", _select_saved_basic_profile_for_shape.bind(profile_id), true):
 		return false
 	var selected := bool(active_stage_controller.call(
 		"select_active_saved_basic_profile",
@@ -4822,7 +4853,7 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 	var action_id := StringName(menu_entry.get("action", StringName()))
 	var action_value: Variant = menu_entry.get("value", null)
 	if (
-		v2_save_in_progress
+		(v2_save_in_progress or _is_retained_edit_pending())
 		and action_id not in [
 			&"view_fit",
 			&"view_reset",
@@ -4831,7 +4862,7 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 			&"view_axis",
 		]
 	):
-		_set_v2_action_status_text("Save in progress")
+		_set_v2_action_status_text("Shape edit in progress" if _is_retained_edit_pending() else "Save in progress")
 		return
 	var keep_shape_popup_open := _is_v2_shape_repeat_action(action_id)
 	match action_id:
@@ -4864,11 +4895,7 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 			if active_stage_controller != null:
 				active_stage_controller.set_active_primitive_id(StringName(action_value))
 		&"tool":
-			var next_tool_id := StringName(action_value)
-			if next_tool_id == &"tool_handles":
-				_activate_handle_authoring_tool()
-			else:
-				_set_active_v2_tool(next_tool_id)
+			_set_active_v2_tool(StringName(action_value))
 		&"handle_path_mode":
 			_activate_handle_authoring_tool(StringName(action_value))
 		&"basic_saved_profile":
@@ -4922,6 +4949,8 @@ func _on_v2_menu_id_pressed(menu_id: int) -> void:
 		_refresh_v2_shape_menu_popup_contents()
 
 func _on_profile_builder_menu_id_pressed(menu_id: int) -> void:
+	if _is_retained_edit_pending():
+		return
 	var menu_entry: Dictionary = profile_builder_action_lookup.get(menu_id, {}) as Dictionary
 	if menu_entry.is_empty():
 		return
@@ -4935,11 +4964,7 @@ func _on_profile_builder_menu_id_pressed(menu_id: int) -> void:
 			if StringName(action_value) == ForgeV2ProfileShapeLibraryScript.PROFILE_2D_BUILDER:
 				_select_profile_builder_basic_builder()
 			else:
-				editor_loaded_saved_profile_id = StringName()
-				if active_stage_controller.has_method("set_active_tool_id"):
-					active_stage_controller.call("set_active_tool_id", &"tool_volume_stroke")
-				if active_stage_controller.has_method("set_active_profile_id"):
-					active_stage_controller.call("set_active_profile_id", StringName(action_value))
+				_select_basic_profile_for_editor(StringName(action_value))
 		&"profile_handle":
 			_select_profile_builder_handle_builder()
 		&"profile_saved_load":
@@ -4953,6 +4978,31 @@ func _on_profile_builder_menu_id_pressed(menu_id: int) -> void:
 	if action_id != &"profile_handle" and action_id != &"profile_saved_load" and action_id != &"profile_saved_delete":
 		_refresh_from_controller()
 		_refresh_profile_builder_popup()
+
+func _select_basic_profile_for_editor(profile_id: StringName) -> void:
+	if _defer_unfinished_profile_tool_change(&"tool_volume_stroke", _select_basic_profile_for_editor.bind(profile_id), true):
+		return
+	editor_loaded_saved_profile_id = StringName()
+	var summary: Dictionary = active_stage_controller.call("get_status_summary") as Dictionary
+	if StringName(summary.get("active_tool", StringName())) == &"tool_handles":
+		active_stage_controller.call("set_active_tool_id", &"tool_volume_stroke")
+	active_stage_controller.call("set_active_profile_id", profile_id)
+	_refresh_from_controller()
+	_refresh_profile_builder_popup()
+
+func _defer_unfinished_profile_tool_change(tool: StringName, action: Callable, keep_basic_tool: bool = false) -> bool:
+	if workspace_action_menu == null:
+		return false
+	var context: Dictionary = workspace_action_menu.call("get_context") as Dictionary
+	var current_tool := StringName(context.get("tool", StringName()))
+	if current_tool == tool or (keep_basic_tool and current_tool != &"tool_handles"):
+		return false
+	if not bool(context.get("unfinished", false)):
+		return false
+	_settle_profile_builder_edit_gesture()
+	_finish_workspace_edit_before_view_change()
+	workspace_action_menu.call("request_tool_change", tool, action)
+	return true
 
 func _is_v2_shape_repeat_action(action_id: StringName) -> bool:
 	return (
@@ -5105,22 +5155,17 @@ func _sync_workspace_spline_work_plane_context() -> void:
 func _set_active_v2_tool(tool_id: StringName) -> void:
 	if active_stage_controller == null:
 		return
-	if tool_id == &"tool_handles":
-		_activate_handle_authoring_tool()
-		return
-	if not active_stage_controller.has_method("set_active_tool_id"):
-		return
 	_settle_profile_builder_edit_gesture()
-	if workspace_brush_stroke_active:
-		_finish_workspace_brush_stroke(Vector2.ZERO, false)
-	_finish_workspace_spline_point_drag()
-	editor_loaded_saved_profile_id = StringName()
-	active_stage_controller.call("set_active_tool_id", tool_id)
+	_finish_workspace_edit_before_view_change()
+	if workspace_action_menu != null:
+		workspace_action_menu.call("request_tool_change", tool_id)
 
 func _activate_handle_authoring_tool(
 	handle_path_mode_id: StringName = StringName()
 ) -> void:
 	if active_stage_controller == null:
+		return
+	if _defer_unfinished_profile_tool_change(&"tool_handles", _activate_handle_authoring_tool.bind(handle_path_mode_id)):
 		return
 	if not active_stage_controller.has_method("activate_handle_tool"):
 		_select_profile_builder_handle_builder()
@@ -5161,9 +5206,17 @@ func _cancel_active_spline_line() -> void:
 	if active_stage_controller == null or not active_stage_controller.has_method("cancel_spline_line"):
 		return
 	_finish_workspace_spline_point_drag()
-	active_stage_controller.call("cancel_spline_line")
+	if _is_retained_spline_edit_active():
+		active_stage_controller.call("cancel_retained_spline_change")
+	else:
+		active_stage_controller.call("cancel_spline_line")
+	_refresh_retained_edit_mode()
 
 func _generate_active_spline_csg_noodle() -> void:
+	if _is_retained_spline_edit_active():
+		_finish_workspace_spline_point_drag()
+		active_stage_controller.call("apply_retained_spline_change")
+		return
 	if _is_v2_detailing_brush_active():
 		_generate_active_detailing_brush()
 		return
@@ -5208,6 +5261,9 @@ func _clear_active_spline_csg_noodle() -> void:
 	active_stage_controller.call("clear_spline_line_csg_noodle")
 
 func _save_current_v2_draft() -> bool:
+	if _is_retained_edit_pending():
+		_set_v2_action_status_text("Finish the shape edit before saving.")
+		return false
 	if active_stage_controller == null or not active_stage_controller.has_method("save_current_wip"):
 		_set_v2_action_status_text("Save failed: no V2 draft")
 		return false
@@ -5225,6 +5281,9 @@ func _save_current_v2_draft() -> bool:
 	return true
 
 func _save_current_v2_draft_as(project_name: String) -> bool:
+	if _is_retained_edit_pending():
+		_set_v2_action_status_text("Finish the shape edit before saving.")
+		return false
 	if (
 		active_stage_controller == null
 		or not active_stage_controller.has_method("save_current_wip_as")
@@ -5517,6 +5576,8 @@ func _delete_saved_v2_draft(saved_wip_id: StringName) -> bool:
 	return true
 
 func _load_saved_v2_draft(saved_wip_id: StringName) -> bool:
+	if _is_retained_edit_pending():
+		return false
 	if active_stage_controller == null or not active_stage_controller.has_method("load_saved_wip"):
 		_set_v2_action_status_text("Load failed: no V2 controller")
 		return false
@@ -5636,6 +5697,115 @@ func _apply_fullscreen_workspace_layout() -> void:
 	_apply_v2_fit_scale(viewport_size)
 	call_deferred("_sync_workspace_frame_layout")
 
+func _is_retained_spline_edit_active() -> bool:
+	return (
+		active_stage_controller != null
+		and active_stage_controller.has_method("is_retained_spline_change_active")
+		and bool(active_stage_controller.call("is_retained_spline_change_active"))
+	)
+
+func _is_retained_edit_pending() -> bool:
+	return (
+		active_stage_controller != null
+		and active_stage_controller.has_method("is_retained_spline_change_pending")
+		and bool(active_stage_controller.call("is_retained_spline_change_pending"))
+	)
+
+func _is_retained_edit_session_active() -> bool:
+	if _is_retained_spline_edit_active():
+		return true
+	var state := _get_spline_roll_authoring_state()
+	return retained_edit_handle_active and state != null and bool(state.call("is_handle_change_active"))
+
+func _try_handle_retained_edit_input(event: InputEvent) -> bool:
+	if not _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_RETAINED_EDIT, event):
+		return false
+	if (
+		v2_save_in_progress or _is_keybinding_capture_active() or _is_text_entry_focused()
+		or _has_focused_window_layer() or _has_visible_popup_menu()
+	):
+		return false
+	if _is_retained_edit_pending():
+		return true
+	_finish_workspace_edit_before_view_change()
+	_end_action_history_hold()
+	var next_mode := not retained_edit_mode
+	var context: Dictionary = workspace_action_menu.call("get_context") as Dictionary
+	if bool(context.get("unfinished", false)):
+		workspace_action_menu.call("open_context_popup", StringName(), _set_retained_edit_mode.bind(next_mode))
+	else:
+		_set_retained_edit_mode(next_mode)
+	return true
+
+func _set_retained_edit_mode(enabled: bool) -> void:
+	retained_edit_mode = enabled
+	if not enabled:
+		retained_edit_handle_active = false
+	_clear_retained_edit_hover()
+	_refresh_retained_edit_mode()
+	if active_stage_controller != null:
+		_refresh_from_controller()
+
+func _refresh_retained_edit_mode() -> void:
+	var state := _get_spline_roll_authoring_state()
+	if retained_edit_handle_active and (state == null or not bool(state.call("is_handle_change_active"))):
+		retained_edit_handle_active = false
+	if workspace_view_container != null:
+		workspace_view_container.mouse_default_cursor_shape = Control.CURSOR_ARROW
+	if workspace_preview == null:
+		return
+	workspace_preview.call("set_retained_edit_selection_enabled", retained_edit_mode and not _is_retained_edit_session_active())
+	workspace_preview.call("set_retained_edit_cursor_suppressed", retained_edit_mode)
+	if retained_edit_mode and active_stage_controller != null:
+		active_stage_controller.call("clear_placement_cursor")
+
+func _clear_retained_edit_hover() -> void:
+	retained_edit_hover_body = StringName()
+	if workspace_preview != null:
+		workspace_preview.call("set_retained_edit_hover", StringName())
+
+func _update_retained_edit_hover(screen_position: Vector2) -> void:
+	var hit: Dictionary = workspace_preview.call("resolve_retained_edit_selection", screen_position) as Dictionary
+	var body_id := StringName(hit.get("body_id", StringName())) if bool(hit.get("editable", false)) else StringName()
+	if body_id == retained_edit_hover_body:
+		return
+	retained_edit_hover_body = body_id
+	workspace_preview.call("set_retained_edit_hover", body_id)
+
+func _retained_edit_selection_status_label() -> String:
+	var state := _get_spline_roll_authoring_state()
+	var edit_status: Dictionary = state.call("get_retained_spline_edit_status") as Dictionary if state != null else {}
+	var count := int(edit_status.get("editable_count", 0))
+	if not bool(edit_status.get("available", false)) and StringName(edit_status.get("reason", StringName())) != &"no_retained_splines":
+		return "E selection | %d editable splines | %s | Purple: Handle" % [count,
+			String(edit_status.get("label", "Spline editing is currently unavailable."))]
+	return "E selection | %d editable splines | Green to orange: newest to oldest | Purple: Handle | Red: unavailable" % count
+
+func _select_retained_edit_surface(screen_position: Vector2) -> void:
+	var hit: Dictionary = workspace_preview.call("resolve_retained_edit_selection", screen_position) as Dictionary
+	if not bool(hit.get("valid", false)):
+		return
+	if not bool(hit.get("editable", false)):
+		_set_v2_action_status_text("This surface is not editable.")
+		return
+	var began := false
+	if bool(hit.get("is_handle", false)):
+		retained_edit_handle_active = true
+		var activation: Dictionary = active_stage_controller.call("activate_handle_tool") as Dictionary
+		began = bool(activation.get("ok", false)) and bool(activation.get("handle_change_active", false))
+		retained_edit_handle_active = began
+		if began:
+			editor_loaded_saved_profile_id = StringName(activation.get("handle_source_profile_id", StringName()))
+	else:
+		began = bool(active_stage_controller.call("begin_retained_spline_change", StringName(hit.get("body_id", StringName()))))
+	if not began:
+		_set_v2_action_status_text("Shape is currently unavailable for editing.")
+		return
+	_clear_retained_edit_hover()
+	_refresh_from_controller()
+	_refresh_profile_builder_popup()
+	_set_v2_action_status_text("Shape opened for editing. Move points or adjust Twist; S opens Apply / Cancel.")
+
 func _ensure_spline_roll_controls() -> void:
 	if spline_roll_controls != null or workspace_vbox == null:
 		return
@@ -5708,8 +5878,8 @@ func _refresh_spline_roll_controls() -> void:
 		_get_v2_binding_label(ForgeV2KeybindingStateScript.ACTION_SPLINE_POINT_NEXT),
 		_get_v2_binding_label(ForgeV2KeybindingStateScript.ACTION_SPLINE_POINT_PREVIOUS),
 	]
-	spline_roll_degrees_spin_box.editable = has_selected_point and not v2_save_in_progress
-	spline_roll_twist_spin_box.editable = has_selected_point and not v2_save_in_progress
+	spline_roll_degrees_spin_box.editable = has_selected_point and not v2_save_in_progress and not _is_retained_edit_pending()
+	spline_roll_twist_spin_box.editable = has_selected_point and not v2_save_in_progress and not _is_retained_edit_pending()
 	if _is_workspace_view_transitioning():
 		spline_roll_degrees_spin_box.editable = false
 		spline_roll_twist_spin_box.editable = false
@@ -5750,7 +5920,7 @@ func _on_spline_roll_twist_changed(value: float) -> void:
 	_apply_selected_spline_roll_degrees(value * 360.0)
 
 func _apply_selected_spline_roll_degrees(value: float) -> void:
-	if is_refreshing_spline_roll_ui or v2_save_in_progress or _is_workspace_view_transitioning() or not _is_spline_roll_tool_active():
+	if is_refreshing_spline_roll_ui or v2_save_in_progress or _is_retained_edit_pending() or _is_workspace_view_transitioning() or not _is_spline_roll_tool_active():
 		return
 	var state := _get_spline_roll_authoring_state()
 	var selected_index := int(state.get("selected_spline_point_index"))
@@ -5766,6 +5936,7 @@ func _try_handle_spline_point_cycle_input(event: InputEvent) -> bool:
 	if (
 		not event is InputEventKey
 		or v2_save_in_progress
+		or _is_retained_edit_pending()
 		or _is_text_entry_focused()
 		or not _is_spline_roll_tool_active()
 		or workspace_spline_point_drag_active
@@ -5796,6 +5967,9 @@ func _input(event: InputEvent) -> void:
 		_handle_workspace_view_radial_input(event)
 		get_viewport().set_input_as_handled()
 		return
+	if workspace_action_menu != null and bool(workspace_action_menu.call("handle_input", event)):
+		get_viewport().set_input_as_handled()
+		return
 	if _is_keybinding_capture_active():
 		if (
 			is_instance_valid(keybindings_popup)
@@ -5810,6 +5984,9 @@ func _input(event: InputEvent) -> void:
 		):
 			_cancel_keybinding_capture()
 	if _handle_workspace_view_radial_input(event):
+		get_viewport().set_input_as_handled()
+		return
+	if _try_handle_retained_edit_input(event):
 		get_viewport().set_input_as_handled()
 		return
 	if (
@@ -5999,6 +6176,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _close_focused_major_workspace():
 			get_viewport().set_input_as_handled()
 			return
+		if retained_edit_mode:
+			if not _is_retained_edit_pending():
+				if _is_retained_edit_session_active():
+					_cancel_active_spline_line()
+				else:
+					_set_retained_edit_mode(false)
+			get_viewport().set_input_as_handled()
+			return
 		var root_window := get_window()
 		if not is_instance_valid(root_window) or not root_window.has_focus():
 			get_viewport().set_input_as_handled()
@@ -6011,6 +6196,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		return
 	if _is_text_entry_focused():
+		return
+	if _is_retained_edit_pending():
+		get_viewport().set_input_as_handled()
 		return
 	if _try_handle_action_history_binding(event):
 		get_viewport().set_input_as_handled()
@@ -6052,6 +6240,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 func _close_focused_temporary_window_layer() -> bool:
+	if workspace_action_menu != null and bool(workspace_action_menu.call("is_popup_open")):
+		workspace_action_menu.call("dismiss")
+		return true
 	var temporary_layers: Array[Window] = [
 		profile_fillet_popup,
 		profile_canvas_context_panel,
@@ -6135,6 +6326,8 @@ func _close_focused_major_workspace() -> bool:
 	return false
 
 func _has_focused_window_layer() -> bool:
+	if workspace_action_menu != null and bool(workspace_action_menu.call("is_popup_open")):
+		return true
 	var window_layers: Array[Window] = [
 		profile_fillet_popup,
 		profile_canvas_context_panel,
@@ -6357,6 +6550,7 @@ func _configure_option_button(option_button: OptionButton, options: Array[Dictio
 		option_button.set_item_metadata(item_index, option.get("id", StringName()))
 
 func _refresh_from_controller() -> void:
+	_refresh_retained_edit_mode()
 	_sync_workspace_spline_work_plane_context()
 	_refresh_workspace_view_status()
 	_refresh_spline_roll_controls()
@@ -6454,6 +6648,14 @@ func _refresh_from_controller() -> void:
 			summary.get("brush_radius_label", "")
 		)))
 	workspace_status_label.text = " | ".join(workspace_status_parts)
+	if retained_edit_mode:
+		workspace_status_label.text = (
+			"Editing shape | Drag points / twist | S Apply / Cancel | Esc back"
+			if _is_retained_edit_session_active() else
+			_retained_edit_selection_status_label()
+		)
+		if _is_retained_edit_pending():
+			workspace_status_label.text = "Applying shape edit..."
 	platform_contract_label.text = String(summary.get("platform_contract_summary", ""))
 	active_material_label.text = "Active: %s" % String(summary.get("active_material_label", summary.get("active_material", "")))
 	radius_value_label.text = String(summary.get(
@@ -6656,13 +6858,13 @@ func _on_authoring_state_changed(_state) -> void:
 	_refresh_from_controller()
 
 func _on_new_draft_pressed() -> void:
-	if active_stage_controller == null:
+	if active_stage_controller == null or _is_retained_edit_pending():
 		return
 	editor_loaded_saved_profile_id = StringName()
 	active_stage_controller.start_new_draft("%s V2 Draft" % current_bench_name)
 
 func _on_clear_strokes_pressed() -> void:
-	if active_stage_controller == null:
+	if active_stage_controller == null or _is_retained_edit_pending():
 		return
 	if active_stage_controller.has_method("clear_pending_material_bodies"):
 		active_stage_controller.call("clear_pending_material_bodies")
@@ -6710,12 +6912,12 @@ func _on_radius_increase_pressed() -> void:
 	active_stage_controller.adjust_brush_radius_steps(1)
 
 func _on_add_empty_stroke_pressed() -> void:
-	if active_stage_controller == null:
+	if active_stage_controller == null or _is_retained_edit_pending():
 		return
 	active_stage_controller.append_active_primitive_deposit()
 
 func _on_commit_pending_pressed() -> void:
-	if active_stage_controller == null:
+	if active_stage_controller == null or _is_retained_edit_pending():
 		return
 	if active_stage_controller.has_method(
 		"commit_all_pending_material_bodies_as_layers"
@@ -6773,7 +6975,7 @@ func _on_body_stack_selected(index: int) -> void:
 	active_stage_controller.select_material_body_id(StringName(body_stack_option.get_item_metadata(index)))
 
 func _on_delete_selected_body_pressed() -> void:
-	if active_stage_controller == null:
+	if active_stage_controller == null or _is_retained_edit_pending():
 		return
 	active_stage_controller.remove_selected_material_body()
 
@@ -6814,6 +7016,9 @@ func _sync_workspace_subviewport_size() -> void:
 		workspace_subviewport.size = target_size
 
 func _on_workspace_view_gui_input(event: InputEvent) -> void:
+	if workspace_action_menu != null and bool(workspace_action_menu.call("blocks_workspace_input")):
+		workspace_view_container.accept_event()
+		return
 	if active_stage_controller == null:
 		return
 	if workspace_view_radial_active:
@@ -6870,7 +7075,12 @@ func _handle_workspace_mouse_button(mouse_button_event: InputEventMouseButton) -
 		return
 	if mouse_button_event.button_index != paint_mouse_button:
 		return
-	if v2_save_in_progress or _is_workspace_view_transitioning():
+	if v2_save_in_progress or _is_retained_edit_pending() or _is_workspace_view_transitioning():
+		workspace_view_container.accept_event()
+		return
+	if retained_edit_mode and not _is_retained_edit_session_active():
+		if mouse_button_event.pressed:
+			_select_retained_edit_surface(mouse_button_event.position)
 		workspace_view_container.accept_event()
 		return
 	if workspace_spline_roll_drag_active:
@@ -6882,7 +7092,12 @@ func _handle_workspace_mouse_button(mouse_button_event: InputEventMouseButton) -
 	if mouse_button_event.pressed:
 		if _is_v2_path_point_tool_active():
 			if not _try_begin_workspace_spline_roll_drag(mouse_button_event.position):
-				_begin_workspace_spline_input(mouse_button_event.position)
+				if retained_edit_mode:
+					var point_index := _find_nearest_spline_point_at_screen(mouse_button_event.position)
+					if point_index >= 0:
+						_begin_workspace_spline_point_drag(point_index, Vector3.ZERO, mouse_button_event.position)
+				else:
+					_begin_workspace_spline_input(mouse_button_event.position)
 		else:
 			_begin_workspace_brush_stroke(mouse_button_event.position)
 	else:
@@ -6919,9 +7134,14 @@ func _handle_workspace_mouse_motion(motion_event: InputEventMouseMotion) -> void
 			workspace_preview.call("orbit_by", motion_event.relative)
 		workspace_view_container.accept_event()
 		return
+	if retained_edit_mode:
+		if not _is_retained_edit_session_active() and not _is_retained_edit_pending():
+			_update_retained_edit_hover(motion_event.position)
+		return
 	_update_placement_cursor_from_workspace_position(motion_event.position)
 
 func _on_workspace_view_mouse_exited() -> void:
+	_clear_retained_edit_hover()
 	workspace_drag_active = false
 	_finish_workspace_spline_point_drag()
 	if workspace_brush_stroke_active:
@@ -7671,6 +7891,9 @@ func _reset_workspace_brush_input_stabilizer() -> void:
 
 func _update_placement_cursor_from_workspace_position(screen_position: Vector2) -> void:
 	if active_stage_controller == null or not active_stage_controller.has_method("set_placement_cursor_local_position"):
+		return
+	if retained_edit_mode or _is_retained_edit_pending():
+		active_stage_controller.call("clear_placement_cursor")
 		return
 	if _is_workspace_view_transitioning():
 		active_stage_controller.call("clear_placement_cursor")

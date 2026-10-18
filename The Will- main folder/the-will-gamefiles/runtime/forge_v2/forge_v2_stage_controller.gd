@@ -4,8 +4,10 @@ class_name ForgeV2StageController
 signal authoring_state_changed(state)
 signal material_body_preview_changed(state)
 signal placement_cursor_changed(local_position: Vector3, is_valid: bool, radius_meters: float)
+signal retained_spline_change_finished(result: Dictionary)
 
 const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
+const ForgeV2EditorSettingsScript = preload("res://core/models/forge_v2_editor_settings_state.gd")
 const ForgeV2ActionHistoryScript = preload(
 	"res://runtime/forge_v2/forge_v2_action_history.gd"
 )
@@ -31,6 +33,7 @@ const ACTION_KIND_DOCUMENT := &"document_state"
 const ACTION_KIND_PENDING_BODY := &"pending_body"
 const ACTION_KIND_MATERIAL_LAYER := &"material_layer"
 const ACTION_KIND_PROTECTED_HANDLE := &"protected_handle"
+const ACTION_KIND_RETAINED_SPLINE := &"retained_spline_replace"
 const ACTION_DOCUMENT_SNAPSHOT_SCHEMA_ID := &"forge_v2_action_document_snapshot"
 const ACTION_HANDLE_SNAPSHOT_SCHEMA_ID := &"forge_v2_action_handle_snapshot"
 const ACTION_TRANSIENT_DELTA_SCHEMA_ID := &"forge_v2_action_transient_delta"
@@ -44,6 +47,7 @@ var _prepared_grip_target_wrapper: Resource
 
 var active_authoring_state: Resource = null
 var workspace_contract = null
+var editor_settings: Resource = null
 var placement_cursor_local_position: Vector3 = Vector3.ZERO
 var placement_cursor_valid: bool = false
 var active_placement_body_id: StringName = StringName()
@@ -66,6 +70,12 @@ var _handle_change_before_document_snapshot: Dictionary = {}
 var _handle_change_pending_global_action := false
 var _active_editor_action_transaction: Dictionary = {}
 var _action_replay_active := false
+var _retained_spline_change_provider: Callable = Callable()
+var _retained_edit_action_history = ForgeV2ActionHistoryScript.new(ACTION_HISTORY_UNBOUNDED)
+var _retained_change_request: Dictionary = {}
+var _retained_change_request_generation := 0
+var _retained_undo_batch_release_pending := false
+var last_retained_spline_change_result: Dictionary = {}
 var _material_action_context_by_body_id: Dictionary = {}
 var last_material_body_finish_result: Dictionary = {
 	"status": &"none",
@@ -84,8 +94,14 @@ func _ready() -> void:
 func ensure_workspace_contract():
 	if workspace_contract == null:
 		workspace_contract = ForgeV2WorkspaceContractScript.new()
+		workspace_contract.freehand_smoothing_steps = int(_ensure_editor_settings().get("freehand_smoothing_steps"))
 		workspace_contract.normalize()
 	return workspace_contract
+
+func _ensure_editor_settings() -> Resource:
+	if editor_settings == null:
+		editor_settings = ForgeV2EditorSettingsScript.load_or_create()
+	return editor_settings
 
 func get_workspace_contract():
 	return ensure_workspace_contract()
@@ -96,10 +112,14 @@ func get_workspace_contract_summary() -> Dictionary:
 func get_freehand_smoothing_steps() -> int:
 	return int(ensure_workspace_contract().get("freehand_smoothing_steps"))
 
-func set_freehand_smoothing_steps(step_count: int) -> void:
+func set_freehand_smoothing_steps(step_count: int) -> bool:
 	var contract = ensure_workspace_contract()
 	contract.call("set_freehand_smoothing_steps", step_count)
+	var settings := _ensure_editor_settings()
+	settings.set("freehand_smoothing_steps", contract.get("freehand_smoothing_steps"))
+	var saved := bool(settings.call("persist"))
 	_emit_state_changed()
+	return saved
 
 func ensure_authoring_state(project_name: String = "") -> Resource:
 	var created_state := false
@@ -131,6 +151,131 @@ func get_active_authoring_state() -> Resource:
 
 func get_active_saved_wip_id() -> StringName:
 	return active_saved_wip_id
+
+
+func set_retained_spline_change_provider(provider: Callable) -> void:
+	_retained_spline_change_provider = provider
+
+
+func clear_retained_spline_change_provider(provider: Callable) -> void:
+	if _retained_spline_change_provider != provider:
+		return
+	_retained_spline_change_provider = Callable()
+	if is_retained_spline_change_pending():
+		_complete_retained_spline_change(false, {"reason": &"presenter_disconnected"},
+			_retained_change_request_generation)
+
+
+func is_retained_spline_change_active() -> bool:
+	return active_authoring_state != null and bool(active_authoring_state.call(
+		"is_retained_spline_change_active"))
+
+
+func is_retained_spline_change_pending() -> bool:
+	return not _retained_change_request.is_empty()
+
+
+func begin_retained_spline_change(body_id: StringName) -> bool:
+	if _is_action_replay_blocked() or is_retained_spline_change_active():
+		return false
+	var state := ensure_authoring_state(default_project_name)
+	var result := state.call("begin_retained_spline_change", body_id) as Dictionary
+	last_retained_spline_change_result = result
+	if not bool(result.get("ok", false)):
+		return false
+	_retained_edit_action_history.call("clear")
+	placement_cursor_valid = false
+	_emit_state_changed()
+	_emit_placement_cursor_changed()
+	return true
+
+
+func cancel_retained_spline_change() -> bool:
+	if is_retained_spline_change_pending() or not is_retained_spline_change_active():
+		return false
+	end_action_history_undo_batch()
+	if not bool(active_authoring_state.call("cancel_retained_spline_change")):
+		return false
+	_retained_edit_action_history.call("clear")
+	last_retained_spline_change_result = {"ok": true, "status": &"cancelled"}
+	_emit_state_changed()
+	_emit_placement_cursor_changed()
+	return true
+
+
+func apply_retained_spline_change() -> bool:
+	if _is_action_replay_blocked() or not is_retained_spline_change_active():
+		return false
+	end_action_history_undo_batch()
+	var candidate := active_authoring_state.call(
+		"build_retained_spline_change_candidate") as Dictionary
+	if not bool(candidate.get("ok", false)):
+		last_retained_spline_change_result = candidate
+		return false
+	return _request_retained_spline_publication(candidate, {"reason": &"apply"})
+
+
+func _request_retained_spline_publication(candidate: Dictionary, context: Dictionary) -> bool:
+	if is_retained_spline_change_pending() or not _retained_spline_change_provider.is_valid():
+		last_retained_spline_change_result = {"ok": false, "status": &"failed",
+			"reason": &"retained_edit_presenter_unavailable"}
+		return false
+	_retained_change_request_generation += 1
+	var generation := _retained_change_request_generation
+	_retained_change_request = context.duplicate()
+	_retained_change_request["candidate"] = candidate
+	_retained_change_request["state"] = active_authoring_state
+	last_retained_spline_change_result = {"ok": true, "status": &"pending"}
+	var accepted := bool(_retained_spline_change_provider.call(candidate,
+		_complete_retained_spline_change.bind(generation)))
+	if not accepted and is_retained_spline_change_pending():
+		_complete_retained_spline_change(false, {"reason": &"retained_edit_request_rejected"}, generation)
+	if accepted and is_retained_spline_change_pending():
+		_emit_state_changed()
+	return accepted
+
+
+## The presenter invokes this only after the candidate state, mesh, collider and
+## backend have been installed together. Failed candidates never move history.
+func _complete_retained_spline_change(success: bool, result: Dictionary, generation: int) -> void:
+	if generation != _retained_change_request_generation or _retained_change_request.is_empty():
+		return
+	var request := _retained_change_request
+	_retained_change_request = {}
+	var candidate := request.get("candidate", {}) as Dictionary
+	var history = request.get("history")
+	if request.get("state") != active_authoring_state:
+		success = false
+		result = {"reason": &"authoring_state_changed"}
+	if success:
+		match StringName(request.get("reason", StringName())):
+			&"apply":
+				_retained_edit_action_history.call("clear")
+				_push_action_record_to(_action_history, {
+					"kind": ACTION_KIND_RETAINED_SPLINE, "label": "Edit Spline",
+					"payload": {
+						"body_id": candidate.get("source_body_id", StringName()),
+						"layer_id": candidate.get("source_layer_id", StringName()),
+						"action_body_ids": [candidate.get("source_body_id", StringName())],
+						"before": candidate.get("before_source"),
+						"after": candidate.get("after_source"),
+					},
+				})
+			&"undo", &"redo":
+				if history != null:
+					success = bool(history.call("confirm_undo" if request.reason == &"undo" else "confirm_redo_batch"))
+	if not success and history != null:
+		history.call("cancel_pending_confirmation")
+	last_retained_spline_change_result = result.duplicate(true)
+	last_retained_spline_change_result.erase("candidate")
+	last_retained_spline_change_result["ok"] = success
+	last_retained_spline_change_result["status"] = &"succeeded" if success else &"failed"
+	if _retained_undo_batch_release_pending:
+		_retained_undo_batch_release_pending = false
+		end_action_history_undo_batch()
+	_emit_state_changed()
+	_emit_placement_cursor_changed()
+	retained_spline_change_finished.emit(last_retained_spline_change_result)
 
 func set_grip_target_wrapper_export_provider(provider: Callable) -> void:
 	_grip_target_wrapper_export_provider = provider
@@ -180,6 +325,17 @@ func prepare_pending_work_for_save(
 	timeout_msec: int = SAVE_PREPARATION_TIMEOUT_MSEC,
 	progress_callback: Callable = Callable()
 ) -> Dictionary:
+	if is_retained_spline_change_active() and not is_retained_spline_change_pending():
+		if not apply_retained_spline_change():
+			return {"ok": false, "reason": &"retained_edit_apply_failed"}
+	if is_retained_spline_change_pending():
+		var retained_deadline := Time.get_ticks_msec() + maxi(timeout_msec, 1)
+		while is_retained_spline_change_pending() and is_inside_tree():
+			if Time.get_ticks_msec() > retained_deadline:
+				return {"ok": false, "reason": &"retained_edit_save_timeout"}
+			await get_tree().process_frame
+		if not bool(last_retained_spline_change_result.get("ok", false)):
+			return {"ok": false, "reason": &"retained_edit_apply_failed"}
 	var state: Resource = ensure_authoring_state(default_project_name)
 	if state == null:
 		return {
@@ -648,6 +804,8 @@ func load_saved_wip(
 func _prepare_active_authoring_state_for_replacement(
 	failure_reason: StringName
 ) -> bool:
+	if is_retained_spline_change_active() or is_retained_spline_change_pending():
+		return false
 	if not _deferred_material_body_commit_queue.is_empty():
 		return false
 	if (
@@ -698,32 +856,44 @@ func _bounded_state_is_restore_ready_without_live_backend(
 	)
 
 func set_builder_path_id(builder_path_id: StringName) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.set_builder_path(builder_path_id)
 	_emit_state_changed()
 
 func set_builder_component_id(builder_component_id: StringName) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.set_builder_component(builder_component_id)
 	_emit_state_changed()
 
 func set_active_operation_mode(operation_mode: StringName) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.set_active_operation_mode(operation_mode)
 	_emit_state_changed()
 
 func set_placement_policy(placement_policy: StringName) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.set_placement_policy(placement_policy)
 	_emit_state_changed()
 
 func set_active_primitive_id(primitive_id: StringName) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.set_active_primitive_id(primitive_id)
 	_emit_state_changed()
 	_emit_placement_cursor_changed()
 
 func select_active_saved_basic_profile(profile_data: Dictionary) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var changed := bool(state.call(
 		"select_active_saved_basic_profile",
@@ -735,16 +905,36 @@ func select_active_saved_basic_profile(profile_data: Dictionary) -> bool:
 	return changed
 
 func set_active_tool_id(tool_id: StringName) -> void:
+	if is_retained_spline_change_pending():
+		return
 	active_placement_body_id = StringName()
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.set_active_tool_id(tool_id)
 	_emit_state_changed()
 	_emit_placement_cursor_changed()
 
+func can_select_tool_for_authoring() -> bool:
+	return not _is_material_or_async_action_busy()
+
+func select_tool_for_authoring(tool_id: StringName) -> bool:
+	# Plain selection after the UI resolves unfinished work. Reopening an existing
+	# Handle remains the explicit activate_handle_tool workflow.
+	if not can_select_tool_for_authoring() or is_retained_spline_change_active():
+		return false
+	if tool_id not in [
+		ForgeV2AuthoringStateScript.TOOL_VOLUME_STROKE,
+		ForgeV2AuthoringStateScript.TOOL_SPLINE_LINE,
+		ForgeV2AuthoringStateScript.TOOL_HANDLES,
+		ForgeV2AuthoringStateScript.TOOL_DETAILING_BRUSH,
+	]:
+		return false
+	set_active_tool_id(tool_id)
+	return true
+
 func activate_handle_tool(
 	handle_path_mode_id: StringName = StringName()
 ) -> Dictionary:
-	if _is_material_or_async_action_busy():
+	if _is_material_or_async_action_busy() or is_retained_spline_change_active():
 		return {
 			"ok": false,
 			"reason": &"material_or_async_action_busy",
@@ -811,6 +1001,8 @@ func activate_handle_tool(
 	return result
 
 func set_active_handle_path_mode_id(handle_path_mode_id: StringName) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	if not state.has_method("set_active_handle_path_mode_id"):
 		return false
@@ -826,11 +1018,15 @@ func set_active_handle_path_mode_id(handle_path_mode_id: StringName) -> bool:
 	return changed
 
 func set_active_profile_id(profile_id: StringName) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.set_active_profile_id(profile_id)
 	_emit_state_changed()
 
 func set_active_profile_display_name(display_name: String) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	state.call("set_active_profile_display_name", display_name)
@@ -838,6 +1034,8 @@ func set_active_profile_display_name(display_name: String) -> void:
 	_emit_state_changed()
 
 func reset_active_handle_profile_builder() -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	state.call("reset_active_handle_profile_builder")
@@ -845,6 +1043,8 @@ func reset_active_handle_profile_builder() -> void:
 	_emit_state_changed()
 
 func reset_active_basic_profile_builder() -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	state.call("reset_active_basic_profile_builder")
@@ -852,6 +1052,8 @@ func reset_active_basic_profile_builder() -> void:
 	_emit_state_changed()
 
 func set_active_profile_width_meters(width_meters: float) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_profile_width_meters(width_meters)
@@ -859,6 +1061,8 @@ func set_active_profile_width_meters(width_meters: float) -> void:
 	_emit_state_changed()
 
 func set_active_profile_height_meters(height_meters: float) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_profile_height_meters(height_meters)
@@ -866,6 +1070,8 @@ func set_active_profile_height_meters(height_meters: float) -> void:
 	_emit_state_changed()
 
 func set_active_profile_anchor_x_meters(anchor_x_meters: float) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_profile_anchor_x_meters(anchor_x_meters)
@@ -873,6 +1079,8 @@ func set_active_profile_anchor_x_meters(anchor_x_meters: float) -> void:
 	_emit_state_changed()
 
 func set_active_profile_anchor_y_meters(anchor_y_meters: float) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_profile_anchor_y_meters(anchor_y_meters)
@@ -880,6 +1088,8 @@ func set_active_profile_anchor_y_meters(anchor_y_meters: float) -> void:
 	_emit_state_changed()
 
 func set_active_profile_anchor_2d_meters(anchor_position_meters: Vector2) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	state.call("set_active_profile_anchor_2d_meters", anchor_position_meters)
@@ -887,6 +1097,8 @@ func set_active_profile_anchor_2d_meters(anchor_position_meters: Vector2) -> voi
 	_emit_state_changed()
 
 func reset_active_profile_anchor_to_center() -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	state.call("reset_active_profile_anchor_to_center")
@@ -894,6 +1106,8 @@ func reset_active_profile_anchor_to_center() -> void:
 	_emit_state_changed()
 
 func set_active_profile_rotation_degrees(rotation_degrees: float) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_profile_rotation_degrees(rotation_degrees)
@@ -901,6 +1115,8 @@ func set_active_profile_rotation_degrees(rotation_degrees: float) -> void:
 	_emit_state_changed()
 
 func set_active_handle_face_count(face_count: int) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_handle_face_count(face_count)
@@ -908,6 +1124,8 @@ func set_active_handle_face_count(face_count: int) -> void:
 	_emit_state_changed()
 
 func set_active_handle_rounding_enabled(is_enabled: bool) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_handle_rounding_enabled(is_enabled)
@@ -915,6 +1133,8 @@ func set_active_handle_rounding_enabled(is_enabled: bool) -> void:
 	_emit_state_changed()
 
 func set_active_handle_corner_radius_meters(corner_radius_meters: float) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	state.set_active_handle_corner_radius_meters(corner_radius_meters)
@@ -922,6 +1142,8 @@ func set_active_handle_corner_radius_meters(corner_radius_meters: float) -> void
 	_emit_state_changed()
 
 func set_active_handle_control_point_2d_meters(point_index: int, point_position_meters: Vector2) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call("set_active_handle_control_point_2d_meters", point_index, point_position_meters))
@@ -931,11 +1153,15 @@ func set_active_handle_control_point_2d_meters(point_index: int, point_position_
 	return changed
 
 func set_active_handle_grid_snapping_enabled(is_enabled: bool) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.call("set_active_handle_grid_snapping_enabled", is_enabled)
 	_emit_state_changed()
 
 func set_active_basic_control_point_2d_meters(point_index: int, point_position_meters: Vector2) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call("set_active_basic_control_point_2d_meters", point_index, point_position_meters))
@@ -961,6 +1187,8 @@ func insert_active_basic_control_point_on_segment(
 	return new_corner_id
 
 func remove_active_basic_control_point(corner_id: StringName) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call("remove_active_basic_control_point", corner_id))
@@ -970,6 +1198,8 @@ func remove_active_basic_control_point(corner_id: StringName) -> bool:
 	return changed
 
 func add_active_basic_corner_fillet(corner_id: StringName) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call("add_active_basic_corner_fillet", corner_id))
@@ -982,6 +1212,8 @@ func set_active_basic_corner_fillet_radius(
 	corner_id: StringName,
 	radius_meters: float
 ) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call(
@@ -995,6 +1227,8 @@ func set_active_basic_corner_fillet_radius(
 	return changed
 
 func remove_active_basic_corner_fillet(corner_id: StringName) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call("remove_active_basic_corner_fillet", corner_id))
@@ -1011,11 +1245,15 @@ func get_active_basic_corner_fillet_settings(corner_id: StringName) -> Dictionar
 	) as Dictionary
 
 func set_active_basic_grid_snapping_enabled(is_enabled: bool) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.call("set_active_basic_grid_snapping_enabled", is_enabled)
 	_emit_state_changed()
 
 func apply_tool_profile_preset(profile_data: Dictionary) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call("apply_tool_profile_preset", profile_data))
@@ -1030,17 +1268,23 @@ func build_active_tool_profile_preset_data(requested_name: String = "") -> Dicti
 	return state.call("build_active_tool_profile_preset_data", requested_name) as Dictionary
 
 func set_active_material_variant_id(material_variant_id: StringName) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.set_active_material_variant_id(material_variant_id)
 	_emit_state_changed()
 
 func adjust_brush_radius_steps(step_count: int) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.adjust_brush_radius_steps(step_count)
 	_emit_state_changed()
 	_emit_placement_cursor_changed()
 
 func adjust_amount_ratio_steps(step_count: int) -> void:
+	if is_retained_spline_change_pending():
+		return
 	var state: Resource = ensure_authoring_state(default_project_name)
 	state.adjust_amount_ratio_steps(step_count)
 	_emit_state_changed()
@@ -1049,6 +1293,8 @@ func append_empty_volume_stroke() -> Resource:
 	return append_empty_material_body()
 
 func append_empty_material_body() -> Resource:
+	if is_retained_spline_change_active() or is_retained_spline_change_pending():
+		return null
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_document_action_snapshot()
 	var body: Resource = state.append_empty_material_body()
@@ -1061,6 +1307,8 @@ func append_sample_volume_stroke() -> Resource:
 	return append_sample_material_body()
 
 func append_sample_material_body() -> Resource:
+	if is_retained_spline_change_active() or is_retained_spline_change_pending():
+		return null
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_document_action_snapshot()
 	var body: Resource = state.append_sample_material_body()
@@ -1070,6 +1318,8 @@ func append_sample_material_body() -> Resource:
 	return body
 
 func append_active_primitive_deposit() -> Array[Resource]:
+	if is_retained_spline_change_active() or is_retained_spline_change_pending():
+		return []
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_document_action_snapshot()
 	var bodies: Array[Resource] = state.append_active_primitive_deposit()
@@ -1094,6 +1344,8 @@ func append_point_material_body(
 	local_surface_normal: Vector3 = Vector3.FORWARD,
 	local_contact_direction: Vector3 = Vector3.ZERO
 ) -> Resource:
+	if is_retained_spline_change_active() or is_retained_spline_change_pending():
+		return null
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_document_action_snapshot()
 	var body: Resource = state.append_point_material_body(
@@ -1127,6 +1379,8 @@ func begin_material_body_path(
 	local_surface_normal: Vector3 = Vector3.FORWARD,
 	local_contact_direction: Vector3 = Vector3.ZERO
 ) -> StringName:
+	if is_retained_spline_change_active() or is_retained_spline_change_pending():
+		return StringName()
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	var body: Resource = state.append_point_material_body(
@@ -1502,6 +1756,8 @@ func append_spline_line_point(
 	local_position: Vector3,
 	local_surface_normal: Vector3 = Vector3.FORWARD
 ) -> int:
+	if is_retained_spline_change_pending():
+		return -1
 	active_placement_body_id = StringName()
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var before_point_count := (
@@ -1611,6 +1867,8 @@ func replace_detailing_brush_path_solution(
 	return changed
 
 func set_spline_line_point(point_index: int, local_position: Vector3) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var before_points := state.get("spline_line_points") as PackedVector3Array
 	var before_point_count := before_points.size()
@@ -1653,6 +1911,8 @@ func set_spline_line_point(point_index: int, local_position: Vector3) -> bool:
 	return changed
 
 func select_spline_line_point(point_index: int) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var changed: bool = bool(state.call("select_spline_line_point", point_index))
 	if changed:
@@ -1660,6 +1920,8 @@ func select_spline_line_point(point_index: int) -> bool:
 	return changed
 
 func select_next_spline_line_point(step_count: int = 1) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var changed := bool(state.call("select_next_spline_line_point", step_count))
 	if changed:
@@ -1670,6 +1932,8 @@ func set_spline_line_point_roll_degrees(
 	point_index: int,
 	value_degrees: float
 ) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_editor_transient_snapshot()
 	var changed := bool(state.call(
@@ -1698,6 +1962,10 @@ func finish_spline_line() -> bool:
 	return changed
 
 func cancel_spline_line() -> bool:
+	if is_retained_spline_change_pending():
+		return false
+	if is_retained_spline_change_active():
+		return cancel_retained_spline_change()
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var cancelling_handle_change := (
 		state.has_method("is_handle_change_active")
@@ -1716,6 +1984,10 @@ func cancel_spline_line() -> bool:
 	return changed
 
 func generate_spline_line_csg_noodle() -> bool:
+	if is_retained_spline_change_pending():
+		return false
+	if is_retained_spline_change_active():
+		return apply_retained_spline_change()
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_document_action_snapshot()
 	var changed: bool = bool(state.call("generate_spline_line_csg_noodle"))
@@ -1725,6 +1997,8 @@ func generate_spline_line_csg_noodle() -> bool:
 	return changed
 
 func generate_detailing_brush() -> bool:
+	if is_retained_spline_change_pending() or is_retained_spline_change_active():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var action_before := _capture_document_action_snapshot()
 	var changed := bool(state.call("generate_detailing_brush"))
@@ -1734,6 +2008,8 @@ func generate_detailing_brush() -> bool:
 	return changed
 
 func generate_profile_extrusion_from_spline() -> bool:
+	if is_retained_spline_change_pending() or is_retained_spline_change_active():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var applying_handle_change := (
 		state.has_method("is_handle_change_active")
@@ -1799,6 +2075,8 @@ func clear_pending_material_bodies() -> void:
 	_emit_state_changed()
 
 func commit_pending_material_bodies_as_layer() -> Resource:
+	if is_retained_spline_change_active() or is_retained_spline_change_pending():
+		return null
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var pending_count := int(state.call("get_pending_material_body_count"))
 	var pending_body_ids := _get_pending_material_body_ids(state)
@@ -1962,6 +2240,11 @@ func begin_action_history_undo_batch() -> bool:
 func end_action_history_undo_batch() -> bool:
 	if _active_undo_batch_history == null:
 		return false
+	if is_retained_spline_change_pending():
+		# Releasing Ctrl while an asynchronous Undo is baking must not invalidate
+		# its outstanding history confirmation. Seal the gesture after publication.
+		_retained_undo_batch_release_pending = true
+		return true
 	var history = _active_undo_batch_history
 	_active_undo_batch_history = null
 	var ended := bool(history.call("end_undo_batch"))
@@ -1979,6 +2262,8 @@ func undo_latest_action() -> bool:
 	var record := history.call("peek_undo") as Dictionary
 	if record.is_empty():
 		return false
+	if StringName(record.get("kind", StringName())) == ACTION_KIND_RETAINED_SPLINE:
+		return _request_retained_history_replay([record], false, history)
 	_action_replay_active = true
 	var changed := _replay_action_record(record, false)
 	_action_replay_active = false
@@ -1999,6 +2284,9 @@ func redo_latest_action() -> bool:
 	var records := history.call("peek_redo_batch") as Array[Dictionary]
 	if records.is_empty():
 		return false
+	for record: Dictionary in records:
+		if StringName(record.get("kind", StringName())) == ACTION_KIND_RETAINED_SPLINE:
+			return _request_retained_history_replay(records, true, history)
 	_action_replay_active = true
 	var replayed_records: Array[Dictionary] = []
 	var changed := true
@@ -2030,6 +2318,42 @@ func redo_latest_action() -> bool:
 	_emit_state_changed()
 	_emit_placement_cursor_changed()
 	return true
+
+
+## Stage a whole mixed held-Undo gesture off-document. Replaying ordinary layer
+## records and replacement records separately on the live engine would expose a
+## half-replayed document if a later operand failed. The independent state is
+## bounded by the same checkpoint and five retained slots as the live document.
+func _request_retained_history_replay(records: Array[Dictionary], use_after: bool, history) -> bool:
+	var state := ensure_authoring_state(default_project_name)
+	var replay_state := state.call("create_retained_history_replay_state") as Resource
+	if replay_state == null:
+		history.call("cancel_pending_confirmation")
+		return false
+	var replay_controller = (load("res://runtime/forge_v2/forge_v2_stage_controller.gd") as Script).new()
+	replay_controller.active_authoring_state = replay_state
+	replay_controller._action_replay_active = true
+	var replayed := true
+	for record: Dictionary in records:
+		if not replay_controller._replay_action_record(record, use_after):
+			replayed = false
+			break
+	replay_controller.free()
+	if not replayed:
+		history.call("cancel_pending_confirmation")
+		last_retained_spline_change_result = {"ok": false, "status": &"failed",
+			"reason": &"retained_history_replay_failed"}
+		return false
+	var reason := &"redo" if use_after else &"undo"
+	var candidate := state.call("build_retained_history_install_candidate", replay_state, reason) as Dictionary
+	if not bool(candidate.get("ok", false)):
+		history.call("cancel_pending_confirmation")
+		last_retained_spline_change_result = candidate
+		return false
+	var accepted := _request_retained_spline_publication(candidate, {"reason": reason, "history": history})
+	if not accepted:
+		history.call("cancel_pending_confirmation")
+	return accepted
 
 
 ## A held Undo is one user gesture, so Redo replays its records as one batch.
@@ -2065,7 +2389,7 @@ func _rollback_batched_action_records(records: Array[Dictionary]) -> bool:
 # action API above. A successful native mutation invalidates the action journal
 # so the two histories can never silently disagree about what is latest.
 func undo_latest_layer() -> bool:
-	if not _deferred_material_body_commit_queue.is_empty():
+	if not _deferred_material_body_commit_queue.is_empty() or is_retained_spline_change_active() or is_retained_spline_change_pending():
 		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var changed: bool = bool(state.call("undo_latest_layer"))
@@ -2076,7 +2400,7 @@ func undo_latest_layer() -> bool:
 
 
 func redo_latest_layer() -> bool:
-	if not _deferred_material_body_commit_queue.is_empty():
+	if not _deferred_material_body_commit_queue.is_empty() or is_retained_spline_change_active() or is_retained_spline_change_pending():
 		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var changed: bool = bool(state.call("redo_latest_layer"))
@@ -2144,19 +2468,22 @@ func _advance_action_history_checkpoint_floor(transition: Dictionary) -> void:
 	var undo_records := _action_history.call(
 		"get_undo_records"
 	) as Array[Dictionary]
+	var last_dependent_index := -1
 	for record_index in range(undo_records.size()):
 		var record := undo_records[record_index] as Dictionary
-		if StringName(record.get("kind", StringName())) != ACTION_KIND_MATERIAL_LAYER:
+		if StringName(record.get("kind", StringName())) not in [ACTION_KIND_MATERIAL_LAYER, ACTION_KIND_RETAINED_SPLINE]:
 			continue
 		var payload := record.get("payload", {}) as Dictionary
 		if StringName(payload.get("layer_id", StringName())) != promoted_layer_id:
 			continue
+		last_dependent_index = record_index
+	if last_dependent_index >= 0:
 		if bool(_action_history.call(
 			"discard_undo_prefix_through",
-			record_index,
+			last_dependent_index,
 			true
 		)):
-			_action_history_checkpoint_prune_count += record_index + 1
+			_action_history_checkpoint_prune_count += last_dependent_index + 1
 		return
 	# A loaded project can promote a pre-session layer whose authored actions
 	# were intentionally not restored. In that valid case there is no journal
@@ -2250,6 +2577,7 @@ func get_action_history_summary() -> Dictionary:
 	var active_history = _get_active_action_history()
 	var summary := active_history.call("get_status_summary") as Dictionary
 	summary["scope"] = (
+		&"retained_spline_edit" if active_history == _retained_edit_action_history else
 		&"handle_edit"
 		if active_history == _handle_edit_action_history
 		else &"forge_session"
@@ -2267,6 +2595,10 @@ func _clear_action_session() -> void:
 	_active_undo_batch_history = null
 	_action_history.call("clear")
 	_handle_edit_action_history.call("clear")
+	_retained_edit_action_history.call("clear")
+	_retained_change_request_generation += 1
+	_retained_change_request = {}
+	_retained_undo_batch_release_pending = false
 	_handle_change_before_document_snapshot = {}
 	_handle_change_pending_global_action = false
 	_active_editor_action_transaction = {}
@@ -2278,6 +2610,8 @@ func _clear_action_session() -> void:
 
 func _get_active_action_history():
 	var state := active_authoring_state
+	if is_retained_spline_change_active():
+		return _retained_edit_action_history
 	if (
 		state != null
 		and state.has_method("is_handle_change_active")
@@ -2294,6 +2628,8 @@ func _get_action_replay_history():
 
 
 func _is_material_or_async_action_busy() -> bool:
+	if is_retained_spline_change_pending():
+		return true
 	if active_placement_body_id != StringName():
 		return true
 	if not _deferred_material_body_commit_queue.is_empty():
@@ -2430,6 +2766,11 @@ func _restore_handle_action_snapshot(snapshot: Dictionary) -> bool:
 	var rollback := _capture_handle_action_snapshot()
 	if rollback.is_empty():
 		return false
+	normalized_snapshot["transient"] = _preserve_unrelated_tool_profile_memory(
+		normalized_snapshot.get("transient", {}) as Dictionary,
+		rollback.get("transient", {}) as Dictionary,
+		ForgeV2AuthoringStateScript.TOOL_HANDLES
+	)
 	if _apply_handle_action_snapshot(normalized_snapshot):
 		return true
 	_apply_handle_action_snapshot(rollback)
@@ -2498,7 +2839,12 @@ func _restore_document_action_snapshot(snapshot: Dictionary) -> bool:
 	var rollback := _capture_document_action_snapshot()
 	if rollback.is_empty():
 		return false
-	if _apply_document_action_snapshot(snapshot):
+	var replay_snapshot := snapshot.duplicate(true)
+	replay_snapshot["transient"] = _preserve_unrelated_tool_profile_memory(
+		snapshot.get("transient", {}) as Dictionary,
+		rollback.get("transient", {}) as Dictionary
+	)
+	if _apply_document_action_snapshot(replay_snapshot):
 		return true
 	_apply_document_action_snapshot(rollback)
 	return false
@@ -2539,6 +2885,36 @@ func _apply_document_action_snapshot(snapshot: Dictionary) -> bool:
 			return false
 	var transient := snapshot.get("transient", {}) as Dictionary
 	return bool(state.call("restore_editor_transient_snapshot", transient))
+
+
+func _preserve_unrelated_tool_profile_memory(
+	target_snapshot: Dictionary,
+	current_snapshot: Dictionary,
+	profile_owner: StringName = StringName()
+) -> Dictionary:
+	if target_snapshot.is_empty():
+		return {}
+	var target := target_snapshot.duplicate(true)
+	var active_tool_id := StringName(target.get("active_tool_id", StringName()))
+	if profile_owner == StringName():
+		profile_owner = active_tool_id
+	var target_profiles := target.get("tool_profile_memory", {}) as Dictionary
+	var current_profiles := current_snapshot.get("tool_profile_memory", {}) as Dictionary
+	# Whole-document actions still restore their own tool and path, but ordinary
+	# later selections on unrelated tools are not part of that authoring action.
+	for tool_id: Variant in current_profiles:
+		if StringName(tool_id) != profile_owner:
+			target_profiles[tool_id] = _duplicate_action_value(current_profiles[tool_id])
+	target["tool_profile_memory"] = target_profiles
+	# A Handle change can restore the tool that was active before Handle editing.
+	# Keep its flat active fields consistent with the preserved profile memory.
+	if active_tool_id != profile_owner and current_profiles.has(active_tool_id):
+		for property_name: Variant in current_profiles[active_tool_id]:
+			if target.has(property_name):
+				target[property_name] = _duplicate_action_value(
+					current_profiles[active_tool_id][property_name]
+				)
+	return target
 
 
 func _push_action_record_to(history, record: Dictionary) -> bool:
@@ -2620,6 +2996,10 @@ func _build_transient_action_delta(
 	):
 		return {}
 	var changes: Dictionary = {}
+	var profile_fields: Dictionary = {}
+	if before.get("active_tool_id") == after.get("active_tool_id"):
+		var after_memory := after.get("tool_profile_memory", {}) as Dictionary
+		profile_fields = after_memory.get(after.get("active_tool_id"), {}) as Dictionary
 	for key_variant: Variant in after.keys():
 		if not before.has(key_variant):
 			return {}
@@ -2627,7 +3007,17 @@ func _build_transient_action_delta(
 		var after_value: Variant = after.get(key_variant)
 		if before_value == after_value:
 			continue
-		if _action_delta_sequences_are_compatible(before_value, after_value):
+		if String(key_variant) == "tool_profile_memory":
+			var memory_change := _build_tool_profile_memory_change(
+				before_value as Dictionary, after_value as Dictionary
+			)
+			if not memory_change.is_empty():
+				changes[key_variant] = memory_change
+		elif profile_fields.has(key_variant):
+			# These fields are replayed through their owning tool's memory below.
+			# A later plain tool selection must not redirect an older profile edit.
+			continue
+		elif _action_delta_sequences_are_compatible(before_value, after_value):
 			changes[key_variant] = _build_action_sequence_splice(
 				before_value,
 				after_value
@@ -2641,6 +3031,26 @@ func _build_transient_action_delta(
 	if changes.is_empty():
 		return {}
 	return _make_transient_action_delta(changes)
+
+
+func _build_tool_profile_memory_change(before: Dictionary, after: Dictionary) -> Dictionary:
+	var tool_changes: Dictionary = {}
+	for tool_id: Variant in after:
+		var before_profile := before.get(tool_id, {}) as Dictionary
+		var after_profile := after.get(tool_id, {}) as Dictionary
+		var fields: Dictionary = {}
+		for field: Variant in after_profile:
+			if before_profile.get(field) == after_profile.get(field):
+				continue
+			fields[field] = {
+				"before": _duplicate_action_value(before_profile.get(field)),
+				"after": _duplicate_action_value(after_profile.get(field)),
+			}
+		if not fields.is_empty():
+			tool_changes[tool_id] = fields
+	if tool_changes.is_empty():
+		return {}
+	return {"mode": &"tool_profiles", "tools": tool_changes}
 
 
 func _record_known_transient_delta(
@@ -2805,11 +3215,29 @@ func _patch_transient_snapshot_with_delta(
 	var changes := delta.get("changes", {}) as Dictionary
 	if changes.is_empty():
 		return {"ok": false}
+	var changed_profile_tools: Array = []
 	for key_variant: Variant in changes.keys():
 		if not patched.has(key_variant):
 			return {"ok": false}
 		var change := changes.get(key_variant, {}) as Dictionary
 		var mode := StringName(change.get("mode", StringName()))
+		if mode == &"tool_profiles" and String(key_variant) == "tool_profile_memory":
+			var memory := patched.get(key_variant, {}) as Dictionary
+			var tool_changes := change.get("tools", {}) as Dictionary
+			for tool_id: Variant in tool_changes:
+				if not memory.get(tool_id) is Dictionary:
+					return {"ok": false}
+				var profile := memory[tool_id] as Dictionary
+				var fields := tool_changes[tool_id] as Dictionary
+				for field: Variant in fields:
+					var field_change := fields[field] as Dictionary
+					if profile.get(field) != field_change.get("before" if use_after else "after"):
+						return {"ok": false}
+					profile[field] = _duplicate_action_value(field_change.get(
+						"after" if use_after else "before"
+					))
+				changed_profile_tools.append(tool_id)
+			continue
 		if mode == &"replace":
 			var source_value: Variant = change.get(
 				"before" if use_after else "after"
@@ -2873,6 +3301,13 @@ func _patch_transient_snapshot_with_delta(
 		if typeof(rebuilt_sequence) != sequence_type:
 			return {"ok": false}
 		patched[key_variant] = rebuilt_sequence
+	var active_tool: Variant = patched.get("active_tool_id")
+	if changed_profile_tools.has(active_tool):
+		var memory := patched.get("tool_profile_memory", {}) as Dictionary
+		var active_profile := memory.get(active_tool, {}) as Dictionary
+		for field: Variant in active_profile:
+			if patched.has(field):
+				patched[field] = _duplicate_action_value(active_profile[field])
 	return {
 		"ok": true,
 		"snapshot": patched,
@@ -3121,6 +3556,15 @@ func _replay_action_record(record: Dictionary, use_after: bool) -> bool:
 	var payload := record.get("payload", {}) as Dictionary
 	var target_key := "after" if use_after else "before"
 	match kind:
+		ACTION_KIND_RETAINED_SPLINE:
+			# Only a staging controller uses this synchronous path. The player-facing
+			# journal routes replacement replay through candidate publication above.
+			var state := ensure_authoring_state(default_project_name)
+			var candidate := state.call("build_retained_spline_replacement_candidate",
+				StringName(payload.get("body_id", StringName())), payload.get(target_key) as Resource,
+				&"redo" if use_after else &"undo") as Dictionary
+			return bool(candidate.get("ok", false)) and bool(state.call(
+				"accept_retained_spline_change_candidate", candidate))
 		ACTION_KIND_TRANSIENT:
 			var delta := payload.get("delta", {}) as Dictionary
 			if not delta.is_empty():
@@ -3158,12 +3602,16 @@ func _replay_pending_body_action(payload: Dictionary, use_after: bool) -> bool:
 	if body_id == StringName():
 		return false
 	var rollback_transient := _capture_editor_transient_snapshot()
+	var target_transient := _preserve_unrelated_tool_profile_memory(
+		payload.get("after_transient" if use_after else "before_transient", {}) as Dictionary,
+		rollback_transient
+	)
 	if use_after:
 		if not bool(state.call("restore_pending_body_bundle", bundle)):
 			return false
 		if bool(state.call(
 			"restore_editor_transient_snapshot",
-			payload.get("after_transient", {}) as Dictionary
+			target_transient
 		)):
 			return true
 		state.call("remove_pending_body_bundle", body_id)
@@ -3173,7 +3621,7 @@ func _replay_pending_body_action(payload: Dictionary, use_after: bool) -> bool:
 		return false
 	if bool(state.call(
 		"restore_editor_transient_snapshot",
-		payload.get("before_transient", {}) as Dictionary
+		target_transient
 	)):
 		return true
 	state.call("restore_pending_body_bundle", bundle)
@@ -3197,10 +3645,10 @@ func _replay_material_layer_action(payload: Dictionary, use_after: bool) -> bool
 	))
 	if not layer_changed:
 		return false
-	var target_transient := payload.get(
-		"after_transient" if use_after else "before_transient",
-		{}
-	) as Dictionary
+	var target_transient := _preserve_unrelated_tool_profile_memory(
+		payload.get("after_transient" if use_after else "before_transient", {}) as Dictionary,
+		rollback_transient
+	)
 	if (
 		target_transient.is_empty()
 		or bool(state.call(
@@ -3487,6 +3935,8 @@ func _get_action_record_body_ids(record: Dictionary) -> Array[StringName]:
 	return record_ids
 
 func select_material_body_id(body_id: StringName) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var changed: bool = bool(state.select_material_body(body_id))
 	if changed:
@@ -3494,6 +3944,8 @@ func select_material_body_id(body_id: StringName) -> bool:
 	return changed
 
 func select_next_material_body(step_count: int = 1) -> bool:
+	if is_retained_spline_change_pending():
+		return false
 	var state: Resource = ensure_authoring_state(default_project_name)
 	var changed: bool = bool(state.select_next_material_body(step_count))
 	if changed:
@@ -3512,6 +3964,8 @@ func remove_selected_material_body() -> bool:
 	return changed
 
 func set_placement_cursor_local_position(local_position: Vector3, is_valid: bool = true) -> void:
+	if is_retained_spline_change_pending():
+		return
 	placement_cursor_local_position = local_position
 	placement_cursor_valid = is_valid
 	_emit_placement_cursor_changed()
@@ -3541,6 +3995,9 @@ func get_status_summary() -> Dictionary:
 	summary["action_redo_label"] = String(action_summary.get("redo_label", ""))
 	summary["can_undo_action"] = can_undo_action()
 	summary["can_redo_action"] = can_redo_action()
+	summary["retained_spline_change_active"] = is_retained_spline_change_active()
+	summary["retained_spline_change_pending"] = is_retained_spline_change_pending()
+	summary["retained_spline_change_result"] = last_retained_spline_change_result.duplicate(true)
 	return summary
 
 func get_builder_path_options() -> Array[Dictionary]:

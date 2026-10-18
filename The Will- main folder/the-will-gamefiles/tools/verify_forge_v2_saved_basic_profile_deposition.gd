@@ -1205,16 +1205,17 @@ func _init() -> void:
 
 	var spline_state: Resource = ForgeV2AuthoringStateScript.new()
 	spline_state.call("reset_new_draft", "Saved Basic Spline Verify")
+	# Profile selection belongs to each tool; configure Spline after activating it.
+	spline_state.call(
+		"set_active_tool_id",
+		ForgeV2AuthoringStateScript.TOOL_SPLINE_LINE
+	)
 	if not bool(spline_state.call(
 		"select_active_saved_basic_profile",
 		saved_profile
 	)):
 		_fail("saved Basic profile could not be selected for Spline Line")
 		return
-	spline_state.call(
-		"set_active_tool_id",
-		ForgeV2AuthoringStateScript.TOOL_SPLINE_LINE
-	)
 	spline_state.call(
 		"append_spline_line_point",
 		Vector3.ZERO,

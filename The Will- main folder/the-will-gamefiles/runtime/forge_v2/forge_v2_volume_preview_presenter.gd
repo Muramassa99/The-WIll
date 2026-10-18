@@ -17,6 +17,7 @@ const PrimaryGripHandleMeshPacketScript = preload(
 	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
 )
 const GripTargetWrapperBaker = preload("res://runtime/forge_v2/forge_v2_grip_target_wrapper_baker.gd")
+const RetainedSurfaceSelection = preload("res://runtime/forge_v2/forge_v2_retained_surface_selection.gd")
 
 const PREVIEW_TUBE_SIDES := 12
 const PREVIEW_SPHERE_RINGS := 6
@@ -59,6 +60,13 @@ const NATIVE_PROTECTED_HANDLE_BOOTSTRAP_NODE_NAME := (
 )
 
 var active_stage_controller: Node = null
+var retained_edit_selection = RetainedSurfaceSelection.new()
+var retained_edit_selection_enabled := false
+var retained_edit_cursor_suppressed := false
+var retained_edit_selection_generation := 0
+var retained_edit_selection_signature := ""
+var retained_edit_candidate_pending := false
+var retained_edit_candidate_generation := 0
 var preview_mesh_instance: MeshInstance3D = null
 var spline_preview_mesh_instance: MeshInstance3D = null
 var spline_roll_preview_mesh_instance: MeshInstance3D = null
@@ -288,6 +296,8 @@ func clear_stage_controller() -> bool:
 func _connect_stage_controller() -> void:
 	if active_stage_controller == null:
 		return
+	if active_stage_controller.has_method("set_retained_spline_change_provider"):
+		active_stage_controller.call("set_retained_spline_change_provider", Callable(self, "_provide_retained_spline_change"))
 	if active_stage_controller.has_method("set_grip_target_wrapper_export_provider"):
 		active_stage_controller.call("set_grip_target_wrapper_export_provider",
 			Callable(self, "_provide_grip_target_wrapper_export"))
@@ -316,6 +326,11 @@ func _connect_stage_controller() -> void:
 func _disconnect_stage_controller() -> void:
 	if active_stage_controller == null:
 		return
+	retained_edit_candidate_generation += 1
+	retained_edit_candidate_pending = false
+	set_retained_edit_selection_enabled(false)
+	if active_stage_controller.has_method("clear_retained_spline_change_provider"):
+		active_stage_controller.call("clear_retained_spline_change_provider", Callable(self, "_provide_retained_spline_change"))
 	if active_stage_controller.has_method("clear_grip_target_wrapper_export_provider"):
 		active_stage_controller.call("clear_grip_target_wrapper_export_provider",
 			Callable(self, "_provide_grip_target_wrapper_export"))
@@ -336,6 +351,394 @@ func _disconnect_stage_controller() -> void:
 
 func _provide_grip_target_wrapper_export(body: Resource, packet: Dictionary, config: Dictionary) -> Dictionary:
 	return await GripTargetWrapperBaker.new().bake(self, body, packet, config)
+
+
+func _provide_retained_spline_change(candidate: Dictionary, completion: Callable) -> bool:
+	if retained_edit_candidate_pending or native_static_publication_pending or not is_inside_tree():
+		return false
+	var state := _retained_edit_authoring_state()
+	if state == null or not bool(state.call("is_retained_spline_change_candidate_current", candidate)):
+		return false
+	retained_edit_candidate_pending = true
+	retained_edit_candidate_generation += 1
+	call_deferred("_prepare_retained_spline_change", candidate, completion,
+		retained_edit_candidate_generation, native_static_publication_generation)
+	return true
+
+
+func _retained_edit_authoring_state() -> Resource:
+	if active_stage_controller == null or not active_stage_controller.has_method("get_active_authoring_state"):
+		return null
+	return active_stage_controller.call("get_active_authoring_state") as Resource
+
+
+func _retained_candidate_is_current(candidate: Dictionary, generation: int, publication_generation: int) -> bool:
+	var state := _retained_edit_authoring_state()
+	return (state != null and generation == retained_edit_candidate_generation
+		and publication_generation == native_static_publication_generation
+		and bool(state.call("is_retained_spline_change_candidate_current", candidate)))
+
+
+func _prepare_retained_spline_change(candidate: Dictionary, completion: Callable, generation: int, publication_generation: int) -> void:
+	if not _retained_candidate_is_current(candidate, generation, publication_generation):
+		_finish_retained_candidate_failure(completion, generation, "retained_candidate_stale")
+		return
+	var descriptor: Dictionary = (candidate.get("candidate_descriptor", {}) as Dictionary).duplicate()
+	var active_bodies: Array = descriptor.get("active_tail_bodies", [])
+	var redo_bodies: Array = descriptor.get("redo_timeline_bodies", [])
+	var timeline: Array = active_bodies.duplicate()
+	timeline.append_array(redo_bodies)
+	if timeline.size() > BOUNDED_HISTORY_WINDOW_CAPACITY or timeline.is_empty():
+		_finish_retained_candidate_failure(completion, generation, "retained_candidate_tail_invalid")
+		return
+	var checkpoint_count := _resolve_bounded_checkpoint_operation_count(descriptor)
+	var checkpoint_packet := _resolve_bounded_checkpoint_packet(descriptor)
+	if checkpoint_count > 0 and not _bounded_checkpoint_packet_is_materialized(checkpoint_packet, checkpoint_count):
+		if native_static_manifold_backend == null:
+			_finish_retained_candidate_failure(completion, generation, "retained_checkpoint_backend_missing")
+			return
+		var exported := native_static_manifold_backend.call("export_checkpoint_mesh") as Dictionary
+		if not _native_checkpoint_export_is_valid(exported, checkpoint_count, native_static_expected_revision):
+			_finish_retained_candidate_failure(completion, generation, "retained_checkpoint_export_invalid")
+			return
+		checkpoint_packet = exported
+		descriptor["checkpoint_packet"] = exported
+	if checkpoint_count > 0:
+		# Native double-precision Boolean output can collapse a zero-area facet
+		# when exported as Godot Vector3. Remove only exact degeneracies before
+		# re-import; native Manifold still certifies the resulting closed mesh.
+		var cleaned := _clean_retained_checkpoint_packet(checkpoint_packet)
+		if not bool(cleaned.get("ok", false)):
+			_finish_retained_candidate_failure(completion, generation, "retained_checkpoint_flatten_failed")
+			return
+		checkpoint_packet["vertices"] = cleaned["vertices"]
+		checkpoint_packet["indices"] = cleaned["indices"]
+	var expected_material := _resolve_bounded_material_variant_id(descriptor)
+	for body: Resource in timeline:
+		var validation := _validate_native_static_body(body, expected_material)
+		if not bool(validation.get("ok", false)):
+			_finish_retained_candidate_failure(completion, generation, String(validation.get("reason", "retained_operand_ineligible")))
+			return
+		if expected_material == StringName():
+			expected_material = StringName(body.get("material_variant_id"))
+	var packets: Array[Dictionary] = []
+	var operands_ready := false
+	for _frame in range(NATIVE_CAPSULE_OPERAND_BAKE_FRAME_LIMIT + 2):
+		packets.clear()
+		operands_ready = true
+		for body: Resource in timeline:
+			var packet := _build_native_static_operand_packet(body)
+			packets.append(packet)
+			if bool(packet.get("pending", false)):
+				operands_ready = false
+				# Operand baking is preparation, never an extra visible body.
+				var pending: Dictionary = native_capsule_operand_pending.get(packet.get("signature", ""), {})
+				var operand_node := pending.get("node") as Node3D
+				if operand_node != null:
+					operand_node.visible = false
+			elif not bool(packet.get("ok", false)):
+				_finish_retained_candidate_failure(completion, generation, String(packet.get("reason", "retained_operand_failed")))
+				return
+		if operands_ready:
+			break
+		await get_tree().process_frame
+		if not _retained_candidate_is_current(candidate, generation, publication_generation):
+			_finish_retained_candidate_failure(completion, generation, "retained_candidate_stale")
+			return
+	if not operands_ready:
+		_finish_retained_candidate_failure(completion, generation, "retained_operand_readiness_failed")
+		return
+	var backend := ClassDB.instantiate(&"ForgeV2ManifoldBoolean") as Object if ClassDB.class_exists(&"ForgeV2ManifoldBoolean") else null
+	if backend == null:
+		_finish_retained_candidate_failure(completion, generation, "retained_backend_unavailable")
+		return
+	var history := backend.call("set_history_window_enabled", true) as Dictionary
+	if not bool(history.get("ok", false)) or int(history.get("history_window_capacity", 0)) != BOUNDED_HISTORY_WINDOW_CAPACITY:
+		_finish_retained_candidate_failure(completion, generation, "retained_backend_history_failed")
+		return
+	var operations: Array[Dictionary] = []
+	var start_index := 0
+	if checkpoint_count > 0:
+		operations.append({"method": &"reset_checkpoint_mesh", "arguments": [checkpoint_packet.get("vertices"), checkpoint_packet.get("indices"), checkpoint_count]})
+	else:
+		operations.append({"method": &"reset_mesh", "arguments": [packets[0].get("vertices"), packets[0].get("indices")]})
+		start_index = 1
+	for index in range(start_index, packets.size()):
+		operations.append({"method": &"add_mesh", "arguments": [packets[index].get("vertices"), packets[index].get("indices")]})
+	for _redo_body: Resource in redo_bodies:
+		operations.append({"method": &"undo_state", "arguments": []})
+	var revision := 0
+	var result: Dictionary = {}
+	for operation: Dictionary in operations:
+		result = backend.callv(operation["method"], operation["arguments"]) as Dictionary
+		var validation := _validate_native_committed_result(result, revision)
+		if not bool(validation.get("ok", false)):
+			_finish_retained_candidate_failure(completion, generation, "retained_native_%s" % String(validation.get("reason", "failed")))
+			return
+		revision = int(result.get("revision", -1))
+	var final_history := backend.call("get_history_info") as Dictionary
+	if (int(final_history.get("checkpoint_operation_count", -1)) != checkpoint_count
+		or int(final_history.get("redo_count", -1)) != redo_bodies.size()
+		or int(final_history.get("active_tail_cursor", -1)) != active_bodies.size()
+		or int(final_history.get("tail_timeline_count", -1)) != timeline.size()
+		or int(final_history.get("retained_state_count", 99)) > BOUNDED_HISTORY_WINDOW_CAPACITY + 1):
+		_finish_retained_candidate_failure(completion, generation, "retained_history_result_mismatch")
+		return
+	var vertices: PackedVector3Array = result.get("vertices", PackedVector3Array())
+	var indices: PackedInt32Array = result.get("indices", PackedInt32Array())
+	var protected_check := _validate_bounded_protected_handle_lane(descriptor, descriptor)
+	if not bool(protected_check.get("ok", false)):
+		_finish_retained_candidate_failure(completion, generation, String(protected_check.get("reason", "retained_handle_invalid")))
+		return
+	var handle := protected_check.get("protected_handle") as Resource
+	var empty_publication := not bool(result.get("state_initialized", false)) and handle == null
+	# Use candidate aggregate explicitly. The live protected decomposition helpers
+	# bind to the current backend and must never label its mesh as a candidate.
+	var node_result: Dictionary
+	if empty_publication:
+		node_result = {"ok": true, "node": Node3D.new()}
+	else:
+		node_result = _build_native_static_handle_composite_revision_node(vertices, indices, active_bodies, revision, descriptor, handle) if handle != null else _build_native_static_revision_node(vertices, indices, active_bodies, revision, descriptor)
+	if not bool(node_result.get("ok", false)):
+		_finish_retained_candidate_failure(completion, generation, String(node_result.get("reason", "retained_publication_build_failed")))
+		return
+	var staged := node_result.get("node") as Node3D
+	native_static_body_root.add_child(staged)
+	staged.visible = false
+	var ready := false
+	for _frame in range(NATIVE_STATIC_CSG_READINESS_FRAME_LIMIT):
+		await get_tree().process_frame
+		await get_tree().physics_frame
+		if not _retained_candidate_is_current(candidate, generation, publication_generation):
+			staged.free()
+			_finish_retained_candidate_failure(completion, generation, "retained_candidate_stale")
+			return
+		if empty_publication or _native_static_revision_node_is_complete(staged):
+			ready = true
+			break
+	if not ready:
+		staged.free()
+		_finish_retained_candidate_failure(completion, generation, "retained_publication_readiness_failed")
+		return
+	var state := _retained_edit_authoring_state()
+	if not bool(state.call("accept_retained_spline_change_candidate", candidate)):
+		staged.free()
+		_finish_retained_candidate_failure(completion, generation, "retained_candidate_accept_failed")
+		return
+	# No yield between logical acceptance, backend installation and collider swap.
+	var previous := native_static_published_node
+	native_static_manifold_backend = backend
+	native_static_expected_revision = revision
+	native_static_published_revision = revision
+	native_static_active_vertices = vertices
+	native_static_active_indices = indices
+	native_static_state_initialized = bool(result.get("state_initialized", false))
+	native_static_lifecycle = NATIVE_STATIC_LIFECYCLE_ACTIVE
+	native_static_bound_state_instance_id = state.get_instance_id()
+	native_static_bound_authoring_state = state
+	native_static_material_variant_id = expected_material
+	var transition := state.call("get_bounded_history_transition") as Dictionary
+	native_static_consumed_transition_revision = int(transition.get("revision", -1))
+	_capture_bounded_native_snapshot(state.call("get_bounded_presentation_descriptor") as Dictionary)
+	native_static_publication_generation += 1
+	_set_native_static_revision_targetable(staged, true, false)
+	staged.visible = true
+	if previous != null and is_instance_valid(previous):
+		_set_native_static_revision_targetable(previous, false, false)
+	native_static_published_node = null if empty_publication else staged
+	native_static_authoritative = true
+	native_static_publication_pending = false
+	native_static_body_root.visible = not empty_publication
+	_set_csg_static_publication_enabled(false)
+	if csg_static_body_root != null:
+		csg_static_body_root.visible = false
+	if previous != null and is_instance_valid(previous):
+		previous.free()
+	if empty_publication:
+		staged.free()
+	retained_edit_candidate_pending = false
+	native_static_sync_diagnostics["last_mode"] = "retained_replace"
+	native_static_sync_diagnostics["last_failure_reason"] = ""
+	_capture_native_static_history_diagnostics(result)
+	_refresh_native_static_diagnostics()
+	retained_edit_selection_signature = ""
+	if completion.is_valid():
+		completion.call(true, {"ok": true, "revision": revision})
+	_refresh_retained_edit_selection()
+
+
+func _finish_retained_candidate_failure(completion: Callable, generation: int, reason: String) -> void:
+	if generation == retained_edit_candidate_generation:
+		retained_edit_candidate_pending = false
+	if completion.is_valid():
+		completion.call(false, {"ok": false, "reason": reason})
+
+
+func _clean_retained_checkpoint_packet(packet: Dictionary) -> Dictionary:
+	# Exact-position weld and exact-zero removal only. Do not use the Handle
+	# bake helper's minimum-volume test: ordinary artwork can be much smaller.
+	var source_vertices: PackedVector3Array = packet.get("vertices", PackedVector3Array())
+	var source_indices: PackedInt32Array = packet.get("indices", PackedInt32Array())
+	if source_indices.is_empty() or source_indices.size() % 3 != 0:
+		return {"ok": false}
+	var vertices := PackedVector3Array()
+	var remap := PackedInt32Array()
+	var position_indices: Dictionary = {}
+	for point: Vector3 in source_vertices:
+		if not point.is_finite():
+			return {"ok": false}
+		if not position_indices.has(point):
+			position_indices[point] = vertices.size()
+			vertices.append(point)
+		remap.append(int(position_indices[point]))
+	var indices := PackedInt32Array()
+	for offset in range(0, source_indices.size(), 3):
+		for index in range(offset, offset + 3):
+			if source_indices[index] < 0 or source_indices[index] >= remap.size():
+				return {"ok": false}
+		var a := remap[source_indices[offset]]
+		var b := remap[source_indices[offset + 1]]
+		var c := remap[source_indices[offset + 2]]
+		if a == b or a == c or b == c:
+			continue
+		if (vertices[b] - vertices[a]).cross(vertices[c] - vertices[a]).length_squared() <= 0.0:
+			continue
+		indices.append_array(PackedInt32Array([a, b, c]))
+	return {"ok": not indices.is_empty(), "vertices": vertices, "indices": indices}
+
+
+func set_retained_edit_cursor_suppressed(suppressed: bool) -> void:
+	retained_edit_cursor_suppressed = suppressed
+	if suppressed and placement_cursor_mesh_instance != null:
+		placement_cursor_mesh_instance.visible = false
+
+
+func set_retained_edit_selection_enabled(enabled: bool) -> void:
+	if retained_edit_selection_enabled == enabled:
+		return
+	retained_edit_selection_enabled = enabled
+	retained_edit_selection_generation += 1
+	retained_edit_selection_signature = ""
+	retained_edit_selection.clear()
+	if enabled:
+		_refresh_retained_edit_selection()
+
+
+func resolve_retained_edit_selection(ray_origin_local: Vector3, ray_direction_local: Vector3) -> Dictionary:
+	return retained_edit_selection.resolve(ray_origin_local, ray_direction_local) if retained_edit_selection_enabled else {"valid": false, "editable": false}
+
+
+func set_retained_edit_hover(body_id: StringName) -> void:
+	retained_edit_selection.hover(body_id)
+
+
+func _refresh_retained_edit_selection() -> void:
+	if not retained_edit_selection_enabled or retained_edit_candidate_pending or native_static_publication_pending:
+		return
+	var state := _retained_edit_authoring_state()
+	if state == null:
+		return
+	var transition: Dictionary = state.call("get_bounded_history_transition")
+	var signature := "%s|%s|%s" % [state.get_instance_id(), native_static_publication_generation, transition.get("revision", -1)]
+	if signature == retained_edit_selection_signature:
+		return
+	retained_edit_selection_signature = signature
+	retained_edit_selection_generation += 1
+	retained_edit_selection.clear()
+	_rebuild_retained_edit_selection(state, retained_edit_selection_generation)
+
+
+func _rebuild_retained_edit_selection(state: Resource, generation: int) -> void:
+	var descriptor: Dictionary = state.call("get_bounded_presentation_descriptor")
+	var sources: Array[Dictionary] = []
+	var protected_bodies: Array = descriptor.get("protected_bodies", [])
+	for handle: Resource in protected_bodies:
+		var packet := _resolve_authoritative_protected_handle_packet(handle)
+		if not bool(packet.get("ok", false)):
+			var mesh := _build_active_material_body_sweep_mesh(handle)
+			if mesh != null:
+				var bvh := RetainedSurfaceSelection.build_query_bvh(_retained_mesh_faces(mesh))
+				if bvh != null:
+					sources.append({"body_id": StringName(handle.get("body_id")), "is_handle": true, "editable": true, "bvh": bvh})
+		else:
+			_append_retained_selection_source(sources, handle, packet, true, true)
+	var tail: Array = (descriptor.get("active_tail_bodies", []) as Array).duplicate()
+	tail.reverse()
+	for body: Resource in tail:
+		var packet: Dictionary = {}
+		for _frame in range(NATIVE_CAPSULE_OPERAND_BAKE_FRAME_LIMIT + 2):
+			packet = _build_native_static_operand_packet(body)
+			if not bool(packet.get("pending", false)):
+				break
+			var entry: Dictionary = native_capsule_operand_pending.get(packet.get("signature", ""), {})
+			var operand_node := entry.get("node") as Node3D
+			if operand_node != null:
+				operand_node.visible = false
+			await get_tree().process_frame
+			if generation != retained_edit_selection_generation or not retained_edit_selection_enabled:
+				return
+		if bool(packet.get("ok", false)):
+			var editable := state.has_method("is_retained_spline_body_editable") and bool(state.call("is_retained_spline_body_editable", StringName(body.get("body_id"))))
+			_append_retained_selection_source(sources, body, packet, editable, false)
+	if generation != retained_edit_selection_generation or not retained_edit_selection_enabled:
+		return
+	var faces := PackedVector3Array()
+	var publication := native_static_published_node if native_static_authoritative else csg_static_body_root
+	if publication != null and is_instance_valid(publication):
+		_collect_retained_final_faces(publication, faces)
+	retained_edit_selection.build(self, faces, sources)
+
+
+func _append_retained_selection_source(sources: Array[Dictionary], body: Resource, packet: Dictionary, editable: bool, is_handle: bool) -> void:
+	var vertices: PackedVector3Array = packet.get("vertices", PackedVector3Array())
+	var indices: PackedInt32Array = packet.get("indices", PackedInt32Array())
+	var faces := PackedVector3Array()
+	for index: int in indices:
+		if index < 0 or index >= vertices.size():
+			return
+		faces.append(vertices[index])
+	var bvh := RetainedSurfaceSelection.build_query_bvh(faces)
+	if bvh != null:
+		sources.append({"body_id": StringName(body.get("body_id")), "editable": editable, "is_handle": is_handle, "bvh": bvh})
+
+
+func _collect_retained_final_faces(node: Node, faces: PackedVector3Array) -> void:
+	if node is Node3D and not (node as Node3D).visible:
+		return
+	if String(node.name) == NATIVE_PROTECTED_HANDLE_BOOTSTRAP_NODE_NAME:
+		return
+	var mesh: Mesh = null
+	if node is MeshInstance3D:
+		mesh = (node as MeshInstance3D).mesh
+	elif node is CSGShape3D:
+		if not (node as CSGShape3D).is_root_shape():
+			return
+		mesh = (node as CSGShape3D).bake_static_mesh()
+	if mesh != null:
+		var transform_to_local := global_transform.affine_inverse() * (node as Node3D).global_transform
+		for vertex: Vector3 in _retained_mesh_faces(mesh):
+			faces.append(transform_to_local * vertex)
+		return
+	for child: Node in node.get_children():
+		_collect_retained_final_faces(child, faces)
+
+
+func _retained_mesh_faces(mesh: Mesh) -> PackedVector3Array:
+	# Mesh.get_faces() passes through TriangleMesh's metre-space vertex snap.
+	# Read the same arrays that RenderingServer draws, without that lossy step.
+	var faces := PackedVector3Array()
+	for surface_index in range(mesh.get_surface_count()):
+		if mesh.surface_get_primitive_type(surface_index) != Mesh.PRIMITIVE_TRIANGLES:
+			continue
+		var arrays: Array = mesh.surface_get_arrays(surface_index)
+		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var index_value: Variant = arrays[Mesh.ARRAY_INDEX]
+		if index_value is PackedInt32Array and not (index_value as PackedInt32Array).is_empty():
+			for index: int in index_value:
+				faces.append(vertices[index])
+		else:
+			faces.append_array(vertices)
+	return faces
 
 func _on_authoring_state_changed(_state: Resource) -> void:
 	_sync_from_controller()
@@ -360,6 +763,7 @@ func _sync_from_controller() -> void:
 	_sync_spline_csg_noodle(authoring_state)
 	_sync_active_material_body_preview_mesh(authoring_state)
 	_sync_csg_material_body_preview(authoring_state)
+	_refresh_retained_edit_selection()
 
 func _sync_preview_mesh(authoring_state: Resource) -> void:
 	_ensure_preview_mesh_instance()
@@ -831,6 +1235,8 @@ func _sync_active_material_body_preview_mesh(authoring_state: Resource) -> void:
 	)
 
 func _sync_csg_material_body_preview(authoring_state: Resource) -> void:
+	if retained_edit_candidate_pending:
+		return
 	_ensure_csg_material_body_root()
 	if csg_material_body_root == null:
 		return
@@ -3153,6 +3559,16 @@ func _validate_native_static_body(
 		for normal: Vector3 in path_normals:
 			if not normal.is_finite() or normal.length_squared() <= 0.000001:
 				return {"ok": false, "reason": "capsule_normal_invalid"}
+	elif (
+		body_kind == ForgeV2MaterialBodyScript.BODY_KIND_PROFILE_EXTRUSION
+		and shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_PROFILE_PATH
+	):
+		var spline_polygon: PackedVector2Array = body.get("profile_polygon_2d_meters")
+		if path_points.size() < 2 or spline_polygon.size() < 3:
+			return {"ok": false, "reason": "saved_spline_profile_incomplete"}
+		for point: Vector3 in path_points:
+			if not point.is_finite():
+				return {"ok": false, "reason": "saved_spline_point_nonfinite"}
 	else:
 		if (
 			not body.has_method("uses_explicit_surface_contact_authority")
@@ -8717,7 +9133,7 @@ func _sync_placement_cursor(local_position: Vector3, is_valid: bool, radius_mete
 	_ensure_placement_cursor_mesh_instance()
 	if placement_cursor_mesh_instance == null:
 		return
-	placement_cursor_mesh_instance.visible = is_valid
+	placement_cursor_mesh_instance.visible = is_valid and not retained_edit_cursor_suppressed
 	if not is_valid:
 		return
 	var sphere_mesh: SphereMesh = placement_cursor_mesh_instance.mesh as SphereMesh

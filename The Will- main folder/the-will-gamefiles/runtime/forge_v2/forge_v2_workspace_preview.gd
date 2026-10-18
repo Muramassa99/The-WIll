@@ -256,6 +256,26 @@ func resolve_material_surface_target(screen_position: Vector2) -> Dictionary:
 		_get_workspace_contract()
 	)
 
+func set_retained_edit_selection_enabled(enabled: bool) -> void:
+	if is_instance_valid(volume_preview_presenter):
+		volume_preview_presenter.call("set_retained_edit_selection_enabled", enabled)
+
+func set_retained_edit_cursor_suppressed(suppressed: bool) -> void:
+	if is_instance_valid(volume_preview_presenter):
+		volume_preview_presenter.call("set_retained_edit_cursor_suppressed", suppressed)
+
+func set_retained_edit_hover(body_id: StringName) -> void:
+	if is_instance_valid(volume_preview_presenter):
+		volume_preview_presenter.call("set_retained_edit_hover", body_id)
+
+func resolve_retained_edit_selection(screen_position: Vector2) -> Dictionary:
+	if camera == null or not is_instance_valid(volume_preview_presenter) or is_view_transitioning():
+		return {"valid": false}
+	# The provenance owner operates in its own mesh space, in either camera mode.
+	var origin := volume_preview_presenter.to_local(camera.project_ray_origin(screen_position))
+	var direction := (volume_preview_presenter.global_basis.inverse() * camera.project_ray_normal(screen_position)).normalized()
+	return volume_preview_presenter.call("resolve_retained_edit_selection", origin, direction) as Dictionary
+
 func resolve_placement_plane_target(screen_position: Vector2) -> Dictionary:
 	return _get_placement_target_resolver().resolve_placement_plane_from_camera(
 		camera,

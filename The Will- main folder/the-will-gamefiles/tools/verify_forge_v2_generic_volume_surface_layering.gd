@@ -3,6 +3,7 @@ extends SceneTree
 const ForgeV2StageControllerScript = preload(
 	"res://runtime/forge_v2/forge_v2_stage_controller.gd"
 )
+const ForgeV2EditorSettingsScript = preload("res://core/models/forge_v2_editor_settings_state.gd")
 const ForgeV2KeybindingStateScript = preload(
 	"res://runtime/forge_v2/forge_v2_keybinding_state.gd"
 )
@@ -62,6 +63,9 @@ func _run() -> void:
 	root.size = Vector2i(1280, 720)
 
 	var controller: Node = ForgeV2StageControllerScript.new()
+	var editor_settings: Resource = ForgeV2EditorSettingsScript.new()
+	editor_settings.set("save_file_path", "user://diagnostics/generic_volume_surface_layering/editor_settings.tres")
+	controller.set("editor_settings", editor_settings)
 	controller.name = "GenericVolumeSurfaceLayeringController"
 	root.add_child(controller)
 	controller.call("start_new_draft", "Generic Volume Surface Layering Verify")

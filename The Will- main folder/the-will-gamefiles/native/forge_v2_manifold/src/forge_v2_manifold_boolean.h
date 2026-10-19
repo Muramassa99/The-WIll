@@ -46,6 +46,10 @@ public:
         const PackedVector3Array &vertices,
         const PackedInt32Array &indices
     );
+    Dictionary subtract_mesh(
+        const PackedVector3Array &vertices,
+        const PackedInt32Array &indices
+    );
     Dictionary undo_state();
     Dictionary redo_state();
     Dictionary compose_with_protected_mesh(
@@ -83,6 +87,11 @@ private:
 
     void append_history_metadata(Dictionary &result) const;
     void activate_history_state(size_t cursor);
+    Dictionary append_mesh(
+        const PackedVector3Array &vertices,
+        const PackedInt32Array &indices,
+        bool subtract
+    );
 
     std::shared_ptr<manifold::Manifold> state_solid_;
     std::deque<HistoryState> history_states_;

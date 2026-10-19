@@ -457,6 +457,7 @@ void append_state_metadata(
     result["state_vertex_count"] = vertex_count;
     result["state_triangle_count"] = triangle_count;
     result["state_volume_m3"] = volume;
+    result["state_empty"] = triangle_count == 0;
 }
 
 void append_stateful_timings(
@@ -586,6 +587,7 @@ Dictionary stateful_result_base(const String &operation) {
 }
 
 void append_export_packet(Dictionary &result, const ExportPacket &packet) {
+    result["empty"] = packet.vertex_count == 0 && packet.triangle_count == 0;
     result["output_vertex_count"] = packet.vertex_count;
     result["output_triangle_count"] = packet.triangle_count;
     result["vertices"] = packet.vertices;
@@ -685,6 +687,10 @@ void ForgeV2ManifoldBoolean::_bind_methods() {
     ClassDB::bind_method(
         D_METHOD("add_mesh", "vertices", "indices"),
         &ForgeV2ManifoldBoolean::add_mesh
+    );
+    ClassDB::bind_method(
+        D_METHOD("subtract_mesh", "vertices", "indices"),
+        &ForgeV2ManifoldBoolean::subtract_mesh
     );
     ClassDB::bind_method(D_METHOD("undo_state"), &ForgeV2ManifoldBoolean::undo_state);
     ClassDB::bind_method(D_METHOD("redo_state"), &ForgeV2ManifoldBoolean::redo_state);
@@ -1505,7 +1511,9 @@ Dictionary ForgeV2ManifoldBoolean::get_backend_info() const {
     info["precision"] = "MeshGL64_double";
     info["operation_scope"] = "synchronous_union_proof";
     info["persistent_state"] = true;
-    info["stateful_operation_scope"] = "synchronous_serial_reset_and_add";
+    info["stateful_operation_scope"] = "synchronous_serial_reset_add_and_subtract";
+    info["stateful_subtract_supported"] = true;
+    info["empty_result_supported"] = true;
     info["stateful_mesh_tolerance"] = kGodotCsgMeshTolerance;
     info["stateful_mesh_tolerance_contract"] = "Godot_4_7_CSG_2x_FLT_EPSILON";
     info["protected_composition_supported"] = true;
@@ -1820,19 +1828,16 @@ Dictionary ForgeV2ManifoldBoolean::reset_checkpoint_mesh(
         );
     }
     const bool empty_checkpoint = empty_vertices && empty_indices;
-    if (empty_checkpoint && accumulated_operation_count != 0) {
-        return finish_failure(
-            "EMPTY_CHECKPOINT_REQUIRES_ZERO_OPERATIONS",
-            "an empty checkpoint may only represent zero accumulated operations",
-            "NotRun"
-        );
-    }
-
     std::shared_ptr<manifold::Manifold> candidate_solid;
     uint32_t base_id = 0U;
     double candidate_volume = 0.0;
     ExportPacket packet;
-    if (!empty_checkpoint) {
+    if (empty_checkpoint && accumulated_operation_count > 0) {
+        // A completed Remove can erase an entire prefix. Keep the empty solid
+        // initialized so later operations append to that prefix instead of
+        // treating it as a new, never-authored workpiece.
+        candidate_solid = std::make_shared<manifold::Manifold>();
+    } else if (!empty_checkpoint) {
         base_id = manifold::Manifold::ReserveIDs(1);
         PackedInput packed;
         String error;
@@ -1911,7 +1916,7 @@ Dictionary ForgeV2ManifoldBoolean::reset_checkpoint_mesh(
     checkpoint_operation_count_ = static_cast<uint64_t>(accumulated_operation_count);
     promotion_count_ = 0;
     boolean_count_ = 0;
-    export_count_ = candidate_solid ? 1U : 0U;
+    export_count_ = empty_checkpoint ? 0U : 1U;
     checkpoint_materialization_attempt_count_ = 0;
     checkpoint_materialization_count_ = 0;
     last_mode_ = empty_checkpoint ? "checkpoint_reset_empty" : "checkpoint_reset";
@@ -2098,6 +2103,21 @@ Dictionary ForgeV2ManifoldBoolean::add_mesh(
     const PackedVector3Array &vertices,
     const PackedInt32Array &indices
 ) {
+    return append_mesh(vertices, indices, false);
+}
+
+Dictionary ForgeV2ManifoldBoolean::subtract_mesh(
+    const PackedVector3Array &vertices,
+    const PackedInt32Array &indices
+) {
+    return append_mesh(vertices, indices, true);
+}
+
+Dictionary ForgeV2ManifoldBoolean::append_mesh(
+    const PackedVector3Array &vertices,
+    const PackedInt32Array &indices,
+    bool subtract
+) {
     const Clock::time_point total_start = Clock::now();
     const uint64_t previous_revision = state_revision_;
     const int64_t cached_vertex_count = state_vertex_count_;
@@ -2105,7 +2125,8 @@ Dictionary ForgeV2ManifoldBoolean::add_mesh(
     const bool truncates_redo = history_window_enabled_ &&
         active_tail_cursor_ + 1U < history_states_.size();
     StatefulTimings timings;
-    Dictionary result = stateful_result_base("add_mesh");
+    Dictionary result = stateful_result_base(subtract ? "subtract_mesh" : "add_mesh");
+    result["operation_kind"] = subtract ? "subtract" : "add";
     result["previous_revision"] = static_cast<int64_t>(previous_revision);
     result["input_vertex_count"] = vertices.size();
     result["input_triangle_count"] = indices.size() / 3;
@@ -2132,10 +2153,10 @@ Dictionary ForgeV2ManifoldBoolean::add_mesh(
         return result;
     };
 
-    if (!state_solid_) {
+    if (!state_solid_ && !history_window_enabled_) {
         return finish_failure(
             "STATE_NOT_INITIALIZED",
-            "reset_mesh must commit a base solid before add_mesh",
+            "reset_mesh must commit a base solid or bounded history must be enabled before append",
             "Empty"
         );
     }
@@ -2174,7 +2195,13 @@ Dictionary ForgeV2ManifoldBoolean::add_mesh(
     }
 
     const Clock::time_point boolean_start = Clock::now();
-    manifold::Manifold candidate = state_solid_->Boolean(operand, manifold::OpType::Add);
+    // An enabled history's initial/undone S0 is a valid empty prefix. A cut
+    // against it is a successful no-op operation, with a normal history slot.
+    const manifold::Manifold empty_base;
+    const manifold::Manifold &base = state_solid_ ? *state_solid_ : empty_base;
+    manifold::Manifold candidate = base.Boolean(
+        operand, subtract ? manifold::OpType::Subtract : manifold::OpType::Add
+    );
     const manifold::Manifold::Error candidate_status = candidate.Status();
     double candidate_volume = 0.0;
     if (candidate_status == manifold::Manifold::Error::NoError) {
@@ -2185,7 +2212,7 @@ Dictionary ForgeV2ManifoldBoolean::add_mesh(
     if (candidate_status != manifold::Manifold::Error::NoError) {
         return finish_failure(
             "OUTPUT_MANIFOLD_" + String(status_name(candidate_status)),
-            "union result is not a valid Manifold solid",
+            "Boolean result is not a valid Manifold solid",
             status_name(candidate_status)
         );
     }
@@ -2208,56 +2235,50 @@ Dictionary ForgeV2ManifoldBoolean::add_mesh(
         return finish_failure(export_error_code, export_error_message, "NoError");
     }
 
-    const Clock::time_point commit_start = Clock::now();
     std::shared_ptr<manifold::Manifold> candidate_solid =
         std::make_shared<manifold::Manifold>(std::move(candidate));
+    // Allocate the complete replacement before mutating the live history.
+    // The bounded copy is at most S0 plus five shared solid pointers.
+    std::deque<HistoryState> replacement_states;
+    size_t replacement_cursor = 0U;
     if (history_window_enabled_) {
-        while (history_states_.size() > active_tail_cursor_ + 1U) {
-            history_states_.pop_back();
+        for (size_t i = 0; i <= active_tail_cursor_; ++i) {
+            replacement_states.push_back(history_states_[i]);
         }
-        history_states_.push_back({
-            candidate_solid,
-            packet.vertex_count,
-            packet.triangle_count,
-            candidate_volume,
-            operand_id,
-            true,
-        });
-        ++active_tail_cursor_;
-    } else {
-        // Replacing the sole retained slot releases the previous state as soon
-        // as activate_history_state updates state_solid_.
-        history_states_.clear();
-        history_states_.push_back({
-            candidate_solid,
-            packet.vertex_count,
-            packet.triangle_count,
-            candidate_volume,
-            operand_id,
-            true,
-        });
-        active_tail_cursor_ = 0U;
+        replacement_cursor = active_tail_cursor_ + 1U;
     }
+    replacement_states.push_back({
+        candidate_solid,
+        packet.vertex_count,
+        packet.triangle_count,
+        candidate_volume,
+        operand_id,
+        true,
+    });
+    const bool promotes = history_window_enabled_ &&
+        replacement_states.size() > kHistoryWindowCapacity + 1U;
+    if (promotes) {
+        replacement_states.pop_front();
+        --replacement_cursor;
+        replacement_states.front().current_operand_id = 0U;
+        replacement_states.front().distinguish_current_operand = false;
+    }
+
+    const Clock::time_point commit_start = Clock::now();
+    history_states_.swap(replacement_states);
     ++boolean_count_;
     ++export_count_;
     last_mode_ = truncates_redo ? "branch_append" : "append";
 
-    if (
-        history_window_enabled_ &&
-        history_states_.size() > kHistoryWindowCapacity + 1U
-    ) {
+    if (promotes) {
         // S1 already owns the exact Manifold produced by its deposited call.
         // Dropping S0 promotes S1 to the prefix checkpoint without replaying
         // a Boolean and without exporting a base mesh on the hot path.
-        history_states_.pop_front();
-        --active_tail_cursor_;
-        history_states_.front().current_operand_id = 0U;
-        history_states_.front().distinguish_current_operand = false;
         ++checkpoint_operation_count_;
         ++promotion_count_;
         last_mode_ = "promotion_append";
     }
-    activate_history_state(active_tail_cursor_);
+    activate_history_state(replacement_cursor);
     ++state_revision_;
     const Clock::time_point commit_end = Clock::now();
     timings.commit_ms = elapsed_ms(commit_start, commit_end);

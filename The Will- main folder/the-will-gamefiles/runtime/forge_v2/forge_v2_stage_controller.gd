@@ -492,7 +492,7 @@ func prepare_pending_work_for_save(
 		# Empty authoring drafts remain saveable as drafts. Once user-authored
 		# geometry exists, however, a terminal mesh error must not silently save
 		# a stale or incomplete runtime contract.
-		if int(state.call("get_user_material_body_count")) <= 0:
+		if int(state.call("get_user_material_body_count")) <= 0 or bool(runtime_mesh_packet.get("authoring_only_empty", false)):
 			if progress_callback.is_valid():
 				progress_callback.call(3)
 			return {

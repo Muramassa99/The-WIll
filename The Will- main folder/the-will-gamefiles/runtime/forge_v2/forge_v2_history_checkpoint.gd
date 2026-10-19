@@ -1,7 +1,7 @@
 extends Resource
 class_name ForgeV2HistoryCheckpoint
 
-const SCHEMA_VERSION := 2
+const SCHEMA_VERSION := 3
 
 @export var schema_version: int = SCHEMA_VERSION
 @export var checkpoint_id: StringName = StringName()
@@ -10,6 +10,7 @@ const SCHEMA_VERSION := 2
 @export var accumulated_operation_count: int = 0
 @export var materialized_mesh_operation_count: int = 0
 @export var mesh_dirty: bool = false
+@export var materialized_empty: bool = false
 @export var lifetime_operation_count_at_checkpoint: int = 0
 @export var material_variant_id: StringName = StringName()
 @export var vertices: PackedVector3Array = PackedVector3Array()
@@ -23,6 +24,7 @@ const SCHEMA_VERSION := 2
 @export var checkpoint_cell_materials: Dictionary = {}
 @export var checkpoint_protected_handle_cells: Dictionary = {}
 @export var checkpoint_material_cell_counts: Dictionary = {}
+@export var checkpoint_occupancy_empty: bool = false
 @export var material_ledger_summary: Dictionary = {}
 @export var created_timestamp: float = 0.0
 @export var updated_timestamp: float = 0.0
@@ -36,6 +38,7 @@ func reset() -> void:
 	accumulated_operation_count = 0
 	materialized_mesh_operation_count = 0
 	mesh_dirty = false
+	materialized_empty = false
 	lifetime_operation_count_at_checkpoint = 0
 	material_variant_id = StringName()
 	vertices = PackedVector3Array()
@@ -49,6 +52,7 @@ func reset() -> void:
 	checkpoint_cell_materials = {}
 	checkpoint_protected_handle_cells = {}
 	checkpoint_material_cell_counts = {}
+	checkpoint_occupancy_empty = false
 	material_ledger_summary = {}
 	created_timestamp = 0.0
 	updated_timestamp = 0.0
@@ -96,13 +100,18 @@ func is_initialized() -> bool:
 
 
 func has_materialized_mesh() -> bool:
-	return (
-		materialized_mesh_operation_count == accumulated_operation_count
-		and accumulated_operation_count > 0
-		and not vertices.is_empty()
-		and not indices.is_empty()
-		and indices.size() % 3 == 0
-	)
+	if (
+		materialized_mesh_operation_count != accumulated_operation_count
+		or accumulated_operation_count <= 0
+	):
+		return false
+	if materialized_empty:
+		return (
+			vertices.is_empty() and indices.is_empty()
+			and source_original_ids.is_empty() and source_face_ids.is_empty()
+			and vertex_count == 0 and triangle_count == 0 and volume_m3 == 0.0
+		)
+	return not vertices.is_empty() and not indices.is_empty() and indices.size() % 3 == 0
 
 
 func is_restore_ready() -> bool:
@@ -152,7 +161,6 @@ func can_advance_logical_checkpoint_with_occupancy_delta(
 ) -> bool:
 	if (
 		expected_operation_count != accumulated_operation_count + 1
-		or next_material_variant_id == StringName()
 		or next_resolver_sample_cell_size_meters <= 0.0
 		or not bool(occupancy_delta.get("ok", false))
 		or int(occupancy_delta.get(
@@ -265,6 +273,20 @@ func can_advance_logical_checkpoint_with_occupancy_delta(
 			next_counts[material_key]
 		):
 			return false
+	# A leading no-op cut may precede the first material. Erasure of an
+	# established material retains that identity in the authoring state.
+	if next_material_variant_id == StringName():
+		if next_total_cell_count != 0:
+			return false
+		var remaining_protected_count := checkpoint_protected_handle_cells.size()
+		for cell_key: Variant in protected_updates.keys():
+			if bool(protected_updates[cell_key]):
+				if not checkpoint_protected_handle_cells.has(cell_key):
+					remaining_protected_count += 1
+			elif checkpoint_protected_handle_cells.has(cell_key):
+				remaining_protected_count -= 1
+		if remaining_protected_count != 0:
+			return false
 	return true
 
 
@@ -307,6 +329,11 @@ func advance_logical_checkpoint_with_occupancy_delta(
 		"next_material_cell_counts",
 		{}
 	) as Dictionary
+	checkpoint_occupancy_empty = (
+		checkpoint_cell_materials.is_empty()
+		and checkpoint_protected_handle_cells.is_empty()
+		and checkpoint_material_cell_counts.is_empty()
+	)
 	checkpoint_id = StringName(next_checkpoint_identity.get("checkpoint_id"))
 	if created_timestamp <= 0.0:
 		created_timestamp = Time.get_unix_time_from_system()
@@ -337,7 +364,11 @@ func advance_logical_checkpoint(
 ) -> bool:
 	if (
 		expected_operation_count != accumulated_operation_count + 1
-		or next_material_variant_id == StringName()
+		or (next_material_variant_id == StringName() and (
+			not next_checkpoint_cell_materials.is_empty()
+			or not next_checkpoint_protected_handle_cells.is_empty()
+			or not next_checkpoint_material_cell_counts.is_empty()
+		))
 		or next_resolver_sample_cell_size_meters <= 0.0
 	):
 		return false
@@ -358,6 +389,11 @@ func advance_logical_checkpoint(
 		next_checkpoint_protected_handle_cells
 	)
 	checkpoint_material_cell_counts = next_checkpoint_material_cell_counts
+	checkpoint_occupancy_empty = (
+		checkpoint_cell_materials.is_empty()
+		and checkpoint_protected_handle_cells.is_empty()
+		and checkpoint_material_cell_counts.is_empty()
+	)
 	material_ledger_summary = next_material_ledger_summary.duplicate(true)
 	mesh_dirty = true
 	updated_timestamp = Time.get_unix_time_from_system()
@@ -472,6 +508,7 @@ func materialize_from_native_packet(
 		packet_indices.size() / 3
 	))
 	volume_m3 = maxf(float(packet.get("checkpoint_volume_m3", 0.0)), 0.0)
+	materialized_empty = bool(packet.get("empty", false))
 	mesh_dirty = false
 	updated_timestamp = Time.get_unix_time_from_system()
 	schema_version = SCHEMA_VERSION
@@ -507,14 +544,12 @@ func _is_valid_native_materialization_packet(
 		return false
 	var packet_vertices := packet_vertices_variant as PackedVector3Array
 	var packet_indices := packet_indices_variant as PackedInt32Array
-	return (
+	if not (
 		expected_operation_count > 0
 		and int(packet.get("checkpoint_operation_count", -1))
 		== expected_operation_count
 		and bool(packet.get("ok", false))
 		and bool(packet.get("checkpoint_initialized", false))
-		and not packet_vertices.is_empty()
-		and not packet_indices.is_empty()
 		and packet_indices.size() % 3 == 0
 		and int(packet.get(
 			"checkpoint_vertex_count",
@@ -525,7 +560,17 @@ func _is_valid_native_materialization_packet(
 			packet_indices.size() / 3
 		)) == packet_indices.size() / 3
 		and is_finite(float(packet.get("checkpoint_volume_m3", 0.0)))
-	)
+		and float(packet.get("checkpoint_volume_m3", 0.0)) >= 0.0
+	):
+		return false
+	if bool(packet.get("empty", false)):
+		return (
+			packet_vertices.is_empty() and packet_indices.is_empty()
+			and (source_original_ids_variant as PackedInt32Array).is_empty()
+			and (source_face_ids_variant as PackedInt32Array).is_empty()
+			and float(packet.get("checkpoint_volume_m3", -1.0)) == 0.0
+		)
+	return not packet_vertices.is_empty() and not packet_indices.is_empty()
 
 
 func to_native_packet() -> Dictionary:
@@ -535,6 +580,7 @@ func to_native_packet() -> Dictionary:
 		"checkpoint_initialized": is_initialized(),
 		"checkpoint_restore_ready": is_restore_ready(),
 		"checkpoint_mesh_dirty": mesh_dirty,
+		"empty": materialized_empty,
 		"checkpoint_revision": revision,
 		"checkpoint_materialization_revision": materialization_revision,
 		"checkpoint_operation_count": accumulated_operation_count,
@@ -555,6 +601,9 @@ func to_native_packet() -> Dictionary:
 			checkpoint_protected_handle_cells
 		),
 		"checkpoint_material_cell_counts": checkpoint_material_cell_counts,
+		# This describes persisted logical occupancy, independently of whether
+		# its native mesh has been materialized yet.
+		"checkpoint_occupancy_empty": checkpoint_occupancy_empty,
 	}
 
 

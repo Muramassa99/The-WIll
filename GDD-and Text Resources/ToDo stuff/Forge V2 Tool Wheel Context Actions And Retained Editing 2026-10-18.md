@@ -655,3 +655,34 @@ worlds, persistence, multiplayer/server work, economy, operations, Steam and
 ongoing performance/flow work. This is a general-system reference item, not a
 special-case target to hardcode around. The user is building it next; the note
 does not authorize implementing all listed systems or changing Git branches.
+
+## Post-savepoint report: primitive Detailing Remove rejection - 2026-10-18
+
+After push ce720442, the user reported pending_layer_commit_rejected from Save
+and S Apply while using primitive Detailing Brush in Remove mode. Fresh isolated
+controller/state reproduction confirms Add commits but Remove is rejected by
+the existing bounded Add eligibility gate before native geometry processing.
+No production fix was made; this is missing bounded-history subtraction support.
+The 255-check workspace result covered Detailing Add from an empty draft, not
+this case. Retry does not resolve this capability restriction.
+
+See [Forge V2 Bounded Remove Support TODO 2026-10-18.md](<Forge V2 Bounded Remove Support TODO 2026-10-18.md>)
+for exact evidence, affected owners, accounting/checkpoint concerns and next
+acceptance cases. The user closed the game; their failing unsaved draft was not
+captured. No player save was modified. The pushed savepoint is unchanged.
+
+## Bounded Remove implemented - 2026-10-18
+
+The post-savepoint rejection above is now fixed for chronological Remove in the
+single-material bounded history. Native subtraction, S Apply, promotion, E replay,
+Undo/Redo, ledger compaction and empty/checkpoint saving are integrated. Five
+ordinary retained operations and the separate protected Handle remain the limits.
+The actual S popup test now includes Detail Remove after committed Add: 257/257.
+Rendered primitive integration62/62 and saved-profile/protected integration80/80
+pass, along with the existing E integration121/121 and normal project startup.
+
+See [Bounded Remove evidence](<Forge V2 Bounded Remove Support TODO 2026-10-18.md>)
+for all checks and limits. Its older broad Add test has14 failures reproduced
+identically on pre-fix HEAD; they are recorded separately, not attributed to this
+fix or hidden by weakened assertions. User confirmed the twist-density hard stop
+works; twist logic was unchanged. No new Git push or player-save rewrite.

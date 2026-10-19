@@ -4267,6 +4267,43 @@ func _resolve_authoring_contact_axis_error_degrees(
 		1.0
 	)))
 
+## Measure the visible elbow in the same reference frame as manual arm roll.
+## This is a read-only control frame; zero saved roll still means automatic.
+func get_authoring_upperarm_roll_control_state(slot_id: StringName) -> Dictionary:
+	if skeleton == null or slot_id not in [&"hand_right", &"hand_left"]:
+		return {}
+	var is_left := slot_id == &"hand_left"
+	var upperarm_bone: StringName = LEFT_UPPERARM_BONE if is_left else RIGHT_UPPERARM_BONE
+	var forearm_bone: StringName = LEFT_FOREARM_BONE if is_left else RIGHT_FOREARM_BONE
+	var hand_bone: StringName = LEFT_HAND_BONE if is_left else RIGHT_HAND_BONE
+	for bone_name: StringName in [upperarm_bone, forearm_bone, hand_bone]:
+		if skeleton.find_bone(String(bone_name)) < 0:
+			return {}
+	var shoulder_world: Vector3 = _get_bone_world_position(upperarm_bone)
+	var elbow_world: Vector3 = _get_bone_world_position(forearm_bone)
+	var hand_world: Vector3 = _get_bone_world_position(hand_bone)
+	var axis_world: Vector3 = hand_world - shoulder_world
+	if axis_world.length_squared() <= 0.000001:
+		return {}
+	axis_world = axis_world.normalized()
+	var reference_world: Vector3 = _resolve_authoring_upperarm_roll_reference_world(slot_id, axis_world)
+	if reference_world.length_squared() <= 0.000001:
+		return {}
+	var shoulder_to_elbow: Vector3 = elbow_world - shoulder_world
+	var radial_world: Vector3 = shoulder_to_elbow - axis_world * shoulder_to_elbow.dot(axis_world)
+	if radial_world.length_squared() <= 0.000001:
+		radial_world = reference_world * maxf(shoulder_to_elbow.length(), 0.05)
+	var normal_world: Vector3 = radial_world.normalized()
+	return {
+		"center_global": shoulder_world.lerp(hand_world, 0.5),
+		"axis_global": axis_world,
+		"initial_normal_global": normal_world,
+		"reference_global": reference_world,
+		"initial_roll_degrees": rad_to_deg(_resolve_signed_planar_angle(reference_world, normal_world, axis_world)),
+		"radial_length_meters": radial_world.length(),
+	}
+
+
 func _apply_authoring_manual_upperarm_roll_pose(
 	slot_id: StringName,
 	upperarm_bone: StringName,

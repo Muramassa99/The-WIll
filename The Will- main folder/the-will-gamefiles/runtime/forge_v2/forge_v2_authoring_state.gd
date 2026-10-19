@@ -3479,7 +3479,7 @@ func _commit_material_bodies_as_layer(pending_bodies: Array[Resource]) -> Resour
 	) as Dictionary
 	if (
 		stages_bounded_promotion
-		and not _can_commit_layer_to_bounded_add_history(
+		and not _can_commit_layer_to_bounded_history(
 			layer,
 			commit_ready_bodies
 		)
@@ -3530,7 +3530,7 @@ func _commit_material_bodies_as_layer(pending_bodies: Array[Resource]) -> Resour
 			layer,
 			commit_ready_bodies
 		)
-	elif _can_commit_layer_to_bounded_add_history(layer, commit_ready_bodies):
+	elif _can_commit_layer_to_bounded_history(layer, commit_ready_bodies):
 		if forge_layers.size() > BOUNDED_HISTORY_TAIL_CAPACITY:
 			_stage_bounded_history_promotion(
 				layer,
@@ -3655,6 +3655,7 @@ func get_bounded_presentation_descriptor() -> Dictionary:
 		"transition_revision": bounded_history_transition_revision,
 		"tail_capacity": BOUNDED_HISTORY_TAIL_CAPACITY,
 		"lifetime_operation_count": bounded_history_lifetime_operation_count,
+		"material_variant_id": _get_bounded_history_material_id(),
 		"checkpoint": bounded_history_checkpoint,
 		"checkpoint_packet": checkpoint_packet,
 		"checkpoint_identity": checkpoint_identity,
@@ -3804,11 +3805,14 @@ func acknowledge_bounded_history_transition(
 	if next_checkpoint_identity.is_empty():
 		return false
 	var next_checkpoint_token := next_checkpoint_identity.duplicate()
+	# A cut's operation material is VOID, not the material of the solid it cuts.
+	# The identity is captured before promotion removes its oldest source.
+	var next_solid_material_id := StringName(_bounded_history_pending_promotion.get(
+		"solid_material_variant_id", _get_bounded_history_material_id()
+	))
 	next_checkpoint_token["checkpoint_initialized"] = true
 	next_checkpoint_token["checkpoint_restore_ready"] = false
-	next_checkpoint_token["material_variant_id"] = StringName(
-		promoted_layer.get("operation_material_id")
-	)
+	next_checkpoint_token["material_variant_id"] = next_solid_material_id
 	next_checkpoint_token["resolver_sample_cell_size_meters"] = (
 		sample_cell_size_meters
 	)
@@ -3837,7 +3841,7 @@ func acknowledge_bounded_history_transition(
 			"can_advance_logical_checkpoint_with_occupancy_delta",
 			expected_checkpoint_operation_count,
 			next_checkpoint_identity,
-			StringName(promoted_layer.get("operation_material_id")),
+			next_solid_material_id,
 			sample_cell_size_meters,
 			occupancy_result
 		))
@@ -3853,7 +3857,7 @@ func acknowledge_bounded_history_transition(
 		"advance_logical_checkpoint_with_occupancy_delta",
 		expected_checkpoint_operation_count,
 		next_checkpoint_identity,
-		StringName(promoted_layer.get("operation_material_id")),
+		next_solid_material_id,
 		next_checkpoint_summary,
 		bounded_history_lifetime_operation_count,
 		sample_cell_size_meters,
@@ -5965,7 +5969,7 @@ func _must_reject_unsupported_bounded_commit(
 		return false
 	if commit_ready_bodies.size() != 1:
 		return true
-	return not _is_body_bounded_add_history_eligible(
+	return not _is_body_bounded_history_eligible(
 		commit_ready_bodies[0],
 		_get_bounded_history_material_id()
 	)
@@ -5979,7 +5983,7 @@ func _will_stage_bounded_history_promotion(
 		and forge_layers.size() >= BOUNDED_HISTORY_TAIL_CAPACITY
 		and commit_ready_bodies.size() == 1
 		and not _is_history_protected_body(commit_ready_bodies[0])
-		and _is_body_bounded_add_history_eligible(
+		and _is_body_bounded_history_eligible(
 			commit_ready_bodies[0],
 			_get_bounded_history_material_id()
 		)
@@ -5990,9 +5994,28 @@ func _is_body_bounded_add_history_eligible(
 	body: Resource,
 	expected_material_variant_id: StringName
 ) -> bool:
+	return (
+		body != null
+		and StringName(body.get("operation_mode")) == OPERATION_ADD_MATERIAL
+		and _is_body_bounded_history_eligible(body, expected_material_variant_id)
+	)
+
+func _is_body_bounded_history_eligible(
+	body: Resource,
+	expected_material_variant_id: StringName
+) -> bool:
 	if body == null:
 		return false
 	var material_variant_id := StringName(body.get("material_variant_id"))
+	var operation_mode := StringName(body.get("operation_mode"))
+	if operation_mode not in [OPERATION_ADD_MATERIAL, OPERATION_REMOVE_MATERIAL]:
+		return false
+	if operation_mode == OPERATION_ADD_MATERIAL and (
+		material_variant_id == StringName()
+		or (expected_material_variant_id != StringName() and material_variant_id != expected_material_variant_id)
+		or StringName(body.get("placement_policy")) != PLACEMENT_REPLACE_EXISTING
+	):
+		return false
 	var body_kind := StringName(body.get("body_kind"))
 	var path_points: PackedVector3Array = body.get("path_points")
 	var path_normals: PackedVector3Array = body.get("path_surface_normals")
@@ -6004,11 +6027,7 @@ func _is_body_bounded_add_history_eligible(
 	):
 		var polygon: PackedVector2Array = body.get("profile_polygon_2d_meters")
 		if (
-			material_variant_id == StringName()
-			or (expected_material_variant_id != StringName() and material_variant_id != expected_material_variant_id)
-			or StringName(body.get("operation_mode")) != OPERATION_ADD_MATERIAL
-			or StringName(body.get("placement_policy")) != PLACEMENT_REPLACE_EXISTING
-			or polygon.size() < 3 or path_points.size() < 2
+			polygon.size() < 3 or path_points.size() < 2
 			or path_normals.size() != path_points.size()
 			or not path_contacts.is_empty()
 		):
@@ -6035,16 +6054,7 @@ func _is_body_bounded_add_history_eligible(
 		)
 		var radius_meters := float(body.get("radius_meters"))
 		if (
-			material_variant_id == StringName()
-			or (
-				expected_material_variant_id != StringName()
-				and material_variant_id != expected_material_variant_id
-			)
-			or StringName(body.get("operation_mode"))
-			!= ForgeV2VolumeStrokeScript.OPERATION_ADD_MATERIAL
-			or StringName(body.get("placement_policy"))
-			!= ForgeV2VolumeStrokeScript.PLACEMENT_REPLACE_EXISTING
-			or body_kind not in [
+			body_kind not in [
 				ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE,
 				ForgeV2MaterialBodyScript.BODY_KIND_DETAILING_BRUSH,
 			]
@@ -6069,16 +6079,7 @@ func _is_body_bounded_add_history_eligible(
 				return false
 		return true
 	return (
-		material_variant_id != StringName()
-		and (
-			expected_material_variant_id == StringName()
-			or material_variant_id == expected_material_variant_id
-		)
-		and StringName(body.get("operation_mode"))
-		== ForgeV2VolumeStrokeScript.OPERATION_ADD_MATERIAL
-		and StringName(body.get("placement_policy"))
-		== ForgeV2VolumeStrokeScript.PLACEMENT_REPLACE_EXISTING
-		and body_kind in [
+		body_kind in [
 			ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE,
 			ForgeV2MaterialBodyScript.BODY_KIND_DETAILING_BRUSH,
 		]
@@ -6197,7 +6198,7 @@ func _restore_bounded_promotion_rollback_snapshot(
 	_normalize_selected_material_body_id()
 
 
-func _can_commit_layer_to_bounded_add_history(
+func _can_commit_layer_to_bounded_history(
 	layer: Resource,
 	commit_ready_bodies: Array[Resource]
 ) -> bool:
@@ -6209,14 +6210,16 @@ func _can_commit_layer_to_bounded_add_history(
 	):
 		return false
 	var expected_material_variant_id := _get_bounded_history_material_id()
-	if expected_material_variant_id == StringName():
+	if expected_material_variant_id == StringName() and StringName(
+		commit_ready_bodies[0].get("operation_mode")
+	) == OPERATION_ADD_MATERIAL:
 		expected_material_variant_id = StringName(
 			commit_ready_bodies[0].get("material_variant_id")
 		)
 	if (
-		not layer.has_method("is_bounded_add_history_eligible")
+		not layer.has_method("is_bounded_history_eligible")
 		or not bool(layer.call(
-			"is_bounded_add_history_eligible",
+			"is_bounded_history_eligible",
 			expected_material_variant_id
 		))
 	):
@@ -6225,10 +6228,10 @@ func _can_commit_layer_to_bounded_add_history(
 		if (
 			active_layer == null
 			or not active_layer.has_method(
-				"is_bounded_add_history_eligible"
+				"is_bounded_history_eligible"
 			)
 			or not bool(active_layer.call(
-				"is_bounded_add_history_eligible",
+				"is_bounded_history_eligible",
 				expected_material_variant_id
 			))
 		):
@@ -6237,12 +6240,19 @@ func _can_commit_layer_to_bounded_add_history(
 
 func _get_bounded_history_material_id() -> StringName:
 	if _has_bounded_history_checkpoint():
-		return StringName(bounded_history_checkpoint.get("material_variant_id"))
+		var checkpoint_material := StringName(bounded_history_checkpoint.get("material_variant_id"))
+		if checkpoint_material not in [StringName(), ForgeV2LayerDataScript.MATERIAL_VOID]:
+			return checkpoint_material
+	var promoting_material := StringName(_bounded_history_pending_promotion.get(
+		"solid_material_variant_id", StringName()
+	))
+	if promoting_material not in [StringName(), ForgeV2LayerDataScript.MATERIAL_VOID]:
+		return promoting_material
 	for layer: Resource in forge_layers:
-		if layer == null:
+		if layer == null or StringName(layer.get("operation_type")) != ForgeV2LayerDataScript.OPERATION_ADD_MATERIAL:
 			continue
 		var material_id := StringName(layer.get("operation_material_id"))
-		if material_id != StringName():
+		if material_id not in [StringName(), ForgeV2LayerDataScript.MATERIAL_VOID, ForgeV2LayerDataScript.MATERIAL_MIXED]:
 			return material_id
 	return StringName()
 
@@ -6283,6 +6293,7 @@ func _stage_bounded_history_promotion(
 		pre_rebase_bodies
 	) as Array
 	var previous_checkpoint_token := _get_bounded_history_checkpoint_token()
+	var solid_material_variant_id := _get_bounded_history_material_id()
 	var promoted_layer := forge_layers.pop_front() as Resource
 	var promoted_bodies := _get_layer_material_bodies(promoted_layer)
 	_remove_material_bodies_for_layer(promoted_layer)
@@ -6296,6 +6307,7 @@ func _stage_bounded_history_promotion(
 		{
 			"requires_native_ack": true,
 			"pending_native_ack": true,
+			"material_variant_id": solid_material_variant_id,
 			"promoted_layer": promoted_layer,
 			"promoted_layer_id": StringName(promoted_layer.get("layer_id")),
 			"promoted_bodies": promoted_bodies,
@@ -6306,6 +6318,7 @@ func _stage_bounded_history_promotion(
 		}
 	)
 	_bounded_history_pending_promotion = {
+		"solid_material_variant_id": solid_material_variant_id,
 		"revision": bounded_history_transition_revision,
 		"expected_checkpoint_operation_count": (
 			expected_checkpoint_operation_count

@@ -149,20 +149,50 @@ func get_material_delta_units(material_variant_id: StringName) -> float:
 func is_bounded_add_history_eligible(
 	expected_material_variant_id: StringName = StringName()
 ) -> bool:
+	return (
+		operation_type == OPERATION_ADD_MATERIAL
+		and is_bounded_history_eligible(expected_material_variant_id)
+	)
+
+## One authored Add or Remove occupies one ordinary bounded-history slot.
+## Cutter material is only a UI hint; negative deltas belong to the cut solid.
+func is_bounded_history_eligible(
+	expected_material_variant_id: StringName = StringName()
+) -> bool:
+	var is_remove := operation_type == OPERATION_SUBTRACT_VOID
 	if (
-		operation_type != OPERATION_ADD_MATERIAL
-		or csg_operation != CSG_OPERATION_UNION
+		operation_type not in [OPERATION_ADD_MATERIAL, OPERATION_SUBTRACT_VOID]
+		or csg_operation != (CSG_OPERATION_SUBTRACTION if is_remove else CSG_OPERATION_UNION)
 		or not undoable
 		or layer_id == StringName()
 		or operation_material_id == StringName()
 		or operation_material_id == MATERIAL_MIXED
 		or (
-			expected_material_variant_id != StringName()
-			and operation_material_id != expected_material_variant_id
+			not is_remove
+			and (
+				operation_material_id == MATERIAL_VOID
+				or (
+					expected_material_variant_id != StringName()
+					and operation_material_id != expected_material_variant_id
+				)
+			)
 		)
 		or input_shape_records.size() != 1
 		or body_ids.size() != 1
-		or not removed_material_records.is_empty()
+	):
+		return false
+	if is_remove:
+		if (
+			operation_material_id != MATERIAL_VOID
+			or removed_material_records.size() != 1
+			or StringName(removed_material_records[0].get("layer_id", StringName())) != layer_id
+			or rough_void_material_centi_units < 0
+			or not is_finite(rough_void_volume_cell_equivalents)
+			or rough_void_volume_cell_equivalents < 0.0
+		):
+			return false
+	elif (
+		not removed_material_records.is_empty()
 		or rough_void_material_centi_units != 0
 		or not is_zero_approx(rough_void_volume_cell_equivalents)
 	):
@@ -173,15 +203,31 @@ func is_bounded_add_history_eligible(
 	var record := record_variant as Dictionary
 	if (
 		StringName(record.get("body_id", StringName())) != body_ids[0]
-		or StringName(record.get(
+		or (not is_remove and StringName(record.get(
 			"material_variant_id",
 			StringName()
-		)) != operation_material_id
+		)) != operation_material_id)
+		or StringName(record.get("operation_mode", StringName())) != (
+			SOURCE_OPERATION_REMOVE_MATERIAL if is_remove else SOURCE_OPERATION_ADD_MATERIAL
+		)
+		or (not is_remove and StringName(record.get("placement_policy", StringName()))
+			!= SOURCE_PLACEMENT_REPLACE_EXISTING)
 	):
 		return false
 	for ledger_material_key: Variant in ledger_delta.keys():
-		if StringName(ledger_material_key) != operation_material_id:
+		var ledger_material_id := StringName(ledger_material_key)
+		if not is_remove and ledger_material_id != operation_material_id:
 			return false
+		if is_remove:
+			if expected_material_variant_id == StringName() or ledger_material_id != expected_material_variant_id:
+				return false
+			var delta_variant: Variant = ledger_delta[ledger_material_key]
+			if not delta_variant is Dictionary:
+				return false
+			var delta: Dictionary = delta_variant
+			var volume_delta := float(delta.get("rough_volume_cell_equivalents", 0.0))
+			if not is_finite(volume_delta) or volume_delta > 0.0 or int(delta.get("rough_material_centi_units", 0)) > 0:
+				return false
 	var path_points: PackedVector3Array = record.get(
 		"path_points",
 		PackedVector3Array()
@@ -204,11 +250,7 @@ func is_bounded_add_history_eligible(
 			"profile_polygon_2d_meters", PackedVector2Array()
 		)
 		if (
-			StringName(record.get("operation_mode", StringName()))
-			!= SOURCE_OPERATION_ADD_MATERIAL
-			or StringName(record.get("placement_policy", StringName()))
-			!= SOURCE_PLACEMENT_REPLACE_EXISTING
-			or polygon.size() < 3 or path_points.size() < 2
+			polygon.size() < 3 or path_points.size() < 2
 			or path_normals.size() != path_points.size()
 			or not path_contacts.is_empty()
 		):
@@ -240,10 +282,6 @@ func is_bounded_add_history_eligible(
 				ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE,
 				ForgeV2MaterialBodyScript.BODY_KIND_DETAILING_BRUSH,
 			]
-			or StringName(record.get("operation_mode", StringName()))
-			!= SOURCE_OPERATION_ADD_MATERIAL
-			or StringName(record.get("placement_policy", StringName()))
-			!= SOURCE_PLACEMENT_REPLACE_EXISTING
 			or int(record.get("profile_runtime_schema_version", 0)) != 0
 			or path_points.size() < minimum_path_point_count
 			or path_normals.size() != path_points.size()
@@ -270,10 +308,6 @@ func is_bounded_add_history_eligible(
 			ForgeV2MaterialBodyScript.BODY_KIND_VOLUME_STROKE,
 			ForgeV2MaterialBodyScript.BODY_KIND_DETAILING_BRUSH,
 		]
-		and StringName(record.get("operation_mode", StringName()))
-		== SOURCE_OPERATION_ADD_MATERIAL
-		and StringName(record.get("placement_policy", StringName()))
-		== SOURCE_PLACEMENT_REPLACE_EXISTING
 		and StringName(record.get("shape_kind", StringName()))
 		== ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
 		and int(record.get("profile_runtime_schema_version", 0)) > 0

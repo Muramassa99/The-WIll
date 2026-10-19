@@ -5497,8 +5497,28 @@ func get_held_item_hand_end_bounds(held_item: Node3D, slot_id: StringName) -> Di
 		"primary_grip_span_end_local", "primary_grip_span_end_origin_id",
 		Vector3.ZERO, CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
 	var world_basis := held_item.global_basis if held_item.is_inside_tree() else held_item.basis
+	var span_vector: Vector3 = end - start
+	# A rotation does not resize the handle. Recomputing float32 lengths every
+	# pose can move an end station across the grip identity grid and discard an
+	# otherwise unchanged binding. Cache by geometry and physical scale metric,
+	# including nonuniform parent scale and its orientation relative to the item.
+	var scale_metric: Basis = world_basis.transposed() * world_basis
+	var measurement: Dictionary = held_item.get_meta("preview_handle_span_measurement", {})
+	var same_metric := false
+	if not measurement.is_empty():
+		var previous_metric: Basis = measurement["scale_metric"]
+		var magnitude: float = scale_metric.x.x + scale_metric.y.y + scale_metric.z.z
+		var previous_magnitude: float = previous_metric.x.x + previous_metric.y.y + previous_metric.z.z
+		# Compare relatively even for miniature items: an absolute epsilon on
+		# tiny squared scales would otherwise conceal a genuine resize.
+		if magnitude > 0.0 and previous_magnitude > 0.0:
+			same_metric = is_equal_approx(magnitude / previous_magnitude, 1.0) and scale_metric.scaled(Vector3.ONE / magnitude).is_equal_approx(previous_metric.scaled(Vector3.ONE / previous_magnitude))
+	if measurement.is_empty() or measurement.get("span_vector") != span_vector or not same_metric:
+		measurement = {"span_vector": span_vector, "scale_metric": scale_metric,
+			"length_meters": (world_basis * span_vector).length()}
+		held_item.set_meta("preview_handle_span_measurement", measurement)
 	return PrimaryGripSeatResolverScript.resolve_hand_end_bounds(
-		(world_basis * (end - start)).length(), float(spans.get(slot_id, 0.0)))
+		float(measurement["length_meters"]), float(spans.get(slot_id, 0.0)))
 
 
 func get_preview_hand_end_bounds(preview_subviewport: SubViewport, support: bool = false) -> Dictionary:
@@ -7370,7 +7390,8 @@ func _evaluate_preview_slot_legality(
 		var grip_span_projection: Dictionary = _project_world_target_to_held_item_grip_span(
 			held_item,
 			solved_transform,
-			corrected_target
+			corrected_target,
+			slot_id
 		)
 		if not grip_span_projection.is_empty():
 			var projected_world: Vector3 = grip_span_projection.get("projected_world", corrected_target) as Vector3
@@ -8389,7 +8410,8 @@ func _resolve_preview_support_grip_seat_local_for_target(
 	var projection: Dictionary = _project_world_target_to_held_item_grip_span(
 		held_item,
 		solved_transform,
-		support_target_world
+		support_target_world,
+		_resolve_preview_support_slot_id()
 	)
 	if projection.is_empty():
 		return _get_origin_tracked_vector3_state(
@@ -8512,7 +8534,8 @@ func _apply_preview_reach_limit(actor: Node3D, slot_id: StringName, shoulder_wor
 func _project_world_target_to_held_item_grip_span(
 	held_item: Node3D,
 	solved_transform: Transform3D,
-	target_world: Vector3
+	target_world: Vector3,
+	slot_id: StringName
 ) -> Dictionary:
 	if held_item == null:
 		return {}
@@ -8550,7 +8573,9 @@ func _project_world_target_to_held_item_grip_span(
 	var span_length_squared: float = span_vector_world.length_squared()
 	if span_length_squared <= 0.000001:
 		return {}
-	var bounds := get_held_item_hand_end_bounds(held_item, _resolve_preview_support_slot_id())
+	# This projection serves both hands. Reusing support's footprint here makes
+	# primary acquisition and later motion disagree about the same end station.
+	var bounds := get_held_item_hand_end_bounds(held_item, slot_id)
 	if not bounds.get("valid", false):
 		return {}
 	var ratio: float = clampf((target_world - span_start_world).dot(span_vector_world) / span_length_squared,
@@ -9372,10 +9397,8 @@ func _create_upperarm_roll_gizmo_markers(state: Dictionary, motion_node: CombatA
 			skeleton,
 			trajectory_root,
 			slot_id,
-			PREVIEW_LEFT_UPPERARM_BONE if is_left_slot else PREVIEW_RIGHT_UPPERARM_BONE,
-			PREVIEW_LEFT_FOREARM_BONE if is_left_slot else PREVIEW_RIGHT_FOREARM_BONE,
-			PREVIEW_LEFT_HAND_BONE if is_left_slot else PREVIEW_RIGHT_HAND_BONE,
-			motion_node.left_upperarm_roll_degrees if is_left_slot else motion_node.right_upperarm_roll_degrees
+			motion_node.left_upperarm_roll_degrees if is_left_slot else motion_node.right_upperarm_roll_degrees,
+			actor
 		)
 		if not slot_state.is_empty():
 			gizmo_state[slot_id] = slot_state
@@ -9390,27 +9413,18 @@ func _build_upperarm_roll_gizmo_state(
 	skeleton: Skeleton3D,
 	trajectory_root: Node3D,
 	slot_id: StringName,
-	upperarm_bone: StringName,
-	forearm_bone: StringName,
-	hand_bone: StringName,
-	current_roll_degrees: float
+	current_roll_degrees: float,
+	actor: Node3D
 ) -> Dictionary:
-	var shoulder_world: Vector3 = _get_preview_bone_world_position(skeleton, upperarm_bone)
-	var elbow_world: Vector3 = _get_preview_bone_world_position(skeleton, forearm_bone)
-	var hand_world: Vector3 = _get_preview_bone_world_position(skeleton, hand_bone)
-	var axis_world: Vector3 = hand_world - shoulder_world
-	if axis_world.length_squared() <= 0.000001:
+	if skeleton == null or actor == null or not actor.has_method("get_authoring_upperarm_roll_control_state"):
 		return {}
-	axis_world = axis_world.normalized()
-	var center_world: Vector3 = shoulder_world.lerp(hand_world, 0.5)
-	var radial_world: Vector3 = elbow_world - center_world
-	radial_world -= axis_world * radial_world.dot(axis_world)
-	if radial_world.length_squared() <= 0.000001:
-		radial_world = _resolve_upperarm_roll_reference_world(slot_id, axis_world)
-	if radial_world.length_squared() <= 0.000001:
+	var control_state: Dictionary = actor.call("get_authoring_upperarm_roll_control_state", slot_id)
+	if control_state.is_empty():
 		return {}
-	var radius: float = clampf(radial_world.length(), UPPERARM_ROLL_GIZMO_MIN_RADIUS_METERS, UPPERARM_ROLL_GIZMO_MAX_RADIUS_METERS)
-	var normal_world: Vector3 = radial_world.normalized()
+	var axis_world: Vector3 = control_state["axis_global"]
+	var center_world: Vector3 = control_state["center_global"]
+	var radius: float = clampf(float(control_state["radial_length_meters"]), UPPERARM_ROLL_GIZMO_MIN_RADIUS_METERS, UPPERARM_ROLL_GIZMO_MAX_RADIUS_METERS)
+	var normal_world: Vector3 = control_state["initial_normal_global"]
 	var handle_world: Vector3 = center_world + normal_world * radius
 	var target: StringName = (
 		CombatAnimationMotionNodeEditorScript.DRAG_TARGET_LEFT_UPPERARM_ROLL
@@ -9424,7 +9438,11 @@ func _build_upperarm_roll_gizmo_state(
 		"center_global": center_world,
 		"axis_global": axis_world,
 		"initial_normal_global": normal_world,
-		"initial_roll_degrees": current_roll_degrees,
+		# The stored angle can differ from the visible elbow after automatic or
+		# constrained posing. A grab must start at the elbow the user can see.
+		"initial_roll_degrees": control_state["initial_roll_degrees"],
+		"authored_roll_degrees": current_roll_degrees,
+		"reference_global": control_state["reference_global"],
 		"radius_meters": radius,
 		"handle_global": handle_world,
 		"center_local": trajectory_inverse * center_world,
@@ -9465,17 +9483,6 @@ func _draw_upperarm_roll_gizmo(
 	_create_control_gizmo_marker(marker_root, handle_local, marker_color, 0.018 if focus_active else 0.015, "%sHandle" % prefix, 0.9)
 	_create_line_gizmo_marker(marker_root, center_local, handle_local, marker_color, "%sRod" % prefix)
 	return 3
-
-func _resolve_upperarm_roll_reference_world(slot_id: StringName, axis_world: Vector3) -> Vector3:
-	var side_reference: Vector3 = Vector3.LEFT if slot_id == &"hand_left" else Vector3.RIGHT
-	var reference_world: Vector3 = side_reference - axis_world * side_reference.dot(axis_world)
-	if reference_world.length_squared() <= 0.000001:
-		reference_world = Vector3.UP - axis_world * Vector3.UP.dot(axis_world)
-	if reference_world.length_squared() <= 0.000001:
-		reference_world = Vector3.FORWARD - axis_world * Vector3.FORWARD.dot(axis_world)
-	if reference_world.length_squared() <= 0.000001:
-		return Vector3.ZERO
-	return reference_world.normalized()
 
 func _get_preview_bone_world_position(skeleton: Skeleton3D, bone_name: StringName) -> Vector3:
 	var bone_index: int = skeleton.find_bone(String(bone_name)) if skeleton != null else -1

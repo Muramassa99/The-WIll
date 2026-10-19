@@ -348,6 +348,16 @@ func _test_handle_and_detail_dispatch() -> void:
 	await _wait_for_context_completion("Detail Apply")
 	_check(not _popup_open() and _points().is_empty() and _user_body_count() > bodies_before and _pending_body_count() == 0,
 		"actual Detail Apply generates and commits material then clears the solved path")
+	controller.call("set_active_operation_mode", REMOVE)
+	_check(_install_detail_solution(), "Detail Remove installs over committed Add")
+	ui.call("_input", _key(KEY_S))
+	await _click_popup_button("Apply")
+	await _wait_for_context_completion("Detail Remove Apply")
+	_check(not _popup_open() and _points().is_empty() and _pending_body_count() == 0,
+		"real S Apply accepts and commits Detailing Remove after Add")
+	var cut_layers: Array = state.get("forge_layers")
+	_check(cut_layers.size() == 2 and StringName(cut_layers.back().get("operation_type")) == &"layer_operation_subtract_void",
+		"S Remove preserves chronological Add then subtract history")
 	evidence["detail_boundary"] = "Tests command dispatch using a coherent solved surface path; surface picking is not reverified here"
 
 

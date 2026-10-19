@@ -875,8 +875,14 @@ func _validate_checkpoint_occupancy_token(
 	if (
 		int(checkpoint_token.get("checkpoint_operation_count", 0)) > 0
 		and cell_materials.is_empty()
+		and not bool(checkpoint_token.get("checkpoint_occupancy_empty", false))
 	):
 		return {"ok": false, "reason": &"checkpoint_prefix_occupancy_missing"}
+	if bool(checkpoint_token.get("checkpoint_occupancy_empty", false)) and (
+		not cell_materials.is_empty() or not protected_cells.is_empty()
+		or not stored_material_counts.is_empty()
+	):
+		return {"ok": false, "reason": &"checkpoint_empty_occupancy_inconsistent"}
 
 	var computed_material_counts: Dictionary = {}
 	for cell_key: Variant in cell_materials.keys():

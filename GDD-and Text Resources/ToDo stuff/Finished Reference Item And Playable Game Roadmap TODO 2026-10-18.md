@@ -27,6 +27,9 @@ is a planned task, not a branch change performed now.
 
 ## Reference item and Skill Crafter
 
+- [x] Resolve the primitive Detailing Remove commit/Save blocker (bounded Remove
+  implemented; focused rendered checks pass; user artwork retest pending):
+  [bounded Remove support investigation](<Forge V2 Bounded Remove Support TODO 2026-10-18.md>).
 - [ ] Build and save the reference item in Forge V2; record its actual saved name
   and identifier when available.
 - [ ] Use the item to expose current and future Forge V2 features and authoring

@@ -7465,7 +7465,7 @@ func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 					return
 				_begin_preview_drag_override(pick_motion_node)
 				if _is_arm_roll_focus(session_state.current_focus):
-					motion_node_editor.begin_upperarm_roll_drag(drag_target, arm_roll_pick.get("roll_state", {}) as Dictionary)
+					motion_node_editor.begin_upperarm_roll_drag(drag_target, arm_roll_pick.get("roll_state", {}) as Dictionary, camera, mb.position)
 				elif _is_hand_proxy_focus(session_state.current_focus):
 					_seed_preview_drag_hand_proxy_segment(_resolve_hand_proxy_focus_slot(session_state.current_focus), hand_proxy_pick_state)
 					motion_node_editor.begin_drag(drag_target, mb.position, pick_motion_node)

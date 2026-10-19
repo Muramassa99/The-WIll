@@ -1011,3 +1011,144 @@ Related measurement, placement and persistence plan:
 [Grip Overhaul Consolidation 2026-09-18.md](<Grip Overhaul Consolidation 2026-09-18.md>),
 October 14 sections. This entry records intended UI behavior only; no UI code
 or runtime behavior was changed when it was added.
+
+## Deferred Upper-Body Rotation and Motion Limits - 2026-10-18
+
+User-reported Skill Crafter issues; save for later investigation and adjustment.
+This is a documentation request, not authorization to change the rig now.
+
+- [ ] Investigate wrist/hand rotation hard stops. The visible usable range feels
+  like roughly three quarters of a circle, and the remaining quarter contains
+  orientations the user needs. This is an approximate observation, not a measured
+  joint limit. Identify whether the restriction comes from angle wrapping, control
+  limits, wrist/forearm constraints or the wider arm solve before adjusting it.
+- [ ] Investigate unwanted arm over-rotation. The user suspects the shoulder to
+  upper-arm connection; the source joint is not yet confirmed. Relate this to the
+  earlier intermittent right-elbow inversion near full extension and retraction,
+  where the elbow may reveal an upstream rotation problem.
+- [ ] Review the clavicle/shoulder-girdle connection between the upper spine and
+  upper arm. Allow the intended additional upper-body turning around the spine
+  axis through appropriate joint participation; current turning feels insufficient.
+- [ ] Reassess torso and upper-spine twist together with clavicle, shoulder,
+  upper-arm, forearm and wrist limits. The intended outcome is more usable motion
+  with coherent body following, while preventing excessive arm rotation and
+  anatomically incorrect bends. Do not simply remove every hard stop or assign
+  the entire requested hand rotation to the wrist alone.
+- [ ] When implemented, check both arms, normal/reverse grips and one-/two-handed
+  configurations, including extension/retraction and saved-skill/F replay. Retain
+  intended weapon orientation and established grip placement.
+
+NEEDS_DECISION after inspection: exact comfortable ranges, neutral references,
+rotation axes and how turning is distributed across the upper-body chain. No
+numeric caps are agreed by this report. No code changes or runtime tests were
+performed for this TODO entry.
+
+## Body Control And Directional Combat Brainstorm - 2026-10-19
+
+User requested saving the complete useful brainstorming session and its original
+annotated cross-section image. Current focus returns to body mobility and player
+agency over skill/body composition. This is documentation, not implementation
+authorization.
+
+Full decisions, proposals, open questions, source findings and embedded original
+image: [Skill Crafter Body Control And Directional Combat Brainstorm 2026-10-19.md](<Skill Crafter Body Control And Directional Combat Brainstorm 2026-10-19.md>).
+
+- [ ] Establish more extensive player control: torso rotation/position, head
+  direction and hip twist, including ownership relative to weapon/grip control
+  and preservation through save and replay. Exact controls and UX remain open.
+- [ ] Consider a ground front-direction arrow or a visual target approximately
+  80% of maximum weapon range. Their reference/range definition remains open.
+- [ ] Preserve optional advanced authoring as an exploration, with one coherent
+  saved result and approachable default interaction. No full Blender clone scope.
+- [ ] Future combat direction is explicitly selected: directional classification
+  with forgiving contact detection, rather than precise per-edge hitbox zones.
+  Geometry informs slash/blunt/pierce directions; detailed rules remain open.
+- [ ] Retain the cross-section scan proposal as a candidate preparation method.
+  The annotated comparison means 60% of the longest scan LENGTH, not 60 degrees.
+  Local sharpness/taper validation is also needed; no threshold is validated.
+- [ ] Preserve projectile deflection, visual cutting and environmental-use
+  examples as future work, including redirecting a burning attack into a rope
+  to release a drawbridge. Do not start those systems before the body-control work.
+
+The prior wrist/shoulder issues were assumed solved only for the hypothetical
+discussion. The October 18 defect TODO remains unresolved. The historical
+Forge V1 decision to drop the cutting/blunt classifier reflects old constraints;
+it is not a current prohibition and does not authorize restoring old block rules.
+No game code changes or runtime tests were performed for the brainstorming portion.
+
+## Body Mobility Investigation And Reusable Fixture - 2026-10-19
+
+Follow-up to the brainstorming portion: diagnostic game runs are now authorized;
+production solver/limit/control changes remain for a later implementation slice.
+User will handle token renewal and explicitly requests keeping the test fixture.
+
+- [x] Exercise normal single-hand axial thrust/retraction via pommel movement,
+  both main hands, Broken_Balde_v1, skill slot 2. Retained 164 samples with stage
+  transforms and requested/accepted positions. This exercised the scenario; it
+  did not establish the severe right-arm wrapping reproduction.
+- [ ] Diagnose upstream continuity and reference-frame behaviour before changing
+  wrist ranges. An isolated zero-request helper reset defect is reproduced;
+  its contribution to the visible issue is not yet established.
+- [x] Require applied grip readiness before motion, then record binding loss
+  during motion. Earlier fixed-frame-wait exploratory sweeps do not establish
+  the bound-grip case. Both right sweeps stayed bound; left lost its binding.
+- [x] Retain the reusable diagnostic, offline HTML review, raw stage measurements
+  and rendered frames for torso/head/hip work. Capture is not test acceptance.
+- [ ] Isolate left-hand relationship identity jitter: a 0.104308 micrometre
+  station-X change restarts acquisition during rigid motion. Inspect the
+  station producer and identity contract before choosing a correction.
+- [ ] Investigate right elbow-plane continuity near the 168-degree extension
+  limit. Large plane-normal changes were measured, not equivalent bone spins.
+  Confirm genuinely elevated right-hand coverage: the requested 25-degree setup
+  was constrained back near horizontal in this run.
+- [x] Add the user's three-step reproduction: extend -> pull toward shoulder ->
+  hold and drag the actual elbow control, with no re-extension/reset. Latest
+  evidence `elbow_correction_20261019_201302` retains 66 samples. Left stays bound
+  and its corrective drag produces a large discontinuity; right loses binding.
+- [ ] Correct anatomical elbow-side selection: current direct-authoring limiter
+  checks unsigned maximum bend and does not reject reversed bend direction.
+- [ ] Unify elbow-gizmo and rig angle references, including zero. Bound left
+  correction reproduced a 104-degree forearm world jump while authored weapon
+  endpoints stayed fixed. The intended elbow side was not restored correctly.
+- [ ] Inspect residual forearm/twist-helper compensation after correct elbow
+  placement; validate retained edit on mouse release as well as during dragging.
+- [ ] Define body-control ownership, torso-position/stance meaning and capture/
+  replay coverage before implementing the first artistic controls.
+
+Current detailed work note and run instructions:
+[Skill Crafter Body Mobility Preparation 2026-10-19.md](<Skill Crafter Body Mobility Preparation 2026-10-19.md>).
+
+### Later R-L-R authorization and focused correction — 2026-10-19
+
+The user subsequently authorized a fix attempt after usable R-L-R evidence;
+the earlier investigation-only scope above is historical. First R is warmup,
+and the settle timer starts after loading/pose setup, at acquisition request.
+
+- [x] Reproduce the manual reference mismatch with a freshly generated gizmo:
+  bound left arm, approximately 10.55-degree input, 101.50-degree plane jump.
+- [x] Align the gizmo's starting angle with the rig's visible, actor-relative
+  angle; calibrate from the actual press and preserve sphere-side continuity.
+  Focused verifier: 96/96 checks, both hands, rotated actor and rear/oblique views.
+- [x] Correct the shared span projection using support-hand width for primary
+  placement. Require the actual slot at both call sites.
+- [x] Stabilize Handle length against rigid-motion float noise while retaining
+  true geometry/scale changes, including nonuniform parents and miniature scales.
+  Expanded `verify_handle_coordinate_contract.gd` passes.
+- [x] Complete and record the final integrated R-L-R comparison with all fixes:
+  `godot_runs/elbow_rlr_final_20261019_204728`, 99 samples, first R warmup;
+  compared L and second R both retain applied binding 33/33 and accept release.
+  First elbow-plane step follows pointer: 11.138 vs 11.135 degrees left,
+  7.735 vs 7.746 degrees right. The old bound-left first jump was 101.498 degrees.
+- [ ] Investigate remaining rendered-weapon movement during elbow correction:
+  authored endpoints stay fixed but maximum observed pommel movement is 22.80 mm
+  left / 26.64 mm right. Do not call this a fully fixed world-space weapon hold.
+- [ ] Establish anatomical elbow-side validity during automatic reach/retraction.
+  The unsigned max-angle check is still not a signed hinge constraint. Do not
+  equate fixing the control's angular jump with completing anatomical arm limits.
+- [ ] Decide explicit manual-zero semantics separately if needed: saved zero
+  still means automatic. No saved-data migration or new body controls here.
+
+Existing shoulder-swing and upper-body checks passed. Wrist limits and helper
+distribution remain unchanged; the isolated zero-helper reset issue still needs
+its own assessment. Evidence, limitations and fresh run paths are in the body
+mobility preparation note.

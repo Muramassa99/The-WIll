@@ -286,6 +286,63 @@ func _verify_hand_size_and_transform(
 		&"hand_right": TEST_HAND_SPAN_METERS,
 		&"hand_left": 0.1,
 	})
+	# Projection is shared by initial primary legality and support placement.
+	# Its footprint must belong to the queried hand, independent of dominance.
+	for dominant: StringName in [&"hand_right", &"hand_left"]:
+		preview_presenter.call("configure_preview_hand_setup", dominant, false)
+		for slot: StringName in [&"hand_right", &"hand_left"]:
+			var clearance: float = TEST_END_CLEARANCE_METERS if slot == &"hand_right" else 0.06
+			for end: float in [0.0, 1.0]:
+				var projected: Dictionary = preview_presenter.call(
+					"_project_world_target_to_held_item_grip_span", held_item,
+					Transform3D.IDENTITY, Vector3.RIGHT * end, slot
+				)
+				_assert_close(float(projected.get("projected_ratio", -1.0)),
+					clearance if end == 0.0 else 1.0 - clearance,
+					"%s projection uses its own end clearance with %s primary" % [slot, dominant])
+	preview_presenter.call("configure_preview_hand_setup", &"hand_right", false)
+	var stationary_bounds: Dictionary = preview_presenter.call(
+		"get_held_item_hand_end_bounds", held_item, &"hand_right")
+	for angle: float in [0.13, 0.59, 1.14, 1.76, 2.91, 3.17, 4.56, 5.92]:
+		held_item.basis = Basis.from_euler(Vector3(angle * 0.37, angle, angle * -0.21))
+		var rotated_bounds: Dictionary = preview_presenter.call(
+			"get_held_item_hand_end_bounds", held_item, &"hand_right")
+		assert(rotated_bounds.min_ratio == stationary_bounds.min_ratio,
+			"rigid rotation must not move the end station across an identity rounding boundary")
+	held_item.transform = Transform3D.IDENTITY
+	held_item.set_meta("primary_grip_span_end_local", Vector3.RIGHT * 2.0)
+	var longer_span_bounds: Dictionary = preview_presenter.call(
+		"get_held_item_hand_end_bounds", held_item, &"hand_right")
+	_assert_close(float(longer_span_bounds.min_ratio), TEST_END_CLEARANCE_METERS / 2.0,
+		"changing the authored span invalidates the cached physical length")
+	held_item.set_meta("primary_grip_span_end_local", Vector3.RIGHT)
+	var restored_span_bounds: Dictionary = preview_presenter.call(
+		"get_held_item_hand_end_bounds", held_item, &"hand_right")
+	_assert_close(float(restored_span_bounds.min_ratio), TEST_END_CLEARANCE_METERS,
+		"restoring the authored span restores its original end clearance")
+	held_item.scale = Vector3.ONE * 2.0
+	var scaled_bounds: Dictionary = preview_presenter.call(
+		"get_held_item_hand_end_bounds", held_item, &"hand_right")
+	_assert_close(float(scaled_bounds.min_ratio), TEST_END_CLEARANCE_METERS / 2.0,
+		"physical item scaling invalidates the cached length")
+	held_item.transform = Transform3D.IDENTITY
+	var restored_scale_bounds: Dictionary = preview_presenter.call(
+		"get_held_item_hand_end_bounds", held_item, &"hand_right")
+	_assert_close(float(restored_scale_bounds.min_ratio), TEST_END_CLEARANCE_METERS,
+		"removing item scale restores the original physical length")
+	held_item.set_meta("hand_grip_spans_meters", {&"hand_right": TEST_HAND_SPAN_METERS * 0.001, &"hand_left": 0.1})
+	held_item.scale = Vector3.ONE * 0.001
+	var tiny_bounds: Dictionary = preview_presenter.call(
+		"get_held_item_hand_end_bounds", held_item, &"hand_right")
+	_assert_close(float(tiny_bounds.min_ratio), TEST_END_CLEARANCE_METERS,
+		"proportionally scaled miniature item and hand retain the same clearance ratio")
+	held_item.scale = Vector3.ONE * 0.002
+	var resized_tiny_bounds: Dictionary = preview_presenter.call(
+		"get_held_item_hand_end_bounds", held_item, &"hand_right")
+	_assert_close(float(resized_tiny_bounds.min_ratio), TEST_END_CLEARANCE_METERS / 2.0,
+		"relative resizing at miniature scale invalidates the cached metric")
+	held_item.transform = Transform3D.IDENTITY
+	held_item.set_meta("hand_grip_spans_meters", {&"hand_right": TEST_HAND_SPAN_METERS, &"hand_left": 0.1})
 	var left_bounds: Dictionary = preview_presenter.call(
 		"get_held_item_hand_end_bounds", held_item, &"hand_left"
 	)
@@ -314,6 +371,16 @@ func _verify_hand_size_and_transform(
 	)
 	_assert_close(float(transformed_bounds.get("min_ratio", -1.0)), TEST_END_CLEARANCE_METERS / 3.0,
 		"clearance uses the world span after parent scale and item rotation, not local units")
+	held_item.rotation = Vector3.ZERO
+	var reoriented_bounds: Dictionary = preview_presenter.call(
+		"get_held_item_hand_end_bounds", held_item, &"hand_right")
+	_assert_close(float(reoriented_bounds.min_ratio), TEST_END_CLEARANCE_METERS / 2.0,
+		"item rotation under a nonuniform parent invalidates changed physical length")
+	scale_parent.scale = Vector3(5.0, 3.0, 4.0)
+	var rescaled_parent_bounds: Dictionary = preview_presenter.call(
+		"get_held_item_hand_end_bounds", held_item, &"hand_right")
+	_assert_close(float(rescaled_parent_bounds.min_ratio), TEST_END_CLEARANCE_METERS / 5.0,
+		"changing parent scale invalidates the cached physical length")
 	held_item.reparent(root, false)
 	held_item.transform = Transform3D.IDENTITY
 	scale_parent.free()

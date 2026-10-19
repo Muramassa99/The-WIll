@@ -92,11 +92,7 @@ func replace_with_summary(summary: Dictionary) -> void:
 		"removed_material_records",
 		[]
 	) as Array
-	for record_variant: Variant in source_removed_records:
-		if record_variant is Dictionary:
-			removed_material_records.append(
-				(record_variant as Dictionary).duplicate(true)
-			)
+	removed_material_records = _compact_checkpoint_removed_records(source_removed_records)
 	_recalculate_totals_from_material_entries()
 	updated_timestamp = Time.get_unix_time_from_system()
 
@@ -121,6 +117,9 @@ func get_checkpoint_summary() -> Dictionary:
 		entry["layer_ids"] = []
 		checkpoint_materials[StringName(material_key)] = entry
 	summary["materials"] = checkpoint_materials
+	summary["removed_material_records"] = _compact_checkpoint_removed_records(
+		removed_material_records
+	)
 	return summary
 
 func apply_layer(layer: Resource) -> void:
@@ -165,14 +164,44 @@ func get_summary() -> Dictionary:
 			else 0.0
 		)
 		normalized_materials[material_variant_id] = entry
+	var removed_record_count := 0
+	for record: Dictionary in removed_material_records:
+		removed_record_count += maxi(int(record.get("source_record_count", 1)), 1)
 	return {
 		"total_rough_material_centi_units": total_rough_material_centi_units,
 		"total_rough_material_units": float(total_rough_material_centi_units) / 100.0,
 		"total_rough_volume_cell_equivalents": total_rough_volume_cell_equivalents,
 		"materials": normalized_materials,
 		"removed_material_records": removed_material_records.duplicate(true),
-		"removed_material_record_count": removed_material_records.size(),
+		"removed_material_record_count": removed_record_count,
 	}
+
+func _compact_checkpoint_removed_records(records: Array) -> Array[Dictionary]:
+	# These values describe rough cutter requests, as existing records do;
+	# actual occupied-material change remains the signed ledger delta. One
+	# aggregate preserves that accounting without keeping dead source IDs.
+	var source_record_count := 0
+	var rough_material_centi_units := 0
+	var rough_volume_cell_equivalents := 0.0
+	for record_variant: Variant in records:
+		if not record_variant is Dictionary:
+			continue
+		var record := record_variant as Dictionary
+		source_record_count += maxi(int(record.get("source_record_count", 1)), 1)
+		rough_material_centi_units += int(record.get("rough_material_centi_units", 0))
+		rough_volume_cell_equivalents += float(record.get("rough_volume_cell_equivalents", 0.0))
+	var compact_records: Array[Dictionary] = []
+	if source_record_count > 0:
+		compact_records.append({
+			"checkpoint_aggregate": true,
+			"source_record_count": source_record_count,
+			"material_variant_id": &"mat_unknown_removed",
+			"operation_material_id": &"mat_void",
+			"rough_volume_cell_equivalents": rough_volume_cell_equivalents,
+			"rough_material_centi_units": rough_material_centi_units,
+			"rough_material_units": float(rough_material_centi_units) / 100.0,
+		})
+	return compact_records
 
 func get_summary_label() -> String:
 	var summary: Dictionary = get_summary()

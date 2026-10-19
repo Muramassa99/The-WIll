@@ -415,11 +415,11 @@ func _prepare_retained_spline_change(candidate: Dictionary, completion: Callable
 		checkpoint_packet["indices"] = cleaned["indices"]
 	var expected_material := _resolve_bounded_material_variant_id(descriptor)
 	for body: Resource in timeline:
-		var validation := _validate_native_static_body(body, expected_material)
+		var validation := _validate_native_static_body(body, expected_material, true)
 		if not bool(validation.get("ok", false)):
 			_finish_retained_candidate_failure(completion, generation, String(validation.get("reason", "retained_operand_ineligible")))
 			return
-		if expected_material == StringName():
+		if expected_material == StringName() and not _is_native_remove_body(body):
 			expected_material = StringName(body.get("material_variant_id"))
 	var packets: Array[Dictionary] = []
 	var operands_ready := false
@@ -460,11 +460,11 @@ func _prepare_retained_spline_change(candidate: Dictionary, completion: Callable
 	var start_index := 0
 	if checkpoint_count > 0:
 		operations.append({"method": &"reset_checkpoint_mesh", "arguments": [checkpoint_packet.get("vertices"), checkpoint_packet.get("indices"), checkpoint_count]})
-	else:
+	elif not _is_native_remove_body(timeline[0]):
 		operations.append({"method": &"reset_mesh", "arguments": [packets[0].get("vertices"), packets[0].get("indices")]})
 		start_index = 1
 	for index in range(start_index, packets.size()):
-		operations.append({"method": &"add_mesh", "arguments": [packets[index].get("vertices"), packets[index].get("indices")]})
+		operations.append({"method": _native_body_operation_method(timeline[index]), "arguments": [packets[index].get("vertices"), packets[index].get("indices")]})
 	for _redo_body: Resource in redo_bodies:
 		operations.append({"method": &"undo_state", "arguments": []})
 	var revision := 0
@@ -491,7 +491,7 @@ func _prepare_retained_spline_change(candidate: Dictionary, completion: Callable
 		_finish_retained_candidate_failure(completion, generation, String(protected_check.get("reason", "retained_handle_invalid")))
 		return
 	var handle := protected_check.get("protected_handle") as Resource
-	var empty_publication := not bool(result.get("state_initialized", false)) and handle == null
+	var empty_publication := indices.is_empty() and handle == null
 	# Use candidate aggregate explicitly. The live protected decomposition helpers
 	# bind to the current backend and must never label its mesh as a candidate.
 	var node_result: Dictionary
@@ -579,6 +579,8 @@ func _clean_retained_checkpoint_packet(packet: Dictionary) -> Dictionary:
 	# bake helper's minimum-volume test: ordinary artwork can be much smaller.
 	var source_vertices: PackedVector3Array = packet.get("vertices", PackedVector3Array())
 	var source_indices: PackedInt32Array = packet.get("indices", PackedInt32Array())
+	if _native_packet_is_explicitly_empty(packet):
+		return {"ok": true, "vertices": source_vertices, "indices": source_indices}
 	if source_indices.is_empty() or source_indices.size() % 3 != 0:
 		return {"ok": false}
 	var vertices := PackedVector3Array()
@@ -1945,7 +1947,8 @@ func _apply_bounded_native_append(
 	)
 	var body_validation := _validate_native_static_body(
 		appended_body,
-		expected_material_id
+		expected_material_id,
+		true
 	)
 	if not bool(body_validation.get("ok", false)):
 		return _reject_bounded_native_fast_lane(
@@ -2020,7 +2023,7 @@ func _apply_bounded_native_append(
 		)
 	var native_result: Dictionary
 	var mode := "append"
-	if use_reset:
+	if use_reset and not _is_native_remove_body(appended_body):
 		native_result = native_static_manifold_backend.call(
 			"reset_mesh",
 			operand_packet.get("vertices", PackedVector3Array()),
@@ -2029,7 +2032,7 @@ func _apply_bounded_native_append(
 		mode = "reset"
 	else:
 		native_result = native_static_manifold_backend.call(
-			"add_mesh",
+			_native_body_operation_method(appended_body),
 			operand_packet.get("vertices", PackedVector3Array()),
 			operand_packet.get("indices", PackedInt32Array())
 		) as Dictionary
@@ -2119,7 +2122,7 @@ func _apply_bounded_protected_handle_change(
 			)
 		if (
 			native_static_active_vertices.is_empty()
-			or native_static_active_indices.is_empty()
+			!= native_static_active_indices.is_empty()
 		):
 			return _reject_bounded_native_fast_lane(
 				authoring_state,
@@ -2163,7 +2166,7 @@ func _native_checkpoint_export_is_valid(
 		"indices",
 		PackedInt32Array()
 	)
-	return (
+	return _native_packet_is_explicitly_empty(checkpoint_export) or (
 		not vertices.is_empty()
 		and not indices.is_empty()
 		and indices.size() % 3 == 0
@@ -2249,7 +2252,7 @@ func _accept_bounded_native_result(
 		[]
 	) as Array
 	var should_publish_revision := (
-		state_initialized or not protected_bodies.is_empty()
+		not output_indices.is_empty() or not protected_bodies.is_empty()
 	)
 	var preview_timeline_bodies: Array = []
 	if bool(transition.get("requires_native_ack", false)):
@@ -2346,7 +2349,7 @@ func _stage_bounded_current_native_packet(
 		"protected_bodies",
 		[]
 	) as Array
-	if not native_static_state_initialized and protected_bodies.is_empty():
+	if native_static_active_indices.is_empty() and protected_bodies.is_empty():
 		_commit_native_static_empty_publication(native_static_expected_revision)
 		_capture_bounded_native_snapshot(presentation)
 		native_static_lifecycle = NATIVE_STATIC_LIFECYCLE_ACTIVE
@@ -2424,7 +2427,7 @@ func _validate_native_committed_result(
 		PackedInt32Array()
 	)
 	if state_initialized:
-		if vertices.is_empty() or indices.is_empty() or indices.size() % 3 != 0:
+		if not _native_packet_is_explicitly_empty(native_result) and (vertices.is_empty() or indices.is_empty() or indices.size() % 3 != 0):
 			return {"ok": false, "reason": "initialized_output_invalid"}
 	elif not vertices.is_empty() or not indices.is_empty():
 		return {"ok": false, "reason": "empty_state_has_output_mesh"}
@@ -2465,10 +2468,9 @@ func _capture_bounded_native_snapshot(presentation: Dictionary) -> void:
 		[]
 	) as Array
 	_capture_native_static_prefix(active_tail_bodies)
-	if native_static_material_variant_id == StringName():
-		native_static_material_variant_id = _resolve_bounded_material_variant_id(
-			presentation
-		)
+	native_static_material_variant_id = _resolve_bounded_material_variant_id(
+		presentation
+	)
 
 
 func _restore_bounded_native_static_lane(
@@ -2560,7 +2562,8 @@ func _restore_bounded_native_static_lane(
 		var body := body_variant as Resource
 		var body_validation := _validate_native_static_body(
 			body,
-			expected_material_id
+			expected_material_id,
+			true
 		)
 		if not bool(body_validation.get("ok", false)):
 			return _reject_bounded_native_fast_lane(
@@ -2571,7 +2574,7 @@ func _restore_bounded_native_static_lane(
 					"bounded_restore_body_ineligible"
 				))
 			)
-		if expected_material_id == StringName():
+		if expected_material_id == StringName() and not _is_native_remove_body(body):
 			expected_material_id = StringName(body.get(
 				"material_variant_id"
 			))
@@ -2685,7 +2688,7 @@ func _restore_bounded_native_static_lane(
 				checkpoint_count,
 			],
 		})
-	elif not replay_bodies.is_empty():
+	elif not replay_bodies.is_empty() and not _is_native_remove_body(replay_bodies[0]):
 		var first_packet := replay_operand_packets[0]
 		operations.append({
 			"method": &"reset_mesh",
@@ -2698,7 +2701,7 @@ func _restore_bounded_native_static_lane(
 	for body_index in range(first_tail_index, replay_bodies.size()):
 		var operand_packet := replay_operand_packets[body_index]
 		operations.append({
-			"method": &"add_mesh",
+			"method": _native_body_operation_method(replay_bodies[body_index]),
 			"arguments": [
 				operand_packet.get("vertices", PackedVector3Array()),
 				operand_packet.get("indices", PackedInt32Array()),
@@ -2796,9 +2799,9 @@ func _bounded_checkpoint_packet_is_materialized(
 	))
 	return (
 		materialized_count == checkpoint_count
-		and not vertices.is_empty()
-		and not indices.is_empty()
-		and indices.size() % 3 == 0
+		and (_native_packet_is_explicitly_empty(packet) or (
+			not vertices.is_empty() and not indices.is_empty() and indices.size() % 3 == 0
+		))
 	)
 
 
@@ -2833,7 +2836,7 @@ func _resolve_bounded_material_variant_id(
 		var bodies: Array = presentation.get(collection_name, []) as Array
 		for body_variant: Variant in bodies:
 			var body := body_variant as Resource
-			if body == null:
+			if body == null or _is_native_remove_body(body):
 				continue
 			material_variant_id = StringName(body.get(
 				"material_variant_id"
@@ -2925,6 +2928,14 @@ func _provide_bounded_checkpoint_export(
 func _resolve_authoritative_runtime_mesh_packet(
 	allow_empty_ordinary_mesh: bool = false
 ) -> Dictionary:
+	if (native_static_authoritative and native_static_state_initialized
+		and native_static_active_vertices.is_empty() and native_static_active_indices.is_empty()
+		and not native_static_publication_pending):
+		return {
+			"ok": true, "empty": true,
+			"vertices": PackedVector3Array(), "indices": PackedInt32Array(),
+			"source": &"forge_v2_native_ordinary_mesh_v1", "includes_protected_handle": false,
+		}
 	if (
 		not native_static_active_vertices.is_empty()
 		and not native_static_active_indices.is_empty()
@@ -3147,6 +3158,7 @@ func _provide_runtime_contract_mesh_export() -> Dictionary:
 			return {
 				"ok": false,
 				"error_code": "RUNTIME_CONTRACT_MESH_EMPTY",
+				"authoring_only_empty": bool(published_mesh_packet.get("empty", false)),
 			}
 		return {
 			"ok": true,
@@ -3492,9 +3504,38 @@ func _try_sync_native_static_fast_lane(static_bodies: Array) -> Dictionary:
 	)
 
 
+func _is_native_remove_body(body: Resource) -> bool:
+	return body != null and ForgeV2MaterialCompositionPolicyScript.resolve_effective_operation_mode(body) == ForgeV2VolumeStrokeScript.OPERATION_REMOVE_MATERIAL
+
+
+func _native_body_operation_method(body: Resource) -> StringName:
+	return &"subtract_mesh" if _is_native_remove_body(body) else &"add_mesh"
+
+
+func _native_packet_is_explicitly_empty(packet: Dictionary) -> bool:
+	# An erased solid is valid history, distinct from a missing/failed mesh.
+	var vertices: PackedVector3Array = packet.get("vertices", PackedVector3Array())
+	var indices: PackedInt32Array = packet.get("indices", PackedInt32Array())
+	if not bool(packet.get("empty", false)) or not vertices.is_empty() or not indices.is_empty():
+		return false
+	# Export packets may also carry metadata about a different, nonempty live
+	# state. Validate the exported geometry, not that independent cursor state.
+	if float(packet.get("manifold_volume_m3", packet.get("checkpoint_volume_m3", 0.0))) != 0.0:
+		return false
+	if int(packet.get("output_vertex_count", packet.get("checkpoint_vertex_count", 0))) != 0:
+		return false
+	if int(packet.get("output_triangle_count", packet.get("checkpoint_triangle_count", 0))) != 0:
+		return false
+	for key: String in ["source_original_ids", "source_face_ids"]:
+		if not (packet.get(key, PackedInt32Array()) as PackedInt32Array).is_empty():
+			return false
+	return true
+
+
 func _validate_native_static_body(
 	body: Resource,
-	expected_material_variant_id: StringName
+	expected_material_variant_id: StringName,
+	allow_remove: bool = false
 ) -> Dictionary:
 	if body == null:
 		return {"ok": false, "reason": "body_missing"}
@@ -3502,23 +3543,24 @@ func _validate_native_static_body(
 	if body_id == StringName():
 		return {"ok": false, "reason": "body_id_missing"}
 	var material_variant_id := StringName(body.get("material_variant_id"))
+	var is_remove := allow_remove and _is_native_remove_body(body)
 	if material_variant_id == StringName():
 		return {"ok": false, "reason": "material_variant_id_missing"}
 	if (
-		expected_material_variant_id != StringName()
+		not is_remove and expected_material_variant_id != StringName()
 		and material_variant_id != expected_material_variant_id
 	):
 		return {"ok": false, "reason": "multiple_materials_unsupported"}
 	if ForgeV2MaterialCompositionPolicyScript.is_protected_handle_entry(body):
 		return {"ok": false, "reason": "protected_handle_unsupported"}
-	if (
+	if not is_remove and (
 		ForgeV2MaterialCompositionPolicyScript.resolve_effective_operation_mode(
 			body
 		)
 		!= ForgeV2VolumeStrokeScript.OPERATION_ADD_MATERIAL
 	):
 		return {"ok": false, "reason": "effective_operation_not_add"}
-	if (
+	if not is_remove and (
 		ForgeV2MaterialCompositionPolicyScript.resolve_effective_placement_policy(
 			body
 		)
@@ -3685,6 +3727,7 @@ func _ensure_native_static_backend() -> Dictionary:
 		or not backend.has_method("reset_checkpoint_mesh")
 		or not backend.has_method("reset_mesh")
 		or not backend.has_method("add_mesh")
+		or not backend.has_method("subtract_mesh")
 		or not backend.has_method("undo_state")
 		or not backend.has_method("redo_state")
 		or not backend.has_method("clear_state")
@@ -4220,7 +4263,7 @@ func _capture_native_static_prefix(static_bodies: Array) -> void:
 		native_static_body_bounds_by_id[body_id] = _build_csg_body_bounds(
 			body
 		)
-		if native_static_material_variant_id == StringName():
+		if native_static_material_variant_id == StringName() and not _is_native_remove_body(body):
 			native_static_material_variant_id = StringName(
 				body.get("material_variant_id")
 			)
@@ -4267,7 +4310,7 @@ func _validate_native_static_runtime_state(
 		and state_initialized != native_static_state_initialized
 	):
 		return {"ok": false, "reason": "native_initialized_state_mismatch"}
-	if state_initialized and native_static_authoritative and (
+	if state_initialized and not bool(state_info.get("state_empty", false)) and native_static_authoritative and (
 		native_static_published_node == null
 		or not is_instance_valid(native_static_published_node)
 	):

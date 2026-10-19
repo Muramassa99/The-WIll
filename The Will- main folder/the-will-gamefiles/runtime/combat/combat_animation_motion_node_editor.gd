@@ -26,6 +26,7 @@ const AUTO_CURVE_HANDLE_MIN_LENGTH_METERS: float = 0.025
 const AUTO_CURVE_ENDPOINT_STRENGTH: float = 0.3333333
 const AUTO_CURVE_MIDDLE_STRENGTH: float = 0.1666667
 const WEAPON_ROTATION_HANDLE_DISTANCE_METERS: float = 0.22
+const UPPERARM_ROLL_DRAG_START_EPSILON_RADIANS: float = 0.0001
 
 var _dragging: bool = false
 var _drag_target: StringName = StringName()
@@ -354,35 +355,83 @@ func resolve_weapon_orientation_drag(
 		return motion_node.weapon_orientation_degrees
 	return _resolve_orientation_from_normal(desired_normal.normalized())
 
-func begin_upperarm_roll_drag(target: StringName, roll_state: Dictionary) -> void:
+func begin_upperarm_roll_drag(target: StringName, roll_state: Dictionary, camera: Camera3D, screen_position: Vector2) -> void:
 	begin_drag(target)
 	_arm_roll_drag_state = roll_state.duplicate(true)
+	_arm_roll_drag_state["pointer_moved"] = false
+	_arm_roll_drag_state["press_screen_position"] = screen_position
+	# The nearest sphere hit may be on the opposite side from the visible
+	# handle. Calibrate against the actual press ray, not the visible radial.
+	_arm_roll_drag_state["press_normal_global"] = _project_upperarm_roll_pointer_normal(camera, screen_position)
+	_arm_roll_drag_state["previous_pointer_normal_global"] = _arm_roll_drag_state["press_normal_global"]
 
 func resolve_upperarm_roll_drag(camera: Camera3D, screen_position: Vector2) -> Variant:
 	if camera == null or _arm_roll_drag_state.is_empty():
 		return null
-	var center_global: Vector3 = _arm_roll_drag_state.get("center_global", Vector3.ZERO) as Vector3
 	var axis_global: Vector3 = _arm_roll_drag_state.get("axis_global", Vector3.ZERO) as Vector3
-	var initial_normal_global: Vector3 = _arm_roll_drag_state.get("initial_normal_global", Vector3.ZERO) as Vector3
+	var initial_normal_global: Vector3 = _arm_roll_drag_state.get("press_normal_global", Vector3.ZERO) as Vector3
 	var initial_roll_degrees: float = float(_arm_roll_drag_state.get("initial_roll_degrees", 0.0))
-	var radius: float = maxf(float(_arm_roll_drag_state.get("radius_meters", 0.12)), 0.01)
 	if axis_global.length_squared() <= 0.000001 or initial_normal_global.length_squared() <= 0.000001:
+		return null
+	if not _arm_roll_drag_state.get("pointer_moved", false) and screen_position.is_equal_approx(_arm_roll_drag_state["press_screen_position"]):
 		return null
 	axis_global = axis_global.normalized()
 	initial_normal_global = initial_normal_global.normalized()
-	var hit_global: Variant = _raycast_global_sphere(camera, screen_position, center_global, radius)
-	if hit_global == null:
-		return null
-	var desired_normal_global: Vector3 = (hit_global as Vector3) - center_global
-	desired_normal_global -= axis_global * desired_normal_global.dot(axis_global)
+	var desired_normal_global: Vector3 = _project_upperarm_roll_pointer_normal(camera, screen_position)
 	if desired_normal_global.length_squared() <= 0.000001:
 		return null
-	desired_normal_global = desired_normal_global.normalized()
 	var angle_delta: float = atan2(
 		axis_global.dot(initial_normal_global.cross(desired_normal_global)),
 		clampf(initial_normal_global.dot(desired_normal_global), -1.0, 1.0)
 	)
+	# Measuring the actual elbow does not itself author a pose. Once movement
+	# starts, returning to the grabbed point is a valid edit and must be allowed.
+	if not _arm_roll_drag_state.get("pointer_moved", false):
+		if absf(angle_delta) <= UPPERARM_ROLL_DRAG_START_EPSILON_RADIANS:
+			return null
+		_arm_roll_drag_state["pointer_moved"] = true
+	_arm_roll_drag_state["previous_pointer_normal_global"] = desired_normal_global
 	return wrapf(initial_roll_degrees + rad_to_deg(angle_delta) + 180.0, 0.0, 360.0) - 180.0
+
+func _project_upperarm_roll_pointer_normal(camera: Camera3D, screen_position: Vector2) -> Vector3:
+	if camera == null:
+		return Vector3.ZERO
+	var center: Vector3 = _arm_roll_drag_state.get("center_global", Vector3.ZERO)
+	var axis: Vector3 = _arm_roll_drag_state.get("axis_global", Vector3.ZERO)
+	if axis.length_squared() <= 0.000001:
+		return Vector3.ZERO
+	axis = axis.normalized()
+	var radius: float = maxf(float(_arm_roll_drag_state.get("radius_meters", 0.12)), 0.01)
+	var ray_origin: Vector3 = camera.project_ray_origin(screen_position)
+	var ray_direction: Vector3 = camera.project_ray_normal(screen_position).normalized()
+	var offset: Vector3 = ray_origin - center
+	var projection: float = offset.dot(ray_direction)
+	# Compute from the closest ray point to avoid cancelling camera-distance
+	# squares when the pointer is on the sphere silhouette.
+	var closest_offset: Vector3 = offset - ray_direction * projection
+	var discriminant: float = radius * radius - closest_offset.length_squared()
+	if discriminant < -radius * radius * 0.0001:
+		return Vector3.ZERO
+	# The selected handle can be on the far side of the sphere. Follow its
+	# branch, then the preceding pointer normal, instead of mirroring movement
+	# through the near hit. The press offset remains calibrated independently.
+	var reference: Vector3 = _arm_roll_drag_state.get("previous_pointer_normal_global", _arm_roll_drag_state.get("initial_normal_global", Vector3.ZERO))
+	var best_normal := Vector3.ZERO
+	var best_alignment := -INF
+	var root_distance: float = sqrt(maxf(discriminant, 0.0))
+	for distance: float in [-projection - root_distance, -projection + root_distance]:
+		if distance <= 0.001:
+			continue
+		var normal: Vector3 = offset + ray_direction * distance
+		normal -= axis * normal.dot(axis)
+		if normal.length_squared() <= 0.000001:
+			continue
+		normal = normal.normalized()
+		var alignment: float = normal.dot(reference)
+		if alignment > best_alignment:
+			best_alignment = alignment
+			best_normal = normal
+	return best_normal
 
 func _get_screen_pick_distance_pixels(
 	camera: Camera3D,

@@ -318,6 +318,10 @@ var authoring_limb_twist_neutral_rotation_lookup: Dictionary = {}
 var authoring_digit_hinge_neutral_rotation_lookup: Dictionary = {}
 var authoring_limb_twist_distribution_state: Dictionary = {}
 var last_two_hand_solve_result: Dictionary = {}
+# Opt-in diagnostics only. Empty in normal play; sinks must not write bone poses.
+var authoring_arm_solver_trace_sink: Callable = Callable()
+var _arm_solver_trace_scopes: Array[Dictionary] = []
+var _arm_solver_trace_iteration: int = -1
 var upper_body_authoring_auto_apply_enabled: bool = true
 var authoring_preview_mode_enabled: bool = false
 var authoring_preview_baseline_animation_name: StringName = StringName()
@@ -615,7 +619,7 @@ func capture_authoring_wrist_origin(slot_id: StringName) -> Dictionary:
 		return {"available": false, "reason": validation.get("reason", &"invalid_wrist_origin_chain")}
 	var registered_record = registry.get_origin(wrist_origin_id)
 	registered_record.resolved_transform_to_machine = registry.resolve_transform_to_machine(wrist_origin_id)
-	return {
+	var capture: Dictionary = {
 		"available": true,
 		"reason": &"ok",
 		"wrist_origin_id": wrist_origin_id,
@@ -626,6 +630,52 @@ func capture_authoring_wrist_origin(slot_id: StringName) -> Dictionary:
 		"registry": registry,
 		"machine_to_world": machine_to_world,
 	}
+	# Roll limits use the forearm skin's distal frame, not the unweighted Hand
+	# parent. Missing helpers must not invalidate this general wrist capture.
+	capture.merge(_capture_authoring_wrist_roll_reference(slot_id, hand_bone_index))
+	return capture
+
+func _capture_authoring_wrist_roll_reference(slot_id: StringName, hand_index: int) -> Dictionary:
+	var twist_bones: Array = _get_slot_forearm_twist_bones(slot_id)
+	var forearm_name: StringName = LEFT_FOREARM_BONE if slot_id == &"hand_left" else RIGHT_FOREARM_BONE
+	var forearm_index: int = skeleton.find_bone(String(forearm_name))
+	var proximal_index: int = skeleton.find_bone(String(twist_bones[0]))
+	var distal_index: int = skeleton.find_bone(String(twist_bones[1]))
+	if forearm_index < 0 or proximal_index < 0 or distal_index < 0:
+		return {"roll_reference_reason": &"missing_roll_reference_bones"}
+	if (
+		skeleton.get_bone_parent(hand_index) != forearm_index
+		or skeleton.get_bone_parent(proximal_index) != forearm_index
+		or skeleton.get_bone_parent(distal_index) != proximal_index
+	):
+		return {"roll_reference_reason": &"unsupported_roll_reference_bone_chain"}
+	var proximal_rest: Basis = skeleton.get_bone_rest(proximal_index).basis
+	var distal_rest: Basis = skeleton.get_bone_rest(distal_index).basis
+	var hand_rest: Basis = skeleton.get_bone_rest(hand_index).basis
+	var distal_world: Basis = skeleton.global_basis * skeleton.get_bone_global_pose(distal_index).basis
+	for source_basis: Basis in [proximal_rest, distal_rest, hand_rest, distal_world]:
+		if not _valid_authoring_roll_reference_basis(source_basis):
+			return {"roll_reference_reason": &"invalid_roll_reference_basis"}
+	# This rest calibration matches the actual Skin inverse-bind relationship:
+	# HandNeutral = DistalWorld * DistalInverseBind * inverse(HandInverseBind).
+	# The helpers are siblings of Hand, so their imported frame offsets cancel.
+	var neutral_world: Basis = distal_world * (proximal_rest * distal_rest).inverse() * hand_rest
+	if not _valid_authoring_roll_reference_basis(neutral_world):
+		return {"roll_reference_reason": &"invalid_roll_reference_basis"}
+	return {
+		"roll_neutral_world_basis": neutral_world.orthonormalized(),
+		"roll_reference_bone_name": StringName(twist_bones[1]),
+		"roll_reference_reason": &"ok",
+	}
+
+func _valid_authoring_roll_reference_basis(value: Basis) -> bool:
+	if not value.is_finite():
+		return false
+	var determinant: float = value.determinant()
+	if not is_finite(determinant) or determinant <= 0.0:
+		return false
+	var rotation: Basis = value.orthonormalized()
+	return rotation.is_finite() and rotation.determinant() > 0.0 and rotation.is_orthonormal()
 
 ## Final editor Roll writer. Only the Hand rotation may change; no IK or digits.
 func apply_authoring_wrist_roll_pose(slot_id: StringName, desired_hand_world: Transform3D) -> bool:
@@ -2172,11 +2222,38 @@ func _apply_authoring_contact_alignment_pose(
 		_apply_authoring_direct_arm_reach_pose(direct_solve_iterations, reseat_iterations)
 		_apply_authoring_contact_wrist_basis_pose()
 
+func _arm_solver_trace_enter(scope: StringName, slot_id: StringName = StringName()) -> void:
+	_arm_solver_trace_scopes.append({"scope": scope, "slot_id": slot_id, "parent_iteration": _arm_solver_trace_iteration})
+	_arm_solver_trace_iteration = -1
+	_arm_solver_trace_emit(&"phase_begin")
+
+func _arm_solver_trace_leave() -> void:
+	_arm_solver_trace_emit(&"phase_end")
+	var scope: Dictionary = _arm_solver_trace_scopes.pop_back()
+	_arm_solver_trace_iteration = int(scope["parent_iteration"])
+
+func _arm_solver_trace_emit(event: StringName, details: Dictionary = {}) -> void:
+	if not authoring_arm_solver_trace_sink.is_valid():
+		return
+	details["scope_stack"] = _arm_solver_trace_scopes.duplicate(true)
+	details["iteration"] = _arm_solver_trace_iteration
+	if not _arm_solver_trace_scopes.is_empty():
+		details["scope"] = _arm_solver_trace_scopes.back()["scope"]
+		details["slot_id"] = _arm_solver_trace_scopes.back()["slot_id"]
+	authoring_arm_solver_trace_sink.call(event, details)
+
+func _arm_solver_trace_slot(hand_bone: StringName) -> StringName:
+	return &"hand_left" if hand_bone == LEFT_HAND_BONE else &"hand_right"
+
 func _apply_authoring_direct_arm_reach_pose(
 	solve_iterations: int = AUTHORING_DIRECT_ARM_SOLVE_ITERATIONS,
 	reseat_iterations: int = AUTHORING_ARM_SPLINE_RESEAT_ITERATIONS
 ) -> void:
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_enter(&"direct_reach", StringName())
 	if not _can_apply_authoring_contact_alignment() or skeleton == null:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	if is_arm_guidance_active(&"hand_right") and right_hand_ik_target != null:
 		var right_hand_target_world: Vector3 = right_hand_ik_target.global_position
@@ -2273,6 +2350,9 @@ func _apply_authoring_direct_arm_reach_pose(
 		)
 		_enforce_authoring_elbow_max_angle(LEFT_UPPERARM_BONE, LEFT_FOREARM_BONE, LEFT_HAND_BONE)
 	skeleton.force_update_all_bone_transforms()
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_leave()
+
 
 func _can_apply_authoring_contact_alignment() -> bool:
 	if authoring_preview_mode_enabled:
@@ -2313,13 +2393,23 @@ func _apply_authoring_contact_wrist_basis_for_slot(
 	hand_anchor: Node3D,
 	strength: float
 ) -> void:
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_enter(&"wrist_basis", slot_id)
 	if not is_arm_guidance_active(slot_id):
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	if not finger_grip_source_lookup.has(slot_id):
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	if not authoring_contact_anchor_basis_lookup.has(slot_id):
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	if hand_anchor == null or not is_instance_valid(hand_anchor):
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var desired_anchor_basis_world: Basis = authoring_contact_anchor_basis_lookup.get(slot_id, Basis.IDENTITY) as Basis
 	var anchor_local_basis: Basis = hand_anchor.transform.basis.orthonormalized()
@@ -2333,6 +2423,8 @@ func _apply_authoring_contact_wrist_basis_for_slot(
 			# Its arm owns following that frame; generic wrist projection must not
 			# immediately rotate it away from the established weapon contact.
 			realize_prepared_support_hand_frame(slot_id, bound_frame.hand_to_world, posture.local)
+			if authoring_arm_solver_trace_sink.is_valid():
+				_arm_solver_trace_leave()
 			return
 		# Preserve the acquired orientation instead of deriving a different grip
 		# from forearm direction. The existing twist limits below still apply.
@@ -2357,6 +2449,9 @@ func _apply_authoring_contact_wrist_basis_for_slot(
 		desired_hand_basis_world
 	)
 	_apply_bone_world_basis(hand_bone, desired_hand_basis_world, strength)
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_leave()
+
 
 func _sync_authoring_joint_range_debug() -> void:
 	authoring_joint_range_debug_state = {
@@ -3637,25 +3732,37 @@ func _clamp_authoring_contact_wrist_twist(
 	forearm_bone: StringName,
 	desired_world_basis: Basis
 ) -> Basis:
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_enter(&"wrist_clamp", slot_id)
 	if skeleton == null:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return desired_world_basis
 	var resolved_desired_basis: Basis = desired_world_basis.orthonormalized()
 	var contact_axis_local: Vector3 = resolve_hand_index_pinky_axis_local(slot_id)
 	var locked_contact_axis_world: Vector3 = resolved_desired_basis * contact_axis_local
 	if locked_contact_axis_world.length_squared() <= 0.000001:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return desired_world_basis
 	locked_contact_axis_world = locked_contact_axis_world.normalized()
 	var twist_limit_radians: float = deg_to_rad(clampf(authoring_contact_wrist_twist_limit_degrees, 0.0, 180.0))
 	if twist_limit_radians >= PI - 0.0001:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return desired_world_basis
 	var hand_index: int = skeleton.find_bone(String(hand_bone))
 	var forearm_index: int = skeleton.find_bone(String(forearm_bone))
 	if hand_index < 0 or forearm_index < 0:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return desired_world_basis
 	var hand_pose: Transform3D = skeleton.get_bone_global_pose(hand_index)
 	var forearm_pose: Transform3D = skeleton.get_bone_global_pose(forearm_index)
 	var twist_axis_world: Vector3 = skeleton.global_basis * (hand_pose.origin - forearm_pose.origin)
 	if twist_axis_world.length_squared() <= 0.000001:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return desired_world_basis
 	twist_axis_world = twist_axis_world.normalized()
 	var neutral_world_basis: Basis = _resolve_neutral_hand_world_basis(hand_index)
@@ -3669,9 +3776,17 @@ func _clamp_authoring_contact_wrist_twist(
 		-twist_limit_radians,
 		twist_limit_radians
 	)
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_emit(&"wrist_twist_clamp", {
+			"requested_radians": _resolve_signed_twist_angle(desired_twist, twist_axis_world),
+			"clamped_radians": clamped_twist_angle,
+			"twist_axis_world": twist_axis_world,
+		})
 	var clamped_twist: Quaternion = Quaternion(twist_axis_world, clamped_twist_angle).normalized()
 	var clamped_delta: Quaternion = (desired_swing * clamped_twist).normalized()
 	var clamped_basis: Basis = Basis((clamped_delta * neutral_rotation).normalized()).orthonormalized()
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_leave()
 	return _build_basis_aligning_local_axis(contact_axis_local, locked_contact_axis_world, clamped_basis.y)
 
 func _apply_authoring_limb_twist_distribution_for_slot(
@@ -3681,8 +3796,12 @@ func _apply_authoring_limb_twist_distribution_for_slot(
 	desired_world_basis: Basis,
 	strength: float
 ) -> void:
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_enter(&"twist_distribution", slot_id)
 	if not enable_authoring_limb_twist_distribution or skeleton == null:
 		_record_authoring_limb_twist_state(slot_id, false, 0.0, 0.0, 0.0, 0)
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	if authoring_limb_twist_neutral_rotation_lookup.is_empty():
 		_cache_authoring_limb_twist_neutral_pose()
@@ -3691,15 +3810,14 @@ func _apply_authoring_limb_twist_distribution_for_slot(
 		forearm_bone,
 		desired_world_basis
 	)
-	if absf(requested_twist_radians) <= 0.0001:
-		_record_authoring_limb_twist_state(slot_id, false, requested_twist_radians, 0.0, 0.0, 0)
-		return
 	var forearm_twist_bones: Array = _get_slot_forearm_twist_bones(slot_id)
 	var upperarm_twist_bones: Array = _get_slot_upperarm_twist_bones(slot_id)
 	var forearm_twist_count: int = _count_existing_bones(forearm_twist_bones)
 	var upperarm_twist_count: int = _count_existing_bones(upperarm_twist_bones)
 	if forearm_twist_count <= 0 and upperarm_twist_count <= 0:
 		_record_authoring_limb_twist_state(slot_id, false, requested_twist_radians, 0.0, 0.0, 0)
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var forearm_share: float = AUTHORING_LIMB_TWIST_FOREARM_SHARE
 	var upperarm_share: float = AUTHORING_LIMB_TWIST_UPPERARM_SHARE
@@ -3709,24 +3827,32 @@ func _apply_authoring_limb_twist_distribution_for_slot(
 	elif upperarm_twist_count <= 0:
 		forearm_share = 1.0
 		upperarm_share = 0.0
+	var branch: Dictionary = _resolve_authoring_limb_twist_branch(
+		requested_twist_radians,
+		upperarm_twist_bones, upperarm_share,
+		forearm_twist_bones, forearm_share
+	)
+	var resolved_twist_radians: float = branch["resolved_radians"]
 	var forearm_twist_radians: float = clampf(
-		requested_twist_radians * forearm_share,
+		resolved_twist_radians * forearm_share,
 		-AUTHORING_LIMB_TWIST_LIMIT_RADIANS,
 		AUTHORING_LIMB_TWIST_LIMIT_RADIANS
 	)
 	var upperarm_twist_radians: float = clampf(
-		requested_twist_radians * upperarm_share,
+		resolved_twist_radians * upperarm_share,
 		-AUTHORING_LIMB_TWIST_LIMIT_RADIANS,
 		AUTHORING_LIMB_TWIST_LIMIT_RADIANS
 	)
 	var applied_count: int = 0
-	if absf(forearm_twist_radians) > 0.0001:
+	# Zero is a neutral target, not permission to retain the previous helper pose.
+	# Keep the existing strength semantics: partial strength approaches neutral.
+	if forearm_twist_count > 0:
 		applied_count += _apply_authoring_twist_bone_chain(
 			forearm_twist_bones,
 			forearm_twist_radians,
 			strength
 		)
-	if absf(upperarm_twist_radians) > 0.0001:
+	if upperarm_twist_count > 0:
 		applied_count += _apply_authoring_twist_bone_chain(
 			upperarm_twist_bones,
 			upperarm_twist_radians,
@@ -3734,12 +3860,100 @@ func _apply_authoring_limb_twist_distribution_for_slot(
 		)
 	_record_authoring_limb_twist_state(
 		slot_id,
-		applied_count > 0,
+		applied_count > 0 and absf(resolved_twist_radians) > 0.0001,
 		requested_twist_radians,
 		forearm_twist_radians if forearm_twist_count > 0 else 0.0,
 		upperarm_twist_radians if upperarm_twist_count > 0 else 0.0,
-		applied_count
+		applied_count,
+		branch
 	)
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_leave()
+
+
+## Read branch continuity from the posed helpers, which already participate in
+## pose capture/restore. A separate last-angle cache would leak speculative solves
+## across rollback and seek. Cold neutral poses select the principal branch.
+func _resolve_authoring_limb_twist_branch(
+	requested_radians: float,
+	upperarm_bones: Array,
+	upperarm_share: float,
+	forearm_bones: Array,
+	forearm_share: float
+) -> Dictionary:
+	var result := {
+		"resolved_radians": requested_radians,
+		"reference_radians": 0.0,
+		"reference_valid": false,
+		"status": &"principal_no_pose_reference",
+	}
+	if absf(requested_radians) <= 0.0001:
+		result["resolved_radians"] = 0.0
+		result["status"] = &"neutral_request"
+		return result
+	# The smaller Upperarm share remains informative when Forearm has reached
+	# its clamp. Never divide a saturated chain back into an invented request.
+	var reference := _infer_authoring_limb_twist_request(upperarm_bones, upperarm_share)
+	var reference_chain: StringName = &"upperarm_unsaturated"
+	if not reference.get("valid", false):
+		result["upperarm_reference_reason"] = reference.get("reason", &"unavailable")
+		reference = _infer_authoring_limb_twist_request(forearm_bones, forearm_share)
+		reference_chain = &"forearm_unsaturated"
+	if not reference.get("valid", false):
+		result["forearm_reference_reason"] = reference.get("reason", &"unavailable")
+		return result
+	var reference_radians: float = reference["request_radians"]
+	var resolved := requested_radians
+	var best_distance := absf(resolved - reference_radians)
+	for equivalent: float in [requested_radians - TAU, requested_radians + TAU]:
+		var distance := absf(equivalent - reference_radians)
+		# Preserve the principal branch on an exact tie, including a cold pose.
+		if distance < best_distance - 0.000001:
+			resolved = equivalent
+			best_distance = distance
+	result["resolved_radians"] = resolved
+	result["reference_radians"] = reference_radians
+	result["reference_valid"] = true
+	result["status"] = reference_chain
+	return result
+
+
+func _infer_authoring_limb_twist_request(twist_bones: Array, share: float) -> Dictionary:
+	var count := _count_existing_bones(twist_bones)
+	if skeleton == null or count <= 0 or share <= 0.000001:
+		return {"valid": false, "reason": &"missing_chain_or_share"}
+	var per_bone_limit := AUTHORING_LIMB_TWIST_LIMIT_RADIANS / float(count)
+	var epsilon := deg_to_rad(AUTHORING_JOINT_RANGE_EPSILON_DEGREES)
+	var total_twist := 0.0
+	var first_twist := 0.0
+	var observed_count := 0
+	for bone_variant: Variant in twist_bones:
+		var bone := StringName(bone_variant)
+		var index := skeleton.find_bone(String(bone))
+		if index < 0:
+			continue
+		if not authoring_limb_twist_neutral_rotation_lookup.has(bone):
+			return {"valid": false, "reason": &"missing_neutral_pose"}
+		var neutral: Quaternion = authoring_limb_twist_neutral_rotation_lookup[bone]
+		var relative := (neutral.normalized().inverse() * skeleton.get_bone_pose_rotation(index).normalized()).normalized()
+		if not relative.is_finite():
+			return {"valid": false, "reason": &"nonfinite_helper_pose"}
+		var axis := _resolve_authoring_limb_twist_local_axis(bone)
+		var twist_rotation := _extract_quaternion_twist(relative, axis)
+		var twist := _resolve_signed_twist_angle(twist_rotation, axis)
+		if absf(twist) >= per_bone_limit - epsilon:
+			return {"valid": false, "reason": &"saturated_chain"}
+		var residual := (twist_rotation.inverse() * relative).normalized()
+		var off_axis := 2.0 * atan2(Vector3(residual.x, residual.y, residual.z).length(), absf(residual.w))
+		if off_axis > epsilon:
+			return {"valid": false, "reason": &"off_axis_helper_pose"}
+		if observed_count > 0 and absf(twist - first_twist) > epsilon:
+			return {"valid": false, "reason": &"inconsistent_helper_pose"}
+		first_twist = twist
+		observed_count += 1
+		total_twist += twist
+	return {"valid": true, "request_radians": total_twist / share}
+
 
 func _resolve_authoring_contact_wrist_twist_angle(
 	hand_bone: StringName,
@@ -3807,10 +4021,14 @@ func _apply_authoring_twist_bone_local_axis(
 	var local_twist: Quaternion = Quaternion(local_twist_axis, twist_radians).normalized()
 	var desired_local_rotation: Quaternion = (neutral_local_rotation * local_twist).normalized()
 	var current_local_rotation: Quaternion = skeleton.get_bone_pose_rotation(twist_index).normalized()
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_emit(&"before_helper_rotate", {"joint_bone": twist_bone, "twist_radians": twist_radians, "strength": strength, "desired_local_rotation": desired_local_rotation})
 	skeleton.set_bone_pose_rotation(
 		twist_index,
 		current_local_rotation.slerp(desired_local_rotation, clampf(strength, 0.0, 1.0)).normalized()
 	)
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_emit(&"after_helper_rotate", {"joint_bone": twist_bone, "twist_radians": twist_radians, "strength": strength, "desired_local_rotation": desired_local_rotation})
 	return true
 
 func _resolve_authoring_limb_twist_local_axis(_twist_bone: StringName = StringName()) -> Vector3:
@@ -3822,7 +4040,8 @@ func _record_authoring_limb_twist_state(
 	requested_twist_radians: float,
 	forearm_twist_radians: float,
 	upperarm_twist_radians: float,
-	applied_count: int
+	applied_count: int,
+	branch: Dictionary = {}
 ) -> void:
 	authoring_limb_twist_distribution_state[slot_id] = {
 		"active": active,
@@ -3831,6 +4050,16 @@ func _record_authoring_limb_twist_state(
 		"upperarm_applied_degrees": rad_to_deg(upperarm_twist_radians),
 		"applied_bone_count": applied_count,
 	}
+	if not branch.is_empty():
+		# Diagnostics only; branch selection reads bone poses, never this record.
+		authoring_limb_twist_distribution_state[slot_id]["resolved_degrees"] = rad_to_deg(float(branch["resolved_radians"]))
+		authoring_limb_twist_distribution_state[slot_id]["branch_status"] = branch["status"]
+		authoring_limb_twist_distribution_state[slot_id]["branch_reference_valid"] = branch["reference_valid"]
+		authoring_limb_twist_distribution_state[slot_id]["branch_reference_degrees"] = rad_to_deg(float(branch["reference_radians"]))
+		authoring_limb_twist_distribution_state[slot_id]["branch_resolution"] = branch.duplicate()
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_emit(&"twist_distribution_result", authoring_limb_twist_distribution_state[slot_id].duplicate())
+
 
 func _cache_authoring_limb_twist_neutral_pose() -> void:
 	_clear_authoring_joint_range_debug_pose_snapshot()
@@ -4059,20 +4288,29 @@ func _apply_ccd_arm_reach_pose(
 	clavicle_weight: float = AUTHORING_DIRECT_ARM_CLAVICLE_WEIGHT,
 	solve_epsilon_meters: float = AUTHORING_DIRECT_ARM_SOLVE_EPSILON_METERS
 ) -> void:
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_enter(&"ccd", _arm_solver_trace_slot(hand_bone))
 	if skeleton == null:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var target_local: Vector3 = skeleton.to_local(target_world)
 	for _iteration_index: int in range(maxi(solve_iterations, 0)):
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_iteration = _iteration_index
 		if (
 			_resolve_bone_local_position(hand_bone).distance_to(target_local)
 			<= maxf(solve_epsilon_meters, 0.0)
 		):
+			if authoring_arm_solver_trace_sink.is_valid():
+				_arm_solver_trace_leave()
 			return
 		_rotate_bone_toward_end_target(
 			forearm_bone,
 			hand_bone,
 			target_local,
-			forearm_weight
+			forearm_weight,
+			true
 		)
 		_rotate_bone_toward_end_target(
 			upperarm_bone,
@@ -4087,13 +4325,20 @@ func _apply_ccd_arm_reach_pose(
 				target_local,
 				clavicle_weight
 			)
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_leave()
+
 
 func _enforce_authoring_elbow_max_angle(
 	upperarm_bone: StringName,
 	forearm_bone: StringName,
 	hand_bone: StringName
 ) -> void:
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_enter(&"max_angle", _arm_solver_trace_slot(hand_bone))
 	if skeleton == null:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var max_angle_degrees: float = clampf(authoring_elbow_max_plane_angle_degrees, 1.0, 179.0)
 	var upperarm_local: Vector3 = _resolve_bone_local_position(upperarm_bone)
@@ -4103,11 +4348,15 @@ func _enforce_authoring_elbow_max_angle(
 	var elbow_to_hand: Vector3 = hand_local - forearm_local
 	var hand_distance: float = elbow_to_hand.length()
 	if elbow_to_upperarm.length_squared() <= 0.000001 or hand_distance <= 0.000001:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var upperarm_dir: Vector3 = elbow_to_upperarm.normalized()
 	var hand_dir: Vector3 = elbow_to_hand.normalized()
 	var current_angle_degrees: float = rad_to_deg(acos(clampf(upperarm_dir.dot(hand_dir), -1.0, 1.0)))
 	if current_angle_degrees <= max_angle_degrees + AUTHORING_JOINT_RANGE_EPSILON_DEGREES:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var bend_axis: Vector3 = upperarm_dir.cross(hand_dir)
 	if bend_axis.length_squared() <= 0.000001:
@@ -4115,6 +4364,8 @@ func _enforce_authoring_elbow_max_angle(
 	if bend_axis.length_squared() <= 0.000001:
 		bend_axis = upperarm_dir.cross(Vector3.UP)
 	if bend_axis.length_squared() <= 0.000001:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	bend_axis = bend_axis.normalized()
 	var target_hand_dir: Vector3 = (Basis(bend_axis, deg_to_rad(max_angle_degrees)) * upperarm_dir).normalized()
@@ -4125,6 +4376,9 @@ func _enforce_authoring_elbow_max_angle(
 		target_hand_local,
 		1.0
 	)
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_leave()
+
 
 func _apply_authoring_arm_spline_preference(
 	slot_id: StringName,
@@ -4135,12 +4389,18 @@ func _apply_authoring_arm_spline_preference(
 	hand_anchor: Node3D,
 	contact_axis_bias: float = AUTHORING_ARM_SPLINE_CONTACT_AXIS_BIAS
 ) -> void:
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_enter(&"spline", slot_id)
 	if skeleton == null:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	# A bound support Hand follows the established weapon. Its optional style
 	# preference cannot compete with that contact target in normal or precise
 	# updates. Primary body motion still carries the weapon through its owner.
 	if slot_id != dominant_grip_slot_id and resolve_planar_grip_motion_frame(slot_id).get("valid", false):
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var contact_axis_world: Vector3 = _resolve_authoring_contact_axis_world(
 		slot_id,
@@ -4149,6 +4409,8 @@ func _apply_authoring_arm_spline_preference(
 		hand_anchor
 	)
 	if contact_axis_world.length_squared() <= 0.000001:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var clavicle_world: Vector3 = _get_bone_world_position(clavicle_bone)
 	var upperarm_world: Vector3 = _get_bone_world_position(upperarm_bone)
@@ -4156,6 +4418,8 @@ func _apply_authoring_arm_spline_preference(
 	var hand_world: Vector3 = _get_bone_world_position(hand_bone)
 	var current_wrist_axis_world: Vector3 = hand_world - forearm_world
 	if current_wrist_axis_world.length_squared() <= 0.000001:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var current_wrist_axis_normalized: Vector3 = current_wrist_axis_world.normalized()
 	var preferred_wrist_axis_world: Vector3 = current_wrist_axis_normalized.lerp(
@@ -4198,9 +4462,12 @@ func _apply_authoring_arm_spline_preference(
 		forearm_bone,
 		hand_bone,
 		skeleton.to_local(forearm_axis_target_world),
-		AUTHORING_ARM_SPLINE_FOREARM_WEIGHT
+		AUTHORING_ARM_SPLINE_FOREARM_WEIGHT,
+		true
 	)
 	skeleton.force_update_all_bone_transforms()
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_leave()
 
 
 func _resolve_authoring_contact_axis_world(
@@ -4310,16 +4577,24 @@ func _apply_authoring_manual_upperarm_roll_pose(
 	forearm_bone: StringName,
 	hand_bone: StringName
 ) -> void:
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_enter(&"manual_roll", slot_id)
 	if skeleton == null:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var roll_degrees: float = _resolve_authoring_manual_upperarm_roll_degrees(slot_id)
 	if absf(roll_degrees) <= 0.0001:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var shoulder_world: Vector3 = _get_bone_world_position(upperarm_bone)
 	var elbow_world: Vector3 = _get_bone_world_position(forearm_bone)
 	var hand_world: Vector3 = _get_bone_world_position(hand_bone)
 	var shoulder_to_hand: Vector3 = hand_world - shoulder_world
 	if shoulder_to_hand.length_squared() <= 0.000001:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var roll_axis_world: Vector3 = shoulder_to_hand.normalized()
 	var shoulder_to_elbow: Vector3 = elbow_world - shoulder_world
@@ -4328,14 +4603,20 @@ func _apply_authoring_manual_upperarm_roll_pose(
 	if radial_world.length_squared() <= 0.000001:
 		radial_world = _resolve_authoring_upperarm_roll_reference_world(slot_id, roll_axis_world) * maxf(shoulder_to_elbow.length(), 0.05)
 	if radial_world.length_squared() <= 0.000001:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var reference_world: Vector3 = _resolve_authoring_upperarm_roll_reference_world(slot_id, roll_axis_world)
 	if reference_world.length_squared() <= 0.000001:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var current_angle: float = _resolve_signed_planar_angle(reference_world, radial_world.normalized(), roll_axis_world)
 	var target_angle: float = deg_to_rad(clampf(roll_degrees, -180.0, 180.0))
 	var correction_angle: float = _wrap_angle_radians(target_angle - current_angle)
 	if absf(correction_angle) <= 0.0001:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var desired_radial_world: Vector3 = Basis(roll_axis_world, correction_angle) * radial_world
 	var desired_elbow_world: Vector3 = shoulder_world + parallel_world + desired_radial_world
@@ -4352,6 +4633,8 @@ func _apply_authoring_manual_upperarm_roll_pose(
 		1.0
 	)
 	skeleton.force_update_all_bone_transforms()
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_leave()
 
 
 func _enforce_authoring_upperarm_swing_authority(
@@ -4361,18 +4644,26 @@ func _enforce_authoring_upperarm_swing_authority(
 	forearm_bone: StringName,
 	hand_bone: StringName
 ) -> void:
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_enter(&"pure_swing", slot_id)
 	if skeleton == null:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	var clavicle_index: int = skeleton.find_bone(String(clavicle_bone))
 	var upperarm_index: int = skeleton.find_bone(String(upperarm_bone))
 	var forearm_index: int = skeleton.find_bone(String(forearm_bone))
 	var hand_index: int = skeleton.find_bone(String(hand_bone))
 	if clavicle_index < 0 or upperarm_index < 0 or forearm_index < 0 or hand_index < 0:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 	if (
 		skeleton.get_bone_parent(upperarm_index) != clavicle_index
 		or skeleton.get_bone_parent(forearm_index) != upperarm_index
 	):
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 
 	# Shoulder authority is a two-axis swing in the actual side's Clavicle-local
@@ -4387,6 +4678,8 @@ func _enforce_authoring_upperarm_swing_authority(
 		forearm_pose_before.origin - upperarm_pose_before.origin
 	)
 	if shoulder_to_elbow_skeleton.length_squared() <= 0.000001:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 
 	var clavicle_pose: Transform3D = skeleton.get_bone_global_pose(clavicle_index)
@@ -4401,6 +4694,8 @@ func _enforce_authoring_upperarm_swing_authority(
 		upperarm_rest_basis_parent.inverse() * solved_direction_parent
 	).normalized()
 	if solved_direction_neutral.length_squared() <= 0.000001:
+		if authoring_arm_solver_trace_sink.is_valid():
+			_arm_solver_trace_leave()
 		return
 
 	var polar_radians: float = acos(clampf(solved_direction_neutral.y, -1.0, 1.0))
@@ -4455,6 +4750,8 @@ func _enforce_authoring_upperarm_swing_authority(
 			hand_position_before,
 			1.0
 		)
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_leave()
 
 
 func _resolve_authoring_manual_upperarm_roll_degrees(slot_id: StringName) -> float:
@@ -4501,7 +4798,8 @@ func _rotate_bone_toward_end_target(
 	joint_bone: StringName,
 	end_bone: StringName,
 	target_local: Vector3,
-	rotation_weight: float
+	rotation_weight: float,
+	preserve_incoming_bend_branch: bool = false
 ) -> void:
 	var joint_index: int = skeleton.find_bone(String(joint_bone)) if skeleton != null else -1
 	var end_index: int = skeleton.find_bone(String(end_bone)) if skeleton != null else -1
@@ -4515,31 +4813,93 @@ func _rotate_bone_toward_end_target(
 		return
 	var current_direction := current_vector.normalized()
 	var target_direction := target_vector.normalized()
-	var swing_axis := current_direction.cross(target_direction)
-	# The from-to constructor rounds very small turns to identity. atan2 keeps
-	# their cross-product magnitude, allowing the existing precise endpoint
-	# tolerance to converge without increasing the iteration budget.
-	var swing_rotation: Quaternion
-	if swing_axis.length_squared() > 1.0e-16:
-		swing_rotation = Quaternion(swing_axis.normalized(), atan2(
-			swing_axis.length(), clampf(current_direction.dot(target_direction), -1.0, 1.0)))
-	else:
-		swing_rotation = Quaternion(current_direction, target_direction).normalized()
+	var swing_rotation: Quaternion = _resolve_direction_swing_rotation(current_direction, target_direction)
 	var weighted_rotation: Quaternion = Quaternion.IDENTITY.slerp(
 		swing_rotation,
 		clampf(rotation_weight, 0.0, 1.0)
 	).normalized()
+	if preserve_incoming_bend_branch and rotation_weight > 0.0:
+		weighted_rotation = _limit_authoring_forearm_extension_rotation(
+			joint_bone, end_bone, joint_pose.origin, current_direction, weighted_rotation
+		)
 	var desired_global_basis: Basis = (Basis(weighted_rotation) * joint_pose.basis).orthonormalized()
 	var parent_index: int = skeleton.get_bone_parent(joint_index)
 	var desired_local_basis: Basis = desired_global_basis
 	if parent_index >= 0:
 		var parent_pose: Transform3D = skeleton.get_bone_global_pose(parent_index)
 		desired_local_basis = (parent_pose.basis.inverse() * desired_global_basis).orthonormalized()
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_emit(&"before_bone_rotate", {
+			"joint_bone": joint_bone, "end_bone": end_bone,
+			"target_local": target_local, "rotation_weight": rotation_weight,
+			"desired_local_rotation": desired_local_basis.get_rotation_quaternion().normalized(),
+			"weighted_rotation": weighted_rotation,
+		})
 	skeleton.set_bone_pose_rotation(
 		joint_index,
 		desired_local_basis.get_rotation_quaternion().normalized()
 	)
 	skeleton.force_update_all_bone_transforms()
+	if authoring_arm_solver_trace_sink.is_valid():
+		_arm_solver_trace_emit(&"after_bone_rotate", {
+			"joint_bone": joint_bone, "end_bone": end_bone,
+			"target_local": target_local, "rotation_weight": rotation_weight,
+			"desired_local_rotation": desired_local_basis.get_rotation_quaternion().normalized(),
+			"weighted_rotation": weighted_rotation,
+		})
+
+func _resolve_direction_swing_rotation(current_direction: Vector3, target_direction: Vector3) -> Quaternion:
+	var swing_axis := current_direction.cross(target_direction)
+	# Preserve small turns for precise contact convergence; the from-to
+	# constructor rounds them to identity before the endpoint tolerance is met.
+	if swing_axis.length_squared() > 1.0e-16:
+		return Quaternion(swing_axis.normalized(), atan2(
+			swing_axis.length(), clampf(current_direction.dot(target_direction), -1.0, 1.0)
+		)).normalized()
+	return Quaternion(current_direction, target_direction).normalized()
+
+func _limit_authoring_forearm_extension_rotation(
+	forearm_bone: StringName,
+	hand_bone: StringName,
+	elbow_position: Vector3,
+	current_direction: Vector3,
+	proposed_rotation: Quaternion
+) -> Quaternion:
+	var upperarm_bone: StringName
+	if forearm_bone == RIGHT_FOREARM_BONE and hand_bone == RIGHT_HAND_BONE:
+		upperarm_bone = RIGHT_UPPERARM_BONE
+	elif forearm_bone == LEFT_FOREARM_BONE and hand_bone == LEFT_HAND_BONE:
+		upperarm_bone = LEFT_UPPERARM_BONE
+	else:
+		return proposed_rotation
+	var upperarm_index := skeleton.find_bone(String(upperarm_bone))
+	if upperarm_index < 0:
+		return proposed_rotation
+	var upperarm_direction := skeleton.get_bone_global_pose(upperarm_index).origin - elbow_position
+	if upperarm_direction.length_squared() <= 0.000001:
+		return proposed_rotation
+	upperarm_direction = upperarm_direction.normalized()
+	var bend_normal := upperarm_direction.cross(current_direction)
+	if bend_normal.length_squared() <= 1.0e-12:
+		# An exactly straight/folded input has no incoming side to preserve.
+		# Do not invent a world-space pole or retain state outside the bone pose.
+		return proposed_rotation
+	bend_normal = bend_normal.normalized()
+	var incoming_angle := upperarm_direction.angle_to(current_direction)
+	var proposed_direction := (proposed_rotation * current_direction).normalized()
+	var signed_angle := atan2(
+		bend_normal.dot(upperarm_direction.cross(proposed_direction)),
+		clampf(upperarm_direction.dot(proposed_direction), -1.0, 1.0)
+	)
+	var continuous_angle := incoming_angle + wrapf(signed_angle - incoming_angle, -PI, PI)
+	var extension_limit := deg_to_rad(clampf(authoring_elbow_max_plane_angle_degrees, 1.0, 179.0))
+	if continuous_angle <= extension_limit + 0.000001:
+		return proposed_rotation
+	# Enforce the existing cap BEFORE CCD/style writes can cross straight and
+	# lose their incoming branch. The late unsigned clamp cannot recover it.
+	# Explicit manual elbow orbit and endpoint-preserving cleanup opt out.
+	var limited_direction := (Basis(bend_normal, extension_limit) * upperarm_direction).normalized()
+	return _resolve_direction_swing_rotation(current_direction, limited_direction)
 
 func _resolve_bone_local_position(bone_name: StringName) -> Vector3:
 	if skeleton == null:

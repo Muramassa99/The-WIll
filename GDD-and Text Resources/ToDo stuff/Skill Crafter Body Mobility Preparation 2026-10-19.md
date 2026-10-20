@@ -518,6 +518,431 @@ deformation siblings, not parents of the Forearm; a fixed hinge can conflict wit
 the existing pure-swing shoulder and manual elbow orbit. Do not silently impose
 that larger policy based only on an unsigned angle or a world-side label.
 
+## Baseline Push And Causal Exploration - 2026-10-20
+
+User requested a Git baseline followed by exploratory work. Committed/pushed to
+`origin/recovery/stable-92b8a24-chat14`:
+`f99ae7f7bbf87e49f37bb48051cfda0e1895fb27`, **Skill Crafter arm-control baseline
+and Forge v2 removal fixes**. Remote hash verified. Exploration below is later,
+uncommitted work. Editor settings, mutated test fixtures, temporary DLLs and
+unrelated evidence were excluded from the baseline and preserved locally.
+
+### Exact writer of the inverted bend
+
+Fresh read-only stage trace: `godot_runs/arm_stage_trace_20261020`. Real saved
+Broken_Balde_v1, skill_slot_2, normal single hand, R-L-R; first R warmup. One
+extension, pull toward shoulder, KEEP retracted, then actual elbow gizmo movement;
+no second extension. Acquisition timing begins after scene/starting-pose setup,
+at reacquisition, with ten seconds plus stable ready/idle. All three passes have
+33 samples; compared L/R2 retained binding 33/33 each.
+
+First inversion writer: **Forearm CCD rotation, iteration 0**, inside direct
+reach, on second pull sample (step 11):
+
+| Writer measurement | Left | Second right |
+| --- | ---: | ---: |
+| Trace serial before -> after | 1093 -> 1094 | 1039 -> 1040 |
+| Unsigned elbow angle before -> after | 168.000018 -> 176.331699 degrees | 167.999993 -> 176.727045 degrees |
+| Bend-plane change at that write | 175.301814 degrees | 162.270477 degrees |
+
+Forearm crosses straight onto the opposite bend branch. Unsigned angle alone
+hides this. Later max-angle enforcement preserves the reversed plane and clamps
+to about 168 degrees. Pure-swing cleanup at this transition changes the plane
+only 0.165 / 0.246 degrees and hand position about 0.038 / 0.036 mm; it is not
+the first positional inversion writer. No wrist caps or anatomical ranges changed.
+
+### Isolated incoming-bend preservation candidate
+
+`tools/diagnose_skill_crafter_arm_branch_candidate.gd` intercepts the selected
+Forearm's CCD/spline writes after initial acquisition. A proposed step crossing
+the incoming bend branch beyond the existing extension cap is replaced with a
+step on the incoming plane at that cap. It does not constrain manual elbow orbit
+or pure-swing, and does not invent a new lower flexion limit. The normal trace
+fixture is read-only; its derived candidate deliberately changes poses through
+the hook solely during the isolated experiment. Gameplay never installs it.
+
+Fresh run `godot_runs/arm_branch_candidate_20261020`: 99 samples, empty stderr.
+Compared L/R2 retained binding 33/33 each. Both full runs have no dropped trace
+rows or unmatched writer pairs. Held-pose renders inspected for both hands:
+elbows sit beside the torso instead of rising outward after the pull.
+
+| Measurement | Left baseline -> candidate | Right baseline -> candidate |
+| --- | ---: | ---: |
+| Extension-to-held bend-plane change | 175.29 -> 2.52 degrees | 165.68 -> 1.66 degrees |
+| Largest automatic adjacent plane change | 179.88 -> 16.00 degrees | 159.31 -> 12.92 degrees |
+| Maximum shoulder-hand reach | 568.42 -> 567.80 mm | 568.41 -> 568.21 mm |
+| Maximum rendered pommel movement during elbow edit | 22.80 -> 12.62 mm | 26.64 -> 10.92 mm |
+| Final rendered pommel movement from held pose | 7.23 -> 6.96 mm | 22.24 -> 10.92 mm |
+
+Authored endpoints stay fixed during the pointer drag. Rendered movement is
+reduced, not eliminated. Targets derive from each run's accepted pose, so they
+are not guaranteed identical. This establishes useful continuity, not universal
+anatomical/skin/contact certification. Helper jumps remain: Left release step32
+and Right pull step16.
+
+### Separate twist-helper faults and bounded candidate
+
+Full trace plus `tools/diagnose_authoring_twist_branch.gd` confirm:
+
+- Desired 179 -> 181 degrees becomes shortest signed +179 -> -179. Multiplying
+  that discontinuous scalar by existing 0.78 / 0.22 shares and clamping produces
+  a 90-degree jump in each ForearmTwist helper. Both hands/directions reproduce
+  it. Equivalent quaternion q/-q inputs alone are not the cause.
+- Zero request exits before writing neutral helpers. After a 45-degree request,
+  each Forearm helper retains 17.55 degrees and Upperarm helper 4.95 degrees,
+  even after repeated zeros.
+
+Baseline: `godot_runs/twist_branch_20261020/twist_branch.json`.
+Optional `--candidate=true`:
+`godot_runs/twist_branch_candidate_20261020/twist_branch.json`.
+Each probe completed ten cases / 44 samples, empty stderr. Capture success alone
+is not behavior acceptance.
+
+Candidate derives the represented request from currently posed, unsaturated
+helpers relative to cached neutral, preferring the upperarm chain because its
+lower share has not saturated near 180 degrees. It chooses the nearest equivalent
+angle, retains current shares/limits/writers, and explicitly writes neutral at
+zero. Both hands/directions then show 0-degree Forearm helper jumps and
+0.22-degree Upperarm helper steps at 179 -> 181. Zero residuals clear; repeated
+zero and q/-q equivalent inputs stay stable. Hand/elbow position drift is zero.
+
+This is not a finalized production contract: saturated/missing references,
+partial-strength writes, long winding, arbitrary imported poses, cold seek and
+full replay remain unvalidated. Minimizing total helper movement can incorrectly
+choose 360 instead of neutral because saturated Forearm helpers dominate. A
+previous-angle dictionary would need explicit reset/snapshot/restore ownership;
+current helper poses already participate in capture/restore and provide a better
+starting point. No new hidden continuity state was added to gameplay.
+
+### Current code and next implementation boundary
+
+Normal gameplay solver behavior remains unchanged from the pushed baseline.
+`runtime/player/player_humanoid_rig.gd` gained 167 opt-in tracing lines, with an
+empty callback in normal play; original calculations unchanged. Existing
+control/input verifier rerun with tracing disabled: **96/96 passed**, empty stderr,
+`godot_runs/arm_trace_disabled_control_20261020/result.json`.
+
+Retained reusable tools:
+
+- `tools/diagnose_skill_crafter_arm_solver_trace.gd`: extends real-asset R-L-R;
+  stage/bone-write trace excludes setup and screenshot waits.
+- `tools/diagnose_skill_crafter_arm_branch_candidate.gd`: bend experiment only.
+- `tools/diagnose_authoring_twist_branch.gd`: production observation by default;
+  optional helper experiment, no saved library opened or changed.
+- `tools/analyze_skill_crafter_arm_solver_trace.py`: offline writer attribution
+  and optional `--compare-reference`, quaternion-sign-safe measurements.
+
+Evidence:
+[writer attribution](<../../godot_runs/arm_stage_trace_20261020/ARM_STAGE_ANALYSIS.md>),
+[bend comparison](<../../godot_runs/arm_branch_candidate_20261020/ARM_CANDIDATE_COMPARISON.md>),
+[candidate rendered review](<../../godot_runs/arm_branch_candidate_20261020/review.html>),
+[twist comparison](<../../godot_runs/twist_branch_candidate_20261020/TWIST_BRANCH_COMPARISON.md>).
+Raw JSON/JSONL, images and source snapshots are retained beside reports.
+
+Next: put bend continuity at the authoritative Forearm write, then implement
+helper wrap/zero correction with explicit restore/seek behavior. Cover ordinary
+reach and precise contact alignment; the latter runs CCD/spline/reseat/swing
+without all ordinary max/manual stages. Preserve manual elbow control, shoulder
+authority and grip. Repeat R-L-R with BOTH corrections together and inspect skin
+and rendered endpoints. This combined test has NOT happened. Two-hand/reverse,
+saved F/equipped replay, arbitrary anatomy and performance remain untested.
+
+Do not impose a fixed imported-rest hinge from this experiment: UpperarmTwist
+bones are deformation siblings, not Forearm parents, while pure-swing and manual
+elbow orbit redistribute rotation. Anatomical validity is separate from merely
+preserving the incoming branch. Wrist range remains for reassessment afterward.
+
+## Live Runtime Integration - 2026-10-20
+
+User explicitly requested moving the corrections into live code, then varying
+movement to avoid validating only a convenient demonstration. This supersedes
+the preceding exploration's prototype-only boundary for these two corrections.
+No additional Git operation was requested or performed.
+
+Production owner: `runtime/player/player_humanoid_rig.gd`.
+
+- CCD and spline Forearm writes now explicitly request incoming-bend protection
+  in `_rotate_bone_toward_end_target`. It clamps the weighted proposed rotation
+  before writing it, on the incoming bend plane at the existing extension cap.
+  Manual elbow orbit, max-angle cleanup and pure-swing endpoint restoration do
+  not use that guard. The tiny-angle atan2 swing calculation is retained. Exact
+  straightness has no incoming plane; no new world pole or hidden cache invented.
+- Twist distribution reads a trustworthy unsaturated helper pose to select the
+  equivalent request across +/-180. Upperarm reference is preferred, Forearm is
+  fallback. Saturated, off-axis, inconsistent or missing references explicitly
+  fall back to principal angle. Existing shares and clamps remain unchanged.
+- Zero twist now writes neutral through the existing helper writer; partial
+  strength retains its normal blend behavior. Branch continuity follows posed
+  bones and their existing capture/restore, not a separate previous-angle cache.
+
+Initial acquisition uses these same production changes. The live diagnostic
+uses the read-only trace fixture, with no candidate callback or solver override.
+It opens the saved weapon data in the real Skill Crafter station and drives its
+existing pommel and elbow input paths. Player-library persistence stays isolated;
+solver behavior is not substituted.
+
+Focused current production checks:
+
+- `godot_runs/arm_runtime_checks_20261020/verify_authoring_elbow_bend_continuity.json`:
+  100/100, both hands, shifted/yawed rigs, both bend signs, weighted steps, inward
+  no-change, zero strength, exact/near-straight cases, reachable precise CCD.
+- `godot_runs/arm_runtime_checks_20261020_final/verify_player_twist_continuity.json`:
+  318/318, both hands/directions, wrap, neutral/partial strength, quaternion signs,
+  production pose packet capture/restore, cold reset and unavailable references.
+- Same final directory: `verify_skill_crafter_upperarm_roll_control.json` 96/96,
+  plus `shoulder_results.txt` with both hands passing shoulder authority checks.
+  All successful runs exited zero with empty stderr. An initial helper-verifier
+  parse error was a missing closing parenthesis in the new test and was corrected
+  before the successful run; its failed log remains preserved.
+
+Reusable motion variations are in `diagnose_skill_crafter_elbow_correction.gd`:
+`--elevations` now tilts setup, `--lateral-factor` adds signed sideways pull,
+`--elbow-steps` supplies signed 15..60-degree increments, or `--elbow-seed`
+selects twelve reproducible signed increments from 15/25/35/45/55 degrees.
+This grid keeps 10-degree spacing within the requested 15..60 range; explicit
+steps retain 60-degree boundary coverage. Seed/list/vectors and requested versus
+achieved movement are recorded. Original no-option reproduction is preserved.
+Each run still extends once, pulls, keeps retracted and then adjusts the actual
+elbow gizmo. Variation filenames are unique. No extra body controls or wrist
+range changes are part of this slice.
+
+Rendered production verification completed in three fresh directories, each with
+99 samples, R-L-R in one station/actor, first R warmup, post-setup ten-second
+minimum plus ready/idle gating, real Broken_Balde_v1 and skill_slot_2. All runs
+ended with empty stderr and no dropped trace rows or unmatched writer pairs.
+The production rig source was identical in all three runs (SHA256
+`8EB9E85CACD57A7CA504BADAFFEFBBFDA613F0D2CAD8EE04231FB74655B39FC7`).
+
+| Evidence directory under godot_runs | Variation | Largest manual increment error, L / R2 | Maximum rendered pommel displacement from held pose, L / R2 |
+| --- | --- | ---: | ---: |
+| arm_live_large_steps_20261020 | Level, axial pull; signed explicit steps including +/-60 degrees | 0.301 / 0.328 degrees | 20.14 / 16.10 mm |
+| arm_live_random_20261020 | +20-degree setup, outward pull factor 0.15; seed 20261020 | 0.410 / 0.192 degrees | 17.12 / 39.74 mm |
+| arm_live_random_down_20261020 | -20-degree setup, inward pull factor -0.15; seed 20261021 | 0.042 / 0.075 degrees | 17.96 / 40.87 mm |
+
+Each directory contains `review.html`, `ARM_MOTION_SUMMARY.md/json`,
+`ARM_STAGE_ANALYSIS.md/json`, raw traces, source snapshots and screenshots.
+Compared L/R2 samples retain prepared binding 33/33 per case. No individual
+bone-write plane reversal >=90 degrees or helper write >=30 degrees was observed.
+This is arm continuity and retained-binding evidence, not a new full-finger
+contact certificate or a universal anatomical/skin acceptance claim.
+
+The first two runs' raw samples could precede realization of a throttled input.
+Reports retain those samples and separately measure the trace's after-render
+capture before the next input. Those captures confirm the requested steps were
+actually applied. The third fixture waits for native `preview_drag_refresh_pending`
+to clear (bounded at two seconds, failure recorded) and then frame-post-draw
+before measuring. It does not replace or bypass the normal refresh/solver.
+
+The original automatic extension-to-held near-reversal (historical baseline
+175.29 degrees L / 165.68 R) does not recur in these tested trajectories. The
+downward R2 world-plane change is 89.78 degrees, but the Upperarm-local bend
+normal changes only 3.94 degrees from extension to held (maximum pull excursion
+14.74 degrees). The elbow bends 167.61 -> 135.44 degrees without passing through
+straight: the larger world change is arm-frame rotation, not the old hinge flip.
+This variant's L inward pull is partly blocked by the existing
+`body_clearance_rejected` / `left_forearm` restriction: samples 11..17 retain the
+last accepted target. Do not count it as a completed full left retraction.
+Both hands accept all eight pull targets in each of the first two runs, and
+downward R2 accepts all eight. The downward R2 larger world-plane changes first
+appear in the parent frame before direct reach, with effectively unchanged
+Upperarm-local bend plane; trace proof is retained in that run's report.
+
+The downward L run also crosses the raw signed twist boundary live:
+-165.420 -> +173.524 degrees, resolved continuously as 194.580 -> 173.524.
+Forearm helper total remains +90 degrees; Upperarm total changes
+42.808 -> 38.175 degrees, maximum individual helper step 2.316 degrees.
+The first two runs did not cross that boundary; the separate 318-check verifier
+and this third live crossing provide the coverage.
+
+Remaining boundaries: the guard preserves an incoming bend side; it does not
+repair an already inverted saved pose or invent a side for exactly straight/
+folded input. No valid unsaturated helper reference means explicit principal
+fallback. Unlimited winding is not supported; zero requests neutral. Manual
+orbit remains deliberately available. Held/released L/R2 images were inspected,
+but dark sleeves limit fine skin-deformation assessment. Rendered wrist/weapon
+movement during manual editing/release remains: downward R2 reaches 40.87 mm
+pommel displacement; upward R2 release moves the wrist 33.90 mm while its target
+gap improves 34.25 -> 6.39 mm. Authored weapon endpoints remain unchanged.
+Saved F/equipped replay, reverse/two-hand variants and performance benchmarking
+were not rerun here. Production pose-packet capture/restore was tested directly.
+
+User reaffirmed priority at completion: prevent elbow flip first; next investigate
+**wrist rotation range through the weapon-roll control**. Do not replace that
+next focus with general anatomical redesign, extra torso controls or unrelated
+endpoint cleanup. Wrist limits have not been changed in this slice.
+
+Read-only entry points for that next investigation: the station's Weapon Roll
+spinbox and `_set_selected_motion_node_weapon_roll_prepared`,
+`CombatAnimationMotionNode.normalize`, and
+`CombatAnimationWeaponRollManipulator.apply` each currently impose +/-120 degrees.
+`CombatWeaponRollResolver.resolve` supplies geometry, then the rig's
+`capture_authoring_wrist_origin` / `apply_authoring_wrist_roll_pose` writes the Hand.
+That direct writer does not call `_clamp_authoring_contact_wrist_twist`; do not
+assume the separately exposed contact limit is the observed roll stopper.
+Reuse `verify_combat_weapon_roll_resolver.gd`, `verify_authoring_wrist_origin.gd`
+and the sampling of `verify_weapon_roll_manipulation.gd` with this settled real
+asset fixture. The latter still uses an old saved weapon/slot and two-frame
+acquisition wait, so it needs adaptation before meaningful range testing.
+This map is code inspection only, not a wrist-range runtime result or a decision
+to widen any cap.
+
+## Wrist Roll Range Investigation - 2026-10-20
+
+User authorized end-to-end evaluation and correction of both wrists through
+Weapon Roll: natural hand orientation appears at a hard stop rather than inside
+the range. Preserve the completed elbow inversion correction. This is now the
+active slice; evidence below is code inspection until the fresh sweep completes.
+
+The +/-120 scalar is clamped in UI, motion normalization, retargeting and the
+single-hand manipulator. It is not an anatomical joint angle: the manipulator
+captures the currently settled Hand/weapon and the current authored roll scalar,
+then rotates by requested minus captured scalar around Wrist-to-Tip. Encoding
+compensates weapon orientation so the rendered frame can have different scalar
+representations. The direct rig writer rotates only Hand; it bypasses normal
+contact wrist limits and helper distribution. A simple wider or shifted scalar
+interval cannot by itself prove correct wrist anatomy.
+
+First implementation is diagnostic only:
+`tools/diagnose_skill_crafter_weapon_roll.gd`, reusing the settled real-item
+fixture, R-L-R, first R warmup, Broken_Balde_v1, skill_slot_2. Sweep current range
+both directions, beyond-limit probes, return to zero, actual pointer/release;
+record neutral-relative Hand/Forearm frames, helper changes, accepted values,
+binding, fixed Wrist/Tip and rigid grip. Inspect rendered endpoints and neutral.
+Production fix owners and limits are selected after that evidence, not guessed
+from the scalar's name.
+
+Preserve continuous saved roll values and complete frame encoding: ordinary
+scalar interpolation currently uses lerp, so wrapping +181 to -179 would create
+a false long sweep. Solved F/equipped playback consumes captured bone/weapon
+frames; do not add an anatomical solver to that replay path.
+
+### User clarification: move the stops, preserve the span
+
+The A/B -> A1/B1 drawing and subsequent clarification require determining the
+physical placement of the allowed roll interval while retaining its existing
+240-degree travel. The sketch is not a numerical calibration. The earlier
+suggested mirrored 75-degree scalar offset is **not established or implemented**.
+Do not change elbow/forearm movement authority to answer this request.
+
+The current saved weapon-roll zero is not a neutral anatomical reference.
+Compare actual Hand orientation with both parent-times-Hand-rest and the
+rest-calibrated distal forearm twist helper: Hand is a direct Forearm child,
+whereas the visible forearm also uses a separate Twist01 -> Twist02 chain.
+Choose a reference only after checking the rendered pose and skin ownership.
+Existing poses must not move merely because an editor field refreshes.
+
+Read-only diagnostic evidence is being collected in
+`godot_runs/wrist_roll_raw_orbit_20261020`: the same settled real-weapon R-L-R
+fixture, explicit diagnostic bypass of UI stops, full-circle Hand-only samples,
+both candidate reference centers and their +/-120-degree endpoints. It is not
+production acceptance or permission to widen the range.
+
+Planned production edits for this bounded correction:
+
+- `runtime/player/player_humanoid_rig.gd`: capture a rest-calibrated distal
+  ForearmTwist02 reference for Roll; preserve existing arm movement writers.
+- `core/resolvers/combat_weapon_roll_resolver.gd`: derive the closest reference
+  orientation on the existing Wrist-to-Tip orbit, then place stops +/-120
+  degrees around it. Singular reference projections must fail explicitly.
+- `runtime/combat/combat_animation_weapon_roll_manipulator.gd`: expose/capture
+  these bounds and use them for the existing rigid Hand/weapon rotation.
+- `runtime/combat/combat_animation_station_preview_presenter.gd`: expose the
+  settled one-hand range to the UI through the existing preview ownership.
+- `runtime/combat/combat_animation_station_ui.gd`: use the same bounds for
+  numeric and pointer inputs, without mutating poses during field refresh.
+- `core/models/combat_animation_motion_node.gd` and
+  `core/models/combat_animation_retarget_node.gd`: retain finite continuous roll
+  scalars, including values beyond the old +/-120 storage clamp. Do not re-zero
+  or wrap saved angles. Unsupported two-hand/unarmed editing retains its
+  existing explicit range policy rather than inheriting unrestricted input.
+
+The center is the closest attainable reference orientation on the existing
+orbit, not a claim that every wrist bend throughout a 240-degree arc is
+anatomically correct. Existing out-of-range poses remain untouched on load or
+refresh; a deliberate Roll request is constrained to the newly derived bounds.
+
+### Range correction implementation and evidence
+
+The planned production edit is now implemented. The authoritative visual
+reference is the current distal ForearmTwist02 frame, rest-calibrated into the
+Hand frame. The mesh has zero weight on main Forearm; about 95.5% of the arm-side
+weight where Hand and forearm blend belongs to Twist02. Actual inverse skin
+binds agree with the calibration within 0.000031 degrees. Details and asset
+paths: `godot_runs/wrist_roll_raw_orbit_20261020/WRIST_REFERENCE_AUDIT.md`.
+
+The raw rendered diagnostic completed 60 observations, including both proposed
+references and their +/-120 endpoints; only the diagnostic bypassed the old
+stops. The chosen reference produces pose-dependent centers, not one hardcoded
+left/right offset. For example, the initial right pose's center is about +66
+degrees, giving approximately -54..186, while its later settled arm pose is
+near -4, giving approximately -124..116. Both retain exactly 240 degrees.
+
+Fresh focused checks pass: 1,484 range/normalization/serialization/frame
+roundtrip checks; 364 existing rigid geometry checks; 28 wrist-origin/writer
+checks. Logs: `godot_runs/wrist_roll_range_checks_20261020`.
+
+First live production run completed 242 samples over R-L-R, level and +20
+degrees. All authored/rendered, fixed-span, stable-bound, fixed-wrist/Tip,
+rigid-grip, non-Hand and actual pointer checks passed. The initial diagnostic's
+strict 0.01-degree comparison against a whole-degree numeric display produced
+expected display-only failures (maximum 0.324 degrees). The original raw
+failures remain recorded; they are not a clean all-pass run. Corrected fixture
+tolerance is 0.50001 only for display; pose/scalar checks remain strict.
+
+Read-only review then found bounds could display the previous arm pose because
+fields refresh before the preview. The preview wrapper now refreshes bounds
+after presenting the new pose. The next run,
+`godot_runs/wrist_roll_live_limits_final_20261020`, was stopped: its new test
+called a full preview refresh before the first retained Roll transaction. The
+existing ordinary preview re-solved the arm, invalidating the sweep baseline.
+Raw failures and the explanation remain in that directory's
+`INTERRUPTED_RUN.md`; this is not accepted evidence. No production edit was
+needed for this test setup error. The corrected fixture tests full-preview
+retention after the first applied center Roll, while still checking that
+fields-only refresh leaves the original pose intact before any Roll input.
+
+Final production verification completed in
+`godot_runs/wrist_roll_live_limits_verified_20261020`: all 242 samples pass,
+including 82 initial-R warmup samples and 160 L/R2 acceptance samples across
+level and +20-degree poses. All six original field-refresh checks preserve
+pose/data; all six retained full-preview checks preserve pose/data and refresh
+the displayed bounds correctly. Numeric sweeps, both beyond-stop probes and
+actual pointer/release checks pass. Interval drift is zero, with exactly 240
+degrees of travel in every case. Stderr is empty and the diagnostic has ended.
+
+The independent review confirms current production source hashes and retained
+fixture snapshots match the completed run. Reconstructed maximum Hand/weapon
+rotation errors are 0.000023/0.000018 degrees; maximum Tip/grip displacement is
+0.000481/0.000485 mm. The whole-degree UI display tolerance is recorded in every
+row; authored values remain checked without that rounding allowance. Original,
+center and endpoint views were examined, including both L/R2 elevations.
+The neutral reference is better grounded than arbitrary scalar zero, but the
+preserved 240-degree Hand-only orbit still includes visibly extreme wrist
+orientations. This is stop-placement verification, not anatomical certification
+of every point in the arc. User visual examination remains pending.
+
+Final L/R2 examples (pose-dependent authored scalars, not hardcoded constants):
+
+| Hand and elevation | Minimum | Center | Maximum |
+| --- | ---: | ---: | ---: |
+| L, level | -188.925 | -68.925 | 51.075 |
+| L, +20 degrees | -236.775 | -116.775 | 3.225 |
+| R2, level | -123.762 | -3.762 | 116.238 |
+| R2, +20 degrees | -154.834 | -34.834 | 85.166 |
+
+The initial right level pose has a different saved/frame reference: about
+-54.007..185.993 around 65.993 degrees. Do not copy any of these numbers into
+universal left/right constants. The saved scalar's origin and current forearm
+pose determine the interval; it remains fixed during the captured Roll action.
+
+Review artifacts: `review.html`, `WEAPON_ROLL_LIMITS_REVIEW.md`,
+`weapon_roll_limits_review.json`, raw `manifest.json`/`samples.jsonl` and source
+hashes in the final directory. Original player library SHA256 remains
+`45F9B68F80BC8B4BAEAD920B12211967E70243EDC079DC8FC0590C5E39939558`.
+No Git staging, commit or push was performed. Reverse/two-hand calibration and
+full F/equipped replay were not tested in this slice; focused saved-resource
+and frame reconstruction checks passed separately as recorded above.
+
 ## Bounded Implementation Order After Investigation
 
 1. Establish the stage that first introduces the reproduced rotation/mesh defect.
@@ -525,19 +950,21 @@ that larger policy based only on an unsigned angle or a world-side label.
    bend plane. Distinguish reach rejection, continuity, residual helper rotation,
    reference-frame error and skin deformation. Fix only demonstrated causes in
    an authorized implementation slice. The confirmed reference/identity fixes
-   above are now implemented and verified in this slice; anatomical bend policy
-   remains open.
-2. Recommend torso turn, forward/back lean and side lean as the first artistic
+   above and the live bend/twist integration are now implemented and verified
+   within the recorded coverage; broader anatomical bend policy remains open.
+2. Investigate wrist rotation range through the weapon-roll control, per the
+   user's latest explicit ordering. Distinguish authored roll, requested contact
+   orientation, realized wrist range, upstream arm motion and helper rotation.
+   Locate the first real stop before changing any cap. Preserve the elbow fix.
+3. Recommend torso turn, forward/back lean and side lean as the first artistic
    controls. Define whether these are offsets from automatic following and how
    that automatic layer must respect authored choices. Reuse existing arm-roll/
    elbow-preference concepts rather than adding a competing elbow system.
-3. Add head direction and hip twist in bounded increments. Head channels require
+4. Add head direction and hip twist in bounded increments. Head channels require
    corresponding capture/replay coverage. Hip twist requires a deliberate stance
    policy; it does not automatically authorize feet IK, stepping or root motion.
-4. Define what torso POSITION means before adding translation: lean above fixed
+5. Define what torso POSITION means before adding translation: lean above fixed
    hips, pelvis shift or whole-character travel are different operations.
-5. Reassess wrist limits after upstream motion is trustworthy. Distinguish weapon
-   roll authoring limits, contact orientation policy and anatomical wrist range.
 6. For each new control, complete authored data, interpolation, save/load and
    solved F/equipped replay together. Neutral defaults preserve older skills;
    switching UI complexity must not erase authored advanced values.

@@ -3694,6 +3694,15 @@ func supports_weapon_roll_manipulation(preview_subviewport: SubViewport, motion:
 	var context: Dictionary = _weapon_roll_context(preview_subviewport)
 	return not context.is_empty() and motion != null and not _is_noncombat_idle_draft(active_draft) and not _is_unarmed_preview_item(context["weapon"]) and not _should_preview_use_support_hand(context["weapon"], motion)
 
+func get_weapon_roll_limits(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode) -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or motion == null:
+		return {"available": false, "reason": "missing_preview"}
+	if _should_preview_use_support_hand(context["weapon"], motion) or _is_unarmed_preview_item(context["weapon"]):
+		return {"available": false, "reason": "one_handed_weapon_required"}
+	return weapon_roll_manipulator.get_limits(context["actor"], context["weapon"],
+		context["trajectory"], motion, _resolve_preview_dominant_slot_id())
+
 func apply_weapon_roll_manipulation(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode, requested_degrees: float) -> Dictionary:
 	var context: Dictionary = _weapon_roll_context(preview_subviewport)
 	if context.is_empty() or motion == null:

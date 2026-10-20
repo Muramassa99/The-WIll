@@ -13,6 +13,7 @@ const CombatAnimationSessionStateScript = preload("res://core/models/combat_anim
 const CombatAnimationMotionNodeEditorScript = preload("res://runtime/combat/combat_animation_motion_node_editor.gd")
 const CombatAnimationDraftValidatorScript = preload("res://core/resolvers/combat_animation_draft_validator.gd")
 const CombatAnimationWeaponGeometryResolverScript = preload("res://core/resolvers/combat_animation_weapon_geometry_resolver.gd")
+const CombatWeaponRollResolverScript = preload("res://core/resolvers/combat_weapon_roll_resolver.gd")
 const CombatAnimationRetargetResolverScript = preload("res://core/resolvers/combat_animation_retarget_resolver.gd")
 const CombatRuntimeClipBakerScript = preload("res://core/resolvers/combat_runtime_clip_baker.gd")
 const SurfaceGripSolverScript = preload("res://runtime/player/grip/surface_driven_grip_solver.gd")
@@ -410,7 +411,10 @@ func _refresh_grip_acquisition_status() -> void:
 					var lower_bound := "at least " if failure.get("depth_is_lower_bound", false) else ""
 					overlap_detail = " %s: %s%.3f mm overlap, %.3f mm allowed." % [region, lower_bound, float(failure.depth_m) * 1000.0, float(failure.cap_m) * 1000.0]
 				lines.append("%s grip: could not finish seating (%s).%s" % [hand, str(state.get("reason", "unresolved")), overlap_detail])
-	grip_acquisition_label.text = "\n".join(lines)
+	var status_text: String = "\n".join(lines)
+	if grip_acquisition_label.text != status_text:
+		_refresh_weapon_roll_control_bounds(_get_active_motion_node())
+	grip_acquisition_label.text = status_text
 	grip_acquisition_label.visible = not lines.is_empty()
 	if grip_reacquire_button != null:
 		grip_reacquire_button.visible = not states.is_empty() and not session_state.playback_active
@@ -2214,6 +2218,11 @@ func _build_right_inspector(parent: HBoxContainer) -> void:
 	weapon_rotation_y_spin_box = weapon_plane[1]
 	weapon_rotation_z_spin_box = weapon_plane[2]
 	weapon_roll_spin_box = _build_labeled_spinbox(orientation_content, "Weapon Roll (deg)", -120.0, 120.0, 1.0)
+	# Existing authored poses may lie outside their newly measured interval.
+	# Display them honestly; only a deliberate Roll edit applies the stops.
+	weapon_roll_spin_box.allow_greater = true
+	weapon_roll_spin_box.allow_lesser = true
+	weapon_roll_spin_box.rounded = true
 	axial_reposition_spin_box = _build_labeled_spinbox(orientation_content, "Axial Reposition", -1.0, 1.0, 0.0001)
 	grip_seat_slide_spin_box = _build_labeled_spinbox(orientation_content, "Primary Handle Position", 0.0, 1.0, 0.0001)
 	secondary_grip_seat_slide_spin_box = _build_labeled_spinbox(orientation_content, "Support Handle Position", 0.0, 1.0, 0.0001)
@@ -3036,6 +3045,7 @@ func _refresh_editor_fields() -> void:
 	pommel_curve_out_y_spin_box.editable = motion_node_curve_editable
 	pommel_curve_out_z_spin_box.editable = motion_node_curve_editable
 	weapon_roll_spin_box.editable = motion_node_editable
+	_refresh_weapon_roll_control_bounds(motion_node)
 	axial_reposition_spin_box.editable = motion_node_editable
 	grip_seat_slide_spin_box.editable = motion_node_editable
 	secondary_grip_seat_slide_spin_box.editable = motion_node_editable
@@ -3512,6 +3522,10 @@ func _refresh_preview_scene(
 	if scoped_lookup:
 		_begin_preview_authoring_lookup_scope()
 	_refresh_preview_scene_prepared(grip_resolve_reason)
+	if not session_state.playback_active and not chain_player.is_playing():
+		# Endpoint/elbow edits can change the physical range without changing the
+		# acquisition status. Read limits after the new pose has been presented.
+		_refresh_weapon_roll_control_bounds(_get_active_motion_node())
 	if scoped_lookup:
 		_end_preview_authoring_lookup_scope()
 
@@ -7014,6 +7028,31 @@ func set_selected_motion_node_pommel_curve_out(
 	)
 	return true
 
+func _get_weapon_roll_edit_limits(motion_node: CombatAnimationMotionNode) -> Dictionary:
+	if preview_presenter.supports_weapon_roll_manipulation(preview_subviewport, motion_node, _get_active_draft()):
+		return preview_presenter.get_weapon_roll_limits(preview_subviewport, motion_node)
+	# The distinct two-hand/unarmed/full-preview path keeps its existing policy.
+	# Removing the storage clamp must not make that path unrestricted.
+	var half_span: float = CombatWeaponRollResolverScript.HALF_SPAN_DEGREES
+	return {"available": true, "minimum_degrees": -half_span, "maximum_degrees": half_span, "center_degrees": 0.0}
+
+func _refresh_weapon_roll_control_bounds(motion_node: CombatAnimationMotionNode) -> void:
+	if weapon_roll_spin_box == null or motion_node == null:
+		return
+	var limits: Dictionary = _get_weapon_roll_edit_limits(motion_node)
+	if not bool(limits.get("available", false)):
+		return
+	var was_blocked: bool = weapon_roll_spin_box.is_blocking_signals()
+	weapon_roll_spin_box.set_block_signals(true)
+	# Expand before contracting so crossing the previous interval cannot make
+	# Range rewrite the opposite endpoint. No authored property is written here.
+	weapon_roll_spin_box.max_value = maxf(weapon_roll_spin_box.max_value, limits["maximum_degrees"])
+	weapon_roll_spin_box.min_value = limits["minimum_degrees"]
+	weapon_roll_spin_box.max_value = limits["maximum_degrees"]
+	weapon_roll_spin_box.set_value_no_signal(motion_node.weapon_roll_degrees)
+	weapon_roll_spin_box.tooltip_text = "Roll range for this hand pose: %.1f to %.1f degrees (240 degrees of travel)." % [limits["minimum_degrees"], limits["maximum_degrees"]]
+	weapon_roll_spin_box.set_block_signals(was_blocked)
+
 func set_selected_motion_node_weapon_roll(
 	roll_degrees: float,
 	persist_change: bool = true,
@@ -7043,8 +7082,16 @@ func _set_selected_motion_node_weapon_roll_prepared(
 	if _is_motion_node_authoring_locked(motion_node):
 		_reject_locked_motion_node_edit()
 		return false
-	var resolved_roll: float = clampf(roll_degrees, -120.0, 120.0)
+	if not is_finite(roll_degrees) or is_equal_approx(motion_node.weapon_roll_degrees, roll_degrees):
+		return false
+	var limits: Dictionary = _get_weapon_roll_edit_limits(motion_node)
+	if not bool(limits.get("available", false)):
+		if footer_status_label != null:
+			footer_status_label.text = "Weapon roll could not be applied: %s" % String(limits.get("reason", "invalid pose"))
+		return false
+	var resolved_roll: float = clampf(roll_degrees, limits["minimum_degrees"], limits["maximum_degrees"])
 	if is_equal_approx(motion_node.weapon_roll_degrees, resolved_roll):
+		_refresh_weapon_roll_control_bounds(motion_node)
 		return false
 	if preview_presenter.supports_weapon_roll_manipulation(preview_subviewport, motion_node, _get_active_draft()):
 		var result: Dictionary = preview_presenter.apply_weapon_roll_manipulation(preview_subviewport, motion_node, resolved_roll)

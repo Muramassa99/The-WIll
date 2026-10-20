@@ -5,6 +5,55 @@ const CombatOriginRecordScript = preload("res://core/models/combat_origin_record
 const CombatOriginRegistryScript = preload("res://core/resolvers/combat_origin_registry.gd")
 const OWNER_SYSTEM: StringName = &"combat_weapon_roll_resolver"
 const MIN_WRIST_TIP_DISTANCE_SQUARED: float = 0.000000000001
+const HALF_SPAN_DEGREES: float = 120.0
+const MIN_NEUTRAL_PROJECTION_LENGTH_SQUARED: float = 0.000000000001
+
+## Place the unchanged 240-degree window on this captured Wrist-to-Tip orbit.
+## Only the relative neutral offset is wrapped; authored Roll keeps its branch.
+static func resolve_limits(
+		wrist_capture: Dictionary,
+		weapon_transform_world: Transform3D,
+		weapon_tip_local: Vector3,
+		weapon_tip_origin_id: StringName,
+		baseline_roll_degrees: float
+	) -> Dictionary:
+	# Reuse the same origin/frame validation as the actual transform resolver.
+	var baseline: Dictionary = resolve(
+		wrist_capture, weapon_transform_world, weapon_tip_local, weapon_tip_origin_id,
+		baseline_roll_degrees, baseline_roll_degrees
+	)
+	if not bool(baseline.get("available", false)):
+		return _unavailable(baseline.get("reason", &"unavailable_roll_baseline"))
+	if not wrist_capture.get("roll_neutral_world_basis") is Basis:
+		return _unavailable(&"missing_roll_neutral_world_basis")
+	var neutral_basis: Basis = wrist_capture["roll_neutral_world_basis"]
+	if not _valid_orientation_basis(neutral_basis):
+		return _unavailable(&"invalid_roll_neutral_world_basis")
+	var hand_world: Transform3D = baseline["hand_transform_world"]
+	if not _valid_orientation_basis(hand_world.basis):
+		return _unavailable(&"invalid_roll_hand_orientation_basis")
+	var validated_weapon_world: Transform3D = baseline["weapon_transform_world"]
+	var axis_world: Vector3 = (validated_weapon_world * weapon_tip_local - hand_world.origin).normalized()
+	var hand_rotation: Quaternion = hand_world.basis.orthonormalized().get_rotation_quaternion()
+	var neutral_rotation: Quaternion = neutral_basis.orthonormalized().get_rotation_quaternion()
+	var difference: Quaternion = (neutral_rotation * hand_rotation.inverse()).normalized()
+	var projected_component: float = Vector3(difference.x, difference.y, difference.z).dot(axis_world)
+	var projection_length_squared: float = projected_component * projected_component + difference.w * difference.w
+	if not is_finite(projection_length_squared) or projection_length_squared <= MIN_NEUTRAL_PROJECTION_LENGTH_SQUARED:
+		return _unavailable(&"ambiguous_roll_neutral_reference")
+	var delta_degrees: float = wrapf(rad_to_deg(2.0 * atan2(projected_component, difference.w)), -180.0, 180.0)
+	var center_degrees: float = baseline_roll_degrees + delta_degrees
+	var minimum_degrees: float = center_degrees - HALF_SPAN_DEGREES
+	var maximum_degrees: float = center_degrees + HALF_SPAN_DEGREES
+	if not is_finite(center_degrees) or not is_finite(minimum_degrees) or not is_finite(maximum_degrees):
+		return _unavailable(&"non_finite_roll_limits")
+	return {
+		"available": true,
+		"reason": &"ok",
+		"center_degrees": center_degrees,
+		"minimum_degrees": minimum_degrees,
+		"maximum_degrees": maximum_degrees,
+	}
 
 ## Each request uses the same settled gesture capture and its actual weapon frame.
 ## The input capture stays unchanged. The returned registry describes the rotated
@@ -178,6 +227,15 @@ static func _register_frame(
 	record.space_type = space_type
 	record.is_dynamic = true
 	return registry.register_origin(record)
+
+static func _valid_orientation_basis(value: Basis) -> bool:
+	if not value.is_finite():
+		return false
+	var determinant: float = value.determinant()
+	if not is_finite(determinant) or determinant <= 0.0:
+		return false
+	var rotation: Basis = value.orthonormalized()
+	return rotation.is_finite() and rotation.determinant() > 0.0 and rotation.is_orthonormal()
 
 static func _valid_transform(value: Transform3D) -> bool:
 	if not value.basis.is_finite() or not value.origin.is_finite():

@@ -1,14 +1,52 @@
 extends "res://tools/diagnose_skill_crafter_body_motion.gd"
 
 # One extension, one pull toward the shoulder, hold position, elbow gizmo only.
-# Use --elevations=0: establish a forward pose before the three-step sequence.
+# --elevations=0 preserves the original forward pose; positive angles tilt up.
+# Optional --lateral-factor=0.15 adds outward actor-X travel equal to 15% of the
+# shoulderward pull length (right +X, left -X). Zero preserves the exact baseline.
+# --elbow-steps accepts signed 15..60 degree pointer increments while held.
+# Alternatively --elbow-seed selects 12 reproducible signed 15/25/35/45/55 steps.
 var correction_case: Dictionary = {}
 var correction_baseline: Dictionary = {}
 var correction_step := 0
+var correction_case_index := 0
+var correction_angle_steps: Array[float] = []
 
-func _run_thrust(ui: CombatAnimationStationUI, side: String, _elevation: float) -> Dictionary:
-	correction_case = {"case": "%s_pass_%d_push_pull_elbow" % [side, hand_pass_index], "complete": false, "samples": 0, "snapshots": [], "sequence": "extend; pull toward shoulder; hold; actual elbow control drag; no reextension", "warmup_only": hand_pass_index == 1 and String(options.get("warmup-first", "false")) == "true"}
+func _run_thrust(ui: CombatAnimationStationUI, side: String, elevation: float) -> Dictionary:
+	correction_case_index += 1
+	var lateral_factor: float = float(options.get("lateral-factor", "0"))
+	var case_id: String = "%s_pass_%d_push_pull_elbow" % [side, hand_pass_index]
+	if elevation != 0.0 or lateral_factor != 0.0 or options.has("elbow-steps") or options.has("elbow-seed") or String(options.get("elevations", "0,25")).split(",").size() > 1:
+		case_id += "_case_%d_elevation_%.3f_lateral_%.3f" % [correction_case_index, elevation, lateral_factor]
+	correction_case = {"case": case_id, "complete": false, "samples": 0, "snapshots": [], "sequence": "extend; pull toward shoulder; hold; actual elbow control drag; no reextension", "warmup_only": hand_pass_index == 1 and String(options.get("warmup-first", "false")) == "true", "movement_variant": {"elevation_degrees": elevation, "lateral_factor": lateral_factor, "case_index": correction_case_index, "lateral_rule": "outward actor X (R positive, L negative), fraction of shoulderward pull length; negative factor moves inward", "steps_each_way": 8, "extension_distance_m": 1.0, "shoulderward_pull_fraction": 0.45}}
 	correction_step = 0
+	correction_angle_steps.clear()
+	if options.has("elbow-seed") and options.has("elbow-steps"):
+		correction_case["reason"] = "elbow_seed_and_elbow_steps_are_mutually_exclusive"
+		return correction_case
+	if options.has("elbow-steps"):
+		for increment_text: String in String(options["elbow-steps"]).split(",", true):
+			increment_text = increment_text.strip_edges()
+			if not increment_text.is_valid_float() or absf(increment_text.to_float()) < 15.0 or absf(increment_text.to_float()) > 60.0:
+				correction_case["reason"] = "elbow_steps_require_signed_increments_15_to_60_degrees"
+				return correction_case
+			correction_angle_steps.append(increment_text.to_float())
+	elif options.has("elbow-seed"):
+		var seed_text: String = String(options["elbow-seed"]).strip_edges()
+		if not seed_text.is_valid_int():
+			correction_case["reason"] = "elbow_seed_requires_integer"
+			return correction_case
+		var generator := RandomNumberGenerator.new()
+		generator.seed = seed_text.to_int()
+		for _step: int in range(12):
+			var magnitude: float = float(15 + 10 * generator.randi_range(0, 4))
+			correction_angle_steps.append(magnitude * (-1.0 if generator.randi_range(0, 1) == 0 else 1.0))
+		correction_case["movement_variant"].merge({"elbow_seed": seed_text.to_int(), "elbow_random_magnitudes_degrees": [15, 25, 35, 45, 55], "elbow_seed_rule": "restart same seed per case for comparable R-L-R inputs; recorded list is replay authority across engine versions"})
+	correction_case["expected_samples"] = 21 + (correction_angle_steps.size() if not correction_angle_steps.is_empty() else 12)
+	correction_case["movement_variant"]["elbow_step_increments_degrees"] = correction_angle_steps.duplicate()
+	correction_case["movement_variant"]["elbow_control_mode"] = "explicit_signed_pointer_steps" if not correction_angle_steps.is_empty() else "restore_initial_radial_in_12_steps"
+	if options.has("elbow-seed"):
+		correction_case["movement_variant"]["elbow_control_mode"] = "seeded_random_signed_pointer_steps"
 	if not ui.reset_active_draft_to_baseline():
 		return {"complete": false, "reason": "reset_failed"}
 	await _wait_frames(4)
@@ -17,16 +55,20 @@ func _run_thrust(ui: CombatAnimationStationUI, side: String, _elevation: float) 
 	var actor: Node3D = _get_preview_actor(ui)
 	var sk: Skeleton3D = actor.get_node("JosieModel/Josie/Skeleton3D") as Skeleton3D
 	var trajectory: Node3D = _get_trajectory_root(ui)
-	# Establish the same settled forward-facing starting pose as the earlier
-	# bound right-hand sweep. No setup/reset occurs after extension begins.
+	# Elevation changes the setup; extension follows the accepted shoulder-hand
+	# direction. No setup/reset occurs after extension begins.
 	var setup_motion: CombatAnimationMotionNode = ui.call("_get_active_motion_node") as CombatAnimationMotionNode
 	var forward_world: Vector3 = actor.global_basis.z.normalized()
+	if elevation != 0.0:
+		forward_world = (actor.global_basis * Vector3(0.0, sin(deg_to_rad(elevation)), cos(deg_to_rad(elevation)))).normalized()
 	var forward_local: Vector3 = (trajectory.global_basis.inverse() * forward_world).normalized()
 	var weapon_length: float = setup_motion.tip_position_local.distance_to(setup_motion.pommel_position_local)
 	ui.set_selected_motion_node_tip_position(setup_motion.pommel_position_local + forward_local * weapon_length, false, false, false, true, false)
 	await _wait_frames(3)
 	var setup_shoulder: Vector3 = _get_bone_world_position(sk, "CC_Base_%s_Upperarm" % side)
-	_attempt_grip_translation_with_ui(ui, setup_shoulder + forward_world * 0.30 - actor.global_basis.y.normalized() * 0.12)
+	var setup_grip_world: Vector3 = setup_shoulder + forward_world * 0.30 - actor.global_basis.y.normalized() * 0.12
+	correction_case["movement_variant"].merge({"requested_setup_axis_world": _vec(forward_world), "requested_setup_axis_local": _vec(forward_local), "setup_shoulder_world": _vec(setup_shoulder), "requested_setup_grip_world": _vec(setup_grip_world)})
+	_attempt_grip_translation_with_ui(ui, setup_grip_world)
 	await _wait_frames(3)
 	# Selection/reset/setup can obsolete the original asynchronous neutral-pose
 	# job. Start acquisition only once the final starting pose is established.
@@ -50,6 +92,7 @@ func _run_thrust(ui: CombatAnimationStationUI, side: String, _elevation: float) 
 	var hand: Vector3 = _get_bone_world_position(sk, "CC_Base_%s_Hand" % side)
 	var extension_axis: Vector3 = (hand - shoulder).normalized()
 	var extension_delta: Vector3 = trajectory.global_basis.inverse() * extension_axis * 1.0
+	correction_case["movement_variant"].merge({"accepted_setup_weapon_axis_world": _vec((trajectory.global_basis * (display.tip_position_local - display.pommel_position_local)).normalized()), "extension_axis_world": _vec(extension_axis), "extension_delta_local": _vec(extension_delta), "extension_delta_world": _vec(trajectory.global_basis * extension_delta), "extension_start_pommel_local": _vec(display.pommel_position_local)})
 	await _move_pommel(ui, sk, side, display.pommel_position_local, extension_delta, "extend")
 	await _record_stage(ui, sk, side, "maximum_extension")
 	# Begin the pull at accepted position, never at the distant rejected request.
@@ -57,6 +100,12 @@ func _run_thrust(ui: CombatAnimationStationUI, side: String, _elevation: float) 
 	shoulder = _get_bone_world_position(sk, "CC_Base_%s_Upperarm" % side)
 	hand = _get_bone_world_position(sk, "CC_Base_%s_Hand" % side)
 	var pull_delta: Vector3 = trajectory.global_basis.inverse() * (shoulder - hand) * 0.45
+	var lateral_world: Vector3 = Vector3.ZERO
+	if lateral_factor != 0.0:
+		var outward_world: Vector3 = actor.global_basis.x.normalized() * (-1.0 if side == "L" else 1.0)
+		lateral_world = outward_world * shoulder.distance_to(hand) * 0.45 * lateral_factor
+		pull_delta += trajectory.global_basis.inverse() * lateral_world
+	correction_case["movement_variant"].merge({"pull_shoulder_world": _vec(shoulder), "pull_hand_world": _vec(hand), "shoulderward_pull_delta_world": _vec((shoulder - hand) * 0.45), "lateral_pull_delta_world": _vec(lateral_world), "pull_delta_local": _vec(pull_delta), "pull_delta_world": _vec(trajectory.global_basis * pull_delta), "pull_start_pommel_local": _vec(accepted.pommel_position_local), "requested_pull_end_pommel_local": _vec(accepted.pommel_position_local + pull_delta)})
 	await _move_pommel(ui, sk, side, accepted.pommel_position_local, pull_delta, "pull")
 	await _record_stage(ui, sk, side, "retracted_before_release")
 	ui.motion_node_editor.end_drag()
@@ -64,8 +113,7 @@ func _run_thrust(ui: CombatAnimationStationUI, side: String, _elevation: float) 
 	await _wait_frames(2)
 	await _record_stage(ui, sk, side, "retracted_held")
 	await _correct_elbow(ui, sk, side, initial_radial_local)
-	correction_case["expected_samples"] = 33
-	correction_case["complete"] = correction_step == 33 and not correction_case.has("correction_failure")
+	correction_case["complete"] = correction_step == int(correction_case["expected_samples"]) and not correction_case.has("correction_failure")
 	return correction_case
 
 func _await_settled_setup(ui: CombatAnimationStationUI, side: String, started: int) -> Dictionary:
@@ -146,8 +194,14 @@ func _correct_elbow(ui: CombatAnimationStationUI, sk: Skeleton3D, side: String, 
 	var desired: Vector3 = actor.global_basis * initial_radial_local
 	desired = (desired - axis * desired.dot(axis)).normalized()
 	var angle: float = atan2(axis.dot(initial_normal.cross(desired)), initial_normal.dot(desired))
+	var requested_total_degrees: float = rad_to_deg(angle)
+	if not correction_angle_steps.is_empty():
+		requested_total_degrees = 0.0
+		for increment: float in correction_angle_steps:
+			requested_total_degrees += increment
+		desired = Basis(axis, deg_to_rad(requested_total_degrees)) * initial_normal
 	var reference: Vector3 = actor.call("_resolve_authoring_upperarm_roll_reference_world", slot, axis) as Vector3
-	correction_case["correction_start"] = {"gizmo": state, "desired_radial_world": _vec(desired), "pointer_arc_degrees": rad_to_deg(angle), "actual_radial_angle_from_rig_reference_degrees": rad_to_deg(atan2(axis.dot(reference.cross(initial_normal)), reference.dot(initial_normal))), "target_rule": "restore initial applied-grip elbow side; not a universal anatomical certificate"}
+	correction_case["correction_start"] = {"gizmo": state, "desired_radial_world": _vec(desired), "pointer_arc_degrees": requested_total_degrees, "requested_step_increments_degrees": correction_angle_steps.duplicate(), "actual_radial_angle_from_rig_reference_degrees": rad_to_deg(atan2(axis.dot(reference.cross(initial_normal)), reference.dot(initial_normal))), "target_rule": "explicit signed pointer increments while held; not an anatomical certificate" if not correction_angle_steps.is_empty() else "restore initial applied-grip elbow side; not a universal anatomical certificate"}
 	var active: CombatAnimationMotionNode = ui.call("_get_active_motion_node") as CombatAnimationMotionNode
 	var display: CombatAnimationMotionNode = ui.call("_build_authoring_motion_node_baseline", active) as CombatAnimationMotionNode
 	ui.call("_begin_preview_drag_override", display)
@@ -165,7 +219,9 @@ func _correct_elbow(ui: CombatAnimationStationUI, sk: Skeleton3D, side: String, 
 	ui.motion_node_editor.begin_upperarm_roll_drag(state["drag_target"], state, camera, press)
 	var fixed_pommel: Vector3 = display.pommel_position_local
 	var fixed_tip: Vector3 = display.tip_position_local
-	for step: int in range(1, 13):
+	var step_count: int = correction_angle_steps.size() if not correction_angle_steps.is_empty() else 12
+	var cumulative_degrees := 0.0
+	for step: int in range(1, step_count + 1):
 		# Look down the control axis so the full gizmo ring is accessible to the
 		# production pointer ray/sphere resolver, including the opposite side.
 		camera.projection = Camera3D.PROJECTION_ORTHOGONAL
@@ -176,18 +232,40 @@ func _correct_elbow(ui: CombatAnimationStationUI, sk: Skeleton3D, side: String, 
 			up = actor.global_basis.x.normalized()
 		camera.look_at(center, up)
 		var normal: Vector3 = Basis(axis, angle * float(step) / 12.0) * initial_normal
+		var step_degrees: float = rad_to_deg(angle) / 12.0
+		if not correction_angle_steps.is_empty():
+			step_degrees = correction_angle_steps[step - 1]
+			cumulative_degrees += step_degrees
+			normal = Basis(axis, deg_to_rad(cumulative_degrees)) * initial_normal
+		else:
+			cumulative_degrees = rad_to_deg(angle) * float(step) / 12.0
 		var point: Vector3 = center + normal * float(state["radius_meters"]) * 0.999
 		var pointer: Vector2 = camera.unproject_position(point)
 		var resolved: Variant = ui.motion_node_editor.resolve_upperarm_roll_drag(camera, pointer)
 		ui.call("_handle_preview_drag", pointer)
 		ui.call("_flush_pending_preview_drag_refresh")
+		# The live UI throttles drag refreshes by elapsed time, so two frames
+		# alone can still measure the previous input. Wait for its normal update;
+		# do not bypass the throttle or force an alternate solve for the fixture.
+		var refresh_started_msec := Time.get_ticks_msec()
+		while ui.preview_drag_refresh_pending and Time.get_ticks_msec() - refresh_started_msec < 2000:
+			await process_frame
+		if ui.preview_drag_refresh_pending:
+			correction_case["correction_failure"] = "elbow_preview_refresh_timeout"
+			ui.motion_node_editor.end_drag()
+			ui.call("_finalize_preview_drag")
+			return
 		await _wait_frames(2)
+		if DisplayServer.get_name().to_lower() != "headless":
+			await RenderingServer.frame_post_draw
 		var effective: CombatAnimationMotionNode = ui.call("_get_effective_preview_motion_node") as CombatAnimationMotionNode
-		await _record_stage(ui, sk, side, "elbow_correction", {"correction_fraction": float(step) / 12.0, "pointer_resolved_roll_degrees": resolved, "requested_control_normal_world": _vec(normal), "elbow_radial_world": _vec(_elbow_radial(sk, side)), "authored_pommel_drift_m": effective.pommel_position_local.distance_to(fixed_pommel), "authored_tip_drift_m": effective.tip_position_local.distance_to(fixed_tip)})
+		await _record_stage(ui, sk, side, "elbow_correction", {"correction_fraction": float(step) / float(step_count), "requested_step_degrees": step_degrees, "requested_cumulative_arc_degrees": cumulative_degrees, "desired_final_normal_world": _vec(desired), "pointer_resolved_roll_degrees": resolved, "requested_control_normal_world": _vec(normal), "elbow_radial_world": _vec(_elbow_radial(sk, side)), "authored_pommel_drift_m": effective.pommel_position_local.distance_to(fixed_pommel), "authored_tip_drift_m": effective.tip_position_local.distance_to(fixed_tip)})
 	ui.motion_node_editor.end_drag()
 	ui.call("_finalize_preview_drag")
 	await _wait_frames(2)
-	await _record_stage(ui, sk, side, "elbow_corrected_released")
+	var achieved_normal: Vector3 = _elbow_radial(sk, side)
+	correction_case["correction_end"] = {"desired_final_normal_world": _vec(desired), "achieved_radial_world": _vec(achieved_normal), "requested_total_arc_degrees": requested_total_degrees, "normal_error_degrees": rad_to_deg(achieved_normal.angle_to(desired))}
+	await _record_stage(ui, sk, side, "elbow_corrected_released", correction_case["correction_end"])
 
 func _record_stage(ui: CombatAnimationStationUI, sk: Skeleton3D, side: String, phase: String, extra: Dictionary = {}) -> void:
 	var actor: Node3D = _get_preview_actor(ui)

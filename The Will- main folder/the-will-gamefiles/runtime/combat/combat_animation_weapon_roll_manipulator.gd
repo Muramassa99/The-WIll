@@ -35,6 +35,20 @@ func matches(actor: Node3D, weapon: Node3D, trajectory: Node3D, motion: Resource
 			return false
 	return true
 
+## Read-only: refreshing controls must neither move the pose nor start a grip
+## solve. An active gesture retains its original reference and interval.
+func get_limits(actor: Node3D, weapon: Node3D, trajectory: Node3D, motion: Resource, slot: StringName) -> Dictionary:
+	if matches(actor, weapon, trajectory, motion, slot):
+		return (_state["limits"] as Dictionary).duplicate()
+	if not is_instance_valid(actor) or not is_instance_valid(weapon) or trajectory == null or motion == null:
+		return {"available": false, "reason": "missing_roll_context"}
+	var tip_value: Variant = weapon.get_meta("weapon_tip_local", null)
+	if not tip_value is Vector3:
+		return {"available": false, "reason": "missing_weapon_endpoints"}
+	var capture: Dictionary = actor.call("capture_authoring_wrist_origin", slot)
+	return RollResolver.resolve_limits(capture, weapon.global_transform, tip_value,
+		StringName(weapon.get_meta("weapon_tip_origin_id", &"")), float(motion.get("weapon_roll_degrees")))
+
 func apply(actor: Node3D, weapon: Node3D, trajectory: Node3D, motion: Resource, slot: StringName, up_in_weapon: Vector3, requested_degrees: float) -> Dictionary:
 	if not is_finite(requested_degrees) or not up_in_weapon.is_finite():
 		return {"available": false, "reason": "invalid_roll_input"}
@@ -51,10 +65,15 @@ func apply(actor: Node3D, weapon: Node3D, trajectory: Node3D, motion: Resource, 
 		var capture: Dictionary = actor.call("capture_authoring_wrist_origin", slot)
 		if not bool(capture.get("available", false)):
 			return capture
+		var limits: Dictionary = RollResolver.resolve_limits(capture, weapon.global_transform,
+			tip_value, Origin.ORIGIN_WEAPON_ROOT, float(motion.get("weapon_roll_degrees")))
+		if not bool(limits.get("available", false)):
+			return limits
 		_state = {
 			"actor": actor, "weapon": weapon, "trajectory": trajectory, "slot": slot,
 			"capture": capture, "baseline_weapon_world": weapon.global_transform,
 			"baseline_degrees": float(motion.get("weapon_roll_degrees")),
+			"limits": limits,
 			"baseline_motion": motion.duplicate(true),
 			"tip_in_weapon": tip_value, "pommel_in_weapon": pommel_value,
 			"weapon_origin_id": Origin.ORIGIN_WEAPON_ROOT, "up_in_weapon": up_in_weapon,
@@ -64,7 +83,7 @@ func apply(actor: Node3D, weapon: Node3D, trajectory: Node3D, motion: Resource, 
 	if weapon.get_meta("weapon_tip_local", null) != _state["tip_in_weapon"] or weapon.get_meta("weapon_pommel_local", null) != _state["pommel_in_weapon"] or not up_in_weapon.is_equal_approx(_state["up_in_weapon"]):
 		clear()
 		return {"available": false, "reason": "weapon_geometry_changed"}
-	var requested: float = clampf(requested_degrees, -120.0, 120.0)
+	var requested: float = clampf(requested_degrees, _state["limits"]["minimum_degrees"], _state["limits"]["maximum_degrees"])
 	var result: Dictionary = RollResolver.resolve(_state["capture"], _state["baseline_weapon_world"], _state["tip_in_weapon"], _state["weapon_origin_id"], _state["baseline_degrees"], requested)
 	if not bool(result.get("available", false)):
 		return result
@@ -88,6 +107,8 @@ func apply(actor: Node3D, weapon: Node3D, trajectory: Node3D, motion: Resource, 
 	_state["skeleton_version"] = skeleton.get_version()
 	_state["skeleton_world"] = skeleton.global_transform
 	_state["last_weapon_world"] = weapon.global_transform
+	result["roll_limits"] = (_state["limits"] as Dictionary).duplicate()
+	result["applied_roll_degrees"] = requested
 	_state["result"] = result
 	return result
 

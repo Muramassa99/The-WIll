@@ -96,7 +96,7 @@ def analyze(directory):
             image_url = quote(image.relative_to(directory).as_posix()) if image.suffix.lower() == ".png" and image.resolve().is_relative_to(directory) and image.is_file() else None
             samples.append({"step": row.get("step"), "serial": row.get("sample_serial"), "phase": row.get("phase"), "distance_m": row.get("distance_m"), "ready": ready,
                             "prepared_grip_readiness": {key: row.get("prepared_grip_readiness", {}).get(key) for key in ("ready", "status", "reason", "seat_status")},
-                            **{key: row.get(key) for key in ("authored_upperarm_roll_degrees", "pointer_resolved_roll_degrees", "correction_fraction", "authored_pommel_drift_m", "authored_tip_drift_m", "elbow_radial_world", "requested_control_normal_world")},
+                            **{key: row.get(key) for key in ("authored_upperarm_roll_degrees", "pointer_resolved_roll_degrees", "correction_fraction", "requested_step_degrees", "requested_cumulative_arc_degrees", "desired_final_normal_world", "normal_error_degrees", "authored_pommel_drift_m", "authored_tip_drift_m", "elbow_radial_world", "requested_control_normal_world")},
                             "request_gap_m": separation(row.get("requested_pommel_local"), row.get("accepted_pommel_local")),
                             "accepted_travel_m": separation(row.get("accepted_pommel_local"), rows[0].get("accepted_pommel_local")),
                             "requested_travel_m": separation(row.get("requested_pommel_local"), rows[0].get("requested_pommel_local")),
@@ -106,7 +106,7 @@ def analyze(directory):
             previous = row
         complete = bool(spec.get("complete")) and expected is not None and len(rows) == expected and [row.get("step") for row in rows] == list(range(expected)) and spec.get("case") == name
         cases.append({"case": name, "complete": complete, "expected_samples": expected, "sample_count": len(rows), "readiness": dict(readiness),
-                      "sequence": spec.get("sequence"), "correction_start": spec.get("correction_start"),
+                      "sequence": spec.get("sequence"), "correction_start": spec.get("correction_start"), "correction_end": spec.get("correction_end"), "movement_variant": spec.get("movement_variant"),
                       **{key: spec[key] for key in ("hand_pass", "warmup_only", "actor_instance_id", "station_instance_id", "weapon_instance_id", "correction_failure") if key in spec},
                       "setup_timing": {key: spec.get("setup_applied_grip", {}).get(key) for key in ("first_reported_ready_ms", "setup_observed_ms", "open_to_settled_ms", "continuous_stable_ms") if key in spec.get("setup_applied_grip", {})},
                       "requested_setup_elevation_degrees": requested_elevation, "actual_world_elevation_degrees": actual_elevation, "setup_axis_error_degrees": spec.get("setup_axis_error_degrees"), "coverage_warning": coverage_warning,

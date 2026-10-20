@@ -40,8 +40,9 @@ const GRIP_SEAT_COORDINATE_SCHEMA_VERSION := (
 @export var pommel_curve_in_handle: Vector3 = Vector3.ZERO
 @export var pommel_curve_out_handle: Vector3 = Vector3.ZERO
 
-## Weapon Orientation - roll around grip axis (+/-120 degrees).
-@export_range(-120.0, 120.0, 1.0) var weapon_roll_degrees: float = 0.0
+## Continuous authored roll coordinate. The posed hand owns the allowed interval;
+## storage must not clamp or wrap this value and change a saved weapon frame.
+@export var weapon_roll_degrees: float = 0.0
 
 ## Grip Adjustments. Grip-seat values are stored as normalized Pommel-to-Tip
 ## Handle coordinates in 0..1. A balanced weapon may present these as -1..1 in
@@ -167,7 +168,8 @@ func normalize() -> void:
 			-1.0,
 			1.0
 		)
-	weapon_roll_degrees = clampf(weapon_roll_degrees, -120.0, 120.0)
+	if not is_finite(weapon_roll_degrees):
+		weapon_roll_degrees = 0.0
 	right_upperarm_roll_degrees = clampf(right_upperarm_roll_degrees, -180.0, 180.0)
 	left_upperarm_roll_degrees = clampf(left_upperarm_roll_degrees, -180.0, 180.0)
 	if transition_duration_seconds < 0.0:

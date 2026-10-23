@@ -2,7 +2,7 @@ extends RefCounted
 class_name CombatPreparedPose
 
 ## Value contract for a pose already solved and captured during editing.
-const SCHEMA_VERSION := 1
+const SCHEMA_VERSION := 2
 const NON_POSE_FIELDS: Array[StringName] = [
 	&"node_id", &"node_index", &"draft_notes", &"retarget_node",
 	&"prepared_pose", &"prepared_pose_signature", &"transition_duration_seconds",
@@ -24,6 +24,8 @@ static func node_pose_signature(node: Resource) -> String:
 static func validate(snapshot: Dictionary, context_signature: String = "") -> Dictionary:
 	if not bool(snapshot.get("valid", false)) or int(snapshot.get("schema_version", -1)) != SCHEMA_VERSION:
 		return _fail("missing_or_obsolete_prepared_pose")
+	if not snapshot.get("attachment_required") is bool:
+		return _fail("prepared_pose_missing_attachment_policy")
 	if not context_signature.is_empty() and String(snapshot.get("context_signature", "")) != context_signature:
 		return _fail("prepared_pose_context_changed")
 	var names: Array = snapshot.get("bone_names", [])
@@ -49,6 +51,14 @@ static func validate(snapshot: Dictionary, context_signature: String = "") -> Di
 		return _fail("prepared_pose_missing_primary_relationship")
 	if bool(snapshot.get("support_enabled", false)) and (not names.has(snapshot.get("support_hand_bone_name")) or not _valid_transform(snapshot.get("support_hand_in_weapon"))):
 		return _fail("prepared_pose_missing_support_relationship")
+	if snapshot.attachment_required:
+		var primary_slot: StringName = StringName(snapshot.get("primary_hand_slot", StringName()))
+		if not _valid_attachment_constraints(snapshot, names, primary_slot, snapshot.primary_hand_bone_name):
+			return _fail("prepared_pose_missing_primary_arm_constraints")
+		if bool(snapshot.get("support_enabled", false)):
+			var support_slot: StringName = StringName(snapshot.get("support_hand_slot", StringName()))
+			if support_slot == primary_slot or not _valid_attachment_constraints(snapshot, names, support_slot, snapshot.support_hand_bone_name):
+				return _fail("prepared_pose_missing_support_arm_constraints")
 	if not _valid_vector(snapshot.get("weapon_position_reference_local")) or not _valid_vector(snapshot.get("weapon_scale_reference_local")) or not snapshot.get("weapon_rotation_reference_local") is Quaternion:
 		return _fail("prepared_pose_invalid_weapon_transform")
 	var weapon_rotation: Quaternion = snapshot.weapon_rotation_reference_local
@@ -65,6 +75,38 @@ static func validate(snapshot: Dictionary, context_signature: String = "") -> Di
 		if not _valid_vector(snapshot.anchor_positions_weapon_local[index]) or not _valid_vector(snapshot.anchor_scales_weapon_local[index]) or not _valid_rotation(snapshot.anchor_rotations_weapon_local[index]):
 			return _fail("prepared_pose_invalid_anchor_transform")
 	return {"valid": true, "reason": ""}
+
+static func _valid_attachment_constraints(snapshot: Dictionary, names: Array, slot: StringName, hand: StringName) -> bool:
+	if slot not in [&"hand_right", &"hand_left"] or not snapshot.get("arm_constraints_by_slot") is Dictionary:
+		return false
+	var by_slot: Dictionary = snapshot.arm_constraints_by_slot
+	if not by_slot.get(slot) is Dictionary:
+		return false
+	var constraints: Dictionary = by_slot[slot]
+	if not bool(constraints.get("valid", false)) or constraints.get("slot_id") != slot or constraints.get("hand_bone") != hand:
+		return false
+	for field: String in ["clavicle_bone", "upperarm_bone", "forearm_bone", "hand_bone"]:
+		if not names.has(constraints.get(field)):
+			return false
+	for field: String in ["shoulder_min_degrees", "shoulder_max_degrees", "elbow_min_degrees", "elbow_max_degrees", "joint_epsilon_degrees", "limb_twist_limit_radians", "usable_reach_m"]:
+		var value: Variant = constraints.get(field)
+		if not (value is float or value is int) or not is_finite(float(value)):
+			return false
+	for field: String in ["limb_twist_axis", "reference_up"]:
+		if not _valid_vector(constraints.get(field)) or (constraints[field] as Vector3).length_squared() <= 0.00000001:
+			return false
+	if not constraints.get("twist_chains") is Array or not constraints.get("twist_neutral_rotations") is Dictionary:
+		return false
+	for chain: Variant in constraints.twist_chains:
+		if not chain is Array:
+			return false
+		for bone: Variant in chain:
+			if not names.has(bone):
+				continue
+			var neutral: Variant = constraints.twist_neutral_rotations.get(bone)
+			if not neutral is Quaternion or not neutral.is_finite() or neutral.length_squared() <= 0.000001:
+				return false
+	return true
 
 static func _valid_vector(value: Variant) -> bool:
 	return value is Vector3 and value.is_finite()

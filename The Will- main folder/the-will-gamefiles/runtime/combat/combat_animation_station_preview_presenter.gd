@@ -90,6 +90,7 @@ const PREVIEW_WEAPON_INTRINSIC_COM_DEBUG_AXIS_PREFIX := (
 const PREVIEW_WEAPON_INTRINSIC_COM_DEBUG_HALF_EXTENT_METERS := 0.18
 const PREVIEW_WEAPON_INTRINSIC_COM_DEBUG_RADIUS_METERS := 0.018
 const PREVIEW_POSE_MODE_META := "preview_pose_mode"
+const DISPLAYED_GRIP_ATTACHMENT_META: StringName = &"displayed_grip_attachment"
 const PREVIEW_POSE_MODE_HAND_AUTHORED: StringName = &"hand_authored"
 const PREVIEW_POSE_MODE_NONCOMBAT_STOW: StringName = &"noncombat_stow"
 const GRIP_RESOLVE_REASON_HANDLE_POSITION: StringName = &"handle_position_changed"
@@ -1889,7 +1890,37 @@ func capture_entry_transition_snapshot(preview_subviewport: SubViewport, body: R
 		return {}
 	var actor := preview_root.get_node_or_null(PREVIEW_ACTOR_PIVOT_NAME + "/" + PREVIEW_ACTOR_NAME) as Node3D
 	var weapon := _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
-	return EntryTransitionScript.capture(actor, weapon, body)
+	var current_attachment: Dictionary = {}
+	if weapon != null and is_instance_valid(weapon):
+		current_attachment = weapon.get_meta(DISPLAYED_GRIP_ATTACHMENT_META, {}) as Dictionary
+	if current_attachment.is_empty():
+		current_attachment = _read_live_preview_attachment(actor)
+	return EntryTransitionScript.capture(actor, weapon, body, current_attachment)
+
+func _read_live_preview_attachment(actor: Node3D) -> Dictionary:
+	if actor == null:
+		return {}
+	var primary_slot: StringName = StringName(actor.get("dominant_grip_slot_id"))
+	if primary_slot not in [&"hand_right", &"hand_left"]:
+		return {}
+	var support_slot: StringName = &"hand_left" if primary_slot == &"hand_right" else &"hand_right"
+	return {
+		"primary_hand_slot": primary_slot,
+		"support_enabled": actor.has_method("is_support_hand_active") and bool(actor.call("is_support_hand_active", support_slot)),
+	}
+
+func _remember_live_preview_attachment(actor: Node3D) -> void:
+	var preview_root: Node3D = _resolve_preview_root_from_actor(actor)
+	if preview_root == null:
+		return
+	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
+	if held_item == null or not is_instance_valid(held_item):
+		return
+	var current_attachment := _read_live_preview_attachment(actor)
+	if current_attachment.is_empty():
+		held_item.remove_meta(DISPLAYED_GRIP_ATTACHMENT_META)
+	else:
+		held_item.set_meta(DISPLAYED_GRIP_ATTACHMENT_META, current_attachment)
 
 func reset_preview_actor_to_mount_seed_baseline(
 	preview_subviewport: SubViewport,
@@ -3524,6 +3555,12 @@ func _apply_solved_runtime_clip_preview_pose(
 	resolved_playback_state["tip_world"] = solved_tip_world
 	resolved_playback_state["pommel_world"] = solved_pommel_world
 	resolved_playback_state["solved_replay_applied"] = true
+	# Replay clears live acquisition ownership. Retain the frame actually applied,
+	# so a subsequent F entry does not borrow the selected node or opening default.
+	held_item.set_meta(DISPLAYED_GRIP_ATTACHMENT_META, {
+		"primary_hand_slot": _normalize_preview_slot_id(StringName(playback_state.get("primary_hand_slot", target_slot_id))),
+		"support_enabled": _resolve_solved_replay_support_enabled(playback_state),
+	})
 	preview_root.set_meta(PREVIEW_POSE_MODE_META, PREVIEW_POSE_MODE_HAND_AUTHORED)
 	preview_root.set_meta("resolved_playback_state", resolved_playback_state)
 	preview_root.set_meta("weapon_tip_alignment_error_meters", 0.0)
@@ -3688,9 +3725,12 @@ func get_prepared_pose_capture_context(preview_subviewport: SubViewport, motion:
 	var rig_shape: Array = [skeleton.transform.basis.get_scale().snapped(scale_precision), actor.transform.basis.get_scale().snapped(scale_precision)]
 	for bone: int in skeleton.get_bone_count():
 		rig_shape.append([skeleton.get_bone_name(bone), skeleton.get_bone_parent(bone), skeleton.get_bone_rest(bone), skeleton.get_bone_pose_scale(bone).snapped(scale_precision)])
-	var persistent_context: Array = ["prepared_editor_pose_v1", _prepared_pose_geometry_cache_signature, rig_shape,
+	var arm_context: Dictionary = PreparedPoseCaptureScript.capture_arm_context_config(actor)
+	var handle_context: Dictionary = _capture_prepared_handle_path(weapon)
+	var persistent_context: Array = ["prepared_editor_pose_v2", _prepared_pose_geometry_cache_signature, rig_shape,
 		"unarmed" if unarmed else _prepared_pose_anatomy_cache.signature,
-		{} if unarmed else _prepared_pose_anatomy_cache.config]
+		{} if unarmed else _prepared_pose_anatomy_cache.config, arm_context, handle_context,
+		weapon.transform.basis.get_scale().snapped(scale_precision)]
 	context["valid"] = true
 	context["context_signature"] = var_to_bytes(persistent_context).hex_encode().sha256_text()
 	context["dominant_slot"] = dominant
@@ -3715,6 +3755,11 @@ func capture_prepared_authoring_pose(context: Dictionary, context_signature: Str
 	snapshot["trajectory_to_reference"] = reference_world.affine_inverse() * (context.trajectory as Node3D).global_transform
 	snapshot["weapon_tip_local"] = _get_weapon_tip_meta(weapon)
 	snapshot["weapon_pommel_local"] = _get_weapon_pommel_meta(weapon)
+	# The common Handle path belongs to context identity; selected seats belong
+	# to this node, so deliberate percentage changes can share the same context.
+	snapshot["handle_path"] = _capture_prepared_handle_path(weapon)
+	snapshot["primary_handle_seat"] = _capture_prepared_handle_seat(weapon, false)
+	snapshot["support_handle_seat"] = _capture_prepared_handle_seat(weapon, true)
 	var open_packets: Dictionary = {}
 	var fingers: Variant = actor.get("finger_grip_presenter")
 	if fingers != null and fingers.has_method("capture_default_open_finger_rotations"):
@@ -3722,6 +3767,36 @@ func capture_prepared_authoring_pose(context: Dictionary, context_signature: Str
 			open_packets[slot] = fingers.capture_default_open_finger_rotations(skeleton, slot)
 	snapshot["default_open_finger_packets"] = open_packets
 	return snapshot
+
+func _capture_prepared_handle_path(weapon: Node3D) -> Dictionary:
+	var ratios: Variant = weapon.get_meta("primary_grip_slice_axis_ratios_from_span_start", null)
+	var centers: Variant = weapon.get_meta("primary_grip_slice_centers_local", null)
+	var axis: Variant = weapon.get_meta("primary_grip_slide_axis_local", null)
+	var origin: StringName = _resolve_origin_meta_value(weapon, &"primary_grip_slice_center_path_origin_id", StringName())
+	var axis_origin: StringName = _resolve_origin_meta_value(weapon, &"primary_grip_slide_axis_origin_id", StringName())
+	if not (ratios is PackedFloat32Array) or not (centers is PackedVector3Array) or not (axis is Vector3):
+		return {"valid": false, "reason": "handle_path_metadata_unavailable"}
+	var sample_ratios: PackedFloat32Array = ratios
+	var sample_centers: PackedVector3Array = centers
+	var axis_local: Vector3 = axis
+	return {
+		"valid": sample_ratios.size() >= 2 and sample_ratios.size() == sample_centers.size() and origin == CombatOriginRecordScript.ORIGIN_WEAPON_ROOT and axis_origin == origin and axis_local.is_finite() and axis_local.length_squared() > 0.00000001,
+		"ratios": sample_ratios.duplicate(), "centers": sample_centers.duplicate(),
+		"origin_id": origin, "axis_local": axis_local, "axis_origin_id": axis_origin,
+		"tip_side_ratio": weapon.get_meta("primary_grip_handle_tip_side_axis_ratio_from_span_start", null),
+		"coordinate_mode": weapon.get_meta("primary_grip_handle_coordinate_mode", null),
+	}
+
+func _capture_prepared_handle_seat(weapon: Node3D, support: bool) -> Dictionary:
+	var position: Variant = weapon.get_meta(PREVIEW_SUPPORT_GRIP_SEAT_LOCAL_META if support else PREVIEW_PRIMARY_GRIP_SEAT_LOCAL_META, null)
+	var ratio: Variant = weapon.get_meta(PREVIEW_SUPPORT_GRIP_SEAT_RATIO_META if support else PREVIEW_PRIMARY_GRIP_SEAT_RATIO_META, null)
+	var position_origin: StringName = _resolve_origin_meta_value(weapon, StringName(PREVIEW_SUPPORT_GRIP_SEAT_ORIGIN_META if support else PREVIEW_PRIMARY_GRIP_SEAT_ORIGIN_META), StringName())
+	var ratio_origin: StringName = _resolve_origin_meta_value(weapon, StringName(PREVIEW_SUPPORT_GRIP_SEAT_RATIO_ORIGIN_META if support else PREVIEW_PRIMARY_GRIP_SEAT_RATIO_ORIGIN_META), StringName())
+	var valid: bool = position is Vector3 and (ratio is float or ratio is int) and position_origin == CombatOriginRecordScript.ORIGIN_WEAPON_ROOT and ratio_origin == position_origin
+	if valid:
+		valid = (position as Vector3).is_finite() and is_finite(float(ratio)) and float(ratio) >= 0.0 and float(ratio) <= 1.0
+	return {"valid": valid, "position": position, "position_origin_id": position_origin,
+		"ratio": ratio, "ratio_origin_id": ratio_origin}
 
 func is_grip_acquisition_pending(preview_subviewport: SubViewport) -> bool:
 	var context: Dictionary = _weapon_roll_context(preview_subviewport)
@@ -4385,6 +4460,7 @@ func _apply_noncombat_stowed_weapon_pose(
 	resolved_playback_state["weapon_orientation_degrees"] = resolved_weapon_orientation_degrees
 	resolved_playback_state["hands_interact_with_weapon"] = false
 	resolved_playback_state["noncombat_stow_decoupled"] = true
+	held_item.remove_meta(DISPLAYED_GRIP_ATTACHMENT_META)
 	preview_root.set_meta("resolved_playback_state", resolved_playback_state)
 	var stow_metrics: Dictionary = {
 		"stopped_reason": "noncombat_stow_decoupled",
@@ -5620,10 +5696,7 @@ func validate_solved_replay_hand_end_bounds(held_item: Node3D, playback: Diction
 	var positions: Array = playback.get("solved_anchor_positions_weapon_local", [])
 	var main_slot := _normalize_preview_slot_id(StringName(playback.get("primary_hand_slot", _resolve_preview_dominant_slot_id())))
 	var required := {"PrimaryGripAnchor": main_slot}
-	var two_hand_state := StringName(playback.get("two_hand_state", CombatAnimationMotionNodeScript.TWO_HAND_STATE_AUTO))
-	var support_requested := two_hand_state == CombatAnimationMotionNodeScript.TWO_HAND_STATE_TWO_HAND or (
-		two_hand_state == CombatAnimationMotionNodeScript.TWO_HAND_STATE_AUTO and preview_default_two_hand)
-	if support_requested:
+	if _resolve_solved_replay_support_enabled(playback):
 		required["SupportGripAnchor"] = &"hand_left" if main_slot == &"hand_right" else &"hand_right"
 	var start: Vector3 = _get_origin_tracked_vector3_meta(held_item,
 		"primary_grip_span_start_local", "primary_grip_span_start_origin_id",
@@ -5658,6 +5731,11 @@ func validate_solved_replay_hand_end_bounds(held_item: Node3D, playback: Diction
 		if not is_finite(ratio) or ratio < float(bounds.min_ratio) - 0.000001 or ratio > float(bounds.max_ratio) + 0.000001:
 			return {"valid": false, "reason": "saved_grip_outside_handle_end_bounds", "slot": required[path]}
 	return {"valid": true}
+
+func _resolve_solved_replay_support_enabled(playback: Dictionary) -> bool:
+	var two_hand_state := StringName(playback.get("two_hand_state", CombatAnimationMotionNodeScript.TWO_HAND_STATE_AUTO))
+	return two_hand_state == CombatAnimationMotionNodeScript.TWO_HAND_STATE_TWO_HAND or (
+		two_hand_state == CombatAnimationMotionNodeScript.TWO_HAND_STATE_AUTO and preview_default_two_hand)
 
 
 func _resolve_held_item_grip_slice_center(
@@ -6016,12 +6094,13 @@ func _apply_preview_actor_upper_body_pose_now(
 		return
 	if use_drag_frame and actor.has_method("apply_authoring_preview_drag_frame_now"):
 		actor.call("apply_authoring_preview_drag_frame_now", allow_exact_surface_solve)
-		return
-	if actor.has_method("apply_authoring_preview_frame_now"):
+	elif actor.has_method("apply_authoring_preview_frame_now"):
 		actor.call("apply_authoring_preview_frame_now", allow_exact_surface_solve)
-		return
-	if actor.has_method("apply_upper_body_authoring_pose_now"):
+	elif actor.has_method("apply_upper_body_authoring_pose_now"):
 		actor.call("apply_upper_body_authoring_pose_now")
+	else:
+		return
+	_remember_live_preview_attachment(actor)
 
 func _settle_preview_contact_group_on_resolved_weapon(
 	actor: Node3D,

@@ -7,6 +7,8 @@ const Baker = preload("res://core/resolvers/combat_runtime_clip_baker.gd")
 const Clip = preload("res://core/models/combat_runtime_clip.gd")
 const Origins = preload("res://core/models/combat_origin_record.gd")
 const Compiler = preload("res://core/resolvers/combat_animation_runtime_chain_compiler.gd")
+const Capture = preload("res://runtime/combat/combat_prepared_pose_capture.gd")
+const Attachment = preload("res://core/resolvers/combat_prepared_attachment_resolver.gd")
 var checks: Dictionary = {}
 
 func _init() -> void:
@@ -71,6 +73,8 @@ func _run() -> void:
 		snapshot.parent_indices[0] = 2
 	_expect(not Builder.build(control, invalid).get("valid", false), "parent_cycle_is_rejected_without_scene_access")
 	_test_snapshot_identity(a, snapshots[0], output_dir)
+	_test_attachment_contract(snapshots[0])
+	_test_attachment_relationship_sampling()
 	_test_finger_style_transition()
 	_test_primary_hand_swap_compilation()
 	var ok := true
@@ -102,6 +106,98 @@ func _test_snapshot_identity(node: Resource, snapshot: Dictionary, output_dir: S
 	var saved: Error = ResourceSaver.save(copy, path)
 	var loaded: Resource = ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE) if saved == OK else null
 	_expect(loaded != null and PreparedPose.validate(loaded.prepared_pose).valid and loaded.prepared_pose_signature == signature and loaded.prepared_pose.pose_positions == copy.prepared_pose.pose_positions, "prepared_endpoint_survives_resource_save_and_load")
+
+func _test_attachment_contract(snapshot: Dictionary) -> void:
+	var value: Dictionary = snapshot.duplicate(true)
+	value.erase("attachment_required")
+	_expect(not PreparedPose.validate(value).valid, "attachment_policy_must_be_explicit")
+	value = snapshot.duplicate(true)
+	value.schema_version = 1
+	_expect(not PreparedPose.validate(value).valid, "old_snapshot_schema_requires_editor_recapture")
+	value = snapshot.duplicate(true)
+	value.attachment_required = true
+	value["primary_hand_slot"] = &"hand_right"
+	value["support_hand_slot"] = &"hand_left"
+	_expect(not PreparedPose.validate(value).valid, "attached_snapshot_requires_live_primary_constraints")
+	var primary: Dictionary = _constraint_packet(&"hand_right", &"Hand")
+	value["arm_constraints_by_slot"] = {&"hand_right": primary}
+	_expect(not PreparedPose.validate(value).valid, "attached_support_snapshot_requires_support_constraints")
+	value.arm_constraints_by_slot[&"hand_left"] = _constraint_packet(&"hand_left", &"Support")
+	_expect(PreparedPose.validate(value).valid, "attached_snapshot_with_both_constraint_packets_validates")
+	value.arm_constraints_by_slot[&"hand_left"].valid = false
+	_expect(not PreparedPose.validate(value).valid, "invalid_support_constraint_packet_is_rejected")
+	var config: Dictionary = {&"hand_right": primary}
+	primary.twist_neutral_rotations[&"Helper"] = Quaternion(Vector3.UP, 0.2)
+	var before: PackedByteArray = var_to_bytes(config)
+	var stable: Dictionary = Capture.arm_constraints_context_data(config)
+	_expect(var_to_bytes(config) == before, "constraint_hash_preparation_preserves_raw_capture")
+	var moved: Dictionary = config.duplicate(true)
+	moved[&"hand_right"].reference_up = Vector3.RIGHT
+	moved[&"hand_right"].twist_neutral_rotations[&"Helper"] = -primary.twist_neutral_rotations[&"Helper"]
+	_expect(var_to_bytes(Capture.arm_constraints_context_data(moved)) == var_to_bytes(stable), "reference_direction_and_quaternion_sign_do_not_change_common_context")
+	moved[&"hand_right"].shoulder_max_degrees += 0.01
+	_expect(var_to_bytes(Capture.arm_constraints_context_data(moved)) != var_to_bytes(stable), "actual_arm_limit_change_invalidates_common_context")
+
+func _constraint_packet(slot: StringName, hand: StringName) -> Dictionary:
+	return {"valid": true, "slot_id": slot, "clavicle_bone": &"Root", "upperarm_bone": &"Upper",
+		"forearm_bone": &"Support", "hand_bone": hand, "shoulder_min_degrees": 8.0,
+		"shoulder_max_degrees": 155.0, "elbow_min_degrees": 20.0, "elbow_max_degrees": 168.0,
+		"joint_epsilon_degrees": 0.05, "limb_twist_limit_radians": PI * 0.5, "limb_twist_axis": Vector3.UP,
+		"usable_reach_m": 1.0, "reference_up": Vector3.UP, "twist_chains": [], "twist_neutral_rotations": {}}
+
+func _test_attachment_relationship_sampling() -> void:
+	var basis := Basis(Quaternion(Vector3(1, 2, 3).normalized(), 0.63)).scaled(Vector3.ONE * 0.764)
+	var offset := Vector3(0.025, -0.04, 0.012)
+	var fixed := Transform3D(basis, offset)
+	var same_a: Dictionary = {"primary_hand_in_weapon": fixed}
+	var same_b: Dictionary = same_a.duplicate(true)
+	var same: Dictionary = Attachment.sample_relationship(same_a, same_b, "primary", 0.37)
+	_expect(same.valid and same.transform.is_equal_approx(fixed) and not same.handle_path_used, "unchanged_captured_attachment_frame_stays_unchanged")
+	var start := Vector3(-0.1, 0, 0)
+	var bend := Vector3(0, 0.08, 0.035)
+	var end := Vector3(0.1, 0, 0)
+	var path: Dictionary = {"valid": true, "origin_id": Origins.ORIGIN_WEAPON_ROOT,
+		"ratios": PackedFloat32Array([0.0, 0.5, 1.0]), "centers": PackedVector3Array([start, bend, end])}
+	var a: Dictionary = {"primary_hand_in_weapon": Transform3D(basis, start + offset),
+		"primary_handle_seat": {"valid": true, "ratio": 0.0, "position": start}, "handle_path": path}
+	var b: Dictionary = {"primary_hand_in_weapon": Transform3D(basis, end + offset),
+		"primary_handle_seat": {"valid": true, "ratio": 1.0, "position": end}, "handle_path": path.duplicate(true)}
+	var before: PackedByteArray = var_to_bytes([a, b])
+	var middle: Dictionary = Attachment.sample_relationship(a, b, "primary", 0.5)
+	_expect(middle.valid and middle.handle_path_used and middle.transform.origin.is_equal_approx(bend + offset), "curved_handle_slide_follows_bend_instead_of_endpoint_chord")
+	_expect(middle.valid and (middle.transform.origin - bend).is_equal_approx(offset) and middle.transform.basis.is_equal_approx(basis), "curved_handle_slide_preserves_captured_wrist_to_current_seat_offset_and_basis")
+	var reverse: Dictionary = Attachment.sample_relationship(b, a, "primary", 0.5)
+	_expect(reverse.valid and reverse.transform.is_equal_approx(middle.transform), "curved_handle_slide_is_consistent_in_both_travel_directions")
+	var endpoint_a: Dictionary = Attachment.sample_relationship(a, b, "primary", 0.0)
+	var endpoint_b: Dictionary = Attachment.sample_relationship(a, b, "primary", 1.0)
+	_expect(endpoint_a.valid and endpoint_a.transform == a.primary_hand_in_weapon, "attachment_relationship_retains_exact_endpoint_a")
+	_expect(endpoint_b.valid and endpoint_b.transform == b.primary_hand_in_weapon, "attachment_relationship_retains_exact_endpoint_b")
+	var missing: Dictionary = a.duplicate(true)
+	missing.erase("handle_path")
+	_expect(not Attachment.sample_relationship(missing, b, "primary", 0.5).valid, "known_seat_travel_rejects_missing_handle_path")
+	var changed: Dictionary = b.duplicate(true)
+	changed.handle_path.centers[1] += Vector3(0.01, 0, 0)
+	_expect(not Attachment.sample_relationship(a, changed, "primary", 0.5).valid, "known_seat_travel_rejects_changed_handle_path")
+	_expect(var_to_bytes([a, b]) == before, "attachment_relationship_sampling_preserves_inputs")
+	var normal: Resource = _node(0, Vector3.ZERO, 1.0)
+	var flipped: Resource = _node(1, Vector3(0.1, 0, 0), 1.0)
+	flipped.preferred_grip_style_mode = &"grip_reverse"
+	var normal_pose: Dictionary = _snapshot(normal, 0.0, false)
+	var flipped_pose: Dictionary = _snapshot(flipped, 0.2, false)
+	normal_pose.attachment_required = true
+	flipped_pose.attachment_required = true
+	var sample: Dictionary = Builder.sample_pose(normal_pose, flipped_pose, 0.5)
+	var sample_before: PackedByteArray = var_to_bytes(sample)
+	var released: Dictionary = Attachment.apply(sample, normal_pose, flipped_pose, 0.5, normal, flipped)
+	_expect(released.valid and released.diagnostics.get("released_for_style_change", false) and released.ik_calls == 0, "style_flip_explicitly_releases_mate_without_arm_ik")
+	_expect(released.pose_rotations == sample.pose_rotations and var_to_bytes(sample) == sample_before, "style_flip_release_preserves_supplied_tween_sample")
+	# Authored percentage travel cannot use entry's unknown-seat fallback. These
+	# packets deliberately lack seats and constraints: the metadata guard must
+	# reject the slide before any arm realization or sample mutation is attempted.
+	flipped.preferred_grip_style_mode = normal.preferred_grip_style_mode
+	flipped.grip_seat_slide_offset = normal.grip_seat_slide_offset + 0.1
+	var refused_slide: Dictionary = Attachment.apply(sample, normal_pose, flipped_pose, 0.5, normal, flipped)
+	_expect(not refused_slide.valid and refused_slide.reason == "prepared_slide_missing_authored_seat" and var_to_bytes(sample) == sample_before, "authored_seat_change_without_captured_seat_rejects_entry_fallback")
 
 func _test_finger_style_transition() -> void:
 	var a: Resource = _node(0, Vector3.ZERO, 1.0)
@@ -182,7 +278,7 @@ func _snapshot(node: Resource, upper_angle: float, support: bool) -> Dictionary:
 	var hand := Transform3D(Basis.IDENTITY, Vector3(0, 0, 0.3))
 	var supporting := Transform3D(Basis.IDENTITY, Vector3(0.2, 0, 0.2))
 	return {
-		"valid": true, "schema_version": PreparedPose.SCHEMA_VERSION, "context_signature": "synthetic_same_model_and_weapon",
+		"valid": true, "schema_version": PreparedPose.SCHEMA_VERSION, "context_signature": "synthetic_same_model_and_weapon", "attachment_required": false,
 		"bone_names": [&"Root", &"Upper", &"Hand", &"Support"],
 		"pose_positions": PackedVector3Array([root.origin, upper.origin, hand.origin, supporting.origin]),
 		"pose_rotations": PackedVector4Array([_pack(Quaternion.IDENTITY), _pack(upper.basis.get_rotation_quaternion()), _pack(Quaternion.IDENTITY), _pack(Quaternion.IDENTITY)]),

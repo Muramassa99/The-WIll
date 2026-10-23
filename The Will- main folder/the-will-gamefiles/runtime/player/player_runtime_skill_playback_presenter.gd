@@ -1194,6 +1194,7 @@ func _apply_solved_runtime_replay_frame(
 		held_item.global_transform = reference_transform * weapon_reference_transform
 		_apply_solved_replay_anchor_transforms(held_item, playback_state)
 	held_item.set_meta("dominant_contact_slot_id", _normalize_hand_slot_id(dominant_slot_id))
+	held_item.set_meta("prepared_entry_support_enabled", support_requested)
 	var local_tip: Vector3 = _get_weapon_tip_meta(held_item)
 	var local_pommel: Vector3 = _get_weapon_pommel_meta(held_item)
 	var solved_tip_world: Vector3 = held_item.to_global(local_tip)
@@ -2392,6 +2393,14 @@ func _capture_runtime_solved_replay_bridge_snapshot(
 ) -> Dictionary:
 	if humanoid_rig == null or held_item == null or not is_instance_valid(held_item) or target_source_clip == null:
 		return {}
+	if not target_source_clip.prepared_entry_destination.is_empty():
+		var current_slot: StringName = StringName(humanoid_rig.get("dominant_grip_slot_id"))
+		var current_attachment: Dictionary = {}
+		if current_slot not in [&"hand_right", &"hand_left"]:
+			current_slot = StringName(held_item.get_meta("dominant_contact_slot_id", StringName()))
+			current_attachment["support_enabled"] = bool(held_item.get_meta("prepared_entry_support_enabled", false))
+		current_attachment["primary_hand_slot"] = current_slot
+		return EntryTransitionScript.capture(humanoid_rig, held_item, target_source_clip, current_attachment)
 	if (
 		not target_source_clip.has_method("has_solved_replay_track")
 		or not bool(target_source_clip.call("has_solved_replay_track"))

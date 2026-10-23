@@ -989,3 +989,136 @@ reconcile endpoint grips with different radial offsets on a varying handle.
 Do not invent those rules or silently stretch anatomy. Read-only investigation
 continues while the user refines the definition; no production edits or engine
 runs were made during this clarification.
+
+### Attachment implementation checkpoint - 2026-10-24
+
+User authorized a checkpoint, SPS and continued work. Commit `ce641985`
+(`skill crafter optimisation F rotation integration`) is pushed to origin branch
+`recovery/stable-92b8a24-chat14`; remote hash verified. SPS 2026-10-24 01:29 is in
+that checkpoint. The continuation below is later work, not part of that commit.
+
+First bounded experiment: extract the existing analytic support-frame arm math
+into a pure value resolver and exercise the original 46 prepared frames. The
+read-only positional feasibility pass found all frames geometrically reachable
+under the existing shoulder/elbow limits, with 22 using existing wrist-swing
+freedom. This does not yet establish valid rotations or elbow continuity.
+
+Implementation gate: verify complete hand frame, unchanged local translations,
+scales and fingers, existing shoulder/elbow/helper-twist limits, wrist-twist
+preservation, exact endpoints and bend-plane continuity. Initial files are
+`core/resolvers/combat_prepared_arm_frame_resolver.gd` and
+`tools/verify_prepared_arm_frame.gd`, plus their UID companions. No production
+playback call site changes until this proof succeeds. Then capture current
+constraints as data and share attachment enforcement between prepared action
+tracks and the transient entry. Measure actual preparation cost again.
+
+Unreachable paths and incompatible radial offsets remain explicit decisions;
+do not silently change limits, stretch bones, or substitute a new weapon curve.
+
+Capture-only continuation adds actual arm constraints and handle path/seat
+metadata in `combat_prepared_pose_capture.gd` and the station preview presenter.
+Both parse in Godot 4.7. They do not activate playback correction or invalidate
+existing poses yet. These values are needed for a proof with actual limits,
+particularly the helper-twist baseline which the old trace did not contain.
+
+Read-only review also identified a separate rotation-branch concern: endpoint
+quaternion shortest-path interpolation does not by itself respect a 240-degree
+authored Roll interval. Existing Roll orbits Wrist-to-Tip (and can move pommel),
+not the longitudinal tip-pommel axis. A correction around the wrong axis would
+change the control's meaning. The bounded same-grip frame proof must not be
+described as verifying all Roll branches. The current baseline has unchanged
+grip placement; broad roll-orbit reconstruction remains to be tested separately.
+
+User scope reaffirmation during implementation: do not wander into parallel
+elbow/wrist fixes. Finish the attachment/replay integration and timing checks;
+broader anatomy stays deferred. Low token warning does not authorize skipping
+the current integration checks or declaring an unfinished result successful.
+
+Pure following proof `prepared_arm_frame_03.json`: 36/36 checks pass, all 46
+original frames plus rotated/translated-reference and 10/15 mm path variations.
+46 resolver calls cost 39.977 ms. Same-grip hand residual is at most .0365 mm;
+positions/scales/fingers and original endpoints remain unchanged. First attempt
+chose the opposite elbow branch at the last endpoint. Transporting the authored
+bend plane toward the requested hand direction resolves that specific problem;
+this is not a general elbow repair. No new joint ranges were introduced.
+
+The integrated first rendered run (`attached_pose_action_01`) prepares cold F in
+462.265 ms with zero acquisitions and .0365 mm attachment residual. Repeated F
+does not start playback yet, despite successfully reusing the body cache.
+Investigating the new entry validation boundary before accepting integration.
+This failed run is retained as evidence; it is not a successful F/edit/F result.
+# 2026-10-24 continuation: attachment integration closeout
+
+## Final checkpoint evidence and remaining gap
+
+User requested Git checkpoint, then discussion/planning; explicitly HOLD OFF on
+SPS until that discussion finishes. No new SPS was created for this continuation.
+
+Implemented captured arm constraints and full hand-in-weapon frame following in
+the pure prepared-track builder and shared entry. Retained actual displayed hand
+ownership across replay clearing live acquisition flags. Equipped entry can reuse
+missing twist-neutral calibration only from a matching saved skeleton/rest/arm
+dimension/config packet. A small animated hip translation is correctly treated
+as pose motion rather than an arm-dimension change. Existing neutral values are
+never overwritten and the current posed arm is never used as a neutral baseline.
+
+Final evidence under `godot_runs/skill_transition_20261024`:
+
+- `attached_pose_action_04`: cold F 434.649 ms, repeated F 175.472 ms,
+  duration-edit F 448.681 ms; Save 836.446 ms. Those F phases have zero new
+  acquisitions. Original five visible nodes pass. Save produced an isolated
+  real library usable by the actual equipped activation test.
+- `equipped_attached_03`: PASS. Actual equipped idle-to-skill entry, 60 Hz,
+  exactly 160 ms, 10 prefix samples, nine bounded arm-follow calls, unchanged
+  body tail, zero new acquisitions. Maximum attachment error 0.03636 mm,
+  orientation error 1.393e-6 radians; unrelated bone rotations unchanged.
+  Live source weapon is 0.84983 m from destination. Calibration guards reject
+  changed rest/arm limit/conflicting existing neutral; source stays unchanged.
+- `final_checks`: 60/60 prepared-pose, 14/14 action-boundary, 43/43 storage.
+- `final_arm_proof/report.json`: PASS, fresh single-attempt resolver proof;
+  original 46 frames, transformed reference and small path variations included.
+- Real library SHA256 remains
+  `cd17f90751f905aed66d07511463ea19bc3181cc17eaecbda6f25af8c0c32379`.
+
+NOT COMPLETE: appended-node F still rejects `elbow_range_has_no_circle_solution`
+at prepared frame 71 / zero-based segment 4. The test's post-replay recaptured
+last node and appended node do not pass the new contact-preserving arm constraint.
+A bounded nine-distance experiment also failed within the available interval
+0.405943..0.406515 m; it was withdrawn, retaining single-attempt behavior and
+failure diagnostics. This is not proof of global unreachability and not a solved
+elbow bug. Do not describe the entire rolling/appending workflow as passing.
+The UI result now retains attachment failure details rather than only a reason.
+
+Next discussion: how to handle incompatible authored/intermediate arm/weapon
+paths without grip separation, changing anatomical limits or silently replacing
+weapon motion. Broader elbow, wrist, left-hand, support/reverse, interruptions and
+full-hand visual certification remain separate/unverified. No fresh large test
+or anatomy implementation is authorized merely by this note. All owned Godot
+runs finished; user's editor remains open. This is a scoped code checkpoint,
+not a clean-worktree claim; unrelated settings and fixture changes are preserved.
+
+Scope remains stored grip attachment during prepared F/body playback and the
+shared 160 ms entry. User explicitly deferred broader elbow/wrist repairs and
+requested finishing this slice under low tokens, with another Git checkpoint
+if worthwhile. A checkpoint is warranted for this integration.
+
+Fresh intermediate evidence `skill_transition_20261024/attached_pose_action_03`:
+cold F 429.979 ms, repeated F 154.908 ms, duration-edit F 444.887 ms, Save 859.157 ms.
+Those F phases performed zero new acquisitions; Save produced the isolated
+`results/profile_library.tres`. The real user Skill 1 remains untouched.
+The complete rolling test did NOT pass: appended-node F rejected
+`elbow_range_has_no_circle_solution`. This means the selected root-to-elbow
+distance has no legal shoulder-circle solution, not proof the hand target is
+globally unreachable. The formula matches existing live arm-following code.
+A bounded alternative-distance fallback is being checked without widening limits.
+
+Fresh equipped entry run `equipped_attached_01` exposed uninitialized twist-neutral
+calibration caches on the equipped rig. The editor's captured destination contains
+that immutable calibration. A guarded reuse must verify identical skeleton/rests
+and dimensions, fill only missing calibration, then revalidate the packet; it must
+not invent neutral angles from the currently posed character. This run failed and
+is not a successful equipped playback result.
+
+Repeated F initially failed because live acquisition ownership flags are cleared
+after saved replay. Current hand/support intent must be retained from the actual
+applied frame; opening defaults and destination-node intent are not sufficient.

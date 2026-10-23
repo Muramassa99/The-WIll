@@ -1,13 +1,14 @@
 extends RefCounted
 class_name CombatPreparedPoseTrackBuilder
 
-## Pure interpolation of editor-captured destinations. No scene access, IK,
-## contact search, acquisition, or mutation of the input clip/snapshots.
+## Editor-captured destinations plus bounded arm following of their grip frame.
+## No scene access, contact search, acquisition, or input snapshot mutation.
 const Clip = preload("res://core/models/combat_runtime_clip.gd")
 const PreparedPose = preload("res://core/models/combat_prepared_pose.gd")
 const ControlBaker = preload("res://core/resolvers/combat_runtime_clip_baker.gd")
 const ControlFields = preload("res://core/resolvers/combat_runtime_clip_incremental_resolver.gd")
 const GripTransition = preload("res://core/resolvers/combat_grip_transition_resolver.gd")
+const Attachment = preload("res://core/resolvers/combat_prepared_attachment_resolver.gd")
 const EPSILON := 0.000001
 
 static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dictionary:
@@ -36,6 +37,9 @@ static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dicti
 	for index: int in range(1, chain.size()):
 		times.append(times[index - 1] + maxf(float(chain[index].transition_duration_seconds), 0.0))
 	var output: Resource = control_clip.duplicate_clip()
+	# One first destination supplies the shared entry with topology and acquired
+	# attachment data. It is not Reset's hidden baseline or another authored node.
+	output.prepared_entry_destination = first.duplicate(true)
 	_retain_exact_endpoint_samples(output, chain, times)
 	_clear_solved_arrays(output)
 	output.baked_solved_upper_body_bone_names.assign(first.bone_names)
@@ -48,7 +52,7 @@ static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dicti
 		output.baked_solved_anchor_node_paths.append(StringName(str(path)))
 	output.baked_solved_anchor_origin_id = first.anchor_origin_id
 	var diagnostics := {
-		"source": "captured_editor_endpoint_interpolation", "acquisition_calls": 0,
+		"source": "captured_editor_endpoint_attachment_follow", "acquisition_calls": 0,
 		"ik_calls": 0, "endpoint_count": snapshots.size(), "frame_count": output.get_frame_count(),
 		"additional_endpoint_samples": output.get_frame_count() - control_clip.get_frame_count(),
 		"max_primary_attachment_position_error_reference_units": 0.0,
@@ -57,6 +61,8 @@ static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dicti
 		"max_support_attachment_angle_error_radians": 0.0,
 		"max_requested_tip_error_reference_units": 0.0,
 		"interior_contact_validated": false,
+		"attachment_follow_time_ms": 0.0,
+		"max_wrist_twist_change_radians": 0.0,
 	}
 	var segment := 0
 	for frame_index: int in output.get_frame_count():
@@ -82,10 +88,21 @@ static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dicti
 				return weapon_path.merged({"frame_index": frame_index})
 			sample.weapon_transform = weapon_path.transform
 			diagnostics.max_requested_tip_error_reference_units = maxf(diagnostics.max_requested_tip_error_reference_units, weapon_path.tip_error)
+		var follow_started: int = Time.get_ticks_usec()
+		var follow: Dictionary = Attachment.apply(sample, snapshots[segment], snapshots[next], weight, chain[segment], chain[next])
+		diagnostics.attachment_follow_time_ms += (Time.get_ticks_usec() - follow_started) / 1000.0
+		if not bool(follow.get("valid", false)):
+			return follow.merged({"frame_index": frame_index, "node_index": segment})
+		sample.pose_rotations = follow.pose_rotations
+		diagnostics.ik_calls += int(follow.ik_calls)
+		for kind: String in ["primary", "support"]:
+			var metrics: Dictionary = follow.diagnostics.get(kind, {})
+			diagnostics.max_wrist_twist_change_radians = maxf(diagnostics.max_wrist_twist_change_radians, float(metrics.get("wrist_twist_change_rad", 0.0)))
 		var globals: Dictionary = _resolve_globals(sample, first.parent_indices)
 		if not globals.valid:
 			return globals.merged({"frame_index": frame_index})
-		_record_attachment_diagnostics(diagnostics, sample, globals.transforms, first, snapshots[segment], snapshots[next], weight)
+		if not bool(follow.diagnostics.get("released_for_style_change", false)):
+			_record_attachment_diagnostics(diagnostics, sample, globals.transforms, first, snapshots[segment], snapshots[next], weight, follow.relations)
 		_append_sample(output, sample)
 	var finger_result: Dictionary = _apply_finger_style_transitions(output, snapshots, times)
 	if not finger_result.valid:
@@ -226,7 +243,7 @@ static func _resolve_bone(index: int, local: Array[Transform3D], parents: Packed
 	visited[index] = 2
 	return true
 
-static func _record_attachment_diagnostics(diagnostics: Dictionary, sample: Dictionary, globals: Array[Transform3D], layout: Dictionary, a: Dictionary, b: Dictionary, weight: float) -> void:
+static func _record_attachment_diagnostics(diagnostics: Dictionary, sample: Dictionary, globals: Array[Transform3D], layout: Dictionary, a: Dictionary, b: Dictionary, weight: float, relations: Dictionary = {}) -> void:
 	for kind: String in ["primary", "support"]:
 		if a.get(kind + "_hand_bone_name") != b.get(kind + "_hand_bone_name"):
 			continue
@@ -235,7 +252,7 @@ static func _record_attachment_diagnostics(diagnostics: Dictionary, sample: Dict
 		var index: int = layout.bone_names.find(a.get(kind + "_hand_bone_name"))
 		if index < 0:
 			continue
-		var relation: Transform3D = _blend_transform(a[kind + "_hand_in_weapon"], b[kind + "_hand_in_weapon"], weight)
+		var relation: Transform3D = relations.get(kind, _blend_transform(a[kind + "_hand_in_weapon"], b[kind + "_hand_in_weapon"], weight))
 		var target: Transform3D = sample.weapon_transform * relation
 		var actual: Transform3D = globals[index]
 		var position_key: String = "max_" + kind + "_attachment_position_error_reference_units"

@@ -5270,6 +5270,7 @@ func _complete_stored_pose_track(preparation: Dictionary) -> Dictionary:
 	var built: Dictionary = PreparedPoseTrackBuilderScript.build(inputs, snapshots)
 	if not bool(built.get("valid", false)):
 		preparation["result"]["reason"] = built.get("reason", "stored_pose_interpolation_failed")
+		preparation["result"]["attachment_failure"] = built.duplicate(true)
 		return preparation["result"]
 	preparation["runtime_clip"] = built["clip"]
 	var completed := {

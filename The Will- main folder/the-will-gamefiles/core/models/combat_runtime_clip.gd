@@ -3,10 +3,10 @@ class_name CombatRuntimeClip
 
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
-const SCHEMA_VERSION := 9
+const SCHEMA_VERSION := 10
 const SAMPLE_RATE_HZ := 60.0
 # Prepared actions start at visible node 1; Reset is not an animation segment.
-const RUNTIME_CACHE_VERSION := "runtime_cache_v12_stored_endpoint_tween"
+const RUNTIME_CACHE_VERSION := "runtime_cache_v13_attached_endpoint_tween"
 const COMPATIBLE_RUNTIME_CACHE_VERSIONS: Array[String] = [
 	RUNTIME_CACHE_VERSION,
 ]
@@ -33,6 +33,9 @@ const CLIP_KIND_BRIDGE: StringName = &"bridge"
 @export var total_duration_seconds: float = 0.0
 @export var sample_rate_hz: float = SAMPLE_RATE_HZ
 @export var motion_node_chain: Array[Resource] = []
+## One captured first destination supports the transient live-entry attachment
+## calculation. Later authored snapshots stay on the draft, not duplicated here.
+@export var prepared_entry_destination: Dictionary = {}
 @export var baked_frame_times: PackedFloat32Array = PackedFloat32Array()
 @export var baked_tip_positions_local: PackedVector3Array = PackedVector3Array()
 @export var baked_tip_positions_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
@@ -190,6 +193,7 @@ func duplicate_clip():
 	duplicate_resource.total_duration_seconds = total_duration_seconds
 	duplicate_resource.sample_rate_hz = sample_rate_hz
 	duplicate_resource.motion_node_chain = _duplicate_motion_node_chain()
+	duplicate_resource.prepared_entry_destination = prepared_entry_destination.duplicate(true)
 	duplicate_resource.baked_frame_times = baked_frame_times.duplicate()
 	duplicate_resource.baked_tip_positions_local = baked_tip_positions_local.duplicate()
 	duplicate_resource.baked_tip_positions_origin_id = baked_tip_positions_origin_id

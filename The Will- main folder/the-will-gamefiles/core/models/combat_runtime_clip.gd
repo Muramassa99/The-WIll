@@ -3,7 +3,13 @@ class_name CombatRuntimeClip
 
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
-const SCHEMA_VERSION := 8
+const SCHEMA_VERSION := 9
+const SAMPLE_RATE_HZ := 60.0
+# Prepared actions start at visible node 1; Reset is not an animation segment.
+const RUNTIME_CACHE_VERSION := "runtime_cache_v12_stored_endpoint_tween"
+const COMPATIBLE_RUNTIME_CACHE_VERSIONS: Array[String] = [
+	RUNTIME_CACHE_VERSION,
+]
 const UPPER_BODY_POSE_TRACK_SOURCE_SKILL_CRAFTER_AUTHORED_POSE: StringName = &"skill_crafter_authored_pose"
 const SOLVED_REPLAY_TRACK_SOURCE_SKILL_CRAFTER_F_PLAYBACK: StringName = &"skill_crafter_f_playback_grip_slice_center_v1"
 const SOLVED_REPLAY_REFERENCE_BONE_NAME: StringName = &"RL_BoneRoot"
@@ -25,7 +31,7 @@ const CLIP_KIND_BRIDGE: StringName = &"bridge"
 @export_range(0.01, 8.0, 0.01) var playback_speed_scale: float = 1.0
 @export var loop_enabled: bool = false
 @export var total_duration_seconds: float = 0.0
-@export var sample_rate_hz: float = 30.0
+@export var sample_rate_hz: float = SAMPLE_RATE_HZ
 @export var motion_node_chain: Array[Resource] = []
 @export var baked_frame_times: PackedFloat32Array = PackedFloat32Array()
 @export var baked_tip_positions_local: PackedVector3Array = PackedVector3Array()

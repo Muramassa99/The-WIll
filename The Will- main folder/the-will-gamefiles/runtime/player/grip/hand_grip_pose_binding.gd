@@ -9,6 +9,44 @@ const DIGITS: Array[StringName] = [&"middle",&"thumb",&"index",&"ring",&"pinky"]
 const FRAME_GUARD: float = 0.000005
 var states: Dictionary = {}
 
+## Session-only continuation state, not a saved grip or a new acquisition.
+func capture_render_checkpoint() -> Dictionary:
+	var snapshot := {"binding_id": get_instance_id(), "states": states.duplicate(true)}
+	return snapshot if can_restore_render_checkpoint(snapshot) else {}
+
+func can_restore_render_checkpoint(snapshot: Dictionary) -> bool:
+	if snapshot.get("binding_id", 0) != get_instance_id() or not snapshot.get("states") is Dictionary:
+		return false
+	for slot: Variant in snapshot.states:
+		var value: Variant = snapshot.states[slot]
+		if slot not in [&"hand_right", &"hand_left"] or not value is Dictionary:
+			return false
+		var entry: Dictionary = value
+		var reference: Variant = entry.get("weapon_ref")
+		if not reference is WeakRef:
+			return false
+		var weapon: Variant = reference.get_ref()
+		if not is_instance_valid(weapon) or not weapon is Node3D or weapon.is_queued_for_deletion() or weapon.get_instance_id() != entry.get("weapon_instance_id", 0):
+			return false
+		if not entry.get("rotations") is Dictionary:
+			return false
+		for rotation: Variant in entry.rotations.values():
+			if not rotation is Quaternion or not rotation.is_finite():
+				return false
+	return true
+
+func restore_render_checkpoint(snapshot: Dictionary) -> bool:
+	if not can_restore_render_checkpoint(snapshot):
+		return false
+	_restore_render_checkpoint_after_preflight(snapshot)
+	return true
+
+## Internal commit only: the enclosing rig/coordinator has preflighted every
+## participant in this same non-yielding call before making any scene writes.
+func _restore_render_checkpoint_after_preflight(snapshot: Dictionary) -> void:
+	# Do not call claim/prepare/commit: those implement a new pose transaction.
+	states = snapshot.states.duplicate(true)
+
 func claim(skeleton: Skeleton3D, slot: StringName, weapon: Node3D, relationship_key: String) -> Dictionary:
 	if skeleton==null or slot not in [&"hand_right",&"hand_left"] or weapon==null or not is_instance_valid(weapon) or relationship_key.is_empty():
 		return _fail("invalid_planar_grip_claim")

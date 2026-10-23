@@ -2,8 +2,48 @@ extends RefCounted
 class_name CombatCollisionLegalityResolver
 
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+const HandTargetConstraintSolverScript = preload("res://runtime/player/hand_target_constraint_solver.gd")
 
 const WEAPON_PROXY_LOCAL_SAMPLE_CACHE_META: StringName = &"combat_collision_proxy_local_samples_cache"
+
+var _native_enabled := true
+var _native_checked := false
+var _native_kernel: RefCounted
+var _native_calls := 0
+var _reference_calls := 0
+var _unavailable_fallback_calls := 0
+var _max_body_shapes := 0
+var _max_weapon_samples := 0
+
+## Diagnostic/reference selection only; both routes implement the same query.
+func configure_native_kernel(enabled: bool) -> void:
+	_native_enabled = enabled
+	_native_checked = false
+	_native_kernel = null
+
+func reset_backend_stats() -> void:
+	_native_calls = 0
+	_reference_calls = 0
+	_unavailable_fallback_calls = 0
+	_max_body_shapes = 0
+	_max_weapon_samples = 0
+
+func get_backend_stats() -> Dictionary:
+	return {"native_enabled": _native_enabled, "native_available": _native_kernel != null,
+		"native_calls": _native_calls, "reference_calls": _reference_calls,
+		"unavailable_fallback_calls": _unavailable_fallback_calls,
+		"max_body_shapes": _max_body_shapes, "max_weapon_samples": _max_weapon_samples}
+
+func _ensure_native_kernel() -> bool:
+	if not _native_enabled:
+		return false
+	if not _native_checked:
+		_native_checked = true
+		if ClassDB.class_exists(&"CombatBodyCollisionKernel"):
+			_native_kernel = ClassDB.instantiate(&"CombatBodyCollisionKernel") as RefCounted
+		if _native_kernel == null:
+			push_warning("Combat body collision native kernel unavailable; using the GDScript reference query.")
+	return _native_kernel != null
 
 func evaluate_weapon_pose(
 	body_restriction_root: Node3D,
@@ -27,6 +67,29 @@ func evaluate_weapon_pose(
 	if body_restriction_root == null or held_item == null or constraint_solver == null:
 		result["estimated_clearance_meters"] = -1.0
 		return result
+	var use_prepared_query: bool = (
+		constraint_solver.has_method("prepare_body_point_query")
+		and constraint_solver.has_method("query_point_prepared_body_restriction")
+	)
+	var prepared_body_query: Array[Dictionary] = []
+	if use_prepared_query:
+		prepared_body_query = constraint_solver.call("prepare_body_point_query", body_restriction_root)
+	# Only the concrete snapshot owner opts into this native data contract.
+	# Alternative/custom solvers retain their own point-query semantics.
+	if use_prepared_query and constraint_solver.get_script() == HandTargetConstraintSolverScript:
+		_max_body_shapes = maxi(_max_body_shapes, prepared_body_query.size())
+		_max_weapon_samples = maxi(_max_weapon_samples, samples.size())
+		if _ensure_native_kernel():
+			# Preserve the reference route's origin annotation on cached samples.
+			for sample: Dictionary in samples:
+				var origin_id := StringName(sample.get("local_position_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT))
+				sample["local_position_origin_id"] = origin_id if origin_id != StringName() else CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
+			_native_calls += 1
+			return _native_kernel.call("evaluate_weapon_pose", prepared_body_query, samples,
+				solved_transform, HandTargetConstraintSolverScript.DEFAULT_BODY_CLEARANCE_OFFSET_METERS) as Dictionary
+		if _native_enabled:
+			_unavailable_fallback_calls += 1
+	_reference_calls += 1
 	var min_clearance: float = INF
 	for sample: Dictionary in samples:
 		var sample_position_origin_id: StringName = StringName(sample.get(
@@ -40,11 +103,13 @@ func evaluate_weapon_pose(
 		sample["local_position_origin_id"] = fallback_position_origin_id
 		var sample_position_local: Vector3 = sample.get("local_position", fallback_position_local) as Vector3
 		var sample_world: Vector3 = solved_transform * sample_position_local
-		var point_result: Dictionary = _query_body_point(
-			body_restriction_root,
-			sample_world,
-			constraint_solver
-		)
+		var point_result: Dictionary
+		if use_prepared_query:
+			point_result = constraint_solver.call(
+				"query_point_prepared_body_restriction", prepared_body_query, sample_world
+			) as Dictionary
+		else:
+			point_result = _query_body_point(body_restriction_root, sample_world, constraint_solver)
 		var clearance: float = float(point_result.get("estimated_clearance_meters", INF))
 		if clearance < min_clearance:
 			min_clearance = clearance

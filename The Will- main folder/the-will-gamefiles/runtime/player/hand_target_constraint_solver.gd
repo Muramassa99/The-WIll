@@ -366,6 +366,80 @@ func query_point_body_restriction(body_restriction_root: Node3D, point_world: Ve
 		result["estimated_clearance_meters"] = -1.0
 	return result
 
+func prepare_body_point_query(body_restriction_root: Node3D) -> Array[Dictionary]:
+	# A value snapshot for one synchronous set of point queries. Callers rebuild
+	# it after moving the body; no scene nodes or shape resources are retained.
+	var prepared: Array[Dictionary] = []
+	if body_restriction_root == null:
+		return prepared
+	for attachment_node: Node in body_restriction_root.get_children():
+		var attachment: Node3D = attachment_node as Node3D
+		if attachment == null:
+			continue
+		var area: Area3D = attachment.get_node_or_null("RestrictionArea") as Area3D
+		if area == null:
+			continue
+		var collision_shape: CollisionShape3D = area.get_node_or_null("RestrictionShape") as CollisionShape3D
+		if collision_shape == null or collision_shape.shape == null:
+			continue
+		var shape_transform: Transform3D = collision_shape.global_transform
+		var entry := {
+			"inverse_transform": shape_transform.affine_inverse(),
+			"global_basis": shape_transform.basis,
+			"body_region": String(attachment.get_meta("proxy_region", "")),
+			"attachment_name": String(attachment.name),
+			"shape_kind": StringName(),
+		}
+		var box_shape: BoxShape3D = collision_shape.shape as BoxShape3D
+		var capsule_shape: CapsuleShape3D = collision_shape.shape as CapsuleShape3D
+		if box_shape != null:
+			entry["shape_kind"] = &"box"
+			entry["half_size"] = box_shape.size * 0.5
+		elif capsule_shape != null:
+			entry["shape_kind"] = &"capsule"
+			entry["radius"] = capsule_shape.radius
+			entry["half_mid"] = maxf(capsule_shape.height * 0.5 - capsule_shape.radius, 0.0)
+		prepared.append(entry)
+	return prepared
+
+func query_point_prepared_body_restriction(prepared: Array[Dictionary], point_world: Vector3) -> Dictionary:
+	var result := {
+		"legal": true,
+		"inside": false,
+		"body_region": "",
+		"attachment_name": "",
+		"shape_kind": StringName(),
+		"estimated_clearance_meters": INF,
+		"suggested_correction_world": Vector3.ZERO,
+		"point_world": point_world,
+	}
+	for entry: Dictionary in prepared:
+		var local_point: Vector3 = (entry["inverse_transform"] as Transform3D) * point_world
+		var shape_basis: Basis = entry["global_basis"] as Basis
+		var shape_result: Dictionary
+		match entry["shape_kind"]:
+			&"box":
+				shape_result = _query_point_against_box_shape(shape_basis, entry["half_size"] as Vector3, local_point)
+			&"capsule":
+				shape_result = _query_point_against_capsule_shape(shape_basis, float(entry["radius"]), float(entry["half_mid"]), local_point)
+			_:
+				shape_result = {"inside": false, "shape_kind": StringName(), "estimated_clearance_meters": -1.0, "suggested_correction_world": Vector3.ZERO}
+		var clearance: float = float(shape_result.get("estimated_clearance_meters", INF))
+		if bool(shape_result.get("inside", false)):
+			shape_result["legal"] = false
+			shape_result["body_region"] = entry["body_region"]
+			shape_result["attachment_name"] = entry["attachment_name"]
+			shape_result["point_world"] = point_world
+			return shape_result
+		if clearance < float(result.get("estimated_clearance_meters", INF)):
+			result["estimated_clearance_meters"] = clearance
+			result["body_region"] = entry["body_region"]
+			result["attachment_name"] = entry["attachment_name"]
+			result["shape_kind"] = shape_result.get("shape_kind", StringName())
+	if float(result.get("estimated_clearance_meters", INF)) == INF:
+		result["estimated_clearance_meters"] = -1.0
+	return result
+
 func evaluate_body_self_collision(body_restriction_root: Node3D) -> Dictionary:
 	var result := {
 		"legal": true,
@@ -999,19 +1073,23 @@ func _query_point_against_restriction_shape(collision_shape: CollisionShape3D, p
 	var local_point: Vector3 = collision_shape.global_transform.affine_inverse() * point_world
 	var box_shape: BoxShape3D = collision_shape.shape as BoxShape3D
 	if box_shape != null:
-		return _query_point_against_box_shape(collision_shape, box_shape, local_point)
+		return _query_point_against_box_shape(collision_shape.global_basis, box_shape.size * 0.5, local_point)
 	var capsule_shape: CapsuleShape3D = collision_shape.shape as CapsuleShape3D
 	if capsule_shape != null:
-		return _query_point_against_capsule_shape(collision_shape, capsule_shape, local_point)
+		return _query_point_against_capsule_shape(
+			collision_shape.global_basis,
+			capsule_shape.radius,
+			maxf(capsule_shape.height * 0.5 - capsule_shape.radius, 0.0),
+			local_point
+		)
 	result["estimated_clearance_meters"] = -1.0
 	return result
 
 func _query_point_against_box_shape(
-	collision_shape: CollisionShape3D,
-	box_shape: BoxShape3D,
+	shape_basis: Basis,
+	half_size: Vector3,
 	local_point: Vector3
 ) -> Dictionary:
-	var half_size: Vector3 = box_shape.size * 0.5
 	var abs_point := Vector3(absf(local_point.x), absf(local_point.y), absf(local_point.z))
 	var outside := Vector3(
 		maxf(abs_point.x - half_size.x, 0.0),
@@ -1045,16 +1123,15 @@ func _query_point_against_box_shape(
 		"inside": true,
 		"shape_kind": &"box",
 		"estimated_clearance_meters": -penetration_depth,
-		"suggested_correction_world": collision_shape.global_basis * correction_axis * (penetration_depth + DEFAULT_BODY_CLEARANCE_OFFSET_METERS),
+		"suggested_correction_world": shape_basis * correction_axis * (penetration_depth + DEFAULT_BODY_CLEARANCE_OFFSET_METERS),
 	}
 
 func _query_point_against_capsule_shape(
-	collision_shape: CollisionShape3D,
-	capsule_shape: CapsuleShape3D,
+	shape_basis: Basis,
+	cap_radius: float,
+	half_mid: float,
 	local_point: Vector3
 ) -> Dictionary:
-	var cap_radius: float = capsule_shape.radius
-	var half_mid: float = maxf(capsule_shape.height * 0.5 - cap_radius, 0.0)
 	var clamped_y: float = clampf(local_point.y, -half_mid, half_mid)
 	var closest_axis_point := Vector3(0.0, clamped_y, 0.0)
 	var radial_vector: Vector3 = local_point - closest_axis_point
@@ -1072,7 +1149,7 @@ func _query_point_against_capsule_shape(
 		"inside": true,
 		"shape_kind": &"capsule",
 		"estimated_clearance_meters": -penetration_depth,
-		"suggested_correction_world": collision_shape.global_basis * correction_axis * (penetration_depth + DEFAULT_BODY_CLEARANCE_OFFSET_METERS),
+		"suggested_correction_world": shape_basis * correction_axis * (penetration_depth + DEFAULT_BODY_CLEARANCE_OFFSET_METERS),
 	}
 
 func _resolve_best_orbit_candidate(

@@ -3243,6 +3243,46 @@ func _sample_animation_hand_pose(animation_name: StringName, sample_ratio: float
 	josie_root.free()
 	return sample
 
+## Read-only default-open packet for prepared grip transitions. Unlike the live
+## open setter this deliberately does not reapply an owned planar closed grip.
+## Parent-local output is decoded from the existing hand-relative idle baseline;
+## no skeleton, binding, grip cache or acquisition state changes here.
+func capture_default_open_finger_rotations(skeleton: Skeleton3D, slot_id: StringName) -> Dictionary:
+	if skeleton == null:
+		return {"valid": false, "reason": "missing_skeleton"}
+	var slot_cache: Dictionary = animation_idle_baseline_cache.get(slot_id, {})
+	var source: Dictionary = slot_cache.get("rotations", {})
+	var hand_name: StringName = (PALM_TRIANGULATION_BONES.get(slot_id, {}) as Dictionary).get("hand", StringName())
+	var hand_index: int = skeleton.find_bone(String(hand_name))
+	if source.is_empty() or hand_index < 0:
+		return {"valid": false, "reason": "missing_default_open_baseline"}
+	var hand_basis: Basis = skeleton.get_bone_global_pose(hand_index).basis.orthonormalized()
+	var rotations: Dictionary = {}
+	var default_global: Dictionary = {hand_name: hand_basis}
+	var names: Array[StringName] = PlayerDigitHingeRulesScript.get_finger_bone_names(slot_id)
+	if names.size() != 15:
+		return {"valid": false, "reason": "missing_digit_layout"}
+	for bone_name: StringName in names:
+		var bone_index: int = skeleton.find_bone(String(bone_name))
+		if bone_index < 0 or not source.get(bone_name) is Quaternion:
+			return {"valid": false, "reason": "incomplete_default_open_baseline"}
+		var parent_index: int = skeleton.get_bone_parent(bone_index)
+		if parent_index < 0:
+			return {"valid": false, "reason": "missing_default_open_parent"}
+		var relative: Quaternion = source[bone_name]
+		if not relative.is_finite() or relative.length_squared() <= 0.00000001:
+			return {"valid": false, "reason": "invalid_default_open_rotation"}
+		var parent_name: StringName = StringName(skeleton.get_bone_name(parent_index))
+		if not default_global.has(parent_name):
+			return {"valid": false, "reason": "unexpected_default_open_hierarchy"}
+		var desired_global: Basis = hand_basis * Basis(relative.normalized())
+		var parent_global: Basis = default_global[parent_name]
+		rotations[bone_name] = (parent_global.inverse() * desired_global).get_rotation_quaternion().normalized()
+		default_global[bone_name] = desired_global
+	return {"valid": true, "hand_slot": slot_id, "rotations": rotations,
+		"rotation_origins": &"parent_bone_local", "source": &"animation_idle_baseline"}
+
+
 func _apply_animation_contact_open_pose(skeleton: Skeleton3D, slot_id: StringName) -> void:
 	_apply_animation_pose_cache_to_slot(skeleton, animation_idle_baseline_cache, slot_id)
 

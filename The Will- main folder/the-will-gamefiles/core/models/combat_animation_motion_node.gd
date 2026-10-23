@@ -13,6 +13,8 @@ const TRANSITION_KIND_NONE: StringName = &""
 const TRANSITION_KIND_GRIP_STYLE_SWAP: StringName = &"grip_style_swap"
 const TRANSITION_KIND_PRIMARY_HAND_SWAP: StringName = &"primary_hand_swap"
 const TRANSITION_KIND_TWO_HAND_STATE_SWAP: StringName = &"two_hand_state_swap"
+const DEFAULT_TRANSITION_DURATION_SECONDS := 1.0
+const LEGACY_SERIALIZED_TRANSITION_DURATION_SECONDS := 0.18
 const DEFAULT_GRIP_SEAT_SLIDE_OFFSET: float = 0.2
 const DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET: float = 0.0
 const GRIP_SEAT_COORDINATE_SCHEMA_LEGACY_DISPLAY_VALUE := 1
@@ -55,7 +57,9 @@ const GRIP_SEAT_COORDINATE_SCHEMA_VERSION := (
 @export var secondary_grip_seat_slide_offset: float = DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET
 
 ## Timing
-@export_range(0.0, 2.0, 0.01) var transition_duration_seconds: float = 0.18
+## Old resources omitted their default-valued 0.18. Preserve that load value;
+## authored-node factories explicitly assign DEFAULT_TRANSITION_DURATION_SECONDS.
+@export_range(0.0, 2.0, 0.01) var transition_duration_seconds: float = LEGACY_SERIALIZED_TRANSITION_DURATION_SECONDS
 
 ## Body
 @export_range(0.0, 1.0, 0.01) var body_support_blend: float = 0.0
@@ -95,6 +99,9 @@ const GRIP_SEAT_COORDINATE_SCHEMA_VERSION := (
 @export var grip_style_transition_source_pommel_local: Vector3 = Vector3.ZERO
 @export var grip_style_transition_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 @export_multiline var draft_notes: String = ""
+# Captured only after ordinary editing has settled; F consumes these values.
+@export_storage var prepared_pose: Dictionary = {}
+@export_storage var prepared_pose_signature: String = ""
 
 static func get_two_hand_state_ids() -> Array[StringName]:
 	return [

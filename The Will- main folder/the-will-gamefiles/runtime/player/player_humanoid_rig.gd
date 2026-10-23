@@ -302,6 +302,8 @@ var grip_solve_root: Node3D = null
 var runtime_bone_debug_root: Node3D = null
 var authoring_joint_range_debug_root: Node3D = null
 var authoring_joint_range_debug_state: Dictionary = {}
+var _authoring_debug_visual_batch_depth := 0
+var _authoring_debug_visual_refresh_pending := false
 var authoring_joint_range_debug_pose_snapshot: Dictionary = {}
 var authoring_joint_range_debug_config_signature: int = 0
 var runtime_bone_debug_state: Dictionary = {}
@@ -330,6 +332,231 @@ var runtime_solved_replay_modifier_processing: bool = false
 var runtime_solved_replay_pose_state: Dictionary = {}
 var runtime_solved_replay_weapon_state: Dictionary = {}
 var runtime_debug_visuals_visible: bool = false
+
+const RENDER_CHECKPOINT_RIG_FIELDS := [
+	&"dominant_grip_slot_id", &"upper_body_authoring_state", &"authoring_contact_anchor_basis_lookup",
+	&"_prepared_support_wrist_postures", &"authoring_limb_twist_neutral_rotation_lookup",
+	&"authoring_digit_hinge_neutral_rotation_lookup", &"authoring_limb_twist_distribution_state",
+	&"last_two_hand_solve_result", &"finger_grip_source_lookup", &"finger_grip_target_lookup",
+	&"finger_grip_modifier_lookup", &"upper_body_authoring_auto_apply_enabled", &"authoring_preview_mode_enabled",
+	&"authoring_preview_baseline_animation_name", &"runtime_solved_replay_pose_state", &"runtime_solved_replay_weapon_state",
+]
+const RENDER_CHECKPOINT_FINGER_FIELDS := [
+	&"surface_grasp_state_lookup", &"weapon_surface_seat_state_lookup", &"weapon_surface_seat_prepared_attempt_lookup",
+	&"active_grip_execution_path_lookup", &"planar_grip_rotation_lookup",
+	&"animation_grip_baseline_cache", &"animation_idle_baseline_cache", &"animation_grip_baseline_initialized",
+]
+var _render_checkpoint_geometry_revision := 0
+var _render_checkpoint_geometry_resources: Array[Resource] = []
+
+## Exact continuation state for this live authoring rig, never a saved asset.
+## The coordinator also checkpoints the weapon/presenter and acquisition owner.
+func capture_render_checkpoint() -> Dictionary:
+	if not _render_checkpoint_rig_idle():
+		return {}
+	_ensure_render_checkpoint_geometry_watch()
+	var positions := PackedVector3Array()
+	var rotations: Array[Quaternion] = []
+	var scales := PackedVector3Array()
+	for index: int in skeleton.get_bone_count():
+		positions.append(skeleton.get_bone_pose_position(index))
+		rotations.append(skeleton.get_bone_pose_rotation(index))
+		scales.append(skeleton.get_bone_pose_scale(index))
+	var binding: Dictionary = planar_grip_pose_binding.capture_render_checkpoint()
+	if binding.is_empty():
+		return {}
+	var rig_state: Dictionary = {}
+	for property: StringName in RENDER_CHECKPOINT_RIG_FIELDS:
+		rig_state[property] = _copy_render_checkpoint_value(get(property))
+	var fingers: Dictionary = {}
+	for property: StringName in RENDER_CHECKPOINT_FINGER_FIELDS:
+		fingers[property] = _copy_render_checkpoint_value(finger_grip_presenter.get(property))
+	var nodes: Array[Dictionary] = []
+	for node: Node in _render_checkpoint_nodes():
+		var record := {"node": node, "parent": node.get_parent(), "path": node.get_path()}
+		if node is Node3D:
+			record["transform"] = node.transform
+		if node is SkeletonModifier3D:
+			record["active"] = node.active
+			record["influence"] = node.influence
+		nodes.append(record)
+	var guidance_nodes: Array[Dictionary] = []
+	var seen_guidance: Array[Node] = []
+	for target: Variant in guidance_state_presenter.guidance_targets.values() + finger_grip_source_lookup.values():
+		if is_instance_valid(target) and target is Node3D and target not in seen_guidance:
+			seen_guidance.append(target)
+			guidance_nodes.append({"node": target, "parent": target.get_parent(), "path": target.get_path(), "transform": target.transform})
+	return {"identity": _render_checkpoint_rig_identity(), "positions": positions, "rotations": rotations,
+		"scales": scales, "nodes": nodes, "rig_state": rig_state, "fingers": fingers, "binding": binding,
+		"guidance_nodes": guidance_nodes, "prepared_grip_meta_present": has_meta("prepared_grip_preview_enabled"),
+		"prepared_grip_meta": get_meta("prepared_grip_preview_enabled", false),
+		"guidance_targets": guidance_state_presenter.guidance_targets.duplicate(true),
+		"arm_guidance_state": guidance_state_presenter.arm_guidance_state.duplicate(true),
+		"support_hand_state": guidance_state_presenter.support_hand_state.duplicate(true),
+		"modifier_callback_mode": skeleton.modifier_callback_mode_process}
+
+func can_restore_render_checkpoint(snapshot: Dictionary) -> bool:
+	if not _render_checkpoint_rig_idle():
+		return false
+	_ensure_render_checkpoint_geometry_watch()
+	if snapshot.get("identity", {}) != _render_checkpoint_rig_identity():
+		return false
+	if not snapshot.get("positions") is PackedVector3Array or not snapshot.get("rotations") is Array or not snapshot.get("scales") is PackedVector3Array:
+		return false
+	var count := skeleton.get_bone_count()
+	if snapshot.positions.size() != count or snapshot.rotations.size() != count or snapshot.scales.size() != count:
+		return false
+	for index: int in count:
+		if not snapshot.positions[index].is_finite() or not snapshot.scales[index].is_finite() or not snapshot.rotations[index] is Quaternion or not snapshot.rotations[index].is_finite():
+			return false
+	for key: String in ["rig_state", "fingers", "binding", "guidance_targets", "arm_guidance_state", "support_hand_state"]:
+		if not snapshot.get(key) is Dictionary:
+			return false
+	for property: StringName in RENDER_CHECKPOINT_RIG_FIELDS:
+		if not snapshot.rig_state.has(property) or typeof(snapshot.rig_state[property]) != typeof(get(property)):
+			return false
+	for property: StringName in RENDER_CHECKPOINT_FINGER_FIELDS:
+		if not snapshot.fingers.has(property) or typeof(snapshot.fingers[property]) != typeof(finger_grip_presenter.get(property)):
+			return false
+	if not planar_grip_pose_binding.can_restore_render_checkpoint(snapshot.binding):
+		return false
+	if not snapshot.get("nodes") is Array or not snapshot.get("modifier_callback_mode") is int:
+		return false
+	var current_nodes := _render_checkpoint_nodes()
+	if current_nodes.size() != snapshot.nodes.size():
+		return false
+	for index: int in current_nodes.size():
+		var record: Variant = snapshot.nodes[index]
+		var node: Node = current_nodes[index]
+		if not record is Dictionary or not is_instance_valid(record.get("node")) or record.node != node \
+			or node.get_parent() != record.get("parent") or node.get_path() != record.get("path") or node.is_queued_for_deletion():
+			return false
+		if node is Node3D and (not record.get("transform") is Transform3D or not record.transform.is_finite()):
+			return false
+		if node is SkeletonModifier3D and (not record.get("active") is bool or not record.get("influence") is float):
+			return false
+	if not snapshot.get("guidance_nodes") is Array or not snapshot.get("prepared_grip_meta_present") is bool or not snapshot.get("prepared_grip_meta") is bool:
+		return false
+	for record: Variant in snapshot.guidance_nodes:
+		if not record is Dictionary or not is_instance_valid(record.get("node")) or not record.node is Node3D:
+			return false
+		if record.node.is_queued_for_deletion() or record.node.get_parent() != record.get("parent") or record.node.get_path() != record.get("path") \
+			or not record.get("transform") is Transform3D or not record.transform.is_finite():
+			return false
+	return _render_checkpoint_references_valid(snapshot.rig_state) and _render_checkpoint_references_valid(snapshot.guidance_targets) \
+		and _render_checkpoint_references_valid(snapshot.fingers)
+
+func restore_render_checkpoint(snapshot: Dictionary) -> bool:
+	if not can_restore_render_checkpoint(snapshot):
+		return false
+	_restore_render_checkpoint_after_preflight(snapshot)
+	return true
+
+## Internal commit only. The coordinator (or public wrapper above) must have
+## completed all participant checks in this same non-yielding restore call.
+func _restore_render_checkpoint_after_preflight(snapshot: Dictionary) -> void:
+	# Preflight above covers every participant before the first write. In
+	# particular, do not use replay setters that normalize/decompose rotations.
+	planar_grip_pose_binding._restore_render_checkpoint_after_preflight(snapshot.binding)
+	for property: StringName in RENDER_CHECKPOINT_RIG_FIELDS:
+		set(property, _copy_render_checkpoint_value(snapshot.rig_state[property]))
+	for property: StringName in RENDER_CHECKPOINT_FINGER_FIELDS:
+		finger_grip_presenter.set(property, _copy_render_checkpoint_value(snapshot.fingers[property]))
+	guidance_state_presenter.guidance_targets = snapshot.guidance_targets.duplicate(true)
+	guidance_state_presenter.arm_guidance_state = snapshot.arm_guidance_state.duplicate(true)
+	guidance_state_presenter.support_hand_state = snapshot.support_hand_state.duplicate(true)
+	if snapshot.prepared_grip_meta_present:
+		set_meta("prepared_grip_preview_enabled", snapshot.prepared_grip_meta)
+	elif has_meta("prepared_grip_preview_enabled"):
+		remove_meta("prepared_grip_preview_enabled")
+	for record: Dictionary in snapshot.nodes:
+		var node: Node = record.node
+		if node is Node3D:
+			node.transform = record.transform
+		if node is SkeletonModifier3D:
+			node.active = record.active
+			node.influence = record.influence
+	for record: Dictionary in snapshot.guidance_nodes:
+		record.node.transform = record.transform
+	skeleton.modifier_callback_mode_process = snapshot.modifier_callback_mode
+	for index: int in skeleton.get_bone_count():
+		skeleton.set_bone_pose_position(index, snapshot.positions[index])
+		skeleton.set_bone_pose_rotation(index, snapshot.rotations[index])
+		skeleton.set_bone_pose_scale(index, snapshot.scales[index])
+	# No advance/force-update: the caller finishes restoring weapon and grip
+	# ownership before any skeleton_updated callback is allowed to retain a seat.
+
+func _render_checkpoint_rig_idle() -> bool:
+	var idle: bool = is_instance_valid(skeleton) and not skeleton.is_queued_for_deletion() and not is_queued_for_deletion() \
+		and not combat_authoring_modifier_processing and not runtime_solved_replay_modifier_processing \
+		and _prepared_support_grip_seat.is_empty()
+	if not idle:
+		return false
+	var grip_owner: Node = get_node_or_null("PreparedGripAcquisition")
+	return grip_owner == null or (grip_owner.has_method("is_render_checkpoint_idle") and grip_owner.is_render_checkpoint_idle())
+
+func _copy_render_checkpoint_value(value: Variant) -> Variant:
+	return value.duplicate(true) if value is Dictionary or value is Array else value
+
+func _render_checkpoint_references_valid(value: Variant) -> bool:
+	if value is Dictionary:
+		for entry: Variant in value.values():
+			if not _render_checkpoint_references_valid(entry): return false
+	elif value is Array:
+		for entry: Variant in value:
+			if not _render_checkpoint_references_valid(entry): return false
+	elif typeof(value) == TYPE_OBJECT and value != null:
+		if not is_instance_valid(value): return false
+		if value is Node and value.is_queued_for_deletion(): return false
+	return true
+
+func _render_checkpoint_nodes() -> Array[Node]:
+	# Only pose participants: deferred cosmetic debug meshes are not solver state.
+	var nodes: Array[Node] = [self, josie_model, skeleton.get_parent(), skeleton, ik_targets_root]
+	var pending: Array[Node] = ik_targets_root.get_children()
+	while not pending.is_empty():
+		var child: Node = pending.pop_front()
+		nodes.append(child)
+		pending.append_array(child.get_children())
+	for anchor: Node3D in [get_right_hand_item_anchor(), get_left_hand_item_anchor()]:
+		if is_instance_valid(anchor):
+			if anchor.get_parent() not in nodes: nodes.append(anchor.get_parent())
+			if anchor not in nodes: nodes.append(anchor)
+	for child: Node in skeleton.get_children():
+		if child is SkeletonModifier3D and child not in nodes: nodes.append(child)
+	return nodes
+
+func _render_checkpoint_rig_identity() -> Dictionary:
+	var rests: Array[Transform3D] = []
+	for index: int in skeleton.get_bone_count(): rests.append(skeleton.get_bone_rest(index))
+	var configuration: Dictionary = {}
+	for property: Dictionary in get_script().get_script_property_list():
+		if int(property.usage) & PROPERTY_USAGE_EDITOR:
+			configuration[property.name] = get(property.name)
+	return {"rig": get_instance_id(), "skeleton": skeleton.get_instance_id(), "version": skeleton.get_version(),
+		"rests": rests, "geometry_revision": _render_checkpoint_geometry_revision,
+		"geometry_resources": _render_checkpoint_geometry_resources.duplicate(), "configuration": configuration,
+		"mesh": mesh_instance.get_instance_id() if is_instance_valid(mesh_instance) else 0,
+		"mesh_parent": mesh_instance.get_parent() if is_instance_valid(mesh_instance) else null,
+		"mesh_transform": mesh_instance.transform if is_instance_valid(mesh_instance) else Transform3D.IDENTITY}
+
+func _ensure_render_checkpoint_geometry_watch() -> void:
+	var resources: Array[Resource] = []
+	if is_instance_valid(mesh_instance):
+		if mesh_instance.mesh != null: resources.append(mesh_instance.mesh)
+		if mesh_instance.skin != null: resources.append(mesh_instance.skin)
+	if resources == _render_checkpoint_geometry_resources:
+		return
+	for resource: Resource in _render_checkpoint_geometry_resources:
+		if resource.changed.is_connected(_render_checkpoint_geometry_changed):
+			resource.changed.disconnect(_render_checkpoint_geometry_changed)
+	_render_checkpoint_geometry_resources = resources
+	_render_checkpoint_geometry_revision += 1
+	for resource: Resource in resources:
+		resource.changed.connect(_render_checkpoint_geometry_changed)
+
+func _render_checkpoint_geometry_changed() -> void:
+	_render_checkpoint_geometry_revision += 1
 
 func _ready() -> void:
 	_apply_target_height_scale()
@@ -2016,6 +2243,22 @@ func sync_authoring_joint_range_debug_now(debug_visible: bool = true) -> void:
 	set_authoring_joint_range_debug_visible(debug_visible)
 	_sync_authoring_joint_range_debug()
 
+## Offline pose baking does not display its intermediate frames. Keep neutral
+## reference initialization and the final display, without rebuilding meshes
+## for each sampled pose. This never defers skeleton or constraint updates.
+func begin_authoring_debug_visual_batch() -> void:
+	if _authoring_debug_visual_batch_depth == 0:
+		_sync_authoring_joint_range_debug_if_pose_changed()
+	_authoring_debug_visual_batch_depth += 1
+
+func end_authoring_debug_visual_batch() -> void:
+	if _authoring_debug_visual_batch_depth <= 0:
+		return
+	_authoring_debug_visual_batch_depth -= 1
+	if _authoring_debug_visual_batch_depth == 0 and _authoring_debug_visual_refresh_pending:
+		_authoring_debug_visual_refresh_pending = false
+		_sync_authoring_joint_range_debug_if_pose_changed()
+
 func resolve_hand_anatomical_y_axis_world(slot_id: StringName) -> Vector3:
 	var hand_bone: StringName = RIGHT_HAND_BONE
 	var forearm_bone: StringName = RIGHT_FOREARM_BONE
@@ -2152,6 +2395,15 @@ func reset_authoring_preview_baseline_pose(baseline_animation_name: StringName =
 		guidance_state_presenter.set_support_hand_active(slot_id, false)
 		clear_finger_grip_target(slot_id)
 	_apply_authoring_preview_baseline_pose(baseline_animation_name)
+	# Bone transforms are current here, but hand mounting reads the child
+	# BoneAttachment frame. Publish the restored pose before any mount/IK target
+	# captures it; waiting for the next skeleton signal can reuse the old hand.
+	for anchor: Node3D in [get_right_hand_item_anchor(), get_left_hand_item_anchor()]:
+		if not is_instance_valid(anchor):
+			continue
+		var attachment: BoneAttachment3D = anchor.get_parent() as BoneAttachment3D
+		if attachment != null and not attachment.override_pose:
+			attachment.on_skeleton_update()
 	_snap_support_arm_ik_targets_to_current_pose()
 	_refresh_support_arm_ik_influences()
 	_refresh_finger_grip_ik_influences()
@@ -2454,6 +2706,9 @@ func _apply_authoring_contact_wrist_basis_for_slot(
 
 
 func _sync_authoring_joint_range_debug() -> void:
+	if _authoring_debug_visual_batch_depth > 0:
+		_authoring_debug_visual_refresh_pending = true
+		return
 	authoring_joint_range_debug_state = {
 		"visible": false,
 		"visual_count": 0,
@@ -2594,9 +2849,16 @@ func _sync_authoring_joint_range_debug() -> void:
 
 
 func _sync_authoring_joint_range_debug_if_pose_changed() -> void:
+	if _authoring_debug_visual_batch_depth > 0:
+		_authoring_debug_visual_refresh_pending = true
+		return
+	var trace_started := Time.get_ticks_usec() if bool(get_meta("trace_save_latency", false)) else 0
 	if _authoring_joint_range_debug_pose_matches_snapshot():
 		return
 	_sync_authoring_joint_range_debug()
+	if trace_started > 0:
+		set_meta("last_save_debug_visual_ms", float(get_meta("last_save_debug_visual_ms", 0.0)) + float(Time.get_ticks_usec() - trace_started) / 1000.0)
+		set_meta("last_save_debug_visual_count", int(get_meta("last_save_debug_visual_count", 0)) + 1)
 
 
 func _authoring_joint_range_debug_pose_matches_snapshot() -> bool:

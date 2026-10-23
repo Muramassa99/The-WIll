@@ -1254,3 +1254,641 @@ movement. A fixed mirrored 75-degree offset was considered but never used.
 This slice places stops on the existing motion; full anatomical validity of
 every extreme pose, reverse/two-hand calibration and full F/equipped replay
 remain outside this verification. Existing elbow corrections are preserved.
+
+## Default Body And Grip Authority - 2026-10-20 Clarification
+
+- [x] Record the user's default: upstream bone-chain references own anatomical
+  allowances; accepted wrist motion carries the held weapon; the settled
+  weapon supplies the support target, subject to that arm's own limits.
+  Initial seating retains the hand while the weapon seats; support engagement
+  retains the established primary grip/weapon while the offhand engages.
+- [x] Separate requested control targets from anatomical permission: weapon
+  controls may drive IK without redefining joint limits. Phase-specific
+  exceptions must state their ownership explicitly.
+- [ ] Apply this authority review when scoping torso/head/hip and coordinated
+  support controls. Do not report the current single-hand stop correction as
+  complete enforcement of the entire chain. Its orbit remains Wrist-to-Tip.
+
+Detailed rule and current-code boundary: **Default Pose And Limit Authority**
+in the body mobility preparation note. Documentation only; no new code/test run.
+
+## User Priority Override - 2026-10-20
+
+**Accepted limitations / deferred, not active work:**
+
+- Rendered weapon/wrist movement during elbow adjustment or release.
+- Existing clearance restrictions on some downward left-arm movements.
+- Remaining extreme wrist poses and broader anatomical correctness.
+
+User instruction: do not investigate these further unless they become
+inconvenient in future use. Preserve earlier evidence and unchecked historical
+entries; this newer priority supersedes their implied active follow-up. These
+items are not fixed, and they do not block planned body-control work.
+
+## Save Timing And On-Demand Replay - 2026-10-20
+
+Current user direction: first measure and optimise the existing working Save
+workflow. Separating preparation from Save is optional later work, not an
+assumed destination. Faster `adjust -> Save -> F` is already a useful outcome.
+No automatic playback: replay must remain explicitly requested by the user.
+
+Use these terms in this investigation:
+
+- **Skill rendering:** compile/sample the authored motion and prepare the solved
+  body, weapon and grip-anchor tracks consumed by F and equipped playback.
+- **File saving:** persist authored WIP/skill data and the prepared tracks in the
+  player weapon library. This currently includes whole-WIP copies and library
+  serialization, not just a selected-slot file write.
+
+Static audit: F and equipped gameplay share solved data, the chain player and
+rig application methods. Equipped activation also compiles for its context and
+adds a current-pose entry bridge; it is not a zero-work file replay. Preserve
+the complete solved output and check downstream consumers when optimising.
+
+User reports similar waits for few/many nodes, up to about 40 seconds. The
+progress bar supplies visible stage checkpoints; it is not measured phase
+progress. Measure both total Save wall time and longest process-frame interval.
+Do not mistake cached/no-edit Save for a complete rerender.
+
+- [x] Change system motion-node duration default from 0.18 to 1.0 second.
+  Newly inserted R nodes use that default; explicit duplicated/custom timings
+  and separate generated hand-swap bridge timing remain distinct. Historical
+  untouched baseline recognition accepts the previous default. The serialized
+  property retains its legacy 0.18 initializer so old files that omitted it do
+  not silently change timing; authoring factories explicitly initialize 1.0.
+- [x] Add opt-in in-memory Save/render/persistence timings; disabled during
+  ordinary use. No solver or Save/F ownership redesign in this instrumentation.
+- [x] Profile Broken_Balde_v1, skill_slot_1, with 20 visible nodes plus hidden
+  node 0, using the prior thrust-test positions and actual R insertion path.
+  Compare a short chain, 20 nodes, warm rerender and cached Save; record actual
+  clip duration and sampled-frame count as well as node count.
+- [x] Publish the verified 20-node skill into the real weapon library, as the
+  user explicitly requests. Keep it playable in slot 1; do not remove/revert
+  the test animation after measurement.
+- [x] Decide the first optimisation from measured cost, preserving existing
+  skill-render output and actual file-save success.
+
+Reusable diagnostic: `tools/diagnose_skill_save_latency.gd`. Measurements use
+the full copied real library through live production Save; the final approved
+skill is then published deliberately to the real library. Initial acquisition
+waits start after setup and require stable readiness, with at least 10 seconds
+allowed. Long synchronous Save calls are expected, not classified as crashes.
+
+### Measured baseline and first optimisation
+
+Evidence root: `godot_runs/skill_save_profile_20261020/`.
+The `baseline_retry` run completed short and long Saves; its later warm case
+was stopped because the diagnostic's F check had cleared the authoring grip
+context. The diagnostic now runs F only after its last case. Do not treat the
+incomplete baseline report as four successful cases.
+
+- Short: 3 visible nodes / 3 seconds / 181 frames; Save **13.520 s**.
+  Applying poses cost 12.083 s; serialization/write cost 0.278 s.
+- Long: 20 visible nodes / 20 seconds / 1,201 frames; Save **172.662 s**.
+  Applying poses cost 143.052 s; serialization/write cost 0.603 s.
+  A further 23.895 s occurred at the next process-frame wait.
+- Both reused every prepared grip relationship; no fresh contact solves were
+  performed inside these sampled tracks. These figures are fixture-specific,
+  not a claim that all Save cases have the same bottleneck.
+- `pose_detail` repeated the short case at 13.069 s. Its 362 joint-guide
+  rebuilds cost 3.429 s, collision queries 4.853 s, endpoint legality 2.469 s.
+
+First changes preserve the existing Save/F contract, 60 Hz sampling and
+constraint equations: batch intermediate joint-guide rendering, prepare body
+shape data once per collision evaluation, and remove a discarded preliminary
+collision query while retaining its proxy synchronization and final check.
+Endpoint legality remains active because it also updates grip-seat metadata.
+
+Diagnostic setup separately exposed a stale acquisition request that was idle
+but still labelled `solving` after a tiny station-identity change. The harness
+records this and reacquires once through the existing API after stable setup.
+This is not Save time and is not claimed fixed in runtime code.
+
+Initial optimized run (`optimized/report.json`) completed all four cases:
+short 4.417 s; 20-second render 27.209 s; warm full rebuild 26.844 s;
+metadata-only cached Save 1.199 s. The final F check used the solved fast path.
+`short_parity.json` confirms exact equality of authored data and all exported
+skill/combat-idle tracks against `pose_detail`.
+
+The first long comparison was **not a valid parity result**: the earlier
+baseline ran F before building its next case and used the earlier serialized
+default, so authored inputs differed. A fresh `matched_reference` run with the
+same setup/defaults and only the three optimizations disabled completed:
+short **13.063 s**, twenty-node **172.485 s**. `matched_long_parity.json`
+confirms exact equality of authored data and all exported skill/combat-idle
+tracks against the optimized twenty-node case. Optimized source was restored
+after SHA256 checks; no reference switches remain active.
+
+This is approximately **66% less Save time for the short case and 84% less for
+the twenty-node case**, with unchanged 60 Hz output. The optimized full render
+still blocks its process frame for roughly 26 seconds; it is not an instant
+preview or asynchronous editor workflow. Cached 1.199-second Save is a separate
+case, not a full rerender.
+
+Final collision-query parity: **9,819 checks passed** with no engine errors
+(`body_query_parity_final.log`). The timeline verifier also passed after the
+duration compatibility refinement. Full-track parity covers the optimization;
+it is not a full-hand anatomical or visual-quality certificate.
+
+Equipped probe exposed a separate pre-existing scale/order issue: the weapon
+initially inherits the hand mount's 0.764165 scale, but saved authored frames
+use scale 1. The old end-bound preflight checked the previous mount's 162 mm
+handle rather than the saved frame's 212 mm handle. The shared validator and
+UI cache gate now use the saved frame's rotation/scale without applying it,
+preserving the same clearance rules. **213 focused checks passed** for this
+guard, including invalid prospective scales, either hand outside the ends,
+rotated/nonuniform transforms, per-frame UI cache validation, and unchanged
+live pose/cache (`replay_end_bounds_scale.log`).
+
+The equipped diagnostic initially skipped the normal combat-idle tick before
+activation and read bones outside their final modifier stage. Its revised
+version runs production idle updates and captures fresh final skin poses from
+`Skeleton3D.skeleton_updated`. These were diagnostic corrections, not additional
+runtime pose changes. A final report-merge bug also retained the initial false
+completion flag despite passing samples; the final actual-library rerun fixes
+that and exits successfully.
+
+**Real publication completed**, `publication.json`:
+`Broken_Balde_v1`, ID `player_wip_1792291462.519_14`, `skill_slot_1`, twenty
+visible one-second nodes plus hidden node 0, 20-second authored clip, 1,201
+saved frames. Required combat idle is saved too. The helper verifies original
+library hash, provenance/schema, geometry, native normalization, and full
+stored-value reload; existing skill text/notes, other slots and geometry remain.
+Backup: `publication_before_4447450.tres` in the evidence root.
+Actual library: `%APPDATA%/Godot/app_userdata/The Will-Gamefiles/forge/player_wip_library_state.tres`.
+Post-save SHA256: `faa71eea315d36a7d5516b8788cc374f7cdd08856eb06c356678964d3cf0ee48`.
+
+`equipped_published.json` **complete/ok true**: freshly loads that real library,
+equips the actual weapon, runs saved combat idle, resolves slot 1 through the
+real controller, and applies entry/start/middle/terminal samples through the
+runtime presenter and rig. The three authored samples match the saved pose
+within 0.0001 m / 0.001 rad; actual position errors are below 0.3 micrometres.
+Terminal playback finishes and matches the saved terminal data. Runtime uses
+its existing 30 Hz track and adds a 0.3-second entry bridge (20.3 seconds total).
+The entry bridge has existing anchor-lock translation, so its pose equality is
+not asserted; acceptance, finite state and application are checked.
+
+Verification limits: this is sampled real-runtime verification, not continuous
+visual acceptance, draw-from-stow/cold activation, recovery, reverse/two-hand
+coverage, collision/damage behavior, or a full-hand anatomical certificate.
+User's manual test is next. All owned diagnostic Godot runs ended; no Git
+stage/commit/push was performed. Save/F separation, incremental preparation,
+automatic replay and C++ migration remain unimplemented future decisions.
+
+### Native collision acceleration - 2026-10-21 (completed)
+
+User explicitly selected the existing C++ GDExtension setup, rather than C#.
+Continue optimizing the current Save/render workflow; do not separate Save/F,
+change sampling, relax constraints, or rewrite grip/arm ownership in this slice.
+The real published twenty-node Skill 1 remains available and is not overwritten.
+
+Measured target: the existing 1,201-frame report spends 8.434 seconds in final
+collision and 8.577 seconds in endpoint legality, which calls the same collision
+evaluator. Add a stateless `CombatBodyCollisionKernel` to `native/grip_contact`:
+one ordered body snapshot, weapon-local samples and candidate transform enter;
+the existing aggregate collision dictionary leaves. Scene synchronization,
+raycasts, metadata writes, hand/reach checks and replay remain with their owners.
+Use the reference GDScript query when explicitly comparing or if the extension
+is unavailable; custom solver implementations retain their own point queries.
+
+Preserve first-inside/nearest-outside ordering, inclusive boundaries, box ties,
+capsule-center fallback, unknown/disabled shape handling, the 5 mm correction
+padding, and Godot's double scalar/single-precision vector arithmetic. Snapshots
+are prepared for each evaluation, not retained across moving poses.
+
+Fresh verification completed. Evidence directory:
+`C:/WORKSPACE/godot_runs/native_skill_save_20261021/`.
+
+| Rendered station Save case | GDScript reference | Native collision |
+| --- | ---: | ---: |
+| 3 visible nodes / 3 seconds / 181 frames | 4.372594 s | 2.043521 s |
+| 20 visible nodes / 20 seconds / 1,201 frames | 27.298025 s | 10.709136 s |
+| Warm full twenty-node rebuild | not repeated in this slice | 10.465323 s |
+| Metadata-only cached Save | not repeated in this slice | 1.165184 s |
+
+These are matched fresh rendered runs, `reference_rendered/report.json` and
+`native_rendered/report.json`, with the same copied source library and fixture.
+The native twenty-node Save made 2,406 native queries over 20 body shapes and
+144 weapon samples, with zero reference/fallback calls. Combined collision and
+legality time fell to 0.862 seconds. Total Save time fell about 61%; short Save
+fell about 53%. File saving, pose application and grip ownership remain intact.
+
+- `body_query_parity.log`: **19,823 checks passed**, zero numerical differences.
+  Includes ordered hits/ties, box/capsule boundaries, transforms, old snapshot
+  immutability, unsupported shapes, default sample fields and custom solver
+  bypass. Forced-reference selection was tested; an absent DLL was not simulated.
+- `short_parity.json` and `long_parity.json`: **exact equality** of authored
+  data and every saved skill/combat-idle track. Both keep 60 Hz output.
+- Final native station case passed F's solved replay fast path; stored-value
+  reload checks passed for all four cases.
+- `equipped_native.json`: complete/ok true. Loads the native-rendered real asset
+  copy, equips it, performs production combat-idle preparation and slot-1
+  activation, then checks final rig output at entry/start/middle/terminal.
+  Source remains unchanged. This is sampled consumer verification, not visual,
+  continuous playback, recovery, reverse/two-hand or damage certification.
+
+The full long Save still blocks a process frame for **9.782 seconds**; no async
+or incremental rendering is claimed. Remaining render costs include initial
+body/settling about 3.50 seconds, reused grip application about 1.92 seconds,
+plus sampling and other existing work. They are measured follow-up candidates,
+not permission for further rewrites.
+
+The original published user library is unchanged, SHA256
+`faa71eea315d36a7d5516b8788cc374f7cdd08856eb06c356678964d3cf0ee48`.
+Existing slot 1 remains playable. Build succeeded with the existing toolchain;
+the previous DLL is preserved as `grip_contact_before.dll` in the evidence root.
+The unused `reference/` headless attempt was stopped before timing; use the two
+rendered reports above. All owned Godot runs ended; only Project Manager remains.
+No Git stage/commit/push was performed for this slice.
+
+### Incremental unsaved F replay - 2026-10-21 (implemented; verification limits below)
+
+User explicitly chose F preparation and replay of unsaved edits, with retained
+rendered motion for the append/edit/F workflow. Camera navigation must remain
+usable while preparing, even if cooperative preparation takes longer overall.
+The previous three-second / 181-frame Save of about two seconds is a target,
+not a guaranteed delay. Do not expand this into new shoulder/spine controls.
+
+- F finalizes the current edit, prepares only the active draft in memory, then
+  replays through the existing solved-track consumer. It does not save files.
+- Repeated F during preparation coalesces. An authored edit, draft/weapon
+  change or close cancels pending playback; camera motion and node selection do not. No automatic
+  replay on editing. A subsequent F requests the current revision.
+- Compare newly compiled sampled inputs exactly, retain a matching prefix and
+  resume from a validated solver checkpoint. Do not assume a fixed three-node
+  dependency window or reuse a later suffix without proving its solver state.
+- Preserve bone/weapon/anchor output, 60 Hz sampling, final-node inclusion,
+  anatomical constraints and grip acceptance. Save can reuse the completed
+  active clip and still prepares required combat idle and persists normally.
+- Preparation is sliced on the main thread; live scene-tree mutation is not
+  moved to a worker thread. Suspend/resume restores the visible editing pose.
+  Checkpoints are session-local and invalid identities force a full rebuild.
+- Verification must compare full and incremental tracks from the same initial
+  state, exercise append/edit/delete/timing and invalidation, and check unsaved
+  F, repeated F, camera responsiveness, cancellation, Save/reload and equipped
+  consumption using an isolated copy of the real weapon. No results claimed yet.
+
+Implementation now uses `CombatRuntimeClipIncrementalResolver` for exact
+sampled-input prefix comparison, `combat_animation_pose_bake_job.gd` for the
+existing pose pipeline, and `combat_animation_render_checkpoint.gd` plus the
+rig/grip owners for exact in-memory suspension. Checkpoints every 30 samples
+bound repeated work before the first changed input; later dependent samples
+are rendered again. No later suffix is guessed reusable.
+
+F uses cooperative 20 ms work slices (one expensive frame can exceed that
+budget). The visible editor pose is restored before yielding; camera state is
+not rolled back with the solver checkpoint. Synchronous Save retains the old
+terminal-skill-to-combat-idle handoff and its existing outer restoration.
+Prepared F clips remain dirty until Save. No user library was written by F.
+
+Root-cause corrections found during integration: scalar weapon length now
+comes from intrinsic forge geometry rather than pose-transformed endpoints;
+free-hand proxy guide nodes retain identity; failed synchronous grip requests
+drain only their own queued work; endcap rejection during baking returns a
+failure without clearing the owner's configuration; restore validates once
+before committing all snapshot participants. Camera comparisons allow only
+floating-point angle conversion noise; sampled motion and solved tracks are
+compared exactly. Fresh integration results follow below when complete.
+
+Further integration corrections in this slice:
+
+- F now also advances input sampling in cooperative batches through
+  `core/resolvers/combat_runtime_clip_sample_job.gd`. The existing baker's
+  synchronous entry point drains the same calculation for Save. Sampling owns
+  a private clip; edits can cancel either sampling or pose preparation without
+  publishing partial data. Setup, sampling work and pose-startup timings are
+  recorded separately. Compilation/setup and an individual expensive sample
+  are still atomic; the 20 ms budget is not a hard frame-time guarantee.
+- A preexisting terminal-clock rounding discrepancy appeared at twenty
+  seconds: the player remained about 1.16e-13 seconds short and used its
+  interpolated state at the nominal endpoint. The baker now explicitly records
+  the final compiled node at that time. All earlier samples are unchanged.
+  The derived cache signature is now `runtime_cache_v10_explicit_terminal_frame`;
+  old derived clips rebuild through F/Save, without a file-format migration.
+- Explicit Reacquire invalidates station draft clips and in-memory solver
+  continuations and prevents the old saved clip from being silently restored.
+  Freshly prepared local clips remain reusable. This action does not write files.
+- Save after F restores the normal authored preview, waits for acquisition,
+  then retains a valid active clip. When combat idle needs preparation, it
+  resumes from the checked terminal skill checkpoint or uses the established
+  synchronous fallback. An absent optional support-hand restoration snapshot
+  is not evidence that a one-hand grip is invalid.
+- Save validates its source before persistence and after its final yield, so
+  intervening edits cannot save a different source or mark newer work clean.
+
+Fresh focused checks: `prefix_final.log` has 143 passing prefix/cache checks;
+`sampled_batches_verifier.log` has 725 passing sampling checks, including exact
+sliced/synchronous equality, unchanged preterminal samples, terminal channels,
+empty/single-node cases and cancellation. Both are in
+`godot_runs/incremental_skill_replay_20261021/`. Live end-to-end verification
+continues below; these focused checks alone are not a runtime acceptance claim.
+
+The compatible derived-cache versions now live in `CombatRuntimeClip`: authoring
+emits v10, while equipped playback and the diagnostic publisher accept v9 and
+v10 with the same exact grip-solver revision check. This preserves already
+published v9 skills; there is no saved-data schema migration.
+
+Save failure handling now propagates the library's failure result. A rejected
+file write leaves edits dirty, preserves the prepared clip for retry, retains
+any explicit Reacquire cache block, and reports that changes remain unsaved.
+
+Fresh comparison diagnosis (not a pose correction): `short_lifecycle` found
+live authored data and the saved in-memory clone exactly equal. Only the scalar
+`retarget_node.source_weapon_length_meters` changed on .tres reload: the file
+writes a short decimal for a float32-origin length and reads it as float64.
+Maximum observed difference was 2.050933845e-8 m. The verifier retains exact
+differences and permits only this named scalar when the original is exactly
+float32-representable and both values map to the same float32 value. All other
+authored fields and all 66 sampled/solved-track fields retain exact comparison.
+
+Fresh runtime evidence so far (all paths below are under
+`godot_runs/incremental_skill_replay_20261021/`):
+
+- `short_lifecycle_final/results/incremental_replay.json`: complete/ok true,
+  18 passing steps. Includes unsaved F; cached repeat F; public R append;
+  latest-pose edit; deletion; off-grid timing; pose-stage camera movement and
+  cancellation; actual Save/reload; explicit Reacquire and fresh zero-reuse F;
+  failed persistence with dirty/cache retention; edits immediately before and
+  after the file write. The two engine 'Cannot save file' errors are the
+  deliberately injected isolated persistence failure, not unexpected failures.
+- `incremental_full6/results/incremental_replay.json`: all twenty-node motion
+  cases passed exact 66-field full/incremental comparisons. Includes sampling-
+  and pose-stage camera/edit cancellation, final-node retention, and append,
+  edit, deletion and timing changes. Its original overall result stopped at
+  the authored scalar text-roundtrip assertion diagnosed above. Its actual
+  file write and exact solved skill/idle reload both passed; the corrected
+  lifecycle assertion was then verified in the short run, not by pretending
+  this historical report changed.
+- `equipped_full6_compatible.json`: complete/ok true. Production equipment,
+  combat-idle preparation and slot-1 activation consume the new twenty-node
+  saved copy. Selected entry/start/middle/terminal rig samples match the saved
+  output within the existing transform reconstruction tolerances; source is
+  unchanged. This is not continuous visual playback/recovery certification.
+
+| Preparation case | 3-node fixture | 20-node fixture |
+| --- | ---: | ---: |
+| First cooperative F | 5.180 s | 39.248 s |
+| Append through R, including grip wait | 5.427 s | 9.691 s |
+| Latest-pose edit | 2.109 s | 5.481 s |
+| Delete last node | 1.102 s | 4.322 s |
+| Off-grid duration edit | 1.827 s | 4.860 s |
+
+Repeated F with no edits takes the cached path without rerendering. The long
+latest-pose edit reused 1,201 frames and rendered 60; append reused 1,171 and
+rendered 90. Preparation yields to editor input; it trades wall time for
+responsiveness. The measured long-run maximum process-frame interval was
+about 258 ms, while input-sampling slices peaked near 22 ms and pose-work slices
+near 53 ms. Scene updates, compilation/setup, checkpoint work and an individual
+expensive grip operation can exceed the requested 20 ms work budget. No hard
+frame-time guarantee or fully threaded solver is claimed. Save itself retains
+its synchronous rendering fallback when needed.
+
+Variant verification exposed and corrected two integration gaps:
+
+1. Solved F playback clears live grip ownership. F-stop followed by R only
+   refreshes selection visuals, so the next cache-miss F could capture an
+   unconfigured owner, configure it during frame 0, then correctly fail the
+   editor-restoration guard. Uncached F now conditionally restores ordinary
+   authored preview using the same existing predicate as Save, preserves the
+   camera, waits for grip readiness, and only then refreshes retarget data.
+   Cached F still returns before this work. Checkpoint guards were not relaxed;
+   failure-only diagnostics now identify the rejected checkpoint participant.
+2. A one-node combat idle bypassed the station's skill-chain compiler and could
+   retain its right-authored hand while equipment was left. Save now calls the
+   existing `compile_idle_chain()` with the same equipment context already used
+   by gameplay. It compiles a copy; authored idle data remains unchanged. No new
+   handedness rule or solver allowance was introduced.
+
+`variant_left_idle_final/results/incremental_replay_left.json` passes first F,
+repeat cached F, R append, terminal-duration edit, exact incremental/full parity,
+and actual Save/reload including the derived left-hand combat idle. The focused
+compiler verifier also passes its existing checks plus single-node left-equipment
+compilation with original right-hand/endpoints retained. Evidence is copied to
+`idle_compiler_final_results.txt`.
+
+`variant_reverse/` used the historical October 13 Stage 1 V2 Draft Copy and
+never obtained initial preview/grip readiness (120-second timeout before the
+variant case). It provides no reverse-grip acceptance evidence. Subsequent
+variant runs use the current Broken_Balde_v1 asset instead.
+
+
+Final session evidence, 2026-10-21 04:05 Europe/Bucharest:
+
+- `incremental_long_final/results/incremental_replay.json`: all 16 motion
+  steps passed, including middle duration change, deletion and public-R
+  reinsertion. Full/incremental sampled and solved tracks compare exactly in
+  all 66 fields. Twenty-node cold F was 38.362 s; append 9.938 s; latest-pose
+  edit 5.701 s; final deletion 4.341 s; middle edits 20.054-22.351 s.
+  Save after preparation was 4.713 s with exact skill/idle track reload.
+- That frozen long report retains its failed scalar metadata assertion.
+  `incremental_long_final/results/metadata_verification.json` now passes all
+  375 offline checks. It permits only the named source-length float32
+  roundtrip and `retarget_node.pivot_range_percent` exactly matching Godot's
+  own `str_to_var(var_to_str(original))` result. It rejects other fields or
+  altered values, verifies all other recorded Save checks, and confirms the
+  original report hash is unchanged. No production data normalization was
+  added; no expensive motion run was repeated for this diagnostic correction.
+- `variant_reverse_ready/`: first/cached F, reverse bridge and duration edit
+  passed exact full/incremental comparison. Save wrote successfully and all
+  66 skill/idle reload fields matched; live and persisted-clone authoring were
+  exact. Its overall diagnostic gate still fails only on the same length
+  roundtrip and one pivot percentage changing by minus one float64 ULP.
+  The long-only sidecar has NOT been run against reverse, so this is recorded
+  as motion/track success with a metadata-only diagnostic gate outstanding.
+  First preparation and reverse bridge took about 53.6/55.8 seconds with fresh
+  grip work. Do not claim all F requests are fast or free of atomic stalls.
+- `equipped_final.json`: fresh complete/ok true, source unchanged. Production
+  equipment, combat idle and slot activation consumed the latest saved long
+  copy; selected entry/start/middle/terminal rig samples matched. This is a
+  sampled consumer check, not continuous visual or recovery certification.
+- The earlier 18-step lifecycle run predates the final authored-preview and
+  single-idle compiler fixes. Later long and left runs cover those fixes; the
+  whole 18-step suite was not repeated after them.
+- Single-to-dual-to-single support transitions remain UNVERIFIED for this
+  incremental implementation. The ready harness supports `--variant=support`;
+  no new long run was started after the user's 1% token/shutdown notice.
+  Resume with that bounded existing test, not a new architecture change.
+- Scoped diff whitespace checks pass. All owned Godot runs ended; only idle
+  Project Manager PID 3872 remains. Actual user library SHA256 is unchanged:
+  `faa71eea315d36a7d5516b8788cc374f7cdd08856eb06c356678964d3cf0ee48`.
+  The native DLL is unchanged within this incremental slice. No Git mutation.
+
+Next: user testing of unsaved F/edit/R/F and camera responsiveness; finish the
+existing support variant and narrow reverse metadata diagnostic next session.
+Cold long preparation and middle changes still take substantial time. The
+20 ms work budget is cooperative, not a hard frame deadline; individual grip
+operations can remain atomic. No further optimization scope was added.
+
+### User runtime feedback - recorded 2026-10-23
+
+Source: user report posted on 2026-10-23, quoting notes written approximately
+48 hours earlier after real F/edit/F usage. Documentation only in this turn;
+no fresh engine reproduction or measured diagnosis. This feedback supersedes
+any assumption that the previous checks established acceptable everyday use.
+It does not erase the historical test results or establish a root cause.
+
+- On a three-motion-node skill, the user observed approximately **one prepared
+  frame per real second** during F preparation. The user reports longer skill
+  duration causing longer preparation. This is an observed progress rate, not
+  a measured display FPS or an independently established scaling law. Exact
+  weapon/draft, node durations and progress-counter meaning were not supplied
+  in this report; do not silently substitute the earlier diagnostic fixture.
+- F preparation without saving still takes far too long for the intended
+  F/edit/F workflow. Performance acceptance is **not achieved**.
+- Ordinary Save feels as slow as before, with no significant improvement in
+  the user's real workflow. Earlier fixture timings cannot establish that this
+  reported case improved.
+- The displayed trajectory/pathing lines do not follow the weapon's actual
+  movement. Visual path fidelity is an **open issue**.
+- The elbow shows the same inversion problem as before. Earlier targeted
+  arm checks did not establish a general fix; elbow correctness is **unresolved**.
+- The user is disappointed by the outcome relative to the time/token cost,
+  plans further manual testing, and explicitly wants to avoid another prolonged,
+  expensive investigation that does not produce a demonstrable practical gain.
+
+Working boundary: preserve the report and wait for further testing/direction.
+Do not turn this note into authorization for code changes, Godot runs, a broad
+rewrite, or automatic continuation of the older support/reverse test queue.
+If investigation is later authorized, first reproduce one actual failing case
+with a bounded test. Compare wall-clock F/Save duration and visible motion in
+that same case before extending the work. Report progress and limits before
+expanding; test counts and full/incremental parity alone are not acceptance of
+speed, path fidelity or anatomical correctness. No arbitrary time target or
+diagnosis is being invented here.
+
+### Playtest audit authorization - 2026-10-23
+
+The user subsequently authorized a thorough **playtest/audit, not a fixing pass**.
+Trajectory guides are accepted as approximate for now and are deferred. Preserve
+the good calculations while identifying preparation cost and mechanical issues.
+Read the current saved Skill 1; recreate it through normal Skill Crafter editing
+in Skill 2, without copying its draft/clip into that slot. Preserve Skill 1.
+Capture the full bone structure and arm rotations during recreation and replay,
+and measure what F/Save do and where time is consumed. Record findings and missing
+or surprising restrictions before proposing changes. More tokens permit a thorough
+audit, not speculative production fixes or an unbounded optimization campaign.
+
+Working evidence and decisions are maintained in
+[Skill Crafter Playtest Audit 2026-10-23.md](<Skill Crafter Playtest Audit 2026-10-23.md>).
+This authorization supersedes the preceding wait-for-direction boundary only
+for this specific investigation.
+
+### Playtest audit results - 2026-10-23
+
+Fresh isolated tests of the user's actual `Broken_Balde_v1` Skill 1 (five visible
+nodes, .95 s nominal duration, 58 samples at 60 Hz) reproduced the problem:
+F 38.388 s; cold Save 34.580 s; cached F 64-70 ms; Save after F 4.329 s.
+Grip preparation consumed 33.1-33.7 s, with twelve new relationships caused by
+the hidden .20-to-visible .50 handle-station interpolation. Trajectory sampling
+was about 18-21 ms; file writing about .28-.30 s. The F budget cannot preempt
+multi-second synchronous acquisitions; cold Save blocked a process-frame interval
+for nearly 34 s. Fresh F and Save produced float32-identical compared control and
+solved arrays. This agreement does not establish anatomical correctness.
+
+All 77 model bones were captured during editing/replay. The old stored clip and
+fresh clip both contain steep arm/hand rotation changes between 60 Hz samples;
+signed elbow-orbit wrap crossings and pose-history dependence remain review items.
+The original stored clip differs from fresh output; cause is not yet isolated.
+
+Normal UI-owner reconstruction in Slot 2 was attempted and measured but is **not
+equivalent**: hidden node 0 cannot be selected, endpoint setters start from the
+displayed solved frame, and Roll can rewrite endpoints/orientation. Kept all
+replicas isolated. The real library is byte-identical to the source backup.
+No production fix or Git operation was made. Review the linked audit and agree
+on the next narrow change before implementation; do not resume old test queues
+or declare the elbow fixed from these findings.
+
+### Node 0 and Reset clarification / follow-up audit - 2026-10-23
+
+The user clarified the intended entry contract: **node 0 inherits node 1's
+prepared hand-to-weapon relationship**, while its body/weapon starting pose
+comes from the actual state at activation. Transition that current pose to
+node 1; do not manufacture a default .20-to-.50 grip change. Prepared combat
+idle is an acceptable fallback for now, and the skill should recover to
+prepared combat idle. Out-of-combat draw/spawn rules remain deferred.
+The earlier static hand solver is historical context, not an implementation
+template to restore blindly.
+
+Current code does not enforce that inheritance. Equipped prepared playback
+adds a live-pose bridge to saved hidden node 0, then plays its baked 0 -> 1
+segment. F directly plays saved sample 0. Entry/recovery infrastructure still
+exists; an October 14 routing change retained saved node 0 for prepared clips.
+The audit did not establish an old grip-inheritance trigger being deleted.
+This resolves the audit's question about whether the observed hidden .20 ->
+visible .50 regrip was intended: it was not.
+
+Reset restores authored controls, but fresh isolated tests found that it does
+not reproduce a consistent solved pose. After matching control resets, a
+second Reset changed the right-hand bone by 30.561 degrees in skeleton space
+and 42.581 mm in world space. Six seconds of passive observation after each
+reset showed no further movement. Two runs reproduced the result. The cause
+has not yet been isolated; do not equate numeric-reset success with complete
+pose-reset correctness.
+
+Prepared grip reuse already exists across unchanged relationships. The measured
+entry-station sweep causes new relationships and costly acquisitions. Review
+that ownership mismatch before treating the 60 Hz preparation rate itself as
+the problem. No corrected timing or anatomical success is claimed.
+
+Additional code-only fidelity issue logged: equipped startup uses 30 Hz control
+resampling and nearest prepared pose copies; station preparation/F uses 60 Hz.
+Detailed owners, evidence, history and boundaries are in
+[the playtest audit](<Skill Crafter Playtest Audit 2026-10-23.md>).
+This remains investigation only. No production fix, actual library edit or
+Git operation was made; do not automatically resume an implementation queue.
+
+Further user clarification in the following message: **conceptual node 0 is
+the current live body/weapon/hand state with its already solved incoming grip**
+from the last action, combat idle, or the appropriate out-of-combat acquisition
+path. It bridges directly into visible node 1. This refines the preceding
+blanket node-1-grip inheritance wording: source and destination grips may match
+or differ. Do not silently replace the incoming grip with node 1's relationship.
+Do not impose the saved hidden node as an extra fixed waypoint. Differing-grip
+transition policy remains to be defined; block/dodge/dash are future consumers,
+not current implementation scope. See the latest clarification in the audit.
+
+The user subsequently explained that stored hidden node 0 originally provided
+a Reset recovery target for broken poses. Proposed separation: retain that
+default pose for Reset/fallback outside the action's motion list; exclude it
+from skill preparation/F and saved action nodes. Live incoming solved state
+then bridges directly to visible node 1. Preserve one-visible-node skills and
+entry timing; the editor F path also needs a live entry rather than merely
+dropping the first baked sample. Historical intent and design implications
+are recorded in the audit. No production change has been made.
+
+The user's requested consolidated change list is now recorded at the end of the
+audit under "Consolidated proposed change scope". It separates Reset baseline,
+prepared visible action nodes and transient live entry; covers F/equipped
+consistency, grip reuse, timing, old-cache/index migration and focused validation.
+From-current-pose stow/unstow and other combat actions are recorded as future
+consumers of the same transition mechanism, not added to immediate scope.
+Entry-duration ownership, differing-grip transitions and obstructed/unreachable
+entry policy remain explicit decisions. This remains planning, not a fix pass.
+
+### Stored editor poses, recovery and remaining motion authority - 2026-10-24
+
+Later explicit user instructions authorized implementation and supersede the
+preceding planning-only state. Full decisions and evidence are in the latest
+sections of `Skill Crafter Playtest Audit 2026-10-23.md`.
+
+- [x] Separate Reset baseline from saved visible action nodes; entry is actual
+  current solved state -> visible node 1, fixed at 160 ms independent of speed.
+- [x] Store settled editor body/finger/weapon/attachment poses on motion nodes;
+  reuse them for F and Save without new grip acquisition or hidden endpoint bake.
+- [x] Use 60 Hz throughout prepared/F/equipped tracks; retain exact key times.
+- [x] Verify duration edit -> F, R -> adjustment -> F, final endpoint, Save/reload
+  and actual equipped consumption on the isolated saved weapon. Real Skill 1
+  remains unchanged. Fresh F .375 s, cached F .142 s, edited F .377/.485 s,
+  Save after F .835 s. Initial editor acquisition/capture is a separate cost.
+- [x] Restore the zero-filled UI source and check for additional obvious loss.
+  No additional missing/NUL-only source or documentation files were found.
+  Windows crash cause remains unproven; evidence is retained under godot_runs.
+- [ ] Resolve **interior hand/weapon separation** before calling the new motion
+  visually finished. Independent bone and weapon tweens deviate by up to .377 m
+  in the real test although endpoints are exact. NEEDS_DECISION: preserve weapon
+  path with bounded arm kinematics (no new grip solve), or preserve bone tween
+  and let weapon follow hand. Asked in chat; no silent choice. Apply the chosen
+  authority consistently to entry, F and equipped playback.
+- [ ] Validate the eventual correction, then user visual review and relevant
+  support/reverse/interrupt variants. Current checks are not anatomy or full-hand
+  grip certification. Do not broaden into the deferred body-control roadmap.

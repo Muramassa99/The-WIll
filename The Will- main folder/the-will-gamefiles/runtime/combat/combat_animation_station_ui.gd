@@ -15,6 +15,10 @@ const CombatAnimationDraftValidatorScript = preload("res://core/resolvers/combat
 const CombatAnimationWeaponGeometryResolverScript = preload("res://core/resolvers/combat_animation_weapon_geometry_resolver.gd")
 const CombatWeaponRollResolverScript = preload("res://core/resolvers/combat_weapon_roll_resolver.gd")
 const CombatAnimationRetargetResolverScript = preload("res://core/resolvers/combat_animation_retarget_resolver.gd")
+const CombatRuntimeClipScript = preload("res://core/models/combat_runtime_clip.gd")
+const EntryTransitionScript = preload("res://runtime/combat/combat_runtime_entry_transition.gd")
+const PreparedPoseTrackBuilderScript = preload("res://core/resolvers/combat_prepared_pose_track_builder.gd")
+const PreparedPoseScript = preload("res://core/models/combat_prepared_pose.gd")
 const CombatRuntimeClipBakerScript = preload("res://core/resolvers/combat_runtime_clip_baker.gd")
 const SurfaceGripSolverScript = preload("res://runtime/player/grip/surface_driven_grip_solver.gd")
 const CombatAnimationRuntimeChainCompilerScript = preload("res://core/resolvers/combat_animation_runtime_chain_compiler.gd")
@@ -99,6 +103,7 @@ const HAND_SLOT_LEFT: StringName = &"hand_left"
 const UNARMED_PROJECT_LIST_LABEL := "- Unarmed"
 const UNARMED_BUILDER_SCOPE_LABEL := "Empty Hand"
 const PREVIEW_RUNTIME_CLIP_SAMPLE_RATE_HZ := 60.0
+const PREVIEW_PREPARE_BUDGET_USEC := 20000
 const PERSIST_RUNTIME_CACHE_KEEP: StringName = &"runtime_cache_keep"
 const PERSIST_RUNTIME_CACHE_DIRTY_ACTIVE: StringName = &"runtime_cache_dirty_active"
 const PERSIST_RUNTIME_CACHE_DIRTY_ALL: StringName = &"runtime_cache_dirty_all"
@@ -260,6 +265,18 @@ var active_preview_dominant_slot_id: StringName = HAND_SLOT_RIGHT
 var active_preview_default_two_hand: bool = false
 var manual_save_in_progress: bool = false
 var manual_save_start_msec: int = 0
+var preview_prepare_in_progress: bool = false
+var preview_prepare_generation: int = 0
+var preview_prepare_job: RefCounted = null
+# Reacquire changes the live grip seed without changing authored node signatures.
+# Keep old saved clips unavailable until the current weapon is saved or replaced.
+var saved_runtime_cache_reuse_blocked_by_grip: bool = false
+var _prepared_pose_refresh_generation: int = 0
+var _prepared_pose_candidate_key: String = ""
+var _prepared_pose_candidate_frame: int = -1
+var _prepared_pose_completed_key: String = ""
+var _prepared_pose_completed_input_key: String = ""
+var _prepared_pose_observed_acquisition_key: String = ""
 
 const PREVIEW_DRAG_MIN_REFRESH_INTERVAL_MSEC: int = 16
 const PREVIEW_DRAG_MAX_REFRESH_INTERVAL_MSEC: int = 83
@@ -349,6 +366,8 @@ func _process(delta: float) -> void:
 		_refresh_live_editor_shortcuts()
 		_flush_pending_preview_drag_refresh()
 		_refresh_grip_acquisition_status()
+		if not preview_prepare_in_progress and not manual_save_in_progress and not session_state.playback_active:
+			capture_selected_prepared_pose()
 	if not chain_player.is_playing():
 		return
 	chain_player.advance(delta)
@@ -358,12 +377,25 @@ func _process(delta: float) -> void:
 		_refresh_preview_scene()
 	if not chain_player.is_playing():
 		session_state.playback_active = false
+		_refresh_manual_save_controls()
 		footer_status_label.text = "Preview finished."
+
+func _exit_tree() -> void:
+	preview_prepare_generation += 1
+	if preview_prepare_job != null:
+		preview_prepare_job.call("cancel")
+	preview_prepare_job = null
+	preview_prepare_in_progress = false
 
 func _refresh_grip_acquisition_status() -> void:
 	if grip_acquisition_label == null:
 		return
 	var states: Dictionary = preview_presenter.get_grip_acquisition_status(preview_subviewport)
+	var capture_states: Array = []
+	for capture_slot: StringName in states:
+		var capture_state: Dictionary = states[capture_slot]
+		capture_states.append([capture_slot, capture_state.get("serial", -1), capture_state.get("status", "")])
+	_prepared_pose_observed_acquisition_key = var_to_bytes(capture_states).hex_encode().sha256_text()
 	var lines: PackedStringArray = []
 	for slot: StringName in states:
 		var state: Dictionary = states[slot]
@@ -418,6 +450,123 @@ func _refresh_grip_acquisition_status() -> void:
 	grip_acquisition_label.visible = not lines.is_empty()
 	if grip_reacquire_button != null:
 		grip_reacquire_button.visible = not states.is_empty() and not session_state.playback_active
+
+## Snapshot the result already displayed by the editor. Two complete idle
+## frames separate a changed selection/input or finished acquisition from
+## capture. Calling this method never advances a solver or waits for one.
+func capture_selected_prepared_pose(allow_preparation: bool = false) -> Dictionary:
+	if panel == null or not panel.visible or workflow_step != WORKFLOW_STEP_EDITOR or active_wip == null:
+		return _prepared_pose_capture_unavailable("prepared_pose_editor_not_active")
+	if ((manual_save_in_progress or preview_prepare_in_progress) and not allow_preparation) or chain_player.is_playing() or session_state.playback_active:
+		return _prepared_pose_capture_unavailable("prepared_pose_editor_busy")
+	if motion_node_editor.is_dragging() or preview_weapon_roll_dragging or preview_drag_override_node != null or preview_drag_refresh_pending:
+		return _prepared_pose_capture_unavailable("prepared_pose_edit_in_progress")
+	if preview_presenter.is_grip_acquisition_pending(preview_subviewport):
+		return _prepared_pose_capture_unavailable("prepared_pose_grip_pending")
+	var node: CombatAnimationMotionNode = _get_active_motion_node()
+	var draft: Resource = _get_active_draft()
+	if node == null or draft == null:
+		return _prepared_pose_capture_unavailable("missing_prepared_pose_motion_node")
+	var signature: String = PreparedPoseScript.node_pose_signature(node)
+	var input_key: String = var_to_bytes([node.get_instance_id(), signature,
+		_prepared_pose_refresh_generation, _prepared_pose_observed_acquisition_key]).hex_encode().sha256_text()
+	# No repeated mesh hashing, bone reads or snapshot allocations after capture.
+	# The F/Save validator still checks the current durable geometry context.
+	if input_key == _prepared_pose_completed_input_key and node.prepared_pose_signature == signature and not node.prepared_pose.is_empty():
+		return {"valid": true, "captured": false, "reason": "prepared_pose_already_current"}
+	var context: Dictionary = preview_presenter.get_prepared_pose_capture_context(preview_subviewport, node)
+	if not bool(context.get("valid", false)):
+		return _prepared_pose_capture_unavailable(String(context.get("reason", "prepared_pose_not_ready")))
+	if not _preview_display_meta_matches_selected_motion_node(context.root):
+		return _prepared_pose_capture_unavailable("prepared_pose_display_selection_changed")
+	var context_signature: String = _prepared_pose_context_signature(context)
+	var key: String = var_to_bytes([node.get_instance_id(), signature, context_signature,
+		_prepared_pose_refresh_generation, context.get("settle_serial", 0)]).hex_encode().sha256_text()
+	if key == _prepared_pose_completed_key and node.prepared_pose_signature == signature:
+		var retained: Dictionary = PreparedPoseScript.validate(node.prepared_pose, context_signature)
+		if bool(retained.get("valid", false)):
+			_prepared_pose_completed_input_key = input_key
+			return {"valid": true, "captured": false, "reason": "prepared_pose_already_current"}
+	var frame: int = Engine.get_process_frames()
+	if key != _prepared_pose_candidate_key:
+		_prepared_pose_candidate_key = key
+		_prepared_pose_candidate_frame = frame
+		return {"valid": false, "captured": false, "reason": "prepared_pose_settling"}
+	if frame - _prepared_pose_candidate_frame < 2:
+		return {"valid": false, "captured": false, "reason": "prepared_pose_settling"}
+	var snapshot: Dictionary = preview_presenter.capture_prepared_authoring_pose(context, context_signature)
+	var validation: Dictionary = PreparedPoseScript.validate(snapshot, context_signature)
+	if not bool(validation.get("valid", false)):
+		return _prepared_pose_capture_unavailable(String(validation.get("reason", "prepared_pose_capture_failed")))
+	var changed: bool = node.prepared_pose_signature != signature or var_to_bytes(node.prepared_pose) != var_to_bytes(snapshot)
+	node.prepared_pose = snapshot
+	node.prepared_pose_signature = signature
+	_prepared_pose_completed_key = key
+	_prepared_pose_completed_input_key = input_key
+	if changed:
+		# Captured data is part of the draft, but capturing is not another editor
+		# action: no re-normalization, pose refresh or automatic disk write here.
+		_mark_draft_runtime_clip_cache_dirty(draft)
+		if not bool(get_meta("verification_skip_persistence", false)):
+			editor_state_dirty = true
+		_refresh_manual_save_controls(draft)
+	var result := {"valid": true, "captured": changed, "reason": "",
+		"node_index": get_selected_motion_node_index(), "bone_count": snapshot.get("bone_names", []).size()}
+	set_meta("last_prepared_pose_capture", result)
+	return result
+
+
+func _prepared_pose_capture_unavailable(reason: String) -> Dictionary:
+	_prepared_pose_candidate_key = ""
+	_prepared_pose_candidate_frame = -1
+	_prepared_pose_completed_key = ""
+	_prepared_pose_completed_input_key = ""
+	return {"valid": false, "captured": false, "reason": reason}
+
+
+func _prepared_pose_context_signature(context: Dictionary) -> String:
+	return var_to_bytes([context.get("context_signature", ""),
+		String(SurfaceGripSolverScript.REVISION), String(active_wip.wip_id) if active_wip != null else "",
+		_build_active_primary_grip_path_cache_signature(),
+		active_preview_dominant_slot_id, active_preview_default_two_hand]).hex_encode().sha256_text()
+
+
+## A loaded legacy node is deliberately not filled by solving it off screen.
+## Its normal editor selection/edit must produce the snapshot first. Timing,
+## curve handles and renumbering do not invalidate a captured endpoint pose.
+func get_prepared_action_pose_status(draft: Resource = null) -> Dictionary:
+	if draft == null:
+		draft = _get_active_draft()
+	var selected: CombatAnimationMotionNode = _get_active_motion_node()
+	if draft == null or selected == null or active_wip == null:
+		return {"valid": false, "reason": "missing_prepared_pose_draft", "missing_node_indices": []}
+	var context: Dictionary = preview_presenter.get_prepared_pose_capture_context(preview_subviewport, selected, false)
+	if not bool(context.get("valid", false)):
+		return {"valid": false, "reason": context.get("reason", "prepared_pose_context_unavailable"), "missing_node_indices": []}
+	var context_signature: String = _prepared_pose_context_signature(context)
+	var chain: Array = draft.call("get_action_motion_node_chain") as Array
+	var missing: Array[int] = []
+	var reasons: Dictionary = {}
+	for index: int in chain.size():
+		var node: CombatAnimationMotionNode = chain[index] as CombatAnimationMotionNode
+		var reason: String = ""
+		if node == null:
+			reason = "missing_prepared_pose_motion_node"
+		elif node.prepared_pose_signature != PreparedPoseScript.node_pose_signature(node):
+			reason = "prepared_pose_inputs_changed"
+		else:
+			var validation: Dictionary = PreparedPoseScript.validate(node.prepared_pose, context_signature)
+			if not bool(validation.get("valid", false)):
+				reason = String(validation.get("reason", "invalid_prepared_pose"))
+		if not reason.is_empty():
+			var visible_index: int = index + 1
+			missing.append(visible_index)
+			reasons[visible_index] = reason
+	return {"valid": not chain.is_empty() and missing.is_empty(),
+		"reason": "" if not chain.is_empty() and missing.is_empty() else "motion_nodes_need_prepared_poses",
+		"missing_node_indices": missing, "node_reasons": reasons,
+		"context_signature": context_signature, "node_count": chain.size()}
+
 
 func _input(event: InputEvent) -> void:
 	if _has_visible_weapon_open_popup():
@@ -485,6 +634,8 @@ func toggle_for(player, bench_name: String) -> void:
 	open_for(player, bench_name)
 
 func open_for(player, bench_name: String) -> void:
+	_cancel_preview_preparation()
+	saved_runtime_cache_reuse_blocked_by_grip = false
 	active_player = player
 	active_wip_library = _get_forge_wip_library_state()
 	_migrate_saved_skill_draft_baselines_if_needed()
@@ -509,6 +660,7 @@ func open_for(player, bench_name: String) -> void:
 func close_ui() -> void:
 	if not panel.visible:
 		return
+	_cancel_preview_preparation()
 	chain_player.stop()
 	preview_camera_orbiting = false
 	if motion_node_editor.is_dragging():
@@ -526,6 +678,7 @@ func close_ui() -> void:
 	active_player = null
 	active_wip_library = null
 	active_wip = null
+	saved_runtime_cache_reuse_blocked_by_grip = false
 	active_saved_wip_id = StringName()
 	station_display_name = ""
 	workflow_step = WORKFLOW_STEP_WEAPON_SELECT
@@ -543,6 +696,7 @@ func select_saved_wip(
 	advance_workflow: bool = true,
 	opening_config: Dictionary = {}
 ) -> bool:
+	_cancel_preview_preparation()
 	var open_perf_trace: Array = []
 	var open_perf_step_usec: int = Time.get_ticks_usec()
 	var trace_open_latency: bool = bool(get_meta("trace_open_latency", false))
@@ -552,6 +706,7 @@ func select_saved_wip(
 		return false
 	if active_wip != null and active_saved_wip_id != StringName():
 		_finalize_preview_drag("Motion node edit locked in.")
+		capture_selected_prepared_pose()
 	if active_wip != null and active_saved_wip_id != StringName() and active_saved_wip_id != saved_wip_id:
 		editor_state_dirty = false
 	if trace_open_latency:
@@ -570,6 +725,8 @@ func select_saved_wip(
 	if trace_open_latency:
 		open_perf_step_usec = _append_perf_trace_elapsed(open_perf_trace, "ensure_station_state", open_perf_step_usec)
 	active_saved_wip_id = saved_wip_id
+	if not reusing_active_wip:
+		saved_runtime_cache_reuse_blocked_by_grip = false
 	active_wip = selected_clone
 	editor_state_dirty = false
 	_set_manual_save_progress(0.0, "", false)
@@ -626,6 +783,7 @@ func select_unarmed_authoring(
 	advance_workflow: bool = true,
 	opening_config: Dictionary = {}
 ) -> bool:
+	_cancel_preview_preparation()
 	if active_wip_library == null:
 		return false
 	var unarmed_wip_id: StringName = CraftedItemWIPScript.UNARMED_AUTHORING_WIP_ID
@@ -639,6 +797,8 @@ func select_unarmed_authoring(
 		return false
 	_normalize_unarmed_authoring_wip(selected_clone)
 	active_saved_wip_id = unarmed_wip_id
+	if not reusing_active_wip:
+		saved_runtime_cache_reuse_blocked_by_grip = false
 	active_wip = selected_clone
 	editor_state_dirty = false
 	_set_manual_save_progress(0.0, "", false)
@@ -682,6 +842,7 @@ func open_saved_wip_with_hand_setup(
 	})
 
 func select_authoring_mode(mode_id: StringName) -> bool:
+	_cancel_preview_preparation()
 	var station_state: Resource = _get_active_station_state()
 	if station_state == null:
 		return false
@@ -694,6 +855,7 @@ func select_authoring_mode(mode_id: StringName) -> bool:
 	return true
 
 func select_draft(draft_identifier: StringName, advance_workflow: bool = true) -> bool:
+	_cancel_preview_preparation()
 	var station_state: Resource = _get_active_station_state()
 	var draft: Resource = _find_active_draft_by_identifier(draft_identifier)
 	if station_state == null or draft == null:
@@ -718,12 +880,14 @@ func select_draft(draft_identifier: StringName, advance_workflow: bool = true) -
 	return true
 
 func select_skill_slot(slot_id: StringName, advance_workflow: bool = true) -> bool:
+	_cancel_preview_preparation()
 	if not _is_authoring_skill_slot_id(slot_id):
 		return false
 	var station_state: Resource = _get_active_station_state()
 	if station_state == null:
 		return false
 	_finalize_preview_drag("Motion node edit locked in.")
+	capture_selected_prepared_pose()
 	station_state.set("selected_authoring_mode", CombatAnimationStationStateScript.AUTHORING_MODE_SKILL)
 	var display_name: String = _get_skill_slot_display_name(slot_id)
 	var draft: Resource = _find_skill_draft_by_slot_id(slot_id)
@@ -799,6 +963,7 @@ func select_motion_node(node_index: int) -> bool:
 	if motion_node_chain.is_empty():
 		return false
 	_finalize_preview_drag("Motion node edit locked in.")
+	capture_selected_prepared_pose()
 	draft.set("selected_motion_node_index", clampi(node_index, 0, motion_node_chain.size() - 1))
 	session_state.current_motion_node_index = int(draft.get("selected_motion_node_index"))
 	_refresh_active_editor_surface("Motion node selection updated.")
@@ -814,12 +979,14 @@ func insert_motion_node_after_selection() -> bool:
 	if _is_idle_draft(draft):
 		return reset_active_draft_to_baseline()
 	_finalize_preview_drag("Motion node edit locked in.")
+	capture_selected_prepared_pose()
 	if trace_enabled:
 		trace_step_usec = _append_perf_trace_elapsed(trace, "finalize_preview_drag", trace_step_usec)
 	var seed_node: CombatAnimationMotionNode = _get_active_motion_node()
 	var new_node: CombatAnimationMotionNode = _duplicate_or_build_motion_node(seed_node)
 	if new_node == null:
 		return false
+	new_node.transition_duration_seconds = CombatAnimationMotionNodeScript.DEFAULT_TRANSITION_DURATION_SECONDS
 	_prepare_inserted_motion_node_identity(new_node)
 	if trace_enabled:
 		trace_step_usec = _append_perf_trace_elapsed(trace, "duplicate_seed_node", trace_step_usec)
@@ -855,6 +1022,7 @@ func duplicate_selected_motion_node() -> bool:
 	if _is_idle_draft(draft):
 		return reset_active_draft_to_baseline()
 	_finalize_preview_drag("Motion node edit locked in.")
+	capture_selected_prepared_pose()
 	motion_node = _get_active_motion_node()
 	if motion_node == null:
 		return false
@@ -918,8 +1086,10 @@ func reset_active_draft_to_baseline() -> bool:
 	if motion_node_editor.is_dragging():
 		motion_node_editor.end_drag()
 	_clear_preview_drag_override()
-	preview_presenter.reset_preview_actor_to_mount_seed_baseline(preview_subviewport)
-	var geometry_seed: Dictionary = _resolve_active_weapon_authored_baseline_seed(true)
+	var reset_frame: Dictionary = preview_presenter.reset_preview_actor_to_mount_seed_baseline(preview_subviewport)
+	set_meta("last_reset_baseline_frame", reset_frame)
+	_clear_active_weapon_baseline_seed_cache()
+	var geometry_seed: Dictionary = _resolve_active_weapon_authored_baseline_seed(false)
 	var used_weapon_seed: bool = not geometry_seed.is_empty()
 	var reset_ok: bool = false
 	var typed_draft: CombatAnimationDraft = draft as CombatAnimationDraft
@@ -1308,6 +1478,7 @@ func _insert_generated_grip_style_transition_after_selection(
 	bridge_node.draft_notes = "Generated grip-style swap bridge. Endpoints stay locked; Bezier path handles can be shaped."
 	bridge_node.normalize()
 	var authored_node: CombatAnimationMotionNode = _duplicate_or_build_motion_node(bridge_node)
+	authored_node.transition_duration_seconds = CombatAnimationMotionNodeScript.DEFAULT_TRANSITION_DURATION_SECONDS
 	authored_node.draft_notes = source_node.draft_notes
 	_prepare_inserted_motion_node_identity(bridge_node)
 	_prepare_inserted_motion_node_identity(authored_node)
@@ -1631,6 +1802,7 @@ func _set_workflow_step(step_id: StringName, status_message: String = "") -> voi
 		return
 	workflow_step = step_id
 	if workflow_step != WORKFLOW_STEP_EDITOR:
+		_cancel_preview_preparation()
 		chain_player.stop()
 		session_state.playback_active = false
 	_refresh_workflow_visibility()
@@ -2331,7 +2503,7 @@ func _build_footer(parent: VBoxContainer) -> void:
 	grip_reacquire_button = Button.new()
 	grip_reacquire_button.text = "Reacquire grip"
 	grip_reacquire_button.visible = false
-	grip_reacquire_button.pressed.connect(func() -> void: preview_presenter.reacquire_grip(preview_subviewport))
+	grip_reacquire_button.pressed.connect(_request_preview_grip_reacquisition)
 	parent.add_child(grip_reacquire_button)
 	save_progress_bar = ProgressBar.new()
 	save_progress_bar.min_value = 0.0
@@ -2347,6 +2519,16 @@ func _build_footer(parent: VBoxContainer) -> void:
 	save_progress_label.add_theme_color_override("font_color", COLOR_TEXT_DIM)
 	save_progress_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	parent.add_child(save_progress_label)
+
+func _request_preview_grip_reacquisition() -> void:
+	if active_wip == null:
+		return
+	# Every station draft can inherit this grip seed. Neither a completed clip
+	# nor a suspended pose checkpoint may silently restore the previous fit.
+	saved_runtime_cache_reuse_blocked_by_grip = true
+	_stage_active_wip_edit("Grip reacquisition requested. Press F to prepare the updated preview.", PERSIST_RUNTIME_CACHE_DIRTY_ALL)
+	preview_presenter.invalidate_runtime_pose_render_caches()
+	preview_presenter.reacquire_grip(preview_subviewport)
 
 func _build_section_panel(parent: Control, expand: bool) -> VBoxContainer:
 	var section := PanelContainer.new()
@@ -2646,6 +2828,7 @@ func _populate_static_options() -> void:
 
 func _select_initial_wip() -> void:
 	active_wip = null
+	saved_runtime_cache_reuse_blocked_by_grip = false
 	active_saved_wip_id = StringName()
 	_reset_active_weapon_open_config()
 	if active_wip_library == null:
@@ -3109,7 +3292,7 @@ func _refresh_editor_fields() -> void:
 		weapon_rotation_x_spin_box.value = 0.0
 		weapon_rotation_y_spin_box.value = 0.0
 		weapon_rotation_z_spin_box.value = 0.0
-		transition_spin_box.value = 0.18
+		transition_spin_box.value = CombatAnimationMotionNodeScript.DEFAULT_TRANSITION_DURATION_SECONDS
 		body_support_spin_box.value = 0.0
 		curve_in_x_spin_box.value = 0.0
 		curve_in_y_spin_box.value = 0.0
@@ -3518,6 +3701,7 @@ func _refresh_summary(status_message: String = "") -> void:
 func _refresh_preview_scene(
 	grip_resolve_reason: StringName = StringName()
 ) -> void:
+	_prepared_pose_refresh_generation += 1
 	var scoped_lookup: bool = motion_node_editor.is_dragging()
 	if scoped_lookup:
 		_begin_preview_authoring_lookup_scope()
@@ -4188,7 +4372,9 @@ func _enforce_idle_authority(draft: Resource, mark_dirty: bool = false) -> bool:
 	else:
 		var raw_chain: Array = draft.get("motion_node_chain") as Array
 		if raw_chain.is_empty():
-			raw_chain.append(CombatAnimationMotionNodeScript.new())
+			var idle_node: CombatAnimationMotionNode = CombatAnimationMotionNodeScript.new()
+			idle_node.transition_duration_seconds = CombatAnimationMotionNodeScript.DEFAULT_TRANSITION_DURATION_SECONDS
+			raw_chain.append(idle_node)
 			draft_changed = true
 		while raw_chain.size() > 1:
 			raw_chain.remove_at(raw_chain.size() - 1)
@@ -4661,7 +4847,9 @@ func _build_preview_playback_state() -> Dictionary:
 	var playback_state: Dictionary = {
 		"debugger_view_enabled": debugger_view_enabled,
 	}
-	if not session_state.playback_active or not chain_player.is_playing():
+	# The finishing tick still owns the exact terminal solved frame even after
+	# advance() stops the player. _process clears playback_active after sync.
+	if not session_state.playback_active:
 		playback_state["open_mount_seed"] = _resolve_active_weapon_authored_baseline_seed(true)
 		return playback_state
 	playback_state["active"] = true
@@ -4876,15 +5064,15 @@ func _persist_active_wip(
 	status_message: String = "",
 	runtime_cache_mode: StringName = PERSIST_RUNTIME_CACHE_DIRTY_ACTIVE,
 	refresh_retarget_authoring_snapshot: bool = true
-) -> void:
+) -> bool:
 	if bool(get_meta("verification_skip_persistence", false)):
 		editor_state_dirty = false
 		if footer_status_label != null and not status_message.strip_edges().is_empty():
 			footer_status_label.text = status_message
 		_refresh_manual_save_controls()
-		return
+		return true
 	if active_wip_library == null or active_wip == null:
-		return
+		return false
 	active_wip.ensure_combat_animation_station_state()
 	if refresh_retarget_authoring_snapshot:
 		_refresh_active_station_retarget_authoring_snapshot()
@@ -4892,27 +5080,35 @@ func _persist_active_wip(
 	if _is_active_unarmed_authoring_wip():
 		_normalize_unarmed_authoring_wip(active_wip)
 		var saved_unarmed_clone: CraftedItemWIP = active_wip_library.save_unarmed_authoring_wip(active_wip)
-		if saved_unarmed_clone != null:
-			active_saved_wip_id = CraftedItemWIPScript.UNARMED_AUTHORING_WIP_ID
-			active_wip = saved_unarmed_clone
+		if saved_unarmed_clone == null:
+			editor_state_dirty = true
+			return false
+		active_saved_wip_id = CraftedItemWIPScript.UNARMED_AUTHORING_WIP_ID
+		active_wip = saved_unarmed_clone
+		saved_runtime_cache_reuse_blocked_by_grip = false
 		editor_state_dirty = false
 		_refresh_manual_save_controls()
 		if not status_message.strip_edges().is_empty():
 			footer_status_label.text = status_message
-		return
+		return true
 	var saved_clone: CraftedItemWIP = active_wip_library.save_wip(active_wip)
-	if saved_clone != null:
-		active_saved_wip_id = saved_clone.wip_id
-		active_wip.wip_id = saved_clone.wip_id
+	if saved_clone == null:
+		editor_state_dirty = true
+		return false
+	active_saved_wip_id = saved_clone.wip_id
+	active_wip.wip_id = saved_clone.wip_id
+	saved_runtime_cache_reuse_blocked_by_grip = false
 	editor_state_dirty = false
 	_refresh_manual_save_controls()
 	if not status_message.strip_edges().is_empty():
 		footer_status_label.text = status_message
+	return true
 
 func _stage_active_wip_edit(
 	status_message: String = "",
 	runtime_cache_mode: StringName = PERSIST_RUNTIME_CACHE_DIRTY_ACTIVE
 ) -> void:
+	_cancel_preview_preparation("Preview preparation cancelled by an edit. Press F to prepare current edits.")
 	if active_wip == null:
 		return
 	active_wip.ensure_combat_animation_station_state()
@@ -5053,6 +5249,48 @@ func _refresh_active_draft_runtime_clip_cache() -> Dictionary:
 	return _refresh_runtime_clip_cache_for_draft(_get_active_draft())
 
 func _refresh_runtime_clip_cache_for_draft(draft: Resource) -> Dictionary:
+	var preparation: Dictionary = _prepare_runtime_clip_cache_bake(draft)
+	if not preparation.has("runtime_clip"):
+		return preparation["result"]
+	return _complete_stored_pose_track(preparation)
+
+func _complete_stored_pose_track(preparation: Dictionary) -> Dictionary:
+	var draft: Resource = preparation["draft"]
+	var readiness: Dictionary = get_prepared_action_pose_status(draft)
+	if not bool(readiness.get("valid", false)):
+		var failed: Dictionary = preparation["result"]
+		failed["reason"] = "editing_pose_not_recorded"
+		failed["missing_node_indices"] = readiness.get("missing_node_indices", [])
+		failed["pose_readiness"] = readiness
+		return failed
+	var inputs: Resource = preparation["runtime_clip"]
+	var snapshots: Array[Dictionary] = []
+	for node: Resource in inputs.motion_node_chain:
+		snapshots.append(node.prepared_pose)
+	var built: Dictionary = PreparedPoseTrackBuilderScript.build(inputs, snapshots)
+	if not bool(built.get("valid", false)):
+		preparation["result"]["reason"] = built.get("reason", "stored_pose_interpolation_failed")
+		return preparation["result"]
+	preparation["runtime_clip"] = built["clip"]
+	var completed := {
+		"baked": true, "solved_replay_track": true,
+		"frame_count": built["clip"].get_frame_count(),
+		"processed_frames": built["clip"].get_frame_count(),
+		"bone_count": built["clip"].baked_solved_upper_body_bone_names.size(),
+		"profile": {"solved_relationships": 0, "reused_relationships": 0,
+			"stored_pose_count": snapshots.size(), "grip_ms": 0.0},
+		"interpolation_diagnostics": built.get("diagnostics", {}),
+		"source": "stored_editing_poses",
+	}
+	var result := _complete_runtime_clip_cache_bake(preparation, completed)
+	result["source"] = "stored_editing_poses"
+	result["interpolation_diagnostics"] = built.get("diagnostics", {})
+	return result
+
+func _prepare_runtime_clip_cache_bake(draft: Resource, defer_sampling: bool = false) -> Dictionary:
+	var trace_started_usec := Time.get_ticks_usec() if bool(get_meta("trace_save_latency", false)) else 0
+	var trace_step_usec := trace_started_usec
+	var timings: Dictionary = {}
 	var result := {
 		"cached": false,
 		"skipped": false,
@@ -5061,23 +5299,27 @@ func _refresh_runtime_clip_cache_for_draft(draft: Resource) -> Dictionary:
 		"upper_body_pose_track": false,
 		"solved_replay_track": false,
 	}
+	var preparation := {
+		"result": result, "draft": draft, "timings": timings,
+		"trace_started_usec": trace_started_usec,
+	}
 	if active_wip == null or runtime_clip_baker == null or preview_presenter == null:
 		result["reason"] = "missing_runtime_clip_context"
-		return result
+		return preparation
 	if draft == null:
 		result["reason"] = "no_draft"
-		return result
+		return preparation
 	if _is_noncombat_idle_draft(draft):
 		draft.set("baked_runtime_clip", null)
 		_set_draft_runtime_cache_signature(draft, "")
 		result["reason"] = "noncombat_stow_uses_body_anchor_not_hand_pose"
-		return result
-	var motion_node_chain: Array = draft.get("motion_node_chain") as Array
+		return preparation
+	var motion_node_chain: Array = draft.call("get_action_motion_node_chain") as Array
 	if motion_node_chain.is_empty():
 		draft.set("baked_runtime_clip", null)
 		_set_draft_runtime_cache_signature(draft, "")
 		result["reason"] = "empty_motion_node_chain"
-		return result
+		return preparation
 	var cache_signature: String = _build_runtime_clip_cache_signature(draft)
 	var existing_runtime_clip = draft.get("baked_runtime_clip")
 	if _can_reuse_runtime_clip_cache(draft, existing_runtime_clip, cache_signature):
@@ -5091,7 +5333,10 @@ func _refresh_runtime_clip_cache_for_draft(draft: Resource) -> Dictionary:
 				and bool(existing_runtime_clip.call("has_upper_body_pose_track"))
 			)
 			result["solved_replay_track"] = true
-			return result
+			_record_skill_render_phase(timings, "cache_validation", trace_step_usec)
+			_record_save_render_result(draft, result, timings, trace_started_usec)
+			return preparation
+	trace_step_usec = _record_skill_render_phase(timings, "cache_validation", trace_step_usec)
 	# A failed refresh must not leave an older solved track available to runtime.
 	# Authored nodes survive; only their derived pose cache is invalidated.
 	_mark_draft_runtime_clip_cache_dirty(draft)
@@ -5100,56 +5345,85 @@ func _refresh_runtime_clip_cache_for_draft(draft: Resource) -> Dictionary:
 	var playable_motion_node_chain: Array = motion_node_chain
 	var runtime_clip = existing_runtime_clip if _can_reuse_runtime_clip_cache(draft, existing_runtime_clip, cache_signature) else null
 	if runtime_clip == null:
-		if motion_node_chain.size() >= 2:
-			runtime_chain_result = _build_preview_runtime_motion_chain(motion_node_chain, trajectory_volume_config)
+		if not motion_node_chain.is_empty():
+			runtime_chain_result = _build_preview_runtime_motion_chain(motion_node_chain, trajectory_volume_config, _is_idle_draft(draft))
 			playable_motion_node_chain = runtime_chain_result.get("motion_node_chain", motion_node_chain) as Array
+		trace_step_usec = _record_skill_render_phase(timings, "compile_chain", trace_step_usec)
 		if playable_motion_node_chain.is_empty():
 			draft.set("baked_runtime_clip", null)
 			_set_draft_runtime_cache_signature(draft, "")
 			result["reason"] = "runtime_chain_empty"
-			return result
+			return preparation
 		var clip_kind: StringName = &"skill_playback"
 		if _is_idle_draft(draft):
 			clip_kind = &"idle"
-		runtime_clip = runtime_clip_baker.bake_from_motion_node_chain(
-			playable_motion_node_chain,
-			{
-				"clip_kind": clip_kind,
-				"source_draft_id": StringName(draft.get("draft_id")),
-				"source_skill_slot_id": _resolve_draft_skill_slot_id_for_runtime_cache(draft) if not _is_idle_draft(draft) else StringName(),
-				"source_idle_context_id": StringName(draft.get("context_id")) if _is_idle_draft(draft) else StringName(),
-				"source_weapon_wip_id": active_wip.wip_id,
-				"source_weapon_length_meters": _get_active_weapon_total_length(),
-				"playback_speed_scale": float(draft.get("preview_playback_speed_scale")),
-				"loop_enabled": bool(draft.get("preview_loop_enabled")),
-				"sample_rate_hz": PREVIEW_RUNTIME_CLIP_SAMPLE_RATE_HZ,
-				"trajectory_volume_config": trajectory_volume_config,
-				"compile_diagnostics": runtime_chain_result.get("diagnostics", []),
-				"degraded_node_count": int(runtime_chain_result.get("degraded_node_count", 0)),
-				"hand_swap_bridge_count": int(runtime_chain_result.get("hand_swap_bridge_count", 0)),
-				"retargeted_count": int(runtime_chain_result.get("retargeted_count", 0)),
-			}
-		)
-	if runtime_clip == null or not runtime_clip.has_method("get_frame_count") or int(runtime_clip.call("get_frame_count")) <= 0:
+		var sample_options: Dictionary = {
+			"clip_kind": clip_kind,
+			"source_draft_id": StringName(draft.get("draft_id")),
+			"source_skill_slot_id": _resolve_draft_skill_slot_id_for_runtime_cache(draft) if not _is_idle_draft(draft) else StringName(),
+			"source_idle_context_id": StringName(draft.get("context_id")) if _is_idle_draft(draft) else StringName(),
+			"source_weapon_wip_id": active_wip.wip_id,
+			"source_weapon_length_meters": _get_active_weapon_total_length(),
+			"playback_speed_scale": float(draft.get("preview_playback_speed_scale")),
+			"loop_enabled": bool(draft.get("preview_loop_enabled")),
+			"sample_rate_hz": PREVIEW_RUNTIME_CLIP_SAMPLE_RATE_HZ,
+			"trajectory_volume_config": trajectory_volume_config,
+			"compile_diagnostics": runtime_chain_result.get("diagnostics", []),
+			"degraded_node_count": int(runtime_chain_result.get("degraded_node_count", 0)),
+			"hand_swap_bridge_count": int(runtime_chain_result.get("hand_swap_bridge_count", 0)),
+			"retargeted_count": int(runtime_chain_result.get("retargeted_count", 0)),
+		}
+		if defer_sampling:
+			var sampling_started_usec := Time.get_ticks_usec()
+			var sampling_job: RefCounted = runtime_clip_baker.begin_bake_from_motion_node_chain(playable_motion_node_chain, sample_options)
+			preparation["sampling_job"] = sampling_job
+			preparation["sampling_started_usec"] = sampling_started_usec
+			preparation["sampling_setup_ms"] = float(Time.get_ticks_usec() - sampling_started_usec) / 1000.0
+			runtime_clip = sampling_job.get("clip")
+			trace_step_usec = _record_skill_render_phase(timings, "sample_setup", trace_step_usec)
+		else:
+			runtime_clip = runtime_clip_baker.bake_from_motion_node_chain(playable_motion_node_chain, sample_options)
+			trace_step_usec = _record_skill_render_phase(timings, "sample_motion", trace_step_usec)
+	if runtime_clip == null or not runtime_clip.has_method("get_frame_count") or (not defer_sampling and int(runtime_clip.call("get_frame_count")) <= 0):
 		draft.set("baked_runtime_clip", null)
 		_set_draft_runtime_cache_signature(draft, "")
 		result["reason"] = "runtime_clip_bake_failed"
-		return result
+		return preparation
 	var selected_node_index: int = clampi(
-		int(draft.get("selected_motion_node_index")),
+		int(draft.get("selected_motion_node_index")) - (0 if _is_idle_draft(draft) else 1),
 		0,
 		maxi(playable_motion_node_chain.size() - 1, 0)
 	)
-	var pose_track_result: Dictionary = preview_presenter.bake_runtime_clip_upper_body_pose_track(
-		preview_view_container,
-		preview_subviewport,
-		active_wip,
-		draft,
-		runtime_clip,
-		selected_node_index
-	)
+	preparation.merge({
+		"runtime_clip": runtime_clip, "selected_node_index": selected_node_index,
+		"cache_signature": cache_signature, "trace_step_usec": trace_step_usec,
+		"context_key": _build_runtime_pose_bake_context_key(draft),
+	})
+	return preparation
+
+func _complete_runtime_clip_cache_bake(preparation: Dictionary, pose_track_result: Dictionary) -> Dictionary:
+	var draft: Resource = preparation["draft"]
+	var runtime_clip: Resource = preparation["runtime_clip"]
+	var result: Dictionary = preparation["result"]
+	var timings: Dictionary = preparation["timings"]
+	var trace_started_usec: int = preparation["trace_started_usec"]
+	var trace_step_usec: int = preparation["trace_step_usec"]
+	var cache_signature: String = preparation["cache_signature"]
+	_record_skill_render_phase(timings, "interpolate_stored_poses", trace_step_usec)
+	result["max_slice_ms"] = float(pose_track_result.get("max_slice_ms", 0.0))
+	if trace_started_usec > 0:
+		result["profile"] = pose_track_result.get("profile", {})
+		result["duration_seconds"] = runtime_clip.get("total_duration_seconds")
+		result["sample_rate_hz"] = runtime_clip.get("sample_rate_hz")
 	if not bool(pose_track_result.get("baked", false)) or not bool(pose_track_result.get("solved_replay_track", false)):
 		result["reason"] = String(pose_track_result.get("reason", "solved_grip_replay_unavailable"))
+		_record_save_render_result(draft, result, timings, trace_started_usec)
+		return result
+	if draft != _get_active_draft() and preview_prepare_in_progress:
+		result["reason"] = "preview_source_changed"
+		return result
+	if cache_signature != _build_runtime_clip_cache_signature(draft):
+		result["reason"] = "preview_source_changed"
 		return result
 	draft.set("baked_runtime_clip", runtime_clip)
 	_set_draft_runtime_cache_signature(draft, cache_signature)
@@ -5158,7 +5432,31 @@ func _refresh_runtime_clip_cache_for_draft(draft: Resource) -> Dictionary:
 	result["upper_body_pose_track"] = bool(pose_track_result.get("baked", false))
 	result["solved_replay_track"] = bool(pose_track_result.get("solved_replay_track", false))
 	result["reason"] = String(pose_track_result.get("reason", ""))
+	result["processed_frames"] = int(pose_track_result.get("processed_frames", 0))
+	result["reused_frames"] = int(pose_track_result.get("reused_frames", 0))
+	result["completed_frames"] = int(pose_track_result.get("completed_frames", result["processed_frames"] + result["reused_frames"]))
+	_record_save_render_result(draft, result, timings, trace_started_usec)
 	return result
+
+func _record_skill_render_phase(timings: Dictionary, label: String, start_usec: int) -> int:
+	if not bool(get_meta("trace_save_latency", false)):
+		return 0
+	var now_usec := Time.get_ticks_usec()
+	timings[label] = float(now_usec - start_usec) / 1000.0
+	return now_usec
+
+func _record_save_render_result(draft: Resource, result: Dictionary, timings: Dictionary, start_usec: int) -> void:
+	if start_usec <= 0:
+		return
+	var entry := result.duplicate(true)
+	entry["draft_id"] = str(draft.get("draft_id")) if draft != null else ""
+	entry["timing_ms"] = timings
+	entry["total_ms"] = float(Time.get_ticks_usec() - start_usec) / 1000.0
+	var trace: Dictionary = get_meta("last_save_latency_trace", {})
+	var calls: Array = trace.get("render_calls", [])
+	calls.append(entry)
+	trace["render_calls"] = calls
+	set_meta("last_save_latency_trace", trace)
 
 func _can_reuse_runtime_clip_cache(draft: Resource, runtime_clip, cache_signature: String) -> bool:
 	if draft == null or runtime_clip == null or cache_signature.is_empty():
@@ -5167,6 +5465,9 @@ func _can_reuse_runtime_clip_cache(draft: Resource, runtime_clip, cache_signatur
 		return false
 	var stored_signature: String = _get_draft_runtime_cache_signature(draft)
 	if stored_signature != cache_signature:
+		return false
+	# Stored poses must still belong to the current weapon and anatomy.
+	if not bool(get_prepared_action_pose_status(draft).get("valid", false)):
 		return false
 	if not _runtime_clip_has_solved_replay_track(runtime_clip):
 		return false
@@ -5202,6 +5503,8 @@ func _runtime_clip_respects_handle_ends(runtime_clip: Resource) -> bool:
 	var available: Array = runtime_clip.get("baked_solved_replay_frame_available")
 	var hand_states: Array = runtime_clip.get("baked_two_hand_states")
 	var main_slots: Array = runtime_clip.get("baked_primary_hand_slots")
+	var weapon_rotations: PackedVector4Array = runtime_clip.get("baked_solved_weapon_rotations_reference_local")
+	var weapon_scales: PackedVector3Array = runtime_clip.get("baked_solved_weapon_scales_reference_local")
 	var frame_count: int = runtime_clip.get_frame_count()
 	if frames.size() != frame_count or available.size() != frame_count:
 		return false
@@ -5212,6 +5515,10 @@ func _runtime_clip_respects_handle_ends(runtime_clip: Resource) -> bool:
 			return false
 		var frame := {"solved_anchor_node_paths": paths,
 			"solved_anchor_positions_weapon_local": Array(frames[frame_index])}
+		if frame_index < weapon_rotations.size() and frame_index < weapon_scales.size():
+			var rotation: Vector4 = weapon_rotations[frame_index]
+			frame["solved_weapon_rotation_reference_local"] = Quaternion(rotation.x, rotation.y, rotation.z, rotation.w)
+			frame["solved_weapon_scale_reference_local"] = weapon_scales[frame_index]
 		if frame_index < hand_states.size():
 			frame["two_hand_state"] = hand_states[frame_index]
 		if frame_index < main_slots.size():
@@ -5225,16 +5532,14 @@ func _refresh_manual_save_controls(draft: Resource = null) -> void:
 	var active_draft: Resource = draft if draft != null else _get_active_draft()
 	var has_draft: bool = active_draft != null
 	var save_required: bool = has_draft and _active_draft_requires_manual_save(active_draft)
-	var can_save: bool = has_draft and save_required and not manual_save_in_progress and not chain_player.is_playing()
+	var can_save: bool = has_draft and save_required and not manual_save_in_progress and not preview_prepare_in_progress and not chain_player.is_playing()
 	if save_button != null:
 		save_button.disabled = not can_save
 	if play_preview_button != null:
 		play_preview_button.disabled = (
 			manual_save_in_progress
-			or (
-				not chain_player.is_playing()
-				and (not has_draft or save_required)
-			)
+			or preview_prepare_in_progress
+			or (not chain_player.is_playing() and not has_draft)
 		)
 
 func _active_draft_requires_manual_save(draft: Resource = null) -> bool:
@@ -5271,6 +5576,8 @@ func _active_draft_has_valid_preview_cache(draft: Resource) -> bool:
 	return _saved_draft_runtime_clip_cache_matches(draft, cache_signature)
 
 func _saved_draft_runtime_clip_cache_matches(draft: Resource, cache_signature: String) -> bool:
+	if saved_runtime_cache_reuse_blocked_by_grip:
+		return false
 	if active_wip_library == null or active_wip == null or draft == null or cache_signature.is_empty():
 		return false
 	var saved_wip_id: StringName = active_saved_wip_id
@@ -5309,10 +5616,19 @@ func _prepare_cached_preview_playback(draft: Resource, playback_speed: float, sh
 	if not _can_reuse_runtime_clip_cache(draft, runtime_clip, cache_signature):
 		return false
 	_set_draft_runtime_cache_signature(draft, cache_signature)
-	chain_player.prepare_runtime_clip(runtime_clip, playback_speed, should_loop)
+	var playback_clip: Resource = runtime_clip
+	if not _is_idle_draft(draft):
+		var incoming: Dictionary = preview_presenter.capture_entry_transition_snapshot(preview_subviewport, runtime_clip)
+		var selected: Resource = _get_active_motion_node()
+		playback_clip = EntryTransitionScript.build(runtime_clip, incoming, selected, _resolve_preview_trajectory_volume_config())
+		if playback_clip == null:
+			return false
+	chain_player.prepare_runtime_clip(playback_clip, playback_speed, should_loop)
 	return true
 
 func _restore_active_draft_runtime_clip_cache(draft: Resource, cache_signature: String) -> bool:
+	if saved_runtime_cache_reuse_blocked_by_grip:
+		return false
 	if active_wip_library == null or active_wip == null or draft == null or cache_signature.is_empty():
 		return false
 	var saved_wip_id: StringName = active_saved_wip_id
@@ -5358,10 +5674,19 @@ func _set_draft_runtime_cache_signature(draft: Resource, cache_signature: String
 func _build_runtime_clip_cache_signature(draft: Resource) -> String:
 	if draft == null:
 		return ""
+	var parts: PackedStringArray = _build_runtime_clip_cache_global_parts(draft)
+	# Reset is an editor fallback, not part of the reusable action body.
+	var motion_node_chain: Array = draft.call("get_action_motion_node_chain") as Array
+	parts.append(str(motion_node_chain.size()))
+	for motion_node_variant: Variant in motion_node_chain:
+		parts.append(_build_motion_node_runtime_cache_signature(motion_node_variant as CombatAnimationMotionNode))
+	return "|".join(parts)
+
+func _build_runtime_clip_cache_global_parts(draft: Resource) -> PackedStringArray:
 	var parts := PackedStringArray()
-	# Rebuild derived tracks that could capture pending/open fingers instead of
-	# the committed hand/weapon relationship. Authored motion is unchanged.
-	parts.append("runtime_cache_v9_grip_transition_motion")
+	# Rebuild older derived tracks with the current sampler and grip solver.
+	# Compatible prior tracks can still play in equipped runtime until rebuilt.
+	parts.append(CombatRuntimeClipScript.RUNTIME_CACHE_VERSION)
 	parts.append(String(SurfaceGripSolverScript.REVISION))
 	parts.append(String(active_wip.wip_id) if active_wip != null else "")
 	parts.append(String(draft.get("draft_id")))
@@ -5379,11 +5704,19 @@ func _build_runtime_clip_cache_signature(draft: Resource) -> String:
 	parts.append(str(snapped(float(draft.get("speed_deceleration_percent")), 0.0001)))
 	parts.append(str(snapped(_get_active_weapon_total_length(), 0.0001)))
 	parts.append(_build_active_primary_grip_path_cache_signature())
-	var motion_node_chain: Array = draft.get("motion_node_chain") as Array
-	parts.append(str(motion_node_chain.size()))
-	for motion_node_variant: Variant in motion_node_chain:
-		parts.append(_build_motion_node_runtime_cache_signature(motion_node_variant as CombatAnimationMotionNode))
-	return "|".join(parts)
+	return parts
+
+func _build_runtime_pose_bake_context_key(draft: Resource) -> String:
+	# Node/frame signatures belong to the bake job. Keep this common context
+	# independent of the selected node so an unchanged rendered prefix can survive R.
+	# The current shoulder/pivot projection config only builds sampled inputs;
+	# the job compares those inputs directly and restores its own rig checkpoint.
+	return var_to_bytes([
+		_build_runtime_clip_cache_global_parts(draft),
+		active_preview_dominant_slot_id, active_preview_default_two_hand,
+		active_wip.get_instance_id(), active_wip.grip_style_mode,
+		active_wip.latest_baked_profile_snapshot.get_instance_id() if active_wip.latest_baked_profile_snapshot != null else 0,
+	]).hex_encode().sha256_text()
 
 func _build_active_primary_grip_path_cache_signature() -> String:
 	if active_wip == null or active_wip.latest_baked_profile_snapshot == null:
@@ -5455,6 +5788,8 @@ func _build_motion_node_runtime_cache_signature(motion_node: CombatAnimationMoti
 	parts.append(str(motion_node.grip_style_transition_source_pommel_local))
 	parts.append(String(motion_node.grip_style_transition_origin_id))
 	parts.append(_build_retarget_node_runtime_cache_signature(motion_node.retarget_node))
+	parts.append(motion_node.prepared_pose_signature)
+	parts.append(var_to_bytes(motion_node.prepared_pose).hex_encode().sha256_text())
 	return ",".join(parts)
 
 func _build_retarget_node_runtime_cache_signature(retarget_node: Resource) -> String:
@@ -5533,6 +5868,13 @@ func _apply_motion_node_change(
 func _manual_save_active_editor_state() -> void:
 	if manual_save_in_progress:
 		return
+	_cancel_preview_preparation()
+	set_meta("last_save_terminal_handoff", {})
+	var trace_enabled := bool(get_meta("trace_save_latency", false))
+	var trace_started_usec := Time.get_ticks_usec() if trace_enabled else 0
+	var trace_step_usec := trace_started_usec
+	if trace_enabled:
+		set_meta("last_save_latency_trace", {"phases": [], "render_calls": []})
 	var draft: Resource = _get_active_draft()
 	if active_wip == null or active_wip_library == null or draft == null:
 		if footer_status_label != null:
@@ -5542,17 +5884,26 @@ func _manual_save_active_editor_state() -> void:
 		if footer_status_label != null:
 			footer_status_label.text = "Stop preview playback before saving."
 		return
+	capture_selected_prepared_pose()
 	if not _active_draft_requires_manual_save(draft):
 		_refresh_manual_save_controls(draft)
 		_set_manual_save_progress(100.0, "Already saved. Preview ready.", true)
 		if footer_status_label != null:
 			footer_status_label.text = "Already saved. Preview ready."
 		return
+	trace_step_usec = _record_save_latency_phase("preflight", trace_step_usec)
+	var save_source_wip: CraftedItemWIP = active_wip
+	var save_generation: int = preview_prepare_generation
 	manual_save_in_progress = true
 	manual_save_start_msec = Time.get_ticks_msec()
 	_refresh_manual_save_controls(draft)
 	_set_manual_save_progress(5.0, "Preparing save...")
+	trace_step_usec = _record_save_latency_phase("begin_and_controls", trace_step_usec)
 	await get_tree().process_frame
+	trace_step_usec = _record_save_latency_phase("frame_wait_before_edit", trace_step_usec)
+	if not _manual_save_source_is_current(save_source_wip, draft, save_generation):
+		_abort_manual_save_preparation("The draft changed before saving. Save the current edits again.")
+		return
 	if motion_node_editor.is_dragging():
 		motion_node_editor.end_drag()
 	_finalize_preview_drag("")
@@ -5564,37 +5915,77 @@ func _manual_save_active_editor_state() -> void:
 		if footer_status_label != null:
 			footer_status_label.text = "No active skill draft to save."
 		return
+	save_generation = preview_prepare_generation
+	trace_step_usec = _record_save_latency_phase("finish_active_edit", trace_step_usec)
 	_set_manual_save_progress(20.0, "Refreshing authoring data...")
 	active_wip.ensure_combat_animation_station_state()
-	_refresh_active_station_retarget_authoring_snapshot()
-	await get_tree().process_frame
-	var bake_selection_key := _grip_bake_selection_key()
-	var grip_bake_context: Dictionary = preview_presenter.capture_grip_before_bake(preview_subviewport, bake_selection_key)
-	_set_manual_save_progress(45.0, "Building preview cache...")
+	while _preview_grip_acquisition_is_pending():
+		_set_manual_save_progress(20.0, "Waiting for the current edit's grip...")
+		await get_tree().process_frame
+		if not _manual_save_source_is_current(save_source_wip, draft, save_generation):
+			_abort_manual_save_preparation("The draft changed during save preparation. Save the current edits again.")
+			return
+	var capture: Dictionary = capture_selected_prepared_pose(true)
+	while String(capture.get("reason", "")) == "prepared_pose_settling":
+		await get_tree().process_frame
+		if not _manual_save_source_is_current(save_source_wip, draft, save_generation):
+			_abort_manual_save_preparation("The draft changed during save preparation. Save the current edits again.")
+			return
+		capture = capture_selected_prepared_pose(true)
+	trace_step_usec = _record_save_latency_phase("capture_editing_pose", trace_step_usec)
+	_set_manual_save_progress(45.0, "Preparing stored motion poses...")
 	var cache_result: Dictionary = _refresh_active_draft_runtime_clip_cache()
+	trace_step_usec = _record_save_latency_phase("active_skill_render", trace_step_usec)
 	var cache_ready: bool = bool(cache_result.get("cached", false))
 	var cache_reason: String = String(cache_result.get("reason", "unknown"))
 	if cache_ready and not _is_idle_draft(draft):
-		_set_manual_save_progress(65.0, "Preparing equipped combat idle...")
-		var combat_idle: Resource = _get_existing_combat_idle_draft()
-		var idle_result: Dictionary = _refresh_runtime_clip_cache_for_draft(combat_idle)
+		_set_manual_save_progress(65.0, "Preparing stored combat idle...")
+		var idle_result: Dictionary = _refresh_runtime_clip_cache_for_draft(_get_existing_combat_idle_draft())
+		trace_step_usec = _record_save_latency_phase("combat_idle_render", trace_step_usec)
 		if not bool(idle_result.get("cached", false)):
 			cache_ready = false
-			cache_reason = "combat_idle: %s" % String(idle_result.get("reason", "unknown"))
-	# Baking visits other frames/drafts without changing the authored selection.
-	# Restore the visible selection even if a temporary bake context failed.
-	# Failed bakes use ordinary queued acquisition; only ready clips reuse a grip.
-	_refresh_preview_scene()
-	if bool(cache_result.get("cached", false)):
-		var restored: Dictionary = preview_presenter.restore_grip_after_bake(preview_subviewport, grip_bake_context, _grip_bake_selection_key())
-		if not bool(restored.get("valid", false)):
-			cache_ready = false
-			cache_reason = "preview_restore: %s" % String(restored.get("reason", "unknown"))
+			cache_reason = "combat_idle: %s (visit Combat Idle once to record its pose)" % String(idle_result.get("reason", "unknown"))
 	await get_tree().process_frame
+	trace_step_usec = _record_save_latency_phase("frame_wait_before_file", trace_step_usec)
+	if not _manual_save_source_is_current(save_source_wip, draft, save_generation):
+		_abort_manual_save_preparation("The draft changed before the file write. Save the current edits again.")
+		return
 	_set_manual_save_progress(85.0, "Writing save file...")
-	_persist_active_wip("", PERSIST_RUNTIME_CACHE_KEEP, false)
+	var persisted: bool = _persist_active_wip("", PERSIST_RUNTIME_CACHE_KEEP, false)
+	trace_step_usec = _record_save_latency_phase("file_saving", trace_step_usec)
+	if not persisted:
+		manual_save_in_progress = false
+		editor_state_dirty = true
+		var failure_text := "Save failed. Changes remain unsaved."
+		_set_manual_save_progress(0.0, failure_text, true)
+		_refresh_manual_save_controls()
+		if footer_status_label != null:
+			footer_status_label.text = failure_text
+		if trace_enabled:
+			var failed_trace: Dictionary = get_meta("last_save_latency_trace", {})
+			failed_trace.merge({"persisted": false, "failure_reason": "library_persistence_failed",
+				"cache_ready": cache_ready, "cache_reason": cache_reason, "completion_text": failure_text,
+				"total_ms": float(Time.get_ticks_usec() - trace_started_usec) / 1000.0}, true)
+			set_meta("last_save_latency_trace", failed_trace)
+		return
+	# Unarmed persistence can replace its live clone synchronously. Subsequent
+	# changes still must match the generation that authorized this save.
+	save_source_wip = active_wip
+	draft = _get_active_draft()
 	await get_tree().process_frame
+	trace_step_usec = _record_save_latency_phase("frame_wait_after_file", trace_step_usec)
 	manual_save_in_progress = false
+	if not _manual_save_source_is_current(save_source_wip, draft, save_generation):
+		# Persistence already completed. Leave newer dirty state and its current
+		# editor selection intact instead of applying the old save's completion UI.
+		_set_manual_save_progress(0.0, "", false)
+		_refresh_manual_save_controls()
+		if trace_enabled:
+			var changed_trace: Dictionary = get_meta("last_save_latency_trace", {})
+			changed_trace.merge({"source_changed_after_write": true, "persisted": true, "cache_ready": cache_ready,
+				"cache_reason": cache_reason, "total_ms": float(Time.get_ticks_usec() - trace_started_usec) / 1000.0}, true)
+			set_meta("last_save_latency_trace", changed_trace)
+		return
 	var elapsed_seconds: float = float(Time.get_ticks_msec() - manual_save_start_msec) / 1000.0
 	var completion_text: String = (
 		"Saved in %.2fs. Preview ready." % elapsed_seconds
@@ -5602,12 +5993,46 @@ func _manual_save_active_editor_state() -> void:
 		else "Saved in %.2fs. Preview cache needs review: %s" % [elapsed_seconds, cache_reason]
 	)
 	_set_manual_save_progress(100.0, completion_text, true)
-	editor_state_dirty = false
 	_refresh_manual_save_controls(draft)
 	_refresh_editor_fields()
 	_refresh_summary(completion_text)
 	if footer_status_label != null:
 		footer_status_label.text = completion_text
+	if trace_enabled:
+		_record_save_latency_phase("final_editor_refresh", trace_step_usec)
+		var trace: Dictionary = get_meta("last_save_latency_trace", {})
+		trace["total_ms"] = float(Time.get_ticks_usec() - trace_started_usec) / 1000.0
+		trace["persisted"] = true
+		trace["cache_ready"] = cache_ready
+		trace["cache_reason"] = cache_reason
+		trace["completion_text"] = completion_text
+		set_meta("last_save_latency_trace", trace)
+
+func _manual_save_source_is_current(source_wip: CraftedItemWIP, draft: Resource, generation: int) -> bool:
+	return is_inside_tree() and panel.visible and workflow_step == WORKFLOW_STEP_EDITOR \
+		and active_wip == source_wip and _get_active_draft() == draft and preview_prepare_generation == generation
+
+func _abort_manual_save_preparation(reason: String) -> void:
+	manual_save_in_progress = false
+	_set_manual_save_progress(0.0, "Save cancelled: " + reason, true)
+	_refresh_manual_save_controls()
+	if footer_status_label != null:
+		footer_status_label.text = "Save cancelled: " + reason
+	if bool(get_meta("trace_save_latency", false)):
+		var trace: Dictionary = get_meta("last_save_latency_trace", {})
+		trace.merge({"aborted": true, "cache_ready": false, "cache_reason": reason}, true)
+		set_meta("last_save_latency_trace", trace)
+
+func _record_save_latency_phase(label: String, start_usec: int) -> int:
+	if not bool(get_meta("trace_save_latency", false)):
+		return 0
+	var now_usec := Time.get_ticks_usec()
+	var trace: Dictionary = get_meta("last_save_latency_trace", {})
+	var phases: Array = trace.get("phases", [])
+	phases.append({"label": label, "ms": float(now_usec - start_usec) / 1000.0})
+	trace["phases"] = phases
+	set_meta("last_save_latency_trace", trace)
+	return now_usec
 
 func _grip_bake_selection_key() -> String:
 	var draft: Resource = _get_active_draft()
@@ -5702,6 +6127,7 @@ func _clear_preview_drag_override() -> void:
 	_invalidate_preview_drag_motion_chain_cache()
 
 func _begin_preview_drag_override(source_motion_node: CombatAnimationMotionNode) -> void:
+	_cancel_preview_preparation("Preview preparation cancelled by an edit. Press F to prepare current edits.")
 	if source_motion_node == null:
 		preview_drag_override_node = null
 		preview_drag_has_moved = false
@@ -6296,6 +6722,7 @@ func _duplicate_or_build_motion_node(source_node: CombatAnimationMotionNode) -> 
 		new_node = source_node.duplicate_node()
 	else:
 		new_node = CombatAnimationMotionNodeScript.new()
+		new_node.transition_duration_seconds = CombatAnimationMotionNodeScript.DEFAULT_TRANSITION_DURATION_SECONDS
 		var geometry_seed: Dictionary = _resolve_active_weapon_authored_baseline_seed()
 		_apply_motion_seed_to_motion_node(new_node, geometry_seed)
 	if new_node != null:
@@ -6839,32 +7266,166 @@ func _toggle_preview_playback() -> void:
 	if chain_player.is_playing():
 		chain_player.stop()
 		session_state.playback_active = false
+		_refresh_manual_save_controls()
 		footer_status_label.text = "Preview stopped."
 		return
+	if manual_save_in_progress:
+		footer_status_label.text = "Wait for the current save to finish."
+		return
+	if preview_prepare_in_progress:
+		footer_status_label.text = "Preview preparation is already in progress."
+		return
+	if motion_node_editor.is_dragging():
+		motion_node_editor.end_drag()
+	_finalize_preview_drag("")
 	var draft: Resource = _get_active_draft()
-	if draft == null:
+	if active_wip == null or draft == null:
 		footer_status_label.text = "No active draft to preview."
 		return
-	var motion_node_chain: Array = draft.get("motion_node_chain") as Array
-	if motion_node_chain.size() < 2:
-		footer_status_label.text = "Need at least 2 motion nodes to preview."
+	var motion_node_chain: Array = draft.call("get_action_motion_node_chain") as Array
+	if motion_node_chain.is_empty():
+		footer_status_label.text = "Need at least one visible motion node to preview."
 		return
-	var playback_speed: float = float(draft.get("preview_playback_speed_scale"))
-	var should_loop: bool = bool(draft.get("preview_loop_enabled"))
-	if _active_draft_requires_manual_save(draft):
-		_refresh_manual_save_controls(draft)
-		footer_status_label.text = "Save current edits before previewing."
+	capture_selected_prepared_pose()
+	# Validate the existing authored snapshot before rebuilding retarget data.
+	# That rebuild uses the currently posed shoulder/reach and can change node
+	# signatures even though the user has made no edits since the last render.
+	if not _preview_grip_acquisition_is_pending() and _prepare_cached_preview_playback(draft, float(draft.get("preview_playback_speed_scale")), bool(draft.get("preview_loop_enabled"))):
+		_start_prepared_preview_playback()
 		return
-	if not _prepare_cached_preview_playback(draft, playback_speed, should_loop):
-		_refresh_manual_save_controls(draft)
-		footer_status_label.text = "Preview cache is missing or stale. Save current edits before previewing."
-		return
+	active_wip.ensure_combat_animation_station_state()
+	preview_prepare_generation += 1
+	preview_prepare_in_progress = true
+	_refresh_manual_save_controls(draft)
+	_set_manual_save_progress(0.0, "Preparing preview...")
+	footer_status_label.text = "Preparing preview..."
+	_prepare_preview_replay.call_deferred(
+		preview_prepare_generation, active_wip, draft, _build_runtime_clip_cache_signature(draft)
+	)
+
+func _start_prepared_preview_playback() -> void:
 	chain_player.start()
 	session_state.playback_active = true
 	_sync_preview_playback_pose_only()
+	_refresh_manual_save_controls()
 	footer_status_label.text = "Preview playing... (F to stop)"
 
-func _build_preview_runtime_motion_chain(motion_node_chain: Array, trajectory_volume_config: Dictionary) -> Dictionary:
+func _cancel_preview_preparation(status_message: String = "") -> void:
+	preview_prepare_generation += 1
+	if not preview_prepare_in_progress:
+		return
+	if preview_prepare_job != null:
+		preview_prepare_job.call("cancel")
+	preview_prepare_job = null
+	preview_prepare_in_progress = false
+	set_meta("last_preview_prepare_result", {"cached": false, "cancelled": true, "reason": "preview_request_cancelled"})
+	_set_manual_save_progress(0.0, "", false)
+	_refresh_manual_save_controls()
+	if footer_status_label != null and not status_message.is_empty():
+		footer_status_label.text = status_message
+
+func _preview_prepare_request_is_current(generation: int, source_wip: CraftedItemWIP, draft: Resource, source_signature: String) -> bool:
+	var current: bool = (
+		preview_prepare_in_progress and generation == preview_prepare_generation
+		and is_inside_tree() and panel.visible and workflow_step == WORKFLOW_STEP_EDITOR
+		and active_wip == source_wip and _get_active_draft() == draft
+		and source_signature == _build_runtime_clip_cache_signature(draft)
+	)
+	if not current and generation == preview_prepare_generation:
+		_cancel_preview_preparation("Preview preparation cancelled because the draft changed. Press F to try again.")
+	return current
+
+func _preview_grip_acquisition_is_pending() -> bool:
+	return preview_presenter.is_grip_acquisition_pending(preview_subviewport)
+
+func _prepare_preview_replay(generation: int, source_wip: CraftedItemWIP, draft: Resource, source_signature: String) -> void:
+	# This is an explicit F request. Preparing never persists the WIP or clears
+	# its dirty state, and an intervening edit cancels the request rather than
+	# starting playback later against the user's newly selected pose.
+	if not _preview_prepare_request_is_current(generation, source_wip, draft, source_signature):
+		return
+	# Only finish work already started by editing. Replay itself never acquires a
+	# grip, visits authored poses, or refreshes pose-dependent authoring inputs.
+	while _preview_grip_acquisition_is_pending():
+		footer_status_label.text = "Waiting for the current edit's grip..."
+		await get_tree().process_frame
+		if not _preview_prepare_request_is_current(generation, source_wip, draft, source_signature):
+			return
+	var capture: Dictionary = capture_selected_prepared_pose(true)
+	while String(capture.get("reason", "")) == "prepared_pose_settling":
+		await get_tree().process_frame
+		if not _preview_prepare_request_is_current(generation, source_wip, draft, source_signature):
+			return
+		capture = capture_selected_prepared_pose(true)
+	# This request may have recorded its selected endpoint, not changed its controls.
+	source_signature = _build_runtime_clip_cache_signature(draft)
+	var input_preparation_started_usec := Time.get_ticks_usec()
+	var preparation: Dictionary = _prepare_runtime_clip_cache_bake(draft, true)
+	var cache_result: Dictionary = preparation["result"]
+	cache_result["input_preparation_ms"] = float(Time.get_ticks_usec() - input_preparation_started_usec) / 1000.0
+	cache_result["input_preparation_phases_ms"] = (preparation["timings"] as Dictionary).duplicate(true)
+	if preparation.has("sampling_job"):
+		var sampling_job: RefCounted = preparation["sampling_job"]
+		preview_prepare_job = sampling_job
+		var sampled_clip: Resource = preparation["runtime_clip"]
+		var estimated_total: int = maxi(int(ceil(float(sampled_clip.get("total_duration_seconds")) * float(sampled_clip.get("sample_rate_hz")))) + 1, 1)
+		var sampling_result: Dictionary = {}
+		var sampling_work_usec: int = 0
+		set_meta("last_preview_prepare_progress", {"stage": "sampling", "sampled_frames": 0, "estimated_total_frames": estimated_total})
+		_set_manual_save_progress(0.0, "Sampling preview motion...")
+		# Give input/camera events a turn after compilation and before sampling.
+		await get_tree().process_frame
+		while true:
+			if not _preview_prepare_request_is_current(generation, source_wip, draft, source_signature):
+				return
+			var sampling_step_started_usec := Time.get_ticks_usec()
+			sampling_result = sampling_job.call("step", PREVIEW_PREPARE_BUDGET_USEC)
+			sampling_work_usec += Time.get_ticks_usec() - sampling_step_started_usec
+			sampling_result["stage"] = "sampling"
+			sampling_result["estimated_total_frames"] = estimated_total
+			var sampled: int = int(sampling_result.get("sampled_frames", 0))
+			var sampling_text := "Sampling preview motion: %d frames..." % sampled
+			_set_manual_save_progress(100.0 * float(sampled) / float(estimated_total), sampling_text)
+			footer_status_label.text = sampling_text
+			set_meta("last_preview_prepare_progress", sampling_result.duplicate(true))
+			if bool(sampling_result.get("done", false)):
+				break
+			await get_tree().process_frame
+		cache_result["input_sampling"] = sampling_result.duplicate(true)
+		cache_result["input_sampling"]["setup_ms"] = preparation["sampling_setup_ms"]
+		cache_result["input_sampling"]["work_ms"] = float(sampling_work_usec) / 1000.0
+		cache_result["input_sampling"]["wall_ms"] = float(Time.get_ticks_usec() - int(preparation["sampling_started_usec"])) / 1000.0
+		var timings: Dictionary = preparation["timings"]
+		timings["sample_motion_work"] = float(sampling_work_usec) / 1000.0
+		timings["sample_motion_wall"] = cache_result["input_sampling"]["wall_ms"]
+		if bool(sampling_result.get("cancelled", false)) or int(sampled_clip.call("get_frame_count")) <= 0:
+			cache_result["reason"] = "runtime_clip_sampling_cancelled" if bool(sampling_result.get("cancelled", false)) else "runtime_clip_bake_failed"
+			preparation.erase("runtime_clip")
+		# Sampling owns only its private clip. No draft cache is published here.
+		await get_tree().process_frame
+		if not _preview_prepare_request_is_current(generation, source_wip, draft, source_signature):
+			return
+	if preparation.has("runtime_clip"):
+		preparation["trace_step_usec"] = Time.get_ticks_usec() if bool(get_meta("trace_save_latency", false)) else 0
+		cache_result = _complete_stored_pose_track(preparation)
+	preview_prepare_job = null
+	preview_prepare_in_progress = false
+	set_meta("last_preview_prepare_result", cache_result.duplicate(true))
+	_refresh_manual_save_controls(draft)
+	if not bool(cache_result.get("cached", false)):
+		var failure_text := "Preview preparation failed: %s" % String(cache_result.get("reason", "unknown"))
+		if cache_result.get("reason") == "editing_pose_not_recorded":
+			failure_text = "Visit motion nodes %s and let their grips finish once, then press F." % str(cache_result.get("missing_node_indices", []))
+		_set_manual_save_progress(0.0, failure_text)
+		footer_status_label.text = failure_text
+		return
+	if not _prepare_cached_preview_playback(draft, float(draft.get("preview_playback_speed_scale")), bool(draft.get("preview_loop_enabled"))):
+		footer_status_label.text = "Preview preparation is stale. Press F to prepare current edits."
+		return
+	_set_manual_save_progress(100.0, "Preview ready. Unsaved edits remain." if editor_state_dirty else "Preview ready.")
+	_start_prepared_preview_playback()
+
+func _build_preview_runtime_motion_chain(motion_node_chain: Array, trajectory_volume_config: Dictionary, is_idle: bool = false) -> Dictionary:
 	var result: Dictionary = {
 		"compiled": false,
 		"motion_node_chain": motion_node_chain,
@@ -6873,24 +7434,30 @@ func _build_preview_runtime_motion_chain(motion_node_chain: Array, trajectory_vo
 		"hand_swap_bridge_count": 0,
 		"retargeted_count": 0,
 	}
-	if runtime_chain_compiler == null or motion_node_chain.size() < 2:
+	if runtime_chain_compiler == null or motion_node_chain.is_empty():
 		return result
 	var dominant_slot_id: StringName = active_preview_dominant_slot_id
 	if dominant_slot_id == StringName():
 		dominant_slot_id = HAND_SLOT_RIGHT
 	var support_slot_id: StringName = HAND_SLOT_LEFT if dominant_slot_id == HAND_SLOT_RIGHT else HAND_SLOT_RIGHT
 	var support_hand_available: bool = true
-	var compile_result: Dictionary = runtime_chain_compiler.compile_skill_chain(
-		motion_node_chain,
-		_get_active_weapon_total_length(),
-		trajectory_volume_config,
-		{
-			"support_hand_available": support_hand_available,
-			"two_hand_allowed": active_preview_default_two_hand and support_hand_available,
-			"dominant_slot_id": dominant_slot_id,
-			"support_slot_id": support_slot_id,
-		}
-	)
+	var equipment_context: Dictionary = {
+		"support_hand_available": support_hand_available,
+		"two_hand_allowed": active_preview_default_two_hand and support_hand_available,
+		"dominant_slot_id": dominant_slot_id,
+		"support_slot_id": support_slot_id,
+	}
+	var compile_result: Dictionary
+	if is_idle:
+		# Single-node idle uses the same derived equipment-hand authority as
+		# equipped gameplay. The compiler leaves its authored node unchanged.
+		compile_result = runtime_chain_compiler.compile_idle_chain(
+			motion_node_chain, _get_active_weapon_total_length(), trajectory_volume_config, equipment_context
+		)
+	else:
+		compile_result = runtime_chain_compiler.compile_skill_chain(
+			motion_node_chain, _get_active_weapon_total_length(), trajectory_volume_config, equipment_context
+		)
 	if bool(compile_result.get("compiled", false)):
 		return compile_result
 	return result
@@ -7968,7 +8535,10 @@ func _get_preview_root() -> Node3D:
 	return preview_subviewport.get_node_or_null("CombatAnimationPreviewRoot3D") as Node3D
 
 func _get_active_weapon_total_length() -> float:
-	var geometry_seed: Dictionary = _resolve_active_weapon_motion_seed()
+	# Geometry owns length in meters, including the forge's authored scale.
+	# Mounting projects endpoints through posed world/authoring frames; measuring
+	# that result introduces pose-dependent roundoff into clip identity.
+	var geometry_seed: Dictionary = _resolve_active_weapon_geometry_seed_base()
 	if not geometry_seed.is_empty():
 		var weapon_total_length_meters: float = float(geometry_seed.get("weapon_total_length_meters", 0.0))
 		if weapon_total_length_meters > 0.001:

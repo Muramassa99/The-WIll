@@ -4,6 +4,7 @@ class_name CombatAnimationRuntimeChainCompiler
 const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
 const CombatAnimationRetargetResolverScript = preload("res://core/resolvers/combat_animation_retarget_resolver.gd")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+const CombatPreparedPoseScript = preload("res://core/models/combat_prepared_pose.gd")
 
 const DIAG_TWO_HAND_DEGRADED: StringName = &"two_hand_degraded_to_one_hand"
 const DIAG_AUTO_TWO_HAND_RESOLVED_ONE_HAND: StringName = &"auto_two_hand_resolved_one_hand"
@@ -24,9 +25,9 @@ func compile_skill_chain(
 		current_weapon_length_meters,
 		volume_config,
 		equipment_context,
-		2,
+		1,
 		&"too_few_runtime_nodes",
-		"Runtime chain needs at least 2 motion nodes."
+		"Runtime action needs at least 1 destination motion node."
 	)
 
 func compile_idle_chain(
@@ -216,10 +217,27 @@ func _nodes_need_primary_hand_swap_bridge(from_node, to_node) -> bool:
 	var to_slot: StringName = CombatAnimationMotionNodeScript.normalize_primary_hand_slot(to_node.primary_hand_slot)
 	if from_slot == CombatAnimationMotionNodeScript.PRIMARY_HAND_AUTO or to_slot == CombatAnimationMotionNodeScript.PRIMARY_HAND_AUTO:
 		return false
+	# Captured endpoints already own both arms and the weapon. Interpolate the
+	# two authored poses directly; a cloned source pose with a different hand
+	# label would invent an unsolved destination and add unauthored time.
+	if _has_current_prepared_pose(from_node) and _has_current_prepared_pose(to_node):
+		return false
 	return from_slot != to_slot
+
+func _has_current_prepared_pose(motion_node) -> bool:
+	var snapshot: Dictionary = motion_node.prepared_pose
+	return (
+		not motion_node.prepared_pose_signature.is_empty()
+		and motion_node.prepared_pose_signature == CombatPreparedPoseScript.node_pose_signature(motion_node)
+		and bool(CombatPreparedPoseScript.validate(snapshot).get("valid", false))
+	)
 
 func _build_primary_hand_swap_bridge(from_node, to_node, two_hand_allowed: bool):
 	var bridge_node = from_node.duplicate(true)
+	# Legacy bridges remain controls for the legacy path. They cannot inherit a
+	# stored pose captured for a different hand relationship.
+	bridge_node.prepared_pose = {}
+	bridge_node.prepared_pose_signature = ""
 	bridge_node.node_id = StringName("generated_primary_hand_swap_%02d" % int(to_node.node_index))
 	bridge_node.transition_duration_seconds = HAND_SWAP_BRIDGE_DURATION_SECONDS
 	bridge_node.tip_curve_in_handle = Vector3.ZERO

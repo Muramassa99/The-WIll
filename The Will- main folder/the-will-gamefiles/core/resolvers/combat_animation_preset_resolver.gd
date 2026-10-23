@@ -152,7 +152,7 @@ func _build_motion_node_from_resolved_values(
 	motion_node.body_support_blend = float(resolved_values.get("body_support_blend", 0.0))
 	motion_node.right_upperarm_roll_degrees = float(resolved_values.get("right_upperarm_roll_degrees", 0.0))
 	motion_node.left_upperarm_roll_degrees = float(resolved_values.get("left_upperarm_roll_degrees", 0.0))
-	motion_node.transition_duration_seconds = float(resolved_values.get("transition_duration_seconds", motion_node.transition_duration_seconds))
+	motion_node.transition_duration_seconds = float(resolved_values.get("transition_duration_seconds", CombatAnimationMotionNodeScript.DEFAULT_TRANSITION_DURATION_SECONDS))
 	motion_node.preferred_grip_style_mode = StringName(resolved_values.get("preferred_grip_style_mode", &"grip_normal"))
 	motion_node.two_hand_state = StringName(resolved_values.get("two_hand_state", CombatAnimationMotionNodeScript.TWO_HAND_STATE_AUTO))
 	motion_node.primary_hand_slot = CombatAnimationMotionNodeScript.normalize_primary_hand_slot(StringName(resolved_values.get(

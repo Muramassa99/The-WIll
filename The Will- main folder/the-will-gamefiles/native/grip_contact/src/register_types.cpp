@@ -6,6 +6,7 @@
 #include "grip_topology_kernel.h"
 #include "grip_pose_surface_kernel.h"
 #include "grip_skin_point_kernel.h"
+#include "combat_body_collision_kernel.h"
 
 #include <godot_cpp/godot.hpp>
 #include <godot_cpp/variant/vector2.hpp>
@@ -26,6 +27,7 @@ void initialize_grip_contact(ModuleInitializationLevel level) {
     GDREGISTER_CLASS(GripTopologyKernel);
     GDREGISTER_CLASS(GripPoseSurfaceKernel);
     GDREGISTER_CLASS(GripSkinPointKernel);
+    GDREGISTER_CLASS(CombatBodyCollisionKernel);
 }
 
 void uninitialize_grip_contact(ModuleInitializationLevel level) {

@@ -3,12 +3,17 @@ class_name CombatRuntimeClipBaker
 
 const CombatRuntimeClipScript = preload("res://core/models/combat_runtime_clip.gd")
 const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
-const CombatAnimationChainPlayerScript = preload("res://runtime/combat/combat_animation_chain_player.gd")
+const CombatRuntimeClipSampleJobScript = preload("res://core/resolvers/combat_runtime_clip_sample_job.gd")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
-const DEFAULT_SAMPLE_RATE_HZ := 30.0
+const DEFAULT_SAMPLE_RATE_HZ := CombatRuntimeClipScript.SAMPLE_RATE_HZ
 
 func bake_from_motion_node_chain(motion_node_chain: Array, options: Dictionary = {}):
+	var job: RefCounted = begin_bake_from_motion_node_chain(motion_node_chain, options)
+	job.step(0)
+	return job.clip
+
+func begin_bake_from_motion_node_chain(motion_node_chain: Array, options: Dictionary = {}) -> RefCounted:
 	var clip = CombatRuntimeClipScript.new()
 	clip.clip_kind = StringName(options.get("clip_kind", CombatRuntimeClipScript.CLIP_KIND_SKILL_PLAYBACK))
 	clip.clip_id = _resolve_clip_id(clip.clip_kind, options)
@@ -40,12 +45,7 @@ func bake_from_motion_node_chain(motion_node_chain: Array, options: Dictionary =
 	clip.baked_solved_anchor_origin_id = StringName(options.get("baked_solved_anchor_origin_id", CombatOriginRecordScript.ORIGIN_WEAPON_ROOT))
 	clip.motion_node_chain = _duplicate_motion_node_chain(motion_node_chain)
 	clip.total_duration_seconds = _resolve_total_duration_seconds(clip.motion_node_chain)
-	_sample_clip_frames(
-		clip,
-		trajectory_volume_config
-	)
-	clip.normalize()
-	return clip
+	return CombatRuntimeClipSampleJobScript.new(self, clip, trajectory_volume_config)
 
 func build_tip_curve(motion_node_chain: Array) -> Curve3D:
 	var curve := Curve3D.new()
@@ -113,35 +113,8 @@ func _resolve_total_duration_seconds(motion_node_chain: Array) -> float:
 	return total_duration
 
 func _sample_clip_frames(clip, trajectory_volume_config: Dictionary) -> void:
-	_clear_frame_data(clip)
-	if clip.motion_node_chain.is_empty():
-		return
-	if clip.motion_node_chain.size() == 1:
-		_append_motion_node_frame(clip, clip.motion_node_chain[0] as CombatAnimationMotionNode, 0.0)
-		return
-	var chain_player: CombatAnimationChainPlayer = CombatAnimationChainPlayerScript.new()
-	chain_player.prepare(
-		clip.motion_node_chain,
-		build_tip_curve(clip.motion_node_chain),
-		build_pommel_curve(clip.motion_node_chain),
-		1.0,
-		false,
-		trajectory_volume_config
-	)
-	chain_player.start()
-	_append_chain_player_frame(clip, chain_player, 0.0)
-	var sample_step: float = 1.0 / maxf(clip.sample_rate_hz, 1.0)
-	var elapsed_seconds := 0.0
-	var total_duration: float = maxf(clip.total_duration_seconds, 0.0)
-	while elapsed_seconds + sample_step < total_duration - 0.0001:
-		elapsed_seconds += sample_step
-		chain_player.advance(sample_step)
-		_append_chain_player_frame(clip, chain_player, elapsed_seconds)
-	var final_delta: float = maxf(total_duration - elapsed_seconds, 0.0)
-	if final_delta > 0.0001 and chain_player.is_playing():
-		chain_player.advance(final_delta)
-	if clip.baked_frame_times.is_empty() or absf(clip.baked_frame_times[clip.baked_frame_times.size() - 1] - total_duration) > 0.0001:
-		_append_chain_player_frame(clip, chain_player, total_duration)
+	var job: RefCounted = CombatRuntimeClipSampleJobScript.new(self, clip, trajectory_volume_config)
+	job.step(0)
 
 func _clear_frame_data(clip) -> void:
 	clip.baked_frame_times.clear()

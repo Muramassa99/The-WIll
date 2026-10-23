@@ -2,6 +2,7 @@ extends Resource
 class_name CombatAnimationDraft
 
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+const CombatRuntimeClipScript = preload("res://core/models/combat_runtime_clip.gd")
 
 const DRAFT_KIND_SKILL: StringName = &"draft_skill"
 const DRAFT_KIND_IDLE: StringName = &"draft_idle"
@@ -22,10 +23,12 @@ const LEGACY_SKILL_NODE_1_TIP := Vector3(0.0, 0.0, -0.12)
 const LEGACY_SKILL_NODE_1_POMMEL := Vector3(0.0, 0.0, -0.12)
 const LEGACY_SKILL_NODE_1_TIP_CURVE_IN := Vector3(0.0, 0.0, 0.04)
 const LEGACY_BASELINE_EPSILON := 0.0001
-const DEFAULT_NODE_TRANSITION_DURATION_SECONDS := 0.18
+const LEGACY_NODE_TRANSITION_DURATION_SECONDS := CombatAnimationMotionNode.LEGACY_SERIALIZED_TRANSITION_DURATION_SECONDS
+const DEFAULT_NODE_TRANSITION_DURATION_SECONDS := CombatAnimationMotionNode.DEFAULT_TRANSITION_DURATION_SECONDS
 const DEFAULT_SPEED_ACCELERATION_PERCENT := 35.0
 const DEFAULT_SPEED_DECELERATION_PERCENT := 35.0
 const DEFAULT_STOW_CONTACT_RATIO := 0.5
+const ACTION_EDITOR_PLACEHOLDER_META: StringName = &"action_editor_reset_placeholder"
 
 @export var draft_id: StringName = &""
 @export var display_name: String = ""
@@ -37,7 +40,33 @@ const DEFAULT_STOW_CONTACT_RATIO := 0.5
 @export var stow_anchor_mode: StringName = STOW_ANCHOR_SHOULDER_HANGING
 @export_range(0.0, 1.0, 0.01) var stow_contact_ratio: float = DEFAULT_STOW_CONTACT_RATIO
 @export var authored_for_two_hand_only: bool = false
+# Editor/legacy representation: skills retain a hidden Reset placeholder at 0.
+# Ordinary Resource.duplicate(true) must preserve it. Persistence opts into the
+# separate action representation below, which excludes that placeholder.
 @export var motion_node_chain: Array[Resource] = []
+@export_storage var action_motion_node_chain: Array[Resource] = []:
+	get:
+		return get_action_motion_node_chain()
+	set(value):
+		var editor_chain: Array[Resource] = []
+		if draft_kind == DRAFT_KIND_SKILL and not value.is_empty():
+			# Reset obtains its real baseline from the weapon setup. Loading an
+			# action must not invent a preceding pose or overwrite visible node 1.
+			var reset_placeholder: Resource = _build_default_motion_node(0, Vector3.ZERO, Vector3.ZERO) as Resource
+			if reset_placeholder != null:
+				reset_placeholder.set_meta(ACTION_EDITOR_PLACEHOLDER_META, true)
+				editor_chain.append(reset_placeholder)
+		editor_chain.append_array(value)
+		motion_node_chain = editor_chain
+@export_storage var action_baseline_signature: String = "":
+	get:
+		if not _loaded_action_baseline_signature.is_empty():
+			return _loaded_action_baseline_signature
+		if draft_kind == DRAFT_KIND_SKILL and (not is_publishable_skill_draft() or needs_weapon_geometry_seed()):
+			return _build_action_baseline_signature()
+		return ""
+	set(value):
+		_loaded_action_baseline_signature = value
 @export var baked_runtime_clip: Resource = null
 @export var runtime_cache_signature: String = ""
 @export var selected_motion_node_index: int = 0
@@ -50,6 +79,76 @@ const DEFAULT_STOW_CONTACT_RATIO := 0.5
 @export var skill_icon: Texture2D
 @export var skill_description: String = ""
 @export_multiline var draft_notes: String = ""
+
+var _action_storage_depth: int = 0
+var _loaded_action_baseline_signature: String = ""
+
+func get_action_motion_node_chain() -> Array[Resource]:
+	# Return a separate array; nodes remain authored Resources. Runtime compilers
+	# duplicate them before applying equipment/legality changes.
+	var action_chain: Array[Resource] = []
+	var first_index: int = 1 if draft_kind == DRAFT_KIND_SKILL else 0
+	for node_index: int in range(first_index, motion_node_chain.size()):
+		action_chain.append(motion_node_chain[node_index])
+	return action_chain
+
+func begin_action_storage() -> void:
+	# The library brackets synchronous ResourceSaver calls with this mode.
+	# Direct ResourceSaver users must do the same; normal deep copies retain
+	# their editor Reset state and never use the persistence-only property.
+	_action_storage_depth += 1
+	if _action_storage_depth == 1:
+		notify_property_list_changed()
+
+func end_action_storage() -> void:
+	_action_storage_depth = maxi(_action_storage_depth - 1, 0)
+	if _action_storage_depth == 0:
+		notify_property_list_changed()
+
+func _validate_property(property: Dictionary) -> void:
+	var property_name: StringName = StringName(property.get("name", ""))
+	var store_action: bool = _action_storage_depth > 0 and draft_kind == DRAFT_KIND_SKILL
+	if (
+		(property_name == &"motion_node_chain" and store_action)
+		or (property_name == &"action_motion_node_chain" and not store_action)
+	):
+		property["usage"] = int(property["usage"]) & ~PROPERTY_USAGE_STORAGE
+	elif (
+		_action_storage_depth > 0
+		and property_name in [&"baked_runtime_clip", &"runtime_cache_signature"]
+		and not runtime_cache_signature.begins_with(CombatRuntimeClipScript.RUNTIME_CACHE_VERSION + "|")
+	):
+		# Old prepared tracks may still contain the Reset-to-node-1 segment.
+		# Omit them from the new save without clearing a live editor's Resources.
+		property["usage"] = int(property["usage"]) & ~PROPERTY_USAGE_STORAGE
+
+func _has_action_editor_placeholder() -> bool:
+	return (
+		draft_kind == DRAFT_KIND_SKILL
+		and not motion_node_chain.is_empty()
+		and motion_node_chain[0] != null
+		and bool(motion_node_chain[0].get_meta(ACTION_EDITOR_PLACEHOLDER_META, false))
+	)
+
+func _build_action_baseline_signature() -> String:
+	# Preserve the distinction between an untouched slot and a one-pose skill
+	# without storing its old Reset coordinates. Derived retarget Resources and
+	# editor numbering are deliberately outside authored-content identity.
+	var values: Array = []
+	for motion_node: Resource in get_action_motion_node_chain():
+		var node_values: Array = []
+		if motion_node != null:
+			for property: Dictionary in motion_node.get_property_list():
+				var property_name: StringName = StringName(property.name)
+				if (
+					(int(property.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE) == 0
+					or (int(property.usage) & PROPERTY_USAGE_STORAGE) == 0
+					or property_name in [&"node_id", &"node_index", &"retarget_node", &"prepared_pose", &"prepared_pose_signature"]
+				):
+					continue
+				node_values.append([property_name, motion_node.get(property_name)])
+		values.append(node_values)
+	return var_to_bytes(values).hex_encode().sha256_text()
 
 static func get_draft_kind_ids() -> Array[StringName]:
 	return [
@@ -173,6 +272,7 @@ static func _build_default_motion_node(
 	var motion_node = node_script.new() if node_script != null else null
 	if motion_node == null:
 		return null
+	motion_node.transition_duration_seconds = DEFAULT_NODE_TRANSITION_DURATION_SECONDS
 	var resolved_tip_origin_id: StringName = _normalize_motion_node_position_origin_id(tip_position_origin_id)
 	var resolved_pommel_origin_id: StringName = _normalize_motion_node_position_origin_id(pommel_position_origin_id)
 	motion_node.node_index = index
@@ -214,6 +314,7 @@ func normalize() -> void:
 			motion_node = node_script.new() if node_script != null else null
 			if motion_node == null:
 				continue
+			motion_node.set("transition_duration_seconds", DEFAULT_NODE_TRANSITION_DURATION_SECONDS)
 			motion_node_chain[node_index] = motion_node
 		motion_node.set("node_index", node_index)
 		if motion_node.has_method("normalize"):
@@ -232,6 +333,7 @@ func ensure_minimum_baseline_nodes() -> void:
 	if not motion_node_chain.is_empty():
 		normalize()
 		return
+	_loaded_action_baseline_signature = ""
 	if draft_kind == DRAFT_KIND_IDLE:
 		var default_idle_origin_id: StringName = _resolve_default_motion_node_origin_id(draft_kind, context_id)
 		var default_idle_nodes: Array[Resource] = []
@@ -261,6 +363,15 @@ func ensure_minimum_baseline_nodes() -> void:
 func needs_weapon_geometry_seed() -> bool:
 	if motion_node_chain.is_empty():
 		return true
+	if (
+		_has_action_editor_placeholder()
+		and motion_node_chain.size() == 2
+		and not _loaded_action_baseline_signature.is_empty()
+		and _loaded_action_baseline_signature == _build_action_baseline_signature()
+	):
+		var first_pose: CombatAnimationMotionNode = motion_node_chain[1] as CombatAnimationMotionNode
+		if first_pose != null and first_pose.tip_position_local.is_equal_approx(first_pose.pommel_position_local):
+			return true
 	var minimum_node_count: int = 1 if draft_kind == DRAFT_KIND_IDLE else 2
 	if motion_node_chain.size() != minimum_node_count:
 		return false
@@ -324,6 +435,7 @@ func apply_weapon_geometry_seed(seed_data: Dictionary, force_reseed: bool = fals
 	var baseline_count: int = 1 if draft_kind == DRAFT_KIND_IDLE else 2
 	preferred_grip_style_mode = preferred_grip_mode
 	authored_for_two_hand_only = authored_two_hand_only
+	_loaded_action_baseline_signature = ""
 	motion_node_chain.clear()
 	for node_index: int in range(baseline_count):
 		var motion_node = _build_default_motion_node(
@@ -374,6 +486,7 @@ func reset_authoring_baseline(seed_data: Dictionary = {}) -> bool:
 	return reset_to_default_baseline()
 
 func reset_to_default_baseline() -> bool:
+	_loaded_action_baseline_signature = ""
 	motion_node_chain.clear()
 	selected_motion_node_index = 0
 	continuity_motion_node_index = 0
@@ -474,6 +587,14 @@ func is_publishable_skill_draft() -> bool:
 		return true
 	if not String(draft_notes).strip_edges().is_empty():
 		return true
+	if _has_action_editor_placeholder():
+		return (
+			not get_action_motion_node_chain().is_empty()
+			and (
+				_loaded_action_baseline_signature.is_empty()
+				or _loaded_action_baseline_signature != _build_action_baseline_signature()
+			)
+		)
 	if _matches_legacy_skill_baseline():
 		return false
 	if motion_node_chain.size() != 2:
@@ -557,9 +678,18 @@ func _matches_clean_skill_seed_pair(node_0: CombatAnimationMotionNode, node_1: C
 		and node_1.primary_hand_slot == CombatAnimationMotionNode.PRIMARY_HAND_AUTO
 		and node_0.preferred_grip_style_mode == &"grip_normal"
 		and node_1.preferred_grip_style_mode == &"grip_normal"
-		and absf(node_0.transition_duration_seconds - DEFAULT_NODE_TRANSITION_DURATION_SECONDS) <= LEGACY_BASELINE_EPSILON
-		and absf(node_1.transition_duration_seconds - DEFAULT_NODE_TRANSITION_DURATION_SECONDS) <= LEGACY_BASELINE_EPSILON
+		and _matches_clean_seed_transition_durations(node_0, node_1)
 	)
+
+func _matches_clean_seed_transition_durations(node_0: CombatAnimationMotionNode, node_1: CombatAnimationMotionNode) -> bool:
+	# Recognize untouched seeds from either default without rewriting authored timing.
+	for default_duration: float in [DEFAULT_NODE_TRANSITION_DURATION_SECONDS, LEGACY_NODE_TRANSITION_DURATION_SECONDS]:
+		if (
+			absf(node_0.transition_duration_seconds - default_duration) <= LEGACY_BASELINE_EPSILON
+			and absf(node_1.transition_duration_seconds - default_duration) <= LEGACY_BASELINE_EPSILON
+		):
+			return true
+	return false
 
 func _matches_clean_grip_seat_slide(value: float) -> bool:
 	return (

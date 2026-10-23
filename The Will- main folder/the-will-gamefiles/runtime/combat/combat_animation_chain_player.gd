@@ -7,6 +7,7 @@ signal node_reached(node_index: int)
 const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
 const CombatAnimationTrajectoryVolumeResolverScript = preload("res://core/resolvers/combat_animation_trajectory_volume_resolver.gd")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
+const GripTransitionResolver = preload("res://core/resolvers/combat_grip_transition_resolver.gd")
 
 const CURVE_INTERVAL_EPSILON_METERS := 0.000001
 const CURVE_SEGMENT_SAMPLE_STEPS := 12
@@ -32,6 +33,7 @@ var _total_pommel_length: float = 0.0
 var _clip_elapsed: float = 0.0
 var _clip_frame_index: int = 0
 var _clip_total_duration: float = 0.0
+var _clip_entry_duration: float = 0.0
 
 var current_tip_position: Vector3 = Vector3.ZERO
 var current_tip_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
@@ -117,6 +119,11 @@ func prepare_runtime_clip(clip, playback_speed: float = 1.0, should_loop: bool =
 	_clip_elapsed = 0.0
 	_clip_frame_index = 0
 	_clip_total_duration = _resolve_runtime_clip_total_duration()
+	_clip_entry_duration = 0.0
+	if clip != null and clip.has_meta("entry_duration_seconds"):
+		var requested_entry: float = float(clip.get_meta("entry_duration_seconds"))
+		if is_finite(requested_entry):
+			_clip_entry_duration = clampf(requested_entry, 0.0, _clip_total_duration)
 	_sync_runtime_clip_upper_body_bone_names()
 	_sync_runtime_clip_solved_replay_metadata()
 	_sync_runtime_clip_origin_metadata()
@@ -155,7 +162,7 @@ func advance(delta: float) -> void:
 	if not _playing or motion_node_chain.size() < 2:
 		return
 	_segment_elapsed += delta * speed_scale
-	var segment_duration: float = _segment_durations[_current_segment_index] if _current_segment_index < _segment_durations.size() else 0.18
+	var segment_duration: float = _segment_durations[_current_segment_index] if _current_segment_index < _segment_durations.size() else CombatAnimationMotionNodeScript.DEFAULT_TRANSITION_DURATION_SECONDS
 	if segment_duration <= 0.00001:
 		segment_duration = 0.01
 	while _segment_elapsed >= segment_duration:
@@ -173,7 +180,7 @@ func advance(delta: float) -> void:
 				_playing = false
 				playback_finished.emit()
 				return
-		segment_duration = _segment_durations[_current_segment_index] if _current_segment_index < _segment_durations.size() else 0.18
+		segment_duration = _segment_durations[_current_segment_index] if _current_segment_index < _segment_durations.size() else CombatAnimationMotionNodeScript.DEFAULT_TRANSITION_DURATION_SECONDS
 		if segment_duration <= 0.00001:
 			segment_duration = 0.01
 	var ratio: float = clampf(_segment_elapsed / segment_duration, 0.0, 1.0)
@@ -188,10 +195,23 @@ func _advance_runtime_clip(delta: float) -> void:
 			_playing = false
 			playback_finished.emit()
 		return
-	_clip_elapsed += delta * speed_scale
+	# Entry uses wall time. Only the action body follows the authored playback
+	# speed; a frame crossing the boundary must preserve its unused wall time.
+	var remaining_delta: float = maxf(delta, 0.0)
+	if _clip_elapsed < _clip_entry_duration:
+		var entry_delta: float = minf(remaining_delta, _clip_entry_duration - _clip_elapsed)
+		_clip_elapsed += entry_delta
+		remaining_delta -= entry_delta
+	_clip_elapsed += remaining_delta * speed_scale
 	while _clip_elapsed >= _clip_total_duration:
 		if loop_enabled:
-			_clip_elapsed -= _clip_total_duration
+			var body_duration: float = _clip_total_duration - _clip_entry_duration
+			if body_duration <= 0.000001:
+				# A one-pose action holds its destination after the one live entry.
+				_clip_elapsed = _clip_total_duration
+				_apply_runtime_clip_frame(int(runtime_clip.call("get_frame_count")) - 1)
+				return
+			_clip_elapsed = _clip_entry_duration + fposmod(_clip_elapsed - _clip_entry_duration, body_duration)
 			_clip_frame_index = 0
 			node_reached.emit(0)
 		else:
@@ -780,7 +800,7 @@ func _build_segment_data() -> void:
 	_total_pommel_length = _resolve_safe_curve_baked_length(pommel_curve)
 	for node_index: int in range(motion_node_chain.size()):
 		var motion_node: CombatAnimationMotionNode = motion_node_chain[node_index] as CombatAnimationMotionNode
-		var duration: float = motion_node.transition_duration_seconds if motion_node != null else 0.18
+		var duration: float = motion_node.transition_duration_seconds if motion_node != null else CombatAnimationMotionNodeScript.DEFAULT_TRANSITION_DURATION_SECONDS
 		_segment_durations.append(maxf(duration, 0.01))
 		if tip_curve != null and tip_curve.point_count > node_index:
 			var tip_offset_fallback: float = _segment_tip_offsets[_segment_tip_offsets.size() - 1] if not _segment_tip_offsets.is_empty() else 0.0
@@ -1156,15 +1176,29 @@ func _resolve_unshaped_grip_swap_arc(from_node: CombatAnimationMotionNode,
 		if (pivot + end_rotation * (source_tip - pivot)).distance_to(to_node.tip_position_local) > 0.00005 or (pivot + end_rotation * (source_pommel - pivot)).distance_to(to_node.pommel_position_local) > 0.00005:
 			return {}
 	var progress := clampf(ratio, 0.0, 1.0)
-	var rotation := Basis(flip_axis, PI * progress)
-	var tip := pivot + rotation * (source_tip - pivot)
-	var pommel := pivot + rotation * (source_pommel - pivot)
+	var arc: Dictionary = GripTransitionResolver.sample_endpoint_arc(source_tip, source_pommel,
+		pivot, flip_axis, progress, from_node.tip_position_origin_id)
+	if not arc.get("valid", false):
+		return {}
+	var rotation: Basis = arc.rotation
+	var tip: Vector3 = arc.tip_position
+	var pommel: Vector3 = arc.pommel_position
 	var forward := (tip - pommel).normalized()
 	var roll := lerpf(from_node.weapon_roll_degrees, to_node.weapon_roll_degrees, progress)
-	var unrolled_up := flip_axis.rotated(forward, -deg_to_rad(roll))
+	# The signed anatomical flip axis is not the weapon's material up direction.
+	# Rotate the source weapon up as well, or changing hands/direction injects an
+	# unrelated half-turn of weapon Roll at the start of the prescribed flip.
+	var source_forward: Vector3 = (source_tip - source_pommel).normalized()
+	var source_up: Vector3 = Basis.from_euler(_resolve_effective_weapon_orientation_degrees(from_node) * (PI / 180.0)) * Vector3.UP
+	source_up -= source_forward * source_up.dot(source_forward)
+	if source_up.length_squared() <= 0.00000001:
+		source_up = flip_axis
+	source_up = source_up.normalized().rotated(source_forward, deg_to_rad(from_node.weapon_roll_degrees))
+	var unrolled_up: Vector3 = (rotation * source_up).rotated(forward, -deg_to_rad(roll))
 	return {"tip_position": tip, "pommel_position": pommel,
 		"weapon_orientation_degrees": Quaternion(Vector3.UP, unrolled_up.normalized()).get_euler() * (180.0 / PI),
-		"fixed_pivot": pivot}
+		"fixed_pivot": pivot, "midpoint_tip_position": arc.midpoint_tip_position,
+		"midpoint_pommel_position": arc.midpoint_pommel_position}
 
 func _resolve_fixed_pivot_grip_swap_sample(
 	from_node: CombatAnimationMotionNode,

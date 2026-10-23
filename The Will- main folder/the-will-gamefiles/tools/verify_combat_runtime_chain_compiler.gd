@@ -13,6 +13,8 @@ func _init() -> void:
 func _run_verification() -> void:
 	var compiler = CombatAnimationRuntimeChainCompilerScript.new()
 	var authored_chain: Array = _build_authored_chain()
+	var authored_first_tip_before: Vector3 = authored_chain[0].tip_position_local
+	var authored_first_pommel_before: Vector3 = authored_chain[0].pommel_position_local
 	var authored_second_before = authored_chain[1]
 	var volume_config: Dictionary = {
 		"origin_local": Vector3.ZERO,
@@ -49,6 +51,8 @@ func _run_verification() -> void:
 		{
 			"support_hand_available": false,
 			"two_hand_allowed": false,
+			"dominant_slot_id": CombatAnimationMotionNodeScript.PRIMARY_HAND_LEFT,
+			"support_slot_id": CombatAnimationMotionNodeScript.PRIMARY_HAND_RIGHT,
 		}
 	)
 	var blocked_chain: Array = blocked_result.get("motion_node_chain", []) as Array
@@ -111,6 +115,16 @@ func _run_verification() -> void:
 		and _result_origin_metadata_ok(allowed_result)
 		and _result_origin_metadata_ok(idle_result)
 	)
+	var idle_equipment_primary_authority_ok: bool = (
+		idle_single_node_compile_ok
+		and idle_chain[0].primary_hand_slot == CombatAnimationMotionNodeScript.PRIMARY_HAND_LEFT
+		and int(idle_result.get("equipment_primary_hand_override_count", 0)) == 1
+		and _diagnostics_have_code(idle_result.get("diagnostics", []) as Array, &"equipment_primary_hand_authority_applied")
+		and authored_chain[0].primary_hand_slot == CombatAnimationMotionNodeScript.PRIMARY_HAND_RIGHT
+		and authored_chain[0].tip_position_local == authored_first_tip_before
+		and authored_chain[0].pommel_position_local == authored_first_pommel_before
+		and not bool(idle_result.get("saved_authoring_mutated", true))
+	)
 	var compiled_node_origin_ids_ok: bool = (
 		_chain_origin_ids_ok(blocked_chain)
 		and _chain_origin_ids_ok(allowed_chain)
@@ -125,6 +139,7 @@ func _run_verification() -> void:
 		and hand_swap_bridge_ok
 		and retarget_ok
 		and idle_single_node_compile_ok
+		and idle_equipment_primary_authority_ok
 		and origin_metadata_ok
 		and compiled_node_origin_ids_ok
 	)
@@ -138,6 +153,7 @@ func _run_verification() -> void:
 	lines.append("hand_swap_bridge_ok=%s" % str(hand_swap_bridge_ok))
 	lines.append("retarget_ok=%s" % str(retarget_ok))
 	lines.append("idle_single_node_compile_ok=%s" % str(idle_single_node_compile_ok))
+	lines.append("idle_equipment_primary_authority_ok=%s" % str(idle_equipment_primary_authority_ok))
 	lines.append("origin_metadata_ok=%s" % str(origin_metadata_ok))
 	lines.append("compiled_node_origin_ids_ok=%s" % str(compiled_node_origin_ids_ok))
 	lines.append("blocked_degraded_node_count=%d" % int(blocked_result.get("degraded_node_count", -1)))

@@ -10,6 +10,10 @@ const PersistentResourceStateIOScript = preload("res://core/models/persistent_re
 @export var save_file_path: String = DEFAULT_SAVE_FILE_PATH
 @export var wip_id_generation_sequence: int = 0
 
+# Opt-in diagnostics: deliberately not exported into the saved library.
+var trace_save_latency: bool = false
+var last_save_latency_trace: Dictionary = {}
+
 static func load_or_create(save_path: String = DEFAULT_SAVE_FILE_PATH):
 	var library = PersistentResourceStateIOScript.load_or_create(save_path, "res://core/models/player_forge_wip_library_state.gd")
 	if library != null:
@@ -99,6 +103,9 @@ func get_saved_draft_runtime_clip_cache(
 	return result
 
 func save_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
+	var trace_started_usec := Time.get_ticks_usec() if trace_save_latency else 0
+	if trace_save_latency:
+		last_save_latency_trace = {"success": false, "library_wip_count": saved_wips.size()}
 	if source_wip == null:
 		return null
 	if CraftedItemWIP.is_unarmed_authoring_wip(source_wip):
@@ -106,7 +113,11 @@ func save_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 	if not CraftedItemWIP.is_forge_v2_authoring_wip(source_wip):
 		return null
 	_discard_retired_wips()
+	var clone_started_usec := Time.get_ticks_usec() if trace_save_latency else 0
 	var saved_clone: CraftedItemWIP = source_wip.duplicate(true) as CraftedItemWIP
+	var clone_finished_usec := Time.get_ticks_usec() if trace_save_latency else 0
+	if trace_save_latency:
+		last_save_latency_trace["duplicate_in_ms"] = float(clone_finished_usec - clone_started_usec) / 1000.0
 	var resolved_wip_id: StringName = _resolve_saved_wip_id(saved_clone)
 	saved_clone.wip_id = resolved_wip_id
 	saved_clone.forge_project_name = _resolve_forge_project_name(saved_clone)
@@ -131,14 +142,25 @@ func save_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 	else:
 		saved_wips.append(saved_clone)
 	selected_wip_id = resolved_wip_id
-	if not persist():
+	var persist_started_usec := Time.get_ticks_usec() if trace_save_latency else 0
+	var persisted := persist()
+	var persist_finished_usec := Time.get_ticks_usec() if trace_save_latency else 0
+	if trace_save_latency:
+		last_save_latency_trace["prepare_library_ms"] = float(persist_started_usec - clone_finished_usec) / 1000.0
+		last_save_latency_trace["serialize_write_ms"] = float(persist_finished_usec - persist_started_usec) / 1000.0
+		last_save_latency_trace["success"] = persisted
+	if not persisted:
 		selected_wip_id = previous_selected_wip_id
 		if existing_index >= 0:
 			saved_wips[existing_index] = previous_saved_wip
 		else:
 			saved_wips.remove_at(saved_wips.size() - 1)
 		return null
-	return saved_clone.duplicate(true) as CraftedItemWIP
+	var returned_clone := saved_clone.duplicate(true) as CraftedItemWIP
+	if trace_save_latency:
+		last_save_latency_trace["duplicate_out_ms"] = float(Time.get_ticks_usec() - persist_finished_usec) / 1000.0
+		last_save_latency_trace["total_ms"] = float(Time.get_ticks_usec() - trace_started_usec) / 1000.0
+	return returned_clone
 
 func save_unarmed_authoring_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 	if source_wip == null:
@@ -253,7 +275,37 @@ func set_selected_wip_id(saved_wip_id: StringName, persist_selection: bool = tru
 
 func persist() -> bool:
 	_discard_retired_wips()
-	return PersistentResourceStateIOScript.persist_resource(self, save_file_path)
+	var storage_drafts: Array[Resource] = _begin_draft_action_storage()
+	var saved: bool = PersistentResourceStateIOScript.persist_resource(self, save_file_path)
+	# ResourceSaver is synchronous. Restore editor/deep-copy semantics on both
+	# success and failure; no authored node array was modified for serialization.
+	for draft: Resource in storage_drafts:
+		draft.call("end_action_storage")
+	return saved
+
+func _begin_draft_action_storage() -> Array[Resource]:
+	var storage_drafts: Array[Resource] = []
+	var seen_drafts: Dictionary = {}
+	var source_wips: Array[CraftedItemWIP] = saved_wips.duplicate()
+	if unarmed_authoring_wip != null:
+		source_wips.append(unarmed_authoring_wip)
+	for source_wip: CraftedItemWIP in source_wips:
+		if source_wip == null or source_wip.combat_animation_station_state == null:
+			continue
+		var station: Resource = source_wip.combat_animation_station_state
+		for property_name: StringName in [&"skill_drafts", &"idle_drafts"]:
+			var drafts: Array = station.get(property_name) as Array
+			for draft_variant: Variant in drafts:
+				var draft: Resource = draft_variant as Resource
+				if draft == null or not draft.has_method("begin_action_storage"):
+					continue
+				var instance_id: int = draft.get_instance_id()
+				if seen_drafts.has(instance_id):
+					continue
+				seen_drafts[instance_id] = true
+				draft.call("begin_action_storage")
+				storage_drafts.append(draft)
+	return storage_drafts
 
 func _discard_retired_wips() -> void:
 	var retained_wips: Array[CraftedItemWIP] = []

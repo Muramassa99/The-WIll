@@ -5,6 +5,7 @@ extends Node
 const Acquisition = preload("res://runtime/player/grip/saved_wrapper_grip_acquisition.gd")
 const CharacterData = preload("res://runtime/player/grip/character_grip_data.gd")
 const Capture = preload("res://runtime/player/grip/capture_grip_placement_stage.gd")
+const MotionRebase = preload("res://runtime/player/grip/grip_acquisition_motion_rebase.gd")
 const Origins = preload("res://core/models/combat_origin_record.gd")
 const Chronology = preload("res://runtime/player/grip/grip_chronology.gd")
 const HingeRules = preload("res://runtime/player/player_digit_hinge_rules.gd")
@@ -14,6 +15,12 @@ const FRAME_GUARD_M := 0.000005
 const SEAT_IDENTITY_GRID_M := 0.0000001
 const ACQUISITION_METHOD := &"surface_contact_v6"
 const ACTIVE_DIGITS := [&"index", &"middle", &"ring", &"pinky"]
+const RENDER_CHECKPOINT_FIELDS := [
+	&"_requests", &"_queue", &"_serial", &"_settle_ready", &"_support_macro_primary_serial",
+	&"_last_key_change_frame", &"_started_usec", &"_status", &"_slots", &"_dominant",
+	&"_pose_epoch", &"_primary_seat", &"_replay_pose_cache", &"_support_motion_snapshot",
+	&"_support_motion_clamp_count", &"_last_support_motion_clamp",
+]
 signal primary_seat_applied(weapon: Node3D, actor: Node3D)
 
 var _actor: Node3D
@@ -43,6 +50,107 @@ var _support_motion_snapshot: Dictionary = {}
 var _restoring_support_motion := false
 var _support_motion_clamp_count := 0
 var _last_support_motion_clamp: Dictionary = {}
+var _replay_preparation_context: Dictionary = {}
+
+## These tokens are private, in-memory continuations of this exact owner. They
+## include the cache at this frame: later acquisitions must not leak backward.
+func capture_render_checkpoint() -> Dictionary:
+	if not _render_checkpoint_idle():
+		return {}
+	var identity := _render_checkpoint_identity()
+	if identity.is_empty():
+		return {}
+	var saved_state: Dictionary = {}
+	for property: StringName in RENDER_CHECKPOINT_FIELDS:
+		var value: Variant = get(property)
+		saved_state[property] = value.duplicate(true) if value is Dictionary or value is Array else value
+	return {"identity": identity, "state": saved_state}
+
+func can_restore_render_checkpoint(snapshot: Dictionary) -> bool:
+	if not _render_checkpoint_idle() or not snapshot.get("identity") is Dictionary or not snapshot.get("state") is Dictionary:
+		return false
+	var identity := _render_checkpoint_identity()
+	if identity.is_empty() or snapshot.identity != identity:
+		return false
+	var saved_state: Dictionary = snapshot.state
+	for property: StringName in RENDER_CHECKPOINT_FIELDS:
+		if not saved_state.has(property) or typeof(saved_state[property]) != typeof(get(property)):
+			return false
+	if not saved_state[&"_queue"].is_empty():
+		return false
+	if not bool(identity.get("configured", true)):
+		for property: StringName in [&"_requests", &"_status", &"_slots", &"_primary_seat", &"_replay_pose_cache", &"_support_motion_snapshot"]:
+			if not saved_state[property].is_empty():
+				return false
+		if saved_state[&"_dominant"] != StringName() or saved_state[&"_settle_ready"]:
+			return false
+	for control: Variant in saved_state[&"_support_motion_snapshot"].get("controls", []):
+		if not control is Dictionary or not is_instance_valid(control.get("node")):
+			return false
+	return true
+
+func restore_render_checkpoint(snapshot: Dictionary) -> bool:
+	if not can_restore_render_checkpoint(snapshot):
+		return false
+	_restore_render_checkpoint_after_preflight(snapshot)
+	return true
+
+## Internal commit only, immediately after the coordinator's complete preflight.
+## Do not call across a yield or after running a solver/ownership transaction.
+func _restore_render_checkpoint_after_preflight(snapshot: Dictionary) -> void:
+	for property: StringName in RENDER_CHECKPOINT_FIELDS:
+		var value: Variant = snapshot.state[property]
+		set(property, value.duplicate(true) if value is Dictionary or value is Array else value)
+	# The coordinator restores scene/rig values separately, after preflighting
+	# all owners. No solve, pose application, skeleton update or signal here.
+	_publish()
+
+func _render_checkpoint_idle() -> bool:
+	var idle: bool = not _busy and not _closing and _job == null and _running_slot == StringName() \
+		and _queue.is_empty() and not _restoring_support_motion and _replay_preparation_context.is_empty()
+	if not idle or is_queued_for_deletion():
+		return false
+	if _render_checkpoint_unconfigured():
+		return _actor == null or (is_instance_valid(_actor) and not _actor.is_queued_for_deletion())
+	if not (is_instance_valid(_actor) and is_instance_valid(_weapon) and is_instance_valid(_skeleton) \
+		and not _actor.is_queued_for_deletion() and not _weapon.is_queued_for_deletion() \
+		and not _skeleton.is_queued_for_deletion() and _data.get("valid", false)):
+		return false
+	var support_transaction: Variant = _actor.get("_prepared_support_grip_seat")
+	return support_transaction is Dictionary and support_transaction.is_empty()
+
+func _render_checkpoint_unconfigured() -> bool:
+	# clear() deliberately keeps the owner node for later reuse. This is a
+	# distinct idle state, never interchangeable with a configured checkpoint.
+	return _weapon == null and _skeleton == null and _data.is_empty() \
+		and _requests.is_empty() and _queue.is_empty() and _slots.is_empty() \
+		and _status.is_empty() and not _settle_ready \
+		and _dominant == StringName() and _meshes.is_empty() and _primary_seat.is_empty() \
+		and _replay_pose_cache.is_empty() and _support_motion_snapshot.is_empty()
+
+func is_render_checkpoint_idle() -> bool:
+	return _render_checkpoint_idle()
+
+func _render_checkpoint_identity() -> Dictionary:
+	if _render_checkpoint_unconfigured():
+		return {"owner": get_instance_id(), "owner_parent": get_parent(), "configured": false,
+			"actor": _actor.get_instance_id() if is_instance_valid(_actor) else 0}
+	if not is_instance_valid(_actor) or not is_instance_valid(_weapon) or not is_instance_valid(_skeleton):
+		return {}
+	var anatomy: Resource = _data.get("anatomy") as Resource
+	if anatomy == null:
+		return {}
+	var geometry: Array = []
+	for child: Node in _weapon.get_children():
+		if child is MeshInstance3D and child.mesh != null and child.get_meta("visual_mesh_source", StringName()) == &"editable_mesh":
+			geometry.append([child.get_instance_id(), child.mesh.get_instance_id(), child.transform])
+	if geometry.is_empty():
+		return {}
+	return {"owner": get_instance_id(), "owner_parent": get_parent(), "configured": true, "actor": _actor.get_instance_id(),
+		"actor_parent": _actor.get_parent(), "weapon": _weapon.get_instance_id(), "weapon_parent": _weapon.get_parent(),
+		"skeleton": _skeleton.get_instance_id(), "skeleton_parent": _skeleton.get_parent(),
+		"skeleton_version": _skeleton.get_version(), "geometry_epoch": _geometry_epoch, "geometry": geometry,
+		"anatomy_signature": anatomy.get("source_signature"), "config": _data.config.duplicate(true)}
 
 ## A cached primary relationship must be visible to the macro pose on the same
 ## frame that changes style/station. Restore only its validated local binding;
@@ -79,12 +187,45 @@ func restore_cached_primary_binding_for_replay() -> Dictionary:
 ## editing. Rigid motion reuses a committed local grip; changed stations solve
 ## once per relationship instead of recording pending/open fingers.
 func prepare_replay_grip(slots: Array[StringName], dominant: StringName) -> Dictionary:
-	if _busy:
+	if _busy or _job != null or _running_slot != StringName() or _closing \
+		or _restoring_support_motion or not _replay_preparation_context.is_empty():
 		return {"valid": false, "reason": "grip_acquisition_pending"}
 	if not is_instance_valid(_actor) or not is_instance_valid(_weapon) or not _data.get("valid", false):
 		return {"valid": false, "reason": "missing_replay_grip_context"}
 	if slots.is_empty() or dominant not in slots:
 		return {"valid": false, "reason": "missing_replay_grip_slots"}
+	_replay_preparation_context = {"actor": _actor, "weapon": _weapon, "skeleton": _skeleton,
+		"geometry_epoch": _geometry_epoch, "slots": slots.duplicate(), "dominant": dominant}
+	var result := _prepare_replay_grip_now(slots, dominant)
+	if not result.get("valid", false):
+		result["render_rollback_ready"] = _abort_failed_replay_preparation(String(result.get("reason", "replay_grip_failed")))
+	_replay_preparation_context = {}
+	return result
+
+func _abort_failed_replay_preparation(reason: String) -> bool:
+	# The synchronous caller owns these pending slots and never awaits. Discard
+	# only its remaining queued work so the coordinator can restore the exact
+	# pre-render checkpoint, including requests/bindings. Never cancel an async job.
+	if _replay_preparation_context.is_empty() or _busy or _job != null or _closing \
+		or _running_slot != StringName() or _restoring_support_motion:
+		return false
+	var context := _replay_preparation_context
+	if context.actor != _actor or context.weapon != _weapon or context.skeleton != _skeleton \
+		or context.geometry_epoch != _geometry_epoch or context.slots != _slots or context.dominant != _dominant:
+		return false
+	for slot: StringName in _queue:
+		if slot not in context.slots:
+			return false
+	for slot: StringName in _queue:
+		var entry: Dictionary = _status.get(slot, {})
+		entry.merge({"status": "unresolved", "reason": reason, "replay_preparation_aborted": true}, true)
+		_status[slot] = entry
+	_queue.clear()
+	_settle_ready = false
+	_publish()
+	return true
+
+func _prepare_replay_grip_now(slots: Array[StringName], dominant: StringName) -> Dictionary:
 	synchronize(slots, dominant)
 	_settle_ready = false
 	var ordered: Array[StringName] = [dominant]
@@ -300,6 +441,11 @@ func retain_roll() -> void:
 		_primary_seat["last_applied_world"] = _weapon.global_transform
 	for slot: StringName in _requests:
 		if slot in _queue or (_busy and _running_slot == slot):
+			if slot == _dominant:
+				# Rigid movement is not a changed grip request. Keep its private
+				# worker alive; completion must prove current local skin/weapon
+				# equivalence before transporting the result to the moving Hand.
+				continue
 			if _running_slot == slot and _job != null:
 				_job.cancel()
 			_queue.erase(slot)
@@ -441,6 +587,13 @@ func _run_next(synchronous: bool = false) -> void:
 	stage.posed_character["digit_dimension_reference"]=dimensions.duplicate(true)
 	_requests[slot]["digit_dimension_reference"]=dimensions.duplicate(true)
 	var source_stamp := _realization_stamp()
+	var motion_capture: Dictionary = {}
+	if slot == request.dominant:
+		motion_capture = MotionRebase.capture(_skeleton, _actor.get("mesh_instance") as MeshInstance3D,
+			_data.anatomy.reference_skin, slot, _weapon.global_transform)
+		if not motion_capture.get("valid", false):
+			_finish_failure(slot, request, motion_capture.get("reason", "motion_capture_failed"), motion_capture.get("details", {}))
+			return
 	_job = Acquisition.new()
 	var solve_config: Dictionary = _data.config.duplicate(true)
 	# Both hands use the same fit. For support this weapon displacement is a
@@ -475,7 +628,7 @@ func _run_next(synchronous: bool = false) -> void:
 		_finish_failure(slot, request, result.get("reason", "acquisition_unresolved"), result.get("details", result.get("detail", {})))
 		return
 	var apply_span := Chronology.begin("owner.apply_result", {"slot":slot,"request_serial":request.serial})
-	var applied: Dictionary = apply_primary_result(slot, request, result, source_stamp) if slot == request.dominant else _apply_support_result(slot, request, result, source_stamp)
+	var applied: Dictionary = apply_primary_result(slot, request, result, source_stamp, motion_capture) if slot == request.dominant else _apply_support_result(slot, request, result, source_stamp)
 	Chronology.finish(apply_span, {"valid":applied.get("valid",false),"reason":applied.get("reason",""),"status":applied.get("status","")})
 	if not applied.get("valid", false):
 		_finish_failure(slot, request, applied.get("reason", "pose_application_rejected"), applied.get("details", {}))
@@ -526,10 +679,18 @@ func _prepare_support_acquisition() -> Dictionary:
 
 ## Atomic primary application: only fifteen digit rotations and one transverse
 ## weapon translation. No arm target, wrist write, modifier advance or await.
-func apply_primary_result(slot: StringName, request: Dictionary, result: Dictionary, source_stamp: PackedByteArray) -> Dictionary:
+func apply_primary_result(slot: StringName, request: Dictionary, result: Dictionary, source_stamp: PackedByteArray, motion_capture: Dictionary = {}) -> Dictionary:
 	if slot != _dominant or not _is_current(slot, request):
 		return {"valid": false, "reason": "primary_request_changed"}
-	if source_stamp.is_empty() or source_stamp != _realization_stamp():
+	if source_stamp.is_empty():
+		return {"valid": false, "reason": "source_pose_changed_during_acquisition"}
+	var motion: Dictionary = {"valid": true, "delta": Transform3D.IDENTITY, "motion_rebased": false}
+	if not motion_capture.is_empty():
+		motion = MotionRebase.validate(motion_capture, _skeleton, _actor.get("mesh_instance") as MeshInstance3D, _weapon.global_transform)
+		if not motion.get("valid", false):
+			return {"valid": false, "reason": "source_pose_changed_during_acquisition", "details": motion}
+	elif source_stamp != _realization_stamp():
+		# Legacy focused callers without a motion proof retain the exact guard.
 		return {"valid": false, "reason": "source_pose_changed_during_acquisition"}
 	if not result.get("valid", false) or not result.get("material_safe", false):
 		return {"valid": false, "reason": "no_pose_within_material_overlap_limits", "details": result.get("material_validation", {})}
@@ -543,8 +704,25 @@ func apply_primary_result(slot: StringName, request: Dictionary, result: Diction
 	var base: Transform3D = result.source_weapon_to_world
 	var final: Transform3D = selected.weapon_to_world
 	var candidate_hand: Transform3D = candidate.hand_to_world
-	if base != _weapon.global_transform or not base.is_finite() or not final.is_finite() or not candidate_hand.is_finite() or base.basis.determinant() <= 0.0 or final.basis.determinant() <= 0.0 or final.basis != base.basis:
+	if not base.is_finite() or not final.is_finite() or not candidate_hand.is_finite() or base.basis.determinant() <= 0.0 or final.basis.determinant() <= 0.0 or final.basis != base.basis:
 		return {"valid": false, "reason": "invalid_or_stale_proposal_frames"}
+	if not motion_capture.is_empty():
+		if base != motion_capture.source.weapon_to_world or not MotionRebase._frame_close(candidate_hand, motion_capture.source.hand_to_world):
+			return {"valid": false, "reason": "proposal_does_not_match_motion_capture"}
+		# Transport only application frames. The worker's captured diagnostics and
+		# named origin tree remain immutable; all digit states are parent-local.
+		var delta: Transform3D = motion.delta
+		base = delta * base
+		final = delta * final
+		candidate_hand = delta * candidate_hand
+	if not MotionRebase._frame_close(base, _weapon.global_transform):
+		return {"valid": false, "reason": "invalid_or_stale_proposal_frames"}
+	if not motion_capture.is_empty():
+		# Keep the actual current weapon basis exactly. Numerical frame transport
+		# must not introduce a tiny orientation/scale edit while applying seating.
+		var transported_offset := final.origin - base.origin
+		base = _weapon.global_transform
+		final = Transform3D(base.basis, base.origin + transported_offset)
 	if candidate.translation_world != Vector3.ZERO:
 		return {"valid": false, "reason": "proposal_moves_fixed_hand"}
 	var skeleton: Skeleton3D = _actor.get("skeleton")
@@ -580,6 +758,8 @@ func apply_primary_result(slot: StringName, request: Dictionary, result: Diction
 	_weapon.global_transform = final
 	var report := _seat_report(base, final)
 	report["digit_application"] = applied
+	if not motion_capture.is_empty():
+		report["motion_rebase"] = motion.duplicate(true)
 	_weapon.set_meta("weapon_surface_seat_state", report.duplicate(true))
 	primary_seat_applied.emit(_weapon, _actor)
 	return report

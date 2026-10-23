@@ -10,11 +10,12 @@ const WeaponGripAnchorProviderScript = preload("res://runtime/player/weapon_grip
 const PlayerRuntimeHiddenBridgeStateScript = preload("res://runtime/player/player_runtime_hidden_bridge_state.gd")
 const CombatAnimationRuntimeChainCompilerScript = preload("res://core/resolvers/combat_animation_runtime_chain_compiler.gd")
 const CombatRuntimeClipScript = preload("res://core/models/combat_runtime_clip.gd")
+const EntryTransitionScript = preload("res://runtime/combat/combat_runtime_entry_transition.gd")
 const CombatRuntimeClipBakerScript = preload("res://core/resolvers/combat_runtime_clip_baker.gd")
 const CombatAnimationWeaponFrameSolverScript = preload("res://runtime/combat/combat_animation_weapon_frame_solver.gd")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 
-const ENTRY_BRIDGE_DURATION_SECONDS := 0.3
+const ENTRY_BRIDGE_DURATION_SECONDS := EntryTransitionScript.ENTRY_DURATION_SECONDS
 const RECOVERY_BRIDGE_DURATION_SECONDS := 1.2
 const DRAW_BRIDGE_DURATION_SECONDS := 0.3
 const STOW_BRIDGE_DURATION_SECONDS := 1.2
@@ -290,8 +291,8 @@ func start_playback(
 		result["message"] = String(slot_activation_result.get("message", "Skill activation data is unavailable."))
 		return result
 	var authored_motion_node_chain: Array = slot_activation_result.get("motion_node_chain", []) as Array
-	if authored_motion_node_chain.size() < 2:
-		result["message"] = "A runtime skill needs at least 2 motion nodes."
+	if authored_motion_node_chain.is_empty():
+		result["message"] = "A runtime skill needs at least one authored motion node."
 		return result
 	var dominant_slot_id: StringName = _resolve_source_equipment_slot_id(slot_activation_result, equipment_state)
 	if dominant_slot_id == StringName():
@@ -322,6 +323,9 @@ func start_playback(
 		return result
 	var motion_node_chain: Array = compile_result.get("motion_node_chain", []) as Array
 	var cached_authored_runtime_clip = _resolve_cached_runtime_clip(slot_activation_result)
+	if cached_authored_runtime_clip == null or not cached_authored_runtime_clip.has_solved_replay_track():
+		result["message"] = "Prepare and save this skill in Skill Crafter before using it."
+		return result
 	var bridge_source_snapshot: Dictionary = _capture_runtime_solved_replay_bridge_snapshot(
 		humanoid_rig,
 		held_item,
@@ -331,6 +335,10 @@ func start_playback(
 		dominant_slot_id,
 		motion_node_chain[0] as CombatAnimationMotionNode
 	)
+	var entered_clip: Resource = EntryTransitionScript.build(cached_authored_runtime_clip, bridge_source_snapshot, inherited_start_node, trajectory_volume_config)
+	if entered_clip == null:
+		result["message"] = "The current solved pose could not be captured for skill entry."
+		return result
 	var was_runtime_playback_active: bool = runtime_playback_active
 	if runtime_idle_active:
 		clear_idle_pose(humanoid_rig, equipped_item_presenter, held_item_nodes, equipment_state, weapons_drawn, true)
@@ -370,31 +378,10 @@ func start_playback(
 	var draft: CombatAnimationDraft = slot_activation_result.get("source_skill_draft", null) as CombatAnimationDraft
 	var playback_speed: float = draft.preview_playback_speed_scale if draft != null else 1.0
 	var should_loop: bool = draft.preview_loop_enabled if draft != null else false
-	active_runtime_clip = _bake_runtime_playback_clip(
-		active_motion_node_chain,
-		{
-			"clip_kind": CombatRuntimeClipScript.CLIP_KIND_SKILL_PLAYBACK,
-			"source_draft_id": slot_activation_result.get("source_skill_draft_id", StringName()),
-			"source_skill_slot_id": slot_activation_result.get("slot_id", StringName()),
-			"source_equipment_slot_id": active_dominant_slot_id,
-			"source_weapon_wip_id": slot_activation_result.get("source_weapon_wip_id", StringName()),
-			"source_weapon_length_meters": _resolve_held_item_weapon_length_meters(held_item),
-			"playback_speed_scale": playback_speed,
-			"loop_enabled": should_loop,
-			"trajectory_volume_config": active_trajectory_volume_config,
-			"compile_diagnostics": active_runtime_skill_result.get("runtime_compile_diagnostics", []),
-			"degraded_node_count": active_runtime_skill_result.get("runtime_compile_degraded_node_count", 0),
-			"hand_swap_bridge_count": active_runtime_skill_result.get("runtime_compile_hand_swap_bridge_count", 0),
-			"retargeted_count": active_runtime_skill_result.get("runtime_compile_retargeted_count", 0),
-		}
-	)
-	var cached_pose_track_applied: bool = _copy_cached_upper_body_pose_track(
-		active_runtime_clip,
-		cached_authored_runtime_clip,
-		float(prepared_chain_result.get("entry_bridge_duration_seconds", 0.0)),
-		bridge_source_snapshot
-	)
-	active_runtime_skill_result["cached_runtime_clip_upper_body_pose_track"] = cached_pose_track_applied
+	# The body is the exact prepared action. Only its live entry is new.
+	active_runtime_clip = entered_clip
+	active_runtime_clip.source_equipment_slot_id = active_dominant_slot_id
+	active_runtime_skill_result["cached_runtime_clip_upper_body_pose_track"] = true
 	if active_runtime_clip != null and active_runtime_clip.is_playable():
 		active_motion_node_chain = active_runtime_clip.motion_node_chain
 		active_runtime_skill_result["runtime_clip_baked"] = true
@@ -2083,11 +2070,14 @@ func _build_motion_node_from_pose_state(
 	return snapshot
 
 func _build_runtime_skill_chain_with_entry(authored_chain: Array, entry_node: CombatAnimationMotionNode, cached_clip) -> Dictionary:
-	# Saved replay starts at authored node 0. Entry bridges into that sample;
-	# skipping to node 1 would discard its first segment (the entire body of a
-	# two-node skill) while cached-track copying still assumes the full body.
-	var first_authored_index := 0 if cached_clip != null and cached_clip.has_solved_replay_track() else 1
-	return _build_runtime_chain_with_entry(authored_chain, entry_node, ENTRY_BRIDGE_DURATION_SECONDS, first_authored_index)
+	# Action arrays already begin at visible node 1. Reset never participates.
+	var result := _build_runtime_chain_with_entry(authored_chain, entry_node, ENTRY_BRIDGE_DURATION_SECONDS, 0)
+	result["entry_bridge_duration_seconds"] = ENTRY_BRIDGE_DURATION_SECONDS
+	result["entry_bridge_active"] = true
+	var chain: Array = result.get("motion_node_chain", [])
+	if chain.size() > 1:
+		chain[1].transition_duration_seconds = ENTRY_BRIDGE_DURATION_SECONDS
+	return result
 
 func _build_runtime_chain_with_entry(
 	authored_motion_node_chain: Array,
@@ -2341,6 +2331,18 @@ func _bake_runtime_playback_clip(motion_node_chain: Array, options: Dictionary):
 	return clip
 
 func _resolve_cached_runtime_clip(source_result: Dictionary):
+	# A source label alone cannot distinguish old Reset-prefixed tracks from
+	# action-only tracks. Check the owning draft before duplicate/normalize,
+	# which can upgrade the clip schema in memory. Applies to skills and idles,
+	# including unarmed/non-stage-2 sources that skip weapon grip validation.
+	var source_draft: Resource = source_result.get("source_skill_draft") as Resource
+	if source_draft == null:
+		source_draft = source_result.get("source_idle_draft") as Resource
+	if source_draft == null:
+		return null
+	var cache_signature: String = String(source_draft.get("runtime_cache_signature"))
+	if not cache_signature.begins_with(CombatRuntimeClipScript.RUNTIME_CACHE_VERSION + "|"):
+		return null
 	var runtime_clip = source_result.get("baked_runtime_clip", null)
 	if runtime_clip == null:
 		return null

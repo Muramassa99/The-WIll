@@ -2,6 +2,7 @@ extends RefCounted
 class_name PlayerEquippedSkillSlotPresenter
 
 const CombatAnimationStationStateScript = preload("res://core/models/combat_animation_station_state.gd")
+const CombatRuntimeClipScript = preload("res://core/models/combat_runtime_clip.gd")
 const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_state.gd")
 const SurfaceGripSolver = preload("res://runtime/player/grip/surface_driven_grip_solver.gd")
 
@@ -104,8 +105,9 @@ func resolve_runtime_skill_slot(
 	result["skill_name"] = draft.skill_name
 	result["skill_description"] = draft.skill_description
 	result["preferred_grip_style_mode"] = draft.preferred_grip_style_mode
-	result["motion_node_count"] = draft.motion_node_chain.size()
-	result["motion_node_chain"] = draft.motion_node_chain
+	var action_motion_node_chain: Array[Resource] = draft.get_action_motion_node_chain()
+	result["motion_node_count"] = action_motion_node_chain.size()
+	result["motion_node_chain"] = action_motion_node_chain
 	result["baked_runtime_clip"] = draft.baked_runtime_clip
 	result["preview_playback_speed_scale"] = draft.preview_playback_speed_scale
 	result["speed_acceleration_percent"] = draft.speed_acceleration_percent
@@ -225,7 +227,7 @@ func _validate_prepared_grip_replay(result: Dictionary, weapon: CraftedItemWIP, 
 	var fields := draft.runtime_cache_signature.split("|", false, 2)
 	var current_revision := (
 		fields.size() >= 2
-		and fields[0] == "runtime_cache_v9_grip_transition_motion"
+		and CombatRuntimeClipScript.COMPATIBLE_RUNTIME_CACHE_VERSIONS.has(fields[0])
 		and fields[1] == String(SurfaceGripSolver.REVISION)
 	)
 	var clip = result.get("baked_runtime_clip")

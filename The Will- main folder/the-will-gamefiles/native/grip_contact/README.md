@@ -7,6 +7,35 @@ triangle slicing and section-topology validation. Grip sequencing, bone limits, 
 allowances, wrapper ownership, and weapon movement remain owned by the calling
 Godot code. This library does not link Forge or Manifold.
 
+## October 21 combat body-query acceleration
+
+The same extension also registers `CombatBodyCollisionKernel`. This is a
+stateless batch implementation of the existing weapon-versus-body query;
+it does not change grip sequencing or anatomical rules. The collision resolver
+passes a fresh ordered body snapshot, ordered weapon-local sample dictionaries,
+the candidate transform, and the existing clearance offset. The kernel returns
+the existing aggregate collision dictionary. It retains no scene objects or
+snapshots between calls. Its `query_points` entry point shares the same inner
+calculation and exists for focused parity verification.
+
+`CombatCollisionLegalityResolver` selects this route only for the concrete
+`HandTargetConstraintSolver` snapshot contract. Custom solvers retain their
+point-query behavior. If this class is unavailable, the resolver warns once
+and runs the GDScript reference query; it never runs both backends for a pose.
+`configure_native_kernel(false)` selects the reference for diagnostics, and
+`get_backend_stats()` exposes actual route counts without changing result data.
+
+Build command and platform requirements below are unchanged. The fresh build
+passed 19,823 focused checks with zero numeric differences, including shape
+boundaries, first-hit/tie ordering, capsule centers, scaled transforms, snapshot
+mutation, unsupported shapes and missing sample-field defaults. Evidence:
+`C:/WORKSPACE/godot_runs/native_skill_save_20261021/body_query_parity.log`.
+Full station timing/output verification is recorded in the current Skill
+Crafter task note and the same evidence directory.
+
+October 21 DLL SHA256:
+`dde8002b3e43645bf7d2422ef1bd28101ef89f226e3691d547dbb05536d0c8d9`.
+
 The supported build is Windows x86_64, Godot standard/single-precision
 `real_t`, using the workspace LLVM-MinGW Clang 22.1.8 toolchain. CMake
 `Release` supplies `-O3`; `template_debug` preserves Godot extension debug

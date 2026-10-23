@@ -34,6 +34,63 @@ turn that assumption into a claim that the defects were repaired.
 Prior discussion, image and future directional-combat ideas remain in
 [the full brainstorming note](<Skill Crafter Body Control And Directional Combat Brainstorm 2026-10-19.md>).
 
+## Default Pose And Limit Authority - User Clarification 2026-10-20
+
+The user explicitly establishes a default chain of authority, with deliberate
+exceptions for specific operations rather than one unconditional rule for all
+solvers. Anatomical reference frames and allowances come from the owning bone
+chain. A downstream object must not redefine an upstream joint's neutral frame
+or angular allowance merely because that object is the manipulation control.
+
+For the present grip/roll workflow:
+
+1. Primary-hand seating: retain the established hand pose while the weapon
+   seats in it, according to the existing seating/reseating phase rules.
+2. Wrist allowance: use the forearm-relative wrist reference. The accepted wrist
+   motion determines how the held weapon may move with the established grip.
+3. Support engagement: retain the established primary grip/weapon state while
+   the support hand comes to the weapon. That weapon pose supplies the support
+   target; the support arm's own bone chain still owns its anatomical limits.
+
+Distinguish a requested target from permission to reach it. A weapon/pommel
+control may request an arm pose through IK, while joint limits and phase
+ownership decide what can actually be accepted. This does not prohibit normal
+IK or require every control to be FK. Likewise, an unreachable support target
+does not silently grant the support solve authority to move the primary grip.
+Exceptions must name the operation, what can move, and what remains retained.
+Policy for an unsatisfiable coordinated body edit remains NEEDS_DECISION below.
+
+Current implementation boundary: normal single-hand Roll now derives its
+240-degree interval from a rest-calibrated distal forearm reference, but still
+uses the existing Wrist-to-actual-Tip rotation axis and applies a common rigid
+rotation to Hand and weapon. Thus weapon geometry still defines this control's
+orbit; this is not yet a general anatomical wrist-envelope solver. The broader
+support-hand/whole-body authority chain has not been reimplemented or certified
+by that bounded correction. Review it explicitly when expanding those controls.
+Earlier full solves also derive twist-helper motion from requested Hand
+orientation; sampling and freezing the settled forearm frame for Roll does not
+by itself remove all earlier downstream influence. The new rule describes
+intended ownership, not a completed global authority audit.
+
+This clarification is documented design intent, not a new runtime change or a
+claim that all existing systems already enforce it. Preserve the current tests
+and same-span wrist requirement while assessing future changes.
+
+### User Priority Override - Accepted Limitations For Now
+
+The user explicitly considers the following not worth further investigation
+at this time. Keep their evidence, but remove them from active follow-up:
+
+- Visible weapon/wrist displacement during elbow adjustments or release.
+- Downward left-arm retraction blocked by existing body-clearance checks.
+- Remaining extreme wrist poses / incomplete anatomical correctness.
+
+Reopen only if one becomes inconvenient during future use. They are accepted
+limitations, not repaired defects and not blockers for planned body-control
+work. Older investigation entries below retain their historical findings;
+they do not override this newer priority decision. No extra diagnostic runs or
+code changes are requested for these three items.
+
 ## Current Code And Ownership
 
 Normal authoring order in `runtime/player/player_humanoid_rig.gd`:

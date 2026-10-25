@@ -54,6 +54,9 @@ const SOLVED_REPLAY_ANCHOR_NODE_PATHS: Array[StringName] = [
 	&"SupportGripAnchor",
 	&"SupportGripAnchor/SupportGripBasisAnchor",
 ]
+const REPLAY_HAND_END_TOLERANCE_METERS := 0.00005
+# Vector3 projection roundoff only, so the exact physical boundary is inclusive.
+const REPLAY_HAND_END_RATIO_ROUNDOFF := 0.0000001
 const PREVIEW_TORSO_CHEST_BONE: StringName = &"CC_Base_Spine02"
 const PREVIEW_HIP_BONE: StringName = &"CC_Base_Hip"
 const PREVIEW_LEFT_CLAVICLE_BONE: StringName = &"CC_Base_L_Clavicle"
@@ -5746,7 +5749,8 @@ func validate_solved_replay_hand_end_bounds(held_item: Node3D, playback: Diction
 		if anchor_index < 0 or anchor_index >= positions.size() or not positions[anchor_index] is Vector3:
 			return {"valid": false, "reason": "saved_grip_end_bounds_anchor_missing"}
 		var ratio: float = ((positions[anchor_index] as Vector3) - start).dot(end - start) / (end - start).length_squared()
-		if not is_finite(ratio) or ratio < float(bounds.min_ratio) - 0.000001 or ratio > float(bounds.max_ratio) + 0.000001:
+		var end_tolerance_ratio := REPLAY_HAND_END_TOLERANCE_METERS / float(bounds.handle_length_meters) + REPLAY_HAND_END_RATIO_ROUNDOFF
+		if not is_finite(ratio) or ratio < float(bounds.min_ratio) - end_tolerance_ratio or ratio > float(bounds.max_ratio) + end_tolerance_ratio:
 			return {"valid": false, "reason": "saved_grip_outside_handle_end_bounds", "slot": required[path]}
 	return {"valid": true}
 

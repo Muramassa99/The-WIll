@@ -45,7 +45,7 @@ static func apply(sample: Dictionary, from: Dictionary, to: Dictionary, weight: 
 		var up: Vector3 = constraints.reference_up.lerp(destination_constraints.reference_up, weight)
 		if up.length_squared() > 0.000001:
 			constraints.reference_up = up.normalized()
-		var relation: Dictionary = sample_relationship(from, to, kind, weight)
+		var relation: Dictionary = sample_relationship(from, to, kind, weight, sample.weapon_transform.basis)
 		if not relation.valid:
 			return relation.merged({"hand": kind})
 		var target: Transform3D = sample.weapon_transform * relation.transform
@@ -62,7 +62,7 @@ static func apply(sample: Dictionary, from: Dictionary, to: Dictionary, weight: 
 		result.diagnostics[kind] = metrics
 	return result
 
-static func sample_relationship(from: Dictionary, to: Dictionary, kind: String, weight: float) -> Dictionary:
+static func sample_relationship(from: Dictionary, to: Dictionary, kind: String, weight: float, sampled_weapon_basis: Variant = null) -> Dictionary:
 	var a: Transform3D = from[kind + "_hand_in_weapon"]
 	var b: Transform3D = to[kind + "_hand_in_weapon"]
 	if weight <= 0.0:
@@ -70,6 +70,23 @@ static func sample_relationship(from: Dictionary, to: Dictionary, kind: String, 
 	if weight >= 1.0:
 		return {"valid": true, "transform": b, "handle_path_used": false}
 	var relation: Transform3D = a.interpolate_with(b, weight)
+	if sampled_weapon_basis != null:
+		# The relative hand scale includes the inverse weapon scale. Blending
+		# both independently changes their product even when hand size is fixed.
+		# Interpolate the captured hand scale in the common replay reference,
+		# then express it relative to the weapon frame actually being sampled.
+		# Relationship-only queries may omit the sampled frame; playback cannot.
+		var source_scale: Variant = from.get("weapon_scale_reference_local")
+		var destination_scale: Variant = to.get("weapon_scale_reference_local")
+		if not sampled_weapon_basis is Basis or not source_scale is Vector3 or not destination_scale is Vector3:
+			return {"valid": false, "reason": "prepared_attachment_missing_weapon_scale"}
+		if not Arm._supported_basis(sampled_weapon_basis) or not Arm._supported_basis(a.basis) or not Arm._supported_basis(b.basis) or not Arm._supported_basis(Basis.from_scale(source_scale)) or not Arm._supported_basis(Basis.from_scale(destination_scale)):
+			return {"valid": false, "reason": "prepared_attachment_unsupported_scale_basis"}
+		var source_hand_scale: Vector3 = source_scale * a.basis.get_scale()
+		var destination_hand_scale: Vector3 = destination_scale * b.basis.get_scale()
+		var hand_scale: Vector3 = source_hand_scale.lerp(destination_hand_scale, weight)
+		var relative_scale: Vector3 = hand_scale / (sampled_weapon_basis as Basis).get_scale()
+		relation.basis = relation.basis.orthonormalized().scaled(relative_scale)
 	var result := {"valid": true, "transform": relation, "handle_path_used": false}
 	var seat_a: Dictionary = from.get(kind + "_handle_seat", {})
 	var seat_b: Dictionary = to.get(kind + "_handle_seat", {})

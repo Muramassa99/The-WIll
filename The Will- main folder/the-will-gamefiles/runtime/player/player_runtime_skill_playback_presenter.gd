@@ -494,7 +494,10 @@ func apply_idle_pose(
 		_start_steady_idle_pose_after_recovery(idle_pose_result, motion_node_chain, dominant_slot_id, held_item, held_item_nodes, humanoid_rig)
 	last_runtime_idle_pose_state = _apply_current_idle_pose(humanoid_rig, held_item_nodes)
 	result = last_runtime_idle_pose_state.duplicate(true)
-	result["applied"] = not last_runtime_idle_pose_state.is_empty()
+	# A rejected saved frame still carries diagnostics. A nonempty failure is
+	# not an applied idle pose, and its reason must reach the controller.
+	var replay_rejected: bool = bool(result.get("grip_endcap_replay_invalid", false))
+	result["applied"] = not last_runtime_idle_pose_state.is_empty() and not replay_rejected
 	result["active"] = runtime_idle_active
 	result["dominant_slot_id"] = active_idle_dominant_slot_id
 	result["idle_context_id"] = idle_pose_result.get("idle_context_id", StringName())
@@ -502,7 +505,8 @@ func apply_idle_pose(
 	result["hidden_bridge_state"] = hidden_bridge_state.to_debug_state()
 	result["combat_idle_elapsed_seconds"] = combat_idle_elapsed_seconds
 	result["combat_idle_expired_pending"] = combat_idle_expired_pending
-	result["message"] = "Authored idle pose applied." if bool(result.get("applied", false)) else "Authored idle pose could not be applied."
+	if not replay_rejected:
+		result["message"] = "Authored idle pose applied." if bool(result.get("applied", false)) else "Authored idle pose could not be applied."
 	return result
 
 func clear_idle_pose(

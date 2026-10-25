@@ -603,3 +603,143 @@ Read-only review confirmed new drags were already focus-restricted. This is
 code/parse verification, not a fresh interactive visual pass; manual checking
 of Space / Shift + Space across controls and while dragging remains appropriate.
 No library writes, commit or push were performed for this UI change.
+
+## Three-node movement and middle-node Tip reproduction (2026-10-25)
+
+The user reported that moving a control in a reset Skill 1 could block both F
+and Save. Requested sequence: author three substantially different weapon poses
+through R, try F and Save separately, then move node 2's Tip substantially and
+try both actions separately again. This pass reproduces and diagnoses that
+workflow; it does not change production gameplay code or solver tolerances.
+
+Evidence: `godot_runs/skill_three_node_20261025/run02/`, especially
+`results/three_node_repro.json`, `stdout.log`, the saved diagnostic script,
+screenshots, and the before/after working drafts. The real project, native
+solver, station UI and real weapon `Broken_Balde_v1` were used with an isolated
+copy of the current library. The source Skill 1 contained one visible node.
+The diagnostic opened it normally, used Reset, then recorded poses through
+the production UI controls and R actions. No prepared pose packets were injected.
+
+- Node 1: accepted approximately 19.73 degrees of Tip rotation.
+- Node 2: approximately 0.286 m of Pommel movement and 39.45 degrees of Tip rotation.
+- Node 3: approximately 54.21 degrees of Tip rotation. Its requested translation
+  was mostly constrained, so the accepted translation alone was only 0.019 m;
+  the large actual orientation change supplies this distinct pose.
+- Initial **F passed**: preparation 551 ms, playback started and completed.
+- Initial **Save passed** independently: 815 ms externally measured, persisted.
+- Selected node 2 again and performed an actual LMB Tip drag through the viewport
+  input handler (12 motion events followed by release), rather than assuming a
+  successful numeric setter meant a significant movement occurred.
+- Accepted Tip change: **58.9805 degrees / 1.34155 m** in authored coordinates.
+  Natural endpoint recording became ready 357 ms after release.
+- Edited **F failed** after 392 ms with
+  `requested_hand_has_no_arm_sphere_intersection`.
+- Edited **Save failed** independently after 269 ms with the same reason.
+  The UI retained the edits and did not overwrite the previous saved skill.
+
+All three endpoint packets were schema-valid and their recorded signatures
+matched their current authored values. The live capture context was valid,
+acquisition had finished, and edited F started zero acquisitions. The failure
+was reported at frame index 37, attachment segment index 0: approximately
+0.617 s into the first authored segment, between visible nodes 1 and 2.
+This is within the skill body, not the separate 160 ms entry transition.
+
+Code location: `CombatPreparedPoseTrackBuilder.build()` samples the weapon path
+and applies hand attachment for every intermediate frame.
+`CombatPreparedArmFrameResolver.resolve()` then rejects an empty feasible
+root-to-elbow distance interval at its sphere-intersection check. Endpoint
+recording success does not establish feasibility of every intermediate sample.
+Numerical reach analysis is recorded below when available; do not assume this
+is another scale error, a new grip acquisition loop, or merely a tolerance issue.
+
+The earlier `run01` is retained as a limited preliminary test: its numeric
+middle-node Tip edit was clamped to effectively zero actual movement. Its F/Save
+success after that attempted edit does not satisfy the requested substantial
+middle-node change. `run02` is the valid reproduction of that requirement.
+
+Isolation checks: the failed Save's library SHA256 stayed
+`3aa618a4b19d52e646e2f92b161fd6a19348ab6823c212f5a1ee9c6df5eced67`.
+The real user's library was verified unchanged at
+`39cbbe25535b321f331f3b84ca4ce4a59d8307f1c5f041108d34d76d603d0568`.
+Both runtime diagnostics exited; only the pre-existing editor remained running.
+Runtime stderr was empty. Retained/recordable grip data is not a claim of full
+per-section contact certification. No production code changes or Git operations
+were performed for this reproduction.
+
+### Numerical arm-reach follow-up
+
+`godot_runs/skill_three_node_20261025/analyze_failed_arm.gd` loads only the failed
+captured draft and uses the current control sampler, prepared-pose interpolation,
+attachment relationship and arm resolver. Evidence is
+`godot_runs/skill_three_node_20261025/failed_arm_numeric_01.json`.
+This bounded headless diagnostic reproduced the live first failure exactly:
+frame 37, first authored segment, primary hand, same sphere-intersection reason.
+It omits the live trajectory-volume config/compiler; agreement of the first
+failure is evidence for this case, not proof that every offline sample is
+identical to every live compilation configuration.
+
+- At frame 37 / 0.616667 s, requested root-to-wrist distance is **663.189292 mm**.
+  The shoulder-limited root-to-elbow maximum is **406.514627 mm**, with
+  **256.557614 mm** of forearm length. Their sum is **663.072241 mm**: the
+  requested wrist is **0.117051 mm** beyond that geometric upper bound.
+- At examined frame 45 / 0.75 s, requested distance is **670.242310 mm**,
+  exceeding the same bound by **7.170174 mm**. This exceeds the accepted 5 mm
+  contact tolerance; relaxing only the first small rejection is insufficient.
+- The earlier coarse `usable_reach_m` gate allows **730.721 mm**. The later
+  segment-length/shoulder-limit interval is tighter. Thus passing the coarse
+  reach check does not establish that an attached wrist can follow this sample.
+- Target and rig hand scales agree at approximately **0.764165**. This
+  reproduction is not the previously documented cold equipped-entry scale fault.
+- At frame 37 the ordinary bone tween places the wrist about **630.916 mm**
+  from the arm root. Following the separately sampled weapon path while keeping
+  its captured hand attachment asks for a wrist about **139.15 mm** away from
+  that tweened wrist, producing the larger **663.189 mm** root-to-wrist demand.
+- The sphere interval rejects before the later positional residual acceptance
+  test; no tolerance, anatomy limit, attachment rule or path was changed here.
+
+The endpoint checks above certify stored-packet structure and current signatures,
+not complete anatomical correctness: attachment following bypasses correction
+at exact endpoints. Avoid describing the three recorded poses as anatomically
+certified or claiming full grip-contact acceptance from packet validation.
+
+Focused next investigation: reconcile intermediate weapon-path generation and
+arm-follow feasibility using this preserved failing draft. Authored endpoints
+already have current stored data. Do not redo R recording, reintroduce per-frame
+finger acquisition, widen unrelated wrist limits, or repair idle/equipped scale
+as a supposed fix for this specific failure. A path/body correction policy still
+needs to be chosen and checked before implementation; this pass establishes
+the blocker, not a completed correction.
+
+## Follow-up: reachable three-node workflow (2026-10-25)
+
+After reviewing the failure, the user requested a proper three-node test with
+allowed movement. `godot_runs/skill_three_node_20261025/run03/` repeats the same
+real UI/R-authored three-node baseline and uses a bounded -25 degree screen arc
+for the middle-node Tip edit, instead of the failed run's -60 degree arc.
+No production code, limits, captured packets or path rules were changed. The
+test preserves its checks for an actual accepted edit exceeding 10 degrees and
+0.10 m; it did not shrink the movement repeatedly to manufacture a pass.
+
+Fresh report: `run03/results/three_node_repro.json`, `ok=true`.
+
+| Action | Result | External duration |
+| --- | --- | --- |
+| Three-node F | Prepared, played and completed | 576 ms preparation |
+| Three-node Save, separately | Persisted | 830 ms |
+| Node 2 Tip edit | Accepted 24.1553 degrees / 0.556130 m | 348 ms until natural recording ready |
+| Edited F | Prepared, played and completed | 581 ms preparation |
+| Edited Save, separately | Persisted | 816 ms |
+
+Both F preparations started zero grip acquisitions. Initial opening acquisition
+took 3518 ms, Reset baseline 3835 ms, and selecting node 2 again 3058 ms; these
+are separate from the subsecond F/Save measurements. The UI reported 0.52 s for
+each Save before final UI refresh. All three stored node packets remained current.
+
+Screenshots record the edited pose and active playback. This is successful
+three-node playback/save lifecycle evidence, not full anatomical/contact
+certification, equipped-playback verification, or a fix for the earlier
+unreachable-path rejection. The run saved its test Skill 1 only to its isolated
+`results/profile_library.tres`. The real user library stayed at SHA256
+`39cbbe25535b321f331f3b84ca4ce4a59d8307f1c5f041108d34d76d603d0568`.
+The test engine exited, stderr was empty, and the pre-existing editor remained
+open. No Git operations were performed.

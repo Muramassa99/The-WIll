@@ -44,6 +44,15 @@ func _run() -> void:
 	_check(float(current_bounds.min_ratio) > 0.4, "fixture_current_mount_rejects_anchor")
 	_expect_frame(larger, true, "larger_prospective_scale_accepted")
 	_expect_ui([larger], true, "ui_uses_saved_scale_before_application")
+	# Preserve the measured boundary-roundoff regression as well as the newly
+	# allowed physical tolerance, which must not grow with handle length.
+	var saved_bounds: Dictionary = SeatScript.resolve_hand_end_bounds(_span.length(), 0.12)
+	for edge: float in [float(saved_bounds.min_ratio), float(saved_bounds.max_ratio)]:
+		var outward := -1.0 if edge < 0.5 else 1.0
+		var rounded_boundary := _frame(1.0, edge + outward * 0.0000014757)
+		_expect_frame(rounded_boundary, true, "saved_boundary_roundoff_accepted")
+		_expect_ui([rounded_boundary], true, "ui_accepts_saved_boundary_roundoff")
+	_verify_physical_end_tolerance(weapon)
 	var invalid_anchor := _frame(1.0, 0.1)
 	_expect_frame(invalid_anchor, false, "invalid_primary_still_rejected", "saved_grip_outside_handle_end_bounds", &"hand_right")
 	_expect_ui([invalid_anchor], false, "ui_invalid_primary_rejected")
@@ -108,6 +117,32 @@ func _run() -> void:
 	mount.free()
 	print(JSON.stringify({"verifier": "solved_replay_end_bounds_scale", "checks": _checks, "passed": _failures.is_empty(), "failures": _failures}, "\t"))
 	quit(0 if _failures.is_empty() else 1)
+
+func _verify_physical_end_tolerance(weapon: Node3D) -> void:
+	var original_span := _span
+	for local_length: float in [0.2, 0.5, 2.0]:
+		_span = Vector3(local_length, 0.0, 0.0)
+		weapon.set_meta("primary_grip_span_end_local", _start + _span)
+		for saved_scale: float in [1.0, 1.7]:
+			var length_meters := (Basis.IDENTITY.scaled(Vector3.ONE * saved_scale) * ((_start + _span) - _start)).length()
+			var bounds: Dictionary = SeatScript.resolve_hand_end_bounds(length_meters, 0.12)
+			for edge: float in [float(bounds.min_ratio), float(bounds.max_ratio)]:
+				var outward := -1.0 if edge < 0.5 else 1.0
+				for excess_meters: float in [0.000049, 0.00005, 0.000051]:
+					var packet := _frame(saved_scale, edge + outward * excess_meters / length_meters)
+					var accepted := excess_meters <= 0.00005
+					var label := "physical_end_tolerance_%sm_%sx_%smm_%s" % [local_length, saved_scale, excess_meters * 1000.0, outward]
+					_expect_frame(packet, accepted, label, "" if accepted else "saved_grip_outside_handle_end_bounds")
+					_expect_ui([packet], accepted, "ui_" + label)
+	_span = original_span
+	weapon.set_meta("primary_grip_span_end_local", _start + _span)
+	# Packets without a saved basis use the live physical length, too.
+	var live_bounds: Dictionary = _presenter.get_held_item_hand_end_bounds(weapon, &"hand_right")
+	for excess_meters: float in [0.00005, 0.000051]:
+		var packet := _frame(1.0, float(live_bounds.max_ratio) + excess_meters / float(live_bounds.handle_length_meters))
+		packet.erase("solved_weapon_rotation_reference_local")
+		packet.erase("solved_weapon_scale_reference_local")
+		_expect_frame(packet, excess_meters <= 0.00005, "live_basis_physical_tolerance_%smm" % (excess_meters * 1000.0))
 
 func _frame(scale_value: float, primary_ratio: float, support_ratio: float = 0.5) -> Dictionary:
 	return {

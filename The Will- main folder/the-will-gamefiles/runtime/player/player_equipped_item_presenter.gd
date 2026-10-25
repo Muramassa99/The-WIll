@@ -2660,13 +2660,15 @@ func sync_rig_weapon_guidance(
 
 	var right_item: Node3D = held_item_nodes.get(&"hand_right") as Node3D
 	var left_item: Node3D = held_item_nodes.get(&"hand_left") as Node3D
+	# An empty equipment slot does not request support. Authored actions and
+	# combat idle own that choice through sync_single_weapon_contact_guidance.
 	if right_item != null:
 		right_item.set_meta("dominant_contact_slot_id", &"hand_right")
 		sync_single_weapon_contact_guidance(
 			humanoid_rig,
 			right_item,
 			&"hand_right",
-			left_item == null,
+			false,
 			left_item == null,
 			false,
 			true,
@@ -2679,7 +2681,7 @@ func sync_rig_weapon_guidance(
 			humanoid_rig,
 			left_item,
 			&"hand_left",
-			right_item == null,
+			false,
 			right_item == null,
 			false,
 			true,

@@ -17,7 +17,7 @@ var current_focus: StringName = FOCUS_TIP
 var playback_active: bool = false
 var onion_skin_enabled: bool = true
 
-func cycle_focus(available_focus_ids: Array = []) -> void:
+func cycle_focus(available_focus_ids: Array = [], direction: int = 1) -> void:
 	var focus_ids: Array = available_focus_ids.duplicate()
 	if focus_ids.is_empty():
 		focus_ids = [
@@ -30,7 +30,7 @@ func cycle_focus(available_focus_ids: Array = []) -> void:
 	if current_index < 0:
 		current_focus = focus_ids[0] as StringName
 		return
-	current_focus = focus_ids[(current_index + 1) % focus_ids.size()] as StringName
+	current_focus = focus_ids[posmod(current_index + direction, focus_ids.size())] as StringName
 
 func is_tip_focused() -> bool:
 	return current_focus == FOCUS_TIP

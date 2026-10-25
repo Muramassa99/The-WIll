@@ -1903,7 +1903,8 @@ func _event_matches_any_action(event: InputEvent, action_names: Array[StringName
 func _capture_editor_cycle_focus_event(event: InputEvent) -> bool:
 	if not _should_capture_editor_cycle_focus_event(event):
 		return false
-	_cycle_focus()
+	var direction: int = -1 if event is InputEventWithModifiers and event.shift_pressed else 1
+	_cycle_focus(direction)
 	get_viewport().set_input_as_handled()
 	return true
 
@@ -2009,7 +2010,7 @@ func _refresh_header_state() -> void:
 			]
 
 func _build_editor_shortcut_hint_text() -> String:
-	return "%s/%s nav  %s new node  %s del  %s cycle  %s preview" % [
+	return "%s/%s nav  %s new node  %s del  %s cycle (Shift: reverse)  %s preview" % [
 		_get_action_binding_label(ACTION_PREV_NODE),
 		_get_action_binding_label(ACTION_NEXT_NODE),
 		_get_action_binding_label(ACTION_NEW_NODE),
@@ -2028,7 +2029,7 @@ func _build_preview_shortcut_overlay_text() -> String:
 		_get_action_binding_label(ACTION_NEW_NODE),
 		_get_action_binding_label(ACTION_DELETE_NODE),
 	])
-	lines.append("%s  Cycle Tip / Pommel / Weapon / Arms / Free Hands" % _get_action_binding_label(ACTION_CYCLE_FOCUS))
+	lines.append("%s  Cycle Tip / Pommel / Weapon / Arms / Free Hands (Shift: reverse)" % _get_action_binding_label(ACTION_CYCLE_FOCUS))
 	lines.append("%s  Preview / Stop" % _get_action_binding_label(ACTION_PREVIEW_PLAYBACK))
 	lines.append("LMB  Drag Active Control / Bezier Handles")
 	lines.append("Weapon Center  Rotate  |  Green Orb  Weapon Orientation")
@@ -7337,8 +7338,12 @@ func _navigate_motion_node(direction: int) -> void:
 	if new_index != current_index:
 		select_motion_node(new_index)
 
-func _cycle_focus() -> void:
-	session_state.cycle_focus(_resolve_available_focus_ids())
+func _cycle_focus(direction: int = 1) -> void:
+	# A focus switch must not leave a now-hidden control attached to the mouse.
+	if motion_node_editor.is_dragging():
+		motion_node_editor.end_drag()
+		_finalize_preview_drag("")
+	session_state.cycle_focus(_resolve_available_focus_ids(), direction)
 	_refresh_focus_indicators()
 	preview_presenter.refresh_focus_visuals(
 		preview_view_container,

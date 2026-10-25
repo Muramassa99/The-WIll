@@ -2710,7 +2710,6 @@ func _refresh_drag_budgeted_visuals(
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D
 	var trajectory_root: Node3D = state.get("trajectory_root", null) as Node3D
 	var marker_root: Node3D = state.get("marker_root", null) as Node3D
-	var trajectory_mesh_instance: MeshInstance3D = state.get("trajectory_mesh", null) as MeshInstance3D
 	var control_mesh_instance: MeshInstance3D = state.get("control_mesh", null) as MeshInstance3D
 	var sphere_viz_mesh: MeshInstance3D = state.get("sphere_viz_mesh", null) as MeshInstance3D
 	var onion_skin_root: Node3D = state.get("onion_skin_root", null) as Node3D
@@ -2720,12 +2719,12 @@ func _refresh_drag_budgeted_visuals(
 		_clear_child_nodes(marker_root)
 		_clear_child_nodes(onion_skin_root)
 		preview_root.set_meta("drag_budgeted_markers_active", true)
-	_clear_immediate_mesh(trajectory_mesh_instance)
+	# Keep the last evaluated paths visible during the budgeted drag. Their
+	# normal refresh still runs when the authored edit is finalized.
 	_clear_immediate_mesh(control_mesh_instance)
 	_clear_immediate_mesh(sphere_viz_mesh)
 	preview_root.set_meta("motion_node_count", motion_node_chain.size())
 	preview_root.set_meta("draft_point_count", motion_node_chain.size())
-	preview_root.set_meta("curve_baked_point_count", 0)
 	preview_root.set_meta("speed_state_sample_count", 0)
 	preview_root.set_meta("speed_state_armed_sample_count", 0)
 	preview_root.set_meta("speed_state_buildup_sample_count", 0)
@@ -2776,20 +2775,24 @@ func _refresh_drag_budgeted_visuals(
 	)
 	_update_drag_point_marker(marker_root, "DragTipMarker", motion_node.tip_position_local, tip_active)
 	_update_drag_point_marker(marker_root, "DragPommelMarker", motion_node.pommel_position_local, pommel_active)
-	_sync_drag_curve_handle_markers(marker_root, motion_node_chain, selected_node_index, motion_node)
+	var handle_marker_count: int = _sync_drag_curve_handle_markers(marker_root, motion_node_chain, selected_node_index, motion_node, active_focus)
+	if control_mesh_instance != null:
+		_render_control_lines(control_mesh_instance.mesh as ImmediateMesh, motion_node_chain, selected_node_index, active_focus)
 	_sync_drag_weapon_orientation_markers(marker_root, motion_node, active_focus)
 	var upperarm_marker_count: int = 0
 	_clear_hand_proxy_gizmo_markers(marker_root)
+	_clear_upperarm_roll_gizmo_markers(marker_root)
 	if active_focus == CombatAnimationSessionStateScript.FOCUS_ARM_ROLL:
-		_clear_upperarm_roll_gizmo_markers(marker_root)
 		upperarm_marker_count = _create_upperarm_roll_gizmo_markers(state, motion_node, active_focus)
 	elif active_focus == CombatAnimationSessionStateScript.FOCUS_RIGHT_ARM_ROLL or active_focus == CombatAnimationSessionStateScript.FOCUS_LEFT_ARM_ROLL:
-		_clear_upperarm_roll_gizmo_markers(marker_root)
 		upperarm_marker_count = _create_upperarm_roll_gizmo_markers(state, motion_node, active_focus)
 	var hand_proxy_marker_count: int = _create_hand_proxy_gizmo_markers(state, motion_node, active_focus)
-	preview_root.set_meta("motion_node_marker_count", 2)
-	preview_root.set_meta("point_marker_count", 2)
-	preview_root.set_meta("weapon_gizmo_marker_count", 2 + upperarm_marker_count + hand_proxy_marker_count)
+	var point_marker_count: int = 1 if tip_active or pommel_active else 0
+	var weapon_marker_count: int = 2 if active_focus == CombatAnimationSessionStateScript.FOCUS_WEAPON else 0
+	preview_root.set_meta("motion_node_marker_count", point_marker_count)
+	preview_root.set_meta("point_marker_count", point_marker_count)
+	preview_root.set_meta("control_handle_marker_count", handle_marker_count)
+	preview_root.set_meta("weapon_gizmo_marker_count", weapon_marker_count + upperarm_marker_count + hand_proxy_marker_count)
 
 func _clear_child_nodes(root: Node) -> void:
 	if root == null:
@@ -2834,7 +2837,7 @@ func _update_drag_point_marker(marker_root: Node3D, marker_name: String, local_p
 		mesh.height = mesh.radius * 2.0
 		marker.mesh = mesh
 		marker_root.add_child(marker)
-	marker.visible = true
+	marker.visible = active
 	marker.position = local_position
 	marker.material_override = _build_overlay_surface_material(Color(1.0, 0.33, 0.24, 1.0) if active else Color(0.92, 0.92, 0.92, 1.0), 0.35)
 
@@ -2842,16 +2845,24 @@ func _sync_drag_curve_handle_markers(
 	marker_root: Node3D,
 	motion_node_chain: Array,
 	selected_node_index: int,
-	motion_node: CombatAnimationMotionNode
-) -> void:
+	motion_node: CombatAnimationMotionNode,
+	active_focus: StringName
+) -> int:
+	var tip_active: bool = active_focus == CombatAnimationSessionStateScript.FOCUS_TIP
+	var pommel_active: bool = active_focus == CombatAnimationSessionStateScript.FOCUS_POMMEL
 	var tip_curve_in_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, selected_node_index, true, true)
 	var tip_curve_out_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, selected_node_index, true, false)
 	var pommel_curve_in_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, selected_node_index, false, true)
 	var pommel_curve_out_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, selected_node_index, false, false)
-	_update_drag_handle_marker(marker_root, "DragTipInHandle", motion_node.tip_position_local + tip_curve_in_handle, Color(0.2, 0.75, 1.0, 1.0), tip_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS)
-	_update_drag_handle_marker(marker_root, "DragTipOutHandle", motion_node.tip_position_local + tip_curve_out_handle, Color(1.0, 0.55, 0.12, 1.0), tip_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS)
-	_update_drag_handle_marker(marker_root, "DragPomInHandle", motion_node.pommel_position_local + pommel_curve_in_handle, Color(0.2, 0.55, 0.85, 1.0), pommel_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS)
-	_update_drag_handle_marker(marker_root, "DragPomOutHandle", motion_node.pommel_position_local + pommel_curve_out_handle, Color(0.85, 0.4, 0.12, 1.0), pommel_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS)
+	var tip_in_visible: bool = tip_active and tip_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS
+	var tip_out_visible: bool = tip_active and tip_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS
+	var pommel_in_visible: bool = pommel_active and pommel_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS
+	var pommel_out_visible: bool = pommel_active and pommel_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS
+	_update_drag_handle_marker(marker_root, "DragTipInHandle", motion_node.tip_position_local + tip_curve_in_handle, Color(0.2, 0.75, 1.0, 1.0), tip_in_visible)
+	_update_drag_handle_marker(marker_root, "DragTipOutHandle", motion_node.tip_position_local + tip_curve_out_handle, Color(1.0, 0.55, 0.12, 1.0), tip_out_visible)
+	_update_drag_handle_marker(marker_root, "DragPomInHandle", motion_node.pommel_position_local + pommel_curve_in_handle, Color(0.2, 0.55, 0.85, 1.0), pommel_in_visible)
+	_update_drag_handle_marker(marker_root, "DragPomOutHandle", motion_node.pommel_position_local + pommel_curve_out_handle, Color(0.85, 0.4, 0.12, 1.0), pommel_out_visible)
+	return int(tip_in_visible) + int(tip_out_visible) + int(pommel_in_visible) + int(pommel_out_visible)
 
 func _update_drag_handle_marker(marker_root: Node3D, marker_name: String, local_position: Vector3, color: Color, visible: bool) -> void:
 	var marker: MeshInstance3D = marker_root.get_node_or_null(marker_name) as MeshInstance3D
@@ -2990,8 +3001,12 @@ func _refresh_trajectory_visuals(
 		var is_selected: bool = node_index == selected_node_index
 		var tip_marker_active: bool = is_selected and tip_is_active_focus
 		var pommel_marker_active: bool = is_selected and pommel_is_active_focus
-		_create_point_marker(marker_root, motion_node.tip_position_local, tip_marker_active)
-		_create_point_marker(marker_root, motion_node.pommel_position_local, pommel_marker_active)
+		if tip_marker_active:
+			_create_point_marker(marker_root, motion_node.tip_position_local, true)
+			node_marker_count += 1
+		if pommel_marker_active:
+			_create_point_marker(marker_root, motion_node.pommel_position_local, true)
+			node_marker_count += 1
 		if is_selected:
 			_set_origin_tracked_vector3_meta(
 				preview_root,
@@ -3011,19 +3026,18 @@ func _refresh_trajectory_visuals(
 			var tip_curve_out_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, node_index, true, false)
 			var pommel_curve_in_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, node_index, false, true)
 			var pommel_curve_out_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, node_index, false, false)
-			if tip_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+			if tip_is_active_focus and tip_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
 				_create_handle_marker(marker_root, motion_node.tip_position_local + tip_curve_in_handle, Color(0.2, 0.75, 1.0, 1.0), "TipIn")
 				handle_marker_count += 1
-			if tip_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+			if tip_is_active_focus and tip_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
 				_create_handle_marker(marker_root, motion_node.tip_position_local + tip_curve_out_handle, Color(1.0, 0.55, 0.12, 1.0), "TipOut")
 				handle_marker_count += 1
-			if pommel_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+			if pommel_is_active_focus and pommel_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
 				_create_handle_marker(marker_root, motion_node.pommel_position_local + pommel_curve_in_handle, Color(0.2, 0.55, 0.85, 1.0), "PomIn")
 				handle_marker_count += 1
-			if pommel_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+			if pommel_is_active_focus and pommel_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
 				_create_handle_marker(marker_root, motion_node.pommel_position_local + pommel_curve_out_handle, Color(0.85, 0.4, 0.12, 1.0), "PomOut")
 				handle_marker_count += 1
-		node_marker_count += 2
 	if playback_active:
 		var playback_tip_position_local: Vector3 = _get_origin_tracked_vector3_state(
 			playback_state,
@@ -3056,7 +3070,7 @@ func _refresh_trajectory_visuals(
 		_render_lightweight_curve_mesh(trajectory_mesh_instance.mesh as ImmediateMesh, tip_curve, pommel_curve)
 	else:
 		_render_speed_colored_curve_mesh(trajectory_mesh_instance.mesh as ImmediateMesh, speed_state_result)
-	_render_control_lines(control_mesh_instance.mesh as ImmediateMesh, motion_node_chain, selected_node_index)
+	_render_control_lines(control_mesh_instance.mesh as ImmediateMesh, motion_node_chain, selected_node_index, StringName() if playback_active else active_focus)
 	if not authoring_drag_active:
 		_refresh_onion_skin(onion_skin_root, motion_node_chain, selected_node_index)
 	preview_root.set_meta("motion_node_count", motion_node_chain.size())
@@ -3103,6 +3117,7 @@ func _refresh_trajectory_selection_visuals(
 	var control_mesh_instance: MeshInstance3D = state.get("control_mesh", null) as MeshInstance3D
 	if preview_root == null or marker_root == null or control_mesh_instance == null:
 		return
+	preview_root.set_meta("drag_budgeted_markers_active", false)
 	for child_node: Node in marker_root.get_children():
 		child_node.queue_free()
 	var node_marker_count: int = 0
@@ -3129,8 +3144,12 @@ func _refresh_trajectory_selection_visuals(
 		if motion_node == null:
 			continue
 		var is_selected: bool = node_index == selected_node_index
-		_create_point_marker(marker_root, motion_node.tip_position_local, is_selected and tip_is_active_focus)
-		_create_point_marker(marker_root, motion_node.pommel_position_local, is_selected and pommel_is_active_focus)
+		if is_selected and tip_is_active_focus:
+			_create_point_marker(marker_root, motion_node.tip_position_local, true)
+			node_marker_count += 1
+		if is_selected and pommel_is_active_focus:
+			_create_point_marker(marker_root, motion_node.pommel_position_local, true)
+			node_marker_count += 1
 		if is_selected:
 			_set_origin_tracked_vector3_meta(
 				preview_root,
@@ -3150,20 +3169,19 @@ func _refresh_trajectory_selection_visuals(
 			var tip_curve_out_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, node_index, true, false)
 			var pommel_curve_in_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, node_index, false, true)
 			var pommel_curve_out_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, node_index, false, false)
-			if tip_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+			if tip_is_active_focus and tip_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
 				_create_handle_marker(marker_root, motion_node.tip_position_local + tip_curve_in_handle, Color(0.2, 0.75, 1.0, 1.0), "TipIn")
 				handle_marker_count += 1
-			if tip_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+			if tip_is_active_focus and tip_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
 				_create_handle_marker(marker_root, motion_node.tip_position_local + tip_curve_out_handle, Color(1.0, 0.55, 0.12, 1.0), "TipOut")
 				handle_marker_count += 1
-			if pommel_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+			if pommel_is_active_focus and pommel_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
 				_create_handle_marker(marker_root, motion_node.pommel_position_local + pommel_curve_in_handle, Color(0.2, 0.55, 0.85, 1.0), "PomIn")
 				handle_marker_count += 1
-			if pommel_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+			if pommel_is_active_focus and pommel_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
 				_create_handle_marker(marker_root, motion_node.pommel_position_local + pommel_curve_out_handle, Color(0.85, 0.4, 0.12, 1.0), "PomOut")
 				handle_marker_count += 1
-		node_marker_count += 2
-	_render_control_lines(control_mesh_instance.mesh as ImmediateMesh, motion_node_chain, selected_node_index)
+	_render_control_lines(control_mesh_instance.mesh as ImmediateMesh, motion_node_chain, selected_node_index, active_focus)
 	preview_root.set_meta("motion_node_count", motion_node_chain.size())
 	preview_root.set_meta("draft_point_count", motion_node_chain.size())
 	preview_root.set_meta("selected_motion_node_index", selected_node_index)
@@ -9465,8 +9483,9 @@ func _refresh_weapon_and_sphere_visuals(state: Dictionary, motion_node_chain: Ar
 	var gizmo_marker_count: int = 0
 	if marker_root != null:
 		_clear_hand_proxy_gizmo_markers(marker_root)
-		_create_weapon_rotation_gizmo_markers(marker_root, motion_node, active_focus)
-		gizmo_marker_count += 2
+		if active_focus == CombatAnimationSessionStateScript.FOCUS_WEAPON:
+			_create_weapon_rotation_gizmo_markers(marker_root, motion_node, active_focus)
+			gizmo_marker_count += 2
 		gizmo_marker_count += _create_upperarm_roll_gizmo_markers(state, motion_node, active_focus)
 		gizmo_marker_count += _create_hand_proxy_gizmo_markers(state, motion_node, active_focus)
 		if preview_root != null:
@@ -9541,6 +9560,8 @@ func _create_hand_proxy_gizmo_markers(state: Dictionary, motion_node: CombatAnim
 	return 3
 
 func _create_upperarm_roll_gizmo_markers(state: Dictionary, motion_node: CombatAnimationMotionNode, active_focus: StringName) -> int:
+	if active_focus not in [CombatAnimationSessionStateScript.FOCUS_ARM_ROLL, CombatAnimationSessionStateScript.FOCUS_RIGHT_ARM_ROLL, CombatAnimationSessionStateScript.FOCUS_LEFT_ARM_ROLL]:
+		return 0
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D
 	var trajectory_root: Node3D = state.get("trajectory_root", null) as Node3D
 	var marker_root: Node3D = state.get("marker_root", null) as Node3D
@@ -9713,14 +9734,16 @@ func _curve_has_distinct_points(curve: Curve3D) -> bool:
 			has_any_displacement = true
 	return has_any_displacement
 
-func _render_control_lines(immediate_mesh: ImmediateMesh, motion_node_chain: Array, selected_node_index: int) -> void:
+func _render_control_lines(immediate_mesh: ImmediateMesh, motion_node_chain: Array, selected_node_index: int, active_focus: StringName) -> void:
 	if immediate_mesh == null:
 		return
 	immediate_mesh.clear_surfaces()
 	if motion_node_chain.is_empty():
 		return
-	if not _motion_node_chain_has_visible_curve_handles(motion_node_chain, selected_node_index):
+	if not _motion_node_chain_has_visible_curve_handles(motion_node_chain, selected_node_index, active_focus):
 		return
+	var tip_active: bool = active_focus == CombatAnimationSessionStateScript.FOCUS_TIP
+	var pommel_active: bool = active_focus == CombatAnimationSessionStateScript.FOCUS_POMMEL
 	immediate_mesh.surface_begin(Mesh.PRIMITIVE_LINES)
 	for node_index: int in range(motion_node_chain.size()):
 		if node_index != selected_node_index:
@@ -9733,37 +9756,38 @@ func _render_control_lines(immediate_mesh: ImmediateMesh, motion_node_chain: Arr
 		var tip_curve_out_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, node_index, true, false)
 		var pommel_curve_in_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, node_index, false, true)
 		var pommel_curve_out_handle: Vector3 = motion_node_editor.resolve_effective_curve_handle(motion_node_chain, node_index, false, false)
-		if tip_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+		if tip_active and tip_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
 			immediate_mesh.surface_set_color(Color(0.2, 0.75, 1.0, 1.0))
 			immediate_mesh.surface_add_vertex(tip_pos)
 			immediate_mesh.surface_set_color(Color(0.2, 0.75, 1.0, 1.0))
 			immediate_mesh.surface_add_vertex(tip_pos + tip_curve_in_handle)
-		if tip_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+		if tip_active and tip_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
 			immediate_mesh.surface_set_color(Color(1.0, 0.55, 0.12, 1.0))
 			immediate_mesh.surface_add_vertex(tip_pos)
 			immediate_mesh.surface_set_color(Color(1.0, 0.55, 0.12, 1.0))
 			immediate_mesh.surface_add_vertex(tip_pos + tip_curve_out_handle)
 		var pommel_pos: Vector3 = motion_node.pommel_position_local
-		if pommel_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+		if pommel_active and pommel_curve_in_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
 			immediate_mesh.surface_set_color(Color(0.2, 0.55, 0.85, 1.0))
 			immediate_mesh.surface_add_vertex(pommel_pos)
 			immediate_mesh.surface_set_color(Color(0.2, 0.55, 0.85, 1.0))
 			immediate_mesh.surface_add_vertex(pommel_pos + pommel_curve_in_handle)
-		if pommel_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
+		if pommel_active and pommel_curve_out_handle.length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS:
 			immediate_mesh.surface_set_color(Color(0.85, 0.4, 0.12, 1.0))
 			immediate_mesh.surface_add_vertex(pommel_pos)
 			immediate_mesh.surface_set_color(Color(0.85, 0.4, 0.12, 1.0))
 			immediate_mesh.surface_add_vertex(pommel_pos + pommel_curve_out_handle)
 	immediate_mesh.surface_end()
 
-func _motion_node_chain_has_visible_curve_handles(motion_node_chain: Array, selected_node_index: int) -> bool:
+func _motion_node_chain_has_visible_curve_handles(motion_node_chain: Array, selected_node_index: int, active_focus: StringName) -> bool:
 	if selected_node_index < 0 or selected_node_index >= motion_node_chain.size():
 		return false
+	if active_focus not in [CombatAnimationSessionStateScript.FOCUS_TIP, CombatAnimationSessionStateScript.FOCUS_POMMEL]:
+		return false
+	var use_tip: bool = active_focus == CombatAnimationSessionStateScript.FOCUS_TIP
 	return (
-		motion_node_editor.resolve_effective_curve_handle(motion_node_chain, selected_node_index, true, true).length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS
-		or motion_node_editor.resolve_effective_curve_handle(motion_node_chain, selected_node_index, true, false).length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS
-		or motion_node_editor.resolve_effective_curve_handle(motion_node_chain, selected_node_index, false, true).length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS
-		or motion_node_editor.resolve_effective_curve_handle(motion_node_chain, selected_node_index, false, false).length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS
+		motion_node_editor.resolve_effective_curve_handle(motion_node_chain, selected_node_index, use_tip, true).length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS
+		or motion_node_editor.resolve_effective_curve_handle(motion_node_chain, selected_node_index, use_tip, false).length() >= CURVE_HANDLE_VISUAL_MIN_LENGTH_METERS
 	)
 
 func _refresh_noncombat_stow_anchor_markers(state: Dictionary, active_draft: Resource) -> Dictionary:

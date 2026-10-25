@@ -553,3 +553,53 @@ frame, and the main player collision capsule and camera are outside `JosieModel`
 No 1.5 m/2.5 m comparison or resizing implementation was performed in this
 discussion. First-open fallback reuse and coherent scale handling remain future
 focused work; no additional gameplay changes were made while discussing them.
+
+## Skill Crafter reverse control selection (2026-10-25)
+
+User requested Forge-style backward navigation for the existing Space control
+selection. Space still cycles forward through the current available Tip, Pommel,
+Weapon, arm and free-hand controls; Shift + Space cycles backward through the
+same list, wrapping from first to last. This is active-control selection, not
+motion-node timeline navigation. Shift modifies the existing cycle action, so
+the action ID, aliases and ordinary custom key assignments remain intact.
+
+`CombatAnimationSessionState.cycle_focus()` now accepts a direction, defaulting
+to forward. The station passes the event's Shift modifier and shows the reverse
+shortcut in its hints. Existing text-entry/popup guards and release/echo handling
+remain. No skill serialization, pose solving or replay changes are involved.
+
+Checked official Godot 4.7 documentation for
+[action matching](https://docs.godotengine.org/en/4.7/classes/class_inputevent.html#class-inputevent-method-is-action-pressed)
+and the [Shift modifier](https://docs.godotengine.org/en/4.7/classes/class_inputeventwithmodifiers.html#class-inputeventwithmodifiers-property-shift-pressed).
+The focused station-verifier script and its scene dependencies passed Godot's
+`--check-only` parse check. Diff whitespace check passed. No new runtime input
+run was performed for this small change; forward/reverse visual operation remains
+for manual confirmation. This addition is after Git checkpoint `5e511a1e`.
+
+## Active-control visibility (2026-10-25)
+
+User requested that inactive control markers disappear while the trajectory
+splines remain visible. On the selected motion node, Tip shows its endpoint,
+Bezier cubes and connecting rods; Pommel shows its corresponding controls.
+Weapon, right/left upper-arm and free-hand controls appear for their own active
+focus. Inactive endpoint spheres on other motion nodes are hidden as well;
+those spheres were not an independent mouse-selection route.
+
+The preview presenter applies the same filtering to full, cached-selection and
+budgeted-drag refreshes. The budgeted drag now retains the last evaluated
+trajectory mesh instead of clearing it; normal path refresh still happens on
+edit finalization. This adds no path/collision recalculation during that mode.
+Existing focus-specific picking remains. Space / Shift + Space finishes an
+existing drag before changing focus, preventing a hidden old control from
+continuing to follow the mouse.
+
+Implementation is limited to `combat_animation_station_preview_presenter.gd`
+and `combat_animation_station_ui.gd`; no stored motion, grip or playback data
+changes. Consulted official Godot 4.7
+[Node3D visibility documentation](https://docs.godotengine.org/en/4.7/classes/class_node3d.html#class-node3d-property-visible).
+The existing focus-guard verifier and station dependencies passed Godot
+`--check-only` after this change, and the diff whitespace check passed.
+Read-only review confirmed new drags were already focus-restricted. This is
+code/parse verification, not a fresh interactive visual pass; manual checking
+of Space / Shift + Space across controls and while dragging remains appropriate.
+No library writes, commit or push were performed for this UI change.

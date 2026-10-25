@@ -6,6 +6,11 @@ class_name CombatPreparedArmFrameResolver
 ## Only the four named arm rotations may change. All coordinates share the
 ## captured replay reference; limits and initial helper rotations come from rig.
 const FRAME_EPSILON := 0.00005
+# Accepted hand-to-target positional residual, in metres. Angular and internal
+# correction precision remain independent of this gameplay allowance.
+const POSITION_TOLERANCE_METERS := 0.005
+# Maximum absolute deviation from the target: +/-0.025 degrees (0.05 total).
+const ANGULAR_TOLERANCE_RADIANS := deg_to_rad(0.025)
 
 static func resolve(pose: Dictionary, requested_hand_reference: Transform3D, constraints: Dictionary) -> Dictionary:
 	var validation: Dictionary = _validate(pose, constraints)
@@ -230,7 +235,7 @@ static func _metrics(globals: Array[Transform3D], indices: Array[int], target: T
 	var twist_error: float = absf(_wrap(_wrist_twist(h, f, hand_rest) - wrist_reference))
 	var shoulder_angle: float = rad_to_deg((c.origin - u.origin).angle_to(f.origin - u.origin))
 	var elbow_angle: float = rad_to_deg((u.origin - f.origin).angle_to(h.origin - f.origin))
-	var valid: bool = position_error <= FRAME_EPSILON and angle_error <= FRAME_EPSILON and twist_error <= FRAME_EPSILON and _in_range(shoulder_angle, constraints.shoulder_min_degrees, constraints.shoulder_max_degrees, constraints.joint_epsilon_degrees) and _in_range(elbow_angle, constraints.elbow_min_degrees, constraints.elbow_max_degrees, constraints.joint_epsilon_degrees)
+	var valid: bool = position_error <= POSITION_TOLERANCE_METERS and angle_error <= ANGULAR_TOLERANCE_RADIANS and twist_error <= ANGULAR_TOLERANCE_RADIANS and _in_range(shoulder_angle, constraints.shoulder_min_degrees, constraints.shoulder_max_degrees, constraints.joint_epsilon_degrees) and _in_range(elbow_angle, constraints.elbow_min_degrees, constraints.elbow_max_degrees, constraints.joint_epsilon_degrees)
 	var bend: Vector3 = (f.origin - u.origin).cross(h.origin - f.origin)
 	return {"valid": valid, "reason": "" if valid else "complete_arm_frame_residual", "position_error_m": position_error, "orientation_error_rad": angle_error, "wrist_twist_change_rad": twist_error, "shoulder_angle_degrees": shoulder_angle, "elbow_angle_degrees": elbow_angle, "bend_normal_reference": bend.normalized(), "bend_normal_valid": bend.length_squared() > 0.00000001, "bone_lengths_preserved": true}
 

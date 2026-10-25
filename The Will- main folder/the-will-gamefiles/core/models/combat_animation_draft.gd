@@ -130,6 +130,31 @@ func _has_action_editor_placeholder() -> bool:
 		and bool(motion_node_chain[0].get_meta(ACTION_EDITOR_PLACEHOLDER_META, false))
 	)
 
+func get_saved_content_signature() -> String:
+	# Save owns one draft. Selection, Reset and generated replay caches are not
+	# authored content; captured endpoint packets are part of the saved action.
+	var values: Array = [_build_action_baseline_signature()]
+	for property: Dictionary in get_property_list():
+		var property_name: StringName = StringName(property.name)
+		if (
+			(int(property.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE) == 0
+			or (int(property.usage) & PROPERTY_USAGE_STORAGE) == 0
+			or property_name in [
+				&"motion_node_chain", &"action_motion_node_chain", &"action_baseline_signature",
+				&"baked_runtime_clip", &"runtime_cache_signature",
+				&"selected_motion_node_index", &"continuity_motion_node_index",
+			]
+		):
+			continue
+		var value: Variant = get(property_name)
+		if value is Resource:
+			value = value.resource_path
+		values.append([property_name, value])
+	for motion_node: Resource in get_action_motion_node_chain():
+		if motion_node != null:
+			values.append([motion_node.get("prepared_pose_signature"), motion_node.get("prepared_pose")])
+	return var_to_bytes(values).hex_encode().sha256_text()
+
 func _build_action_baseline_signature() -> String:
 	# Preserve the distinction between an untouched slot and a one-pose skill
 	# without storing its old Reset coordinates. Derived retarget Resources and

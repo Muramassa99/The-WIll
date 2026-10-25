@@ -2,16 +2,28 @@ extends "res://tools/verify_prepared_skill_equipped_playback.gd"
 
 ## Same actual equipped lifecycle as the parent diagnostic, with an independent
 ## FK check of every generated entry sample. Requires a fresh attached cache.
+## --live-entry starts from the actual already-drawn rig/weapon pose without
+## requiring a prepared Combat Idle. It does not certify idle or recovery.
 const Entry = preload("res://runtime/combat/combat_runtime_entry_transition.gd")
 const Arm = preload("res://core/resolvers/combat_prepared_arm_frame_resolver.gd")
 const Attachment = preload("res://core/resolvers/combat_prepared_attachment_resolver.gd")
 var _entry_incoming: Dictionary = {}
 var _entry_checked := false
 var _entry_ok := false
+var _live_entry := false
 
 func _prepare_combat_idle() -> bool:
-	var ready: bool = await super._prepare_combat_idle()
-	if not ready: return false
+	_live_entry = OS.get_cmdline_user_args().has("--live-entry")
+	if _live_entry:
+		_report["combat_idle_preparation"] = {
+			"mode": "not_required_for_active_skill_test",
+			"skipped": true,
+			"scope": "Actual live already-drawn current pose; no idle or recovery proof.",
+		}
+		_report["entry_test_mode"] = "live_already_drawn_current_pose"
+	else:
+		var ready: bool = await super._prepare_combat_idle()
+		if not ready: return false
 	var slot: StringName = &"skill_slot_1"
 	for argument: String in OS.get_cmdline_user_args():
 		if argument.begins_with("--slot="): slot = StringName(argument.trim_prefix("--slot="))
@@ -115,11 +127,34 @@ func _audit_entry(clip: Resource) -> void:
 			var difference: Quaternion = (original.inverse() * Quaternion(current.x, current.y, current.z, current.w)).normalized()
 			maximum_unrelated_rotation = maxf(maximum_unrelated_rotation, 2.0 * atan2(Vector3(difference.x, difference.y, difference.z).length(), absf(difference.w)))
 		rows.append({"frame": frame, "time": clip.baked_frame_times[frame], "position_error_m": position_error, "orientation_error_rad": angle_error})
-	_entry_ok = all_valid and prefix_count == 10 and maximum_position <= 0.00005 and maximum_angle <= 0.00005 and maximum_unrelated_rotation <= 0.00005 and int(diagnostics.get("acquisition_calls", -1)) == 0
-	_report["entry_attachment_audit"] = {"ok": _entry_ok, "prefix_count": prefix_count, "max_position_error_m": maximum_position, "max_orientation_error_rad": maximum_angle, "max_nonarm_rotation_change_rad": maximum_unrelated_rotation, "live_source_weapon_distance_to_destination_m": (_entry_incoming.weapon_position_reference_local as Vector3).distance_to(destination.weapon_position_reference_local), "follow_calls": diagnostics.get("arm_follow_calls", -1), "frames": rows, "scope": "Production equipped idle-to-skill activation output; primary same-hand entry. Parent verifies unchanged body channels,60Hz,160ms and no new acquisitions."}
+	_entry_ok = all_valid and prefix_count == 10 and maximum_position <= Arm.POSITION_TOLERANCE_METERS and maximum_angle <= Arm.ANGULAR_TOLERANCE_RADIANS and maximum_unrelated_rotation <= 0.00005 and int(diagnostics.get("acquisition_calls", -1)) == 0
+	var entry_scope: String = (
+		"Production equipped activation from the actual live already-drawn current pose; primary same-hand entry. No idle or recovery proof."
+		if _live_entry else
+		"Production equipped idle-to-skill activation output; primary same-hand entry."
+	)
+	_report["entry_attachment_audit"] = {"ok": _entry_ok, "prefix_count": prefix_count, "max_position_error_m": maximum_position, "max_orientation_error_rad": maximum_angle, "max_nonarm_rotation_change_rad": maximum_unrelated_rotation, "live_source_weapon_distance_to_destination_m": (_entry_incoming.weapon_position_reference_local as Vector3).distance_to(destination.weapon_position_reference_local), "follow_calls": diagnostics.get("arm_follow_calls", -1), "frames": rows, "scope": entry_scope + " Parent verifies unchanged body channels,60Hz,160ms and no new acquisitions."}
 
 func _finish(success: bool, reason: String) -> void:
 	if success and (not _entry_checked or not _entry_ok):
 		success = false
 		reason = "equipped_entry_attachment_check_failed"
+	if _live_entry and _activation_solve_start_count >= 0:
+		# Preserve the parent's acquisition assertion with the correct starting
+		# state description. Disable only its duplicate report/count afterward.
+		Chronology.event("audit.equipped_samples_complete", {"terminal": true})
+		var final_count: int = _count_acquisition_starts()
+		var no_new_acquisition: bool = final_count == _activation_solve_start_count
+		_report["grip_acquisitions_during_activation_and_playback"] = {
+			"before_activation": _activation_solve_start_count,
+			"after_samples": final_count,
+			"new_acquisitions": final_count - _activation_solve_start_count if final_count >= 0 else -1,
+			"ok": no_new_acquisition,
+			"scope": "Actual owner.solve_started events from live already-drawn current-pose activation through sampled playback; no prepared idle prerequisite or recovery proof.",
+		}
+		_activation_solve_start_count = -1
+		if not no_new_acquisition:
+			success = false
+			if reason.is_empty():
+				reason = "equipped_playback_started_new_grip_acquisition"
 	super._finish(success, reason)

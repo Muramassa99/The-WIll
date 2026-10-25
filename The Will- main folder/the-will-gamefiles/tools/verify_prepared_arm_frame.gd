@@ -135,7 +135,7 @@ func _run() -> void:
 					all_endpoints = all_endpoints and float(row.original_endpoint_trace_error_m) <= 0.000005
 		rows.append(row)
 	var elapsed_ms: float = float(Time.get_ticks_usec() - started) / 1000.0
-	_expect(all_valid, "all_original_samples_realize_complete_hand_frame")
+	_expect(all_valid and max_error <= Resolver.POSITION_TOLERANCE_METERS, "all_original_samples_realize_complete_hand_frame")
 	_expect(all_other_channels, "inputs_and_all_nonarm_rotations_unchanged_including_fingers")
 	_expect(all_lengths, "all_arm_segment_lengths_preserved")
 	_expect(all_idempotent, "realized_frames_are_idempotent")
@@ -150,9 +150,46 @@ func _run() -> void:
 	malformed.parent_indices[0] = 0
 	_expect(not Resolver.resolve(malformed, first_hand, constraints).get("valid", true), "cyclic_layout_is_rejected")
 	_test_invalid_inputs(first_pose, first_hand, constraints)
+	_test_frame_acceptance_boundaries(first_pose, first_fk.transforms, constraints)
 	_test_reference_and_target_variations(layout, clip, mate, constraints, endpoint_times)
 	report.merge({"frames": rows, "frame_count": rows.size(), "endpoint_count": endpoint_count, "elapsed_ms_including_checks": elapsed_ms, "primary_resolve_calls": rows.size(), "primary_resolve_elapsed_ms": float(resolve_usec) / 1000.0, "max_position_error_m": max_error, "max_orientation_error_rad": max_angle, "max_wrist_twist_change_rad": max_twist, "max_adjacent_bend_step_degrees": max_bend_step, "source_dir": source_dir, "scope": "Same-grip right-hand original stored frames only. No acquisition/collision/CCD. Not a full roll-range, slide, reverse, support or entry certification."})
 	_finish()
+
+func _test_frame_acceptance_boundaries(pose: Dictionary, globals: Array[Transform3D], constraints: Dictionary) -> void:
+	# Evaluate residual acceptance on fixed real FK output, rather than letting
+	# resolve() repair a deliberately mismatched target before checking it.
+	var indices: Array[int] = []
+	for field: String in ["clavicle_bone", "upperarm_bone", "forearm_bone", "hand_bone"]:
+		indices.append(pose.bone_names.find(constraints[field]))
+	var hand: Transform3D = globals[indices[3]]
+	var forearm: Transform3D = globals[indices[2]]
+	var rest: Basis = pose.bone_rest_transforms[indices[3]].basis.orthonormalized()
+	var wrist_reference: float = Resolver._wrist_twist(hand, forearm, rest)
+	var baseline: Dictionary = Resolver._metrics(globals, indices, hand, rest, wrist_reference, constraints)
+	_expect(bool(baseline.valid), "position_tolerance_fixture_obeys_existing_joint_and_twist_limits")
+	var near: Transform3D = hand
+	near.origin += Vector3(0.0049, 0.0, 0.0)
+	var far: Transform3D = hand
+	far.origin += Vector3(0.0051, 0.0, 0.0)
+	var near_result: Dictionary = Resolver._metrics(globals, indices, near, rest, wrist_reference, constraints)
+	var far_result: Dictionary = Resolver._metrics(globals, indices, far, rest, wrist_reference, constraints)
+	_expect(bool(near_result.valid) and near_result.position_error_m > Resolver.FRAME_EPSILON and near_result.position_error_m <= Resolver.POSITION_TOLERANCE_METERS, "4_9mm_position_residual_is_accepted")
+	_expect(not bool(far_result.valid) and far_result.position_error_m > Resolver.POSITION_TOLERANCE_METERS and far_result.orientation_error_rad <= Resolver.FRAME_EPSILON and far_result.wrist_twist_change_rad <= Resolver.FRAME_EPSILON, "5_1mm_position_residual_is_rejected")
+	var angular_cases: Array = []
+	for sample: Dictionary in [{"degrees": -0.024, "accepted": true}, {"degrees": 0.024, "accepted": true}, {"degrees": -0.026, "accepted": false}, {"degrees": 0.026, "accepted": false}]:
+		var radians: float = deg_to_rad(float(sample.degrees))
+		var rotated: Transform3D = hand
+		rotated.basis = Basis(Vector3.UP, radians) * hand.basis
+		var angular_result: Dictionary = Resolver._metrics(globals, indices, rotated, rest, wrist_reference, constraints)
+		var twist_result: Dictionary = Resolver._metrics(globals, indices, hand, rest, wrist_reference + radians, constraints)
+		_expect(bool(angular_result.valid) == bool(sample.accepted) and angular_result.position_error_m <= Resolver.FRAME_EPSILON and angular_result.wrist_twist_change_rad <= Resolver.FRAME_EPSILON, "orientation_%s_degrees_expected_%s" % [sample.degrees, sample.accepted])
+		_expect(bool(twist_result.valid) == bool(sample.accepted) and twist_result.position_error_m <= Resolver.FRAME_EPSILON and twist_result.orientation_error_rad <= Resolver.FRAME_EPSILON, "wrist_twist_%s_degrees_expected_%s" % [sample.degrees, sample.accepted])
+		angular_cases.append({"signed_degrees": sample.degrees, "expected_accepted": sample.accepted,
+			"orientation": _plain(angular_result), "wrist_twist": _plain(twist_result)})
+	report["frame_acceptance_boundaries"] = {"position_tolerance_m": Resolver.POSITION_TOLERANCE_METERS,
+		"angular_tolerance_rad": Resolver.ANGULAR_TOLERANCE_RADIANS, "baseline": _plain(baseline),
+		"4_9mm": _plain(near_result), "5_1mm": _plain(far_result),
+		"angular_cases": angular_cases}
 
 func _test_reference_and_target_variations(layout: Dictionary, clip: Dictionary, mate: Transform3D, constraints: Dictionary, endpoint_times: Array[float]) -> void:
 	var transformation := Transform3D(Basis(Vector3(0.3, 0.7, 0.2).normalized(), deg_to_rad(37.0)), Vector3(0.37, -0.19, 0.43))

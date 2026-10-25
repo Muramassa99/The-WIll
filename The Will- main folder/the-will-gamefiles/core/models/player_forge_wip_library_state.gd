@@ -102,6 +102,79 @@ func get_saved_draft_runtime_clip_cache(
 		return result
 	return result
 
+func get_saved_combat_animation_draft(
+	saved_wip_id: StringName, draft_identifier: StringName, is_idle: bool
+) -> Resource:
+	# Read-only access, like get_saved_wip(). Editors mutate their own clones.
+	var saved_wip: CraftedItemWIP = get_unarmed_authoring_wip() if saved_wip_id == CraftedItemWIP.UNARMED_AUTHORING_WIP_ID else get_saved_wip(saved_wip_id)
+	if saved_wip == null or saved_wip.combat_animation_station_state == null:
+		return null
+	var array_name: StringName = &"idle_drafts" if is_idle else &"skill_drafts"
+	var id_name: StringName = &"context_id" if is_idle else &"owning_skill_id"
+	for draft: Resource in saved_wip.combat_animation_station_state.get(array_name):
+		if draft != null and StringName(draft.get(id_name)) == draft_identifier:
+			return draft
+	return null
+
+func save_combat_animation_draft(source_wip: CraftedItemWIP, draft: Resource) -> bool:
+	# Publish only this section into the last saved weapon. Other live editor
+	# drafts and Forge data must not leak into an individual skill/idle Save.
+	if source_wip == null or draft == null:
+		return false
+	_discard_retired_wips()
+	var is_unarmed := CraftedItemWIP.is_unarmed_authoring_wip(source_wip)
+	var previous: CraftedItemWIP = get_unarmed_authoring_wip() if is_unarmed else get_saved_wip(source_wip.wip_id)
+	if previous == null and not is_unarmed:
+		return false
+	var started_usec := Time.get_ticks_usec()
+	var candidate: CraftedItemWIP = (previous if previous != null else source_wip).duplicate(true) as CraftedItemWIP
+	if previous == null:
+		# A first unarmed save starts with defaults, not other unsaved actions.
+		candidate.combat_animation_station_state = null
+	if candidate.combat_animation_station_state == null:
+		candidate.ensure_combat_animation_station_state()
+	var station: Resource = candidate.combat_animation_station_state
+	if previous == null and is_unarmed:
+		station.set("uses_stage1_geometry_truth", false)
+		station.set("uses_stage2_geometry_truth", false)
+	var is_idle: bool = StringName(draft.get("draft_kind")) == CombatAnimationDraft.DRAFT_KIND_IDLE
+	var array_name: StringName = &"idle_drafts" if is_idle else &"skill_drafts"
+	var id_name: StringName = &"context_id" if is_idle else &"owning_skill_id"
+	var identifier: StringName = StringName(draft.get(id_name))
+	if identifier == StringName():
+		return false
+	var drafts: Array = station.get(array_name)
+	var replaced := false
+	for index: int in range(drafts.size()):
+		if drafts[index] != null and StringName(drafts[index].get(id_name)) == identifier:
+			drafts[index] = draft.duplicate(true)
+			replaced = true
+			break
+	if not replaced:
+		drafts.append(draft.duplicate(true))
+	station.set(array_name, drafts)
+	var saved_index: int = _find_saved_wip_index(source_wip.wip_id)
+	var previous_unarmed := unarmed_authoring_wip
+	if is_unarmed:
+		unarmed_authoring_wip = candidate
+	else:
+		saved_wips[saved_index] = candidate
+	var persist_started_usec := Time.get_ticks_usec()
+	var saved := persist()
+	if not saved:
+		if is_unarmed:
+			unarmed_authoring_wip = previous_unarmed
+		else:
+			saved_wips[saved_index] = previous
+	if trace_save_latency:
+		last_save_latency_trace = {
+			"success": saved, "scope": "selected_draft", "draft_identifier": String(identifier),
+			"prepare_library_ms": float(persist_started_usec - started_usec) / 1000.0,
+			"serialize_write_ms": float(Time.get_ticks_usec() - persist_started_usec) / 1000.0,
+			"total_ms": float(Time.get_ticks_usec() - started_usec) / 1000.0,
+		}
+	return saved
+
 func save_wip(source_wip: CraftedItemWIP) -> CraftedItemWIP:
 	var trace_started_usec := Time.get_ticks_usec() if trace_save_latency else 0
 	if trace_save_latency:

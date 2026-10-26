@@ -71,6 +71,24 @@ func _run() -> void:
 		_expect(copied_seed.is_publishable_skill_draft(), "editing_loaded_default_makes_action_publishable")
 		copied_seed.reset_to_default_baseline()
 		_expect(not copied_seed.is_publishable_skill_draft(), "reset_clears_imported_baseline_signature")
+		# SC-01 capture completion is separate from changing authored controls.
+		# This storage test exercises that durable marker only; the real station
+		# lifecycle verifier proves a capture actually occurred before Save.
+		var initialized_default = loaded_seed.duplicate(true)
+		var initialized_visible_before: Array = _nodes_snapshot(initialized_default.get_action_motion_node_chain())
+		initialized_default.authoring_pose_initialized = true
+		_expect(initialized_default.is_publishable_skill_draft(), "initialized_unchanged_default_is_publishable")
+		initialized_default.begin_action_storage()
+		var initialized_path: String = output_dir.path_join("initialized_default_action.tres")
+		_expect(ResourceSaver.save(initialized_default, initialized_path) == OK, "initialized_default_action_save")
+		initialized_default.end_action_storage()
+		var loaded_initialized = ResourceLoader.load(initialized_path, "", ResourceLoader.CACHE_MODE_IGNORE)
+		_expect(loaded_initialized != null and loaded_initialized.authoring_pose_initialized, "initialized_default_marker_survives_disk_reload")
+		_expect(loaded_initialized != null and loaded_initialized.is_publishable_skill_draft(), "initialized_default_remains_publishable_after_reload")
+		_expect(loaded_initialized != null and _nodes_snapshot(loaded_initialized.get_action_motion_node_chain()) == initialized_visible_before, "initialized_default_preserves_unchanged_visible_controls")
+		if loaded_initialized != null:
+			loaded_initialized.reset_to_default_baseline()
+			_expect(not loaded_initialized.authoring_pose_initialized and not loaded_initialized.is_publishable_skill_draft(), "reset_clears_initialized_default_marker")
 
 	var idle = DraftScript.new()
 	idle.draft_kind = DraftScript.DRAFT_KIND_IDLE

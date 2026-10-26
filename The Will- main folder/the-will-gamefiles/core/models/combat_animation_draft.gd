@@ -3,6 +3,7 @@ class_name CombatAnimationDraft
 
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const CombatRuntimeClipScript = preload("res://core/models/combat_runtime_clip.gd")
+const PreparedPoseScript = preload("res://core/models/combat_prepared_pose.gd")
 
 const DRAFT_KIND_SKILL: StringName = &"draft_skill"
 const DRAFT_KIND_IDLE: StringName = &"draft_idle"
@@ -40,6 +41,9 @@ const ACTION_EDITOR_PLACEHOLDER_META: StringName = &"action_editor_reset_placeho
 @export var stow_anchor_mode: StringName = STOW_ANCHOR_SHOULDER_HANGING
 @export_range(0.0, 1.0, 0.01) var stow_contact_ratio: float = DEFAULT_STOW_CONTACT_RATIO
 @export var authored_for_two_hand_only: bool = false
+# A settled/saved default is content even when its controls equal the seed.
+# This is section-local lifecycle state, not permission to reuse stale packets.
+@export_storage var authoring_pose_initialized: bool = false
 # Editor/legacy representation: skills retain a hidden Reset placeholder at 0.
 # Ordinary Resource.duplicate(true) must preserve it. Persistence opts into the
 # separate action representation below, which excludes that placeholder.
@@ -91,6 +95,20 @@ func get_action_motion_node_chain() -> Array[Resource]:
 	for node_index: int in range(first_index, motion_node_chain.size()):
 		action_chain.append(motion_node_chain[node_index])
 	return action_chain
+
+func has_initialized_authoring_pose() -> bool:
+	if authoring_pose_initialized:
+		return true
+	# Existing saves predate the explicit lifecycle marker. A current stored
+	# first pose already establishes ownership; don't reset it on selection.
+	var nodes: Array[Resource] = get_action_motion_node_chain()
+	if nodes.is_empty() or nodes[0] == null:
+		return false
+	var node: Resource = nodes[0]
+	return (
+		String(node.get("prepared_pose_signature")) == PreparedPoseScript.node_pose_signature(node)
+		and bool(PreparedPoseScript.validate(node.get("prepared_pose")).get("valid", false))
+	)
 
 func begin_action_storage() -> void:
 	# The library brackets synchronous ResourceSaver calls with this mode.
@@ -388,6 +406,8 @@ func ensure_minimum_baseline_nodes() -> void:
 func needs_weapon_geometry_seed() -> bool:
 	if motion_node_chain.is_empty():
 		return true
+	if has_initialized_authoring_pose():
+		return false
 	if (
 		_has_action_editor_placeholder()
 		and motion_node_chain.size() == 2
@@ -458,6 +478,7 @@ func apply_weapon_geometry_seed(seed_data: Dictionary, force_reseed: bool = fals
 	)))
 	var authored_two_hand_only: bool = bool(seed_data.get("authored_for_two_hand_only", false))
 	var baseline_count: int = 1 if draft_kind == DRAFT_KIND_IDLE else 2
+	authoring_pose_initialized = false
 	preferred_grip_style_mode = preferred_grip_mode
 	authored_for_two_hand_only = authored_two_hand_only
 	_loaded_action_baseline_signature = ""
@@ -511,6 +532,7 @@ func reset_authoring_baseline(seed_data: Dictionary = {}) -> bool:
 	return reset_to_default_baseline()
 
 func reset_to_default_baseline() -> bool:
+	authoring_pose_initialized = false
 	_loaded_action_baseline_signature = ""
 	motion_node_chain.clear()
 	selected_motion_node_index = 0
@@ -606,6 +628,8 @@ func duplicate_draft():
 func is_publishable_skill_draft() -> bool:
 	if draft_kind != DRAFT_KIND_SKILL:
 		return false
+	if has_initialized_authoring_pose() and not get_action_motion_node_chain().is_empty():
+		return true
 	if not String(skill_name).strip_edges().is_empty():
 		return true
 	if not String(skill_description).strip_edges().is_empty():

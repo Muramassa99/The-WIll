@@ -27,6 +27,8 @@ const CombatOriginRecordScript = preload("res://core/models/combat_origin_record
 const PrimaryGripSeatResolverScript = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
 const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_state.gd")
 const UserSettingsStateScript = preload("res://core/models/user_settings_state.gd")
+const EditorSettingsStateScript = preload("res://core/models/combat_animation_editor_settings_state.gd")
+const NodeDurationControlScript = preload("res://runtime/combat/combat_node_duration_control.gd")
 const UserSettingsRuntimeScript = preload("res://runtime/system/user_settings_runtime.gd")
 const UiWindowLayerPolicyScript = preload("res://runtime/ui/ui_window_layer_policy.gd")
 
@@ -165,6 +167,9 @@ var weapon_rotation_x_spin_box: SpinBox = null
 var weapon_rotation_y_spin_box: SpinBox = null
 var weapon_rotation_z_spin_box: SpinBox = null
 var transition_spin_box: SpinBox = null
+var default_transition_spin_box: SpinBox = null
+var preview_duration_overlay: Control = null
+var preview_duration_control = null
 var body_support_spin_box: SpinBox = null
 var two_hand_state_option_button: OptionButton = null
 var primary_hand_option_button: OptionButton = null
@@ -207,6 +212,9 @@ var weapon_section_foldable: FoldableContainer = null
 var arm_roll_section_foldable: FoldableContainer = null
 
 var active_player = null
+var editor_settings: Resource = null
+var editor_settings_duration_dirty: bool = false
+var editor_settings_persisted_duration: float = -1.0
 var active_wip_library: PlayerForgeWipLibraryState = null
 var active_wip: CraftedItemWIP = null
 var active_saved_wip_id: StringName = StringName()
@@ -227,6 +235,7 @@ var editor_state_dirty: bool = false
 var preview_drag_override_node: CombatAnimationMotionNode = null
 var preview_drag_has_moved: bool = false
 var preview_weapon_roll_dragging: bool = false
+var preview_weapon_facing_dragging: bool = false
 var preview_weapon_roll_pointer_start: Vector2
 var preview_weapon_roll_degrees_start: float = 0.0
 var preview_drag_refresh_pending: bool = false
@@ -291,6 +300,8 @@ const PREVIEW_CAMERA_POST_COMMIT_MOTION_GUARD_MSEC: int = 350
 var last_station_retarget_result: Dictionary = {}
 
 func _ready() -> void:
+	if editor_settings == null:
+		editor_settings = EditorSettingsStateScript.load_or_create()
 	_build_ui()
 	visible = false
 	project_list.item_clicked.connect(_on_project_item_clicked)
@@ -385,6 +396,7 @@ func _process(delta: float) -> void:
 		footer_status_label.text = "Preview finished."
 
 func _exit_tree() -> void:
+	_persist_default_motion_node_duration()
 	preview_prepare_generation += 1
 	if preview_prepare_job != null:
 		preview_prepare_job.call("cancel")
@@ -405,6 +417,7 @@ func _refresh_grip_acquisition_status() -> void:
 		var state: Dictionary = states[slot]
 		var hand := "Right" if slot == &"hand_right" else "Left"
 		match str(state.get("status", "")):
+			"manual_required": lines.append("%s grip: weapon facing changed. Use Reacquire grip when ready." % hand)
 			"queued": lines.append("%s grip: waiting to seat." % hand)
 			"solving": lines.append("%s grip: solving (%.0f s). You can keep using the editor." % [hand, float(state.get("elapsed_seconds", 0.0))])
 			"assessing": lines.append("%s grip: checking contact on the posed hand." % hand)
@@ -463,8 +476,10 @@ func capture_selected_prepared_pose(allow_preparation: bool = false) -> Dictiona
 		return _prepared_pose_capture_unavailable("prepared_pose_editor_not_active")
 	if ((manual_save_in_progress or preview_prepare_in_progress) and not allow_preparation) or chain_player.is_playing() or session_state.playback_active:
 		return _prepared_pose_capture_unavailable("prepared_pose_editor_busy")
-	if motion_node_editor.is_dragging() or preview_weapon_roll_dragging or preview_drag_override_node != null or preview_drag_refresh_pending:
+	if motion_node_editor.is_dragging() or preview_weapon_roll_dragging or preview_weapon_facing_dragging or preview_drag_override_node != null or preview_drag_refresh_pending:
 		return _prepared_pose_capture_unavailable("prepared_pose_edit_in_progress")
+	if preview_presenter.is_weapon_facing_reacquisition_required(preview_subviewport):
+		return _prepared_pose_capture_unavailable("weapon_facing_requires_manual_reacquisition")
 	if preview_presenter.is_grip_acquisition_pending(preview_subviewport):
 		return _prepared_pose_capture_unavailable("prepared_pose_grip_pending")
 	var node: CombatAnimationMotionNode = _get_active_motion_node()
@@ -519,13 +534,19 @@ func capture_selected_prepared_pose(allow_preparation: bool = false) -> Dictiona
 		var seated_frame: Dictionary = preview_presenter.get_prepared_grip_display_state(preview_subviewport, node)
 		if not bool(seated_frame.get("available", false)):
 			return _prepared_pose_capture_unavailable("baseline_seated_frame_unavailable")
-		var baseline: CombatAnimationMotionNode = draft.get("motion_node_chain")[0] as CombatAnimationMotionNode
+		# Idles have one visible node at array index 0; only skills carry a
+		# separate hidden Reset placeholder before visible N01.
+		var baseline: CombatAnimationMotionNode = null
+		if _get_user_visible_motion_node_start_index(draft) == 1:
+			baseline = draft.get("motion_node_chain")[0] as CombatAnimationMotionNode
 		for property: StringName in [&"tip_position_local", &"tip_position_origin_id", &"pommel_position_local", &"pommel_position_origin_id", &"weapon_orientation_degrees", &"weapon_orientation_authored", &"weapon_roll_degrees"]:
 			node.set(property, seated_frame[property])
-			baseline.set(property, seated_frame[property])
+			if baseline != null:
+				baseline.set(property, seated_frame[property])
 		signature = PreparedPoseScript.node_pose_signature(node)
-		baseline.prepared_pose = snapshot.duplicate(true)
-		baseline.prepared_pose_signature = PreparedPoseScript.node_pose_signature(baseline)
+		if baseline != null:
+			baseline.prepared_pose = snapshot.duplicate(true)
+			baseline.prepared_pose_signature = PreparedPoseScript.node_pose_signature(baseline)
 		input_key = var_to_bytes([node.get_instance_id(), signature,
 			_prepared_pose_refresh_generation, _prepared_pose_observed_acquisition_key]).hex_encode().sha256_text()
 		key = var_to_bytes([node.get_instance_id(), signature, context_signature,
@@ -534,6 +555,7 @@ func capture_selected_prepared_pose(allow_preparation: bool = false) -> Dictiona
 	var changed: bool = node.prepared_pose_signature != signature or var_to_bytes(node.prepared_pose) != var_to_bytes(snapshot)
 	node.prepared_pose = snapshot
 	node.prepared_pose_signature = signature
+	draft.set("authoring_pose_initialized", true)
 	_prepared_pose_completed_key = key
 	_prepared_pose_completed_input_key = input_key
 	if changed:
@@ -547,7 +569,7 @@ func capture_selected_prepared_pose(allow_preparation: bool = false) -> Dictiona
 		"node_index": get_selected_motion_node_index(), "bone_count": snapshot.get("bone_names", []).size()}
 	set_meta("last_prepared_pose_capture", result)
 	if not baseline_source.is_empty():
-		set_meta("last_baseline_preparation", {"ready": true, "reason": "", "node_index": 1, "source": baseline_source})
+		set_meta("last_baseline_preparation", {"ready": true, "reason": "", "node_index": get_selected_motion_node_index(), "source": baseline_source})
 		_refresh_active_editor_surface("Baseline grip ready. Node 1 recorded.", false)
 	return result
 
@@ -559,7 +581,7 @@ func _begin_baseline_preparation(source: String) -> void:
 		"draft": draft.get_instance_id(), "node": node.get_instance_id(),
 		"signature": PreparedPoseScript.node_pose_signature(node)}
 	_prepared_pose_capture_unavailable("baseline_grip_pending")
-	set_meta("last_baseline_preparation", {"ready": false, "reason": "baseline_grip_pending", "node_index": 1, "source": source})
+	set_meta("last_baseline_preparation", {"ready": false, "reason": "baseline_grip_pending", "node_index": get_selected_motion_node_index(), "source": source})
 	_refresh_editor_fields()
 
 
@@ -569,8 +591,8 @@ func _baseline_preparation_matches(draft: Resource, node: CombatAnimationMotionN
 		and _baseline_preparation.get("draft") == draft.get_instance_id()
 		and _baseline_preparation.get("node") == node.get_instance_id()
 		and _baseline_preparation.get("signature") == signature
-		and get_selected_motion_node_index() == 1
-		and draft.get("motion_node_chain").size() == 2
+		and get_selected_motion_node_index() == _get_user_visible_motion_node_start_index(draft)
+		and _get_user_visible_motion_node_count(draft) == 1
 	)
 
 
@@ -627,6 +649,9 @@ func get_prepared_action_pose_status(draft: Resource = null) -> Dictionary:
 
 
 func _input(event: InputEvent) -> void:
+	# A release over an overlay must still end a viewport-started camera orbit.
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
+		preview_camera_orbiting = false
 	if _has_visible_weapon_open_popup():
 		return
 	_capture_editor_cycle_focus_event(event)
@@ -716,6 +741,9 @@ func open_for(player, bench_name: String) -> void:
 	_refresh_all("Select a weapon to begin.")
 
 func close_ui() -> void:
+	if is_instance_valid(preview_duration_control):
+		preview_duration_control.finish_interaction()
+	_persist_default_motion_node_duration()
 	if not panel.visible:
 		return
 	_cancel_preview_preparation()
@@ -919,6 +947,8 @@ func select_draft(draft_identifier: StringName, advance_workflow: bool = true) -
 	if station_state == null or draft == null:
 		return false
 	_finalize_preview_drag("Motion node edit locked in.")
+	capture_selected_prepared_pose()
+	_baseline_preparation.clear()
 	if _is_idle_mode():
 		station_state.set("selected_idle_context_id", draft_identifier)
 	else:
@@ -932,7 +962,12 @@ func select_draft(draft_identifier: StringName, advance_workflow: bool = true) -
 		var stow_segment_changed: bool = _recenter_active_noncombat_stow_segment()
 		if stow_segment_changed:
 			_stage_active_wip_edit("Noncombat stow pivot centered.")
-	_refresh_all("Draft selection updated.")
+	if advance_workflow and _combat_idle_has_untouched_baseline(draft):
+		return _reset_active_draft_to_baseline("new_combat_idle")
+	var grip_reason := StringName()
+	if advance_workflow and _is_combat_idle_draft(draft) and not preview_presenter.can_restore_prepared_authoring_pose(_get_active_motion_node()):
+		grip_reason = PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION
+	_refresh_all("Draft selection updated.", grip_reason)
 	if advance_workflow and footer_status_label != null:
 		footer_status_label.text = "Editing %s." % String(draft.get("display_name"))
 	return true
@@ -971,16 +1006,16 @@ func select_skill_slot(slot_id: StringName, advance_workflow: bool = true) -> bo
 	session_state.current_draft_ref = draft
 	if advance_workflow:
 		_set_workflow_step(WORKFLOW_STEP_EDITOR)
-	# Selecting a skill is an explicit command to occupy the authored Handle
-	# position, even when its stored value exactly matches the open-mount seed.
-	# Equality of data must not be mistaken for absence of that command: the
-	# open-mount shortcut clears digit guidance, whereas this one-shot reason
-	# enters the complete authored grip/contact solve at the preserved target.
+	_ensure_valid_editor_motion_node_selection()
+	# Restore a current recorded pose on passive selection. Explicit Reset or a
+	# missing packet still requests acquisition; the presenter also validates
+	# the saved packet against current geometry/rig context before applying it.
 	var initial_grip_resolve_reason := StringName()
 	if (
 		advance_workflow
 		and active_wip != null
 		and not _is_active_unarmed_authoring_wip()
+		and not preview_presenter.can_restore_prepared_authoring_pose(_get_active_motion_node())
 	):
 		initial_grip_resolve_reason = PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION
 	var defer_initial_grip_resolve: bool = (
@@ -1112,7 +1147,7 @@ func _insert_recorded_motion_node() -> bool:
 	var new_node: CombatAnimationMotionNode = _duplicate_or_build_motion_node(seed_node)
 	if new_node == null:
 		return false
-	new_node.transition_duration_seconds = CombatAnimationMotionNodeScript.DEFAULT_TRANSITION_DURATION_SECONDS
+	new_node.transition_duration_seconds = get_default_motion_node_transition_duration()
 	_prepare_inserted_motion_node_identity(new_node)
 	if trace_enabled:
 		trace_step_usec = _append_perf_trace_elapsed(trace, "duplicate_seed_node", trace_step_usec)
@@ -1239,8 +1274,10 @@ func _reset_active_draft_to_baseline(source: String) -> bool:
 	_normalize_draft(draft)
 	_enforce_idle_authority(draft, false)
 	var status_message: String = "Draft reset to active weapon and grip baseline." if used_weapon_seed else "Draft reset to default baseline."
+	if _is_noncombat_idle_draft(draft):
+		status_message = "Draft reset to default body and stow attachment."
 	_stage_active_wip_edit(status_message)
-	if active_wip != null and not _is_active_unarmed_authoring_wip() and StringName(draft.get("draft_kind")) == CombatAnimationDraftScript.DRAFT_KIND_SKILL:
+	if active_wip != null and not _is_active_unarmed_authoring_wip() and not _is_noncombat_idle_draft(draft):
 		_refresh_all(status_message, PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION)
 		_begin_baseline_preparation(source)
 	else:
@@ -1341,8 +1378,16 @@ func set_selected_motion_node_transition_duration(
 	if _is_motion_node_authoring_locked(motion_node):
 		_reject_locked_motion_node_edit()
 		return false
-	var resolved_duration: float = maxf(duration_seconds, 0.0)
+	if not is_finite(duration_seconds):
+		return false
+	var resolved_duration: float = clampf(
+		snappedf(duration_seconds, CombatAnimationMotionNodeScript.TRANSITION_DURATION_STEP_SECONDS),
+		CombatAnimationMotionNodeScript.MIN_AUTHORED_TRANSITION_DURATION_SECONDS,
+		CombatAnimationMotionNodeScript.MAX_AUTHORED_TRANSITION_DURATION_SECONDS
+	)
 	if is_equal_approx(motion_node.transition_duration_seconds, resolved_duration):
+		if is_instance_valid(transition_spin_box):
+			transition_spin_box.set_value_no_signal(resolved_duration)
 		return false
 	motion_node.transition_duration_seconds = resolved_duration
 	motion_node.normalize()
@@ -1616,7 +1661,7 @@ func _insert_generated_grip_style_transition_after_selection(
 	bridge_node.draft_notes = "Generated grip-style swap bridge. Endpoints stay locked; Bezier path handles can be shaped."
 	bridge_node.normalize()
 	var authored_node: CombatAnimationMotionNode = _duplicate_or_build_motion_node(bridge_node)
-	authored_node.transition_duration_seconds = CombatAnimationMotionNodeScript.DEFAULT_TRANSITION_DURATION_SECONDS
+	authored_node.transition_duration_seconds = get_default_motion_node_transition_duration()
 	authored_node.draft_notes = source_node.draft_notes
 	_prepare_inserted_motion_node_identity(bridge_node)
 	_prepare_inserted_motion_node_identity(authored_node)
@@ -2029,10 +2074,10 @@ func _build_preview_shortcut_overlay_text() -> String:
 		_get_action_binding_label(ACTION_NEW_NODE),
 		_get_action_binding_label(ACTION_DELETE_NODE),
 	])
-	lines.append("%s  Cycle Tip / Pommel / Weapon / Arms / Free Hands (Shift: reverse)" % _get_action_binding_label(ACTION_CYCLE_FOCUS))
+	lines.append("%s  Cycle Tip / Pommel / Wrist Roll / Weapon Facing / Arms / Free Hands (Shift: reverse)" % _get_action_binding_label(ACTION_CYCLE_FOCUS))
 	lines.append("%s  Preview / Stop" % _get_action_binding_label(ACTION_PREVIEW_PLAYBACK))
 	lines.append("LMB  Drag Active Control / Bezier Handles")
-	lines.append("Weapon Center  Rotate  |  Green Orb  Weapon Orientation")
+	lines.append("Green Orb  Wrist Roll  |  Dark Green Cube  Weapon-only Roll")
 	lines.append("RMB  Orbit Camera")
 	lines.append("Wheel  Zoom")
 	return "\n".join(lines)
@@ -2045,6 +2090,8 @@ func _get_focus_display_name(focus_id: StringName) -> String:
 			return "Pommel"
 		CombatAnimationSessionStateScript.FOCUS_WEAPON:
 			return "Weapon Orientation"
+		CombatAnimationSessionStateScript.FOCUS_WEAPON_FACING:
+			return "Weapon Facing (weapon only)"
 		CombatAnimationSessionStateScript.FOCUS_ARM_ROLL:
 			return "Upper Arm Roll"
 		CombatAnimationSessionStateScript.FOCUS_RIGHT_ARM_ROLL:
@@ -2396,7 +2443,7 @@ func _build_center_column(parent: HBoxContainer) -> void:
 	preview_shortcut_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	preview_shortcut_overlay.add_theme_constant_override("margin_left", 14)
 	preview_shortcut_overlay.add_theme_constant_override("margin_top", 14)
-	preview_shortcut_overlay.add_theme_constant_override("margin_right", 14)
+	preview_shortcut_overlay.add_theme_constant_override("margin_right", 130)
 	preview_shortcut_overlay.add_theme_constant_override("margin_bottom", 14)
 	preview_panel.add_child(preview_shortcut_overlay)
 	var preview_shortcut_layout := VBoxContainer.new()
@@ -2426,6 +2473,17 @@ func _build_center_column(parent: HBoxContainer) -> void:
 	preview_shortcut_overlay_label.add_theme_color_override("font_color", Color(0.72, 0.74, 0.78, 0.88))
 	preview_shortcut_overlay_label.text = ""
 	preview_shortcut_row.add_child(preview_shortcut_overlay_label)
+	preview_duration_overlay = Control.new()
+	preview_duration_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	preview_panel.add_child(preview_duration_overlay)
+	preview_duration_control = NodeDurationControlScript.new()
+	preview_duration_control.name = "NewNodeDurationControl"
+	preview_duration_overlay.add_child(preview_duration_control)
+	preview_duration_control.set_duration_ms(roundi(get_default_motion_node_transition_duration() * 1000.0))
+	preview_duration_control.duration_changed.connect(_on_preview_default_duration_changed)
+	preview_duration_control.edit_finished.connect(_persist_default_motion_node_duration)
+	preview_duration_overlay.resized.connect(_layout_preview_duration_control)
+	_layout_preview_duration_control.call_deferred()
 	var tl_panel := PanelContainer.new()
 	tl_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	tl_panel.size_flags_stretch_ratio = 1.0
@@ -2452,6 +2510,17 @@ func _build_center_column(parent: HBoxContainer) -> void:
 	save_button = _build_styled_button(action_row, "Save")
 	save_button.tooltip_text = "Save current skill edits and rebuild the preview playback cache."
 	play_preview_button = _build_styled_button(action_row, "Play [F]")
+
+func _layout_preview_duration_control() -> void:
+	if not is_instance_valid(preview_duration_control) or not is_instance_valid(preview_duration_overlay):
+		return
+	var available: Vector2 = preview_duration_overlay.size
+	var control_height: float = minf(clampf(available.y * 0.65, 210.0, 420.0), maxf(available.y - 20.0, 190.0))
+	preview_duration_control.size = Vector2(110.0, control_height)
+	preview_duration_control.position = Vector2(maxf(available.x - 124.0, 0.0), maxf((available.y - control_height) * 0.5, 0.0))
+
+func _on_preview_default_duration_changed(duration_ms: int) -> void:
+	set_default_motion_node_transition_duration(float(duration_ms) / 1000.0, false)
 
 func _build_right_inspector(parent: HBoxContainer) -> void:
 	var inspector_panel := PanelContainer.new()
@@ -2540,7 +2609,10 @@ func _build_right_inspector(parent: HBoxContainer) -> void:
 	var timing_section: Dictionary = _build_foldable_section(vbox, "TIMING & BEHAVIOR", true)
 	var timing_content: VBoxContainer = timing_section.get("content", null) as VBoxContainer
 	_build_helper_text(timing_content, "Transition time is the travel time from the previous motion node into the selected node. Node 01 is the starting baseline, so its transition value is not used during preview.")
-	transition_spin_box = _build_labeled_spinbox(timing_content, "Time From Previous Node (s)", 0.0, 2.0, 0.01)
+	transition_spin_box = _build_labeled_spinbox(timing_content, "Time From Previous Node (s)", CombatAnimationMotionNodeScript.MIN_AUTHORED_TRANSITION_DURATION_SECONDS, CombatAnimationMotionNodeScript.MAX_AUTHORED_TRANSITION_DURATION_SECONDS, CombatAnimationMotionNodeScript.TRANSITION_DURATION_STEP_SECONDS)
+	# Display legacy saved timings honestly. Deliberate edits use the bounds above.
+	transition_spin_box.allow_lesser = true
+	transition_spin_box.allow_greater = true
 	body_support_spin_box = _build_labeled_spinbox(timing_content, "Body Support", 0.0, 1.0, 0.05)
 	var arm_roll_section: Dictionary = _build_foldable_section(timing_content, "UPPER ARM ROLL", true)
 	arm_roll_section_foldable = arm_roll_section.get("foldable", null) as FoldableContainer
@@ -2559,6 +2631,13 @@ func _build_right_inspector(parent: HBoxContainer) -> void:
 	grip_mode_option_button = OptionButton.new()
 	_style_option_button(grip_mode_option_button)
 	timing_content.add_child(grip_mode_option_button)
+	var editor_settings_section: Dictionary = _build_foldable_section(vbox, "EDITOR SETTINGS", false)
+	var editor_settings_content: VBoxContainer = editor_settings_section.get("content", null) as VBoxContainer
+	_build_helper_text(editor_settings_content, "Default travel time for new motion nodes. Remembered across sessions; existing nodes keep their own timing.")
+	default_transition_spin_box = _build_labeled_spinbox(editor_settings_content, "New Node Duration (s)", CombatAnimationMotionNodeScript.MIN_AUTHORED_TRANSITION_DURATION_SECONDS, CombatAnimationMotionNodeScript.MAX_AUTHORED_TRANSITION_DURATION_SECONDS, CombatAnimationMotionNodeScript.TRANSITION_DURATION_STEP_SECONDS)
+	default_transition_spin_box.name = "DefaultMotionNodeDuration"
+	default_transition_spin_box.set_value_no_signal(get_default_motion_node_transition_duration())
+	default_transition_spin_box.value_changed.connect(_on_default_transition_changed)
 	var draft_section: Dictionary = _build_foldable_section(vbox, "DRAFT SETTINGS", false)
 	var draft_content: VBoxContainer = draft_section.get("content", null) as VBoxContainer
 	_build_field_label(draft_content, "Draft Name")
@@ -3853,6 +3932,7 @@ func _refresh_preview_scene(
 		_end_preview_authoring_lookup_scope()
 
 func _refresh_preview_scene_prepared(grip_resolve_reason: StringName) -> void:
+	preview_presenter.prepared_authoring_context_signature_resolver = Callable(self, "_prepared_pose_context_signature")
 	_ensure_current_focus_available()
 	var baked_profile: BakedProfile = _get_active_baked_profile()
 	var playback_state: Dictionary = _build_preview_playback_state()
@@ -4384,6 +4464,8 @@ func _skill_draft_has_untouched_baseline(draft: Resource) -> bool:
 	var typed: CombatAnimationDraft = draft as CombatAnimationDraft
 	if typed == null or typed.draft_kind != CombatAnimationDraftScript.DRAFT_KIND_SKILL or typed.get_action_motion_node_chain().size() != 1:
 		return false
+	if typed.has_initialized_authoring_pose():
+		return false
 	if not typed.skill_name.is_empty() or not typed.skill_description.is_empty() or not typed.draft_notes.is_empty() or typed.skill_icon != null:
 		return false
 	if not is_equal_approx(typed.preview_playback_speed_scale, 1.0) or typed.preview_loop_enabled or not is_equal_approx(typed.speed_acceleration_percent, CombatAnimationDraftScript.DEFAULT_SPEED_ACCELERATION_PERCENT) or not is_equal_approx(typed.speed_deceleration_percent, CombatAnimationDraftScript.DEFAULT_SPEED_DECELERATION_PERCENT):
@@ -4408,6 +4490,29 @@ func _skill_draft_has_untouched_baseline(draft: Resource) -> bool:
 			expected_node.transition_duration_seconds = duration
 			if signature == expected._build_action_baseline_signature():
 				return true
+	return false
+
+
+func _combat_idle_has_untouched_baseline(draft: Resource) -> bool:
+	var typed: CombatAnimationDraft = draft as CombatAnimationDraft
+	if not _is_combat_idle_draft(typed) or typed.has_initialized_authoring_pose():
+		return false
+	if typed.needs_weapon_geometry_seed():
+		return true
+	# Compare the full authored node with the same mounted seed used on open,
+	# not raw weapon geometry. Missing packets alone do not authorize Reset.
+	var expected: CombatAnimationDraft = CombatAnimationDraftScript.new()
+	expected.draft_kind = CombatAnimationDraftScript.DRAFT_KIND_IDLE
+	expected.context_id = CombatAnimationDraftScript.IDLE_CONTEXT_COMBAT
+	if not expected.apply_weapon_geometry_seed(_resolve_active_weapon_authored_baseline_seed(), true):
+		return false
+	var expected_node: CombatAnimationMotionNode = expected.motion_node_chain[0] as CombatAnimationMotionNode
+	expected_node.primary_hand_slot = _resolve_active_authoring_primary_slot_id()
+	expected_node.normalize()
+	for duration: float in [CombatAnimationMotionNodeScript.DEFAULT_TRANSITION_DURATION_SECONDS, CombatAnimationMotionNodeScript.LEGACY_SERIALIZED_TRANSITION_DURATION_SECONDS]:
+		expected_node.transition_duration_seconds = duration
+		if typed._build_action_baseline_signature() == expected._build_action_baseline_signature():
+			return true
 	return false
 
 
@@ -4842,6 +4947,10 @@ func _seed_draft_from_active_weapon_geometry(draft: Resource, force_reseed: bool
 func _realign_active_draft_to_preview_open_baseline(force_reseed: bool = false) -> bool:
 	var draft: Resource = _get_active_draft()
 	if draft == null:
+		return false
+	# Seeding another untouched section during weapon open must not overwrite
+	# the selected section's already recorded first pose.
+	if draft is CombatAnimationDraft and draft.has_initialized_authoring_pose():
 		return false
 	return _seed_draft_from_active_weapon_geometry(draft, force_reseed)
 
@@ -5705,6 +5814,8 @@ func _active_draft_requires_manual_save(draft: Resource = null) -> bool:
 	var active_draft: Resource = draft if draft != null else _get_active_draft()
 	if active_draft == null:
 		return false
+	if not bool(active_draft.get("authoring_pose_initialized")):
+		return true
 	if _draft_has_unsaved_content(active_draft):
 		return true
 	if _is_noncombat_idle_draft(active_draft):
@@ -6142,6 +6253,9 @@ func _manual_save_active_editor_state() -> void:
 		_abort_manual_save_preparation("The draft changed before the file write. Save the current edits again.")
 		return
 	_set_manual_save_progress(85.0, "Writing save file...")
+	# Noncombat has a body attachment, not a grip packet. Its first explicit
+	# Save establishes the same section ownership as a captured in-hand pose.
+	draft.set("authoring_pose_initialized", true)
 	var persisted: bool = _persist_active_wip("", PERSIST_RUNTIME_CACHE_KEEP, false)
 	trace_step_usec = _record_save_latency_phase("file_saving", trace_step_usec)
 	if not persisted:
@@ -6308,6 +6422,7 @@ func _ensure_preview_drag_motion_chain_cache() -> Dictionary:
 
 func _clear_preview_drag_override() -> void:
 	preview_weapon_roll_dragging = false
+	preview_weapon_facing_dragging = false
 	preview_drag_override_node = null
 	preview_drag_has_moved = false
 	preview_drag_refresh_pending = false
@@ -6773,6 +6888,13 @@ func _apply_motion_node_curve_handle_state(target: CombatAnimationMotionNode, so
 	return changed
 
 func _finalize_preview_drag(status_message: String = "Motion node edit locked in.") -> void:
+	if preview_weapon_facing_dragging:
+		preview_weapon_facing_dragging = false
+		_refresh_motion_node_list()
+		_refresh_editor_fields()
+		_refresh_grip_acquisition_status()
+		_refresh_summary("Weapon facing adjusted. Use Reacquire grip when ready.")
+		return
 	if preview_weapon_roll_dragging:
 		preview_weapon_roll_dragging = false
 		_refresh_motion_node_list()
@@ -6907,13 +7029,57 @@ func _get_minimum_motion_node_count(draft: Resource) -> int:
 		return 1
 	return 1 if draft.get("draft_kind") == CombatAnimationDraftScript.DRAFT_KIND_IDLE else 2
 
+func get_default_motion_node_transition_duration() -> float:
+	if editor_settings == null:
+		editor_settings = EditorSettingsStateScript.load_or_create()
+	if editor_settings_persisted_duration < 0.0:
+		editor_settings_persisted_duration = float(editor_settings.get("default_transition_duration_seconds"))
+	return float(editor_settings.get("default_transition_duration_seconds"))
+
+func set_default_motion_node_transition_duration(duration_seconds: float, persist_change: bool = true) -> bool:
+	if not is_finite(duration_seconds):
+		return false
+	var previous: float = get_default_motion_node_transition_duration()
+	var resolved: float = clampf(
+		snappedf(duration_seconds, CombatAnimationMotionNodeScript.TRANSITION_DURATION_STEP_SECONDS),
+		CombatAnimationMotionNodeScript.MIN_AUTHORED_TRANSITION_DURATION_SECONDS,
+		CombatAnimationMotionNodeScript.MAX_AUTHORED_TRANSITION_DURATION_SECONDS
+	)
+	if not is_equal_approx(previous, resolved):
+		editor_settings.set("default_transition_duration_seconds", resolved)
+		editor_settings_duration_dirty = true
+	_sync_default_motion_node_duration_controls(resolved)
+	return _persist_default_motion_node_duration() if persist_change else true
+
+func _sync_default_motion_node_duration_controls(duration_seconds: float) -> void:
+	if is_instance_valid(default_transition_spin_box):
+		default_transition_spin_box.set_value_no_signal(duration_seconds)
+	if is_instance_valid(preview_duration_control):
+		preview_duration_control.set_duration_ms(roundi(duration_seconds * 1000.0))
+
+func _persist_default_motion_node_duration() -> bool:
+	if not editor_settings_duration_dirty or editor_settings == null:
+		return true
+	editor_settings_duration_dirty = false
+	if not bool(editor_settings.call("persist")):
+		editor_settings.set("default_transition_duration_seconds", editor_settings_persisted_duration)
+		_sync_default_motion_node_duration_controls(editor_settings_persisted_duration)
+		if is_instance_valid(footer_status_label):
+			footer_status_label.text = "Could not save the default node duration. Previous value retained."
+		return false
+	editor_settings_persisted_duration = float(editor_settings.get("default_transition_duration_seconds"))
+	return true
+
+func _on_default_transition_changed(value: float) -> void:
+	set_default_motion_node_transition_duration(value)
+
 func _duplicate_or_build_motion_node(source_node: CombatAnimationMotionNode) -> CombatAnimationMotionNode:
 	var new_node: CombatAnimationMotionNode = null
 	if source_node != null:
 		new_node = source_node.duplicate_node()
 	else:
 		new_node = CombatAnimationMotionNodeScript.new()
-		new_node.transition_duration_seconds = CombatAnimationMotionNodeScript.DEFAULT_TRANSITION_DURATION_SECONDS
+		new_node.transition_duration_seconds = get_default_motion_node_transition_duration()
 		var geometry_seed: Dictionary = _resolve_active_weapon_authored_baseline_seed()
 		_apply_motion_seed_to_motion_node(new_node, geometry_seed)
 	if new_node != null:
@@ -7360,6 +7526,7 @@ func _refresh_focus_indicators() -> void:
 	var tip_active: bool = session_state.is_tip_focused()
 	var pommel_active: bool = session_state.is_pommel_focused()
 	var weapon_active: bool = session_state.is_weapon_focused()
+	var facing_active: bool = session_state.current_focus == CombatAnimationSessionStateScript.FOCUS_WEAPON_FACING
 	var right_arm_roll_active: bool = session_state.current_focus == CombatAnimationSessionStateScript.FOCUS_RIGHT_ARM_ROLL or session_state.current_focus == CombatAnimationSessionStateScript.FOCUS_ARM_ROLL
 	var left_arm_roll_active: bool = session_state.current_focus == CombatAnimationSessionStateScript.FOCUS_LEFT_ARM_ROLL
 	var arm_roll_active: bool = right_arm_roll_active or left_arm_roll_active
@@ -7370,8 +7537,8 @@ func _refresh_focus_indicators() -> void:
 		pommel_section_foldable.title = "POMMEL POSITION [ACTIVE]" if pommel_active else "POMMEL POSITION"
 		pommel_section_foldable.add_theme_color_override("font_color", COLOR_TEXT_TITLE if pommel_active else COLOR_TEXT_HEADER)
 	if weapon_section_foldable != null:
-		weapon_section_foldable.title = "WEAPON ORIENTATION [ACTIVE]" if weapon_active else "WEAPON ORIENTATION"
-		weapon_section_foldable.add_theme_color_override("font_color", COLOR_TEXT_TITLE if weapon_active else COLOR_TEXT_HEADER)
+		weapon_section_foldable.title = "WEAPON FACING [ACTIVE]" if facing_active else ("WEAPON ORIENTATION [ACTIVE]" if weapon_active else "WEAPON ORIENTATION")
+		weapon_section_foldable.add_theme_color_override("font_color", COLOR_TEXT_TITLE if weapon_active or facing_active else COLOR_TEXT_HEADER)
 	if arm_roll_section_foldable != null:
 		var arm_title: String = "UPPER ARM ROLL"
 		if right_arm_roll_active:
@@ -7390,6 +7557,8 @@ func _resolve_available_focus_ids() -> Array[StringName]:
 		CombatAnimationSessionStateScript.FOCUS_LEFT_ARM_ROLL,
 	]
 	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
+	if active_wip != null and not _is_active_unarmed_authoring_wip() and not _is_noncombat_idle_draft(_get_active_draft()):
+		focus_ids.insert(3, CombatAnimationSessionStateScript.FOCUS_WEAPON_FACING)
 	for slot_id: StringName in _resolve_available_hand_proxy_slots(motion_node):
 		focus_ids.append(
 			CombatAnimationSessionStateScript.FOCUS_LEFT_HAND_PROXY
@@ -7844,6 +8013,34 @@ func _refresh_weapon_roll_control_bounds(motion_node: CombatAnimationMotionNode)
 	weapon_roll_spin_box.tooltip_text = "Roll range for this hand pose: %.1f to %.1f degrees (240 degrees of travel)." % [limits["minimum_degrees"], limits["maximum_degrees"]]
 	weapon_roll_spin_box.set_block_signals(was_blocked)
 
+## Cumulative angle from the start of this weapon-only gesture. Final facing
+## uses the existing node orientation; wrist Roll remains a separate coordinate.
+func apply_selected_motion_node_weapon_facing_delta(delta_degrees: float, begin_gesture: bool = false) -> bool:
+	var motion: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion == null or _is_motion_node_authoring_locked(motion) or chain_player.is_playing() or not is_finite(delta_degrees):
+		return false
+	if not preview_presenter.supports_weapon_facing_manipulation(preview_subviewport, motion, _get_active_draft()):
+		return false
+	if begin_gesture:
+		_cancel_preview_preparation("Preview preparation cancelled by an edit. Press F after reacquiring grip.")
+		var started: Dictionary = preview_presenter.begin_weapon_facing_manipulation(preview_subviewport, motion)
+		if not bool(started.get("available", false)):
+			footer_status_label.text = "Could not start weapon facing: %s." % started.get("reason", "unavailable")
+			return false
+	var result: Dictionary = preview_presenter.apply_weapon_facing_manipulation(preview_subviewport, motion, delta_degrees)
+	if not bool(result.get("available", false)):
+		footer_status_label.text = "Could not adjust weapon facing: %s." % result.get("reason", "unavailable")
+		return false
+	if not bool(result.get("changed", false)):
+		return true
+	_stage_active_wip_edit("Weapon facing adjusted. Use Reacquire grip when ready.")
+	_refresh_editor_fields()
+	_refresh_grip_acquisition_status()
+	# Update only controls, never the macro-pose/IK path during this gesture.
+	preview_presenter.refresh_focus_visuals(preview_view_container, preview_subviewport,
+		_get_active_draft(), get_selected_motion_node_index(), session_state.current_focus, _get_active_baked_profile())
+	return true
+
 func set_selected_motion_node_weapon_roll(
 	roll_degrees: float,
 	persist_change: bool = true,
@@ -8293,6 +8490,14 @@ func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 					_reject_locked_motion_node_edit()
 					preview_view_container.accept_event()
 					return
+				if drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_WEAPON_FACING:
+					if apply_selected_motion_node_weapon_facing_delta(0.0, true):
+						preview_weapon_facing_dragging = true
+						preview_weapon_roll_pointer_start = mb.position
+						motion_node_editor.begin_drag(drag_target, mb.position, motion_node)
+						footer_status_label.text = "Drag left or right to roll only the weapon; reacquire grip when ready."
+					preview_view_container.accept_event()
+					return
 				if drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_WEAPON_ROTATION and preview_presenter.supports_weapon_roll_manipulation(preview_subviewport, motion_node, _get_active_draft()):
 					preview_weapon_roll_dragging = true
 					preview_weapon_roll_pointer_start = mb.position
@@ -8356,6 +8561,9 @@ func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 			preview_view_container.accept_event()
 
 func _handle_preview_drag(screen_position: Vector2) -> void:
+	if preview_weapon_facing_dragging:
+		apply_selected_motion_node_weapon_facing_delta((screen_position.x - preview_weapon_roll_pointer_start.x) * 0.5)
+		return
 	if preview_weapon_roll_dragging:
 		var requested_degrees: float = preview_weapon_roll_degrees_start + (screen_position.x - preview_weapon_roll_pointer_start.x) * 0.5
 		set_selected_motion_node_weapon_roll(requested_degrees, false, false, true, true, false)

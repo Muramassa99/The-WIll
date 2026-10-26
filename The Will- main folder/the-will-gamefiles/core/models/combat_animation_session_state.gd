@@ -4,6 +4,7 @@ class_name CombatAnimationSessionState
 const FOCUS_TIP: StringName = &"tip"
 const FOCUS_POMMEL: StringName = &"pommel"
 const FOCUS_WEAPON: StringName = &"weapon"
+const FOCUS_WEAPON_FACING: StringName = &"weapon_facing"
 const FOCUS_ARM_ROLL: StringName = &"arm_roll"
 const FOCUS_RIGHT_ARM_ROLL: StringName = &"right_arm_roll"
 const FOCUS_LEFT_ARM_ROLL: StringName = &"left_arm_roll"
@@ -24,6 +25,7 @@ func cycle_focus(available_focus_ids: Array = [], direction: int = 1) -> void:
 			FOCUS_TIP,
 			FOCUS_POMMEL,
 			FOCUS_WEAPON,
+			FOCUS_WEAPON_FACING,
 			FOCUS_ARM_ROLL,
 		]
 	var current_index: int = focus_ids.find(current_focus)
@@ -40,6 +42,9 @@ func is_pommel_focused() -> bool:
 
 func is_weapon_focused() -> bool:
 	return current_focus == FOCUS_WEAPON
+
+func is_weapon_facing_focused() -> bool:
+	return current_focus == FOCUS_WEAPON_FACING
 
 func is_arm_roll_focused() -> bool:
 	return current_focus == FOCUS_ARM_ROLL or current_focus == FOCUS_RIGHT_ARM_ROLL or current_focus == FOCUS_LEFT_ARM_ROLL

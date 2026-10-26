@@ -9,6 +9,7 @@ const CombatAnimationSessionStateScript = preload("res://core/models/combat_anim
 const DRAG_TARGET_TIP: StringName = &"tip"
 const DRAG_TARGET_POMMEL: StringName = &"pommel"
 const DRAG_TARGET_WEAPON_ROTATION: StringName = &"weapon_rotation"
+const DRAG_TARGET_WEAPON_FACING: StringName = &"weapon_facing"
 const DRAG_TARGET_TIP_CURVE_IN: StringName = &"tip_curve_in"
 const DRAG_TARGET_TIP_CURVE_OUT: StringName = &"tip_curve_out"
 const DRAG_TARGET_POMMEL_CURVE_IN: StringName = &"pommel_curve_in"
@@ -169,6 +170,12 @@ func get_weapon_rotation_handle_local(
 ) -> Vector3:
 	return get_weapon_center_local(motion_node) + get_weapon_rotation_normal_local(motion_node) * handle_distance_meters
 
+func get_weapon_facing_handle_local(
+	motion_node: CombatAnimationMotionNode,
+	handle_distance_meters: float = WEAPON_ROTATION_HANDLE_DISTANCE_METERS
+) -> Vector3:
+	return get_weapon_center_local(motion_node) - get_weapon_rotation_normal_local(motion_node) * handle_distance_meters
+
 func build_tip_curve(motion_node_chain: Array, bake_interval: float = 0.015) -> Curve3D:
 	return build_endpoint_curve(motion_node_chain, true, bake_interval)
 
@@ -225,6 +232,11 @@ func pick_drag_target(
 	fallback_focus: StringName
 ) -> StringName:
 	if camera == null or motion_node == null or trajectory_root == null:
+		return StringName()
+	if fallback_focus == CombatAnimationSessionStateScript.FOCUS_WEAPON_FACING:
+		var facing_handle: Vector3 = get_weapon_facing_handle_local(motion_node)
+		if _get_screen_pick_distance_pixels(camera, trajectory_root, facing_handle, screen_position) <= CONTROL_SCREEN_PICK_RADIUS_PIXELS:
+			return DRAG_TARGET_WEAPON_FACING
 		return StringName()
 	if fallback_focus == CombatAnimationSessionStateScript.FOCUS_WEAPON:
 		var weapon_center: Vector3 = get_weapon_center_local(motion_node)

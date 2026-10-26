@@ -20,6 +20,7 @@ const RENDER_CHECKPOINT_FIELDS := [
 	&"_last_key_change_frame", &"_started_usec", &"_status", &"_slots", &"_dominant",
 	&"_pose_epoch", &"_primary_seat", &"_replay_pose_cache", &"_support_motion_snapshot",
 	&"_support_motion_clamp_count", &"_last_support_motion_clamp",
+	&"_manual_reacquisition_required",
 ]
 signal primary_seat_applied(weapon: Node3D, actor: Node3D)
 
@@ -51,6 +52,7 @@ var _restoring_support_motion := false
 var _support_motion_clamp_count := 0
 var _last_support_motion_clamp: Dictionary = {}
 var _replay_preparation_context: Dictionary = {}
+var _manual_reacquisition_required := false
 
 ## These tokens are private, in-memory continuations of this exact owner. They
 ## include the cache at this frame: later acquisitions must not leak backward.
@@ -82,7 +84,7 @@ func can_restore_render_checkpoint(snapshot: Dictionary) -> bool:
 		for property: StringName in [&"_requests", &"_status", &"_slots", &"_primary_seat", &"_replay_pose_cache", &"_support_motion_snapshot"]:
 			if not saved_state[property].is_empty():
 				return false
-		if saved_state[&"_dominant"] != StringName() or saved_state[&"_settle_ready"]:
+		if saved_state[&"_dominant"] != StringName() or saved_state[&"_settle_ready"] or saved_state[&"_manual_reacquisition_required"]:
 			return false
 	for control: Variant in saved_state[&"_support_motion_snapshot"].get("controls", []):
 		if not control is Dictionary or not is_instance_valid(control.get("node")):
@@ -126,7 +128,8 @@ func _render_checkpoint_unconfigured() -> bool:
 		and _requests.is_empty() and _queue.is_empty() and _slots.is_empty() \
 		and _status.is_empty() and not _settle_ready \
 		and _dominant == StringName() and _meshes.is_empty() and _primary_seat.is_empty() \
-		and _replay_pose_cache.is_empty() and _support_motion_snapshot.is_empty()
+		and _replay_pose_cache.is_empty() and _support_motion_snapshot.is_empty() \
+		and not _manual_reacquisition_required
 
 func is_render_checkpoint_idle() -> bool:
 	return _render_checkpoint_idle()
@@ -156,6 +159,8 @@ func _render_checkpoint_identity() -> Dictionary:
 ## frame that changes style/station. Restore only its validated local binding;
 ## neither weapon seating nor a fresh acquisition belongs before the macro pass.
 func restore_cached_primary_binding_for_replay() -> Dictionary:
+	if _manual_reacquisition_required:
+		return {"valid": false, "restored": false, "reason": "manual_grip_reacquisition_required"}
 	if _busy or _closing or not is_instance_valid(_actor) or not is_instance_valid(_weapon) or not _data.get("valid", false):
 		return {"valid": false, "restored": false, "reason": "replay_context_not_ready"}
 	var request: Dictionary = _requests.get(_dominant, {})
@@ -187,6 +192,8 @@ func restore_cached_primary_binding_for_replay() -> Dictionary:
 ## editing. Rigid motion reuses a committed local grip; changed stations solve
 ## once per relationship instead of recording pending/open fingers.
 func prepare_replay_grip(slots: Array[StringName], dominant: StringName) -> Dictionary:
+	if _manual_reacquisition_required:
+		return {"valid": false, "reason": "manual_grip_reacquisition_required"}
 	if _busy or _job != null or _running_slot != StringName() or _closing \
 		or _restoring_support_motion or not _replay_preparation_context.is_empty():
 		return {"valid": false, "reason": "grip_acquisition_pending"}
@@ -226,6 +233,8 @@ func _abort_failed_replay_preparation(reason: String) -> bool:
 	return true
 
 func _prepare_replay_grip_now(slots: Array[StringName], dominant: StringName) -> Dictionary:
+	if _manual_reacquisition_required:
+		return {"valid": false, "reason": "manual_grip_reacquisition_required"}
 	synchronize(slots, dominant)
 	_settle_ready = false
 	var ordered: Array[StringName] = [dominant]
@@ -306,6 +315,8 @@ func capture_bake_context(selection_key: String) -> Dictionary:
 
 
 func restore_bake_context(context: Dictionary, selection_key: String) -> Dictionary:
+	if _manual_reacquisition_required:
+		return {"valid": false, "reason": "manual_grip_reacquisition_required"}
 	if context.is_empty() or _busy or context.selection_key != selection_key or context.owner_id != get_instance_id() or context.dominant != _dominant or context.keys.size() != _slots.size():
 		return {"valid": false, "reason": "bake_preview_context_changed"}
 	var saved: Dictionary = context.snapshot
@@ -361,6 +372,10 @@ func configure(actor: Node3D, weapon: Node3D) -> bool:
 func synchronize(slots: Array[StringName], dominant: StringName, force_reason: StringName = StringName()) -> void:
 	if not is_instance_valid(_actor) or not is_instance_valid(_weapon) or not _data.get("valid", false):
 		return
+	if _manual_reacquisition_required:
+		if force_reason != &"reacquire":
+			return
+		_manual_reacquisition_required = false
 	var span := Chronology.begin("owner.synchronize", {"owner_id":str(get_instance_id()),"slots":slots,"dominant":dominant,"force_reason":force_reason})
 	# One closure owner for both hands. Existing support IK positions its Hand;
 	# only primary acquisition can translate the weapon.
@@ -426,6 +441,8 @@ func owns(slot: StringName) -> bool:
 	return _requests.has(slot) and is_instance_valid(_weapon) and not _weapon.is_queued_for_deletion()
 
 func settle_ready(support_aligned: bool = false) -> void:
+	if _manual_reacquisition_required:
+		return
 	_pose_changed()
 	_settle_ready = true
 	if support_aligned:
@@ -434,6 +451,8 @@ func settle_ready(support_aligned: bool = false) -> void:
 		_support_macro_primary_serial = int(_requests[_dominant].serial) if _primary_ready_for_support() else -1
 
 func retain_roll() -> void:
+	if _manual_reacquisition_required:
+		return
 	_pose_changed()
 	if not _primary_seat.is_empty():
 		# Roll already moved the seated weapon/Hand pair. Do not add the seat a
@@ -457,6 +476,49 @@ func retain_roll() -> void:
 				"actual_assessment_current": false, "actual_3d_grip_verified": false}
 	_publish()
 
+## Weapon-only facing deliberately breaks the old mate. Keep the current bones
+## and weapon untouched, invalidate its jobs/bindings, and await explicit input.
+## The owner/configuration survives so reacquire() can use this exact live pose.
+func suspend_for_weapon_facing() -> Dictionary:
+	if not is_instance_valid(_actor) or not is_instance_valid(_weapon) or not _data.get("valid", false):
+		return {"valid": false, "reason": "missing_weapon_facing_grip_context"}
+	if _slots.is_empty() or _dominant not in _slots:
+		return {"valid": false, "reason": "missing_weapon_facing_grip_slots"}
+	if _manual_reacquisition_required:
+		return {"valid": true, "reason": "manual_grip_reacquisition_required"}
+	_manual_reacquisition_required = true
+	_pose_epoch += 1
+	_serial += 1
+	_settle_ready = false
+	_support_macro_primary_serial = -1
+	_queue.clear()
+	_primary_seat.clear()
+	_support_motion_snapshot.clear()
+	_replay_pose_cache.clear()
+	_last_support_motion_clamp.clear()
+	if _job != null:
+		# Keep the worker reference/busy flag until its await drains. Its removed
+		# request cannot apply, even if manual reacquisition is pressed immediately.
+		_job.cancel()
+	# release_planar_grip_pose normally rolls back an unfinished support-seat
+	# transaction. End that transaction without rollback to retain the pose the
+	# user is currently looking at; this method performs no scene writes.
+	if _actor.has_method("finish_prepared_support_grip_seat"):
+		_actor.finish_prepared_support_grip_seat(true)
+	for slot: StringName in _slots:
+		_actor.release_planar_grip_pose(slot)
+	_requests.clear()
+	_status.clear()
+	for slot: StringName in _slots:
+		_status[slot] = {"status": "manual_required", "serial": _serial,
+			"reason": "weapon_facing_changed", "actual_3d_grip_verified": false,
+			"actual_assessment_current": false, "contact_condition_met": false}
+	_publish()
+	return {"valid": true, "reason": "manual_grip_reacquisition_required"}
+
+func is_manual_reacquisition_required() -> bool:
+	return _manual_reacquisition_required
+
 func reacquire() -> void:
 	if not _slots.is_empty():
 		synchronize(_slots.duplicate(), _dominant, &"reacquire")
@@ -464,6 +526,7 @@ func reacquire() -> void:
 
 func clear() -> void:
 	Chronology.event("owner.clear", {"owner_id":str(get_instance_id()),"busy":_busy,"queue_size":_queue.size(),"serial":_serial})
+	_manual_reacquisition_required = false
 	_pose_epoch += 1
 	if is_instance_valid(_skeleton) and _skeleton.skeleton_updated.is_connected(_retain_final_skeleton_grip):
 		_skeleton.skeleton_updated.disconnect(_retain_final_skeleton_grip)
@@ -499,6 +562,8 @@ func _pose_changed() -> void:
 
 func _geometry_changed() -> void:
 	_geometry_epoch += 1
+	if _manual_reacquisition_required:
+		return
 	synchronize(_slots.duplicate(), _dominant)
 	# Geometry notifications occur after the current synchronous editing action.
 	_settle_ready = true
@@ -528,6 +593,8 @@ func _process(_delta: float) -> void:
 		if not _requests.is_empty():
 			clear()
 		return
+	if _manual_reacquisition_required:
+		return
 	if _busy:
 		if _job != null and _requests.has(_running_slot):
 			var entry: Dictionary = _status.get(_running_slot, {})
@@ -540,7 +607,7 @@ func _process(_delta: float) -> void:
 		_run_next()
 
 func _run_next(synchronous: bool = false) -> void:
-	if _busy or _queue.is_empty(): return
+	if _manual_reacquisition_required or _busy or _queue.is_empty(): return
 	# Rapid edits can leave an older support request ahead of the new primary.
 	# Always establish the current primary seat before capturing its support.
 	if _dominant in _queue:
@@ -909,6 +976,8 @@ func _apply_realized_support_result(slot: StringName, request: Dictionary, resul
 ## Its realized Hand carries the complete immutable grip, not merely a cached
 ## translation. This writer never changes bones or invokes an IK/grip solve.
 func recompose_primary_seat() -> Dictionary:
+	if _manual_reacquisition_required:
+		return {"valid": false, "applied": false, "reason": "manual_grip_reacquisition_required"}
 	if not owns(_dominant):
 		return {"valid": false, "applied": false, "reason": "primary_grip_not_owned"}
 	if _primary_seat.is_empty():
@@ -932,7 +1001,7 @@ func recompose_primary_seat() -> Dictionary:
 func _retain_final_skeleton_grip() -> void:
 	# Godot emits this after modifiers finish. A deferred wrist update must not
 	# detach a grip that was correctly retained by the synchronous UI pass.
-	if not _primary_seat.is_empty() and not _closing and not _restoring_support_motion:
+	if not _manual_reacquisition_required and not _primary_seat.is_empty() and not _closing and not _restoring_support_motion:
 		recompose_primary_seat()
 		retain_support_motion()
 
@@ -941,6 +1010,8 @@ func _retain_final_skeleton_grip() -> void:
 ## clamp must not silently detach it. Keep the last realized body/weapon pose;
 ## authored controls remain requests and are never rewritten by this guard.
 func retain_support_motion() -> Dictionary:
+	if _manual_reacquisition_required:
+		return {"valid": false, "applied": false, "reason": "manual_grip_reacquisition_required"}
 	if _support_motion_snapshot.is_empty() or _restoring_support_motion or _busy or _closing:
 		return {"valid": true, "applied": false}
 	var saved: Dictionary = _support_motion_snapshot
@@ -1067,7 +1138,7 @@ func _realization_stamp() -> PackedByteArray:
 		skeleton.global_transform, poses, _weapon.global_transform, _geometry_epoch])
 
 func _is_current(slot: StringName, request: Dictionary) -> bool:
-	return is_instance_valid(_actor) and is_instance_valid(_weapon) and not _weapon.is_queued_for_deletion() and _requests.get(slot, {}).get("serial", -1) == request.get("serial", -2) and relationship_key(_weapon, slot, request.dominant, _data.anatomy.get("source_signature"), _geometry_epoch) == request.key
+	return not _manual_reacquisition_required and is_instance_valid(_actor) and is_instance_valid(_weapon) and not _weapon.is_queued_for_deletion() and _requests.get(slot, {}).get("serial", -1) == request.get("serial", -2) and relationship_key(_weapon, slot, request.dominant, _data.anatomy.get("source_signature"), _geometry_epoch) == request.key
 
 ## Sampled solver evidence is not a whole-hand skin certificate.
 func _solver_diagnostics(result: Dictionary) -> Dictionary:

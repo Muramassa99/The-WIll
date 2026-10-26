@@ -14,6 +14,9 @@ const TRANSITION_KIND_GRIP_STYLE_SWAP: StringName = &"grip_style_swap"
 const TRANSITION_KIND_PRIMARY_HAND_SWAP: StringName = &"primary_hand_swap"
 const TRANSITION_KIND_TWO_HAND_STATE_SWAP: StringName = &"two_hand_state_swap"
 const DEFAULT_TRANSITION_DURATION_SECONDS := 1.0
+const MIN_AUTHORED_TRANSITION_DURATION_SECONDS := 0.1
+const MAX_AUTHORED_TRANSITION_DURATION_SECONDS := 2.0
+const TRANSITION_DURATION_STEP_SECONDS := 0.01
 const LEGACY_SERIALIZED_TRANSITION_DURATION_SECONDS := 0.18
 const DEFAULT_GRIP_SEAT_SLIDE_OFFSET: float = 0.2
 const DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET: float = 0.0
@@ -59,7 +62,7 @@ const GRIP_SEAT_COORDINATE_SCHEMA_VERSION := (
 ## Timing
 ## Old resources omitted their default-valued 0.18. Preserve that load value;
 ## authored-node factories explicitly assign DEFAULT_TRANSITION_DURATION_SECONDS.
-@export_range(0.0, 2.0, 0.01) var transition_duration_seconds: float = LEGACY_SERIALIZED_TRANSITION_DURATION_SECONDS
+@export_range(0.1, 2.0, 0.01) var transition_duration_seconds: float = LEGACY_SERIALIZED_TRANSITION_DURATION_SECONDS
 
 ## Body
 @export_range(0.0, 1.0, 0.01) var body_support_blend: float = 0.0

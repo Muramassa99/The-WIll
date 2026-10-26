@@ -18,6 +18,7 @@ const DEFAULT_FORGE_VIEW_TUNING_RESOURCE: ForgeViewTuningDef = preload("res://co
 const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animation_motion_node.gd")
 const CombatRuntimeClipScript = preload("res://core/models/combat_runtime_clip.gd")
 const EntryTransitionScript = preload("res://runtime/combat/combat_runtime_entry_transition.gd")
+const PreparedPoseScript = preload("res://core/models/combat_prepared_pose.gd")
 const PreparedPoseCaptureScript = preload("res://runtime/combat/combat_prepared_pose_capture.gd")
 const CombatAnimationWeaponFrameSolverScript = preload("res://runtime/combat/combat_animation_weapon_frame_solver.gd")
 const GripTransitionResolver = preload("res://core/resolvers/combat_grip_transition_resolver.gd")
@@ -28,6 +29,10 @@ const CombatCollisionLegalityResolverScript = preload("res://runtime/combat/comb
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const WeaponRollManipulatorScript = preload("res://runtime/combat/combat_animation_weapon_roll_manipulator.gd")
 var weapon_roll_manipulator = WeaponRollManipulatorScript.new()
+const WeaponFacingManipulatorScript = preload("res://runtime/combat/combat_animation_weapon_facing_manipulator.gd")
+var weapon_facing_manipulator = WeaponFacingManipulatorScript.new()
+var _weapon_facing_motion: CombatAnimationMotionNode = null
+var _weapon_facing_delta_degrees: float = 0.0
 const PreviewGripAcquisition = preload("res://runtime/player/grip/preview_grip_acquisition.gd")
 const GripChronology = preload("res://runtime/player/grip/grip_chronology.gd")
 const PrimaryGripSeatResolverScript = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
@@ -207,6 +212,8 @@ var collision_legality_resolver = CombatCollisionLegalityResolverScript.new()
 var material_lookup_cache: Dictionary = {}
 var preview_dominant_slot_id: StringName = &"hand_right"
 var preview_default_two_hand: bool = false
+## The capture owner adds WIP, solver, grip path, and hand setup identity.
+var prepared_authoring_context_signature_resolver: Callable = Callable()
 var _save_pose_latency_profile: Dictionary = {}
 var _pose_render_caches: Dictionary = {}
 var _pose_render_cache_weapon_id: StringName
@@ -405,10 +412,20 @@ func refresh_preview(
 		else _resolve_visible_selected_motion_node_index(active_draft, selected_node_index, visible_motion_node_chain.size())
 	)
 	var playback_motion_node: CombatAnimationMotionNode = _build_effective_preview_motion_node(selected_motion_node, playback_state)
-	_refresh_actor_and_weapon(state, active_wip, playback_motion_node, active_draft)
+	var retained_facing: Dictionary = _retained_weapon_facing_pose(preview_subviewport, playback_motion_node, playback_state)
+	if retained_facing.is_empty():
+		_refresh_actor_and_weapon(state, active_wip, playback_motion_node, active_draft)
 	_prepare_trajectory_root_for_authoring(state)
+	var restored_pose: Dictionary = retained_facing if not retained_facing.is_empty() else _try_restore_prepared_authoring_pose(
+		state, preview_subviewport, active_wip, active_draft, playback_motion_node,
+		playback_state, live_motion_node_override != null, true)
+	if restored_pose.is_empty() and _is_prepared_authoring_pose_restore_candidate(
+		active_wip, active_draft, playback_motion_node, playback_state, live_motion_node_override != null):
+		# An incompatible saved packet must acquire, even at the mount seed.
+		playback_state = playback_state.duplicate(true)
+		playback_state["grip_resolve_reason"] = GRIP_RESOLVE_REASON_HANDLE_POSITION
 	var open_mount_seed: Dictionary = playback_state.get("open_mount_seed", {}) as Dictionary
-	if active_wip != null and not bool(playback_state.get("active", false)):
+	if restored_pose.is_empty() and active_wip != null and not bool(playback_state.get("active", false)):
 		if open_mount_seed.is_empty():
 			open_mount_seed = resolve_preview_hand_mounted_motion_seed(
 				preview_subviewport,
@@ -426,20 +443,22 @@ func refresh_preview(
 		if live_motion_node_override != null
 		else AUTHORING_PREVIEW_DOMINANT_SEAT_LOCK_STRENGTH
 	)
-	var resolved_playback_state: Dictionary = (
-		_apply_preview_open_mount_pose(state, playback_motion_node, playback_state, true)
-		if use_open_mount_baseline
-		else _apply_authored_weapon_pose(
-			state,
-			playback_motion_node,
-			playback_state,
-			true,
-			dominant_seat_lock_strength,
-			true,
-			active_draft,
-			live_motion_node_override != null
+	var resolved_playback_state: Dictionary = restored_pose
+	if resolved_playback_state.is_empty():
+		resolved_playback_state = (
+			_apply_preview_open_mount_pose(state, playback_motion_node, playback_state, true)
+			if use_open_mount_baseline
+			else _apply_authored_weapon_pose(
+				state,
+				playback_motion_node,
+				playback_state,
+				true,
+				dominant_seat_lock_strength,
+				true,
+				active_draft,
+				live_motion_node_override != null
+			)
 		)
-	)
 	var debugger_view_enabled: bool = _resolve_debugger_view_enabled(state, resolved_playback_state)
 	var display_motion_node_chain: Array = visible_motion_node_chain
 	if not (bool(resolved_playback_state.get("authoring_drag_budgeted_visuals", false)) and live_motion_node_override != null):
@@ -518,14 +537,23 @@ func sync_preview_pose(
 	var playback_motion_node: CombatAnimationMotionNode = _build_effective_preview_motion_node(selected_motion_node, playback_state)
 	if trace_enabled:
 		trace_step_usec = _append_latency_trace_elapsed(trace, "build_motion_chain", trace_step_usec)
-	_refresh_actor_and_weapon(state, active_wip, playback_motion_node, active_draft)
+	var retained_facing: Dictionary = _retained_weapon_facing_pose(preview_subviewport, playback_motion_node, playback_state)
+	if retained_facing.is_empty():
+		_refresh_actor_and_weapon(state, active_wip, playback_motion_node, active_draft)
 	if trace_enabled:
 		trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_actor_and_weapon", trace_step_usec)
 	_prepare_trajectory_root_for_authoring(state)
 	if trace_enabled:
 		trace_step_usec = _append_latency_trace_elapsed(trace, "prepare_trajectory_root", trace_step_usec)
+	var restored_pose: Dictionary = retained_facing if not retained_facing.is_empty() else _try_restore_prepared_authoring_pose(
+		state, preview_subviewport, active_wip, active_draft, playback_motion_node,
+		playback_state, live_motion_node_override != null)
+	if restored_pose.is_empty() and _is_prepared_authoring_pose_restore_candidate(
+		active_wip, active_draft, playback_motion_node, playback_state, live_motion_node_override != null):
+		playback_state = playback_state.duplicate(true)
+		playback_state["grip_resolve_reason"] = GRIP_RESOLVE_REASON_HANDLE_POSITION
 	var open_mount_seed: Dictionary = playback_state.get("open_mount_seed", {}) as Dictionary
-	if active_wip != null and not bool(playback_state.get("active", false)):
+	if restored_pose.is_empty() and active_wip != null and not bool(playback_state.get("active", false)):
 		if open_mount_seed.is_empty():
 			open_mount_seed = resolve_preview_hand_mounted_motion_seed(
 				preview_subviewport,
@@ -545,20 +573,22 @@ func sync_preview_pose(
 		if live_motion_node_override != null
 		else AUTHORING_PREVIEW_DOMINANT_SEAT_LOCK_STRENGTH
 	)
-	var resolved_playback_state: Dictionary = (
-		_apply_preview_open_mount_pose(state, playback_motion_node, playback_state, false)
-		if use_open_mount_baseline
-		else _apply_authored_weapon_pose(
-			state,
-			playback_motion_node,
-			playback_state,
-			false,
-			dominant_seat_lock_strength,
-			true,
-			active_draft,
-			live_motion_node_override != null
+	var resolved_playback_state: Dictionary = restored_pose
+	if resolved_playback_state.is_empty():
+		resolved_playback_state = (
+			_apply_preview_open_mount_pose(state, playback_motion_node, playback_state, false)
+			if use_open_mount_baseline
+			else _apply_authored_weapon_pose(
+				state,
+				playback_motion_node,
+				playback_state,
+				false,
+				dominant_seat_lock_strength,
+				true,
+				active_draft,
+				live_motion_node_override != null
+			)
 		)
-	)
 	if trace_enabled:
 		trace_step_usec = _append_latency_trace_elapsed(trace, "apply_authoring_pose", trace_step_usec)
 	var debugger_view_enabled: bool = _resolve_debugger_view_enabled(state, resolved_playback_state)
@@ -1941,8 +1971,13 @@ func reset_preview_actor_to_mount_seed_baseline(
 	var owner: Node = actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
 	if owner != null:
 		var no_slots: Array[StringName] = []
-		owner.synchronize(no_slots, _resolve_preview_dominant_slot_id())
+		if owner.is_manual_reacquisition_required():
+			owner.clear()
+		else:
+			owner.synchronize(no_slots, _resolve_preview_dominant_slot_id())
 	weapon_roll_manipulator.clear()
+	weapon_facing_manipulator.clear()
+	_weapon_facing_motion = null
 	_clear_preview_runtime_solved_replay_state(actor, preview_root)
 	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
 	var baseline_animation_name: StringName = _resolve_preview_authoring_baseline_animation_name(
@@ -2604,6 +2639,15 @@ func _refresh_actor_and_weapon(
 	if preview_root == null or actor_pivot == null:
 		return
 	var actor: Node3D = actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D
+	if _weapon_facing_motion != null and selected_motion_node != _weapon_facing_motion:
+		# Switching sections/Reset abandons the unfinished gesture. Normal node
+		# navigation already records (and therefore requires reacquisition) first.
+		if actor != null:
+			var facing_owner: Node = actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
+			if facing_owner != null and facing_owner.is_manual_reacquisition_required():
+				facing_owner.clear()
+		weapon_facing_manipulator.clear()
+		_weapon_facing_motion = null
 	if actor == null:
 		actor = PlayerHumanoidRigScene.instantiate() as Node3D
 		if actor == null:
@@ -2792,6 +2836,8 @@ func _refresh_drag_budgeted_visuals(
 	var hand_proxy_marker_count: int = _create_hand_proxy_gizmo_markers(state, motion_node, active_focus)
 	var point_marker_count: int = 1 if tip_active or pommel_active else 0
 	var weapon_marker_count: int = 2 if active_focus == CombatAnimationSessionStateScript.FOCUS_WEAPON else 0
+	if active_focus == CombatAnimationSessionStateScript.FOCUS_WEAPON_FACING:
+		weapon_marker_count = 1
 	preview_root.set_meta("motion_node_marker_count", point_marker_count)
 	preview_root.set_meta("point_marker_count", point_marker_count)
 	preview_root.set_meta("control_handle_marker_count", handle_marker_count)
@@ -2819,6 +2865,7 @@ func _set_drag_visual_markers_visible(marker_root: Node3D, visible: bool) -> voi
 		"DragPomOutHandle",
 		"DragWeaponCenterMarker",
 		"DragWeaponNormalMarker",
+		"DragWeaponFacingMarker",
 		"RightUpperarmRollCenter",
 		"RightUpperarmRollHandle",
 		"RightUpperarmRollRod",
@@ -2886,6 +2933,22 @@ func _sync_drag_weapon_orientation_markers(marker_root: Node3D, motion_node: Com
 	var weapon_normal_handle: Vector3 = weapon_center + _resolve_weapon_rotation_normal_local(motion_node) * WEAPON_ROTATION_GIZMO_HANDLE_DISTANCE
 	_update_drag_gizmo_marker(marker_root, "DragWeaponCenterMarker", weapon_center, Color(0.95, 0.58, 0.26, 1.0) if weapon_focus_active else Color(0.72, 0.48, 0.22, 0.65), weapon_focus_active)
 	_update_drag_gizmo_marker(marker_root, "DragWeaponNormalMarker", weapon_normal_handle, Color(0.42, 0.98, 0.72, 1.0) if weapon_focus_active else Color(0.28, 0.72, 0.56, 0.65), weapon_focus_active)
+	_update_weapon_facing_marker(marker_root, "DragWeaponFacingMarker",
+		weapon_center - _resolve_weapon_rotation_normal_local(motion_node) * WEAPON_ROTATION_GIZMO_HANDLE_DISTANCE,
+		active_focus == CombatAnimationSessionStateScript.FOCUS_WEAPON_FACING)
+
+func _update_weapon_facing_marker(marker_root: Node3D, marker_name: String, local_position: Vector3, visible: bool) -> void:
+	var marker: MeshInstance3D = marker_root.get_node_or_null(marker_name) as MeshInstance3D
+	if marker == null:
+		marker = MeshInstance3D.new()
+		marker.name = marker_name
+		var cube := BoxMesh.new()
+		cube.size = Vector3.ONE * 0.035 * CONTROL_MARKER_SIZE_MULTIPLIER
+		marker.mesh = cube
+		marker.material_override = _build_overlay_surface_material(Color(0.08, 0.48, 0.22, 1.0), 0.3)
+		marker_root.add_child(marker)
+	marker.position = local_position
+	marker.visible = visible
 
 func _update_drag_gizmo_marker(marker_root: Node3D, marker_name: String, local_position: Vector3, color: Color, visible: bool) -> void:
 	var marker: MeshInstance3D = marker_root.get_node_or_null(marker_name) as MeshInstance3D
@@ -3639,6 +3702,93 @@ func _resolve_preview_replay_rotation(rotation_data: Variant) -> Quaternion:
 		return Quaternion(vector_rotation.x, vector_rotation.y, vector_rotation.z, vector_rotation.w)
 	return Quaternion.IDENTITY
 
+func supports_weapon_facing_manipulation(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode, active_draft: Resource) -> bool:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	return not context.is_empty() and motion != null and not _is_noncombat_idle_draft(active_draft) and not _is_unarmed_preview_item(context.weapon)
+
+func begin_weapon_facing_manipulation(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode) -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or motion == null:
+		return {"available": false, "reason": "missing_preview"}
+	var tip: Vector3 = _get_weapon_tip_meta(context.weapon)
+	var pommel: Vector3 = _get_weapon_pommel_meta(context.weapon)
+	if tip.distance_squared_to(pommel) <= 0.00000001:
+		return {"available": false, "reason": "missing_weapon_axis"}
+	var result: Dictionary = weapon_facing_manipulator.begin(context.actor, context.weapon, context.trajectory,
+		motion, _resolve_weapon_local_up_reference(context.weapon, (tip - pommel).normalized()))
+	# A live acquisition must not alter the captured baseline while the user
+	# holds the cube before moving it. A settled no-motion click stays read-only.
+	if result.get("available", false) and is_grip_acquisition_pending(preview_subviewport):
+		var owner: Node = context.actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
+		var suspended: Dictionary = owner.suspend_for_weapon_facing() if owner != null else {"valid": false, "reason": "missing_weapon_facing_grip_owner"}
+		if not suspended.get("valid", false):
+			weapon_facing_manipulator.clear()
+			return {"available": false, "reason": suspended.get("reason", "cannot_suspend_grip")}
+	if result.get("available", false):
+		_weapon_facing_motion = motion
+		_weapon_facing_delta_degrees = 0.0
+	return result
+
+func apply_weapon_facing_manipulation(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode, delta_degrees: float) -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or motion == null or motion != _weapon_facing_motion or not is_finite(delta_degrees):
+		return {"available": false, "reason": "missing_weapon_facing_gesture"}
+	if is_equal_approx(delta_degrees, _weapon_facing_delta_degrees):
+		return {"available": true, "changed": false}
+	if not weapon_facing_manipulator.matches(context.actor, context.weapon, context.trajectory, motion):
+		return {"available": false, "reason": "weapon_facing_context_changed"}
+	# A cold restored endpoint has no live slot requests. Initialize them without
+	# advancing a solver, then suspend before any weapon or bone writer can run.
+	_sync_prepared_preview_grip(context.actor, context.weapon, motion, {})
+	var owner: Node = context.actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
+	if owner == null:
+		return {"available": false, "reason": "missing_weapon_facing_grip_owner"}
+	var suspended: Dictionary = owner.suspend_for_weapon_facing()
+	if not suspended.get("valid", false):
+		return {"available": false, "reason": suspended.get("reason", "cannot_suspend_grip")}
+	var result: Dictionary = weapon_facing_manipulator.apply_delta(context.actor, context.weapon, context.trajectory, motion, delta_degrees)
+	if not result.get("available", false):
+		return result
+	_weapon_facing_delta_degrees = delta_degrees
+	weapon_roll_manipulator.clear()
+	# The old prepared endpoint no longer certifies this weapon/hand relation.
+	motion.prepared_pose.clear()
+	motion.prepared_pose_signature = ""
+	_clear_preview_runtime_solved_replay_state(context.actor, context.root)
+	context.root.set_meta("weapon_facing_manipulation_result", result)
+	_publish_retained_weapon_facing_pose(context, motion, context.root.get_meta("resolved_playback_state", {}))
+	result["changed"] = true
+	return result
+
+func is_weapon_facing_reacquisition_required(preview_subviewport: SubViewport) -> bool:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty():
+		return false
+	var owner: Node = context.actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
+	return owner != null and owner.is_manual_reacquisition_required()
+
+func _retained_weapon_facing_pose(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode, playback: Dictionary) -> Dictionary:
+	if motion == null or motion != _weapon_facing_motion or bool(playback.get("active", false)) or playback.has("grip_resolve_reason"):
+		return {}
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or not weapon_facing_manipulator.matches(context.actor, context.weapon, context.trajectory, motion):
+		return {}
+	# A no-motion click is not a grip change and needs no retained-mode override.
+	if not is_weapon_facing_reacquisition_required(preview_subviewport):
+		return {}
+	return _publish_retained_weapon_facing_pose(context, motion, playback)
+
+func _publish_retained_weapon_facing_pose(context: Dictionary, motion: CombatAnimationMotionNode, playback: Dictionary) -> Dictionary:
+	var resolved: Dictionary = playback.duplicate(true)
+	_set_tip_pommel_position_state(resolved, context.trajectory.to_local(context.weapon.to_global(_get_weapon_tip_meta(context.weapon))),
+		context.trajectory.to_local(context.weapon.to_global(_get_weapon_pommel_meta(context.weapon))), CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	resolved["weapon_orientation_degrees"] = motion.weapon_orientation_degrees
+	resolved["weapon_roll_degrees"] = motion.weapon_roll_degrees
+	resolved.erase("grip_resolve_reason")
+	context.root.set_meta("resolved_playback_state", resolved)
+	context.root.set_meta("authoring_endpoint_legality_result", {"available": false, "reason": "weapon_facing_requires_manual_reacquisition"})
+	return resolved
+
 func supports_weapon_roll_manipulation(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode, active_draft: Resource) -> bool:
 	var context: Dictionary = _weapon_roll_context(preview_subviewport)
 	return not context.is_empty() and motion != null and not _is_noncombat_idle_draft(active_draft) and not _is_unarmed_preview_item(context["weapon"]) and not _should_preview_use_support_hand(context["weapon"], motion)
@@ -3680,6 +3830,118 @@ func get_grip_acquisition_status(preview_subviewport: SubViewport) -> Dictionary
 	return owner.status() if owner != null else {}
 
 
+## A cheap selection predicate, not a geometry/rig compatibility certificate.
+## The restore path below also checks the current durable capture context.
+func can_restore_prepared_authoring_pose(motion: CombatAnimationMotionNode) -> bool:
+	return (
+		motion != null
+		and not motion.prepared_pose_signature.is_empty()
+		and motion.prepared_pose_signature == PreparedPoseScript.node_pose_signature(motion)
+		and bool(PreparedPoseScript.validate(motion.prepared_pose).get("valid", false))
+	)
+
+
+func _is_prepared_authoring_pose_restore_candidate(
+	active_wip: CraftedItemWIP,
+	active_draft: Resource,
+	motion: CombatAnimationMotionNode,
+	playback: Dictionary,
+	has_live_override: bool
+) -> bool:
+	return (
+		active_wip != null and not _is_noncombat_idle_draft(active_draft)
+		and not has_live_override and not bool(playback.get("active", false))
+		and not bool(playback.get("authoring_drag_active", false))
+		and not playback.has("grip_resolve_reason")
+		and can_restore_prepared_authoring_pose(motion)
+	)
+
+
+func _try_restore_prepared_authoring_pose(
+	state: Dictionary,
+	preview_subviewport: SubViewport,
+	active_wip: CraftedItemWIP,
+	active_draft: Resource,
+	motion: CombatAnimationMotionNode,
+	playback: Dictionary,
+	has_live_override: bool,
+	update_camera: bool = false
+) -> Dictionary:
+	var root: Node3D = state.get("preview_root") as Node3D
+	if root == null:
+		return {}
+	root.set_meta("prepared_authoring_pose_restore", {"applied": false, "reason": "prepared_pose_not_reusable"})
+	if not _is_prepared_authoring_pose_restore_candidate(
+		active_wip, active_draft, motion, playback, has_live_override):
+		return {}
+	if not prepared_authoring_context_signature_resolver.is_valid():
+		root.set_meta("prepared_authoring_pose_restore", {"applied": false, "reason": "prepared_pose_context_resolver_unavailable"})
+		return {}
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty():
+		return {}
+	# Configure only loads the character's prepared anatomy/configuration. It
+	# does not synchronize a grip request or start an acquisition worker.
+	if not _is_unarmed_preview_item(context.weapon):
+		var owner: Node = _get_or_create_prepared_preview_grip(context.actor)
+		if not owner.configure(context.actor, context.weapon):
+			root.set_meta("prepared_authoring_pose_restore", {"applied": false, "reason": "prepared_pose_anatomy_not_ready"})
+			return {}
+	context = get_prepared_pose_capture_context(preview_subviewport, motion, false)
+	if not bool(context.get("valid", false)):
+		root.set_meta("prepared_authoring_pose_restore", {"applied": false, "reason": context.get("reason", "prepared_pose_context_unavailable")})
+		return {}
+	var context_signature: Variant = prepared_authoring_context_signature_resolver.call(context)
+	if not context_signature is String or String(context_signature).is_empty():
+		root.set_meta("prepared_authoring_pose_restore", {"applied": false, "reason": "prepared_pose_context_signature_unavailable"})
+		return {}
+	var snapshot: Dictionary = motion.prepared_pose
+	var validation: Dictionary = PreparedPoseScript.validate(snapshot, String(context_signature))
+	if not bool(validation.get("valid", false)):
+		root.set_meta("prepared_authoring_pose_restore", {"applied": false, "reason": validation.get("reason", "prepared_pose_invalid")})
+		return {}
+	if StringName(snapshot.get("primary_hand_slot", StringName())) != context.dominant_slot or bool(snapshot.get("support_enabled", false)) != bool(context.support_enabled):
+		root.set_meta("prepared_authoring_pose_restore", {"applied": false, "reason": "prepared_pose_hand_context_changed"})
+		return {}
+	var frame: Dictionary = playback.duplicate(true)
+	frame.merge({
+		"active": false,
+		"primary_hand_slot": snapshot.primary_hand_slot,
+		"two_hand_state": CombatAnimationMotionNodeScript.TWO_HAND_STATE_TWO_HAND if snapshot.support_enabled else CombatAnimationMotionNodeScript.TWO_HAND_STATE_ONE_HAND,
+		"preferred_grip_style_mode": motion.preferred_grip_style_mode,
+		"weapon_roll_degrees": motion.weapon_roll_degrees,
+		"solved_upper_body_bone_names": Array(snapshot.bone_names),
+		"solved_upper_body_pose_positions": Array(snapshot.pose_positions),
+		"solved_upper_body_pose_rotations": Array(snapshot.pose_rotations),
+		"solved_upper_body_pose_scales": Array(snapshot.pose_scales),
+		"solved_replay_reference_bone_name": snapshot.get("reference_bone_name", CombatRuntimeClipScript.SOLVED_REPLAY_REFERENCE_BONE_NAME),
+		"solved_replay_reference_origin_id": snapshot.reference_origin_id,
+		"solved_weapon_position_reference_local": snapshot.weapon_position_reference_local,
+		"solved_weapon_rotation_reference_local": snapshot.weapon_rotation_reference_local,
+		"solved_weapon_scale_reference_local": snapshot.weapon_scale_reference_local,
+		"solved_weapon_reference_origin_id": snapshot.weapon_reference_origin_id,
+		"solved_anchor_node_paths": Array(snapshot.anchor_node_paths),
+		"solved_anchor_positions_weapon_local": Array(snapshot.anchor_positions_weapon_local),
+		"solved_anchor_rotations_weapon_local": Array(snapshot.anchor_rotations_weapon_local),
+		"solved_anchor_scales_weapon_local": Array(snapshot.anchor_scales_weapon_local),
+		"solved_anchor_origin_id": snapshot.anchor_origin_id,
+	}, true)
+	# A pending previous-section worker must not overwrite this saved pose.
+	_clear_prepared_preview_grip(context.actor)
+	var applied: Dictionary = _apply_solved_runtime_clip_preview_pose(state, active_wip, frame)
+	var did_apply: bool = bool(applied.get("solved_replay_applied", false))
+	root.set_meta("prepared_authoring_pose_restore", {"applied": did_apply,
+		"reason": "" if did_apply else applied.get("grip_endcap_replay_reason", "prepared_pose_application_rejected")})
+	if not did_apply:
+		_clear_preview_runtime_solved_replay_state(context.actor, root)
+		return {}
+	applied["prepared_authoring_pose_restored"] = true
+	root.set_meta("resolved_playback_state", applied)
+	if update_camera:
+		_update_camera(root, weapon_grip_anchor_provider.get_primary_grip_anchor(context.weapon))
+	return applied
+
+
 ## Read-only access to the displayed authoring endpoint. Readiness is distinct
 ## from full contact certification: a retained partial grip may be captured,
 ## but pending work and runtime playback must never become authored endpoints.
@@ -3696,6 +3958,8 @@ func get_prepared_pose_capture_context(preview_subviewport: SubViewport, motion:
 		return {"valid": false, "reason": "prepared_pose_preview_is_replay"}
 	var owner: Node = actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
 	var unarmed: bool = _is_unarmed_preview_item(weapon)
+	if require_ready and owner != null and owner.is_manual_reacquisition_required():
+		return {"valid": false, "reason": "weapon_facing_requires_manual_reacquisition"}
 	var dominant: StringName = _resolve_preview_dominant_slot_id()
 	var support_enabled: bool = _should_preview_use_support_hand(weapon, motion)
 	var slots: Array[StringName] = [dominant]
@@ -3894,6 +4158,14 @@ func reacquire_grip(preview_subviewport: SubViewport) -> void:
 		return
 	var owner: Node = context.actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
 	if owner != null:
+		if owner.is_manual_reacquisition_required() and _weapon_facing_motion != null:
+			# Prepared-pose restoration clears live guidance. Restore its roles
+			# and targets only after the user's explicit request; no pose/IK pass.
+			# The owner will settle support after the primary seat is committed.
+			equipped_item_presenter.sync_single_weapon_contact_guidance(
+				context.actor, context.weapon, _resolve_preview_dominant_slot_id(),
+				_should_preview_use_support_hand(context.weapon, _weapon_facing_motion),
+				true, true, true, true)
 		owner.reacquire()
 
 func _weapon_roll_context(preview_subviewport: SubViewport) -> Dictionary:
@@ -3930,6 +4202,12 @@ func _publish_retained_weapon_roll_pose(preview_root: Node3D, actor: Node3D, tra
 		preview_root.set_meta("weapon_tip_alignment_error_meters", weapon.to_global(_get_weapon_tip_meta(weapon)).distance_to(trajectory.to_global(motion.tip_position_local)))
 		preview_root.set_meta("weapon_pommel_alignment_error_meters", weapon.to_global(_get_weapon_pommel_meta(weapon)).distance_to(trajectory.to_global(motion.pommel_position_local)))
 	return resolved
+
+func _has_preview_primary_grip_binding(actor: Node3D) -> bool:
+	if actor == null or not actor.has_method("get_planar_grip_pose_state"):
+		return false
+	var binding: Dictionary = actor.call("get_planar_grip_pose_state", _resolve_preview_dominant_slot_id())
+	return bool(binding.get("has_grip_pose", false))
 
 func _record_save_pose_latency(label: StringName, started_usec: int) -> void:
 	if started_usec <= 0 or _save_pose_latency_profile.is_empty():
@@ -3980,7 +4258,9 @@ func _apply_authored_weapon_pose(
 			active_draft,
 			stow_endpoints_already_display_local
 		)
-	if not bool(playback_state.get("active", false)) and not playback_state.has("grip_resolve_reason") and weapon_roll_manipulator.matches(actor, held_item, trajectory_root, selected_motion_node, _resolve_preview_dominant_slot_id()):
+	# A restored saved pose has bones, but no live digit acquisition binding.
+	# Its first roll must enter acquisition before the endpoint can be recorded.
+	if not bool(playback_state.get("active", false)) and not playback_state.has("grip_resolve_reason") and _has_preview_primary_grip_binding(actor) and weapon_roll_manipulator.matches(actor, held_item, trajectory_root, selected_motion_node, _resolve_preview_dominant_slot_id()):
 		return _publish_retained_weapon_roll_pose(preview_root, actor, trajectory_root, held_item, selected_motion_node, playback_state)
 	var trace_pose := not _save_pose_latency_profile.is_empty()
 	var pose_stage_started_usec := Time.get_ticks_usec() if trace_pose else 0
@@ -4760,7 +5040,7 @@ func _apply_preview_open_mount_pose(
 	var actor: Node3D = actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D if actor_pivot != null else null
 	if held_item == null or not is_instance_valid(held_item):
 		return resolved_playback_state
-	if not bool(playback_state.get("active", false)) and weapon_roll_manipulator.matches(actor, held_item, trajectory_root, selected_motion_node, _resolve_preview_dominant_slot_id()):
+	if not bool(playback_state.get("active", false)) and _has_preview_primary_grip_binding(actor) and weapon_roll_manipulator.matches(actor, held_item, trajectory_root, selected_motion_node, _resolve_preview_dominant_slot_id()):
 		return _publish_retained_weapon_roll_pose(preview_root, actor, trajectory_root, held_item, selected_motion_node, playback_state)
 	if actor != null:
 		if actor.has_method("reset_authoring_preview_baseline_pose"):
@@ -5255,18 +5535,23 @@ func _clear_prepared_preview_grip(actor: Node3D) -> void:
 		owner.clear()
 
 
-func _sync_prepared_preview_grip(actor: Node3D, held_item: Node3D, motion: CombatAnimationMotionNode, playback: Dictionary) -> void:
-	if actor == null or not actor.get_meta("prepared_grip_preview_enabled", false):
-		return
-	if _is_unarmed_preview_item(held_item) or (bool(playback.get("active", false)) and not bool(playback.get("prepared_grip_bake", false))):
-		_clear_prepared_preview_grip(actor)
-		return
+func _get_or_create_prepared_preview_grip(actor: Node3D) -> Node:
 	var owner: Node = actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
 	if owner == null:
 		owner = PreviewGripAcquisition.new()
 		owner.name = PreviewGripAcquisition.NODE_NAME
 		actor.add_child(owner)
 		owner.primary_seat_applied.connect(_publish_prepared_primary_seat)
+	return owner
+
+
+func _sync_prepared_preview_grip(actor: Node3D, held_item: Node3D, motion: CombatAnimationMotionNode, playback: Dictionary) -> void:
+	if actor == null or not actor.get_meta("prepared_grip_preview_enabled", false):
+		return
+	if _is_unarmed_preview_item(held_item) or (bool(playback.get("active", false)) and not bool(playback.get("prepared_grip_bake", false))):
+		_clear_prepared_preview_grip(actor)
+		return
+	var owner: Node = _get_or_create_prepared_preview_grip(actor)
 	if not owner.configure(actor, held_item):
 		return
 	var slots: Array[StringName] = [_resolve_preview_dominant_slot_id()]
@@ -9490,6 +9775,11 @@ func _refresh_weapon_and_sphere_visuals(state: Dictionary, motion_node_chain: Ar
 		if active_focus == CombatAnimationSessionStateScript.FOCUS_WEAPON:
 			_create_weapon_rotation_gizmo_markers(marker_root, motion_node, active_focus)
 			gizmo_marker_count += 2
+		elif active_focus == CombatAnimationSessionStateScript.FOCUS_WEAPON_FACING:
+			var center: Vector3 = motion_node.tip_position_local.lerp(motion_node.pommel_position_local, 0.5)
+			_update_weapon_facing_marker(marker_root, "WeaponFacing",
+				center - _resolve_weapon_rotation_normal_local(motion_node) * WEAPON_ROTATION_GIZMO_HANDLE_DISTANCE, true)
+			gizmo_marker_count += 1
 		gizmo_marker_count += _create_upperarm_roll_gizmo_markers(state, motion_node, active_focus)
 		gizmo_marker_count += _create_hand_proxy_gizmo_markers(state, motion_node, active_focus)
 		if preview_root != null:

@@ -1,6 +1,6 @@
 # Skill Crafter grip-facing and camera-control plan
 
-Prepared 2026-10-26, Europe/Bucharest. Status: **SC-07 implemented; focused verification recorded below**. The user authorized implementation after confirming the dark-green cube, unrestricted turns and both-hands-stationary behavior. Camera behavior remains planned separately. The persistent default duration for new motion nodes is a separate completed change.
+Prepared 2026-10-26, Europe/Bucharest. Status: **SC-07 implemented; camera/input stability follow-up implemented 2026-10-27**. The user authorized implementation after confirming the dark-green cube, unrestricted turns and both-hands-stationary behavior, and later explicitly requested the camera-jolt correction. Focused evidence is recorded below. The selected-node duration control is a separate completed change.
 
 ## SC-03 — qualified manual acceptance
 
@@ -14,6 +14,26 @@ The user exercised 17 motion positions in a somewhat complex sequence and report
 The user accepts this as **"working" with extra manual steps for now** and explicitly does not want the current behavior changed in response to this feedback. Preserve these observations without treating them as a request for solver, anatomy or performance repair. This is user-reported evidence, not an independently reproduced diagnosis of the cause of each symptom.
 
 The 17-position report does not enumerate all combinations in SC-03's L/R main-hand, normal/reverse, support, Save/reopen and equipped-playback matrix. Do not infer a complete matrix pass. Retain the original matrix as the record of coverage still to establish when selected; the user is not blocked on further repair now. Existing anatomy work remains BODY-01 and resource/performance work remains PERF-01, rather than new duplicate tasks.
+
+### Subsequent user report, 2026-10-27: grip loss blocks authoring
+
+The user now reports frequent loss of grip/contact status during movement, requiring manual Reacquire. They explicitly clarify that an unresolved grip prevents **R, F and Save**. This is a workflow blocker, not just a visual defect; the earlier acceptance with extra manual steps must not be read as evidence that this later report is resolved. Exact status text and the preceding control movement have been requested to distinguish an ordinary movement/acquisition fault from the deliberately manual independent-facing workflow. Diagnosis is read-only at this point; no cause or repair is claimed.
+
+Read-only code findings: R (`combat_animation_station_ui.gd`, add-node recording), F preparation and Save all require the current prepared-pose capture. `get_prepared_pose_capture_context()` rejects pending acquisition, a required hand whose status is not `preview_applied`, or a missing live grip binding. Retained partial contact is permitted; this is not a requirement for perfect full-hand contact. A recovery case needs reproduction: `preview_grip_acquisition._finish_failure()` leaves the request `unresolved`, and `synchronize()` skips an unchanged relationship key unless forced. Manual Reacquire forces a new request. Movement during acquisition can fail the motion-rebase proof as `source_pose_changed_during_acquisition`, but this has not been established as the user's actual reason. Do not bypass capture guards or blindly retry all geometry failures. Independent dark-green weapon-facing edits deliberately require manual acquisition under SC-07 and must be distinguished from ordinary Tip/Pommel/wrist movement.
+
+### Screenshot evidence and priority clarification, 2026-10-27
+
+The user supplied both `Preview preparation failed: elbow_range_has_no_circle_solution` and `Not saved: elbow_range_has_no_circle_solution. Edits retained; previous saved skill unchanged.` They clarify that these are the **main failures**. Other hand/weapon failures recover through manual Reacquire and are secondary.
+
+The exact error originates in `core/resolvers/combat_prepared_arm_frame_resolver.gd`, where the attempted shoulder-circle construction cannot meet the elbow-angle range (`abs(ratio) > 1.000001`). This is a constraint on the chosen geometric construction, not proof that every possible arm configuration or the user's authored placement is invalid. Do not simply loosen anatomical limits or assume the grip retry hypothesis explains this message.
+
+For F, acquisition/readiness and endpoint capture are passed before `_complete_stored_pose_track()` invokes `CombatPreparedPoseTrackBuilder.build()`. Its per-frame `CombatPreparedAttachmentResolver.apply()` skips exact endpoints and follows the stored hand/weapon relationship during interior motion samples. That arm-follow calculation emits the reported rejection. Save uses the same track builder; this explains the matching F/Save errors. This is within the authored skill, before the separate 160 ms current-pose-to-node-1 entry. R does not invoke this track builder; a blocked R remains a separate endpoint/acquisition observation unless its own message establishes otherwise.
+
+Next reproduction needs the active weapon/skill and whether the failing edits are saved or only live/unsaved; requested from the user without asking them to discard work. The UI already retains `last_preview_prepare_result.attachment_failure` with `frame_index`, zero-based compiled segment `node_index`, primary/support `hand`, and `elbow_distance_interval` (initial/minimum/maximum). A focused diagnostic should map these to node IDs/time/weight and inspect the requested hand frame, limits and the circle ratio/geometry before deciding whether the path is unreachable or the construction/search is insufficient. No game run or behavior change has been performed for this arm-follow failure.
+
+The user tentatively identifies **Skill 2 on the broken `_1` weapon**, and confirms Save failed so they do not know what persisted. Direct read of the real `forge/player_wip_library_state.tres` identifies `Broken_Balde_v1`, WIP `player_wip_1792291462.519_14`, with selected skill `skill_slot_2`. The library's last-write time is 2026-10-27 19:41:15 Europe/Bucharest. Skill 2 contains only **one** action node (`motion_node_01`, incoming duration 1.0 s), its prepared pose and an existing baked clip. Skill 1 contains five action nodes; Skill 6 contains seventeen; both have prepared poses and clips. Other numbered skills contain one unprepared default node. No newer backup is present beside the real library (only an old unrelated test library). Only the Godot editor, not the running game, was present during inspection. This establishes what is saved, but does not prove which unsaved skill produced the screenshot. Do not claim to reproduce its between-node failure from Skill 2's one-node saved state or overwrite any user skill to manufacture a match. No user data was changed.
+
+Existing verifier review: `tools/verify_combat_prepared_pose_track.gd` is insufficient for this fault because its main fixture sets `attachment_required=false` and expects zero arm IK calls. `tools/verify_prepared_arm_frame.gd` has reusable real-pose input helpers and rig constraints, but is a positive regression, not an existing reproduction of this exact failure. No matching failing fixture was found in the inspected tools, and neither verifier was run in this investigation.
 
 ## SC-07 — additional independent weapon roll
 
@@ -46,7 +66,7 @@ Trace the state through R capture, node navigation, prepared-pose invalidation, 
 
 The existing distinction between the Tip-to-primary mount axis and the handle-span seating axis matters for eccentric geometry. The requested new rotation axis is explicitly Tip–Pommel; preserve the other axes' meanings rather than replacing them globally.
 
-## Editing camera behavior — planned
+## Editing camera behavior — implemented 2026-10-27; verification below
 
 The user reports that starting interaction with a control point can trace/refocus or relocate the camera. A small intended edit may then become a substantial control-point movement because the view changes during the interaction. Pommel movement is particularly disruptive because it can move the arm and body with it.
 
@@ -56,9 +76,35 @@ The requested behavior is:
 - Keep the view stable while making fine adjustments. A control edit must not itself cause a camera jump that changes the intended edit.
 - Retain deliberate camera movement through the user's existing camera controls. This is not a request to disable intentional navigation or explicit focus commands.
 
-This is a user-observed behavior report plus a desired rule, not a verified diagnosis of the current camera owner or event order. Before implementing it, inspect where control selection, focus, drag start and camera updates interact, then test a no-motion press/release and a small drag without unintended view or pose changes.
+The user's concrete reproduction is: move Tip, cycle controls with Space, select the available control, then make a tiny adjustment. The workspace visibly shifts and the apparent adjustment exceeds the mouse movement.
 
-**No camera-toggle setting has been agreed.** The initially unfinished "need in settings" request was subsequently clarified as the default duration for new motion nodes. Whether this future camera behavior is unconditional or exposed as an option, and any label/default for such an option, remain undecided. Do not conflate the duration setting with this deferred camera work.
+The 2026-10-27 request authorizes removing automatic camera movement during editing directly; no toggle is added. The earlier "need in settings" request was duration, not camera behavior.
+
+Current diagnosis and change:
+
+- `CombatAnimationStationPreviewPresenter._ensure_preview_nodes()` called `_update_camera(root, null)` even for control-only refreshes. This reset the pivot to the body center. Full pose refreshes then called `_update_camera()` with the current weapon anchor, moving the pivot again.
+- `_ensure_camera_state()` also overwrote the pivot before checking whether the camera was initialized. A release-time camera restore could not protect picking/dragging from these intermediate moves.
+- Passive `_update_camera()` now initializes framing only once. `_ensure_camera_state()` preserves an existing pivot. Explicit orbit/zoom and saved-camera restoration retain their existing ownership; control/pose refreshes leave the camera transform alone.
+- The UI ignores zero-relative mouse-motion events during a control drag. Godot or the OS may emit them while the pointer is stationary; they must not author an adjustment.
+- A separate first-motion fault was also identified: ordinary point drags discarded the mouse-down offset and raycast the raw cursor through the control center. Clicking off-center could add up to the pick radius to the first tiny movement (20 px for endpoints, 34 px for curve handles). Point drags now retain their initial screen offset, using the same displayed point that was picked. Tip/Pommel, free-hand endpoints and Bezier handles use that corrected pointer; already press-relative wrist/facing/upper-arm angular paths remain unchanged. The offset resets at every drag start/end.
+- Production owners are `runtime/combat/combat_animation_station_preview_presenter.gd`, `runtime/combat/combat_animation_station_ui.gd` and `runtime/combat/combat_animation_motion_node_editor.gd`. No grip, anatomy, path constraints or camera-navigation sensitivity is changed.
+
+Official [Godot 4.7 Camera3D](https://docs.godotengine.org/en/4.7/classes/class_camera3d.html) and [InputEventMouseMotion](https://docs.godotengine.org/en/4.7/classes/class_inputeventmousemotion.html) documentation checked before implementation, including screen/world projection and zero-relative input behavior.
+
+### Camera/input verification, 2026-10-27
+
+- New focused verifier: `tools/verify_combat_camera_edit_stability.gd`. Rendered Godot 4.7, real station and `Broken_Balde_v1`, fresh Skill 3 only in an isolated library. Natural opening acquisition; no injected prepared pose. Mouse events use the production preview input handlers; Space uses the existing action path.
+- Camera-only follow-up, before the grab-offset addition: `godot_runs/sc_camera_stability_20261027/run1/output/camera_edit_stability.json`, **69/69 checks passed**.
+- Final camera plus grab-offset version: `godot_runs/sc_camera_stability_20261027/run2/output/camera_edit_stability.json`, **111/111 checks passed**, clean engine error log and normal shutdown. Camera transform, pivot/orbit state, projection and viewport rectangle stayed identical through Tip edit, the full available Space cycle, and Pommel edit. Stationary off-center press/hold/zero-relative event/release did not alter authored poses.
+- Two-pixel Tip/Pommel motions were exercised with both centered and 4 px off-center grabs. Corrected requested movement excluded the initial click offset. Held projected movement was approximately 2.31/0.48 px for Tip and 0.58/1.19 px for Pommel; existing live constraints influence the realized displacement. These observations are not a new movement tolerance or a guarantee that every constrained target follows the pointer exactly.
+- Deliberate RMB orbit and wheel zoom changed the camera without editing the authored pose; subsequent refresh retained that chosen view. Screenshots were inspected. The test process closed; the existing editor remained open.
+- Real user-library SHA256 before/after: `7834B54752FDAE638CC894D989A76BC04D6D9F1790B90D9032928473626DC7D2`. Actual saved skills were not modified. No F/Save/equipped, anatomy or full grip-geometry certification was attempted. Free-hand/Bezier offset wiring and unchanged angular paths were reviewed in code; their full gesture matrix was not rerun. Manual user acceptance remains pending.
+
+### Informational endpoint marker size, 2026-10-27
+
+The user reports that the colored endpoint markers remaining after Save cover the active Tip/Pommel controls and make Space selection difficult to recognize. Both informational paths (`_create_playback_marker` and `_update_live_playback_marker`) previously used radius `0.026 * 2.8`, larger than the active control radius `0.022 * 2.8`. They now share `PLAYBACK_MARKER_RADIUS_METERS = 0.0052 * 2.8`: one-fifth the former diameter, approximately one-quarter the active control diameter. Active control size, selection radius, colors and marker positions are unchanged.
+
+Code inspection distinguishes the lifecycle: playback can leave its final informational markers present; Save's field/summary refresh does not clear them. Save itself does not directly construct these markers. This adjustment changes size only. Official [Godot 4.7 SphereMesh](https://docs.godotengine.org/en/4.7/classes/class_spheremesh.html) properties were checked; height remains twice radius. Godot 4.7 `--headless --check-only` on the presenter passed, logged at `godot_runs/sc_camera_stability_20261027/marker_size_parse.log`. No new gameplay run or before/after rendered visual verification was performed for this small size change; manual acceptance remains pending.
 
 ## Focused acceptance checks
 
@@ -68,7 +114,7 @@ This is a user-observed behavior report plus a desired rule, not a verified diag
 - Selecting/holding/releasing each relevant control without moving the pointer does not relocate the camera or alter the authored pose. Fine drags remain fine after selection.
 - Intentional camera movement still works. Camera/view changes remain outside action Undo history under the existing SC-04 contract.
 
-The camera checks remain future work. The independent-facing checks are covered by the implementation evidence below; coverage limitations remain explicit.
+Camera verification is recorded in the follow-up below. The independent-facing checks are covered by their earlier implementation evidence; coverage limitations remain explicit.
 
 ## Sources and supersession
 
@@ -79,7 +125,7 @@ The camera checks remain future work. The independent-facing checks are covered 
 - [Body Mobility Preparation](Skill%20Crafter%20Body%20Mobility%20Preparation%202026-10-19.md), "Default Pose And Limit Authority" (lines 37–69): hand-retained primary seating, forearm-relative wrist allowance and support engagement ownership. Preserve these rules alongside the deliberately separate weapon-facing operation.
 - [Action Undo/Redo plan](Skill%20Crafter%20Action%20Undo%20Redo%20Plan%202026-10-26.md): camera/view navigation is not an authored action; future weapon-facing edits must join the agreed node-edit/history lifecycle when that infrastructure is implemented.
 
-Older source documents retain their historical status. The new roll is now implemented; camera changes and the wider anatomy issues are outside this pass.
+Older source documents retain their historical status. The new roll was implemented in the original October 26 pass; the camera/input correction is the October 27 follow-up above. Wider anatomy issues remain outside both passes.
 
 ## Implementation and focused verification, 2026-10-26
 

@@ -26,6 +26,9 @@ var _hold_direction: int = 0
 var _interaction_active: bool = false
 var _numeric_dirty: bool = false
 var _syncing: bool = false
+var _editable: bool = true
+var _slider_dragging: bool = false
+var _slider_gesture_cancelled: bool = false
 
 static func sample_duration_ms(ratio: float) -> float:
 	if _duration_curve == null:
@@ -56,7 +59,7 @@ func _ready() -> void:
 	custom_minimum_size = Vector2(100.0, 190.0)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_force_pass_scroll_events = false
-	tooltip_text = "Default duration for new motion nodes. Existing nodes keep their timing."
+	tooltip_text = "Selected node's travel duration. New nodes inherit it. Skill entry remains 160 ms."
 	slider = VSlider.new()
 	slider.name = "DurationSlider"
 	slider.min_value = 0.0
@@ -78,7 +81,7 @@ func _ready() -> void:
 	value_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	value_edit.add_theme_constant_override("minimum_character_width", 0)
 	value_edit.select_all_on_focus = true
-	value_edit.tooltip_text = "New node duration in milliseconds (100–2000, steps of 10)."
+	value_edit.tooltip_text = "Selected node duration in milliseconds (100–2000, steps of 10)."
 	value_edit.mouse_force_pass_scroll_events = false
 	add_child(value_edit)
 	_repeat_timer = Timer.new()
@@ -134,7 +137,7 @@ func _draw() -> void:
 	if slider == null:
 		return
 	var font := get_theme_default_font()
-	draw_string(font, Vector2(4.0, 14.0), "New node (ms)", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, Color(0.8, 0.83, 0.85))
+	draw_string(font, Vector2(4.0, 14.0), "Node time (ms)", HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, Color(0.8, 0.83, 0.85))
 	var grabber := slider.get_theme_icon("grabber")
 	var inset: float = float(grabber.get_height()) * 0.5 if grabber != null else 8.0
 	var usable := maxf(slider.size.y - inset * 2.0, 1.0)
@@ -147,12 +150,25 @@ func get_duration_ms() -> int:
 	return _duration_ms
 
 func set_duration_ms(value_ms: int) -> void:
-	var resolved := _quantize(value_ms)
-	if resolved == _duration_ms:
+	# Reading a saved node must not retime it or disguise legacy values. Only
+	# deliberate input is constrained; the rail shows its nearest endpoint.
+	if value_ms == _duration_ms:
 		return
-	_duration_ms = resolved
+	_duration_ms = value_ms
 	_numeric_dirty = false
 	_sync_controls(true)
+
+func set_editable(enabled: bool) -> void:
+	if _editable == enabled:
+		return
+	_editable = enabled
+	if not enabled:
+		finish_interaction()
+	if slider != null:
+		slider.editable = enabled
+		up_button.disabled = not enabled
+		down_button.disabled = not enabled
+		value_edit.editable = enabled
 
 func _quantize(value_ms: float) -> int:
 	return clampi(roundi(value_ms / float(STEP_MS)) * STEP_MS, MIN_DURATION_MS, MAX_DURATION_MS)
@@ -168,15 +184,22 @@ func _sync_controls(move_slider: bool) -> void:
 
 func _on_slider_drag_started() -> void:
 	finish_interaction()
+	_slider_dragging = true
+	_slider_gesture_cancelled = false
 	_interaction_active = true
 
 func _on_slider_changed(ratio: float) -> void:
-	if _syncing:
+	if _syncing or not _editable:
+		return
+	if _slider_gesture_cancelled:
+		_sync_controls(true)
 		return
 	_interaction_active = true
 	_set_user_duration(_quantize(sample_duration_ms(ratio)), false)
 
 func _on_slider_drag_ended(_changed: bool) -> void:
+	_slider_dragging = false
+	_slider_gesture_cancelled = false
 	finish_interaction()
 
 func _set_user_duration(value_ms: int, move_slider: bool) -> void:
@@ -187,6 +210,8 @@ func _set_user_duration(value_ms: int, move_slider: bool) -> void:
 		duration_changed.emit(_duration_ms)
 
 func _on_arrow_down(direction: int) -> void:
+	if not _editable:
+		return
 	finish_interaction()
 	_interaction_active = true
 	_hold_direction = direction
@@ -197,7 +222,7 @@ func _on_arrow_down(direction: int) -> void:
 		finish_interaction()
 
 func _can_repeat() -> bool:
-	return (_hold_direction > 0 and _duration_ms < MAX_DURATION_MS) or (_hold_direction < 0 and _duration_ms > MIN_DURATION_MS)
+	return _editable and ((_hold_direction > 0 and _duration_ms < MAX_DURATION_MS) or (_hold_direction < 0 and _duration_ms > MIN_DURATION_MS))
 
 func _on_repeat_timeout() -> void:
 	if not is_visible_in_tree() or not _can_repeat():
@@ -223,6 +248,10 @@ func _on_numeric_submitted(_text: String) -> void:
 	value_edit.release_focus()
 
 func finish_interaction() -> void:
+	# A node switch can finish authoring while native VSlider still has LMB
+	# captured. Ignore that old drag until release; never edit the next node.
+	if _slider_dragging:
+		_slider_gesture_cancelled = true
 	_hold_direction = 0
 	if _repeat_timer != null:
 		_repeat_timer.stop()

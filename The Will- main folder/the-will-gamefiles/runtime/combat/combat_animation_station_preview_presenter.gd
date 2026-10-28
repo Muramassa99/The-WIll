@@ -123,6 +123,7 @@ const UPPERARM_ROLL_PICK_RADIUS_PIXELS := 26.0
 const UPPERARM_ROLL_GIZMO_MIN_RADIUS_METERS := 0.075
 const UPPERARM_ROLL_GIZMO_MAX_RADIUS_METERS := 0.18
 const CONTROL_MARKER_SIZE_MULTIPLIER := 2.8
+const PLAYBACK_MARKER_RADIUS_METERS := 0.0052 * CONTROL_MARKER_SIZE_MULTIPLIER
 const WEAPON_ROLL_MARKER_EXTRA_SCALE := 0.14285715
 const BEZIER_CONTROL_MARKER_SIZE_METERS := 0.032 * CONTROL_MARKER_SIZE_MULTIPLIER
 const STOW_ANCHOR_MARKER_COLOR := Color(1.0, 0.06, 0.78, 0.88)
@@ -9557,9 +9558,13 @@ func _resolve_preview_torso_frame(actor: Node3D) -> Dictionary:
 func _update_camera(preview_root: Node3D, primary_anchor: Node3D) -> void:
 	if preview_root == null:
 		return
+	# Passive pose/selection/drag refreshes must not move the view underneath
+	# the pointer. After first framing, only explicit camera navigation (or a
+	# deliberate saved-camera restore) owns the camera transform and pivot.
+	if bool(_get_node_meta_or_default(preview_root, CAMERA_STATE_READY_META, false)):
+		return
 	var focus_point: Vector3 = _resolve_camera_focus_point(primary_anchor)
 	_ensure_camera_state(preview_root, focus_point)
-	preview_root.set_meta(CAMERA_FOCUS_POINT_META, focus_point)
 	_apply_camera_transform(preview_root)
 
 func _get_preview_root(preview_subviewport: SubViewport) -> Node3D:
@@ -9574,9 +9579,9 @@ func _resolve_camera_focus_point(primary_anchor: Node3D) -> Vector3:
 func _ensure_camera_state(preview_root: Node3D, focus_point: Vector3) -> void:
 	if preview_root == null:
 		return
-	preview_root.set_meta(CAMERA_FOCUS_POINT_META, focus_point)
 	if bool(_get_node_meta_or_default(preview_root, CAMERA_STATE_READY_META, false)):
 		return
+	preview_root.set_meta(CAMERA_FOCUS_POINT_META, focus_point)
 	var orbit_yaw: float = rad_to_deg(atan2(DEFAULT_CAMERA_OFFSET.x, DEFAULT_CAMERA_OFFSET.z))
 	var orbit_pitch: float = rad_to_deg(asin(clampf(DEFAULT_CAMERA_OFFSET.y / CAMERA_DEFAULT_DISTANCE, -1.0, 1.0)))
 	preview_root.set_meta(CAMERA_DISTANCE_META, CAMERA_DEFAULT_DISTANCE)
@@ -10359,7 +10364,7 @@ func _create_playback_marker(marker_root: Node3D, local_position: Vector3, color
 	var marker := MeshInstance3D.new()
 	marker.name = "%sMarker_%d" % [prefix, marker_root.get_child_count()]
 	var mesh := SphereMesh.new()
-	mesh.radius = 0.026 * CONTROL_MARKER_SIZE_MULTIPLIER
+	mesh.radius = PLAYBACK_MARKER_RADIUS_METERS
 	mesh.height = mesh.radius * 2.0
 	marker.mesh = mesh
 	marker.position = local_position
@@ -10401,7 +10406,7 @@ func _update_live_playback_marker(marker_root: Node3D, marker_name: String, loca
 		marker = MeshInstance3D.new()
 		marker.name = marker_name
 		var mesh := SphereMesh.new()
-		mesh.radius = 0.026 * CONTROL_MARKER_SIZE_MULTIPLIER
+		mesh.radius = PLAYBACK_MARKER_RADIUS_METERS
 		mesh.height = mesh.radius * 2.0
 		marker.mesh = mesh
 		marker.material_override = _build_overlay_surface_material(color, 0.28)

@@ -2,7 +2,71 @@
 
 2026-10-26, Europe/Bucharest. Narrow implementation requested during the Project TODO expansion pass. Independent weapon-facing roll was subsequently implemented separately under SC-07; camera behavior, broader grip faults and anatomy work remain deferred.
 
-## Agreed behavior
+## Current contract - selected-node timing, 2026-10-27
+
+The user's new workflow supersedes the separate default/local-override UI below.
+There is now **one visible duration editor**, the viewport slider/arrows/numeric
+box. Its authority is the selected motion node's stored
+`transition_duration_seconds`.
+
+- Selecting a node displays that node's saved duration, without changing it.
+- Editing the viewport value changes only that node's incoming travel duration.
+  N01 can hold a duration for inheritance; the separate current-pose entry still
+  takes 160 ms. This is duration, not a new playback-speed multiplier.
+- R inserts a copy after the selected node, inheriting its duration. Appending
+  and inserting between existing nodes use the same rule. Following nodes keep
+  their own timings. Explicit Duplicate and the editable continuation after a
+  generated grip flip also retain source timing.
+- Example: start four nodes at 800 ms; edit N02 to 200 and N03 to 400; N04
+  still shows 800. Create N05, set it to 300; N06 inherits 300. Insert after
+  N02 and the new node inherits 200, leaving the former N03 at 400.
+- Reset carries the selected duration into the replacement visible baseline
+  while clearing the pose/history as before. A brand-new section is seeded by
+  the last deliberately edited duration remembered across sessions (1000 ms
+  on a fresh installation). This internal preference never overrides an
+  existing node or supplies R's value when a source node exists.
+- Removed the old **Time From Previous Node (s)** field and the redundant
+  **Editor Settings / New Node Duration (s)** section. Other inspector controls
+  remain in place; the broader Advanced-panel task is still deferred.
+- Same 100-2000 ms authoring bounds, 10 ms numeric steps, continuous nonlinear
+  slider, petite value box and held-arrow behavior. Legacy values outside those
+  bounds display honestly and are preserved until deliberately edited.
+- Pending numeric entry finishes before R, navigation, deletion, Reset,
+  section changes, F and Save. Held input stops at a node boundary; a native
+  slider drag cannot continue editing the next node before mouse release.
+- Generated/locked nodes and idle poses retain their existing timing edit
+  restrictions. Timing-only changes invalidate derived playback timing while
+  retaining solved endpoint poses; no grip or body refresh is requested.
+- F and Save consume that existing authored duration field. Preference-write
+  failure does not revert the selected node or change what R inherits.
+
+Owners changed: `runtime/combat/combat_animation_station_ui.gd`,
+`runtime/combat/combat_node_duration_control.gd`, and the focused
+`tools/verify_combat_editor_node_duration.gd`. No new solver or save schema.
+
+Current verification: the first rendered Godot 4.7 run passed **83/83** checks,
+including the example, middle insertion, no-edit navigation, preserved endpoint
+packet/signature, active runtime-cache invalidation, Reset, action-resource
+save/reload, persistence failure and native slider/held-arrow behavior.
+Report: `C:/WORKSPACE/godot_runs/sc_selected_duration_20261027/run1/results.json`.
+The fixture supplies captured endpoints and has no live weapon/actor; this is
+timing/UI/storage evidence, not a new live-grip or equipped/F animation pass.
+Final rendered follow-up after adding the native slider node-switch guard:
+**89/89 checks passed**, report
+`C:/WORKSPACE/godot_runs/sc_selected_duration_20261027/run2/results.json`.
+Additional native-pointer checks cover a held slider or arrow while selecting
+another node, no movement spilling into that node, and a fresh drag working
+after release. No script/runtime errors were emitted. The earlier run's
+screenshot was inspected for the renamed viewport label and petite value box.
+User manual feel check is pending. Real user weapon/skill files were not edited.
+No Git operation requested or performed for this follow-up.
+
+Implementation follows the native signal behavior documented in
+[Godot 4.7 Range](https://docs.godotengine.org/en/4.7/classes/class_range.html)
+and [Slider](https://docs.godotengine.org/en/4.7/classes/class_slider.html), checked
+again for this change: silent display updates and explicit drag boundaries.
+
+## Historical 2026-10-26 behavior - superseded where conflicting above
 
 - A user-selectable default travel time for newly added motion nodes, initially **1.0 seconds**.
 - Change it once, then continue authoring multiple nodes at that duration; for example set 0.2 seconds, add three nodes, then select another default for subsequent nodes.

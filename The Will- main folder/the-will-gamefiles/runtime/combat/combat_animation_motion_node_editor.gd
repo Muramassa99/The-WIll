@@ -32,6 +32,7 @@ const UPPERARM_ROLL_DRAG_START_EPSILON_RADIANS: float = 0.0001
 var _dragging: bool = false
 var _drag_target: StringName = StringName()
 var _arm_roll_drag_state: Dictionary = {}
+var _point_drag_screen_offset: Vector2 = Vector2.ZERO
 
 ## Intersect a camera ray with a camera-facing drag plane through the current
 ## pommel. The pommel is the free translation handle for the whole weapon.
@@ -328,11 +329,42 @@ func raycast_curve_handle_on_view_drag_plane(
 func begin_drag(target: StringName, _screen_position: Vector2 = Vector2.ZERO, _motion_node: CombatAnimationMotionNode = null) -> void:
 	_dragging = true
 	_drag_target = target
+	_point_drag_screen_offset = Vector2.ZERO
+
+## Keep the exact grabbed part of a positional control under the pointer.
+## Existing raycasts and downstream movement constraints remain unchanged.
+func begin_point_drag(
+	target: StringName,
+	screen_position: Vector2,
+	local_point: Vector3,
+	camera: Camera3D,
+	trajectory_root: Node3D
+) -> void:
+	begin_drag(target, screen_position)
+	if camera == null or trajectory_root == null:
+		return
+	_point_drag_screen_offset = camera.unproject_position(trajectory_root.to_global(local_point)) - screen_position
+
+func resolve_point_drag_screen_position(screen_position: Vector2) -> Vector2:
+	return screen_position + _point_drag_screen_offset if _dragging else screen_position
+
+func get_point_drag_anchor_local(motion_node: CombatAnimationMotionNode, target: StringName) -> Vector3:
+	if motion_node == null:
+		return Vector3.ZERO
+	match target:
+		DRAG_TARGET_TIP:
+			return motion_node.tip_position_local
+		DRAG_TARGET_POMMEL:
+			return motion_node.pommel_position_local
+		DRAG_TARGET_TIP_CURVE_IN, DRAG_TARGET_TIP_CURVE_OUT, DRAG_TARGET_POMMEL_CURVE_IN, DRAG_TARGET_POMMEL_CURVE_OUT:
+			return _resolve_curve_handle_local_position(motion_node, target)
+	return Vector3.ZERO
 
 func end_drag() -> void:
 	_dragging = false
 	_drag_target = StringName()
 	_arm_roll_drag_state = {}
+	_point_drag_screen_offset = Vector2.ZERO
 
 func is_dragging() -> bool:
 	return _dragging

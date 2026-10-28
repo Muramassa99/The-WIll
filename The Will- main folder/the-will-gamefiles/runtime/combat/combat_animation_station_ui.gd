@@ -166,8 +166,6 @@ var position_z_spin_box: SpinBox = null
 var weapon_rotation_x_spin_box: SpinBox = null
 var weapon_rotation_y_spin_box: SpinBox = null
 var weapon_rotation_z_spin_box: SpinBox = null
-var transition_spin_box: SpinBox = null
-var default_transition_spin_box: SpinBox = null
 var preview_duration_overlay: Control = null
 var preview_duration_control = null
 var body_support_spin_box: SpinBox = null
@@ -336,7 +334,6 @@ func _ready() -> void:
 	weapon_rotation_x_spin_box.value_changed.connect(_on_weapon_orientation_component_changed.bind(0))
 	weapon_rotation_y_spin_box.value_changed.connect(_on_weapon_orientation_component_changed.bind(1))
 	weapon_rotation_z_spin_box.value_changed.connect(_on_weapon_orientation_component_changed.bind(2))
-	transition_spin_box.value_changed.connect(_on_transition_changed)
 	body_support_spin_box.value_changed.connect(_on_body_support_changed)
 	two_hand_state_option_button.item_selected.connect(_on_two_hand_state_selected)
 	primary_hand_option_button.item_selected.connect(_on_primary_hand_selected)
@@ -782,6 +779,7 @@ func select_saved_wip(
 	advance_workflow: bool = true,
 	opening_config: Dictionary = {}
 ) -> bool:
+	_finish_node_duration_interaction()
 	_cancel_preview_preparation()
 	var open_perf_trace: Array = []
 	var open_perf_step_usec: int = Time.get_ticks_usec()
@@ -869,6 +867,7 @@ func select_unarmed_authoring(
 	advance_workflow: bool = true,
 	opening_config: Dictionary = {}
 ) -> bool:
+	_finish_node_duration_interaction()
 	_cancel_preview_preparation()
 	if active_wip_library == null:
 		return false
@@ -928,6 +927,7 @@ func open_saved_wip_with_hand_setup(
 	})
 
 func select_authoring_mode(mode_id: StringName) -> bool:
+	_finish_node_duration_interaction()
 	_cancel_preview_preparation()
 	var station_state: Resource = _get_active_station_state()
 	if station_state == null:
@@ -941,6 +941,7 @@ func select_authoring_mode(mode_id: StringName) -> bool:
 	return true
 
 func select_draft(draft_identifier: StringName, advance_workflow: bool = true) -> bool:
+	_finish_node_duration_interaction()
 	_cancel_preview_preparation()
 	var station_state: Resource = _get_active_station_state()
 	var draft: Resource = _find_active_draft_by_identifier(draft_identifier)
@@ -973,6 +974,7 @@ func select_draft(draft_identifier: StringName, advance_workflow: bool = true) -
 	return true
 
 func select_skill_slot(slot_id: StringName, advance_workflow: bool = true) -> bool:
+	_finish_node_duration_interaction()
 	_cancel_preview_preparation()
 	if not _is_authoring_skill_slot_id(slot_id):
 		return false
@@ -1032,6 +1034,11 @@ func select_skill_slot(slot_id: StringName, advance_workflow: bool = true) -> bo
 		var baseline_message: String = "Aligned %s baseline with the active hand mount." % display_name
 		_stage_active_wip_edit(baseline_message, PERSIST_RUNTIME_CACHE_DIRTY_ACTIVE)
 		_refresh_all(baseline_message, initial_grip_resolve_reason)
+	if should_realign_baseline:
+		var first_node: CombatAnimationMotionNode = _get_active_motion_node()
+		if first_node != null:
+			first_node.transition_duration_seconds = get_default_motion_node_transition_duration()
+			_sync_selected_node_duration_control()
 	if advance_workflow and footer_status_label != null:
 		footer_status_label.text = "Editing %s." % display_name
 	return true
@@ -1057,6 +1064,7 @@ func is_motion_node_recording_pending() -> bool:
 	return _motion_node_recording_pending
 
 func _record_before_motion_node_action(action: StringName, node_index: int = -1) -> bool:
+	_finish_node_duration_interaction()
 	if _motion_node_recording_pending or manual_save_in_progress or preview_prepare_in_progress or chain_player.is_playing():
 		return false
 	var draft: Resource = _get_active_draft()
@@ -1147,7 +1155,6 @@ func _insert_recorded_motion_node() -> bool:
 	var new_node: CombatAnimationMotionNode = _duplicate_or_build_motion_node(seed_node)
 	if new_node == null:
 		return false
-	new_node.transition_duration_seconds = get_default_motion_node_transition_duration()
 	_prepare_inserted_motion_node_identity(new_node)
 	if trace_enabled:
 		trace_step_usec = _append_perf_trace_elapsed(trace, "duplicate_seed_node", trace_step_usec)
@@ -1212,6 +1219,7 @@ func _duplicate_recorded_motion_node() -> bool:
 	return true
 
 func remove_selected_motion_node() -> bool:
+	_finish_node_duration_interaction()
 	var draft: Resource = _get_active_draft()
 	if draft == null:
 		return false
@@ -1245,9 +1253,12 @@ func reset_active_draft_to_baseline() -> bool:
 
 
 func _reset_active_draft_to_baseline(source: String) -> bool:
+	_finish_node_duration_interaction()
 	var draft: Resource = _get_active_draft()
 	if draft == null:
 		return false
+	var previous_node: CombatAnimationMotionNode = _get_active_motion_node()
+	var retained_duration: float = previous_node.transition_duration_seconds if source == "reset" and previous_node != null else get_default_motion_node_transition_duration()
 	_baseline_preparation.clear()
 	chain_player.stop()
 	session_state.playback_active = false
@@ -1273,6 +1284,12 @@ func _reset_active_draft_to_baseline(source: String) -> bool:
 		return false
 	_normalize_draft(draft)
 	_enforce_idle_authority(draft, false)
+	# Reset replaces poses/history, not the creator's working duration. A first
+	# open uses the remembered value; saved sections never enter this path.
+	var reset_chain: Array = draft.get("motion_node_chain") as Array
+	var visible_index: int = _get_user_visible_motion_node_start_index(draft)
+	if visible_index < reset_chain.size():
+		reset_chain[visible_index].transition_duration_seconds = retained_duration
 	var status_message: String = "Draft reset to active weapon and grip baseline." if used_weapon_seed else "Draft reset to default baseline."
 	if _is_noncombat_idle_draft(draft):
 		status_message = "Draft reset to default body and stow attachment."
@@ -1386,11 +1403,11 @@ func set_selected_motion_node_transition_duration(
 		CombatAnimationMotionNodeScript.MAX_AUTHORED_TRANSITION_DURATION_SECONDS
 	)
 	if is_equal_approx(motion_node.transition_duration_seconds, resolved_duration):
-		if is_instance_valid(transition_spin_box):
-			transition_spin_box.set_value_no_signal(resolved_duration)
 		return false
 	motion_node.transition_duration_seconds = resolved_duration
 	motion_node.normalize()
+	# The selected node owns timing. Remember only a seed for brand-new sections.
+	set_default_motion_node_transition_duration(resolved_duration, false)
 	_apply_motion_node_change(
 		"Motion node transition updated.",
 		persist_change,
@@ -1641,6 +1658,7 @@ func _insert_generated_grip_style_transition_after_selection(
 	refresh_preview: bool = true,
 	refresh_summary: bool = true
 ) -> bool:
+	_finish_node_duration_interaction()
 	var draft: Resource = _get_active_draft()
 	var source_node: CombatAnimationMotionNode = _get_active_motion_node()
 	if draft == null or source_node == null:
@@ -1661,7 +1679,6 @@ func _insert_generated_grip_style_transition_after_selection(
 	bridge_node.draft_notes = "Generated grip-style swap bridge. Endpoints stay locked; Bezier path handles can be shaped."
 	bridge_node.normalize()
 	var authored_node: CombatAnimationMotionNode = _duplicate_or_build_motion_node(bridge_node)
-	authored_node.transition_duration_seconds = get_default_motion_node_transition_duration()
 	authored_node.draft_notes = source_node.draft_notes
 	_prepare_inserted_motion_node_identity(bridge_node)
 	_prepare_inserted_motion_node_identity(authored_node)
@@ -2480,8 +2497,8 @@ func _build_center_column(parent: HBoxContainer) -> void:
 	preview_duration_control.name = "NewNodeDurationControl"
 	preview_duration_overlay.add_child(preview_duration_control)
 	preview_duration_control.set_duration_ms(roundi(get_default_motion_node_transition_duration() * 1000.0))
-	preview_duration_control.duration_changed.connect(_on_preview_default_duration_changed)
-	preview_duration_control.edit_finished.connect(_persist_default_motion_node_duration)
+	preview_duration_control.duration_changed.connect(_on_preview_node_duration_changed)
+	preview_duration_control.edit_finished.connect(_on_preview_node_duration_edit_finished)
 	preview_duration_overlay.resized.connect(_layout_preview_duration_control)
 	_layout_preview_duration_control.call_deferred()
 	var tl_panel := PanelContainer.new()
@@ -2519,8 +2536,37 @@ func _layout_preview_duration_control() -> void:
 	preview_duration_control.size = Vector2(110.0, control_height)
 	preview_duration_control.position = Vector2(maxf(available.x - 124.0, 0.0), maxf((available.y - control_height) * 0.5, 0.0))
 
-func _on_preview_default_duration_changed(duration_ms: int) -> void:
-	set_default_motion_node_transition_duration(float(duration_ms) / 1000.0, false)
+func _on_preview_node_duration_changed(duration_ms: int) -> void:
+	if not _can_edit_selected_node_duration():
+		_sync_selected_node_duration_control()
+		return
+	# No full field/pose refresh on each slider sample: preserve the continuous
+	# thumb position and reuse the already acquired endpoint pose.
+	set_selected_motion_node_transition_duration(float(duration_ms) / 1000.0, false, false, false, false, false)
+
+func _finish_node_duration_interaction() -> void:
+	if is_instance_valid(preview_duration_control):
+		preview_duration_control.finish_interaction()
+
+func _on_preview_node_duration_edit_finished() -> void:
+	_persist_default_motion_node_duration()
+	_refresh_motion_node_list()
+	_refresh_summary()
+
+func _can_edit_selected_node_duration() -> bool:
+	var node: CombatAnimationMotionNode = _get_active_motion_node()
+	return node != null and not _is_motion_node_authoring_locked(node) \
+		and not _is_idle_draft(_get_active_draft()) \
+		and get_selected_motion_node_index() >= _get_user_visible_motion_node_start_index(_get_active_draft()) \
+		and not manual_save_in_progress and not _motion_node_recording_pending and not chain_player.is_playing()
+
+func _sync_selected_node_duration_control() -> void:
+	if not is_instance_valid(preview_duration_control):
+		return
+	var node: CombatAnimationMotionNode = _get_active_motion_node()
+	preview_duration_control.set_editable(_can_edit_selected_node_duration())
+	if node != null:
+		preview_duration_control.set_duration_ms(roundi(node.transition_duration_seconds * 1000.0))
 
 func _build_right_inspector(parent: HBoxContainer) -> void:
 	var inspector_panel := PanelContainer.new()
@@ -2608,11 +2654,6 @@ func _build_right_inspector(parent: HBoxContainer) -> void:
 	secondary_grip_seat_slide_spin_box = _build_labeled_spinbox(orientation_content, "Support Handle Position", 0.0, 1.0, 0.0001)
 	var timing_section: Dictionary = _build_foldable_section(vbox, "TIMING & BEHAVIOR", true)
 	var timing_content: VBoxContainer = timing_section.get("content", null) as VBoxContainer
-	_build_helper_text(timing_content, "Transition time is the travel time from the previous motion node into the selected node. Node 01 is the starting baseline, so its transition value is not used during preview.")
-	transition_spin_box = _build_labeled_spinbox(timing_content, "Time From Previous Node (s)", CombatAnimationMotionNodeScript.MIN_AUTHORED_TRANSITION_DURATION_SECONDS, CombatAnimationMotionNodeScript.MAX_AUTHORED_TRANSITION_DURATION_SECONDS, CombatAnimationMotionNodeScript.TRANSITION_DURATION_STEP_SECONDS)
-	# Display legacy saved timings honestly. Deliberate edits use the bounds above.
-	transition_spin_box.allow_lesser = true
-	transition_spin_box.allow_greater = true
 	body_support_spin_box = _build_labeled_spinbox(timing_content, "Body Support", 0.0, 1.0, 0.05)
 	var arm_roll_section: Dictionary = _build_foldable_section(timing_content, "UPPER ARM ROLL", true)
 	arm_roll_section_foldable = arm_roll_section.get("foldable", null) as FoldableContainer
@@ -2631,13 +2672,6 @@ func _build_right_inspector(parent: HBoxContainer) -> void:
 	grip_mode_option_button = OptionButton.new()
 	_style_option_button(grip_mode_option_button)
 	timing_content.add_child(grip_mode_option_button)
-	var editor_settings_section: Dictionary = _build_foldable_section(vbox, "EDITOR SETTINGS", false)
-	var editor_settings_content: VBoxContainer = editor_settings_section.get("content", null) as VBoxContainer
-	_build_helper_text(editor_settings_content, "Default travel time for new motion nodes. Remembered across sessions; existing nodes keep their own timing.")
-	default_transition_spin_box = _build_labeled_spinbox(editor_settings_content, "New Node Duration (s)", CombatAnimationMotionNodeScript.MIN_AUTHORED_TRANSITION_DURATION_SECONDS, CombatAnimationMotionNodeScript.MAX_AUTHORED_TRANSITION_DURATION_SECONDS, CombatAnimationMotionNodeScript.TRANSITION_DURATION_STEP_SECONDS)
-	default_transition_spin_box.name = "DefaultMotionNodeDuration"
-	default_transition_spin_box.set_value_no_signal(get_default_motion_node_transition_duration())
-	default_transition_spin_box.value_changed.connect(_on_default_transition_changed)
 	var draft_section: Dictionary = _build_foldable_section(vbox, "DRAFT SETTINGS", false)
 	var draft_content: VBoxContainer = draft_section.get("content", null) as VBoxContainer
 	_build_field_label(draft_content, "Draft Name")
@@ -3421,7 +3455,7 @@ func _refresh_editor_fields() -> void:
 	weapon_rotation_x_spin_box.editable = motion_node_editable
 	weapon_rotation_y_spin_box.editable = motion_node_editable
 	weapon_rotation_z_spin_box.editable = motion_node_editable
-	transition_spin_box.editable = motion_node_editable and not idle_draft_locked and get_selected_motion_node_index() > 0
+	_sync_selected_node_duration_control()
 	body_support_spin_box.editable = motion_node_editable
 	two_hand_state_option_button.disabled = not motion_node_editable
 	primary_hand_option_button.disabled = (
@@ -3462,7 +3496,6 @@ func _refresh_editor_fields() -> void:
 		weapon_rotation_x_spin_box.value = motion_node.weapon_orientation_degrees.x
 		weapon_rotation_y_spin_box.value = motion_node.weapon_orientation_degrees.y
 		weapon_rotation_z_spin_box.value = motion_node.weapon_orientation_degrees.z
-		transition_spin_box.value = motion_node.transition_duration_seconds
 		body_support_spin_box.value = motion_node.body_support_blend
 		curve_in_x_spin_box.value = motion_node.tip_curve_in_handle.x
 		curve_in_y_spin_box.value = motion_node.tip_curve_in_handle.y
@@ -3510,7 +3543,6 @@ func _refresh_editor_fields() -> void:
 		weapon_rotation_x_spin_box.value = 0.0
 		weapon_rotation_y_spin_box.value = 0.0
 		weapon_rotation_z_spin_box.value = 0.0
-		transition_spin_box.value = CombatAnimationMotionNodeScript.DEFAULT_TRANSITION_DURATION_SECONDS
 		body_support_spin_box.value = 0.0
 		curve_in_x_spin_box.value = 0.0
 		curve_in_y_spin_box.value = 0.0
@@ -5797,6 +5829,7 @@ func _runtime_clip_respects_handle_ends(runtime_clip: Resource) -> bool:
 
 
 func _refresh_manual_save_controls(draft: Resource = null) -> void:
+	_sync_selected_node_duration_control()
 	var active_draft: Resource = draft if draft != null else _get_active_draft()
 	var has_draft: bool = active_draft != null
 	var save_required: bool = has_draft and _active_draft_requires_manual_save(active_draft)
@@ -6143,6 +6176,7 @@ func _apply_motion_node_change(
 		_refresh_summary(status_message)
 
 func _manual_save_active_editor_state() -> void:
+	_finish_node_duration_interaction()
 	if _motion_node_recording_pending:
 		_motion_node_recording_followup = &"save"
 		footer_status_label.text = "Recording the outgoing motion node, then saving..."
@@ -7048,14 +7082,7 @@ func set_default_motion_node_transition_duration(duration_seconds: float, persis
 	if not is_equal_approx(previous, resolved):
 		editor_settings.set("default_transition_duration_seconds", resolved)
 		editor_settings_duration_dirty = true
-	_sync_default_motion_node_duration_controls(resolved)
 	return _persist_default_motion_node_duration() if persist_change else true
-
-func _sync_default_motion_node_duration_controls(duration_seconds: float) -> void:
-	if is_instance_valid(default_transition_spin_box):
-		default_transition_spin_box.set_value_no_signal(duration_seconds)
-	if is_instance_valid(preview_duration_control):
-		preview_duration_control.set_duration_ms(roundi(duration_seconds * 1000.0))
 
 func _persist_default_motion_node_duration() -> bool:
 	if not editor_settings_duration_dirty or editor_settings == null:
@@ -7063,15 +7090,11 @@ func _persist_default_motion_node_duration() -> bool:
 	editor_settings_duration_dirty = false
 	if not bool(editor_settings.call("persist")):
 		editor_settings.set("default_transition_duration_seconds", editor_settings_persisted_duration)
-		_sync_default_motion_node_duration_controls(editor_settings_persisted_duration)
 		if is_instance_valid(footer_status_label):
-			footer_status_label.text = "Could not save the default node duration. Previous value retained."
+			footer_status_label.text = "Could not remember timing for new sections. Current node timing is retained; use Save for the skill."
 		return false
 	editor_settings_persisted_duration = float(editor_settings.get("default_transition_duration_seconds"))
 	return true
-
-func _on_default_transition_changed(value: float) -> void:
-	set_default_motion_node_transition_duration(value)
 
 func _duplicate_or_build_motion_node(source_node: CombatAnimationMotionNode) -> CombatAnimationMotionNode:
 	var new_node: CombatAnimationMotionNode = null
@@ -7436,11 +7459,6 @@ func _on_weapon_orientation_component_changed(_value: float, axis_index: int) ->
 		return
 	set_selected_motion_node_weapon_orientation(orientation_value, false)
 
-func _on_transition_changed(value: float) -> void:
-	if refreshing_controls:
-		return
-	set_selected_motion_node_transition_duration(value, false)
-
 func _on_body_support_changed(value: float) -> void:
 	if refreshing_controls:
 		return
@@ -7627,6 +7645,7 @@ func _is_authoring_hand_slot_occupied_by_external_equipment(slot_id: StringName)
 	return false
 
 func _toggle_preview_playback() -> void:
+	_finish_node_duration_interaction()
 	if _motion_node_recording_pending:
 		_motion_node_recording_followup = &"preview"
 		footer_status_label.text = "Recording the outgoing motion node, then preparing preview..."
@@ -8511,7 +8530,15 @@ func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 					motion_node_editor.begin_upperarm_roll_drag(drag_target, arm_roll_pick.get("roll_state", {}) as Dictionary, camera, mb.position)
 				elif _is_hand_proxy_focus(session_state.current_focus):
 					_seed_preview_drag_hand_proxy_segment(_resolve_hand_proxy_focus_slot(session_state.current_focus), hand_proxy_pick_state)
-					motion_node_editor.begin_drag(drag_target, mb.position, pick_motion_node)
+					var hand_point_key: String = "tip_position_local" if _is_hand_proxy_tip_drag_target(drag_target) else "pommel_position_local"
+					motion_node_editor.begin_point_drag(drag_target, mb.position, hand_proxy_pick_state[hand_point_key] as Vector3, camera, trajectory_root)
+				elif (
+					drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP
+					or drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_POMMEL
+					or _is_curve_handle_drag_target(drag_target)
+				):
+					var drag_point: Vector3 = motion_node_editor.get_point_drag_anchor_local(pick_motion_node, drag_target)
+					motion_node_editor.begin_point_drag(drag_target, mb.position, drag_point, camera, trajectory_root)
 				else:
 					motion_node_editor.begin_drag(drag_target, mb.position, pick_motion_node)
 				match drag_target:
@@ -8557,6 +8584,10 @@ func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 		if motion_node_editor.is_dragging():
 			if _get_active_motion_node() == null:
 				return
+			# Godot/OS can emit mouse-motion events with no pointer movement.
+			# A stationary hold is not an authored adjustment.
+			if mm.relative.is_zero_approx():
+				return
 			_handle_preview_drag(mm.position)
 			preview_view_container.accept_event()
 
@@ -8576,6 +8607,7 @@ func _handle_preview_drag(screen_position: Vector2) -> void:
 	if editable_motion_node == null:
 		return
 	var drag_target: StringName = motion_node_editor.get_drag_target()
+	var point_screen_position: Vector2 = motion_node_editor.resolve_point_drag_screen_position(screen_position)
 	if (
 		_is_motion_node_authoring_locked(editable_motion_node)
 		and (
@@ -8634,7 +8666,7 @@ func _handle_preview_drag(screen_position: Vector2) -> void:
 		var endpoint_local: Vector3 = current_tip if use_tip_endpoint else current_pommel
 		var hand_hit: Variant = motion_node_editor.raycast_local_point_on_view_drag_plane(
 			camera,
-			screen_position,
+			point_screen_position,
 			trajectory_root,
 			endpoint_local
 		)
@@ -8666,7 +8698,7 @@ func _handle_preview_drag(screen_position: Vector2) -> void:
 	elif drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP:
 		var hit: Variant = motion_node_editor.raycast_tip_on_view_drag_plane(
 			camera,
-			screen_position,
+			point_screen_position,
 			editable_motion_node,
 			trajectory_root
 		)
@@ -8683,7 +8715,7 @@ func _handle_preview_drag(screen_position: Vector2) -> void:
 	elif drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_POMMEL:
 		var hit_pommel: Variant = motion_node_editor.raycast_pommel_on_view_drag_plane(
 			camera,
-			screen_position,
+			point_screen_position,
 			editable_motion_node,
 			trajectory_root
 		)
@@ -8702,7 +8734,7 @@ func _handle_preview_drag(screen_position: Vector2) -> void:
 	elif _is_curve_handle_drag_target(drag_target):
 		var hit_handle: Variant = motion_node_editor.raycast_curve_handle_on_view_drag_plane(
 			camera,
-			screen_position,
+			point_screen_position,
 			editable_motion_node,
 			trajectory_root,
 			drag_target

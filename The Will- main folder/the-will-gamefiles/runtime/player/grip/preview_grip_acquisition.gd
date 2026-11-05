@@ -9,6 +9,7 @@ const MotionRebase = preload("res://runtime/player/grip/grip_acquisition_motion_
 const Origins = preload("res://core/models/combat_origin_record.gd")
 const Chronology = preload("res://runtime/player/grip/grip_chronology.gd")
 const HingeRules = preload("res://runtime/player/player_digit_hinge_rules.gd")
+const PrimarySeat = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
 const NODE_NAME := "PreparedGripAcquisition"
 const SEAT_AXIAL_GUARD_M := 0.00001
 const FRAME_GUARD_M := 0.000005
@@ -67,6 +68,40 @@ func capture_render_checkpoint() -> Dictionary:
 		var value: Variant = get(property)
 		saved_state[property] = value.duplicate(true) if value is Dictionary or value is Array else value
 	return {"identity": identity, "state": saved_state}
+
+## A synchronous motion attempt may run while the private acquisition worker
+## continues. This token never rewinds that worker, its queue, or a new request.
+func capture_motion_checkpoint() -> Dictionary:
+	if _closing or _restoring_support_motion or is_queued_for_deletion():
+		return {}
+	var identity := _render_checkpoint_identity()
+	if identity.is_empty():
+		return {}
+	var saved_state: Dictionary = {}
+	for property: StringName in RENDER_CHECKPOINT_FIELDS:
+		var value: Variant = get(property)
+		saved_state[property] = value.duplicate(true) if value is Dictionary or value is Array else value
+	return {"identity": identity, "state": saved_state, "motion_guard": _motion_checkpoint_guard()}
+
+func can_restore_motion_checkpoint(snapshot: Dictionary) -> bool:
+	if _closing or _restoring_support_motion or is_queued_for_deletion():
+		return false
+	if snapshot.get("identity", {}) != _render_checkpoint_identity() \
+		or snapshot.get("motion_guard", {}) != _motion_checkpoint_guard():
+		return false
+	if not snapshot.get("state") is Dictionary:
+		return false
+	for property: StringName in RENDER_CHECKPOINT_FIELDS:
+		if not snapshot.state.has(property) or typeof(snapshot.state[property]) != typeof(get(property)):
+			return false
+	return true
+
+func _motion_checkpoint_guard() -> Dictionary:
+	return {"process_frame": Engine.get_process_frames(), "physics_frame": Engine.get_physics_frames(),
+		"job": _job, "busy": _busy, "closing": _closing, "running_slot": _running_slot,
+		"serial": _serial, "queue": _queue.duplicate(), "requests": _requests.duplicate(true),
+		"slots": _slots.duplicate(), "dominant": _dominant,
+		"manual_reacquisition_required": _manual_reacquisition_required}
 
 func can_restore_render_checkpoint(snapshot: Dictionary) -> bool:
 	if not _render_checkpoint_idle() or not snapshot.get("identity") is Dictionary or not snapshot.get("state") is Dictionary:
@@ -133,6 +168,199 @@ func _render_checkpoint_unconfigured() -> bool:
 
 func is_render_checkpoint_idle() -> bool:
 	return _render_checkpoint_idle()
+
+## A real live primary acquisition may move the authored weapon endpoints.
+## Restoration and replay are not new acquisitions and must not rewrite them.
+func pending_authoring_frame_serial() -> int:
+	var entry: Dictionary = _status.get(_dominant, {})
+	if entry.get("status", "") != "preview_applied" or not entry.get("authoring_frame_pending", false):
+		return -1
+	return int(entry.get("serial", -1))
+
+func acknowledge_authoring_frame(serial: int) -> void:
+	if serial >= 0 and pending_authoring_frame_serial() == serial:
+		_status[_dominant].erase("authoring_frame_pending")
+
+## Durable acquisition provenance, separate from a merely observed body pose.
+## Session keys, Nodes, WeakRefs and world-space continuation snapshots stay out.
+func export_authoring_grip(context_signature: String) -> Dictionary:
+	if context_signature.is_empty() or not _render_checkpoint_idle() or _manual_reacquisition_required \
+			or _slots.is_empty() or _dominant not in _slots:
+		return {}
+	var packets: Dictionary = {}
+	for slot: StringName in _slots:
+		var key: String = _requests.get(slot, {}).get("key", "")
+		if key.is_empty() or key != relationship_key(_weapon, slot, _dominant, _data.anatomy.get("source_signature"), _geometry_epoch) \
+				or _status.get(slot, {}).get("status", "") != "preview_applied" \
+				or not _actor.get_planar_grip_pose_state(slot).get("has_grip_pose", false):
+			return {}
+		var packet: Dictionary = _compact_authoring_grip_packet(_replay_pose_cache.get(key, {}).get("packet", {}))
+		if packet.is_empty(): return {}
+		var plan: Dictionary = _actor.planar_grip_pose_binding.prepare(_skeleton, slot, _weapon, key, packet)
+		if not plan.get("valid", false) or not _authoring_grip_matches_pose(slot, plan): return {}
+		packets[slot] = packet
+	return {"schema_version": 1, "context_signature": context_signature,
+		"dominant": _dominant, "slots": _slots.duplicate(), "packets": packets,
+		"grip_signature": _authoring_grip_signature(_slots, _dominant)}
+
+## The caller has restored the saved body/weapon pose, seat metadata and hand
+## guidance. Reattach its proven acquisition without moving or solving the rig.
+func restore_authoring_grip(saved: Dictionary, context_signature: String,
+		slots: Array[StringName], dominant: StringName) -> Dictionary:
+	if not _render_checkpoint_idle() or not _data.get("valid", false) or _manual_reacquisition_required:
+		return {"valid": false, "reason": "authoring_grip_owner_not_ready"}
+	if context_signature.is_empty() or saved.get("schema_version", 0) != 1 \
+			or saved.get("context_signature", "") != context_signature \
+			or saved.get("dominant", &"") != dominant or saved.get("slots", []) != slots \
+			or slots.is_empty() or slots.size() > 2 or dominant not in slots \
+			or not saved.get("packets") is Dictionary or saved.packets.size() != slots.size() \
+			or saved.get("grip_signature", "") != _authoring_grip_signature(slots, dominant):
+		return {"valid": false, "reason": "authoring_grip_context_changed"}
+	var keys: Dictionary = {}
+	var packets: Dictionary = {}
+	for slot: StringName in slots:
+		if slot not in [&"hand_right", &"hand_left"] or keys.has(slot):
+			return {"valid": false, "reason": "authoring_grip_slots_invalid"}
+		keys[slot] = relationship_key(_weapon, slot, dominant, _data.anatomy.get("source_signature"), _geometry_epoch)
+		var raw_packet: Variant = saved.packets.get(slot)
+		if keys[slot].is_empty() or not raw_packet is Dictionary:
+			return {"valid": false, "reason": "authoring_grip_packet_missing"}
+		packets[slot] = _compact_authoring_grip_packet(raw_packet)
+		if packets[slot].is_empty() or packets[slot].anatomy_signature != _data.anatomy.get("source_signature"):
+			return {"valid": false, "reason": "authoring_grip_packet_invalid"}
+	# Claim copies the current finger rotations; it does not acquire or move a
+	# Hand. Preflight every slot before committing any restored finger owner.
+	for slot: StringName in slots:
+		var claim: Dictionary = _actor.claim_planar_grip_pose(slot, _weapon, keys[slot])
+		if not claim.get("valid", false):
+			return _discard_authoring_grip_import(slots, String(claim.get("reason", "authoring_grip_claim_failed")))
+		var plan: Dictionary = _actor.planar_grip_pose_binding.prepare(_skeleton, slot, _weapon, keys[slot], packets[slot])
+		if not plan.get("valid", false):
+			return _discard_authoring_grip_import(slots, String(plan.get("reason", "authoring_grip_preflight_failed")))
+		if not _authoring_grip_matches_pose(slot, plan):
+			return _discard_authoring_grip_import(slots, "authoring_grip_pose_mismatch")
+	for slot: StringName in slots:
+		var applied: Dictionary = _actor.apply_planar_grip_pose(slot, _weapon, keys[slot], packets[slot])
+		if not applied.get("valid", false):
+			return _discard_authoring_grip_import(slots, String(applied.get("reason", "authoring_grip_restore_failed")))
+	for old_slot: StringName in _slots:
+		if old_slot not in slots: _actor.release_planar_grip_pose(old_slot)
+	_slots.assign(slots)
+	_dominant = dominant
+	_requests.clear()
+	_status.clear()
+	_replay_pose_cache.clear()
+	_queue.clear()
+	_support_motion_snapshot.clear()
+	for slot: StringName in slots:
+		_serial += 1
+		_requests[slot] = {"key": keys[slot], "serial": _serial, "dominant": dominant}
+		_status[slot] = {"status": "preview_applied", "serial": _serial,
+			"reason": "authoring_acquisition_restored", "acquisition_method": ACQUISITION_METHOD,
+			"actual_assessment_current": false, "actual_3d_grip_verified": false,
+			"contact_condition_met": false, "grip_accepted": false}
+		_replay_pose_cache[keys[slot]] = {"packet": packets[slot], "status": _status[slot].duplicate(true)}
+	_primary_seat = {"key": keys[dominant], "slot": dominant, "last_applied_world": _weapon.global_transform,
+		"last_applied_world_origin_id": Origins.ORIGIN_RL_BONE_ROOT}
+	_support_macro_primary_serial = int(_requests[dominant].serial)
+	for slot: StringName in slots:
+		if slot != dominant: _capture_support_motion_snapshot(slot)
+	_settle_ready = false
+	_publish()
+	return {"valid": true, "restored": true, "solved_relationships": 0}
+
+func _discard_authoring_grip_import(slots: Array[StringName], reason: String) -> Dictionary:
+	var released: Array[StringName] = _slots.duplicate()
+	for slot: StringName in slots:
+		if slot not in released: released.append(slot)
+	for slot: StringName in released: _actor.release_planar_grip_pose(slot)
+	_slots.clear()
+	_requests.clear()
+	_status.clear()
+	_queue.clear()
+	_primary_seat.clear()
+	_replay_pose_cache.clear()
+	_support_motion_snapshot.clear()
+	_support_macro_primary_serial = -1
+	_dominant = StringName()
+	_settle_ready = false
+	_publish()
+	return {"valid": false, "reason": reason}
+
+func _authoring_grip_signature(slots: Array[StringName], dominant: StringName) -> String:
+	if not is_instance_valid(_weapon): return ""
+	var fields: Array = [dominant, slots, _weapon.get_meta("grip_style_mode", StringName())]
+	for slot: StringName in slots:
+		var prefix := "preview_primary_grip_seat" if slot == dominant else "preview_support_grip_seat"
+		var station: Variant = _weapon.get_meta(prefix + "_local")
+		if not station is Vector3 or _weapon.get_meta(prefix + "_origin_id", StringName()) != Origins.ORIGIN_WEAPON_ROOT:
+			return ""
+		fields.append([slot, _station_identity(station), Origins.ORIGIN_WEAPON_ROOT])
+	return var_to_bytes(fields).hex_encode().sha256_text()
+
+func _compact_authoring_grip_packet(source: Dictionary) -> Dictionary:
+	if not source.get("digit_states") is Dictionary or not source.get("hand_in_weapon") is Transform3D: return {}
+	var hand: Transform3D = source.hand_in_weapon
+	if not hand.is_finite() or hand.basis.determinant() <= 0.000000000001: return {}
+	for field: String in ["hand_in_weapon_origin_id", "anatomy_signature", "source_pose_id"]:
+		if not _authoring_grip_name_valid(source.get(field)): return {}
+	var packet: Dictionary = {}
+	for field: String in ["hand_in_weapon", "hand_in_weapon_origin_id", "anatomy_signature", "source_pose_id"]:
+		if not source.has(field): return {}
+		packet[field] = source[field]
+	packet["digit_states"] = {}
+	for digit: StringName in [&"middle", &"thumb", &"index", &"ring", &"pinky"]:
+		var item: Variant = source.digit_states.get(digit)
+		if not item is Dictionary or not item.get("digit") is Dictionary \
+				or not item.get("snapshot") is Dictionary or not item.get("angles_rad") is Array \
+				or item.angles_rad.size() != 3: return {}
+		var compact := {"digit": {}, "snapshot": {}, "angles_rad": item.angles_rad.duplicate()}
+		for field: String in ["slot_id", "digit_id", "hand_bone_name"]:
+			if not _authoring_grip_name_valid(item.digit.get(field)): return {}
+			compact.digit[field] = item.digit[field]
+		for field: String in ["bone_names", "relative_transforms", "neutral_local_rotations", "hinge_axes_local", "min_angles_rad", "max_angles_rad", "relative_transform_origin_ids", "neutral_local_rotation_origin_ids", "hinge_axis_origin_ids"]:
+			if not item.snapshot.get(field) is Array or item.snapshot[field].size() != 3: return {}
+			compact.snapshot[field] = item.snapshot[field].duplicate()
+		# Binding.prepare consumes these typed entries directly. Reject malformed
+		# persisted values before claiming either hand, so casts cannot abort an
+		# import midway through its all-hands preflight.
+		for joint: int in 3:
+			for field: String in ["bone_names", "relative_transform_origin_ids", "neutral_local_rotation_origin_ids", "hinge_axis_origin_ids"]:
+				if not _authoring_grip_name_valid(compact.snapshot[field][joint]): return {}
+			for value: Variant in [compact.angles_rad[joint], compact.snapshot.min_angles_rad[joint], compact.snapshot.max_angles_rad[joint]]:
+				if not (value is float or value is int) or not is_finite(float(value)): return {}
+			var relative: Variant = compact.snapshot.relative_transforms[joint]
+			var neutral: Variant = compact.snapshot.neutral_local_rotations[joint]
+			var axis: Variant = compact.snapshot.hinge_axes_local[joint]
+			if not relative is Transform3D or not relative.is_finite() or relative.basis.determinant() <= 0.000000000001: return {}
+			if not neutral is Quaternion or not neutral.is_finite() or neutral.length_squared() < 0.000001: return {}
+			if not axis is Vector3 or not axis.is_finite() or axis.length_squared() < 0.000001: return {}
+		packet.digit_states[digit] = compact
+	return packet
+
+func _authoring_grip_name_valid(value: Variant) -> bool:
+	return (value is String or value is StringName) and not String(value).is_empty()
+
+func _authoring_grip_matches_pose(slot: StringName, plan: Dictionary) -> bool:
+	var name: StringName = &"CC_Base_L_Hand" if slot == &"hand_left" else &"CC_Base_R_Hand"
+	var index: int = _skeleton.find_bone(name)
+	if index < 0: return false
+	var actual: Transform3D = _skeleton.global_transform * _skeleton.get_bone_global_pose(index)
+	var expected: Transform3D = _weapon.global_transform * (plan.hand_in_weapon as Transform3D)
+	if not actual.is_finite() or not expected.is_finite(): return false
+	if actual.origin.distance_to(expected.origin) > 0.00005: return false
+	var a: Quaternion = actual.basis.orthonormalized().get_rotation_quaternion()
+	var b: Quaternion = expected.basis.orthonormalized().get_rotation_quaternion()
+	if _authoring_grip_rotation_error(a, b) > deg_to_rad(0.025): return false
+	for bone_name: StringName in plan.rotations:
+		var bone: int = _skeleton.find_bone(bone_name)
+		if bone < 0 or _authoring_grip_rotation_error(_skeleton.get_bone_pose_rotation(bone), plan.rotations[bone_name]) > deg_to_rad(0.025): return false
+	return true
+
+func _authoring_grip_rotation_error(a: Quaternion, b: Quaternion) -> float:
+	if not a.is_finite() or not b.is_finite() or a.length_squared() < 0.000001 or b.length_squared() < 0.000001: return INF
+	var delta: Quaternion = (a * b.inverse()).normalized()
+	return 2.0 * atan2(Vector3(delta.x, delta.y, delta.z).length(), absf(delta.w))
 
 func _render_checkpoint_identity() -> Dictionary:
 	if _render_checkpoint_unconfigured():
@@ -621,6 +849,13 @@ func _run_next(synchronous: bool = false) -> void:
 		_busy = false
 		_running_slot = StringName()
 		return
+	if slot == _dominant:
+		# The three entrance paths (% edit, Reacquire, missing saved binding)
+		# share this preparation. Never put orientation fitting inside closure.
+		var aligned := _prepare_primary_alignment()
+		if not aligned.get("valid", false):
+			_finish_failure(slot, request, aligned.get("reason", "primary_alignment_failed"))
+			return
 	if slot != _dominant:
 		if not _primary_ready_for_support():
 			_finish_failure(slot, request, "primary_grip_not_ready", {"primary_status": _status.get(_dominant, {}).get("status", "unavailable")})
@@ -716,10 +951,61 @@ func _run_next(synchronous: bool = false) -> void:
 	}, true)
 	if _replay_pose_cache.has(request.key):
 		_replay_pose_cache[request.key]["status"] = _status[slot].duplicate(true)
+	# Do not copy this authoring-only receipt into cached replay statuses. The
+	# station consumes it after recording the settled pose and matching controls.
+	if slot == _dominant and not synchronous and _replay_preparation_context.is_empty():
+		_status[slot]["authoring_frame_pending"] = true
 	_busy = false
 	_running_slot = StringName()
 	_record_request("owner.preview_applied",slot,request)
 	_publish()
+
+## Only weapon placement changes here. No arm IK, wrist write, digit solve or
+## committed-seat signal. Capture/MotionRebase below observe the prepared frame.
+func _prepare_primary_alignment() -> Dictionary:
+	var wrist: Dictionary = _actor.capture_authoring_wrist_origin(_dominant)
+	if not wrist.get("available", false):
+		return {"valid": false, "reason": "primary_alignment_wrist_origin_missing"}
+	var side := "L" if _dominant == &"hand_left" else "R"
+	var index_name := StringName("CC_Base_%s_Index1" % side)
+	var pinky_name := StringName("CC_Base_%s_Pinky1" % side)
+	var index_id := _skeleton.find_bone(index_name)
+	var pinky_id := _skeleton.find_bone(pinky_name)
+	if index_id < 0 or pinky_id < 0:
+		return {"valid": false, "reason": "primary_alignment_knuckle_origins_missing"}
+	for prefix: String in ["preview_primary_grip_seat", "primary_grip_span_start", "primary_grip_span_end", "weapon_tip", "weapon_pommel"]:
+		if not _weapon.get_meta(prefix + "_local", null) is Vector3 or _weapon.get_meta(prefix + "_origin_id", StringName()) != Origins.ORIGIN_WEAPON_ROOT:
+			return {"valid": false, "reason": "primary_alignment_weapon_origins_missing"}
+	var machine_to_world: Transform3D = wrist.machine_to_world
+	var world_to_machine := machine_to_world.affine_inverse()
+	var skeleton_to_machine := world_to_machine * _skeleton.global_transform
+	var hand_to_machine: Transform3D = wrist.origin_record.resolved_transform_to_machine
+	var weapon_frame := {
+		"frame": world_to_machine * _weapon.global_transform, "frame_origin_id": Origins.ORIGIN_RL_BONE_ROOT,
+		"station": _weapon.get_meta("preview_primary_grip_seat_local"), "station_origin_id": Origins.ORIGIN_WEAPON_ROOT,
+		"axis": (_weapon.get_meta("primary_grip_span_end_local") as Vector3) - (_weapon.get_meta("primary_grip_span_start_local") as Vector3), "axis_origin_id": Origins.ORIGIN_WEAPON_ROOT,
+		"tip_direction": (_weapon.get_meta("weapon_tip_local") as Vector3) - (_weapon.get_meta("weapon_pommel_local") as Vector3), "tip_direction_origin_id": Origins.ORIGIN_WEAPON_ROOT,
+	}
+	var hand := {"origin_id": Origins.ORIGIN_RL_BONE_ROOT,
+		"index": skeleton_to_machine * _skeleton.get_bone_global_pose(index_id).origin, "index_origin_id": index_name,
+		"pinky": skeleton_to_machine * _skeleton.get_bone_global_pose(pinky_id).origin, "pinky_origin_id": pinky_name,
+		"wrist": hand_to_machine.origin, "wrist_origin_id": wrist.origin_record.origin_id,
+		"target": world_to_machine * (_actor.resolve_hand_grip_alignment_world_position(_dominant) as Vector3),
+		"target_source_origin_id": Origins.ORIGIN_HAND_GRIP_ALIGNMENT}
+	var result := PrimarySeat.resolve_primary_alignment(weapon_frame, hand,
+		_weapon.get_meta("grip_style_mode", CraftedItemWIP.GRIP_NORMAL) != CraftedItemWIP.GRIP_NORMAL)
+	if not result.get("valid", false):
+		return result
+	# An older binding must not recompose the previous weapon pose during this
+	# new acquisition. The request/digit ownership itself remains unchanged.
+	_primary_seat.clear()
+	_support_motion_snapshot.clear()
+	_replay_pose_cache.erase(_requests[_dominant].key)
+	_weapon.global_transform = machine_to_world * (result.weapon_to_machine as Transform3D)
+	_weapon.set_meta("primary_grip_alignment", result.duplicate(true))
+	Chronology.event("owner.primary_alignment", {"slot": _dominant, "serial": _requests[_dominant].serial,
+		"swing_radians": (result.swing as Quaternion).get_angle(), "station": weapon_frame.station})
+	return result
 
 func _primary_ready_for_support() -> bool:
 	var request: Dictionary = _requests.get(_dominant, {})

@@ -9,6 +9,7 @@ const ControlBaker = preload("res://core/resolvers/combat_runtime_clip_baker.gd"
 const ControlFields = preload("res://core/resolvers/combat_runtime_clip_incremental_resolver.gd")
 const GripTransition = preload("res://core/resolvers/combat_grip_transition_resolver.gd")
 const Attachment = preload("res://core/resolvers/combat_prepared_attachment_resolver.gd")
+const ArmFrame = preload("res://core/resolvers/combat_prepared_arm_frame_resolver.gd")
 const EPSILON := 0.000001
 
 static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dictionary:
@@ -23,20 +24,24 @@ static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dicti
 	for index: int in snapshots.size():
 		var validation: Dictionary = PreparedPose.validate(snapshots[index])
 		if not validation.valid:
-			return validation.merged({"node_index": index})
+			return _locate_failure(validation.merged({"node_index": index}), chain, index, index)
 		var layout: Dictionary = _validate_shared_layout(first, snapshots[index])
 		if not layout.valid:
-			return layout.merged({"node_index": index})
+			return _locate_failure(layout.merged({"node_index": index}), chain, index, index)
 		for field: String in ["trajectory_to_reference", "primary_hand_in_weapon"]:
 			if not snapshots[index].get(field) is Transform3D or not snapshots[index][field].is_finite():
-				return _fail("prepared_pose_missing_" + field).merged({"node_index": index})
+				return _locate_failure(_fail("prepared_pose_missing_" + field).merged({"node_index": index}), chain, index, index)
 		for field: String in ["weapon_tip_local", "weapon_pommel_local"]:
 			if not snapshots[index].get(field) is Vector3 or not snapshots[index][field].is_finite():
-				return _fail("prepared_pose_missing_" + field).merged({"node_index": index})
+				return _locate_failure(_fail("prepared_pose_missing_" + field).merged({"node_index": index}), chain, index, index)
 	var times := PackedFloat64Array([0.0])
 	for index: int in range(1, chain.size()):
 		times.append(times[index - 1] + maxf(float(chain[index].transition_duration_seconds), 0.0))
 	var output: Resource = control_clip.duplicate_clip()
+	var quality_warnings: Array[Dictionary] = []
+	for index: int in snapshots.size():
+		for warning: Dictionary in snapshots[index].get("quality_warnings", []):
+			append_quality_warning(quality_warnings, warning, {"node_index": index, "failure_scope": "endpoint"})
 	# One first destination supplies the shared entry with topology and acquired
 	# attachment data. It is not Reset's hidden baseline or another authored node.
 	output.prepared_entry_destination = first.duplicate(true)
@@ -62,7 +67,9 @@ static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dicti
 		"max_requested_tip_error_reference_units": 0.0,
 		"interior_contact_validated": false,
 		"attachment_follow_time_ms": 0.0,
+		"material_frame_corrected_samples": 0,
 		"max_wrist_twist_change_radians": 0.0,
+		"quality_fallback_samples": 0,
 	}
 	var segment := 0
 	for frame_index: int in output.get_frame_count():
@@ -78,29 +85,40 @@ static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dicti
 			weight = 1.0
 		var sample: Dictionary = sample_pose(snapshots[segment], snapshots[next], weight)
 		if not sample.valid:
-			return sample.merged({"frame_index": frame_index})
+			return _locate_sample_failure(sample, chain, segment, next, weight, frame_index)
 		# Preserve the existing sampled tip/pommel curve (including explicit grip
 		# flip midpoints) as a deviation from its authored endpoint chord. Carry
 		# the already-solved endpoint seating correction instead of solving again.
 		if weight > 0.0 and weight < 1.0:
 			var weapon_path: Dictionary = _sample_weapon_path(output, frame_index, chain[segment], chain[next], snapshots[segment], snapshots[next], weight)
 			if not weapon_path.valid:
-				return weapon_path.merged({"frame_index": frame_index})
-			sample.weapon_transform = weapon_path.transform
-			diagnostics.max_requested_tip_error_reference_units = maxf(diagnostics.max_requested_tip_error_reference_units, weapon_path.tip_error)
+				if not is_pose_quality_failure(String(weapon_path.get("reason", ""))):
+					return _locate_sample_failure(weapon_path, chain, segment, next, weight, frame_index)
+				append_quality_warning(quality_warnings, _locate_sample_failure(weapon_path, chain, segment, next, weight, frame_index))
+			else:
+				sample.weapon_transform = weapon_path.transform
+				diagnostics.max_requested_tip_error_reference_units = maxf(diagnostics.max_requested_tip_error_reference_units, weapon_path.tip_error)
 		var follow_started: int = Time.get_ticks_usec()
-		var follow: Dictionary = Attachment.apply(sample, snapshots[segment], snapshots[next], weight, chain[segment], chain[next])
+		var guided: Dictionary = guide_sample(sample, snapshots[segment], snapshots[next], weight, chain[segment], chain[next])
 		diagnostics.attachment_follow_time_ms += (Time.get_ticks_usec() - follow_started) / 1000.0
-		if not bool(follow.get("valid", false)):
-			return follow.merged({"frame_index": frame_index, "node_index": segment})
-		sample.pose_rotations = follow.pose_rotations
+		if not guided.valid:
+			return _locate_sample_failure(guided.merged({"node_index": segment}), chain, segment, next, weight, frame_index)
+		sample = guided.sample
+		var follow: Dictionary = guided.follow
+		var normalized: Dictionary = guided.normalized
+		for warning: Dictionary in guided.quality_warnings:
+			append_quality_warning(quality_warnings, _locate_sample_failure(warning, chain, segment, next, weight, frame_index))
+		if not guided.quality_warnings.is_empty():
+			diagnostics.quality_fallback_samples += 1
+		if normalized.diagnostics.changed:
+			diagnostics.material_frame_corrected_samples += 1
 		diagnostics.ik_calls += int(follow.ik_calls)
 		for kind: String in ["primary", "support"]:
 			var metrics: Dictionary = follow.diagnostics.get(kind, {})
 			diagnostics.max_wrist_twist_change_radians = maxf(diagnostics.max_wrist_twist_change_radians, float(metrics.get("wrist_twist_change_rad", 0.0)))
 		var globals: Dictionary = _resolve_globals(sample, first.parent_indices)
 		if not globals.valid:
-			return globals.merged({"frame_index": frame_index})
+			return _locate_sample_failure(globals, chain, segment, next, weight, frame_index)
 		if not bool(follow.diagnostics.get("released_for_style_change", false)):
 			_record_attachment_diagnostics(diagnostics, sample, globals.transforms, first, snapshots[segment], snapshots[next], weight, follow.relations)
 		_append_sample(output, sample)
@@ -116,7 +134,97 @@ static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dicti
 		node.set("prepared_pose", {})
 		node.set("prepared_pose_signature", "")
 	output.set_meta("prepared_endpoint_track_diagnostics", diagnostics.duplicate(true))
-	return {"valid": true, "reason": "", "clip": output, "diagnostics": diagnostics}
+	for warning: Dictionary in quality_warnings:
+		output.compile_diagnostics.append(warning.duplicate(true))
+	return {"valid": true, "reason": "", "clip": output, "diagnostics": diagnostics, "quality_warnings": quality_warnings}
+
+## Limits and contact quality guide authoring; finite recorded animation is
+## still playable when that guidance cannot realize a frame. Missing topology,
+## malformed calibration and corrupt channels are deliberately not in this list.
+static func is_pose_quality_failure(reason: String) -> bool:
+	var base := reason.trim_prefix("prepared_attachment_")
+	return base in ["requested_hand_outside_usable_reach", "requested_hand_has_no_arm_sphere_intersection",
+		"elbow_frame_outside_reach", "shoulder_range", "elbow_circle_has_no_range_freedom",
+		"elbow_range_has_no_circle_solution", "complete_arm_frame_residual", "helper_twist_range",
+		"wrist_motion_range", "wrist_pose_not_representable", "forearm_hand_index_range",
+		"degenerate_incoming_arm_axis", "degenerate_material_hinge", "prepared_weapon_path_has_degenerate_axis",
+		"saved_grip_outside_handle_end_bounds"]
+
+## First failing frame identifies the affected node/span; repeating the same
+## warning at 60 Hz must not create an unbounded diagnostic list.
+static func append_quality_warning(warnings: Array, source: Dictionary, location: Dictionary = {}) -> void:
+	# Resource diagnostics and UI collections are ordinary Arrays, including
+	# after text-resource reload. Only the appended warning is a Dictionary;
+	# the collection must not require a runtime typed-array conversion.
+	var warning := source.duplicate(true)
+	warning.merge(location, false)
+	warning["severity"] = "warning"
+	warning.erase("valid")
+	for existing: Variant in warnings:
+		if not existing is Dictionary:
+			continue
+		var same := true
+		for key: String in ["reason", "failure_scope", "node_index", "source_node_index", "destination_node_index", "hand_slot", "hand"]:
+			if existing.get(key) != warning.get(key):
+				same = false
+				break
+		if same:
+			return
+	warnings.append(warning)
+
+## Shared with the transient entry. A failed guide never leaks its partially
+## modified arm into the fallback; all original finite channels stay together.
+static func guide_sample(sample: Dictionary, from: Dictionary, to: Dictionary, weight: float, from_node: Resource = null, to_node: Resource = null) -> Dictionary:
+	var validation := _validate_sample_channels(sample)
+	if not validation.valid:
+		return validation
+	var raw := sample.duplicate(true)
+	for endpoint: Dictionary in [from, to]:
+		for slot: Variant in endpoint.get("wrist_measurement_failures_by_slot", {}):
+			var reason := String(endpoint.wrist_measurement_failures_by_slot[slot])
+			if reason == "wrist_pose_not_representable":
+				return _quality_fallback(raw, {"reason": reason, "hand_slot": slot})
+	var follow: Dictionary = Attachment.apply(sample, from, to, weight, from_node, to_node)
+	if not follow.get("valid", false):
+		return _quality_fallback(raw, follow) if is_pose_quality_failure(String(follow.get("reason", ""))) else follow
+	var body_pose := from.duplicate()
+	for field: String in ["pose_positions", "pose_scales", "parent_reference_transforms"]:
+		body_pose[field] = sample[field]
+	body_pose.pose_rotations = follow.pose_rotations
+	var normalized: Dictionary = ArmFrame.normalize_material_frames(body_pose)
+	if not normalized.get("valid", false):
+		return _quality_fallback(raw, normalized) if is_pose_quality_failure(String(normalized.get("reason", ""))) else normalized
+	var guided := sample.duplicate()
+	guided.pose_rotations = normalized.pose_rotations
+	validation = _validate_sample_channels(guided)
+	if not validation.valid:
+		return validation
+	return {"valid": true, "sample": guided, "follow": follow, "normalized": normalized, "quality_warnings": []}
+
+static func _quality_fallback(raw: Dictionary, failure: Dictionary) -> Dictionary:
+	return {"valid": true, "sample": raw, "quality_warnings": [failure.duplicate(true)],
+		"follow": {"ik_calls": 0, "diagnostics": {"quality_fallback": true}, "relations": {}},
+		"normalized": {"diagnostics": {"changed": false, "quality_fallback": true}}}
+
+static func _validate_sample_channels(sample: Dictionary) -> Dictionary:
+	var count: int = sample.get("pose_positions", []).size()
+	if count == 0:
+		return _fail("prepared_sample_has_no_bones")
+	for field: String in ["pose_positions", "pose_scales", "pose_rotations", "parent_reference_transforms"]:
+		if sample.get(field, []).size() != count:
+			return _fail("prepared_sample_incomplete_" + field)
+		for value: Variant in sample[field]:
+			if field == "pose_rotations":
+				if not value is Vector4 or not value.is_finite() or value.length_squared() <= 0.000001:
+					return _fail("prepared_sample_invalid_rotation")
+			elif field == "parent_reference_transforms":
+				if not value is Transform3D or not value.is_finite() or value.basis.determinant() <= 0.0:
+					return _fail("prepared_sample_invalid_reference")
+			elif not value is Vector3 or not value.is_finite():
+				return _fail("prepared_sample_invalid_vector")
+	if not sample.get("weapon_transform") is Transform3D or not sample.weapon_transform.is_finite() or sample.weapon_transform.basis.determinant() <= 0.0:
+		return _fail("prepared_sample_invalid_weapon")
+	return {"valid": true}
 
 ## Keep the uniform 60 Hz sampling and add authored key times that fall between
 ## samples. Existing playback consumes timestamps, so no endpoint is rounded
@@ -157,7 +265,7 @@ static func _apply_finger_style_transitions(clip: Resource, snapshots: Array[Dic
 				available = snapshots[index - 1].get("default_open_finger_packets", {})
 				packet = available.get(slot, {})
 			if not bool(packet.get("valid", false)):
-				return _fail("prepared_pose_missing_open_fingers_for_style_transition").merged({"node_index": index, "hand_slot": slot})
+				return _locate_failure(_fail("prepared_pose_missing_open_fingers_for_style_transition").merged({"node_index": index, "hand_slot": slot}), clip.motion_node_chain, index - 1, index)
 			packets[slot] = packet
 			transitions.append({"start_time_seconds": times[index - 1], "end_time_seconds": times[index], "hand_slot": slot})
 	if transitions.is_empty():
@@ -168,6 +276,20 @@ static func _apply_finger_style_transitions(clip: Resource, snapshots: Array[Dic
 	clip.baked_solved_upper_body_pose_rotations = result.rotation_frames
 	clip.baked_upper_body_bone_pose_rotations = result.rotation_frames.duplicate(true)
 	return {"valid": true, "transition_count": transitions.size()}
+
+## Explicit diagnostic locations keep consumers from guessing whether the
+## legacy node_index means an endpoint or the source of an incoming span.
+static func _locate_failure(failure: Dictionary, chain: Array, source: int, destination: int) -> Dictionary:
+	return failure.merged({
+		"failure_scope": "endpoint" if source == destination else "transition",
+		"source_node_index": source, "destination_node_index": destination,
+		"source_node_id": String(chain[source].node_id), "destination_node_id": String(chain[destination].node_id),
+	})
+
+static func _locate_sample_failure(failure: Dictionary, chain: Array, source: int, destination: int, weight: float, frame: int) -> Dictionary:
+	var first: int = destination if weight >= 1.0 else source
+	var last: int = source if weight <= 0.0 else destination
+	return _locate_failure(failure.merged({"frame_index": frame}), chain, first, last)
 
 static func sample_pose(from: Dictionary, to: Dictionary, weight: float) -> Dictionary:
 	var ratio: float = clampf(weight, 0.0, 1.0)

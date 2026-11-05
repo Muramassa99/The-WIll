@@ -58,6 +58,31 @@ func _exercise(rig: PlayerHumanoidRig, sk: Skeleton3D, snapshot: Array[Quaternio
 	var label := "%s_yaw_%.0f" % [side, yaw]
 	var limit: float = rig.authoring_elbow_max_plane_angle_degrees
 	for branch_sign: float in [-1.0, 1.0]:
+		# The former maximum-only guard could fold through zero, then accept
+		# the same unsigned angle on the opposite bend side.
+		for weight: float in [0.25, 1.0]:
+			_restore(sk, snapshot)
+			var folded: Dictionary = _seed(rig, sk, side, 25.0, branch_sign)
+			var fold_target: Vector3 = folded.elbow + Basis(folded.normal, deg_to_rad(-25.0)) * folded.upper_direction * float(folded.lower_length)
+			rig.call("_rotate_bone_toward_end_target", forearm, hand, fold_target, weight, true)
+			var fold_after: Dictionary = _geometry(sk, side)
+			_check(absf(_continuous_angle(folded, fold_after) - rig.authoring_elbow_min_plane_angle_degrees) <= ANGLE_EPSILON_DEGREES
+				and (folded.normal as Vector3).dot(fold_after.normal) > 0.999,
+				label + "_fold_through_stops_at_minimum_sign_%s_weight_%s" % [branch_sign, weight])
+			# Preserve existing 3D target convergence for legal requests. A trial
+			# that projected every step into the incoming plane impaired live reach.
+			_restore(sk, snapshot)
+			var plane_before: Dictionary = _seed(rig, sk, side, 130.0, branch_sign)
+			var off_plane: Vector3 = (Basis(plane_before.normal, deg_to_rad(80.0)) * plane_before.upper_direction + plane_before.normal * 0.4).normalized()
+			var plane_target: Vector3 = plane_before.elbow + off_plane * float(plane_before.lower_length)
+			var plane_rotation: Quaternion = sk.get_bone_pose_rotation(forearm_index)
+			rig.call("_rotate_bone_toward_end_target", forearm, hand, plane_target, weight, false)
+			var unrestricted_rotation: Quaternion = sk.get_bone_pose_rotation(forearm_index)
+			sk.set_bone_pose_rotation(forearm_index, plane_rotation)
+			sk.force_update_all_bone_transforms()
+			rig.call("_rotate_bone_toward_end_target", forearm, hand, plane_target, weight, true)
+			_check(absf(unrestricted_rotation.dot(sk.get_bone_pose_rotation(forearm_index))) > 0.999999,
+				label + "_legal_out_of_plane_update_unchanged_sign_%s_weight_%s" % [branch_sign, weight])
 		for weight: float in [0.25, 0.86, 1.0]:
 			_restore(sk, snapshot)
 			var before: Dictionary = _seed(rig, sk, side, limit - 0.5, branch_sign)

@@ -2,7 +2,9 @@ extends RefCounted
 class_name CombatPreparedPose
 
 ## Value contract for a pose already solved and captured during editing.
-const SCHEMA_VERSION := 2
+# Semantic wrist authority replaces the former Hand swing-twist snapshots.
+# Retain authored controls, but do not silently restore their obsolete solve.
+const SCHEMA_VERSION := 4
 const NON_POSE_FIELDS: Array[StringName] = [
 	&"node_id", &"node_index", &"draft_notes", &"retarget_node",
 	&"prepared_pose", &"prepared_pose_signature", &"transition_duration_seconds",
@@ -59,6 +61,26 @@ static func validate(snapshot: Dictionary, context_signature: String = "") -> Di
 			var support_slot: StringName = StringName(snapshot.get("support_hand_slot", StringName()))
 			if support_slot == primary_slot or not _valid_attachment_constraints(snapshot, names, support_slot, snapshot.support_hand_bone_name):
 				return _fail("prepared_pose_missing_support_arm_constraints")
+	var arm_packets: Variant = snapshot.get("arm_constraints_by_slot", {})
+	if arm_packets is Dictionary:
+		for slot: Variant in arm_packets:
+			var packet: Variant = arm_packets[slot]
+			if not packet is Dictionary or not packet.has("wrist_model_revision"):
+				continue
+			if not _valid_wrist_constraints(packet):
+				return _fail("prepared_pose_missing_wrist_constraints").merged({"hand_slot": slot})
+			# A measured off-mechanism pose remains recordable via its finite bone
+			# transforms. It has no fabricated semantic wrist state; playback uses
+			# that recorded pose with a warning when guidance cannot represent it.
+			if snapshot.get("wrist_measurement_failures_by_slot", {}).get(slot, "") == "wrist_pose_not_representable":
+				continue
+			var state: Variant = snapshot.get("wrist_states_by_slot", {}).get(slot, {})
+			if not state is Dictionary:
+				return _fail("prepared_pose_missing_wrist_state").merged({"hand_slot": slot})
+			for key: String in ["rho", "beta", "gamma"]:
+				var value: Variant = state.get(key)
+				if not (value is float or value is int) or not is_finite(float(value)):
+					return _fail("prepared_pose_missing_wrist_state").merged({"hand_slot": slot})
 	if not _valid_vector(snapshot.get("weapon_position_reference_local")) or not _valid_vector(snapshot.get("weapon_scale_reference_local")) or not snapshot.get("weapon_rotation_reference_local") is Quaternion:
 		return _fail("prepared_pose_invalid_weapon_transform")
 	var weapon_rotation: Quaternion = snapshot.weapon_rotation_reference_local
@@ -85,6 +107,8 @@ static func _valid_attachment_constraints(snapshot: Dictionary, names: Array, sl
 	var constraints: Dictionary = by_slot[slot]
 	if not bool(constraints.get("valid", false)) or constraints.get("slot_id") != slot or constraints.get("hand_bone") != hand:
 		return false
+	if not _valid_wrist_constraints(constraints):
+		return false
 	for field: String in ["clavicle_bone", "upperarm_bone", "forearm_bone", "hand_bone"]:
 		if not names.has(constraints.get(field)):
 			return false
@@ -106,6 +130,29 @@ static func _valid_attachment_constraints(snapshot: Dictionary, names: Array, sl
 			var neutral: Variant = constraints.twist_neutral_rotations.get(bone)
 			if not neutral is Quaternion or not neutral.is_finite() or neutral.length_squared() <= 0.000001:
 				return false
+	return true
+
+static func _valid_wrist_constraints(packet: Dictionary) -> bool:
+	var revision: String = String(packet.get("wrist_model_revision", ""))
+	var calibration: Variant = packet.get("wrist_calibration")
+	var profile: Variant = packet.get("wrist_profile")
+	if revision.is_empty() or not calibration is Dictionary or not profile is Dictionary:
+		return false
+	if String(calibration.get("revision", "")) != revision or String(profile.get("revision", "")) != revision:
+		return false
+	if not bool(calibration.get("valid", false)):
+		return false
+	for field: String in ["neutral_anatomical_in_forearm", "anatomical_in_hand_bone"]:
+		var basis: Variant = calibration.get(field)
+		if not basis is Basis or not basis.is_finite() or basis.determinant() <= 0.000001:
+			return false
+	var radial_sign: Variant = calibration.get("radial_sign")
+	if not (radial_sign is float or radial_sign is int) or not is_equal_approx(absf(float(radial_sign)), 1.0):
+		return false
+	for field: String in ["forearm_roll_limit_radians", "flexion_limit_radians", "extension_limit_radians", "ulnar_limit_radians", "radial_limit_radians", "orientation_tolerance_radians", "angle_epsilon_radians"]:
+		var value: Variant = profile.get(field)
+		if not (value is float or value is int) or not is_finite(float(value)) or float(value) <= 0.0:
+			return false
 	return true
 
 static func _valid_vector(value: Variant) -> bool:

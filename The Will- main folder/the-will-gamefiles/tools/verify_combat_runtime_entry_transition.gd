@@ -35,6 +35,7 @@ func _run() -> void:
 	_check(not body.has_meta("entry_duration_seconds"), "ownership:entry_metadata_only_on_transient_clip")
 	_verify_rejections(body, incoming, source)
 	_verify_single_pose(source)
+	_verify_advisory_prefix(body, incoming, source)
 	print(JSON.stringify({"verifier": "combat_runtime_entry_transition", "checks": _checks,
 		"passed": _failures.is_empty(), "failures": _failures}))
 	quit(0 if _failures.is_empty() else 1)
@@ -143,6 +144,26 @@ func _verify_rejections(body: CombatRuntimeClip, incoming: Dictionary, source: C
 	var unavailable: CombatRuntimeClip = body.duplicate_clip()
 	unavailable.baked_solved_replay_frame_available[0] = false
 	_check(Entry.build(unavailable, incoming, source) == null, "reject:unavailable_destination")
+
+func _verify_advisory_prefix(body: CombatRuntimeClip, incoming: Dictionary, source: CombatAnimationMotionNode) -> void:
+	var combined: CombatRuntimeClip = Entry.build(body, incoming, source)
+	if combined == null:
+		_check(false, "advisory:entry_fixture_builds")
+		return
+	var current := incoming.duplicate(true)
+	current["parent_reference_transforms"] = [Transform3D.IDENTITY, Transform3D.IDENTITY]
+	current["wrist_measurement_failures_by_slot"] = {&"hand_right": "wrist_pose_not_representable"}
+	var destination := current.duplicate(true)
+	var before := combined.baked_solved_upper_body_pose_rotations.duplicate(true)
+	var prefix_count: int = combined.get_frame_count() - body.get_frame_count()
+	var guided: Dictionary = Entry._attach_prefix(combined, current, destination, source, body.motion_node_chain[0], prefix_count)
+	_check(guided.get("valid", false), "advisory:unrepresentable_entry_pose_does_not_cancel_prefix")
+	_check(combined.baked_solved_upper_body_pose_rotations == before, "advisory:entry_keeps_complete_original_raw_pose_frames")
+	_check(guided.get("quality_warnings", []).size() == 1 and guided.quality_warnings[0].get("failure_scope") == "entry",
+		"advisory:entry_warns_once_for_same_issue")
+	combined.baked_solved_upper_body_pose_positions[0][0] = Vector3(NAN, 0.0, 0.0)
+	var bad: Dictionary = Entry._attach_prefix(combined, current, destination, source, body.motion_node_chain[0], prefix_count)
+	_check(not bad.get("valid", true), "advisory:entry_still_rejects_corrupt_channels")
 
 func _verify_single_pose(source: CombatAnimationMotionNode) -> void:
 	var body: CombatRuntimeClip = _body(true)

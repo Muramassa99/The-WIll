@@ -141,6 +141,8 @@ var idle_draft_selector_container: VBoxContainer = null
 var draft_list: ItemList = null
 var new_skill_draft_button: Button = null
 var point_list: ItemList = null
+var _motion_node_validation_draft: Resource = null
+var _motion_node_validation_feedback: Dictionary = {}
 var add_point_button: Button = null
 var duplicate_point_button: Button = null
 var remove_point_button: Button = null
@@ -231,8 +233,14 @@ var preview_camera_skip_next_orbit_motion: bool = false
 var preview_camera_orbit_guard_until_msec: int = 0
 var editor_state_dirty: bool = false
 var preview_drag_override_node: CombatAnimationMotionNode = null
+var preview_drag_forearm_guard_active: bool = false
+var preview_drag_independent_arm_slot: StringName = StringName()
+var preview_drag_independent_hand_proxy: bool = false
+var preview_drag_last_accepted_node: CombatAnimationMotionNode = null
+var preview_drag_forearm_failure: Dictionary = {}
 var preview_drag_has_moved: bool = false
 var preview_weapon_roll_dragging: bool = false
+var _endpoint_pointer_latest: Vector2 = Vector2.ZERO
 var preview_weapon_facing_dragging: bool = false
 var preview_weapon_roll_pointer_start: Vector2
 var preview_weapon_roll_degrees_start: float = 0.0
@@ -378,7 +386,9 @@ func _process(delta: float) -> void:
 		_refresh_live_editor_shortcuts()
 		_flush_pending_preview_drag_refresh()
 		_refresh_grip_acquisition_status()
-		if not preview_prepare_in_progress and not manual_save_in_progress and not session_state.playback_active:
+		# Explicit R/navigation owns its settling window while recording. A
+		# background capture can reject quality warnings and reset that window.
+		if not preview_prepare_in_progress and not manual_save_in_progress and not _motion_node_recording_pending and not session_state.playback_active:
 			capture_selected_prepared_pose()
 	if not chain_player.is_playing():
 		return
@@ -389,6 +399,9 @@ func _process(delta: float) -> void:
 		_refresh_preview_scene()
 	if not chain_player.is_playing():
 		session_state.playback_active = false
+		# Playback owns the displayed bones and releases live grip acquisition.
+		# Return editing ownership to the selected recorded endpoint on exit.
+		_refresh_preview_scene()
 		_refresh_manual_save_controls()
 		footer_status_label.text = "Preview finished."
 
@@ -414,7 +427,7 @@ func _refresh_grip_acquisition_status() -> void:
 		var state: Dictionary = states[slot]
 		var hand := "Right" if slot == &"hand_right" else "Left"
 		match str(state.get("status", "")):
-			"manual_required": lines.append("%s grip: weapon facing changed. Use Reacquire grip when ready." % hand)
+			"manual_required": lines.append("%s grip: weapon facing changed. Release the control to acquire grip." % hand)
 			"queued": lines.append("%s grip: waiting to seat." % hand)
 			"solving": lines.append("%s grip: solving (%.0f s). You can keep using the editor." % [hand, float(state.get("elapsed_seconds", 0.0))])
 			"assessing": lines.append("%s grip: checking contact on the posed hand." % hand)
@@ -468,16 +481,18 @@ func _refresh_grip_acquisition_status() -> void:
 ## Snapshot the result already displayed by the editor. Two complete idle
 ## frames separate a changed selection/input or finished acquisition from
 ## capture. Calling this method never advances a solver or waits for one.
-func capture_selected_prepared_pose(allow_preparation: bool = false) -> Dictionary:
+func capture_selected_prepared_pose(allow_preparation: bool = false, allow_quality_warnings: bool = false) -> Dictionary:
 	if panel == null or not panel.visible or workflow_step != WORKFLOW_STEP_EDITOR or active_wip == null:
 		return _prepared_pose_capture_unavailable("prepared_pose_editor_not_active")
 	if ((manual_save_in_progress or preview_prepare_in_progress) and not allow_preparation) or chain_player.is_playing() or session_state.playback_active:
 		return _prepared_pose_capture_unavailable("prepared_pose_editor_busy")
 	if motion_node_editor.is_dragging() or preview_weapon_roll_dragging or preview_weapon_facing_dragging or preview_drag_override_node != null or preview_drag_refresh_pending:
 		return _prepared_pose_capture_unavailable("prepared_pose_edit_in_progress")
-	if preview_presenter.is_weapon_facing_reacquisition_required(preview_subviewport):
+	# Background capture still lets a fresh default acquisition finish. An
+	# explicit R/F/Save records the finite pose currently shown, with warnings.
+	if not allow_quality_warnings and preview_presenter.is_weapon_facing_reacquisition_required(preview_subviewport):
 		return _prepared_pose_capture_unavailable("weapon_facing_requires_manual_reacquisition")
-	if preview_presenter.is_grip_acquisition_pending(preview_subviewport):
+	if not allow_quality_warnings and preview_presenter.is_grip_acquisition_pending(preview_subviewport):
 		return _prepared_pose_capture_unavailable("prepared_pose_grip_pending")
 	var node: CombatAnimationMotionNode = _get_active_motion_node()
 	var draft: Resource = _get_active_draft()
@@ -506,7 +521,8 @@ func capture_selected_prepared_pose(allow_preparation: bool = false) -> Dictiona
 		return _prepared_pose_capture_unavailable("prepared_pose_display_selection_changed")
 	var context_signature: String = _prepared_pose_context_signature(context)
 	var key: String = var_to_bytes([node.get_instance_id(), signature, context_signature,
-		_prepared_pose_refresh_generation, context.get("settle_serial", 0)]).hex_encode().sha256_text()
+		_prepared_pose_refresh_generation, context.get("settle_serial", 0),
+		context.get("primary_acquisition_frame_serial", -1)]).hex_encode().sha256_text()
 	if key == _prepared_pose_completed_key and node.prepared_pose_signature == signature:
 		var retained: Dictionary = PreparedPoseScript.validate(node.prepared_pose, context_signature)
 		if bool(retained.get("valid", false)):
@@ -524,17 +540,20 @@ func capture_selected_prepared_pose(allow_preparation: bool = false) -> Dictiona
 	if not bool(validation.get("valid", false)):
 		return _prepared_pose_capture_unavailable(String(validation.get("reason", "prepared_pose_capture_failed")))
 	var baseline_source: String = String(_baseline_preparation.get("source", ""))
-	if not baseline_source.is_empty():
-		# Acquisition seats the weapon after the initial seed was authored. Record
-		# that realized frame before signing Node 1, so its controls and snapshot
-		# describe the same in-hand pose. This does not refresh or solve the rig.
-		var seated_frame: Dictionary = preview_presenter.get_prepared_grip_display_state(preview_subviewport, node)
+	var acquired_frame: bool = int(context.get("primary_acquisition_frame_serial", -1)) >= 0 and not preview_presenter.is_grip_acquisition_pending(preview_subviewport)
+	if not baseline_source.is_empty() or acquired_frame:
+		# Acquisition can move the weapon on an existing node too. Record the
+		# realized frame before signing its pose, so curves and playback use the
+		# same endpoints. No rig refresh, neighbour edit or curve-offset rewrite.
+		var seated_frame: Dictionary = preview_presenter.get_prepared_grip_display_state(preview_subviewport, node, allow_quality_warnings)
 		if not bool(seated_frame.get("available", false)):
 			return _prepared_pose_capture_unavailable("baseline_seated_frame_unavailable")
 		# Idles have one visible node at array index 0; only skills carry a
 		# separate hidden Reset placeholder before visible N01.
 		var baseline: CombatAnimationMotionNode = null
-		if _get_user_visible_motion_node_start_index(draft) == 1:
+		# An explicit recording may be poor but finite. It must not replace the
+		# hidden Reset preset with that unfinished acquisition or invalid pose.
+		if not baseline_source.is_empty() and _get_user_visible_motion_node_start_index(draft) == 1 and (snapshot.get("quality_warnings", []) as Array).is_empty() and not preview_presenter.is_grip_acquisition_pending(preview_subviewport):
 			baseline = draft.get("motion_node_chain")[0] as CombatAnimationMotionNode
 		for property: StringName in [&"tip_position_local", &"tip_position_origin_id", &"pommel_position_local", &"pommel_position_origin_id", &"weapon_orientation_degrees", &"weapon_orientation_authored", &"weapon_roll_degrees"]:
 			node.set(property, seated_frame[property])
@@ -547,11 +566,13 @@ func capture_selected_prepared_pose(allow_preparation: bool = false) -> Dictiona
 		input_key = var_to_bytes([node.get_instance_id(), signature,
 			_prepared_pose_refresh_generation, _prepared_pose_observed_acquisition_key]).hex_encode().sha256_text()
 		key = var_to_bytes([node.get_instance_id(), signature, context_signature,
-			_prepared_pose_refresh_generation, context.get("settle_serial", 0)]).hex_encode().sha256_text()
+			_prepared_pose_refresh_generation, context.get("settle_serial", 0),
+			context.get("primary_acquisition_frame_serial", -1)]).hex_encode().sha256_text()
 		_baseline_preparation.clear()
 	var changed: bool = node.prepared_pose_signature != signature or var_to_bytes(node.prepared_pose) != var_to_bytes(snapshot)
 	node.prepared_pose = snapshot
 	node.prepared_pose_signature = signature
+	_update_recorded_node_quality_feedback(draft, node)
 	draft.set("authoring_pose_initialized", true)
 	_prepared_pose_completed_key = key
 	_prepared_pose_completed_input_key = input_key
@@ -562,12 +583,18 @@ func capture_selected_prepared_pose(allow_preparation: bool = false) -> Dictiona
 		if not bool(get_meta("verification_skip_persistence", false)):
 			editor_state_dirty = true
 		_refresh_manual_save_controls(draft)
-	var result := {"valid": true, "captured": changed, "reason": "",
+	var result := {"valid": true, "captured": changed, "reason": "", "quality_warnings": snapshot.get("quality_warnings", []),
 		"node_index": get_selected_motion_node_index(), "bone_count": snapshot.get("bone_names", []).size()}
 	set_meta("last_prepared_pose_capture", result)
+	if acquired_frame:
+		preview_presenter.acknowledge_recorded_grip_frame(context)
+		preview_presenter.refresh_recorded_grip_trajectory(preview_view_container, preview_subviewport,
+			draft, get_selected_motion_node_index(), session_state.current_focus, _get_active_baked_profile())
+		_refresh_motion_node_list()
+		_refresh_editor_fields()
 	if not baseline_source.is_empty():
 		set_meta("last_baseline_preparation", {"ready": true, "reason": "", "node_index": get_selected_motion_node_index(), "source": baseline_source})
-		_refresh_active_editor_surface("Baseline grip ready. Node 1 recorded.", false)
+		_refresh_active_editor_surface("Node 1 recorded with pose warnings." if not (snapshot.get("quality_warnings", []) as Array).is_empty() else "Baseline grip ready. Node 1 recorded.", false)
 	return result
 
 
@@ -1078,7 +1105,7 @@ func _record_before_motion_node_action(action: StringName, node_index: int = -1)
 	# Reset's hidden baseline is not an authored action endpoint.
 	if _is_noncombat_idle_draft(draft) or get_selected_motion_node_index() < _get_user_visible_motion_node_start_index(draft):
 		return _perform_recorded_motion_node_action(action, node_index)
-	var captured: Dictionary = capture_selected_prepared_pose()
+	var captured: Dictionary = capture_selected_prepared_pose(false, true)
 	if bool(captured.get("valid", false)):
 		return _perform_recorded_motion_node_action(action, node_index)
 	_motion_node_recording_pending = true
@@ -1091,12 +1118,12 @@ func _finish_motion_node_recording(source_wip: CraftedItemWIP, draft: Resource,
 	var recorded := false
 	while is_inside_tree() and panel.visible and workflow_step == WORKFLOW_STEP_EDITOR \
 			and active_wip == source_wip and _get_active_draft() == draft and _get_active_motion_node() == node:
-		var capture: Dictionary = capture_selected_prepared_pose()
+		var capture: Dictionary = capture_selected_prepared_pose(false, true)
 		if bool(capture.get("valid", false)):
 			recorded = true
 			break
 		var reason: String = String(capture.get("reason", ""))
-		if reason not in ["prepared_pose_settling", "prepared_pose_grip_pending", "prepared_pose_edit_in_progress"]:
+		if reason not in ["prepared_pose_settling", "prepared_pose_edit_in_progress"]:
 			footer_status_label.text = "Could not record this motion node: %s. Selection retained." % reason
 			break
 		footer_status_label.text = "Recording this motion node before continuing..."
@@ -1129,7 +1156,7 @@ func _select_recorded_motion_node(node_index: int) -> bool:
 	if motion_node_chain.is_empty():
 		return false
 	_finalize_preview_drag("Motion node edit locked in.")
-	capture_selected_prepared_pose()
+	capture_selected_prepared_pose(false, true)
 	draft.set("selected_motion_node_index", clampi(node_index, 0, motion_node_chain.size() - 1))
 	session_state.current_motion_node_index = int(draft.get("selected_motion_node_index"))
 	_refresh_active_editor_surface("Motion node selection updated.")
@@ -1148,7 +1175,7 @@ func _insert_recorded_motion_node() -> bool:
 	if _is_idle_draft(draft):
 		return reset_active_draft_to_baseline()
 	_finalize_preview_drag("Motion node edit locked in.")
-	capture_selected_prepared_pose()
+	capture_selected_prepared_pose(false, true)
 	if trace_enabled:
 		trace_step_usec = _append_perf_trace_elapsed(trace, "finalize_preview_drag", trace_step_usec)
 	var seed_node: CombatAnimationMotionNode = _get_active_motion_node()
@@ -1193,7 +1220,7 @@ func _duplicate_recorded_motion_node() -> bool:
 	if _is_idle_draft(draft):
 		return reset_active_draft_to_baseline()
 	_finalize_preview_drag("Motion node edit locked in.")
-	capture_selected_prepared_pose()
+	capture_selected_prepared_pose(false, true)
 	motion_node = _get_active_motion_node()
 	if motion_node == null:
 		return false
@@ -1321,6 +1348,21 @@ func set_selected_motion_node_tip_position(
 	refresh_preview: bool = true,
 	refresh_summary: bool = true
 ) -> bool:
+	_begin_preview_authoring_lookup_scope()
+	var changed: bool = _set_selected_motion_node_tip_position_prepared(
+		tip_position, persist_change, refresh_list, refresh_fields, refresh_preview, refresh_summary
+	)
+	_end_preview_authoring_lookup_scope()
+	return changed
+
+func _set_selected_motion_node_tip_position_prepared(
+	tip_position: Vector3,
+	persist_change: bool,
+	refresh_list: bool,
+	refresh_fields: bool,
+	refresh_preview: bool,
+	refresh_summary: bool
+) -> bool:
 	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
 	if motion_node == null:
 		return false
@@ -1334,20 +1376,28 @@ func set_selected_motion_node_tip_position(
 		and baseline_motion_node.tip_position_local.is_equal_approx(tip_position)
 	):
 		return false
+	var checkpoint: Dictionary = _capture_direct_endpoint_motion_checkpoint(refresh_preview)
+	if bool(checkpoint.get("unavailable", false)):
+		return false
+	var previous_node: CombatAnimationMotionNode = motion_node.duplicate(true) as CombatAnimationMotionNode
 	var resolved_segment: Dictionary = _resolve_motion_node_segment_for_tip_target(
 		baseline_motion_node,
 		tip_position
 	)
 	var changed: bool = _apply_resolved_segment_to_motion_node(motion_node, resolved_segment)
 	if not changed:
+		if not checkpoint.is_empty():
+			preview_presenter.restore_authoring_motion_checkpoint(checkpoint)
 		return false
 	motion_node.normalize()
+	if not _accept_direct_endpoint_motion(motion_node, previous_node, checkpoint):
+		return false
 	_apply_motion_node_change(
 		"Motion node tip position updated.",
 		persist_change,
 		refresh_list,
 		refresh_fields,
-		refresh_preview,
+		refresh_preview and checkpoint.is_empty(),
 		refresh_summary
 	)
 	return true
@@ -1477,7 +1527,9 @@ func set_selected_motion_node_upperarm_roll(
 		refresh_list,
 		refresh_fields,
 		refresh_preview,
-		refresh_summary
+		refresh_summary,
+		StringName(),
+		slot_id
 	)
 	return true
 
@@ -1509,7 +1561,10 @@ func set_selected_motion_node_hand_proxy_segment(
 		refresh_list,
 		refresh_fields,
 		refresh_preview,
-		refresh_summary
+		refresh_summary,
+		StringName(),
+		slot_id,
+		true
 	)
 	return true
 
@@ -1543,7 +1598,9 @@ func clear_selected_motion_node_hand_proxy_segment(
 		refresh_list,
 		refresh_fields,
 		refresh_preview,
-		refresh_summary
+		refresh_summary,
+		StringName(),
+		slot_id
 	)
 	return true
 
@@ -2619,7 +2676,7 @@ func _build_right_inspector(parent: HBoxContainer) -> void:
 	var pommel_section: Dictionary = _build_foldable_section(vbox, "POMMEL POSITION", true)
 	pommel_section_foldable = pommel_section.get("foldable", null) as FoldableContainer
 	var pommel_content: VBoxContainer = pommel_section.get("content", null) as VBoxContainer
-	_build_helper_text(pommel_content, "Pommel translates the whole weapon. Tip orbits the pommel at the solved weapon length.")
+	_build_helper_text(pommel_content, "Pommel translates the whole weapon. Tip rotates it around the primary grip; Pommel follows that rotation.")
 	_build_field_label(pommel_content, "Position (X / Y / Z)")
 	var pom_pos: Array[SpinBox] = _build_vec3_row(pommel_content, -4.0, 4.0, 0.01)
 	pommel_x_spin_box = pom_pos[0]
@@ -3368,9 +3425,143 @@ func _refresh_motion_node_list() -> void:
 		point_list.add_item(item_text)
 		var item_id: int = point_list.get_item_count() - 1
 		point_list.set_item_metadata(item_id, node_index)
+		_apply_motion_node_validation_feedback(draft, motion_node, item_id, display_index)
 		if node_index == selected_node_index:
 			point_list.select(item_id)
 		display_index += 1
+
+## Session-only feedback from an actual preparation attempt. Resource identity
+## is intentional: inserted nodes can share legacy node_id strings.
+func _clear_motion_node_validation_feedback(draft: Resource = null, refresh_list: bool = true) -> void:
+	if draft != null and draft != _motion_node_validation_draft:
+		return
+	var had_feedback: bool = not _motion_node_validation_feedback.is_empty()
+	_motion_node_validation_feedback.clear()
+	_motion_node_validation_draft = null
+	if had_feedback and refresh_list and is_instance_valid(point_list):
+		_refresh_motion_node_list()
+
+func _apply_motion_node_validation_feedback(draft: Resource, node: Resource, item: int, visible_index: int) -> void:
+	if draft != _motion_node_validation_draft:
+		return
+	var feedback: Dictionary = _motion_node_validation_feedback.get(node.get_instance_id(), {})
+	if feedback.is_empty() or feedback.get("node") != node:
+		return
+	var reason: String = String(feedback.get("reason", "preparation_failed"))
+	var tooltip: String = "N%02d could not be prepared: %s." % [visible_index, reason]
+	var suffix: String = " | pose not ready"
+	var advisory: bool = bool(feedback.get("advisory", false))
+	if advisory:
+		tooltip = "N%02d recorded with warning: %s. Recording, preview and saving remain available." % [visible_index, reason]
+		suffix = " | pose warning"
+	if feedback.get("scope") == "transition":
+		var actions: Array = draft.call("get_action_motion_node_chain")
+		var source_index: int = actions.find(feedback.get("source"))
+		if source_index < 0:
+			return
+		tooltip = "Incoming transition N%02d -> N%02d recorded with warning: %s. Playback remains available." % [source_index + 1, visible_index, reason] if advisory else "Incoming transition N%02d -> N%02d failed validation: %s. This does not mean either endpoint pose is invalid." % [source_index + 1, visible_index, reason]
+		suffix = " | transition warning" if advisory else " | incoming transition failed"
+	point_list.set_item_custom_fg_color(item, Color(1.0, 0.28, 0.28))
+	point_list.set_item_text(item, point_list.get_item_text(item) + suffix)
+	point_list.set_item_tooltip(item, tooltip)
+
+func _update_recorded_node_quality_feedback(draft: Resource, node: Resource) -> void:
+	if draft == null or node == null: return
+	if _motion_node_validation_draft != draft:
+		_motion_node_validation_feedback.clear()
+	_motion_node_validation_draft = draft
+	var warnings: Array = node.prepared_pose.get("quality_warnings", [])
+	var reasons := PackedStringArray()
+	for warning: Dictionary in warnings:
+		var reason := String(warning.get("reason", "pose_quality_warning"))
+		if reason not in reasons: reasons.append(reason)
+	if not reasons.is_empty():
+		_motion_node_validation_feedback[node.get_instance_id()] = {"node": node, "scope": "endpoint", "advisory": true, "reason": "; ".join(reasons)}
+	elif _motion_node_validation_feedback.get(node.get_instance_id(), {}).get("scope", "") == "endpoint":
+		# A newly recorded good endpoint clears its own previous warning, not
+		# unchecked transition warnings belonging to other nodes.
+		_motion_node_validation_feedback.erase(node.get_instance_id())
+	if is_instance_valid(point_list): _refresh_motion_node_list()
+
+func _record_motion_node_quality_warnings(draft: Resource, warnings: Array, compiled_chain: Array = []) -> void:
+	if draft == null or draft != _get_active_draft(): return
+	_motion_node_validation_draft = draft
+	_motion_node_validation_feedback.clear()
+	var actions: Array = draft.call("get_action_motion_node_chain")
+	var mapped: bool = compiled_chain.is_empty() or _validation_chains_correspond(actions, compiled_chain)
+	for warning: Dictionary in warnings:
+		var destination: int = int(warning.get("destination_node_index", warning.get("node_index", -1)))
+		if not mapped or destination < 0 or destination >= actions.size(): continue
+		var node: Resource = actions[destination]
+		var reason := String(warning.get("reason", "pose_quality_warning"))
+		var feedback: Dictionary = _motion_node_validation_feedback.get(node.get_instance_id(), {"node": node, "scope": "endpoint", "advisory": true, "reason": ""})
+		var prior_reason := String(feedback.reason)
+		feedback.reason = reason if prior_reason.is_empty() else prior_reason + "; " + reason
+		var source: int = int(warning.get("source_node_index", -1))
+		if String(warning.get("failure_scope", "")) == "transition" and source >= 0 and source < actions.size():
+			feedback["scope"] = "transition"
+			feedback["source"] = actions[source]
+		_motion_node_validation_feedback[node.get_instance_id()] = feedback
+	if is_instance_valid(point_list): _refresh_motion_node_list()
+
+func _record_motion_node_preparation_failure(draft: Resource, failure: Dictionary, compiled_chain: Array = []) -> void:
+	if draft == null or draft != _get_active_draft():
+		return
+	_motion_node_validation_draft = draft
+	_motion_node_validation_feedback.clear()
+	var actions: Array = draft.call("get_action_motion_node_chain")
+	var reason: String = String(failure.get("reason", "preparation_failed"))
+	if failure.has("missing_node_indices"):
+		var readiness: Dictionary = failure.get("pose_readiness", {})
+		var reasons: Dictionary = readiness.get("node_reasons", {})
+		for visible_index: int in failure.get("missing_node_indices", []):
+			if visible_index < 1 or visible_index > actions.size() or actions[visible_index - 1] == null:
+				continue
+			var node: Resource = actions[visible_index - 1]
+			_motion_node_validation_feedback[node.get_instance_id()] = {"node": node, "scope": "endpoint", "reason": String(reasons.get(visible_index, reason))}
+	elif failure.get("failure_scope", "") in ["endpoint", "transition"] and _validation_chains_correspond(actions, compiled_chain):
+		var source: int = int(failure.get("source_node_index", -1))
+		var destination: int = int(failure.get("destination_node_index", -1))
+		if source >= 0 and destination >= source and destination < actions.size():
+			# The explicit IDs cross-check the producer's indices. IDs alone are
+			# insufficient because middle insertion can duplicate an older ID.
+			if String(compiled_chain[source].node_id) == String(failure.get("source_node_id", "")) and String(compiled_chain[destination].node_id) == String(failure.get("destination_node_id", "")):
+				var node: Resource = actions[destination]
+				_motion_node_validation_feedback[node.get_instance_id()] = {"node": node, "source": actions[source], "scope": failure.failure_scope, "reason": reason}
+	if is_instance_valid(point_list):
+		_refresh_motion_node_list()
+
+func _validation_chains_correspond(actions: Array, compiled_chain: Array) -> bool:
+	# The compiler clones authored nodes in order. A runtime-only inserted
+	# bridge changes this shape: leave that unmapped instead of blaming a row.
+	if actions.is_empty() or compiled_chain.size() != actions.size():
+		return false
+	for index: int in actions.size():
+		if actions[index] == null or compiled_chain[index] == null:
+			return false
+		if actions[index].node_id != compiled_chain[index].node_id or actions[index].prepared_pose_signature != compiled_chain[index].prepared_pose_signature:
+			return false
+	return true
+
+func _record_motion_node_capture_failure(draft: Resource, failure: Dictionary, node: Resource = null) -> void:
+	# Busy/cancelled/missing preview infrastructure is not evidence that a
+	# particular authored pose is wrong. Only explicit grip-readiness failures
+	# identify the selected (or endpoint-recorder supplied) node here.
+	if String(failure.get("reason", "")) not in ["weapon_facing_requires_manual_reacquisition", "prepared_pose_grip_not_applied", "prepared_pose_grip_not_bound"]:
+		return
+	if draft == null or draft != _get_active_draft():
+		return
+	var actions: Array = draft.call("get_action_motion_node_chain")
+	if node == null:
+		var visible_index: int = int(failure.get("node_index", -1))
+		if visible_index >= 1 and visible_index <= actions.size():
+			node = actions[visible_index - 1]
+	if node == null or not actions.has(node):
+		return
+	_motion_node_validation_draft = draft
+	_motion_node_validation_feedback = {node.get_instance_id(): {"node": node, "scope": "endpoint", "reason": failure.reason}}
+	if is_instance_valid(point_list):
+		_refresh_motion_node_list()
 
 func _refresh_editor_fields() -> void:
 	refreshing_controls = true
@@ -3946,6 +4137,7 @@ func _refresh_summary(status_message: String = "") -> void:
 			)
 	if not status_message.strip_edges().is_empty():
 		footer_status_label.text = status_message
+	_refresh_weapon_motion_pose_warning()
 	summary_label.text = "\n".join(lines)
 
 func _refresh_preview_scene(
@@ -3968,6 +4160,13 @@ func _refresh_preview_scene_prepared(grip_resolve_reason: StringName) -> void:
 	_ensure_current_focus_available()
 	var baked_profile: BakedProfile = _get_active_baked_profile()
 	var playback_state: Dictionary = _build_preview_playback_state()
+	if preview_drag_override_node != null and preview_drag_independent_arm_slot != StringName():
+		var arm_result: Dictionary = preview_presenter.apply_independent_arm_edit(
+			preview_subviewport, preview_drag_override_node, preview_drag_independent_arm_slot,
+			true, preview_drag_independent_hand_proxy)
+		if not arm_result.get("valid", false):
+			_set_preview_drag_blocked_status(arm_result)
+			return
 	if grip_resolve_reason != StringName():
 		# This cause belongs to this synchronous refresh only. It must never survive
 		# into a later debug, endpoint, focus, or unrelated authoring refresh.
@@ -4015,6 +4214,104 @@ func _queue_preview_drag_refresh() -> void:
 	if not preview_drag_refresh_pending:
 		preview_drag_first_pending_msec = now_msec
 	preview_drag_refresh_pending = true
+
+func _capture_direct_endpoint_motion_checkpoint(refresh_preview: bool) -> Dictionary:
+	if not refresh_preview or _is_noncombat_idle_draft(_get_active_draft()):
+		return {}
+	var checkpoint: Dictionary = preview_presenter.capture_authoring_motion_checkpoint(preview_subviewport)
+	if checkpoint.is_empty():
+		_set_preview_drag_blocked_status({"reason": "motion_checkpoint_unavailable"})
+		return {"unavailable": true}
+	return checkpoint
+
+func _accept_direct_endpoint_motion(
+	motion_node: CombatAnimationMotionNode,
+	previous_node: CombatAnimationMotionNode,
+	checkpoint: Dictionary
+) -> bool:
+	if checkpoint.is_empty():
+		return true
+	_refresh_preview_scene()
+	var result: Dictionary = preview_presenter.finish_authoring_motion_attempt(checkpoint)
+	set_meta("last_endpoint_motion_validation", result.duplicate(true))
+	if bool(result.get("valid", false)):
+		return true
+	for property: StringName in [&"tip_position_local", &"tip_position_origin_id", &"pommel_position_local", &"pommel_position_origin_id", &"weapon_orientation_degrees", &"weapon_orientation_authored", &"weapon_roll_degrees"]:
+		motion_node.set(property, previous_node.get(property))
+	_refresh_editor_fields()
+	_refresh_endpoint_motion_visuals()
+	_set_preview_drag_blocked_status(result)
+	return false
+
+func _refresh_endpoint_motion_visuals() -> void:
+	preview_presenter.refresh_authoring_motion_visuals(
+		preview_view_container, preview_subviewport, _get_active_draft(),
+		get_selected_motion_node_index(), session_state.current_focus,
+		_get_active_baked_profile(), preview_drag_override_node)
+	_refresh_weapon_roll_control_bounds(_get_active_motion_node())
+
+func _apply_pending_endpoint_motion_attempt(force: bool = false) -> bool:
+	var checkpoint: Dictionary = preview_presenter.capture_authoring_motion_checkpoint(preview_subviewport)
+	if checkpoint.is_empty():
+		preview_drag_forearm_failure = {"valid": false, "reason": "motion_checkpoint_unavailable"}
+		_set_preview_drag_blocked_status(preview_drag_forearm_failure)
+		return false
+	if _is_pommel_drag_authority_active():
+		var authority: Dictionary = _resolve_pending_pommel_drag_authority(force)
+		if not bool(authority.get("legal", true)):
+			preview_presenter.restore_authoring_motion_checkpoint(checkpoint)
+			preview_drag_refresh_pending = false
+			_rebase_endpoint_pointer_to_accepted_node()
+			return false
+	elif motion_node_editor.get_drag_target() == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP and not _is_active_unarmed_authoring_wip():
+		# Match numeric Tip validation at the existing throttled flush. Pointer
+		# events only rotate the candidate; no extra body solves per mouse event.
+		var orbit: Dictionary = preview_presenter.resolve_motion_node_tip_grip_orbit(
+			preview_subviewport, preview_drag_override_node, preview_drag_override_node.tip_position_local)
+		var legality: Dictionary = orbit
+		if orbit.get("available", false):
+			legality = _apply_contact_tether_to_segment(preview_drag_override_node, orbit, &"tip_pivot")
+		if not orbit.get("available", false) or not legality.get("legal", true):
+			preview_presenter.restore_authoring_motion_checkpoint(checkpoint)
+			preview_drag_forearm_failure = legality
+			preview_drag_override_node = preview_drag_last_accepted_node.duplicate(true) as CombatAnimationMotionNode
+			preview_drag_refresh_pending = false
+			preview_drag_first_pending_msec = 0
+			_invalidate_preview_drag_motion_chain_cache()
+			_refresh_endpoint_motion_visuals()
+			_set_preview_drag_blocked_status(legality)
+			_rebase_endpoint_pointer_to_accepted_node()
+			return false
+		_apply_resolved_segment_to_motion_node(preview_drag_override_node, legality)
+		preview_drag_override_node.normalize()
+	_refresh_preview_scene()
+	var result: Dictionary = preview_presenter.finish_authoring_motion_attempt(checkpoint)
+	set_meta("last_endpoint_motion_validation", result.duplicate(true))
+	preview_drag_refresh_pending = false
+	preview_drag_first_pending_msec = 0
+	if bool(result.get("valid", false)):
+		preview_drag_last_accepted_node = preview_drag_override_node.duplicate(true) as CombatAnimationMotionNode
+		preview_drag_forearm_failure.clear()
+		_rebase_endpoint_pointer_to_accepted_node()
+		return true
+	preview_drag_forearm_failure = result
+	preview_drag_override_node = preview_drag_last_accepted_node.duplicate(true) as CombatAnimationMotionNode
+	preview_drag_pommel_last_solve_legal = false
+	preview_drag_pommel_last_validation_result = result.duplicate(true)
+	_invalidate_preview_drag_motion_chain_cache()
+	_refresh_endpoint_motion_visuals()
+	_set_preview_drag_blocked_status(result)
+	_rebase_endpoint_pointer_to_accepted_node()
+	return false
+
+func _rebase_endpoint_pointer_to_accepted_node() -> void:
+	if preview_drag_override_node == null or not motion_node_editor.is_dragging():
+		return
+	var target: StringName = motion_node_editor.get_drag_target()
+	if target not in [CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP, CombatAnimationMotionNodeEditorScript.DRAG_TARGET_POMMEL]:
+		return
+	var point: Vector3 = preview_drag_override_node.tip_position_local if target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP else preview_drag_override_node.pommel_position_local
+	motion_node_editor.rebase_point_drag(_endpoint_pointer_latest, point, _get_preview_camera(), _get_preview_trajectory_root())
 
 func _get_preview_drag_refresh_interval_msec() -> int:
 	if preview_drag_last_refresh_cost_msec <= 0:
@@ -4144,6 +4441,13 @@ func _can_reuse_pommel_drag_authority_commit() -> bool:
 	)
 
 func _flush_pending_preview_drag_refresh() -> void:
+	# The throttled callback runs outside the mouse-input scope. Share station
+	# preparation for this one synchronous flush, while reading live node values.
+	_begin_preview_authoring_lookup_scope()
+	_flush_pending_preview_drag_refresh_prepared()
+	_end_preview_authoring_lookup_scope()
+
+func _flush_pending_preview_drag_refresh_prepared() -> void:
 	if not preview_drag_refresh_pending:
 		return
 	if not motion_node_editor.is_dragging():
@@ -4160,6 +4464,11 @@ func _flush_pending_preview_drag_refresh() -> void:
 	if preview_drag_last_refresh_msec > 0 and now_msec - preview_drag_last_refresh_msec < _get_preview_drag_refresh_interval_msec():
 		return
 	var refresh_start_msec: int = Time.get_ticks_msec()
+	if preview_drag_forearm_guard_active:
+		_apply_pending_endpoint_motion_attempt()
+		preview_drag_last_refresh_msec = Time.get_ticks_msec()
+		preview_drag_last_refresh_cost_msec = maxi(preview_drag_last_refresh_msec - refresh_start_msec, 0)
+		return
 	if _is_pommel_drag_authority_active():
 		_resolve_pending_pommel_drag_authority()
 	preview_drag_refresh_pending = false
@@ -5203,6 +5512,7 @@ func _build_preview_playback_state() -> Dictionary:
 	playback_state["solved_upper_body_pose_positions"] = chain_player.current_solved_upper_body_pose_positions
 	playback_state["solved_upper_body_pose_rotations"] = chain_player.current_solved_upper_body_pose_rotations
 	playback_state["solved_upper_body_pose_scales"] = chain_player.current_solved_upper_body_pose_scales
+	playback_state["solved_forearm_hand_calibration"] = chain_player.current_solved_forearm_hand_calibration
 	playback_state["solved_weapon_position_reference_local"] = chain_player.current_solved_weapon_position_reference_local
 	playback_state["solved_weapon_rotation_reference_local"] = chain_player.current_solved_weapon_rotation_reference_local
 	playback_state["solved_weapon_scale_reference_local"] = chain_player.current_solved_weapon_scale_reference_local
@@ -5408,6 +5718,8 @@ func _stage_active_wip_edit(
 	runtime_cache_mode: StringName = PERSIST_RUNTIME_CACHE_DIRTY_ACTIVE
 ) -> void:
 	_cancel_preview_preparation("Preview preparation cancelled by an edit. Press F to prepare current edits.")
+	# Keep advisory markers until fresh recording/rendering confirms the edit
+	# improved them. Merely touching a control is not a successful validation.
 	if active_wip == null:
 		return
 	active_wip.ensure_combat_animation_station_state()
@@ -5561,6 +5873,7 @@ func _complete_stored_pose_track(preparation: Dictionary) -> Dictionary:
 		failed["reason"] = "editing_pose_not_recorded"
 		failed["missing_node_indices"] = readiness.get("missing_node_indices", [])
 		failed["pose_readiness"] = readiness
+		_record_motion_node_preparation_failure(draft, failed)
 		return failed
 	var inputs: Resource = preparation["runtime_clip"]
 	var snapshots: Array[Dictionary] = []
@@ -5570,8 +5883,20 @@ func _complete_stored_pose_track(preparation: Dictionary) -> Dictionary:
 	if not bool(built.get("valid", false)):
 		preparation["result"]["reason"] = built.get("reason", "stored_pose_interpolation_failed")
 		preparation["result"]["attachment_failure"] = built.duplicate(true)
+		_record_motion_node_preparation_failure(draft, built, inputs.motion_node_chain)
 		return preparation["result"]
 	preparation["runtime_clip"] = built["clip"]
+	var end_check: Dictionary = _inspect_runtime_clip_handle_ends(built["clip"])
+	if not bool(end_check.get("valid", false)):
+		preparation["result"]["reason"] = end_check.get("reason", "invalid_saved_handle_frame")
+		return preparation["result"]
+	var quality_warnings: Array = built.get("quality_warnings", []).duplicate(true)
+	for warning: Dictionary in end_check.get("quality_warnings", []):
+		PreparedPoseTrackBuilderScript.append_quality_warning(quality_warnings, warning)
+	var diagnostics: Array = built["clip"].get("compile_diagnostics").duplicate(true)
+	for warning: Dictionary in quality_warnings:
+		PreparedPoseTrackBuilderScript.append_quality_warning(diagnostics, warning)
+	built["clip"].set("compile_diagnostics", diagnostics)
 	var completed := {
 		"baked": true, "solved_replay_track": true,
 		"frame_count": built["clip"].get_frame_count(),
@@ -5585,6 +5910,9 @@ func _complete_stored_pose_track(preparation: Dictionary) -> Dictionary:
 	var result := _complete_runtime_clip_cache_bake(preparation, completed)
 	result["source"] = "stored_editing_poses"
 	result["interpolation_diagnostics"] = built.get("diagnostics", {})
+	result["quality_warnings"] = quality_warnings
+	if bool(result.get("cached", false)):
+		_record_motion_node_quality_warnings(draft, quality_warnings, inputs.motion_node_chain)
 	return result
 
 func _prepare_runtime_clip_cache_bake(draft: Resource, defer_sampling: bool = false) -> Dictionary:
@@ -5625,6 +5953,9 @@ func _prepare_runtime_clip_cache_bake(draft: Resource, defer_sampling: bool = fa
 	if _can_reuse_runtime_clip_cache(draft, existing_runtime_clip, cache_signature):
 		_set_draft_runtime_cache_signature(draft, cache_signature)
 		if _runtime_clip_has_solved_replay_track(existing_runtime_clip):
+			var warnings: Array = _runtime_clip_quality_warnings(existing_runtime_clip)
+			_record_motion_node_quality_warnings(draft, warnings, existing_runtime_clip.motion_node_chain)
+			result["quality_warnings"] = warnings
 			result["cached"] = true
 			result["skipped"] = true
 			result["frame_count"] = int(existing_runtime_clip.call("get_frame_count"))
@@ -5793,11 +6124,25 @@ func _can_reuse_runtime_clip_cache(draft: Resource, runtime_clip, cache_signatur
 	return clip_slot_id == StringName() or slot_id == StringName() or clip_slot_id == slot_id
 
 func _runtime_clip_respects_handle_ends(runtime_clip: Resource) -> bool:
+	return bool(_inspect_runtime_clip_handle_ends(runtime_clip).get("valid", false))
+
+func _runtime_clip_quality_warnings(runtime_clip: Resource) -> Array:
+	var warnings: Array = []
+	if runtime_clip == null: return warnings
+	for diagnostic: Variant in runtime_clip.get("compile_diagnostics"):
+		if diagnostic is Dictionary and diagnostic.get("severity", "") == "warning":
+			PreparedPoseTrackBuilderScript.append_quality_warning(warnings, diagnostic)
+	for warning: Dictionary in _inspect_runtime_clip_handle_ends(runtime_clip).get("quality_warnings", []):
+		PreparedPoseTrackBuilderScript.append_quality_warning(warnings, warning)
+	return warnings
+
+func _inspect_runtime_clip_handle_ends(runtime_clip: Resource) -> Dictionary:
+	var warnings: Array = []
 	if _is_active_unarmed_authoring_wip():
-		return true
+		return {"valid": true, "quality_warnings": warnings}
 	var context: Dictionary = preview_presenter._weapon_roll_context(preview_subviewport)
 	if context.is_empty():
-		return false
+		return {"valid": false, "reason": "missing_handle_validation_context"}
 	var paths: Array = runtime_clip.get("baked_solved_anchor_node_paths")
 	var frames: Array = runtime_clip.get("baked_solved_anchor_positions_weapon_local")
 	var available: Array = runtime_clip.get("baked_solved_replay_frame_available")
@@ -5807,12 +6152,12 @@ func _runtime_clip_respects_handle_ends(runtime_clip: Resource) -> bool:
 	var weapon_scales: PackedVector3Array = runtime_clip.get("baked_solved_weapon_scales_reference_local")
 	var frame_count: int = runtime_clip.get_frame_count()
 	if frames.size() != frame_count or available.size() != frame_count:
-		return false
+		return {"valid": false, "reason": "invalid_saved_handle_frame_count"}
 	for frame_index: int in range(frame_count):
 		if not bool(available[frame_index]):
 			continue
 		if not (frames[frame_index] is Array or frames[frame_index] is PackedVector3Array):
-			return false
+			return {"valid": false, "reason": "invalid_saved_handle_frame", "frame_index": frame_index}
 		var frame := {"solved_anchor_node_paths": paths,
 			"solved_anchor_positions_weapon_local": Array(frames[frame_index])}
 		if frame_index < weapon_rotations.size() and frame_index < weapon_scales.size():
@@ -5823,9 +6168,25 @@ func _runtime_clip_respects_handle_ends(runtime_clip: Resource) -> bool:
 			frame["two_hand_state"] = hand_states[frame_index]
 		if frame_index < main_slots.size():
 			frame["primary_hand_slot"] = main_slots[frame_index]
-		if not preview_presenter.validate_solved_replay_hand_end_bounds(context.weapon, frame).get("valid", false):
-			return false
-	return true
+		var validation: Dictionary = preview_presenter.validate_solved_replay_hand_end_bounds(context.weapon, frame)
+		if not bool(validation.get("valid", false)):
+			if not bool(validation.get("quality_warning", false)):
+				return validation
+			var node_index := _runtime_warning_node_index(runtime_clip, frame_index)
+			PreparedPoseTrackBuilderScript.append_quality_warning(warnings, validation,
+				{"node_index": node_index, "frame_index": frame_index, "failure_scope": "endpoint"})
+	return {"valid": true, "quality_warnings": warnings}
+
+func _runtime_warning_node_index(runtime_clip: Resource, frame_index: int) -> int:
+	var chain: Array = runtime_clip.get("motion_node_chain")
+	var times: PackedFloat32Array = runtime_clip.get("baked_frame_times")
+	if chain.is_empty() or frame_index >= times.size(): return -1
+	if float(times[frame_index]) <= 0.000001: return 0
+	var elapsed := 0.0
+	for index: int in range(1, chain.size()):
+		elapsed += maxf(float(chain[index].transition_duration_seconds), 0.0)
+		if float(times[frame_index]) <= elapsed + 0.000001: return index
+	return chain.size() - 1
 
 
 func _refresh_manual_save_controls(draft: Resource = null) -> void:
@@ -6160,7 +6521,9 @@ func _apply_motion_node_change(
 	refresh_fields: bool = true,
 	refresh_preview: bool = true,
 	refresh_summary: bool = true,
-	preview_grip_resolve_reason: StringName = StringName()
+	preview_grip_resolve_reason: StringName = StringName(),
+	independent_arm_slot: StringName = StringName(),
+	independent_hand_proxy: bool = false
 ) -> void:
 	if persist_change:
 		_stage_active_wip_edit(status_message)
@@ -6171,6 +6534,12 @@ func _apply_motion_node_change(
 	if refresh_fields:
 		_refresh_editor_fields()
 	if refresh_preview:
+		if independent_arm_slot != StringName():
+			var arm_result: Dictionary = preview_presenter.apply_independent_arm_edit(
+				preview_subviewport, _get_active_motion_node(), independent_arm_slot, false, independent_hand_proxy)
+			if not arm_result.get("valid", false):
+				_set_preview_drag_blocked_status(arm_result)
+				return
 		_refresh_preview_scene(preview_grip_resolve_reason)
 	if refresh_summary:
 		_refresh_summary(status_message)
@@ -6199,7 +6568,7 @@ func _manual_save_active_editor_state() -> void:
 		if footer_status_label != null:
 			footer_status_label.text = "Stop preview playback before saving."
 		return
-	capture_selected_prepared_pose()
+	capture_selected_prepared_pose(false, true)
 	if not _active_draft_requires_manual_save(draft):
 		_refresh_manual_save_controls(draft)
 		_set_manual_save_progress(100.0, "Already saved. Preview ready.", true)
@@ -6235,25 +6604,21 @@ func _manual_save_active_editor_state() -> void:
 	_set_manual_save_progress(20.0, "Refreshing authoring data...")
 	# Stow uses body anchors, not a hand-pose replay clip.
 	if not _is_noncombat_idle_draft(draft):
-		while _preview_grip_acquisition_is_pending():
-			_set_manual_save_progress(20.0, "Waiting for the current edit's grip...")
-			await get_tree().process_frame
-			if not _manual_save_source_is_current(save_source_wip, draft, save_generation):
-				_abort_manual_save_preparation("The draft changed during save preparation. Save the current edits again.")
-				return
-		var capture: Dictionary = capture_selected_prepared_pose(true)
+		var capture: Dictionary = capture_selected_prepared_pose(true, true)
 		while String(capture.get("reason", "")) == "prepared_pose_settling":
 			await get_tree().process_frame
 			if not _manual_save_source_is_current(save_source_wip, draft, save_generation):
 				_abort_manual_save_preparation("The draft changed during save preparation. Save the current edits again.")
 				return
-			capture = capture_selected_prepared_pose(true)
+			capture = capture_selected_prepared_pose(true, true)
 		trace_step_usec = _record_save_latency_phase("capture_editing_pose", trace_step_usec)
 		if not bool(capture.get("valid", false)):
+			_record_motion_node_capture_failure(draft, capture, _get_active_motion_node())
 			_abort_manual_save_preparation("Could not record the current pose: %s. Edits retained." % String(capture.get("reason", "unknown")))
 			return
 		var recovery: Dictionary = await _record_missing_action_endpoints([draft], save_source_wip, draft, save_generation, false)
 		if not bool(recovery.get("valid", false)):
+			_record_motion_node_capture_failure(draft, recovery)
 			_abort_manual_save_preparation("Could not prepare stored poses: %s. Edits retained; previous save unchanged." % String(recovery.get("reason", "unknown")))
 			return
 	trace_step_usec = _record_save_latency_phase("record_selected_endpoints", trace_step_usec)
@@ -6331,6 +6696,9 @@ func _manual_save_active_editor_state() -> void:
 		if cache_ready
 		else "Saved in %.2fs. Preview cache needs review: %s" % [elapsed_seconds, cache_reason]
 	)
+	var save_warnings: Array = cache_result.get("quality_warnings", [])
+	if not save_warnings.is_empty():
+		completion_text = "Saved in %.2fs with %d pose warning(s). Preview ready." % [elapsed_seconds, save_warnings.size()]
 	_set_manual_save_progress(100.0, completion_text, true)
 	_refresh_manual_save_controls(draft)
 	_refresh_editor_fields()
@@ -6458,6 +6826,11 @@ func _clear_preview_drag_override() -> void:
 	preview_weapon_roll_dragging = false
 	preview_weapon_facing_dragging = false
 	preview_drag_override_node = null
+	preview_drag_forearm_guard_active = false
+	preview_drag_independent_arm_slot = StringName()
+	preview_drag_independent_hand_proxy = false
+	preview_drag_last_accepted_node = null
+	preview_drag_forearm_failure.clear()
 	preview_drag_has_moved = false
 	preview_drag_refresh_pending = false
 	preview_drag_last_refresh_msec = 0
@@ -6466,8 +6839,13 @@ func _clear_preview_drag_override() -> void:
 	_reset_preview_drag_authority_state()
 	_invalidate_preview_drag_motion_chain_cache()
 
-func _begin_preview_drag_override(source_motion_node: CombatAnimationMotionNode) -> void:
+func _begin_preview_drag_override(source_motion_node: CombatAnimationMotionNode, drag_target: StringName = StringName()) -> void:
 	_cancel_preview_preparation("Preview preparation cancelled by an edit. Press F to prepare current edits.")
+	preview_drag_forearm_guard_active = false
+	preview_drag_independent_arm_slot = StringName()
+	preview_drag_independent_hand_proxy = false
+	preview_drag_last_accepted_node = null
+	preview_drag_forearm_failure.clear()
 	if source_motion_node == null:
 		preview_drag_override_node = null
 		preview_drag_has_moved = false
@@ -6488,6 +6866,15 @@ func _begin_preview_drag_override(source_motion_node: CombatAnimationMotionNode)
 	_invalidate_preview_drag_motion_chain_cache()
 	if preview_drag_override_node != null:
 		preview_drag_override_node.normalize()
+		if drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_RIGHT_UPPERARM_ROLL:
+			preview_drag_independent_arm_slot = HAND_SLOT_RIGHT
+		elif drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_LEFT_UPPERARM_ROLL:
+			preview_drag_independent_arm_slot = HAND_SLOT_LEFT
+		elif _is_hand_proxy_drag_target(drag_target):
+			preview_drag_independent_arm_slot = _resolve_hand_proxy_drag_slot(drag_target)
+			preview_drag_independent_hand_proxy = true
+		preview_drag_forearm_guard_active = drag_target in [CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP, CombatAnimationMotionNodeEditorScript.DRAG_TARGET_POMMEL] and not _is_noncombat_idle_draft(_get_active_draft())
+		preview_drag_last_accepted_node = preview_drag_override_node.duplicate(true) as CombatAnimationMotionNode
 
 func _get_effective_preview_motion_node() -> CombatAnimationMotionNode:
 	if preview_drag_override_node != null:
@@ -6696,6 +7083,18 @@ func _apply_resolved_segment_to_motion_node(
 ) -> bool:
 	if motion_node == null:
 		return false
+	if bool(resolved_segment.get("motion_allocated", false)):
+		# The allocator owns the exact accepted pose. Approximate equality is
+		# useful for ordinary UI edits, but skipping one near-equal field here
+		# breaks its pose signature and reactivates the previous body solver.
+		var accepted_changed := false
+		for property: StringName in [&"tip_position_local", &"tip_position_origin_id", &"pommel_position_local", &"pommel_position_origin_id", &"weapon_orientation_degrees", &"weapon_orientation_authored", &"weapon_roll_degrees"]:
+			var accepted_value: Variant = resolved_segment.get(property, motion_node.get(property))
+			if motion_node.get(property) != accepted_value:
+				accepted_changed = true
+			motion_node.set(property, accepted_value)
+		_refresh_weapon_motion_pose_warning()
+		return accepted_changed
 	var resolved_tip: Vector3 = resolved_segment.get("tip_position_local", motion_node.tip_position_local) as Vector3
 	var resolved_pommel: Vector3 = resolved_segment.get("pommel_position_local", motion_node.pommel_position_local) as Vector3
 	var resolved_tip_origin_id: StringName = StringName(resolved_segment.get("tip_position_origin_id", motion_node.tip_position_origin_id))
@@ -6724,24 +7123,46 @@ func _apply_resolved_segment_to_motion_node(
 func _apply_contact_tether_to_segment(
 	motion_node: CombatAnimationMotionNode,
 	resolved_segment: Dictionary,
-	_tether_mode: StringName = &"translate"
+	tether_mode: StringName = &"translate"
 ) -> Dictionary:
 	if motion_node == null or resolved_segment.is_empty():
 		return resolved_segment
+	if preview_presenter.supports_weapon_motion_allocation(preview_subviewport, _get_active_draft()):
+		var mode: StringName = &"tip" if tether_mode == &"tip_pivot" else &"pommel"
+		var allocated: Dictionary = preview_presenter.allocate_authored_weapon_segment(preview_subviewport, motion_node, resolved_segment, mode)
+		if not allocated.get("legal", false):
+			_set_preview_drag_blocked_status(allocated)
+		return allocated
 	var tip_position: Vector3 = resolved_segment.get("tip_position_local", motion_node.tip_position_local) as Vector3
 	var pommel_position: Vector3 = resolved_segment.get("pommel_position_local", motion_node.pommel_position_local) as Vector3
+	var candidate_node: CombatAnimationMotionNode = motion_node
+	if resolved_segment.has("weapon_orientation_degrees"):
+		candidate_node = motion_node.duplicate_node()
+		candidate_node.weapon_orientation_degrees = resolved_segment.weapon_orientation_degrees
+		candidate_node.weapon_orientation_authored = true
 	var constrained_segment: Dictionary = preview_presenter.constrain_authored_segment_to_endpoint_authority(
 		preview_subviewport,
 		active_wip,
-		motion_node,
+		candidate_node,
 		tip_position,
 		pommel_position
 	)
+	if tether_mode == &"tip_pivot" and resolved_segment.has("tip_grip_pivot_local"):
+		# A reach-volume translation would move the newly fixed grip pivot.
+		# Reject this request instead; Pommel remains the translation control.
+		var projected_tip: Vector3 = constrained_segment.get("tip_position_local", tip_position)
+		var projected_pommel: Vector3 = constrained_segment.get("pommel_position_local", pommel_position)
+		if projected_tip.distance_to(tip_position) > 0.000001 or projected_pommel.distance_to(pommel_position) > 0.000001:
+			constrained_segment["legal"] = false
+			constrained_segment["reason"] = "tip_grip_pivot_outside_motion_volume"
+	if resolved_segment.has("weapon_orientation_degrees"):
+		constrained_segment["weapon_orientation_degrees"] = resolved_segment.weapon_orientation_degrees
 	if not bool(constrained_segment.get("legal", true)):
 		constrained_segment["tip_position_local"] = motion_node.tip_position_local
 		constrained_segment["pommel_position_local"] = motion_node.pommel_position_local
+		constrained_segment.erase("weapon_orientation_degrees")
 		constrained_segment["body_clearance_rejected"] = true
-	if motion_node.get_meta("prepared_grip_display_frame", false):
+	if motion_node.get_meta("prepared_grip_display_frame", false) and not constrained_segment.has("weapon_orientation_degrees"):
 		constrained_segment["weapon_orientation_degrees"] = motion_node.weapon_orientation_degrees
 	return constrained_segment
 
@@ -6755,6 +7176,24 @@ func _resolve_motion_node_segment_for_tip_target(
 		return {}
 	if _is_noncombat_idle_draft(_get_active_draft()):
 		return _resolve_noncombat_stow_segment_for_tip_target(motion_node, requested_tip_position_local)
+	if not _is_active_unarmed_authoring_wip():
+		var requested_origin: StringName = _normalize_seed_origin_id(requested_tip_position_origin_id, motion_node.tip_position_origin_id)
+		if requested_origin != CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING:
+			_set_preview_drag_blocked_status({"reason": "tip_grip_pivot_origin_mismatch"})
+			return {}
+		var grip_orbit: Dictionary = preview_presenter.resolve_motion_node_tip_grip_orbit(
+			preview_subviewport, motion_node, requested_tip_position_local)
+		if not grip_orbit.get("available", false):
+			_set_preview_drag_blocked_status(grip_orbit)
+			return {}
+		if not apply_endpoint_authority:
+			grip_orbit["endpoint_authority_deferred"] = true
+			return grip_orbit
+		var accepted_orbit: Dictionary = _apply_contact_tether_to_segment(motion_node, grip_orbit, &"tip_pivot")
+		if not accepted_orbit.get("legal", true):
+			_set_preview_drag_blocked_status(accepted_orbit)
+		return accepted_orbit
+	# Unarmed's proxy segment has no Handle station; retain its own controls.
 	var current_tip_origin_id: StringName = _normalize_seed_origin_id(motion_node.tip_position_origin_id, CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
 	var resolved_tip_origin_id: StringName = _normalize_seed_origin_id(requested_tip_position_origin_id, current_tip_origin_id)
 	var resolved_pommel_origin_id: StringName = _normalize_seed_origin_id(motion_node.pommel_position_origin_id, resolved_tip_origin_id)
@@ -6810,18 +7249,14 @@ func _apply_motion_node_state(target: CombatAnimationMotionNode, source: CombatA
 		return _apply_motion_node_curve_handle_state(target, source)
 	var stored_source: CombatAnimationMotionNode = _build_stored_motion_node_state_from_preview_state(source)
 	var changed: bool = false
-	if not target.weapon_orientation_degrees.is_equal_approx(stored_source.weapon_orientation_degrees):
-		target.weapon_orientation_degrees = stored_source.weapon_orientation_degrees
-		changed = true
-	if target.weapon_orientation_authored != stored_source.weapon_orientation_authored:
-		target.weapon_orientation_authored = stored_source.weapon_orientation_authored
-		changed = true
-	if not target.tip_position_local.is_equal_approx(stored_source.tip_position_local):
-		target.tip_position_local = stored_source.tip_position_local
-		changed = true
-	if not target.pommel_position_local.is_equal_approx(stored_source.pommel_position_local):
-		target.pommel_position_local = stored_source.pommel_position_local
-		changed = true
+	# Releasing a drag transfers the accepted override to the stored node.
+	# Preserve every encoded weapon field exactly so ownership survives that
+	# transfer; change detection must not decide which pose fields are copied.
+	for property: StringName in [&"tip_position_local", &"tip_position_origin_id", &"pommel_position_local", &"pommel_position_origin_id", &"weapon_orientation_degrees", &"weapon_orientation_authored", &"weapon_roll_degrees"]:
+		var accepted_value: Variant = stored_source.get(property)
+		if target.get(property) != accepted_value:
+			changed = true
+		target.set(property, accepted_value)
 	if not target.tip_curve_in_handle.is_equal_approx(stored_source.tip_curve_in_handle):
 		target.tip_curve_in_handle = stored_source.tip_curve_in_handle
 		changed = true
@@ -6924,10 +7359,16 @@ func _apply_motion_node_curve_handle_state(target: CombatAnimationMotionNode, so
 func _finalize_preview_drag(status_message: String = "Motion node edit locked in.") -> void:
 	if preview_weapon_facing_dragging:
 		preview_weapon_facing_dragging = false
+		# Keep the body stationary and acquisition suspended while the cube is
+		# held. Release (including focus/navigation finalization) uses the same
+		# acquisition entrance as the manual retry button, once per changed grip.
+		var acquire: bool = preview_presenter.is_weapon_facing_reacquisition_required(preview_subviewport)
+		if acquire:
+			_request_preview_grip_reacquisition()
 		_refresh_motion_node_list()
 		_refresh_editor_fields()
 		_refresh_grip_acquisition_status()
-		_refresh_summary("Weapon facing adjusted. Use Reacquire grip when ready.")
+		_refresh_summary("Weapon facing adjusted. Acquiring grip." if acquire else "Weapon facing unchanged.")
 		return
 	if preview_weapon_roll_dragging:
 		preview_weapon_roll_dragging = false
@@ -6945,8 +7386,23 @@ func _finalize_preview_drag(status_message: String = "Motion node edit locked in
 		if not status_message.strip_edges().is_empty():
 			footer_status_label.text = status_message
 		return
-	if _is_pommel_drag_authority_active():
+	if preview_drag_independent_arm_slot != StringName() and preview_drag_refresh_pending:
+		# Release may arrive before the throttled flush (or after end_drag).
+		# Apply its final selected-arm sample before copying the authored fields.
+		_refresh_preview_scene()
+		preview_drag_refresh_pending = false
+		preview_drag_first_pending_msec = 0
+	if preview_drag_forearm_guard_active and preview_drag_refresh_pending:
+		_apply_pending_endpoint_motion_attempt(true)
+		if preview_drag_refresh_pending:
+			# A synchronous checkpoint was unavailable: do not commit an untested
+			# last pointer sample. Already accepted motion remains usable.
+			preview_drag_override_node = preview_drag_last_accepted_node.duplicate(true) as CombatAnimationMotionNode
+			preview_drag_refresh_pending = false
+	elif not preview_drag_forearm_guard_active and _is_pommel_drag_authority_active():
 		_resolve_pending_pommel_drag_authority(true)
+	var guarded_endpoint: bool = preview_drag_forearm_guard_active
+	var endpoint_failure: Dictionary = preview_drag_forearm_failure.duplicate(true)
 	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
 	var preserved_camera_state: Dictionary = preview_presenter.capture_camera_state(preview_subviewport)
 	var commit_result: Dictionary = _resolve_preview_drag_commit_motion_node(motion_node)
@@ -6964,13 +7420,18 @@ func _finalize_preview_drag(status_message: String = "Motion node edit locked in
 		_stage_active_wip_edit(status_message)
 		_refresh_motion_node_list()
 		_refresh_editor_fields()
-		_refresh_preview_scene()
+		if guarded_endpoint:
+			_refresh_endpoint_motion_visuals()
+		else:
+			_refresh_preview_scene()
 		_restore_preview_camera_after_drag_commit(preserved_camera_state)
 		_refresh_summary(status_message)
 	else:
 		_restore_preview_camera_after_drag_commit(preserved_camera_state)
 		if not status_message.strip_edges().is_empty():
 			footer_status_label.text = status_message
+	if not endpoint_failure.is_empty():
+		_set_preview_drag_blocked_status(endpoint_failure)
 
 func _restore_preview_camera_after_drag_commit(camera_state: Dictionary) -> void:
 	if preview_presenter.restore_camera_state(preview_subviewport, camera_state):
@@ -6996,6 +7457,8 @@ func _resolve_preview_drag_commit_motion_node(source_motion_node: CombatAnimatio
 	if proposed_motion_node == null:
 		return {"legal": true, "motion_node": preview_drag_override_node}
 	proposed_motion_node.normalize()
+	if preview_drag_independent_arm_slot != StringName():
+		return {"legal": true, "motion_node": proposed_motion_node}
 	if _is_motion_node_authoring_locked(source_motion_node):
 		return {"legal": true, "motion_node": proposed_motion_node}
 	var endpoint_or_orientation_changed: bool = (
@@ -7008,6 +7471,10 @@ func _resolve_preview_drag_commit_motion_node(source_motion_node: CombatAnimatio
 		return {"legal": true, "motion_node": proposed_motion_node}
 	if _is_noncombat_idle_draft(_get_active_draft()):
 		return {"legal": true, "motion_node": proposed_motion_node}
+	if preview_drag_forearm_guard_active and not preview_drag_refresh_pending:
+		# This exact override passed the one preview solve, or was replaced with
+		# the last accepted override after rejection. Never solve it again here.
+		return {"legal": true, "motion_node": proposed_motion_node, "forearm_motion_validated": true}
 	if _can_reuse_pommel_drag_authority_commit():
 		return {
 			"legal": true,
@@ -7653,6 +8120,7 @@ func _toggle_preview_playback() -> void:
 	if chain_player.is_playing():
 		chain_player.stop()
 		session_state.playback_active = false
+		_refresh_preview_scene()
 		_refresh_manual_save_controls()
 		footer_status_label.text = "Preview stopped."
 		return
@@ -7673,11 +8141,11 @@ func _toggle_preview_playback() -> void:
 	if motion_node_chain.is_empty():
 		footer_status_label.text = "Need at least one visible motion node to preview."
 		return
-	capture_selected_prepared_pose()
+	capture_selected_prepared_pose(false, true)
 	# Validate the existing authored snapshot before rebuilding retarget data.
 	# That rebuild uses the currently posed shoulder/reach and can change node
 	# signatures even though the user has made no edits since the last render.
-	if not _preview_grip_acquisition_is_pending() and _prepare_cached_preview_playback(draft, float(draft.get("preview_playback_speed_scale")), bool(draft.get("preview_loop_enabled"))):
+	if _prepare_cached_preview_playback(draft, float(draft.get("preview_playback_speed_scale")), bool(draft.get("preview_loop_enabled"))):
 		_start_prepared_preview_playback()
 		return
 	active_wip.ensure_combat_animation_station_state()
@@ -7695,7 +8163,12 @@ func _start_prepared_preview_playback() -> void:
 	session_state.playback_active = true
 	_sync_preview_playback_pose_only()
 	_refresh_manual_save_controls()
-	footer_status_label.text = "Preview playing... (F to stop)"
+	var draft: Resource = _get_active_draft()
+	var runtime_clip: Resource = draft.get("baked_runtime_clip") if draft != null else null
+	var warnings: Array = _runtime_clip_quality_warnings(runtime_clip)
+	if runtime_clip != null:
+		_record_motion_node_quality_warnings(draft, warnings, runtime_clip.motion_node_chain)
+	footer_status_label.text = "Preview playing with %d pose warning(s)... (F to stop)" % warnings.size() if not warnings.is_empty() else "Preview playing... (F to stop)"
 
 func _cancel_preview_preparation(status_message: String = "") -> void:
 	preview_prepare_generation += 1
@@ -7750,23 +8223,20 @@ func _prepare_preview_replay(generation: int, source_wip: CraftedItemWIP, draft:
 		return
 	# Finish the current edit, then repair missing legacy endpoint packets once.
 	# Playback frames themselves only interpolate the resulting stored poses.
-	while _preview_grip_acquisition_is_pending():
-		footer_status_label.text = "Waiting for the current edit's grip..."
-		await get_tree().process_frame
-		if not _preview_prepare_request_is_current(generation, source_wip, draft, source_signature):
-			return
-	var capture: Dictionary = capture_selected_prepared_pose(true)
+	var capture: Dictionary = capture_selected_prepared_pose(true, true)
 	while String(capture.get("reason", "")) == "prepared_pose_settling":
 		await get_tree().process_frame
 		if not _preview_prepare_request_is_current(generation, source_wip, draft, source_signature):
 			return
-		capture = capture_selected_prepared_pose(true)
+		capture = capture_selected_prepared_pose(true, true)
 	if not bool(capture.get("valid", false)):
+		_record_motion_node_capture_failure(draft, capture, _get_active_motion_node())
 		_cancel_preview_preparation("Could not record the current pose: %s." % String(capture.get("reason", "unknown")))
 		return
 	var recovery: Dictionary = await _record_missing_action_endpoints([draft], source_wip, draft, generation, true)
 	if not bool(recovery.get("valid", false)):
 		if generation == preview_prepare_generation:
+			_record_motion_node_capture_failure(draft, recovery)
 			_cancel_preview_preparation("Could not prepare stored poses: %s." % String(recovery.get("reason", "unknown")))
 		return
 	# This request may have recorded its selected endpoint, not changed its controls.
@@ -7827,7 +8297,7 @@ func _prepare_preview_replay(generation: int, source_wip: CraftedItemWIP, draft:
 	if not bool(cache_result.get("cached", false)):
 		var failure_text := "Preview preparation failed: %s" % String(cache_result.get("reason", "unknown"))
 		if cache_result.get("reason") == "editing_pose_not_recorded":
-			failure_text = "Visit motion nodes %s and let their grips finish once, then press F." % str(cache_result.get("missing_node_indices", []))
+			failure_text = "Motion nodes %s are missing recorded pose data. Visit and record them, then press F." % str(cache_result.get("missing_node_indices", []))
 		_set_manual_save_progress(0.0, failure_text)
 		footer_status_label.text = failure_text
 		return
@@ -7920,6 +8390,21 @@ func set_selected_motion_node_pommel_position(
 	refresh_preview: bool = true,
 	refresh_summary: bool = true
 ) -> bool:
+	_begin_preview_authoring_lookup_scope()
+	var changed: bool = _set_selected_motion_node_pommel_position_prepared(
+		pommel_position, persist_change, refresh_list, refresh_fields, refresh_preview, refresh_summary
+	)
+	_end_preview_authoring_lookup_scope()
+	return changed
+
+func _set_selected_motion_node_pommel_position_prepared(
+	pommel_position: Vector3,
+	persist_change: bool,
+	refresh_list: bool,
+	refresh_fields: bool,
+	refresh_preview: bool,
+	refresh_summary: bool
+) -> bool:
 	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
 	if motion_node == null:
 		return false
@@ -7933,20 +8418,28 @@ func set_selected_motion_node_pommel_position(
 		and baseline_motion_node.pommel_position_local.is_equal_approx(pommel_position)
 	):
 		return false
+	var checkpoint: Dictionary = _capture_direct_endpoint_motion_checkpoint(refresh_preview)
+	if bool(checkpoint.get("unavailable", false)):
+		return false
+	var previous_node: CombatAnimationMotionNode = motion_node.duplicate(true) as CombatAnimationMotionNode
 	var resolved_segment: Dictionary = _resolve_motion_node_segment_for_pommel_target(
 		baseline_motion_node,
 		pommel_position
 	)
 	var changed: bool = _apply_resolved_segment_to_motion_node(motion_node, resolved_segment)
 	if not changed:
+		if not checkpoint.is_empty():
+			preview_presenter.restore_authoring_motion_checkpoint(checkpoint)
 		return false
 	motion_node.normalize()
+	if not _accept_direct_endpoint_motion(motion_node, previous_node, checkpoint):
+		return false
 	_apply_motion_node_change(
 		"Pommel position updated.",
 		persist_change,
 		refresh_list,
 		refresh_fields,
-		refresh_preview,
+		refresh_preview and checkpoint.is_empty(),
 		refresh_summary
 	)
 	return true
@@ -8029,7 +8522,7 @@ func _refresh_weapon_roll_control_bounds(motion_node: CombatAnimationMotionNode)
 	weapon_roll_spin_box.min_value = limits["minimum_degrees"]
 	weapon_roll_spin_box.max_value = limits["maximum_degrees"]
 	weapon_roll_spin_box.set_value_no_signal(motion_node.weapon_roll_degrees)
-	weapon_roll_spin_box.tooltip_text = "Roll range for this hand pose: %.1f to %.1f degrees (240 degrees of travel)." % [limits["minimum_degrees"], limits["maximum_degrees"]]
+	weapon_roll_spin_box.tooltip_text = "Attached weapon roll. The anatomical joint limits determine accepted movement." if limits.get("allocation_limits", false) else "Roll range for this hand pose: %.1f to %.1f degrees." % [limits["minimum_degrees"], limits["maximum_degrees"]]
 	weapon_roll_spin_box.set_block_signals(was_blocked)
 
 ## Cumulative angle from the start of this weapon-only gesture. Final facing
@@ -8041,7 +8534,7 @@ func apply_selected_motion_node_weapon_facing_delta(delta_degrees: float, begin_
 	if not preview_presenter.supports_weapon_facing_manipulation(preview_subviewport, motion, _get_active_draft()):
 		return false
 	if begin_gesture:
-		_cancel_preview_preparation("Preview preparation cancelled by an edit. Press F after reacquiring grip.")
+		_cancel_preview_preparation("Preview preparation cancelled by an edit. Grip will acquire when the control is released.")
 		var started: Dictionary = preview_presenter.begin_weapon_facing_manipulation(preview_subviewport, motion)
 		if not bool(started.get("available", false)):
 			footer_status_label.text = "Could not start weapon facing: %s." % started.get("reason", "unavailable")
@@ -8052,7 +8545,7 @@ func apply_selected_motion_node_weapon_facing_delta(delta_degrees: float, begin_
 		return false
 	if not bool(result.get("changed", false)):
 		return true
-	_stage_active_wip_edit("Weapon facing adjusted. Use Reacquire grip when ready.")
+	_stage_active_wip_edit("Weapon facing adjusted. Release the control to acquire grip.")
 	_refresh_editor_fields()
 	_refresh_grip_acquisition_status()
 	# Update only controls, never the macro-pose/IK path during this gesture.
@@ -8216,6 +8709,7 @@ func set_selected_motion_node_grip_seat_slide(
 	motion_node.grip_seat_slide_offset = resolved_handle_coordinate
 	_reseat_motion_node_grip_to_occupied_contact(motion_node)
 	motion_node.normalize()
+	var retained_station_pose := preview_presenter.retain_primary_station_edit_pose(preview_subviewport, motion_node)
 	_apply_motion_node_change(
 		"Grip seat slide updated.",
 		persist_change,
@@ -8223,7 +8717,7 @@ func set_selected_motion_node_grip_seat_slide(
 		refresh_fields,
 		refresh_preview,
 		refresh_summary,
-		PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION
+		StringName() if retained_station_pose else PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION
 	)
 	return true
 
@@ -8514,7 +9008,7 @@ func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 						preview_weapon_facing_dragging = true
 						preview_weapon_roll_pointer_start = mb.position
 						motion_node_editor.begin_drag(drag_target, mb.position, motion_node)
-						footer_status_label.text = "Drag left or right to roll only the weapon; reacquire grip when ready."
+						footer_status_label.text = "Drag left or right to roll only the weapon; release to acquire grip."
 					preview_view_container.accept_event()
 					return
 				if drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_WEAPON_ROTATION and preview_presenter.supports_weapon_roll_manipulation(preview_subviewport, motion_node, _get_active_draft()):
@@ -8525,7 +9019,7 @@ func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 					footer_status_label.text = "Drag left or right to roll the weapon."
 					preview_view_container.accept_event()
 					return
-				_begin_preview_drag_override(pick_motion_node)
+				_begin_preview_drag_override(pick_motion_node, drag_target)
 				if _is_arm_roll_focus(session_state.current_focus):
 					motion_node_editor.begin_upperarm_roll_drag(drag_target, arm_roll_pick.get("roll_state", {}) as Dictionary, camera, mb.position)
 				elif _is_hand_proxy_focus(session_state.current_focus):
@@ -8592,12 +9086,19 @@ func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 			preview_view_container.accept_event()
 
 func _handle_preview_drag(screen_position: Vector2) -> void:
+	_endpoint_pointer_latest = screen_position
 	if preview_weapon_facing_dragging:
 		apply_selected_motion_node_weapon_facing_delta((screen_position.x - preview_weapon_roll_pointer_start.x) * 0.5)
 		return
 	if preview_weapon_roll_dragging:
 		var requested_degrees: float = preview_weapon_roll_degrees_start + (screen_position.x - preview_weapon_roll_pointer_start.x) * 0.5
 		set_selected_motion_node_weapon_roll(requested_degrees, false, false, true, true, false)
+		# Consume this relative input even when the task is constrained. Reversal
+		# must not first cancel angles rejected during previous pointer movement.
+		preview_weapon_roll_pointer_start = screen_position
+		var current: CombatAnimationMotionNode = _get_active_motion_node()
+		if current != null:
+			preview_weapon_roll_degrees_start = current.weapon_roll_degrees
 		return
 	var camera: Camera3D = _get_preview_camera()
 	var trajectory_root: Node3D = _get_preview_trajectory_root()
@@ -8744,8 +9245,31 @@ func _handle_preview_drag(screen_position: Vector2) -> void:
 			editable_motion_node.normalize()
 			_queue_preview_drag_refresh()
 
+func _refresh_weapon_motion_pose_warning() -> void:
+	if footer_status_label == null:
+		return
+	var warning: Dictionary = preview_presenter.get_weapon_motion_pose_warning(preview_subviewport, _get_effective_preview_motion_node())
+	var warning_text := "Pose outside anatomical limits. Movement remains available to adjust it."
+	if not warning.is_empty():
+		footer_status_label.text = warning_text
+	elif footer_status_label.text == warning_text:
+		footer_status_label.text = "Position updated."
+
 func _set_preview_drag_blocked_status(resolved_segment: Dictionary) -> void:
 	if footer_status_label == null:
+		return
+	var reason: String = String(resolved_segment.get("reason", ""))
+	if resolved_segment.has("status") or reason.begins_with("weapon_motion_"):
+		footer_status_label.text = "Movement not accepted: %s (%s)." % [reason, String(resolved_segment.get("status", "not ready"))]
+		return
+	if reason.begins_with("tip_grip_pivot_") or reason in ["missing_preview_grip_frame", "missing_selected_handle_station", "non_finite_tip_grip_pivot", "degenerate_tip_grip_pivot", "degenerate_tip_grip_turn_axis", "authored_frame_roundtrip_failed"]:
+		footer_status_label.text = "Tip movement was not accepted: %s." % reason
+		return
+	if reason == "forearm_hand_index_range":
+		footer_status_label.text = "Stopped at the forearm rotation limit."
+		return
+	if reason in ["motion_checkpoint_unavailable", "forearm_validation_unavailable"] or resolved_segment.has("restore_reason"):
+		footer_status_label.text = "Motion was not accepted: %s." % String(resolved_segment.get("restore_reason", reason))
 		return
 	var region: String = String(resolved_segment.get("collision_region", ""))
 	if region.is_empty():

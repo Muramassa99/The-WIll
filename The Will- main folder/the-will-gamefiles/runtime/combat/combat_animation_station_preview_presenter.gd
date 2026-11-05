@@ -29,10 +29,17 @@ const CombatCollisionLegalityResolverScript = preload("res://runtime/combat/comb
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const WeaponRollManipulatorScript = preload("res://runtime/combat/combat_animation_weapon_roll_manipulator.gd")
 var weapon_roll_manipulator = WeaponRollManipulatorScript.new()
+const WeaponMotionManipulatorScript = preload("res://runtime/combat/combat_animation_weapon_motion_manipulator.gd")
+var weapon_motion_manipulator = WeaponMotionManipulatorScript.new()
 const WeaponFacingManipulatorScript = preload("res://runtime/combat/combat_animation_weapon_facing_manipulator.gd")
 var weapon_facing_manipulator = WeaponFacingManipulatorScript.new()
 var _weapon_facing_motion: CombatAnimationMotionNode = null
 var _weapon_facing_delta_degrees: float = 0.0
+const INDEPENDENT_ARM_EDIT_META := &"retained_independent_arm_edit"
+var _independent_arm_root: Node3D = null
+# A restored editing endpoint owns a live grip continuation. This is selection
+# state only; the portable acquisition packet lives in motion.prepared_pose.
+const RESTORED_AUTHORING_GRIP_META := &"retained_authoring_grip_pose"
 const PreviewGripAcquisition = preload("res://runtime/player/grip/preview_grip_acquisition.gd")
 const GripChronology = preload("res://runtime/player/grip/grip_chronology.gd")
 const PrimaryGripSeatResolverScript = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
@@ -413,7 +420,13 @@ func refresh_preview(
 		else _resolve_visible_selected_motion_node_index(active_draft, selected_node_index, visible_motion_node_chain.size())
 	)
 	var playback_motion_node: CombatAnimationMotionNode = _build_effective_preview_motion_node(selected_motion_node, playback_state)
-	var retained_facing: Dictionary = _retained_weapon_facing_pose(preview_subviewport, playback_motion_node, playback_state)
+	var retained_facing: Dictionary = _retained_independent_arm_pose(preview_subviewport, playback_motion_node, playback_state)
+	if retained_facing.is_empty():
+		retained_facing = _retained_weapon_motion_pose(preview_subviewport, playback_motion_node, playback_state)
+	if retained_facing.is_empty():
+		retained_facing = _retained_weapon_facing_pose(preview_subviewport, playback_motion_node, playback_state)
+	if retained_facing.is_empty():
+		retained_facing = _retained_authoring_grip_pose(preview_subviewport, playback_motion_node, playback_state)
 	if retained_facing.is_empty():
 		_refresh_actor_and_weapon(state, active_wip, playback_motion_node, active_draft)
 	_prepare_trajectory_root_for_authoring(state)
@@ -493,7 +506,7 @@ func refresh_preview(
 			speed_state_config,
 			active_draft
 		)
-		_refresh_weapon_and_sphere_visuals(state, display_motion_node_chain, visible_selected_node_index, active_focus, baked_profile)
+		_refresh_weapon_and_sphere_visuals(state, display_motion_node_chain, visible_selected_node_index, active_focus, baked_profile, active_draft)
 	if not bool(resolved_playback_state.get("authoring_drag_active", false)):
 		_refresh_collision_debug_visuals(state)
 	else:
@@ -538,7 +551,13 @@ func sync_preview_pose(
 	var playback_motion_node: CombatAnimationMotionNode = _build_effective_preview_motion_node(selected_motion_node, playback_state)
 	if trace_enabled:
 		trace_step_usec = _append_latency_trace_elapsed(trace, "build_motion_chain", trace_step_usec)
-	var retained_facing: Dictionary = _retained_weapon_facing_pose(preview_subviewport, playback_motion_node, playback_state)
+	var retained_facing: Dictionary = _retained_independent_arm_pose(preview_subviewport, playback_motion_node, playback_state)
+	if retained_facing.is_empty():
+		retained_facing = _retained_weapon_motion_pose(preview_subviewport, playback_motion_node, playback_state)
+	if retained_facing.is_empty():
+		retained_facing = _retained_weapon_facing_pose(preview_subviewport, playback_motion_node, playback_state)
+	if retained_facing.is_empty():
+		retained_facing = _retained_authoring_grip_pose(preview_subviewport, playback_motion_node, playback_state)
 	if retained_facing.is_empty():
 		_refresh_actor_and_weapon(state, active_wip, playback_motion_node, active_draft)
 	if trace_enabled:
@@ -631,7 +650,7 @@ func sync_preview_pose(
 		)
 		if trace_enabled:
 			trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_trajectory_visuals", trace_step_usec)
-		_refresh_weapon_and_sphere_visuals(state, display_motion_node_chain, visible_selected_node_index, active_focus, baked_profile)
+		_refresh_weapon_and_sphere_visuals(state, display_motion_node_chain, visible_selected_node_index, active_focus, baked_profile, active_draft)
 		if trace_enabled:
 			trace_step_usec = _append_latency_trace_elapsed(trace, "refresh_weapon_and_sphere_visuals", trace_step_usec)
 	if not bool(resolved_playback_state.get("authoring_drag_active", false)):
@@ -654,12 +673,13 @@ func sync_playback_pose(
 	playback_state: Dictionary = {},
 	live_motion_node_override: CombatAnimationMotionNode = null
 ) -> void:
+	_clear_independent_arm_edit()
 	cancel_grip_acquisition(preview_subviewport)
 	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
 	_sync_preview_size(preview_container, preview_subviewport)
 	if bool(playback_state.get("runtime_clip_playback", false)) and bool(playback_state.get("solved_replay_available", false)):
 		var fast_playback_state: Dictionary = _apply_solved_runtime_clip_preview_pose(state, active_wip, playback_state)
-		if fast_playback_state.get("grip_endcap_replay_invalid", false):
+		if fast_playback_state.get("grip_endcap_replay_invalid", false) or fast_playback_state.get("solved_body_replay_invalid", false):
 			state.preview_root.set_meta("resolved_playback_state", fast_playback_state)
 			return
 		if bool(fast_playback_state.get("solved_replay_applied", false)):
@@ -1275,7 +1295,127 @@ func refresh_focus_visuals(
 		speed_state_config,
 		active_draft
 	)
-	_refresh_weapon_and_sphere_visuals(state, display_motion_node_chain, visible_selected_node_index, active_focus, baked_profile)
+	_refresh_weapon_and_sphere_visuals(state, display_motion_node_chain, visible_selected_node_index, active_focus, baked_profile, active_draft)
+
+## One synchronous Tip/Pommel attempt. Acquisition may keep running, but its
+## request/worker identity must survive before a rejected motion is restored.
+func capture_authoring_motion_checkpoint(preview_subviewport: SubViewport) -> Dictionary:
+	var root: Node3D = _get_preview_root(preview_subviewport)
+	if root == null:
+		return {}
+	return RenderCheckpointScript.capture(self, {
+		"preview_root": root,
+		"actor_pivot": root.get_node_or_null(PREVIEW_ACTOR_PIVOT_NAME),
+		"trajectory_root": root.find_child(TRAJECTORY_ROOT_NAME, true, false),
+	}, true)
+
+func finish_authoring_motion_attempt(checkpoint: Dictionary) -> Dictionary:
+	if checkpoint.is_empty():
+		return {"valid": false, "reason": "motion_checkpoint_unavailable", "restored": false}
+	var actor: Node = checkpoint.actor.get_ref()
+	if not is_instance_valid(actor) or not actor.has_method("validate_authoring_forearm_hand_indexing"):
+		return {"valid": false, "reason": "forearm_validation_unavailable", "restored": false}
+	var weapon: Node3D = checkpoint.weapon.get_ref()
+	if weapon_motion_manipulator.owns_current_scene(actor, weapon):
+		# The allocator has already validated this exact committed pose against
+		# its correction baseline. A strict both-wrist check here would undo a
+		# legitimate partial recovery (or veto it because of the other wrist).
+		return {"valid": true, "reason": "accepted_weapon_motion_allocation"}
+	var result: Dictionary = actor.call("validate_authoring_forearm_hand_indexing")
+	if bool(result.get("valid", false)):
+		return result
+	result = result.duplicate(true)
+	result["restored"] = RenderCheckpointScript.restore(self, checkpoint)
+	if not result.restored:
+		result["restore_reason"] = "motion_checkpoint_identity_changed"
+	return result
+
+func restore_authoring_motion_checkpoint(checkpoint: Dictionary) -> bool:
+	return RenderCheckpointScript.restore(self, checkpoint)
+
+## Redraw after acceptance/rollback without another body or grip solve.
+func refresh_authoring_motion_visuals(
+	preview_container: SubViewportContainer,
+	preview_subviewport: SubViewport,
+	active_draft: Resource,
+	selected_node_index: int,
+	active_focus: StringName,
+	baked_profile: BakedProfile,
+	live_motion_node_override: CombatAnimationMotionNode = null
+) -> void:
+	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
+	var effective: Array = _build_effective_motion_node_chain(active_draft, selected_node_index, live_motion_node_override)
+	var visible: Array = _build_visible_motion_node_chain(active_draft, effective)
+	var selected: int = _resolve_visible_selected_motion_node_index(active_draft, selected_node_index, visible.size())
+	var root: Node3D = state.get("preview_root")
+	var resolved: Dictionary = root.get_meta("resolved_playback_state", {}) if root != null else {}
+	var display: Array = _build_resolved_display_motion_node_chain(visible, selected, resolved)
+	if live_motion_node_override != null:
+		_refresh_drag_budgeted_visuals(state, display, selected, active_focus, active_draft)
+	else:
+		_refresh_trajectory_visuals(state, display, selected, active_focus, resolved, _build_speed_state_config(active_draft), active_draft)
+		_refresh_weapon_and_sphere_visuals(state, display, selected, active_focus, baked_profile, active_draft)
+
+## Acquisition can move the weapon without a pointer edit. After the caller
+## records that frame on the selected node, publish the same frame to the guide
+## and rebuild its curves without applying the authored pose to the actor again.
+func refresh_recorded_grip_trajectory(
+	preview_container: SubViewportContainer,
+	preview_subviewport: SubViewport,
+	active_draft: Resource,
+	selected_node_index: int,
+	active_focus: StringName,
+	baked_profile: BakedProfile
+) -> void:
+	if active_draft == null:
+		return
+	var chain: Array = active_draft.get("motion_node_chain") as Array
+	if selected_node_index < 0 or selected_node_index >= chain.size():
+		return
+	var motion: CombatAnimationMotionNode = chain[selected_node_index] as CombatAnimationMotionNode
+	if motion == null:
+		return
+	var node_signature: String = PreparedPoseScript.node_pose_signature(motion)
+	if motion.prepared_pose_signature != node_signature or not prepared_authoring_context_signature_resolver.is_valid():
+		return
+	var captured: Dictionary = get_prepared_pose_capture_context(preview_subviewport, motion)
+	if not bool(captured.get("valid", false)):
+		return
+	var context_signature: Variant = prepared_authoring_context_signature_resolver.call(captured)
+	if not context_signature is String or String(context_signature).is_empty():
+		return
+	if not bool(PreparedPoseScript.validate(motion.prepared_pose, String(context_signature)).get("valid", false)):
+		return
+	if StringName(motion.prepared_pose.get("primary_hand_slot", StringName())) != captured.dominant_slot \
+		or bool(motion.prepared_pose.get("support_enabled", false)) != bool(captured.support_enabled):
+		return
+	var owner: Node = captured.actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
+	if owner == null or not owner.owns(captured.dominant_slot) or owner.is_manual_reacquisition_required():
+		return
+	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
+	var root: Node3D = state.get("preview_root")
+	if root == null or root != captured.root:
+		return
+	# The newly signed node owns the pose already on screen. Retain it through
+	# later unchanged redraws, without rerunning or completing any acquisition.
+	weapon_motion_manipulator.clear()
+	weapon_roll_manipulator.clear()
+	weapon_facing_manipulator.clear()
+	_weapon_facing_motion = null
+	_clear_independent_arm_edit()
+	root.set_meta(RESTORED_AUTHORING_GRIP_META, {"node": motion,
+		"signature": node_signature, "actor": captured.actor, "weapon": captured.weapon,
+		"context_signature": context_signature})
+	var resolved: Dictionary = (root.get_meta("resolved_playback_state", {}) as Dictionary).duplicate(true)
+	for property: StringName in [&"tip_position_local", &"tip_position_origin_id", &"pommel_position_local", &"pommel_position_origin_id", &"weapon_orientation_degrees", &"weapon_orientation_authored", &"weapon_roll_degrees"]:
+		resolved[property] = motion.get(property)
+	# Both the requested and cached signatures described the old endpoints.
+	# Retaining either can turn the following refresh into selection-only work.
+	resolved.erase("trajectory_static_visual_signature")
+	root.set_meta("resolved_playback_state", resolved)
+	root.remove_meta("trajectory_static_visual_signature")
+	refresh_authoring_motion_visuals(preview_container, preview_subviewport,
+		active_draft, selected_node_index, active_focus, baked_profile)
 
 func refresh_selection_visuals(
 	preview_container: SubViewportContainer,
@@ -1978,6 +2118,8 @@ func reset_preview_actor_to_mount_seed_baseline(
 			owner.synchronize(no_slots, _resolve_preview_dominant_slot_id())
 	weapon_roll_manipulator.clear()
 	weapon_facing_manipulator.clear()
+	weapon_motion_manipulator.clear()
+	_clear_independent_arm_edit()
 	_weapon_facing_motion = null
 	_clear_preview_runtime_solved_replay_state(actor, preview_root)
 	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
@@ -2341,6 +2483,40 @@ func resolve_motion_node_primary_grip_seat_local(preview_subviewport: SubViewpor
 		return null
 	return context.trajectory.to_local(context.weapon.global_transform * (station.position as Vector3))
 
+## Tip manipulation fixes the selected Handle slice center associated with the
+## primary index-pinky midpoint. Reconstruct the supplied authoring frame rather
+## than resampling a moving live hand/weapon during throttled pointer updates.
+func resolve_motion_node_tip_grip_orbit(preview_subviewport: SubViewport,
+		motion_node: CombatAnimationMotionNode, requested_tip_local: Vector3) -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or motion_node == null:
+		return {"available": false, "reason": "missing_preview_grip_frame"}
+	if motion_node.tip_position_origin_id != CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING or motion_node.pommel_position_origin_id != CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING:
+		return {"available": false, "reason": "tip_grip_pivot_origin_mismatch"}
+	var weapon: Node3D = context.weapon
+	var trajectory: Node3D = context.trajectory
+	var station: Dictionary = _resolve_primary_grip_seat_state_from_offsets(
+		weapon, motion_node.grip_seat_slide_offset, motion_node.axial_reposition_offset)
+	if not station.get("valid", false):
+		return {"available": false, "reason": "missing_selected_handle_station"}
+	var local_tip: Vector3 = _get_weapon_tip_meta(weapon)
+	var local_pommel: Vector3 = _get_weapon_pommel_meta(weapon)
+	var local_up: Vector3 = _resolve_weapon_local_up_reference(weapon, (local_tip - local_pommel).normalized())
+	var frame: Transform3D = _solve_weapon_segment_transform(weapon, trajectory, motion_node,
+		local_tip, local_pommel, trajectory.to_global(motion_node.tip_position_local),
+		trajectory.to_global(motion_node.pommel_position_local), _resolve_motion_node_weapon_orientation_degrees(motion_node))
+	var orbit: Dictionary = weapon_frame_solver.orbit_tip_around_grip(frame, local_tip,
+		station.position, trajectory.to_global(requested_tip_local), local_up)
+	if not orbit.get("available", false):
+		return orbit
+	var encoded: Dictionary = weapon_frame_solver.encode_transform_for_authoring(orbit.transform,
+		local_tip, local_pommel, local_up, trajectory.global_transform, motion_node.weapon_roll_degrees,
+		CombatOriginRecordScript.ORIGIN_WEAPON_ROOT)
+	if encoded.get("available", false):
+		encoded["tip_grip_pivot_local"] = trajectory.to_local(orbit.pivot_world)
+		encoded["tip_grip_pivot_origin_id"] = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
+	return encoded
+
 func resolve_grip_style_transition_seed(preview_subviewport: SubViewport,
 		motion_node: CombatAnimationMotionNode, target_grip_mode: StringName) -> Dictionary:
 	var context := _weapon_roll_context(preview_subviewport)
@@ -2635,6 +2811,7 @@ func _refresh_actor_and_weapon(
 	selected_motion_node: CombatAnimationMotionNode,
 	active_draft: Resource = null
 ) -> void:
+	_clear_independent_arm_edit()
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D
 	var actor_pivot: Node3D = state.get("actor_pivot", null) as Node3D
 	if preview_root == null or actor_pivot == null:
@@ -3542,7 +3719,8 @@ func _trace_grip_transform(value: Transform3D) -> Dictionary:
 func _apply_solved_runtime_clip_preview_pose(
 	state: Dictionary,
 	active_wip: CraftedItemWIP,
-	playback_state: Dictionary
+	playback_state: Dictionary,
+	restore_authoring_endpoint: bool = false
 ) -> Dictionary:
 	var resolved_playback_state: Dictionary = playback_state.duplicate(false)
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D
@@ -3569,26 +3747,50 @@ func _apply_solved_runtime_clip_preview_pose(
 	if actor.has_method("get_hand_grip_spans_meters"):
 		held_item.set_meta("hand_grip_spans_meters", actor.get_hand_grip_spans_meters())
 	var end_bounds_check := validate_solved_replay_hand_end_bounds(held_item, playback_state)
+	resolved_playback_state.erase("grip_endcap_replay_invalid")
+	resolved_playback_state.erase("grip_endcap_replay_warning")
+	resolved_playback_state.erase("grip_endcap_replay_reason")
 	if not end_bounds_check.get("valid", false):
-		resolved_playback_state["solved_replay_applied"] = false
-		resolved_playback_state["grip_endcap_replay_invalid"] = true
 		resolved_playback_state["grip_endcap_replay_reason"] = end_bounds_check.get("reason", "saved_grip_outside_handle_end_bounds")
-		return resolved_playback_state
+		if not bool(end_bounds_check.get("quality_warning", false)):
+			resolved_playback_state["grip_endcap_replay_invalid"] = true
+			resolved_playback_state["solved_replay_applied"] = false
+			return resolved_playback_state
+		resolved_playback_state["grip_endcap_replay_warning"] = true
+		resolved_playback_state["quality_warnings"] = [end_bounds_check.merged({"severity": "warning"})]
 	if not bool(preview_root.get_meta("preview_runtime_solved_replay_fast_path_active", false)):
+		if not restore_authoring_endpoint:
+			# Replay replaces the live edit pose. Even when its final transform
+			# matches the last manipulation, that old edit no longer owns a grip.
+			weapon_motion_manipulator.clear()
+			weapon_roll_manipulator.clear()
+			weapon_facing_manipulator.clear()
+			_weapon_facing_motion = null
+			_clear_independent_arm_edit()
+			if preview_root.has_meta(RESTORED_AUTHORING_GRIP_META):
+				preview_root.remove_meta(RESTORED_AUTHORING_GRIP_META)
 		_clear_preview_actor_weapon_coupling(actor)
 		if actor.has_method("clear_authoring_contact_anchor_bases"):
 			actor.call("clear_authoring_contact_anchor_bases")
 		preview_root.set_meta("preview_runtime_solved_replay_fast_path_active", true)
 	var pose_applied: bool = bool(actor.call(
-		"apply_runtime_solved_upper_body_pose_frame",
+		"restore_prepared_authoring_pose_frame" if restore_authoring_endpoint else "apply_runtime_solved_upper_body_pose_frame",
 		bone_names,
 		bone_positions,
 		bone_rotations,
 		bone_scales,
-		1.0
+		1.0,
+		playback_state.get("solved_forearm_hand_calibration", {})
 	))
 	if not pose_applied:
+		var validation: Dictionary = actor.get_meta("last_solved_body_replay_validation", {}) as Dictionary
+		resolved_playback_state["solved_replay_applied"] = false
+		resolved_playback_state["solved_body_replay_invalid"] = true
+		var reason: String = String(validation.get("reason", ""))
+		resolved_playback_state["solved_body_replay_reason"] = reason if not reason.is_empty() else "solved_body_pose_application_rejected"
 		return resolved_playback_state
+	resolved_playback_state.erase("solved_body_replay_invalid")
+	resolved_playback_state.erase("solved_body_replay_reason")
 	var reference_bone_name: StringName = playback_state.get("solved_replay_reference_bone_name", PREVIEW_ROOT_BONE) as StringName
 	if reference_bone_name == StringName():
 		reference_bone_name = PREVIEW_ROOT_BONE
@@ -3790,37 +3992,275 @@ func _publish_retained_weapon_facing_pose(context: Dictionary, motion: CombatAni
 	context.root.set_meta("authoring_endpoint_legality_result", {"available": false, "reason": "weapon_facing_requires_manual_reacquisition"})
 	return resolved
 
+## Elbow/free-hand controls own one arm only. Weapon placement and the other
+## arm are already displayed; neither is a target for this edit's solve.
+func apply_independent_arm_edit(preview_subviewport: SubViewport,
+		motion: CombatAnimationMotionNode, slot_id: StringName, use_drag_frame: bool = true,
+		hand_proxy_edit: bool = false) -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or motion == null or slot_id not in [&"hand_right", &"hand_left"]:
+		return {"valid": false, "reason": "independent_arm_context_missing"}
+	if not context.actor.has_method("apply_authoring_independent_arm_frame_now"):
+		return {"valid": false, "reason": "independent_arm_solver_unavailable"}
+	var skeleton: Skeleton3D = context.actor.get("skeleton") as Skeleton3D
+	var payload: Dictionary = _build_preview_upper_body_authoring_payload(context.weapon, motion)
+	if skeleton == null or payload.is_empty():
+		return {"valid": false, "reason": "independent_arm_frame_unavailable"}
+	if not hand_proxy_edit and not _prepare_independent_elbow_guidance(context, slot_id):
+		return {"valid": false, "reason": "independent_elbow_target_unavailable"}
+	weapon_motion_manipulator.clear()
+	weapon_roll_manipulator.clear()
+	_clear_preview_runtime_solved_replay_state(context.actor, context.root)
+	context.actor.call("set_upper_body_authoring_state", payload)
+	if hand_proxy_edit:
+		_apply_hand_authoring_slot_proxy_preview_state(context.actor, context.weapon, motion, {}, slot_id)
+	var result: Dictionary = context.actor.call("apply_authoring_independent_arm_frame_now", slot_id, use_drag_frame)
+	context.root.set_meta("independent_arm_edit_result", result)
+	if not result.get("valid", false):
+		return result
+	_remember_live_preview_attachment(context.actor)
+	# Identity and frames only: the rig holds the live pose; normal R/F/Save
+	# capture owns the durable full-body packet. Root metadata is checkpointed.
+	_independent_arm_root = context.root
+	context.root.set_meta(INDEPENDENT_ARM_EDIT_META, {
+		"actor": context.actor, "weapon": context.weapon, "trajectory": context.trajectory,
+		"node_id": motion.node_id, "signature": PreparedPoseScript.node_pose_signature(motion),
+		"dominant_slot": _resolve_preview_dominant_slot_id(),
+		"support_enabled": _should_preview_use_support_hand(context.weapon, motion),
+		"slot": slot_id, "trajectory_world": context.trajectory.global_transform,
+		"weapon_world": context.weapon.global_transform, "skeleton_world": skeleton.global_transform,
+		"skeleton_version": skeleton.get_version()})
+	_publish_retained_weapon_roll_pose(context.root, context.actor, context.trajectory, context.weapon, motion, {})
+	return result
+
+func _prepare_independent_elbow_guidance(context: Dictionary, slot_id: StringName) -> bool:
+	var anchor: Node3D = _resolve_preview_mount_anchor_for_slot(context.actor, slot_id)
+	if anchor == null or not is_instance_valid(anchor):
+		return false
+	var skeleton: Skeleton3D = context.actor.get("skeleton") as Skeleton3D
+	if skeleton == null:
+		return false
+	skeleton.force_update_all_bone_transforms()
+	var attachment: BoneAttachment3D = anchor.get_parent() as BoneAttachment3D
+	if attachment != null and not attachment.override_pose:
+		attachment.on_skeleton_update()
+	# The elbow edits its bend plane around the currently displayed Hand. This
+	# target is World, derived from the existing hand alignment origin; it is
+	# not a new weapon contact and does not assign a finger/grip owner.
+	var target_world: Vector3 = _resolve_preview_hand_grip_target_world(context.actor, slot_id)
+	if not target_world.is_finite():
+		return false
+	var node_name := "IndependentElbowTarget_%s" % String(slot_id)
+	var target: Node3D = context.root.get_node_or_null(NodePath(node_name)) as Node3D
+	if target == null:
+		target = Node3D.new()
+		target.name = node_name
+		context.root.add_child(target)
+	target.set_meta("guidance_origin", &"world_from_hand_grip_alignment")
+	target.global_transform = Transform3D(anchor.global_basis, target_world)
+	context.actor.call("set_arm_guidance_target", slot_id, target)
+	context.actor.call("set_arm_guidance_active", slot_id, true)
+	context.actor.call("set_authoring_contact_anchor_basis", slot_id, anchor.global_basis.orthonormalized())
+	return true
+
+func _clear_independent_arm_edit() -> void:
+	if is_instance_valid(_independent_arm_root):
+		var retained: Dictionary = _independent_arm_root.get_meta(INDEPENDENT_ARM_EDIT_META, {})
+		var actor: Node = retained.get("actor")
+		if is_instance_valid(actor) and actor.has_method("clear_authoring_independent_arm_pose_authority"):
+			actor.call("clear_authoring_independent_arm_pose_authority")
+		_independent_arm_root.remove_meta(INDEPENDENT_ARM_EDIT_META)
+	_independent_arm_root = null
+
+func _retained_independent_arm_pose(preview_subviewport: SubViewport,
+		motion: CombatAnimationMotionNode, playback: Dictionary) -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty():
+		_clear_independent_arm_edit()
+		return {}
+	var retained: Dictionary = context.root.get_meta(INDEPENDENT_ARM_EDIT_META, {})
+	if retained.is_empty():
+		return {}
+	_independent_arm_root = context.root
+	var skeleton: Skeleton3D = context.actor.get("skeleton") as Skeleton3D
+	var trace: Dictionary = {
+		"node_identity": motion != null and motion.node_id == retained.node_id,
+		"pose_signature": motion != null and PreparedPoseScript.node_pose_signature(motion) == retained.signature,
+		"playback_active": bool(playback.get("active", false)),
+		"grip_refresh": playback.has("grip_resolve_reason"),
+		"dominant_slot": _resolve_preview_dominant_slot_id() == retained.dominant_slot,
+		"support_enabled": motion != null and _should_preview_use_support_hand(context.weapon, motion) == retained.support_enabled,
+		"trajectory_frame": context.trajectory.global_transform.is_equal_approx(retained.trajectory_world),
+		"weapon_frame": context.weapon.global_transform.is_equal_approx(retained.weapon_world),
+		"skeleton_frame": skeleton != null and skeleton.global_transform.is_equal_approx(retained.skeleton_world),
+		"rig_authority": context.actor.call("has_authoring_independent_arm_pose_authority", retained.slot)}
+	var matches: bool = motion != null and not bool(playback.get("active", false)) and not playback.has("grip_resolve_reason")
+	matches = matches and context.actor == retained.actor and context.weapon == retained.weapon and context.trajectory == retained.trajectory
+	if matches:
+		matches = motion.node_id == retained.node_id and PreparedPoseScript.node_pose_signature(motion) == retained.signature
+		matches = matches and _resolve_preview_dominant_slot_id() == retained.dominant_slot \
+			and _should_preview_use_support_hand(context.weapon, motion) == retained.support_enabled
+	matches = matches and skeleton != null and skeleton.get_version() == retained.skeleton_version
+	if matches:
+		matches = context.trajectory.global_transform.is_equal_approx(retained.trajectory_world) \
+			and context.weapon.global_transform.is_equal_approx(retained.weapon_world) \
+			and skeleton.global_transform.is_equal_approx(retained.skeleton_world) \
+			and context.actor.call("has_authoring_independent_arm_pose_authority", retained.slot)
+	if not matches:
+		trace["retained"] = false
+		context.root.set_meta("independent_arm_retention_validation", trace)
+		_clear_independent_arm_edit()
+		return {}
+	trace["retained"] = true
+	context.root.set_meta("independent_arm_retention_validation", trace)
+	var resolved: Dictionary = _publish_retained_weapon_roll_pose(context.root, context.actor,
+		context.trajectory, context.weapon, motion, playback)
+	resolved["independent_arm_edited_slot"] = retained.slot
+	return resolved
+
+func supports_weapon_motion_allocation(preview_subviewport: SubViewport, active_draft: Resource) -> bool:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	return not context.is_empty() and not _is_noncombat_idle_draft(active_draft) and not _is_unarmed_preview_item(context.weapon)
+
+## The allocator replaces sequential body-follow/reach/wrist correction for
+## attached weapon edits. Candidate frames are World; authoring endpoints remain
+## TrajectoryAuthoringOrigin. Collision checks observe candidate bones, never push.
+func allocate_authored_weapon_segment(preview_subviewport: SubViewport,
+		motion: CombatAnimationMotionNode, segment: Dictionary, mode: StringName) -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or motion == null:
+		return {"available": false, "legal": false, "reason": "weapon_motion_context_missing"}
+	var candidate: CombatAnimationMotionNode = motion.duplicate_node()
+	for key: StringName in [&"tip_position_local", &"tip_position_origin_id", &"pommel_position_local", &"pommel_position_origin_id", &"weapon_orientation_degrees", &"weapon_orientation_authored", &"weapon_roll_degrees"]:
+		if segment.has(key):
+			candidate.set(key, segment[key])
+	if candidate.tip_position_origin_id != CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING or candidate.pommel_position_origin_id != CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING:
+		return {"available": false, "legal": false, "reason": "weapon_motion_origin_mismatch"}
+	var tip: Vector3 = _get_weapon_tip_meta(context.weapon)
+	var pommel: Vector3 = _get_weapon_pommel_meta(context.weapon)
+	var target: Transform3D = _solve_weapon_segment_transform(context.weapon, context.trajectory,
+		candidate, tip, pommel, context.trajectory.to_global(candidate.tip_position_local),
+		context.trajectory.to_global(candidate.pommel_position_local), _resolve_motion_node_weapon_orientation_degrees(candidate))
+	return _allocate_weapon_motion(context, motion, mode, target, candidate.weapon_roll_degrees)
+
+func _allocate_weapon_motion(context: Dictionary, motion: CombatAnimationMotionNode,
+		mode: StringName, target_world: Transform3D, requested_roll: float) -> Dictionary:
+	var owner: Node = context.actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
+	if owner == null or owner.is_manual_reacquisition_required() or not owner.is_render_checkpoint_idle():
+		return {"available": false, "legal": false, "reason": "weapon_motion_grip_not_ready"}
+	var station: Dictionary = _resolve_primary_grip_seat_state_from_offsets(
+		context.weapon, motion.grip_seat_slide_offset, motion.axial_reposition_offset)
+	if not station.get("valid", false):
+		return {"available": false, "legal": false, "reason": "missing_selected_handle_station"}
+	var primary: StringName = _resolve_preview_dominant_slot_id()
+	var support: StringName = _resolve_preview_support_slot_id() if _should_preview_use_support_hand(context.weapon, motion) else &""
+	var binding_check: Dictionary = _validate_weapon_motion_bindings(context, primary, support)
+	if not binding_check.get("valid", false):
+		return binding_check.merged({"available": false, "legal": false, "status": "RECOVERY_REQUIRED"})
+	var tip: Vector3 = _get_weapon_tip_meta(context.weapon)
+	var pommel: Vector3 = _get_weapon_pommel_meta(context.weapon)
+	var local_up: Vector3 = _resolve_weapon_local_up_reference(context.weapon, (tip - pommel).normalized())
+	# Collision/no-go checks belong to path evaluation, not permission to use
+	# a control point. The rig adapter still validates anatomy and attachment.
+	var result: Dictionary = weapon_motion_manipulator.apply(context, motion, mode, target_world,
+		station.position, local_up, primary, support, Callable(), requested_roll)
+	result["legal"] = bool(result.get("available", false))
+	context.root.set_meta("weapon_motion_allocation_result", result.get("allocation", result))
+	if result.legal:
+		_clear_independent_arm_edit()
+		weapon_roll_manipulator.clear()
+		owner.retain_roll()
+		context.root.set_meta("preview_runtime_solved_replay_fast_path_active", false)
+	return result
+
+## Informational only; this never gates an authoring input or changes a pose.
+func get_weapon_motion_pose_warning(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode) -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or not weapon_motion_manipulator.matches(context, motion):
+		return {}
+	var allocation: Dictionary = context.root.get_meta("weapon_motion_allocation_result", {})
+	return allocation.get("pose_warning", {})
+
+## An idle worker is not evidence of acquisition. Never turn an arbitrary
+## detached Hand/weapon pose into a new permanent relationship by observing it.
+func _validate_weapon_motion_bindings(context: Dictionary, primary: StringName, support: StringName) -> Dictionary:
+	var skeleton: Skeleton3D = context.actor.get("skeleton") as Skeleton3D
+	if skeleton == null:
+		return {"valid": false, "reason": "weapon_motion_skeleton_missing"}
+	for slot: StringName in [primary, support]:
+		if slot == &"":
+			continue
+		var state: Dictionary = context.actor.get_planar_grip_pose_state(slot)
+		var binding: Dictionary = context.actor.planar_grip_pose_binding.relationship(slot, context.weapon)
+		if not state.get("has_grip_pose", false) or not binding.get("hand_in_weapon") is Transform3D:
+			return {"valid": false, "reason": "weapon_motion_acquired_grip_missing", "slot": slot}
+		var name: StringName = &"CC_Base_L_Hand" if slot == &"hand_left" else &"CC_Base_R_Hand"
+		var index: int = skeleton.find_bone(name)
+		if index < 0:
+			return {"valid": false, "reason": "weapon_motion_hand_bone_missing", "slot": slot}
+		var actual: Transform3D = skeleton.global_transform * skeleton.get_bone_global_pose(index)
+		var expected: Transform3D = context.weapon.global_transform * (binding.hand_in_weapon as Transform3D)
+		var delta: Quaternion = (expected.basis.orthonormalized().get_rotation_quaternion() * actual.basis.orthonormalized().get_rotation_quaternion().inverse()).normalized()
+		var angle: float = 2.0 * atan2(Vector3(delta.x, delta.y, delta.z).length(), absf(delta.w))
+		if actual.origin.distance_to(expected.origin) > 0.00005 or angle > deg_to_rad(0.025):
+			return {"valid": false, "reason": "weapon_motion_acquired_grip_mismatch", "slot": slot,
+				"position_error_m": actual.origin.distance_to(expected.origin), "angle_error_degrees": rad_to_deg(angle)}
+	return {"valid": true}
+
+func _retained_weapon_motion_pose(preview_subviewport: SubViewport,
+		motion: CombatAnimationMotionNode, playback: Dictionary) -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if bool(playback.get("active", false)) or playback.has("grip_resolve_reason") or not weapon_motion_manipulator.matches(context, motion):
+		weapon_motion_manipulator.clear()
+		return {}
+	var resolved: Dictionary = _publish_retained_weapon_roll_pose(context.root, context.actor,
+		context.trajectory, context.weapon, motion, playback)
+	resolved["weapon_motion_allocated"] = true
+	context.root.set_meta("authoring_endpoint_legality_result", {"available": true, "legal": true,
+		"reason": "accepted_weapon_motion_allocation"})
+	return resolved
+
 func supports_weapon_roll_manipulation(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode, active_draft: Resource) -> bool:
 	var context: Dictionary = _weapon_roll_context(preview_subviewport)
-	return not context.is_empty() and motion != null and not _is_noncombat_idle_draft(active_draft) and not _is_unarmed_preview_item(context["weapon"]) and not _should_preview_use_support_hand(context["weapon"], motion)
+	return not context.is_empty() and motion != null and not _is_noncombat_idle_draft(active_draft) and not _is_unarmed_preview_item(context["weapon"])
 
 func get_weapon_roll_limits(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode) -> Dictionary:
 	var context: Dictionary = _weapon_roll_context(preview_subviewport)
 	if context.is_empty() or motion == null:
 		return {"available": false, "reason": "missing_preview"}
-	if _should_preview_use_support_hand(context["weapon"], motion) or _is_unarmed_preview_item(context["weapon"]):
-		return {"available": false, "reason": "one_handed_weapon_required"}
-	return weapon_roll_manipulator.get_limits(context["actor"], context["weapon"],
-		context["trajectory"], motion, _resolve_preview_dominant_slot_id())
+	if _is_unarmed_preview_item(context.weapon):
+		return {"available": false, "reason": "attached_weapon_required"}
+	# This is an input window, not an anatomical bound. Joint envelopes and
+	# whole-task feasibility determine accepted movement, including compensation.
+	return {"available": true, "minimum_degrees": motion.weapon_roll_degrees - 180.0,
+		"maximum_degrees": motion.weapon_roll_degrees + 180.0,
+		"center_degrees": motion.weapon_roll_degrees, "allocation_limits": true}
 
 func apply_weapon_roll_manipulation(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode, requested_degrees: float) -> Dictionary:
 	var context: Dictionary = _weapon_roll_context(preview_subviewport)
 	if context.is_empty() or motion == null:
 		return {"available": false, "reason": "missing_preview"}
 	var weapon: Node3D = context["weapon"]
-	if _should_preview_use_support_hand(weapon, motion) or _is_unarmed_preview_item(weapon):
-		return {"available": false, "reason": "one_handed_weapon_required"}
+	if _is_unarmed_preview_item(weapon):
+		return {"available": false, "reason": "attached_weapon_required"}
 	var tip_value: Variant = weapon.get_meta("weapon_tip_local", null)
 	var pommel_value: Variant = weapon.get_meta("weapon_pommel_local", null)
 	if not tip_value is Vector3 or not pommel_value is Vector3 or (tip_value as Vector3).distance_squared_to(pommel_value as Vector3) < 0.00000001:
 		return {"available": false, "reason": "missing_weapon_axis"}
-	var up_in_weapon: Vector3 = _resolve_weapon_local_up_reference(weapon, ((tip_value as Vector3) - (pommel_value as Vector3)).normalized())
-	var result: Dictionary = weapon_roll_manipulator.apply(context["actor"], weapon, context["trajectory"], motion, _resolve_preview_dominant_slot_id(), up_in_weapon, requested_degrees)
+	var station: Dictionary = _resolve_primary_grip_seat_state_from_offsets(weapon, motion.grip_seat_slide_offset, motion.axial_reposition_offset)
+	if not station.get("valid", false):
+		return {"available": false, "reason": "missing_selected_handle_station"}
+	var source: Transform3D = weapon.global_transform
+	var axis: Vector3 = (source.basis * ((tip_value as Vector3) - (pommel_value as Vector3))).normalized()
+	var rotation := Basis(axis, deg_to_rad(requested_degrees - motion.weapon_roll_degrees))
+	var target_basis: Basis = rotation * source.basis
+	var target := Transform3D(target_basis, source * (station.position as Vector3) - target_basis * (station.position as Vector3))
+	var result: Dictionary = _allocate_weapon_motion(context, motion, &"roll", target, requested_degrees)
 	if bool(result.get("available", false)):
+		for key: StringName in [&"tip_position_local", &"tip_position_origin_id", &"pommel_position_local", &"pommel_position_origin_id", &"weapon_orientation_degrees", &"weapon_orientation_authored", &"weapon_roll_degrees"]:
+			motion.set(key, result[key])
+		motion.normalize()
 		context["root"].set_meta("weapon_roll_manipulation_result", result)
-		var grip_owner: Node = context["actor"].get_node_or_null(PreviewGripAcquisition.NODE_NAME)
-		if grip_owner != null:
-			grip_owner.retain_roll()
 	return result
 
 func get_grip_acquisition_status(preview_subviewport: SubViewport) -> Dictionary:
@@ -3915,6 +4355,12 @@ func _try_restore_prepared_authoring_pose(
 		"solved_upper_body_pose_positions": Array(snapshot.pose_positions),
 		"solved_upper_body_pose_rotations": Array(snapshot.pose_rotations),
 		"solved_upper_body_pose_scales": Array(snapshot.pose_scales),
+		"solved_forearm_hand_calibration": {
+			"bone_names": snapshot.bone_names.duplicate(),
+			"bone_rest_transforms": snapshot.bone_rest_transforms.duplicate(),
+			"arm_constraints_by_slot": snapshot.get("arm_constraints_by_slot", {}).duplicate(true),
+			"wrist_states_by_slot": snapshot.get("wrist_states_by_slot", {}).duplicate(true),
+		},
 		"solved_replay_reference_bone_name": snapshot.get("reference_bone_name", CombatRuntimeClipScript.SOLVED_REPLAY_REFERENCE_BONE_NAME),
 		"solved_replay_reference_origin_id": snapshot.reference_origin_id,
 		"solved_weapon_position_reference_local": snapshot.weapon_position_reference_local,
@@ -3927,20 +4373,99 @@ func _try_restore_prepared_authoring_pose(
 		"solved_anchor_scales_weapon_local": Array(snapshot.anchor_scales_weapon_local),
 		"solved_anchor_origin_id": snapshot.anchor_origin_id,
 	}, true)
-	# A pending previous-section worker must not overwrite this saved pose.
+	# Restore the node's grip targets before its recorded scene. This rebuilds
+	# current role/station metadata; it does not advance a numerical solve.
 	_clear_prepared_preview_grip(context.actor)
-	var applied: Dictionary = _apply_solved_runtime_clip_preview_pose(state, active_wip, frame)
+	_apply_preview_motion_grip_state(context.weapon, motion, playback, context.actor, false)
+	var applied: Dictionary = _apply_solved_runtime_clip_preview_pose(state, active_wip, frame, true)
 	var did_apply: bool = bool(applied.get("solved_replay_applied", false))
 	root.set_meta("prepared_authoring_pose_restore", {"applied": did_apply,
 		"reason": "" if did_apply else applied.get("grip_endcap_replay_reason", "prepared_pose_application_rejected")})
 	if not did_apply:
 		_clear_preview_runtime_solved_replay_state(context.actor, root)
 		return {}
+	# This is an editing endpoint, not active replay. Reinstate contact ownership
+	# after the shared replay writer has restored the exact saved body/weapon.
+	_clear_preview_runtime_solved_replay_state(context.actor, root)
+	if not _is_unarmed_preview_item(context.weapon):
+		equipped_item_presenter.sync_single_weapon_contact_guidance(context.actor,
+			context.weapon, context.dominant_slot, context.support_enabled, true, true, true, true)
+		var owner: Node = _get_or_create_prepared_preview_grip(context.actor)
+		owner.configure(context.actor, context.weapon)
+		var slots: Array[StringName] = [context.dominant_slot]
+		if context.support_enabled:
+			slots.append(&"hand_left" if context.dominant_slot == &"hand_right" else &"hand_right")
+		var restored: Dictionary = owner.restore_authoring_grip(
+			snapshot.get("acquired_grip", {}), String(context_signature), slots, context.dominant_slot)
+		if not restored.get("valid", false):
+			# Includes old weapon-facing poses saved before automatic acquisition.
+			# Legacy/missing acquisition data gets one attempt for this selection.
+			# Repeated redraws retain that worker (including a failed result).
+			owner.synchronize(slots, context.dominant_slot, &"reacquire")
+			owner.settle_ready()
+		# Root metadata participates in the existing render checkpoint, so Save/F
+		# suspension restores the selected endpoint's ownership alongside its pose.
+		root.set_meta(RESTORED_AUTHORING_GRIP_META, {"node": motion, "signature": PreparedPoseScript.node_pose_signature(motion),
+			"actor": context.actor, "weapon": context.weapon, "context_signature": context_signature})
+		root.set_meta("prepared_authoring_grip_restore", restored)
 	applied["prepared_authoring_pose_restored"] = true
 	root.set_meta("resolved_playback_state", applied)
 	if update_camera:
 		_update_camera(root, weapon_grip_anchor_provider.get_primary_grip_anchor(context.weapon))
 	return applied
+
+
+## A primary Handle-% edit already moved the weapon and renewed the acquisition
+## request. Its UI refresh must not re-run whole-body positioning afterwards.
+func retain_primary_station_edit_pose(preview_subviewport: SubViewport,
+		motion: CombatAnimationMotionNode) -> bool:
+	var context := _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or motion == null or not prepared_authoring_context_signature_resolver.is_valid():
+		return false
+	var owner: Node = context.actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
+	if owner == null or not owner.owns(_resolve_preview_dominant_slot_id()) or owner.is_manual_reacquisition_required():
+		return false
+	var captured := get_prepared_pose_capture_context(preview_subviewport, motion, false)
+	if not captured.get("valid", false):
+		return false
+	var signature: Variant = prepared_authoring_context_signature_resolver.call(captured)
+	if not signature is String or String(signature).is_empty():
+		return false
+	weapon_motion_manipulator.clear()
+	weapon_roll_manipulator.clear()
+	weapon_facing_manipulator.clear()
+	_weapon_facing_motion = null
+	_clear_independent_arm_edit()
+	context.root.set_meta(RESTORED_AUTHORING_GRIP_META, {"node": motion,
+		"signature": PreparedPoseScript.node_pose_signature(motion), "actor": context.actor,
+		"weapon": context.weapon, "context_signature": signature})
+	owner.settle_ready()
+	return true
+
+
+func _retained_authoring_grip_pose(preview_subviewport: SubViewport,
+		motion: CombatAnimationMotionNode, playback: Dictionary) -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty():
+		return {}
+	var saved: Dictionary = context.root.get_meta(RESTORED_AUTHORING_GRIP_META, {})
+	if saved.is_empty():
+		return {}
+	if motion == null or saved.node != motion \
+		or saved.actor != context.actor or saved.weapon != context.weapon \
+		or bool(playback.get("active", false)) or playback.has("grip_resolve_reason") \
+		or bool(context.root.get_meta("preview_runtime_solved_replay_fast_path_active", false)) \
+		or PreparedPoseScript.node_pose_signature(motion) != saved.signature:
+		context.root.remove_meta(RESTORED_AUTHORING_GRIP_META)
+		return {}
+	var captured: Dictionary = get_prepared_pose_capture_context(preview_subviewport, motion, false)
+	if not captured.get("valid", false) or not prepared_authoring_context_signature_resolver.is_valid() \
+		or prepared_authoring_context_signature_resolver.call(captured) != saved.context_signature:
+		context.root.remove_meta(RESTORED_AUTHORING_GRIP_META)
+		return {}
+	# No bone rewrite, owner.clear(), or reacquisition on an unchanged redraw.
+	return _publish_retained_weapon_roll_pose(context.root, context.actor,
+		context.trajectory, context.weapon, motion, playback)
 
 
 ## Read-only access to the displayed authoring endpoint. Readiness is distinct
@@ -3959,23 +4484,24 @@ func get_prepared_pose_capture_context(preview_subviewport: SubViewport, motion:
 		return {"valid": false, "reason": "prepared_pose_preview_is_replay"}
 	var owner: Node = actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
 	var unarmed: bool = _is_unarmed_preview_item(weapon)
-	if require_ready and owner != null and owner.is_manual_reacquisition_required():
-		return {"valid": false, "reason": "weapon_facing_requires_manual_reacquisition"}
+	var quality_warnings: Array[Dictionary] = []
+	if owner != null and owner.is_manual_reacquisition_required():
+		quality_warnings.append({"severity": "warning", "reason": "weapon_facing_requires_manual_reacquisition"})
 	var dominant: StringName = _resolve_preview_dominant_slot_id()
 	var support_enabled: bool = _should_preview_use_support_hand(weapon, motion)
 	var slots: Array[StringName] = [dominant]
 	if support_enabled:
 		slots.append(&"hand_left" if dominant == &"hand_right" else &"hand_right")
-	if require_ready and not unarmed:
+	if not unarmed:
 		if owner == null or not owner.is_render_checkpoint_idle():
-			return {"valid": false, "reason": "prepared_pose_grip_pending"}
-		var statuses: Dictionary = owner.status()
+			quality_warnings.append({"severity": "warning", "reason": "prepared_pose_grip_pending"})
+		var statuses: Dictionary = owner.status() if owner != null else {}
 		for slot: StringName in slots:
 			if String(statuses.get(slot, {}).get("status", "")) != "preview_applied":
-				return {"valid": false, "reason": "prepared_pose_grip_not_applied", "slot": slot}
+				quality_warnings.append({"severity": "warning", "reason": "prepared_pose_grip_not_applied", "hand_slot": slot})
 			var bound: Dictionary = actor.get_planar_grip_pose_state(slot)
 			if not bool(bound.get("has_grip_pose", false)):
-				return {"valid": false, "reason": "prepared_pose_grip_not_bound", "slot": slot}
+				quality_warnings.append({"severity": "warning", "reason": "prepared_pose_grip_not_bound", "hand_slot": slot})
 	var anatomy_key: Array = [weapon.get_instance_id(), skeleton.get_instance_id()]
 	if owner != null and not owner._data.is_empty():
 		var anatomy: Resource = owner._data.get("anatomy") as Resource
@@ -4022,7 +4548,17 @@ func get_prepared_pose_capture_context(preview_subviewport: SubViewport, motion:
 	context["dominant_slot"] = dominant
 	context["support_enabled"] = support_enabled
 	context["settle_serial"] = int(owner._serial) if owner != null else 0
+	context["primary_acquisition_frame_serial"] = owner.pending_authoring_frame_serial() if owner != null else -1
+	context["quality_warnings"] = quality_warnings
 	return context
+
+func acknowledge_recorded_grip_frame(context: Dictionary) -> void:
+	var actor: Node3D = context.get("actor")
+	if not is_instance_valid(actor):
+		return
+	var owner: Node = actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
+	if owner != null:
+		owner.acknowledge_authoring_frame(int(context.get("primary_acquisition_frame_serial", -1)))
 
 
 func capture_prepared_authoring_pose(context: Dictionary, context_signature: String) -> Dictionary:
@@ -4032,10 +4568,20 @@ func capture_prepared_authoring_pose(context: Dictionary, context_signature: Str
 		context.dominant_slot, SOLVED_REPLAY_ANCHOR_NODE_PATHS, context.support_enabled, context_signature)
 	if not bool(snapshot.get("valid", false)):
 		return snapshot
+	snapshot["quality_warnings"].append_array(context.get("quality_warnings", []))
 	var actor: Node3D = context.actor
 	var weapon: Node3D = context.weapon
+	var grip_owner: Node = actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
+	if grip_owner != null and not _is_unarmed_preview_item(weapon):
+		snapshot["acquired_grip"] = grip_owner.export_authoring_grip(context_signature)
 	var skeleton: Skeleton3D = actor.get("skeleton") as Skeleton3D
 	var reference_bone: int = skeleton.find_bone(snapshot.reference_bone_name)
+	if not _is_unarmed_preview_item(weapon):
+		var collision: Dictionary = _evaluate_preview_collision_pose(actor, weapon, weapon.global_transform)
+		if not bool(collision.get("legal", true)):
+			snapshot["quality_warnings"].append({"severity": "warning", "reason": "weapon_body_intersection",
+				"sample_count": collision.get("illegal_sample_count", 0),
+				"region": collision.get("colliding_body_region", "")})
 	var reference_world: Transform3D = skeleton.global_transform * skeleton.get_bone_global_pose(reference_bone)
 	reference_world.basis = reference_world.basis.orthonormalized()
 	snapshot["trajectory_to_reference"] = reference_world.affine_inverse() * (context.trajectory as Node3D).global_transform
@@ -4132,12 +4678,12 @@ func restore_grip_after_bake(preview_subviewport: SubViewport, saved_context: Di
 		if restored.get("valid", false): return restored
 	return owner.prepare_replay_grip(owner._slots.duplicate(), owner._dominant)
 
-func get_prepared_grip_display_state(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode) -> Dictionary:
+func get_prepared_grip_display_state(preview_subviewport: SubViewport, motion: CombatAnimationMotionNode, allow_unbound: bool = false) -> Dictionary:
 	var context: Dictionary = _weapon_roll_context(preview_subviewport)
 	if context.is_empty() or motion == null:
 		return {}
 	var binding: Dictionary = context.actor.planar_grip_pose_binding.relationship(_resolve_preview_dominant_slot_id(), context.weapon)
-	if binding.is_empty():
+	if binding.is_empty() and not allow_unbound:
 		return {}
 	return _encode_prepared_grip_display_state(context.weapon, context.trajectory, motion.weapon_roll_degrees)
 
@@ -4259,8 +4805,8 @@ func _apply_authored_weapon_pose(
 			active_draft,
 			stow_endpoints_already_display_local
 		)
-	# A restored saved pose has bones, but no live digit acquisition binding.
-	# Its first roll must enter acquisition before the endpoint can be recorded.
+	# Retain a roll only while the current acquired binding still owns it.
+	# Saved-node ownership is restored separately before reaching this path.
 	if not bool(playback_state.get("active", false)) and not playback_state.has("grip_resolve_reason") and _has_preview_primary_grip_binding(actor) and weapon_roll_manipulator.matches(actor, held_item, trajectory_root, selected_motion_node, _resolve_preview_dominant_slot_id()):
 		return _publish_retained_weapon_roll_pose(preview_root, actor, trajectory_root, held_item, selected_motion_node, playback_state)
 	var trace_pose := not _save_pose_latency_profile.is_empty()
@@ -5399,7 +5945,8 @@ func _apply_preview_motion_grip_state(
 	held_item: Node3D,
 	motion_node: CombatAnimationMotionNode,
 	playback_state: Dictionary = {},
-	actor: Node3D = null
+	actor: Node3D = null,
+	synchronize_grip: bool = true
 ) -> void:
 	if held_item == null:
 		return
@@ -5525,7 +6072,8 @@ func _apply_preview_motion_grip_state(
 		requested_grip_style
 	)
 	_apply_preview_resolved_grip_state(held_item, actor)
-	_sync_prepared_preview_grip(actor, held_item, motion_node, playback_state)
+	if synchronize_grip:
+		_sync_prepared_preview_grip(actor, held_item, motion_node, playback_state)
 
 
 func _clear_prepared_preview_grip(actor: Node3D) -> void:
@@ -5995,7 +6543,8 @@ func get_preview_hand_end_bounds(preview_subviewport: SubViewport, support: bool
 
 
 ## Baked anchor positions are authoritative. Never clamp a cached weapon away
-## from its already-solved fingers; an incompatible frame needs authoring again.
+## from its recorded fingers. Geometric quality is advisory; malformed data is
+## reported separately so callers can still replay an imperfect authored pose.
 func validate_solved_replay_hand_end_bounds(held_item: Node3D, playback: Dictionary) -> Dictionary:
 	if _is_unarmed_preview_item(held_item):
 		return {"valid": true}
@@ -6028,6 +6577,8 @@ func validate_solved_replay_hand_end_bounds(held_item: Node3D, playback: Diction
 			saved_handle_length, float(hand_spans.get(required[path], 0.0))
 		) if saved_handle_length >= 0.0 else get_held_item_hand_end_bounds(held_item, required[path])
 		if not bounds.get("valid", false):
+			if bounds.get("reason", "") == &"handle_shorter_than_hand_footprint":
+				bounds["quality_warning"] = true
 			return bounds
 		var anchor_index := paths.find(StringName(path))
 		if anchor_index < 0:
@@ -6036,8 +6587,10 @@ func validate_solved_replay_hand_end_bounds(held_item: Node3D, playback: Diction
 			return {"valid": false, "reason": "saved_grip_end_bounds_anchor_missing"}
 		var ratio: float = ((positions[anchor_index] as Vector3) - start).dot(end - start) / (end - start).length_squared()
 		var end_tolerance_ratio := REPLAY_HAND_END_TOLERANCE_METERS / float(bounds.handle_length_meters) + REPLAY_HAND_END_RATIO_ROUNDOFF
-		if not is_finite(ratio) or ratio < float(bounds.min_ratio) - end_tolerance_ratio or ratio > float(bounds.max_ratio) + end_tolerance_ratio:
-			return {"valid": false, "reason": "saved_grip_outside_handle_end_bounds", "slot": required[path]}
+		if not is_finite(ratio):
+			return {"valid": false, "reason": "invalid_saved_grip_ratio", "slot": required[path]}
+		if ratio < float(bounds.min_ratio) - end_tolerance_ratio or ratio > float(bounds.max_ratio) + end_tolerance_ratio:
+			return {"valid": false, "quality_warning": true, "reason": "saved_grip_outside_handle_end_bounds", "slot": required[path]}
 	return {"valid": true}
 
 func _resolve_solved_replay_support_enabled(playback: Dictionary) -> bool:
@@ -6244,7 +6797,8 @@ func _apply_hand_authoring_slot_proxy_preview_state(
 	actor: Node3D,
 	held_item: Node3D,
 	selected_motion_node: CombatAnimationMotionNode,
-	playback_state: Dictionary = {}
+	playback_state: Dictionary = {},
+	only_slot_id: StringName = StringName()
 ) -> void:
 	if actor == null or selected_motion_node == null:
 		return
@@ -6253,10 +6807,15 @@ func _apply_hand_authoring_slot_proxy_preview_state(
 	if preview_root == null or trajectory_root == null:
 		return
 	var active_slots: Array[StringName] = []
+	if only_slot_id != StringName():
+		active_slots.assign(preview_root.get_meta("hand_authoring_proxy_slots", []))
+		active_slots.erase(only_slot_id)
 	for slot_id: StringName in [&"hand_right", &"hand_left"]:
+		if only_slot_id != StringName() and slot_id != only_slot_id:
+			continue
 		if not _is_hand_proxy_authoring_slot_available(held_item, selected_motion_node, slot_id):
 			continue
-		if _is_unarmed_preview_item(held_item) and slot_id == _resolve_preview_dominant_slot_id():
+		if only_slot_id == StringName() and _is_unarmed_preview_item(held_item) and slot_id == _resolve_preview_dominant_slot_id():
 			continue
 		var segment_state: Dictionary = _resolve_hand_proxy_authoring_segment_state(
 			actor,
@@ -9757,7 +10316,7 @@ func _create_onion_marker(parent_root: Node3D, local_position: Vector3, color: C
 	marker.material_override = _build_overlay_surface_material(color, 0.5)
 	parent_root.add_child(marker)
 
-func _refresh_weapon_and_sphere_visuals(state: Dictionary, motion_node_chain: Array, selected_node_index: int, active_focus: StringName, baked_profile: BakedProfile) -> void:
+func _refresh_weapon_and_sphere_visuals(state: Dictionary, motion_node_chain: Array, selected_node_index: int, active_focus: StringName, baked_profile: BakedProfile, active_draft: Resource = null) -> void:
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D
 	var marker_root: Node3D = state.get("marker_root", null) as Node3D
 	var sphere_viz_mesh: MeshInstance3D = state.get("sphere_viz_mesh", null) as MeshInstance3D
@@ -9791,7 +10350,17 @@ func _refresh_weapon_and_sphere_visuals(state: Dictionary, motion_node_chain: Ar
 			preview_root.set_meta("weapon_gizmo_marker_count", gizmo_marker_count)
 	if sphere_viz_mesh != null and active_focus == CombatAnimationSessionStateScript.FOCUS_TIP:
 		var weapon_length: float = baked_profile.weapon_total_length_meters if baked_profile != null and baked_profile.weapon_total_length_meters > 0.001 else 0.5
-		_render_endpoint_sphere_wireframe(sphere_viz_mesh.mesh as ImmediateMesh, motion_node.pommel_position_local, weapon_length)
+		var orbit_center: Vector3 = motion_node.pommel_position_local
+		var orbit_radius: float = weapon_length
+		var weapon: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
+		if is_instance_valid(weapon) and not _is_unarmed_preview_item(weapon) and not _is_noncombat_idle_draft(active_draft):
+			var viewport: SubViewport = preview_root.get_parent() as SubViewport
+			var orbit: Dictionary = resolve_motion_node_tip_grip_orbit(viewport, motion_node, motion_node.tip_position_local)
+			if not orbit.get("available", false):
+				return
+			orbit_center = orbit.tip_grip_pivot_local
+			orbit_radius = orbit_center.distance_to(motion_node.tip_position_local)
+		_render_endpoint_sphere_wireframe(sphere_viz_mesh.mesh as ImmediateMesh, orbit_center, orbit_radius)
 
 func _create_weapon_rotation_gizmo_markers(marker_root: Node3D, motion_node: CombatAnimationMotionNode, active_focus: StringName) -> void:
 	if marker_root == null or motion_node == null:

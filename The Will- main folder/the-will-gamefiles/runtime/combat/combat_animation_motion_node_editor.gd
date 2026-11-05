@@ -348,6 +348,14 @@ func begin_point_drag(
 func resolve_point_drag_screen_position(screen_position: Vector2) -> Vector2:
 	return screen_position + _point_drag_screen_offset if _dragging else screen_position
 
+## Discard consumed/rejected relative input without restarting the gesture.
+## The next mouse increment starts at the accepted control, not a hidden target.
+func rebase_point_drag(screen_position: Vector2, local_point: Vector3,
+		camera: Camera3D, trajectory_root: Node3D) -> void:
+	if not _dragging or camera == null or trajectory_root == null:
+		return
+	_point_drag_screen_offset = camera.unproject_position(trajectory_root.to_global(local_point)) - screen_position
+
 func get_point_drag_anchor_local(motion_node: CombatAnimationMotionNode, target: StringName) -> Vector3:
 	if motion_node == null:
 		return Vector3.ZERO

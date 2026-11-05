@@ -6,6 +6,63 @@ const SLICE_DISTANCE_EPSILON_METERS := 0.000001
 const SLICE_POINT_MERGE_EPSILON_METERS := 0.000005
 const SLICE_AREA_EPSILON_SQUARED_METERS := 0.000000000001
 const HAND_END_PADDING_RATIO := 0.10
+const ALIGNMENT_ROOT := &"RL_BoneRoot"
+const ALIGNMENT_WEAPON_ROOT := &"WeaponRootOrigin"
+
+
+## Preparation only: put the selected Handle station at the fixed hand reference
+## and align its length to Index-Pinky. The existing surface solver owns depth
+## seating and finger closure afterwards. All point values share machine space;
+## weapon-local vectors explicitly name their own source origin.
+static func resolve_primary_alignment(weapon: Dictionary, hand: Dictionary, reverse: bool) -> Dictionary:
+	if weapon.get("frame_origin_id") != ALIGNMENT_ROOT or hand.get("origin_id") != ALIGNMENT_ROOT:
+		return {"valid": false, "reason": "primary_alignment_machine_origin_missing"}
+	if not weapon.get("frame") is Transform3D:
+		return {"valid": false, "reason": "primary_alignment_weapon_frame_missing"}
+	var original: Transform3D = weapon.frame
+	if not original.is_finite() or original.basis.determinant() <= 0.0:
+		return {"valid": false, "reason": "primary_alignment_weapon_frame_invalid"}
+	for field: String in ["station", "axis", "tip_direction"]:
+		if weapon.get(field + "_origin_id") != ALIGNMENT_WEAPON_ROOT or not weapon.get(field) is Vector3 or not (weapon[field] as Vector3).is_finite():
+			return {"valid": false, "reason": "primary_alignment_weapon_reference_invalid"}
+	for field: String in ["index", "pinky", "wrist", "target"]:
+		if not hand.get(field) is Vector3 or not (hand[field] as Vector3).is_finite():
+			return {"valid": false, "reason": "primary_alignment_hand_reference_invalid"}
+	for field: String in ["index_origin_id", "pinky_origin_id", "wrist_origin_id", "target_source_origin_id"]:
+		if String(hand.get(field, "")).is_empty():
+			return {"valid": false, "reason": "primary_alignment_hand_provenance_missing"}
+	var source_axis: Vector3 = original.basis * (weapon.axis as Vector3)
+	var tip_direction: Vector3 = original.basis * (weapon.tip_direction as Vector3)
+	var target_axis: Vector3 = (hand.index as Vector3) - (hand.pinky as Vector3)
+	if minf(source_axis.length_squared(), minf(tip_direction.length_squared(), target_axis.length_squared())) < 1.0e-12:
+		return {"valid": false, "reason": "primary_alignment_axis_degenerate"}
+	# Preserve the established Tip-side polarity, independently of span ordering
+	# and anatomical side. Reverse changes polarity, not the selected percentage.
+	if source_axis.dot(tip_direction) < 0.0:
+		source_axis = -source_axis
+	source_axis = source_axis.normalized()
+	target_axis = target_axis.normalized() * (-1.0 if reverse else 1.0)
+	var cross_axis := source_axis.cross(target_axis)
+	var dot_axis := clampf(source_axis.dot(target_axis), -1.0, 1.0)
+	var swing := Quaternion.IDENTITY
+	if cross_axis.length_squared() > 1.0e-14:
+		swing = Quaternion(cross_axis.normalized(), atan2(cross_axis.length(), dot_axis))
+	elif dot_axis < 0.0:
+		# At exactly 180 degrees the shortest arc is ambiguous. Use the named
+		# wrist-to-knuckle reference rather than an arbitrary world axis.
+		var reference: Vector3 = ((hand.index as Vector3) + (hand.pinky as Vector3)) * 0.5 - (hand.wrist as Vector3)
+		reference -= source_axis * reference.dot(source_axis)
+		if reference.length_squared() < 1.0e-12:
+			return {"valid": false, "reason": "primary_alignment_half_turn_reference_degenerate"}
+		swing = Quaternion(reference.normalized(), PI)
+	# Left multiplication rotates the complete basis: existing scale and axial
+	# facing travel with it; no new roll reference or orthonormalization is added.
+	var basis := Basis(swing) * original.basis
+	var result := Transform3D(basis, (hand.target as Vector3) - basis * (weapon.station as Vector3))
+	return {"valid": true, "weapon_to_machine": result, "weapon_to_machine_origin_id": ALIGNMENT_ROOT,
+		"swing": swing, "source_axis_machine": source_axis, "target_axis_machine": target_axis,
+		"vectors_origin_id": ALIGNMENT_ROOT, "selected_station": weapon.station,
+		"selected_station_origin_id": ALIGNMENT_WEAPON_ROOT, "hand_reference": hand.duplicate(true)}
 
 
 static func resolve_hand_end_bounds(

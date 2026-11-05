@@ -94,3 +94,14 @@ No new runtime or automated tests were run for this preparation. SC-01's passing
 - [Project TODO](Project%20TODO.md): SC-04 is the single checklist entry for this outcome. SC-03 records the later qualified user acceptance separately.
 
 No older source was rewritten. Current explicit user decisions will resolve the open points when this topic is discussed.
+
+## 2026-11-04 priority clarification
+
+The user reaffirmed Ctrl+Z / Ctrl+Y for rapid prototyping: undo a positional
+change inside a motion node when the result is not wanted, then redo if useful.
+Queue this after the current weapon-motion lifecycle completion and independent
+arm preservation work. It is low priority and may wait for another session;
+do not expand that implementation pass to include the journal. Existing open
+history-lifetime and structural-boundary decisions above remain open.
+
+Active prerequisite: [Weapon Motion Allocation Implementation](Weapon%20Motion%20Allocation%20Implementation%202026-10-29.md).

@@ -8,7 +8,13 @@ const Channels = preload("res://core/resolvers/combat_runtime_clip_incremental_r
 const PreparedCapture = preload("res://runtime/combat/combat_prepared_pose_capture.gd")
 const PreparedPose = preload("res://core/models/combat_prepared_pose.gd")
 const Attachment = preload("res://core/resolvers/combat_prepared_attachment_resolver.gd")
+const ArmFrame = preload("res://core/resolvers/combat_prepared_arm_frame_resolver.gd")
+const WristMotion = preload("res://core/resolvers/combat_wrist_motion_resolver.gd")
+const PoseTrack = preload("res://core/resolvers/combat_prepared_pose_track_builder.gd")
 const ENTRY_DURATION_SECONDS := 0.160
+# Text-resource parsing can alter the final bits of small radian values. This
+# tolerance identifies the same serialized profile; it is not extra joint ROM.
+const PROFILE_SERIALIZATION_EPSILON := 0.000000000001
 
 static func capture(actor: Node3D, weapon: Node3D, body: Resource, current_attachment: Dictionary = {}) -> Dictionary:
 	if actor == null or weapon == null or body == null or not body.has_solved_replay_track():
@@ -99,14 +105,18 @@ static func _supply_matching_saved_neutrals(current: Dictionary, saved: Dictiona
 		var baseline: Dictionary = saved.arm_constraints_by_slot[slot]
 		if not bool(baseline.get("valid", false)) or not (actual.get("missing_bones", []) as Array).is_empty():
 			return {"valid": false, "reason": "neutral_calibration_bones_unavailable"}
-		for field: String in ["slot_id", "clavicle_bone", "upperarm_bone", "forearm_bone", "hand_bone", "twist_chains", "limb_twist_axis", "shoulder_min_degrees", "shoulder_max_degrees", "elbow_min_degrees", "elbow_max_degrees", "joint_epsilon_degrees", "limb_twist_limit_radians", "usable_reach_m", "contact_wrist_twist_limit_degrees", "contact_wrist_basis_enabled", "limb_twist_distribution_enabled"]:
+		for field: String in ["material_hinge_revision", "forearm_hand_index_revision", "wrist_model_revision", "wrist_profile", "slot_id", "clavicle_bone", "upperarm_bone", "forearm_bone", "hand_bone", "twist_chains", "limb_twist_axis", "shoulder_min_degrees", "shoulder_max_degrees", "elbow_min_degrees", "elbow_max_degrees", "joint_epsilon_degrees", "limb_twist_limit_radians", "usable_reach_m", "contact_wrist_twist_limit_degrees", "contact_wrist_basis_enabled", "limb_twist_distribution_enabled"]:
 			if not actual.has(field) or not baseline.has(field):
 				return {"valid": false, "reason": "neutral_calibration_constraint_missing:" + field}
 			var a: Variant = actual[field]
 			var b: Variant = baseline[field]
 			var matches: bool = is_equal_approx(float(a), float(b)) if (a is float or a is int) and (b is float or b is int) else a == b
+			if field == "wrist_profile":
+				matches = a is Dictionary and b is Dictionary and _matching_wrist_profile(a, b)
 			if not matches:
 				return {"valid": false, "reason": "neutral_calibration_constraint_changed:" + field}
+		if not _matching_wrist_calibration(actual.get("wrist_calibration", {}), baseline.get("wrist_calibration", {})):
+			return {"valid": false, "reason": "neutral_calibration_wrist_model_changed"}
 		var neutrals: Dictionary = actual.get("twist_neutral_rotations", {})
 		for chain: Array in actual.twist_chains:
 			for bone: StringName in chain:
@@ -126,10 +136,78 @@ static func _supply_matching_saved_neutrals(current: Dictionary, saved: Dictiona
 		actual["valid"] = true
 		actual["reason"] = ""
 	current["arm_constraints_by_slot"] = packets
+	# Cold equipped capture has no editor helper-neutral cache. Recover only
+	# semantic state from this actual incoming pose and the checked calibration;
+	# never substitute the destination's pose or mutate the live actor here.
+	var fk: Dictionary = ArmFrame.forward_kinematics(current)
+	if not fk.valid:
+		return fk
+	var wrist_states: Dictionary = current.get("wrist_states_by_slot", {}).duplicate(true)
+	var measurement_failures: Dictionary = current.get("wrist_measurement_failures_by_slot", {}).duplicate(true)
+	var quality_warnings: Array[Dictionary] = []
+	for warning: Dictionary in current.get("quality_warnings", []):
+		PoseTrack.append_quality_warning(quality_warnings, warning)
+	for slot: Variant in packets:
+		var packet: Dictionary = packets[slot]
+		var forearm: int = current.bone_names.find(packet.forearm_bone)
+		var hand: int = current.bone_names.find(packet.hand_bone)
+		if forearm < 0 or hand < 0:
+			return {"valid": false, "reason": "entry_wrist_bones_unavailable", "hand_slot": slot}
+		var wrist: Dictionary = WristMotion.measure_state(fk.transforms[forearm], fk.transforms[hand], packet.wrist_calibration, packet.wrist_profile, wrist_states.get(slot, {}))
+		if not wrist.get("valid", false):
+			if String(wrist.get("reason", "")) != "wrist_pose_not_representable":
+				return wrist.merged({"hand_slot": slot})
+			measurement_failures[slot] = wrist.reason
+			wrist_states.erase(slot)
+			PoseTrack.append_quality_warning(quality_warnings, {"reason": wrist.reason, "hand_slot": slot, "failure_scope": "entry", "node_index": 0})
+			continue
+		wrist_states[slot] = wrist.state.duplicate(true)
+		measurement_failures.erase(slot)
+		if not wrist.within_limits:
+			PoseTrack.append_quality_warning(quality_warnings, {"reason": "wrist_motion_range", "hand_slot": slot, "failure_scope": "entry", "node_index": 0})
+	current["wrist_states_by_slot"] = wrist_states
+	current["wrist_measurement_failures_by_slot"] = measurement_failures
+	current["quality_warnings"] = quality_warnings
 	current["entry_neutral_calibration_source"] = "matching_saved_skeleton"
 	current["entry_restored_neutral_bones"] = restored
 	current["entry_nonarm_translation_differences"] = translation_differences
 	return {"valid": true, "reason": ""}
+
+static func _matching_wrist_profile(current: Dictionary, saved: Dictionary) -> bool:
+	if current.is_empty() or current.size() != saved.size():
+		return false
+	for key: Variant in current:
+		if not saved.has(key):
+			return false
+		var a: Variant = current[key]
+		var b: Variant = saved[key]
+		if a is float or a is int:
+			if not (b is float or b is int) or not is_finite(float(a)) or not is_finite(float(b)):
+				return false
+			var magnitude: float = maxf(1.0, maxf(absf(float(a)), absf(float(b))))
+			if absf(float(a) - float(b)) > PROFILE_SERIALIZATION_EPSILON * magnitude:
+				return false
+		elif a != b:
+			return false
+	return true
+
+static func _matching_wrist_calibration(current: Dictionary, saved: Dictionary) -> bool:
+	if current.is_empty() or saved.is_empty() or not bool(current.get("valid", true)) or not bool(saved.get("valid", true)):
+		return false
+	for field: String in ["revision", "radial_sign", "source_bone_names", "source_parent_bone_names"]:
+		if not current.has(field) or current.get(field) != saved.get(field):
+			return false
+	for field: String in ["neutral_anatomical_in_forearm", "anatomical_in_hand_bone"]:
+		if not current.get(field) is Basis or not saved.get(field) is Basis or not (current[field] as Basis).is_equal_approx(saved[field]):
+			return false
+	var current_rests: Array = current.get("source_rest_transforms", [])
+	var saved_rests: Array = saved.get("source_rest_transforms", [])
+	if current_rests.is_empty() or current_rests.size() != saved_rests.size():
+		return false
+	for index: int in current_rests.size():
+		if not current_rests[index] is Transform3D or not saved_rests[index] is Transform3D or not (current_rests[index] as Transform3D).is_equal_approx(saved_rests[index]):
+			return false
+	return true
 
 static func build(body: Resource, incoming: Dictionary, source_node: Resource, volume_config: Dictionary = {}) -> Resource:
 	if not _valid_source(body, incoming) or source_node == null:
@@ -194,6 +272,8 @@ static func build(body: Resource, incoming: Dictionary, source_node: Resource, v
 			push_warning("Could not prepare attached entry: " + JSON.stringify(attached))
 			return null
 		combined.set_meta("entry_attachment_diagnostics", attached.diagnostics)
+		for warning: Dictionary in attached.get("quality_warnings", []):
+			combined.compile_diagnostics.append(warning.duplicate(true))
 	if body.has_upper_body_pose_track():
 		var legacy: Array = []
 		for index: int in prefix_count:
@@ -258,6 +338,9 @@ static func _source_failure(reason: String) -> bool:
 
 static func _attach_prefix(combined: Resource, incoming: Dictionary, destination: Dictionary, source_node: Resource, destination_node: Resource, prefix_count: int) -> Dictionary:
 	var rows: Array[Dictionary] = []
+	var quality_warnings: Array[Dictionary] = []
+	for warning: Dictionary in incoming.get("quality_warnings", []):
+		PoseTrack.append_quality_warning(quality_warnings, warning, {"failure_scope": "entry", "node_index": 0})
 	var calls := 0
 	for index: int in prefix_count:
 		var ratio: float = float(combined.baked_frame_times[index]) / ENTRY_DURATION_SECONDS
@@ -274,13 +357,19 @@ static func _attach_prefix(combined: Resource, incoming: Dictionary, destination
 			"parent_reference_transforms": parents,
 			"weapon_transform": weapon,
 		}
-		var result: Dictionary = Attachment.apply(sample, incoming, destination, ratio, source_node, destination_node)
-		if not bool(result.get("valid", false)):
-			return result.merged({"frame_index": index, "entry_time_seconds": combined.baked_frame_times[index]})
-		combined.baked_solved_upper_body_pose_rotations[index] = result.pose_rotations
-		calls += int(result.get("ik_calls", 0))
-		rows.append(result.get("diagnostics", {}))
-	return {"valid": true, "diagnostics": {"arm_follow_calls": calls, "acquisition_calls": 0, "frames": rows}}
+		var guided: Dictionary = PoseTrack.guide_sample(sample, incoming, destination, ratio, source_node, destination_node)
+		if not guided.valid:
+			return guided.merged({"frame_index": index, "entry_time_seconds": combined.baked_frame_times[index]})
+		combined.baked_solved_upper_body_pose_rotations[index] = guided.sample.pose_rotations
+		calls += int(guided.follow.get("ik_calls", 0))
+		for warning: Dictionary in guided.quality_warnings:
+			PoseTrack.append_quality_warning(quality_warnings, warning, {"failure_scope": "entry", "node_index": 0,
+				"destination_node_index": 0, "frame_index": index, "entry_time_seconds": combined.baked_frame_times[index]})
+		var frame_diagnostics: Dictionary = guided.follow.get("diagnostics", {}).duplicate()
+		frame_diagnostics["material_frames"] = guided.normalized.diagnostics
+		rows.append(frame_diagnostics)
+	return {"valid": true, "quality_warnings": quality_warnings,
+		"diagnostics": {"arm_follow_calls": calls, "acquisition_calls": 0, "frames": rows, "quality_warnings": quality_warnings}}
 
 static func _blend(source: Variant, destination: Variant, ratio: float, rotation: bool) -> Variant:
 	if source is Vector3:

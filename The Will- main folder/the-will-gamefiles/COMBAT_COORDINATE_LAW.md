@@ -283,3 +283,32 @@ identity, skeleton frame/version/bone poses, or trajectory frame.
 This is the one-handed manipulation stage on either side. F generation, saving,
 baking, runtime playback and two-handed behavior still require their own scoped
 integration; this editor transaction does not establish their parity.
+
+### Shared arm material frame — 2026-10-28
+
+`CombatArmHingeFrameResolver` derives a material hinge from immutable imported
+Forearm-rest-in-Upperarm and Hand-rest-in-Forearm transforms. Their offsets name
+their parent bone frames; these are not anonymous authored points. The imported
+bent rest establishes the direction. A collinear rest reports missing calibration
+instead of inventing a world pole or using an arbitrary current pose.
+
+Live inputs are Skeleton3D-relative Upperarm, Forearm and Hand poses. The output
+Upperarm basis is converted through its current Clavicle parent. Both ancestry
+and model scale remain owned by the existing skeleton chain to `RL_BoneRoot`.
+Prepared inputs use the captured replay reference, `parent_indices` and
+`parent_reference_transforms`; the same value-only rule operates in that common
+reference. Translation cancels in segment differences. The result is independent
+of scene/world position, rotation and uniform scale.
+
+Forearm's parent-relative rotation compensates the changed Upperarm basis, so
+this operation preserves solved elbow/wrist positions and the Hand reference
+orientation. It does not translate joints, re-acquire a grip or choose new reach
+targets. Dedicated twist helpers retain their local deformation values; their
+branch inherits the corrected parent frame once.
+
+The shared solved-pose writer applies the rule after interpolation for complete
+supplied arms, including F, entry and equipped replay. Partial channel writes do
+not gain authority over another arm. Captured-pose schema and runtime-cache
+revision distinguish the new material-frame policy from old pure-swing data;
+authored targets are retained. See the current BODY-01 task note for test results
+and the remaining anatomical-profile and skin-quality limits of this rule.

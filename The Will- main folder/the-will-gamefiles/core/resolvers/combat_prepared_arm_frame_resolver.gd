@@ -3,14 +3,68 @@ class_name CombatPreparedArmFrameResolver
 
 ## Value-only extraction of PlayerHumanoidRig.realize_prepared_support_hand_frame.
 ## No acquisition, collision queries, CCD, scene mutation or new anatomy limits.
-## Only the four named arm rotations may change. All coordinates share the
-## captured replay reference; limits and initial helper rotations come from rig.
+## Arm following changes the four named main rotations; distal material indexing
+## changes only its two forearm helpers. All coordinates share the captured replay
+## reference; limits and helper neutral rotations come from the rig.
+const HingeFrame = preload("res://core/resolvers/combat_arm_hinge_frame_resolver.gd")
+const ForearmIndex = preload("res://core/resolvers/combat_forearm_hand_index_resolver.gd")
+const WristMotion = preload("res://core/resolvers/combat_wrist_motion_resolver.gd")
 const FRAME_EPSILON := 0.00005
 # Accepted hand-to-target positional residual, in metres. Angular and internal
 # correction precision remain independent of this gameplay allowance.
 const POSITION_TOLERANCE_METERS := 0.005
 # Maximum absolute deviation from the target: +/-0.025 degrees (0.05 total).
 const ANGULAR_TOLERANCE_RADIANS := deg_to_rad(0.025)
+
+## Canonicalize complete captured arm chains after pose interpolation, including
+## a free arm that has no weapon attachment. No reach solve or grip acquisition.
+## Minimal/partial pose fixtures without a complete named chain stay untouched.
+static func normalize_material_frames(pose: Dictionary) -> Dictionary:
+	var source: Variant = pose.get("pose_rotations", PackedVector4Array())
+	if not source is PackedVector4Array:
+		return _fail("material_frame_rotation_layout_invalid")
+	var rotations: PackedVector4Array = source.duplicate()
+	var wrist_states: Dictionary = pose.get("wrist_states_by_slot", {}).duplicate(true)
+	var diagnostics := {"checked_slots": [], "changed": false, "ik_calls": 0, "acquisition_calls": 0, "forearm_hand_index": {}}
+	var result := {"valid": true, "reason": "", "pose_rotations": rotations, "wrist_states_by_slot": wrist_states, "diagnostics": diagnostics}
+	var packets: Variant = pose.get("arm_constraints_by_slot", {})
+	if not packets is Dictionary or packets.is_empty():
+		return result
+	var names: Array = pose.get("bone_names", [])
+	for slot: Variant in packets:
+		var packet: Variant = packets[slot]
+		if not packet is Dictionary:
+			continue
+		var indices: Array[int] = []
+		for role: String in ["clavicle", "upperarm", "forearm", "hand"]:
+			var bone: StringName = StringName(packet.get(role + "_bone", StringName()))
+			var index: int = names.find(bone)
+			if bone == StringName() or index < 0:
+				break
+			indices.append(index)
+		if indices.size() != 4:
+			if packet.has("forearm_hand_index_revision") or packet.has("wrist_model_revision"):
+				return _fail("forearm_hand_index_incomplete_arm").merged({"hand_slot": slot})
+			continue
+		for field: String in ["parent_indices", "parent_reference_transforms", "bone_rest_transforms", "pose_positions", "pose_rotations", "pose_scales"]:
+			if not pose.has(field) or pose[field].size() != names.size():
+				return _fail("material_frame_incomplete_" + field).merged({"hand_slot": slot})
+		for link: int in range(1, indices.size()):
+			if pose.parent_indices[indices[link]] != indices[link - 1]:
+				return _fail("unexpected_arm_hierarchy").merged({"hand_slot": slot})
+		var normalized: Dictionary = _enforce_material_hinge_frame(pose, rotations, indices)
+		if not normalized.valid:
+			return normalized.merged({"hand_slot": slot})
+		var indexed: Dictionary = _enforce_forearm_hand_index(pose, rotations, indices, packet)
+		if not indexed.valid:
+			return indexed.merged({"hand_slot": slot})
+		if indexed.has("accepted_wrist_state"):
+			wrist_states[slot] = indexed.accepted_wrist_state
+		diagnostics.forearm_hand_index[slot] = indexed.get("diagnostics", {})
+		diagnostics.checked_slots.append(slot)
+	diagnostics.changed = rotations != source
+	result.pose_rotations = rotations
+	return result
 
 static func resolve(pose: Dictionary, requested_hand_reference: Transform3D, constraints: Dictionary) -> Dictionary:
 	var validation: Dictionary = _validate(pose, constraints)
@@ -33,6 +87,16 @@ static func resolve(pose: Dictionary, requested_hand_reference: Transform3D, con
 	var helper_check: Dictionary = _check_helpers(pose, constraints)
 	if not helper_check.valid:
 		return helper_check
+	# A hand endpoint can be correct while the material elbow frame is reversed.
+	# Normalize that frame before the positional fast path, using the same rest
+	# calibration as live authoring. Input snapshots remain immutable.
+	var initial_frame: Dictionary = _enforce_material_hinge_frame(pose, rotations, indices)
+	if not initial_frame.valid:
+		return initial_frame
+	fk = forward_kinematics(pose, rotations)
+	if not fk.valid:
+		return fk
+	original = fk.transforms
 	var root: Vector3 = original[c].origin
 	var shoulder: Vector3 = original[u].origin
 	var elbow: Vector3 = original[f].origin
@@ -45,10 +109,23 @@ static func resolve(pose: Dictionary, requested_hand_reference: Transform3D, con
 	var wrist_reference: float = _wrist_twist(requested_hand_reference, desired_forearm, hand_rest)
 	var initial_metrics: Dictionary = _metrics(original, indices, requested_hand_reference, hand_rest, wrist_reference, constraints)
 	initial_metrics["upperarm_axial_twist_rad"] = _upperarm_twist(pose, rotations, u)
-	# Existing exact destinations remain byte-for-byte identical, including a
-	# legal authored elbow branch. This is also the idempotent follow case.
+	# Already-correct destinations remain unchanged. A material-frame correction
+	# is reported even when no hand-target following was necessary.
 	if bool(initial_metrics.valid):
-		return initial_metrics.merged({"pose_rotations": rotations, "changed": false, "wrist_swing_used": false, "helper_twists": helper_check.twists})
+		var indexed: Dictionary = _enforce_forearm_hand_index(pose, rotations, indices, constraints)
+		if not indexed.valid:
+			return indexed
+		var accepted_fk: Dictionary = forward_kinematics(pose, rotations)
+		if not accepted_fk.valid:
+			return accepted_fk
+		initial_metrics = _metrics(accepted_fk.transforms, indices, requested_hand_reference, hand_rest, wrist_reference, constraints)
+		if not initial_metrics.valid:
+			return initial_metrics
+		initial_metrics["upperarm_axial_twist_rad"] = _upperarm_twist(pose, rotations, u)
+		helper_check = _check_updated_helpers(pose, rotations, constraints)
+		if not helper_check.valid:
+			return helper_check
+		return initial_metrics.merged({"pose_rotations": rotations, "changed": rotations != pose.pose_rotations, "wrist_swing_used": false, "helper_twists": helper_check.twists, "material_hinge_underdetermined": initial_frame.underdetermined_bend, "forearm_hand_index": indexed.get("diagnostics", {}), "wrist_states_by_slot": _updated_wrist_states(pose, constraints, indexed)})
 	var l1: float = root.distance_to(shoulder)
 	var l2: float = shoulder.distance_to(elbow)
 	var l3: float = desired_forearm.origin.distance_to(requested_hand_reference.origin)
@@ -130,20 +207,104 @@ static func resolve(pose: Dictionary, requested_hand_reference: Transform3D, con
 	_rotate_toward(pose, rotations, u, f, desired_forearm.origin)
 	_set_reference_basis(pose, rotations, f, desired_forearm.basis)
 	rotations[h] = _vector(hand_local.basis.orthonormalized().get_rotation_quaternion())
-	_enforce_upperarm_swing(pose, rotations, indices, constraints.slot_id)
+	var final_frame: Dictionary = _enforce_material_hinge_frame(pose, rotations, indices)
+	if not final_frame.valid:
+		return final_frame
+	var indexed: Dictionary = _enforce_forearm_hand_index(pose, rotations, indices, constraints)
+	if not indexed.valid:
+		return indexed
+	helper_check = _check_updated_helpers(pose, rotations, constraints)
+	if not helper_check.valid:
+		return helper_check
 	var realized: Dictionary = forward_kinematics(pose, rotations)
 	if not realized.valid:
 		return realized
 	var metrics: Dictionary = _metrics(realized.transforms, indices, requested_hand_reference, hand_rest, wrist_reference, constraints)
-	metrics["changed"] = true
+	metrics["changed"] = rotations != pose.pose_rotations
+	metrics["material_hinge_underdetermined"] = final_frame.underdetermined_bend
 	metrics["upperarm_axial_twist_rad"] = _upperarm_twist(pose, rotations, u)
 	metrics["wrist_swing_used"] = wrist_swing
 	metrics["helper_twists"] = helper_check.twists
+	metrics["forearm_hand_index"] = indexed.get("diagnostics", {})
+	metrics["wrist_states_by_slot"] = _updated_wrist_states(pose, constraints, indexed)
 	metrics["shoulder_displacement_m"] = shoulder.distance_to(realized.transforms[u].origin)
 	metrics["elbow_displacement_m"] = elbow.distance_to(realized.transforms[f].origin)
 	if metrics.valid:
 		metrics["pose_rotations"] = rotations
 	return metrics
+
+## Capture's first twist chain is Forearm; Upperarm helpers remain untouched.
+## Old minimal fixtures lacking these helpers have no new indexing contract.
+## A packet declaring the revision must provide the complete real chain.
+static func _enforce_forearm_hand_index(pose: Dictionary, rotations: PackedVector4Array, indices: Array[int], constraints: Dictionary) -> Dictionary:
+	var strict: bool = constraints.has("forearm_hand_index_revision") or constraints.has("wrist_model_revision")
+	var slot: StringName = StringName(constraints.get("slot_id", StringName()))
+	if strict and String(constraints.get("forearm_hand_index_revision", "")) != ForearmIndex.REVISION:
+		return _fail("forearm_hand_index_revision_mismatch").merged({"hand_slot": slot})
+	var chains: Array = constraints.get("twist_chains", [])
+	var chain: Array = chains[0] if not chains.is_empty() and chains[0] is Array else []
+	var helper_indices: Array[int] = []
+	if chain.size() == 2:
+		for name: Variant in chain:
+			var index: int = pose.bone_names.find(StringName(name))
+			if index < 0:
+				break
+			helper_indices.append(index)
+	if helper_indices.size() != 2:
+		if strict:
+			return _fail("forearm_hand_index_incomplete_helpers").merged({"hand_slot": slot})
+		return {"valid": true, "diagnostics": {"skipped_legacy_incomplete_helpers": true}}
+	var f: int = indices[2]
+	var h: int = indices[3]
+	var p: int = helper_indices[0]
+	var d: int = helper_indices[1]
+	if pose.parent_indices[p] != f or pose.parent_indices[d] != p or pose.parent_indices[h] != f:
+		return _fail("forearm_hand_index_unexpected_hierarchy").merged({"hand_slot": slot})
+	var neutrals: Dictionary = constraints.get("twist_neutral_rotations", {})
+	for index: int in helper_indices:
+		if not neutrals.get(pose.bone_names[index]) is Quaternion:
+			return _fail("forearm_hand_index_missing_neutral").merged({"hand_slot": slot, "bone": pose.bone_names[index]})
+	for key: String in ["limb_twist_limit_radians", "joint_epsilon_degrees"]:
+		if not constraints.has(key) or not (constraints[key] is float or constraints[key] is int):
+			return _fail("forearm_hand_index_missing_limit").merged({"hand_slot": slot})
+	var fk: Dictionary = forward_kinematics(pose, rotations)
+	if not fk.valid:
+		return fk
+	if String(constraints.get("wrist_model_revision", "")) != WristMotion.REVISION:
+		return _fail("prepared_wrist_model_missing_or_obsolete").merged({"hand_slot": slot})
+	var calibration: Dictionary = constraints.get("wrist_calibration", {})
+	var profile: Dictionary = constraints.get("wrist_profile", {})
+	var previous: Dictionary = pose.get("wrist_states_by_slot", {}).get(slot, {})
+	var wrist: Dictionary = WristMotion.resolve(fk.transforms[f], fk.transforms[h], calibration, profile, previous)
+	if not wrist.get("valid", false):
+		return wrist.merged({"hand_slot": slot})
+	_set_reference_basis(pose, rotations, h, wrist.accepted_hand_basis)
+	var accepted_hand: Transform3D = fk.transforms[h]
+	accepted_hand.basis = wrist.accepted_hand_basis
+	# The semantic wrist owner allocates pronation separately from its two
+	# bends. Deformation receives only accepted rho; never extract it from Hand.
+	var result: Dictionary = ForearmIndex.distribute(fk.transforms[f], accepted_hand,
+		pose.bone_rest_transforms[p].basis, pose.bone_rest_transforms[d].basis, pose.bone_rest_transforms[h].basis,
+		float(constraints.limb_twist_limit_radians), deg_to_rad(float(constraints.joint_epsilon_degrees)), float(wrist.accepted_state.rho))
+	if not result.valid:
+		return result.merged({"hand_slot": slot})
+	rotations[p] = _vector(result.proximal_rotation)
+	rotations[d] = _vector(result.distal_rotation)
+	result["accepted_wrist_state"] = wrist.accepted_state.duplicate(true)
+	result["diagnostics"]["wrist_model"] = wrist.get("diagnostics", {})
+	result["diagnostics"]["wrist_orientation_error_radians"] = wrist.get("orientation_error_radians", 0.0)
+	return result
+
+static func _updated_wrist_states(pose: Dictionary, constraints: Dictionary, indexed: Dictionary) -> Dictionary:
+	var states: Dictionary = pose.get("wrist_states_by_slot", {}).duplicate(true)
+	if indexed.has("accepted_wrist_state"):
+		states[constraints.slot_id] = indexed.accepted_wrist_state.duplicate(true)
+	return states
+
+static func _check_updated_helpers(pose: Dictionary, rotations: PackedVector4Array, constraints: Dictionary) -> Dictionary:
+	var updated: Dictionary = pose.duplicate()
+	updated.pose_rotations = rotations
+	return _check_helpers(updated, constraints)
 
 static func forward_kinematics(pose: Dictionary, rotations: PackedVector4Array = PackedVector4Array()) -> Dictionary:
 	var resolved: PackedVector4Array = rotations if not rotations.is_empty() else pose.pose_rotations
@@ -196,33 +357,34 @@ static func _direction_swing(from: Vector3, to: Vector3) -> Quaternion:
 	var axis: Vector3 = from.cross(to)
 	return Quaternion(axis.normalized(), atan2(axis.length(), clampf(from.dot(to), -1.0, 1.0))).normalized() if axis.length_squared() > 1.0e-16 else Quaternion(from, to).normalized()
 
-static func _enforce_upperarm_swing(pose: Dictionary, rotations: PackedVector4Array, indices: Array[int], slot: StringName) -> void:
-	var globals: Array[Transform3D] = forward_kinematics(pose, rotations).transforms
+static func _enforce_material_hinge_frame(pose: Dictionary, rotations: PackedVector4Array, indices: Array[int]) -> Dictionary:
+	var fk: Dictionary = forward_kinematics(pose, rotations)
+	if not fk.valid:
+		return fk
+	var globals: Array[Transform3D] = fk.transforms
 	var c: int = indices[0]
 	var u: int = indices[1]
 	var f: int = indices[2]
 	var h: int = indices[3]
-	var direction: Vector3 = globals[f].origin - globals[u].origin
-	if direction.length_squared() <= 0.000001:
-		return
-	var upper_rest: Basis = pose.bone_rest_transforms[u].basis.orthonormalized()
-	var neutral_direction: Vector3 = (upper_rest.inverse() * globals[c].basis.orthonormalized().inverse() * direction.normalized()).normalized()
-	var polar: float = acos(clampf(neutral_direction.y, -1.0, 1.0))
-	var swing := Quaternion.IDENTITY
-	if polar > 0.000001:
-		var axis: Vector3 = Vector3.UP.cross(neutral_direction)
-		axis = Vector3.BACK if axis.length_squared() <= 0.000001 else axis.normalized()
-		if slot == &"hand_left":
-			axis = -axis
-			polar = -polar
-		swing = Quaternion(axis, polar).normalized()
-	var upper_parent: Basis = (upper_rest * Basis(swing)).orthonormalized()
-	var upper_reference: Basis = (globals[c].basis.orthonormalized() * upper_parent).orthonormalized()
+	var resolved: Dictionary = HingeFrame.resolve(
+		globals[u], globals[f], globals[h],
+		pose.bone_rest_transforms[f], pose.bone_rest_transforms[h]
+	)
+	if not resolved.valid:
+		return resolved
+	var upper_reference: Basis = resolved.upperarm_basis
+	if globals[u].basis.orthonormalized().is_equal_approx(upper_reference):
+		return resolved
+	# Move the material frame without changing the acquired Forearm/Hand frame.
+	# Uniform scale remains in the original local pose channels.
+	var upper_parent: Basis = (globals[c].basis.orthonormalized().inverse() * upper_reference).orthonormalized()
 	rotations[u] = _vector(upper_parent.get_rotation_quaternion())
 	rotations[f] = _vector((upper_reference.inverse() * globals[f].basis.orthonormalized()).orthonormalized().get_rotation_quaternion())
 	var after: Array[Transform3D] = forward_kinematics(pose, rotations).transforms
 	if after[h].origin.distance_to(globals[h].origin) > FRAME_EPSILON:
 		_rotate_toward(pose, rotations, f, h, globals[h].origin)
+		_set_reference_basis(pose, rotations, h, globals[h].basis)
+	return resolved
 
 static func _metrics(globals: Array[Transform3D], indices: Array[int], target: Transform3D, hand_rest: Basis, wrist_reference: float, constraints: Dictionary) -> Dictionary:
 	var c: Transform3D = globals[indices[0]]
@@ -235,13 +397,18 @@ static func _metrics(globals: Array[Transform3D], indices: Array[int], target: T
 	var twist_error: float = absf(_wrap(_wrist_twist(h, f, hand_rest) - wrist_reference))
 	var shoulder_angle: float = rad_to_deg((c.origin - u.origin).angle_to(f.origin - u.origin))
 	var elbow_angle: float = rad_to_deg((u.origin - f.origin).angle_to(h.origin - f.origin))
-	var valid: bool = position_error <= POSITION_TOLERANCE_METERS and angle_error <= ANGULAR_TOLERANCE_RADIANS and twist_error <= ANGULAR_TOLERANCE_RADIANS and _in_range(shoulder_angle, constraints.shoulder_min_degrees, constraints.shoulder_max_degrees, constraints.joint_epsilon_degrees) and _in_range(elbow_angle, constraints.elbow_min_degrees, constraints.elbow_max_degrees, constraints.joint_epsilon_degrees)
+	# Combined semantic wrist bends can contain generic swing-twist axial
+	# content. Keep that diagnostic; the new wrist model owns its acceptance.
+	var twist_accepted: bool = String(constraints.get("wrist_model_revision", "")) == WristMotion.REVISION or twist_error <= ANGULAR_TOLERANCE_RADIANS
+	var valid: bool = position_error <= POSITION_TOLERANCE_METERS and angle_error <= ANGULAR_TOLERANCE_RADIANS and twist_accepted and _in_range(shoulder_angle, constraints.shoulder_min_degrees, constraints.shoulder_max_degrees, constraints.joint_epsilon_degrees) and _in_range(elbow_angle, constraints.elbow_min_degrees, constraints.elbow_max_degrees, constraints.joint_epsilon_degrees)
 	var bend: Vector3 = (f.origin - u.origin).cross(h.origin - f.origin)
 	return {"valid": valid, "reason": "" if valid else "complete_arm_frame_residual", "position_error_m": position_error, "orientation_error_rad": angle_error, "wrist_twist_change_rad": twist_error, "shoulder_angle_degrees": shoulder_angle, "elbow_angle_degrees": elbow_angle, "bend_normal_reference": bend.normalized(), "bend_normal_valid": bend.length_squared() > 0.00000001, "bone_lengths_preserved": true}
 
 static func _check_helpers(pose: Dictionary, constraints: Dictionary) -> Dictionary:
 	var twists: Dictionary = {}
-	for chain: Array in constraints.twist_chains:
+	for chain_index: int in constraints.twist_chains.size():
+		var chain: Array = constraints.twist_chains[chain_index]
+		var semantic_forearm: bool = chain_index == 0 and String(constraints.get("wrist_model_revision", "")) == WristMotion.REVISION
 		var count := 0
 		for name: StringName in chain:
 			if pose.bone_names.has(name): count += 1
@@ -249,9 +416,13 @@ static func _check_helpers(pose: Dictionary, constraints: Dictionary) -> Diction
 			var index: int = pose.bone_names.find(name)
 			if index < 0:
 				continue
-			if not constraints.twist_neutral_rotations.has(name):
-				return _fail("missing_helper_twist_neutral").merged({"bone": name})
-			var neutral: Quaternion = constraints.twist_neutral_rotations[name]
+			var neutral: Quaternion
+			if semantic_forearm:
+				neutral = pose.bone_rest_transforms[index].basis.orthonormalized().get_rotation_quaternion().normalized()
+			else:
+				if not constraints.twist_neutral_rotations.has(name):
+					return _fail("missing_helper_twist_neutral").merged({"bone": name})
+				neutral = constraints.twist_neutral_rotations[name]
 			var delta: Quaternion = (neutral.inverse() * _quaternion(pose.pose_rotations[index])).normalized()
 			var twist: float = _signed_twist(delta, constraints.limb_twist_axis)
 			twists[name] = twist

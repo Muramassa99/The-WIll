@@ -8,6 +8,7 @@ const CombatAnimationMotionNodeScript = preload("res://core/models/combat_animat
 const CombatAnimationTrajectoryVolumeResolverScript = preload("res://core/resolvers/combat_animation_trajectory_volume_resolver.gd")
 const CombatOriginRecordScript = preload("res://core/models/combat_origin_record.gd")
 const GripTransitionResolver = preload("res://core/resolvers/combat_grip_transition_resolver.gd")
+const PreparedPose = preload("res://core/models/combat_prepared_pose.gd")
 
 const CURVE_INTERVAL_EPSILON_METERS := 0.000001
 const CURVE_SEGMENT_SAMPLE_STEPS := 12
@@ -73,6 +74,7 @@ var current_solved_upper_body_bone_names: Array[StringName] = []
 var current_solved_upper_body_pose_positions: Array[Vector3] = []
 var current_solved_upper_body_pose_rotations: Array[Quaternion] = []
 var current_solved_upper_body_pose_scales: Array[Vector3] = []
+var current_solved_forearm_hand_calibration: Dictionary = {}
 var current_solved_weapon_position_reference_local: Vector3 = Vector3.ZERO
 var current_solved_weapon_rotation_reference_local: Quaternion = Quaternion.IDENTITY
 var current_solved_weapon_scale_reference_local: Vector3 = Vector3.ONE
@@ -490,6 +492,36 @@ func _sync_runtime_clip_solved_replay_metadata() -> void:
 	var anchor_paths: Array = runtime_clip.get("baked_solved_anchor_node_paths") as Array
 	for path_variant: Variant in anchor_paths:
 		current_solved_anchor_node_paths.append(StringName(path_variant))
+	_sync_runtime_clip_forearm_hand_calibration()
+
+func _sync_runtime_clip_forearm_hand_calibration() -> void:
+	# Reuse saved body calibration once per clip, never infer neutral rotations
+	# from the currently displayed frame or duplicate it into the saved asset.
+	for node: Resource in motion_node_chain:
+		if node == null:
+			continue
+		var snapshot: Dictionary = node.get("prepared_pose") as Dictionary
+		current_solved_forearm_hand_calibration = _calibration_from_prepared_pose(snapshot)
+		if not current_solved_forearm_hand_calibration.is_empty():
+			return
+	# Entry/generated clips may have no prepared payload on their synthetic node.
+	current_solved_forearm_hand_calibration = _calibration_from_prepared_pose(
+		runtime_clip.get("prepared_entry_destination") as Dictionary)
+
+func _calibration_from_prepared_pose(snapshot: Dictionary) -> Dictionary:
+	if not bool(PreparedPose.validate(snapshot).get("valid", false)):
+		return {}
+	if snapshot.bone_names != current_solved_upper_body_bone_names:
+		return {}
+	var constraints: Variant = snapshot.get("arm_constraints_by_slot", {})
+	if not constraints is Dictionary or constraints.is_empty():
+		return {}
+	return {
+		"bone_names": snapshot.bone_names.duplicate(),
+		"bone_rest_transforms": snapshot.bone_rest_transforms.duplicate(),
+		"arm_constraints_by_slot": constraints.duplicate(true),
+		"wrist_states_by_slot": snapshot.get("wrist_states_by_slot", {}).duplicate(true),
+	}
 
 func _sync_runtime_clip_origin_metadata() -> void:
 	if runtime_clip == null:
@@ -780,6 +812,7 @@ func _clear_current_solved_replay_pose(clear_metadata: bool = false) -> void:
 		current_solved_weapon_reference_origin_id = CombatOriginRecordScript.ORIGIN_SOLVED_REPLAY_REFERENCE
 		current_solved_anchor_origin_id = CombatOriginRecordScript.ORIGIN_WEAPON_ROOT
 		current_solved_upper_body_bone_names.clear()
+		current_solved_forearm_hand_calibration = {}
 		current_solved_anchor_node_paths.clear()
 
 func _is_runtime_clip_solved_replay_bridge_frame(frame_index: int) -> bool:

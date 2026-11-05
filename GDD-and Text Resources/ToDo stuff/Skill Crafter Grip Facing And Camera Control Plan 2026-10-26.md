@@ -156,3 +156,74 @@ Follow-up two-hand verification and correction:
 - Source library SHA-256 remains `83d5746a8af2e6bbfc89e969c234c5a02f5f89b4fc6ba8b74b1bbfb6c9276c76`. All test saves remain isolated under `tmp`. No Git index/history action was performed.
 
 Ready for the user's manual check: Space to the dark-green cube immediately after wrist roll, drag horizontally, release, then press **Reacquire grip**. Existing green-ball wrist roll retains its behavior and limits. These checks establish the new control and lifecycle on this weapon; the existing arm/body deformation issues and broader SC-03 matrix remain separate.
+
+## Known F/Save failure feedback on motion nodes, 2026-10-28
+
+> 2026-11-05 acquisition workflow update: the earlier manual-only cube-release
+> behavior and its manual-only verifier expectations above are superseded by
+> the user's automatic acquisition request. See the dated section at the end.
+
+The motion-node list now colors a row red when an existing F/Save preparation attempt identifies a specific endpoint or incoming transition that cannot be prepared. It adds a short status suffix and a tooltip containing the reported reason. This is feedback from the existing validation path, not an additional solve or a global validation pass.
+
+- **Endpoint failure:** mark that visible node with `pose not ready`. Hidden Reset is excluded from visible numbering. Readiness and endpoint-recording results retain their existing one-based visible node convention.
+- **Failure between nodes:** mark the destination with `incoming transition failed`. The tooltip identifies the source and destination, for example `N01 -> N02`, and states that this does not mean either endpoint pose is invalid. Preparation stops at its first known failing sample/segment; the highlight is not a list of every possible failure later in the skill.
+- **Unlocated failure:** keep the existing overall error/status message without guessing a red row. Missing infrastructure, ambiguous legacy indices, and a compiled chain that cannot be matched to its authored source do not accuse a node.
+- **Feedback lifetime:** feedback is session-only and is not written into the skill or prepared-pose packets. Selection/navigation preserves the warning. An authored edit or successfully validated preparation clears it. Automatic pose capture alone does not clear the warning merely because the user navigated to another node.
+- **Identity:** the builder now supplies explicit endpoint/transition scope, source/destination indices and IDs while preserving its older diagnostic fields. The UI checks compiled/action chain correspondence and retains the actual authored Resource identity. This avoids attaching a warning to the wrong node when legacy IDs are duplicated by insertion; a removed/replaced node does not inherit another object's warning.
+
+Production owners are `runtime/combat/combat_animation_station_ui.gd` and `core/resolvers/combat_prepared_pose_track_builder.gd`. The builder change is diagnostic metadata only: no grip acquisition, arm constraints, tolerances, trajectory rules or failure acceptance changed. Native ItemList foreground color and tooltip APIs were checked against the [official Godot 4.7 ItemList documentation](https://docs.godotengine.org/en/4.7/classes/class_itemlist.html).
+
+### Focused verification
+
+`tools/verify_combat_motion_node_validation_feedback.gd` reuses the existing prepared-track fixture and exercises the actual UI preparation -> runtime compiler -> sampler -> prepared-track completion path. Actual builder failures cover endpoint context mismatch, interior attachment rejection, and a missing open-finger packet for a grip-style transition. The checks also cover duplicate IDs, selection retention, edit/success clearing, readiness/capture indexing, unchanged input packets and failures that cannot safely be mapped.
+
+- Headless Godot 4.7: `godot_runs/sc_motion_node_validation_feedback_20261028/report.json`, **26/26 passed**.
+- Rendered Godot 4.7, current feedback-clearing behavior: `godot_runs/sc_motion_node_validation_feedback_20261028_rendered/report.json`, **26/26 passed**. The saved `incoming_transition_feedback.png` was inspected: selected N02 remained red and displayed the incoming-transition failure suffix.
+- These fixtures use synthetic captured endpoints and an in-memory WIP. They do not modify the real player library and do not certify a live grip, complete saved/equipped playback, or reproduce/fix the user's original `elbow_range_has_no_circle_solution` failure. That mechanical blocker remains separate from this feedback addition.
+
+## Weapon-facing cube automatic acquisition, 2026-11-05
+
+User now requests the dark-green cube to use automatic acquisition fallback
+instead of requiring the manual Reacquire button after every roll. The body
+remains stationary during cube manipulation. Grip acquisition stays suspended
+while held; completion of the gesture calls the existing acquisition entrance.
+A settled no-motion click does not restart a valid grip. If a pending acquisition
+was suspended by pressing the cube, releasing it resumes through that entrance.
+The manual button remains available for an explicit retry after failure.
+
+Owners: station UI `_finalize_preview_drag` (shared release/navigation/focus
+finalization), and preview presenter prepared-pose restoration. Old saved rolled
+poses lacking a durable grip now use the ordinary one-attempt recovery route
+instead of restoring a permanent manual-only suspension. Intact grips still
+restore without acquiring again. Internal suspension protects held gestures;
+this is not per-mouse-motion solving. Low-level cumulative gesture samples still
+require completion by their caller.
+
+The preceding alignment and trajectory-writeback work remains authoritative:
+acquisition preserves chosen axial facing, seats against the stationary hand,
+and records corrected endpoints/guides when complete. No solver, anatomy, grip
+acceptance or wrist-roll change. Godot 4.7 [mouse-button press/release](https://docs.godotengine.org/en/4.7/classes/class_inputeventmousebutton.html)
+and [Control input](https://docs.godotengine.org/en/4.7/classes/class_control.html)
+documentation consulted.
+
+Fresh focused verification via `tools/verify_weapon_facing_auto_acquisition.gd`:
+
+- `godot_runs/facing_auto_R_20261105/manifest.json`: **29/29**. Actual cube
+  pointer events, no-motion click without acquisition, no solve or bone movement
+  while held, one primary acquisition on release, stationary body/wrists during
+  fitting, chosen facing transported by the required minimum alignment swing,
+  corrected endpoints and guide, R/F/Save reuse and durable grip on disk.
+- `godot_runs/facing_auto_legacy_R_20261105/manifest.json`: **12/12** in a fresh
+  process. Isolated saved nodes with the old manual-only warning and removed
+  grip provenance each recover once automatically on opening/navigation. F and
+  Save reuse the result. The optional legacy-facing fixture injection is in the
+  existing reopen verifier; no live saved data was altered to make the test pass.
+- Script checks and scoped diff-check passed. Original player-library hashes
+  stayed unchanged. All diagnostic games exited; user's editor remains open.
+
+Boundaries: fresh tests above are right-main single-hand normal grip. Prior
+left/right, reverse and two-hand acquisition evidence is historical, not rerun
+for this release-hook change. Application-focus-loss handling was not added;
+existing release, Space/focus-switch, navigation, RMB takeover and R/F/Save
+finalization paths share the modified handler. Only pointer release was newly
+exercised end to end here. Ordinary green-ball wrist roll remains unchanged.

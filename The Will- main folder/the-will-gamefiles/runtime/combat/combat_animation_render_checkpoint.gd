@@ -2,7 +2,7 @@ extends RefCounted
 
 ## In-memory continuation state for the existing preview rig. Never serialized.
 ## Camera state deliberately does not participate in pose suspension.
-static func capture(presenter, state: Dictionary) -> Dictionary:
+static func capture(presenter, state: Dictionary, motion_only: bool = false) -> Dictionary:
 	var root: Node3D = state.get("preview_root")
 	var pivot: Node3D = state.get("actor_pivot")
 	if not is_instance_valid(root) or not is_instance_valid(pivot):
@@ -11,11 +11,11 @@ static func capture(presenter, state: Dictionary) -> Dictionary:
 	var weapon: Node3D = root.get_meta("preview_held_item", null)
 	if not is_instance_valid(actor) or not is_instance_valid(weapon):
 		return {}
-	var rig: Dictionary = actor.capture_render_checkpoint()
+	var rig: Dictionary = actor.capture_render_checkpoint(motion_only)
 	if rig.is_empty():
 		return {}
 	var owner: Node = actor.get_node_or_null("PreparedGripAcquisition")
-	var grip: Dictionary = owner.capture_render_checkpoint() if owner != null else {}
+	var grip: Dictionary = (owner.capture_motion_checkpoint() if motion_only else owner.capture_render_checkpoint()) if owner != null else {}
 	if owner != null and grip.is_empty():
 		return {}
 	var nodes: Array = []
@@ -29,9 +29,11 @@ static func capture(presenter, state: Dictionary) -> Dictionary:
 		if is_instance_valid(node):
 			_capture_node(node, nodes, false)
 	return {"root": weakref(root), "actor": weakref(actor), "weapon": weakref(weapon),
+		"weapon_motion_state": presenter.weapon_motion_manipulator.capture_state(),
 		"rig": rig, "owner": weakref(owner) if owner != null else null, "grip": grip,
 		"nodes": nodes, "root_meta": _capture_meta(root, true),
-		"slot": presenter.preview_dominant_slot_id, "two_hand": presenter.preview_default_two_hand}
+		"slot": presenter.preview_dominant_slot_id, "two_hand": presenter.preview_default_two_hand,
+		"motion_only": motion_only, "process_frame": Engine.get_process_frames(), "physics_frame": Engine.get_physics_frames()}
 
 static func can_restore(snapshot: Dictionary) -> bool:
 	if snapshot.is_empty():
@@ -39,13 +41,19 @@ static func can_restore(snapshot: Dictionary) -> bool:
 	var root = snapshot.root.get_ref()
 	var actor = snapshot.actor.get_ref()
 	var weapon = snapshot.weapon.get_ref()
+	var motion_only: bool = bool(snapshot.get("motion_only", false))
+	if motion_only and (int(snapshot.get("process_frame", -1)) != Engine.get_process_frames() \
+		or int(snapshot.get("physics_frame", -1)) != Engine.get_physics_frames()):
+		return false
 	if not is_instance_valid(root) or not is_instance_valid(actor) or not is_instance_valid(weapon):
 		return false
-	if root.get_meta("preview_held_item", null) != weapon or not actor.can_restore_render_checkpoint(snapshot.rig):
+	if root.get_meta("preview_held_item", null) != weapon or not actor.can_restore_render_checkpoint(snapshot.rig, motion_only):
 		return false
 	if snapshot.owner != null:
 		var owner = snapshot.owner.get_ref()
-		if not is_instance_valid(owner) or not owner.can_restore_render_checkpoint(snapshot.grip):
+		if not is_instance_valid(owner):
+			return false
+		if not (owner.can_restore_motion_checkpoint(snapshot.grip) if motion_only else owner.can_restore_render_checkpoint(snapshot.grip)):
 			return false
 	for entry: Dictionary in snapshot.nodes:
 		var node = entry.node.get_ref()
@@ -66,6 +74,7 @@ static func restore(presenter, snapshot: Dictionary) -> bool:
 	if snapshot.owner != null:
 		snapshot.owner.get_ref()._restore_render_checkpoint_after_preflight(snapshot.grip)
 	snapshot.actor.get_ref()._restore_render_checkpoint_after_preflight(snapshot.rig)
+	presenter.weapon_motion_manipulator.restore_state(snapshot.get("weapon_motion_state", {}))
 	presenter.configure_preview_hand_setup(snapshot.slot, snapshot.two_hand)
 	return true
 

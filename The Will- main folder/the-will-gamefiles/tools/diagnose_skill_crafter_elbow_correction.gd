@@ -1,5 +1,7 @@
 extends "res://tools/diagnose_skill_crafter_body_motion.gd"
 
+const ElbowPreparedPoseContract = preload("res://core/models/combat_prepared_pose.gd")
+
 # One extension, one pull toward the shoulder, hold position, elbow gizmo only.
 # --elevations=0 preserves the original forward pose; positive angles tilt up.
 # Optional --lateral-factor=0.15 adds outward actor-X travel equal to 15% of the
@@ -52,6 +54,13 @@ func _run_thrust(ui: CombatAnimationStationUI, side: String, elevation: float) -
 	await _wait_frames(4)
 	_select_first_visible_skill_node(ui)
 	await _wait_frames(3)
+	# Reset now owns the node until its seated baseline is naturally recorded.
+	# Fixed frame waits can leave setup edits locked or overwritten by capture.
+	var baseline_ready: Dictionary = await _await_recorded_reset_baseline(ui)
+	correction_case["recorded_baseline_readiness"] = baseline_ready
+	if not bool(baseline_ready.get("ready", false)):
+		correction_case["reason"] = "baseline_not_ready"
+		return correction_case
 	var actor: Node3D = _get_preview_actor(ui)
 	var sk: Skeleton3D = actor.get_node("JosieModel/Josie/Skeleton3D") as Skeleton3D
 	var trajectory: Node3D = _get_trajectory_root(ui)
@@ -115,6 +124,39 @@ func _run_thrust(ui: CombatAnimationStationUI, side: String, elevation: float) -
 	await _correct_elbow(ui, sk, side, initial_radial_local)
 	correction_case["complete"] = correction_step == int(correction_case["expected_samples"]) and not correction_case.has("correction_failure")
 	return correction_case
+
+func _await_recorded_reset_baseline(ui: CombatAnimationStationUI) -> Dictionary:
+	var started: int = Time.get_ticks_msec()
+	var last_print: int = started - 5000
+	var state: Dictionary = {}
+	while Time.get_ticks_msec() - started < 40000:
+		var node: CombatAnimationMotionNode = ui.call("_get_active_motion_node") as CombatAnimationMotionNode
+		var preparation: Dictionary = ui.get_meta("last_baseline_preparation", {})
+		var node_current: bool = (
+			node != null
+			and node.prepared_pose_signature == ElbowPreparedPoseContract.node_pose_signature(node)
+			and bool(ElbowPreparedPoseContract.validate(node.prepared_pose).get("valid", false))
+		)
+		var recording_pending: bool = ui.is_motion_node_recording_pending()
+		var acquisition_pending: bool = ui.preview_presenter.is_grip_acquisition_pending(ui.preview_subviewport)
+		state = {
+			"ready": bool(preparation.get("ready", false)) and not recording_pending and not acquisition_pending and node_current,
+			"wait_ms": Time.get_ticks_msec() - started,
+			"baseline_preparation": preparation.duplicate(true),
+			"recording_pending": recording_pending,
+			"acquisition_pending": acquisition_pending,
+			"node_current": node_current,
+		}
+		if bool(state["ready"]):
+			return state
+		if Time.get_ticks_msec() - last_print >= 5000:
+			print("ELBOW_SEQUENCE waiting_recorded_baseline " + JSON.stringify(state))
+			last_print = Time.get_ticks_msec()
+		await _wait_frames(1)
+	state["ready"] = false
+	state["wait_ms"] = Time.get_ticks_msec() - started
+	state["timeout_ms"] = 40000
+	return state
 
 func _await_settled_setup(ui: CombatAnimationStationUI, side: String, started: int) -> Dictionary:
 	var state: Dictionary = await _await_applied_grip(ui, side)

@@ -87,10 +87,8 @@ func _record_pending(station: Node, request_current: Callable, presenter,
 			if Time.get_ticks_usec() >= next_progress_usec:
 				_report_progress(station, staged.size(), pending.size(), item, _acquisition_label(states))
 				next_progress_usec = Time.get_ticks_usec() + 250000
-			if presenter.is_grip_acquisition_pending(viewport):
-				candidate_key = ""
-				candidate_frame = -1
-				continue
+			# Capture the displayed finite endpoint after the same brief settling
+			# window. Grip acquisition/pose quality is diagnostic, not a wait gate.
 			var context: Dictionary = presenter.get_prepared_pose_capture_context(viewport, motion)
 			if not bool(context.get("valid", false)):
 				return _failure(String(context.get("reason", "endpoint_recording_pose_unavailable")), item, states)

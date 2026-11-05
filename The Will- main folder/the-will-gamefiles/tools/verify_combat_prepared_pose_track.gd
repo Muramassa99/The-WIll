@@ -9,6 +9,8 @@ const Origins = preload("res://core/models/combat_origin_record.gd")
 const Compiler = preload("res://core/resolvers/combat_animation_runtime_chain_compiler.gd")
 const Capture = preload("res://runtime/combat/combat_prepared_pose_capture.gd")
 const Attachment = preload("res://core/resolvers/combat_prepared_attachment_resolver.gd")
+const WristProfile = preload("res://core/defs/wrist_motion_profile_def.gd")
+const WristMotion = preload("res://core/resolvers/combat_wrist_motion_resolver.gd")
 var checks: Dictionary = {}
 
 func _init() -> void:
@@ -77,6 +79,8 @@ func _run() -> void:
 	_test_attachment_relationship_sampling()
 	_test_finger_style_transition()
 	_test_primary_hand_swap_compilation()
+	_test_advisory_recorded_pose(a, b, snapshots[0], snapshots[1], output_dir)
+	_test_warning_collections()
 	var ok := true
 	for passed: bool in checks.values():
 		ok = ok and passed
@@ -86,6 +90,16 @@ func _run() -> void:
 		file.store_string(JSON.stringify(report, "\t"))
 	print(JSON.stringify(report))
 	quit(0 if ok else 1)
+
+func _test_warning_collections() -> void:
+	var warning := {"reason": "wrist_motion_range", "node_index": 1}
+	var typed: Array[Dictionary] = []
+	var persisted: Array = [{"source": "existing_compile_diagnostic"}]
+	Builder.append_quality_warning(typed, warning)
+	Builder.append_quality_warning(persisted, warning)
+	Builder.append_quality_warning(persisted, warning)
+	_expect(typed.size() == 1 and persisted.size() == 2 and persisted[1] == typed[0], "typed_and_ui_resource_warning_lists_accept_and_deduplicate")
+	_expect(persisted[0] == {"source": "existing_compile_diagnostic"}, "warning_append_preserves_existing_compile_diagnostics")
 
 func _test_snapshot_identity(node: Resource, snapshot: Dictionary, output_dir: String) -> void:
 	var signature: String = PreparedPose.node_pose_signature(node)
@@ -121,8 +135,10 @@ func _test_attachment_contract(snapshot: Dictionary) -> void:
 	_expect(not PreparedPose.validate(value).valid, "attached_snapshot_requires_live_primary_constraints")
 	var primary: Dictionary = _constraint_packet(&"hand_right", &"Hand")
 	value["arm_constraints_by_slot"] = {&"hand_right": primary}
+	value["wrist_states_by_slot"] = {&"hand_right": {"rho": 0.0, "beta": 0.0, "gamma": 0.0}}
 	_expect(not PreparedPose.validate(value).valid, "attached_support_snapshot_requires_support_constraints")
 	value.arm_constraints_by_slot[&"hand_left"] = _constraint_packet(&"hand_left", &"Support")
+	value.wrist_states_by_slot[&"hand_left"] = {"rho": 0.0, "beta": 0.0, "gamma": 0.0}
 	_expect(PreparedPose.validate(value).valid, "attached_snapshot_with_both_constraint_packets_validates")
 	value.arm_constraints_by_slot[&"hand_left"].valid = false
 	_expect(not PreparedPose.validate(value).valid, "invalid_support_constraint_packet_is_rejected")
@@ -143,7 +159,41 @@ func _constraint_packet(slot: StringName, hand: StringName) -> Dictionary:
 		"forearm_bone": &"Support", "hand_bone": hand, "shoulder_min_degrees": 8.0,
 		"shoulder_max_degrees": 155.0, "elbow_min_degrees": 20.0, "elbow_max_degrees": 168.0,
 		"joint_epsilon_degrees": 0.05, "limb_twist_limit_radians": PI * 0.5, "limb_twist_axis": Vector3.UP,
-		"usable_reach_m": 1.0, "reference_up": Vector3.UP, "twist_chains": [], "twist_neutral_rotations": {}}
+		"usable_reach_m": 1.0, "reference_up": Vector3.UP, "twist_chains": [], "twist_neutral_rotations": {},
+		"wrist_model_revision": WristMotion.REVISION, "wrist_profile": WristProfile.new().as_dictionary(),
+		"wrist_calibration": {"valid": true, "revision": WristMotion.REVISION, "radial_sign": 1.0,
+			"neutral_anatomical_in_forearm": Basis.IDENTITY, "anatomical_in_hand_bone": Basis.IDENTITY}}
+
+func _test_advisory_recorded_pose(a: Resource, b: Resource, source: Dictionary, destination: Dictionary, output_dir: String) -> void:
+	var first := source.duplicate(true)
+	var last := destination.duplicate(true)
+	first["wrist_measurement_failures_by_slot"] = {&"hand_right": "wrist_pose_not_representable"}
+	first["quality_warnings"] = [{"reason": "wrist_pose_not_representable", "hand_slot": &"hand_right"}]
+	var snapshots: Array[Dictionary] = [first, last]
+	var before := var_to_bytes(snapshots)
+	var result: Dictionary = Builder.build(Baker.new().bake_from_motion_node_chain([a, b]), snapshots)
+	_expect(result.get("valid", false), "recorded_unrepresentable_pose_builds_playable_clip")
+	if result.get("valid", false):
+		var clip: Resource = result.clip
+		var frame := mini(3, clip.get_frame_count() - 1)
+		var ratio: float = float(clip.baked_frame_times[frame]) / float(b.transition_duration_seconds)
+		var raw: Dictionary = Builder.sample_pose(first, last, ratio)
+		_expect(clip.has_solved_replay_track() and clip.baked_solved_upper_body_pose_rotations[frame] == raw.pose_rotations,
+			"quality_fallback_preserves_recorded_bone_tween")
+		_expect(not result.quality_warnings.is_empty() and result.quality_warnings.size() < clip.get_frame_count(),
+			"quality_warnings_are_located_and_deduplicated")
+		_expect(clip.compile_diagnostics[-1].get("severity") == "warning", "quality_warning_persists_in_clip_diagnostics")
+		var saved := ResourceSaver.save(clip, output_dir.path_join("advisory_clip.tres"))
+		var loaded: Resource = ResourceLoader.load(output_dir.path_join("advisory_clip.tres"), "", ResourceLoader.CACHE_MODE_IGNORE) if saved == OK else null
+		_expect(loaded != null and loaded.has_solved_replay_track() and loaded.compile_diagnostics == clip.compile_diagnostics,
+			"advisory_clip_and_warnings_survive_save_load")
+	_expect(var_to_bytes(snapshots) == before, "advisory_builder_does_not_change_recorded_nodes")
+	var bad: Dictionary = Builder.sample_pose(first, last, 0.5)
+	bad.pose_positions[0] = Vector3(NAN, 0.0, 0.0)
+	_expect(not Builder.guide_sample(bad, first, last, 0.5, a, b).valid, "quality_flag_does_not_hide_corrupt_pose_channels")
+	_expect(Builder.is_pose_quality_failure("prepared_attachment_elbow_range_has_no_circle_solution")
+		and not Builder.is_pose_quality_failure("prepared_attachment_missing_constraint_forearm_bone"),
+		"mechanical_quality_is_separate_from_missing_data")
 
 func _test_attachment_relationship_sampling() -> void:
 	var basis := Basis(Quaternion(Vector3(1, 2, 3).normalized(), 0.63)).scaled(Vector3.ONE * 0.764)

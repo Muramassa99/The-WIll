@@ -966,6 +966,14 @@ func _apply_contact_group_runtime_clip_pose(
 	):
 		live_pose_presenter.configure_preview_hand_setup(previous_slot_id, previous_default_two_hand)
 		return resolved_playback_state
+	if bool(resolved_playback_state.get("solved_body_replay_invalid", false)):
+		# Body, helpers and weapon form one accepted pose. A rejected saved body
+		# must not fall through into live solving or detach the weapon from it.
+		live_pose_presenter.configure_preview_hand_setup(previous_slot_id, previous_default_two_hand)
+		resolved_playback_state["solved_replay_applied"] = false
+		resolved_playback_state["status"] = &"saved_body_pose_refresh_required"
+		resolved_playback_state["message"] = "Saved body pose could not be applied: " + String(resolved_playback_state.get("solved_body_replay_reason", "solved_body_pose_application_rejected"))
+		return resolved_playback_state
 	if bool(resolved_playback_state.get("grip_endcap_replay_invalid", false)):
 		# The baked bones, anchors and weapon are one pose. Preserve the last
 		# applied pose rather than falling through to a differently seated solve.
@@ -1137,10 +1145,16 @@ func _apply_solved_runtime_replay_frame(
 		held_item,
 		playback_state
 	)
+	playback_state.erase("grip_endcap_replay_invalid")
+	playback_state.erase("grip_endcap_replay_warning")
+	playback_state.erase("grip_endcap_replay_reason")
 	if not bool(end_bounds.get("valid", false)):
-		playback_state["grip_endcap_replay_invalid"] = true
 		playback_state["grip_endcap_replay_reason"] = end_bounds.get("reason", &"saved_grip_outside_handle_end_bounds")
-		return false
+		if not bool(end_bounds.get("quality_warning", false)):
+			playback_state["grip_endcap_replay_invalid"] = true
+			return false
+		playback_state["grip_endcap_replay_warning"] = true
+		playback_state["quality_warnings"] = [end_bounds.merged({"severity": "warning"})]
 	if not humanoid_rig.has_method("apply_runtime_solved_upper_body_pose_frame"):
 		return false
 	var bone_names: Array = playback_state.get("solved_upper_body_bone_names", []) as Array
@@ -1163,10 +1177,18 @@ func _apply_solved_runtime_replay_frame(
 		bone_positions,
 		bone_rotations,
 		bone_scales,
-		1.0
+		1.0,
+		playback_state.get("solved_forearm_hand_calibration", {})
 	))
 	if not pose_applied:
+		var validation: Dictionary = humanoid_rig.get_meta("last_solved_body_replay_validation", {}) as Dictionary
+		playback_state["solved_replay_applied"] = false
+		playback_state["solved_body_replay_invalid"] = true
+		var reason: String = String(validation.get("reason", ""))
+		playback_state["solved_body_replay_reason"] = reason if not reason.is_empty() else "solved_body_pose_application_rejected"
 		return false
+	playback_state.erase("solved_body_replay_invalid")
+	playback_state.erase("solved_body_replay_reason")
 	var reference_transform: Transform3D = live_pose_presenter._resolve_trajectory_authoring_transform(humanoid_rig)
 	var weapon_position_reference_local: Vector3 = playback_state.get("solved_weapon_position_reference_local", Vector3.ZERO) as Vector3
 	var weapon_rotation_reference_local: Quaternion = playback_state.get("solved_weapon_rotation_reference_local", Quaternion.IDENTITY) as Quaternion
@@ -1645,6 +1667,7 @@ func _build_playback_state() -> Dictionary:
 		"solved_upper_body_pose_positions": chain_player.current_solved_upper_body_pose_positions.duplicate(),
 		"solved_upper_body_pose_rotations": chain_player.current_solved_upper_body_pose_rotations.duplicate(),
 		"solved_upper_body_pose_scales": chain_player.current_solved_upper_body_pose_scales.duplicate(),
+		"solved_forearm_hand_calibration": chain_player.current_solved_forearm_hand_calibration,
 		"solved_weapon_position_reference_local": chain_player.current_solved_weapon_position_reference_local,
 		"solved_weapon_rotation_reference_local": chain_player.current_solved_weapon_rotation_reference_local,
 		"solved_weapon_scale_reference_local": chain_player.current_solved_weapon_scale_reference_local,
@@ -1723,6 +1746,7 @@ func _build_idle_playback_state(effective_motion_node: CombatAnimationMotionNode
 		"solved_upper_body_pose_positions": idle_chain_player.current_solved_upper_body_pose_positions.duplicate() if chain_player_state_available else [],
 		"solved_upper_body_pose_rotations": idle_chain_player.current_solved_upper_body_pose_rotations.duplicate() if chain_player_state_available else [],
 		"solved_upper_body_pose_scales": idle_chain_player.current_solved_upper_body_pose_scales.duplicate() if chain_player_state_available else [],
+		"solved_forearm_hand_calibration": idle_chain_player.current_solved_forearm_hand_calibration if chain_player_state_available else {},
 		"solved_weapon_position_reference_local": idle_chain_player.current_solved_weapon_position_reference_local if chain_player_state_available else Vector3.ZERO,
 		"solved_weapon_rotation_reference_local": idle_chain_player.current_solved_weapon_rotation_reference_local if chain_player_state_available else Quaternion.IDENTITY,
 		"solved_weapon_scale_reference_local": idle_chain_player.current_solved_weapon_scale_reference_local if chain_player_state_available else Vector3.ONE,

@@ -5,6 +5,9 @@ class_name CombatPreparedPoseCapture
 ## advances a modifier, or changes a bone. The UI owns when the pose is settled.
 const Clip = preload("res://core/models/combat_runtime_clip.gd")
 const PreparedPose = preload("res://core/models/combat_prepared_pose.gd")
+const HingeFrame = preload("res://core/resolvers/combat_arm_hinge_frame_resolver.gd")
+const ForearmHandIndex = preload("res://core/resolvers/combat_forearm_hand_index_resolver.gd")
+const WristMotion = preload("res://core/resolvers/combat_wrist_motion_resolver.gd")
 
 static func capture(
 	actor: Node3D,
@@ -75,6 +78,26 @@ static func capture(
 	pose["support_hand_slot"] = &"hand_right" if dominant_slot == &"hand_left" else &"hand_left"
 	pose["support_hand_in_weapon"] = weapon.global_transform.affine_inverse() * skeleton.global_transform * skeleton.get_bone_global_pose(support_index) if support_index >= 0 else Transform3D.IDENTITY
 	pose["arm_constraints_by_slot"] = capture_arm_constraints(actor, reference_world)
+	pose["wrist_states_by_slot"] = {}
+	pose["wrist_measurement_failures_by_slot"] = {}
+	pose["quality_warnings"] = []
+	if actor.has_method("capture_wrist_motion_start_state"):
+		for slot: StringName in [&"hand_right", &"hand_left"]:
+			var measurement: Dictionary = actor.call("capture_wrist_motion_start_state", slot)
+			if bool(measurement.get("valid", false)):
+				pose.wrist_states_by_slot[slot] = measurement.state
+				if not bool(measurement.get("within_limits", true)):
+					pose.quality_warnings.append({"severity": "warning", "reason": "wrist_motion_range", "hand_slot": slot})
+			elif measurement.get("reason", "") == "wrist_pose_not_representable":
+				# The raw parent-local bone transforms still describe this pose.
+				# Do not invent semantic angles for an off-mechanism orientation.
+				pose.wrist_measurement_failures_by_slot[slot] = "wrist_pose_not_representable"
+				pose.quality_warnings.append({"severity": "warning", "reason": "wrist_pose_not_representable", "hand_slot": slot})
+			else:
+				return measurement
+	elif actor.has_method("capture_wrist_constraint_state"):
+		for slot: StringName in [&"hand_right", &"hand_left"]:
+			pose.wrist_states_by_slot[slot] = actor.call("capture_wrist_constraint_state", slot)
 	pose["grip_accepted"] = false
 	# Snapshot validity describes captured data, not a new contact certification.
 	pose["valid"] = true
@@ -87,7 +110,8 @@ static func capture(
 
 ## Read the existing rig contract for attachment preparation and verification.
 ## This does not initialize caches, solve an arm, or change the displayed pose.
-## Missing helper neutrals remain unavailable; rest/current pose is no substitute.
+## Forearm rho uses imported-rest zero. Upperarm keeps the existing captured
+## neutral contract; a missing upperarm neutral is not inferred from animation.
 static func capture_arm_constraints(actor: Node3D, reference_world: Transform3D) -> Dictionary:
 	if not is_instance_valid(actor) or not _valid_transform(reference_world):
 		return {}
@@ -105,9 +129,14 @@ static func capture_arm_constraints(actor: Node3D, reference_world: Transform3D)
 	var properties: Dictionary = {}
 	for property: Dictionary in actor.get_property_list():
 		properties[String(property.name)] = true
-	for name: String in ["authoring_shoulder_min_plane_angle_degrees", "authoring_shoulder_max_plane_angle_degrees", "authoring_elbow_min_plane_angle_degrees", "authoring_elbow_max_plane_angle_degrees", "authoring_limb_twist_neutral_rotation_lookup", "authoring_contact_wrist_twist_limit_degrees", "enable_authoring_contact_wrist_basis", "enable_authoring_limb_twist_distribution"]:
+	for name: String in ["authoring_shoulder_min_plane_angle_degrees", "authoring_shoulder_max_plane_angle_degrees", "authoring_elbow_min_plane_angle_degrees", "authoring_elbow_max_plane_angle_degrees", "authoring_limb_twist_neutral_rotation_lookup", "authoring_contact_wrist_twist_limit_degrees", "enable_authoring_contact_wrist_basis", "enable_authoring_limb_twist_distribution", "wrist_motion_profile"]:
 		if not properties.has(name):
 			return {}
+	if not actor.has_method("capture_wrist_constraint_calibration"):
+		return {}
+	var wrist_profile: Resource = actor.get("wrist_motion_profile") as Resource
+	if wrist_profile == null or not wrist_profile.has_method("as_dictionary"):
+		return {}
 	var neutrals: Dictionary = actor.get("authoring_limb_twist_neutral_rotation_lookup") as Dictionary
 	var reference_up: Vector3 = reference_world.basis.inverse() * actor.global_basis.y
 	var result: Dictionary = {}
@@ -115,6 +144,11 @@ static func capture_arm_constraints(actor: Node3D, reference_world: Transform3D)
 		var prefix: String = "LEFT_" if slot == &"hand_left" else "RIGHT_"
 		var packet: Dictionary = {
 			"valid": true, "reason": "", "capture_source": &"live_rig_constraint_read",
+			"material_hinge_revision": HingeFrame.REVISION,
+			"forearm_hand_index_revision": ForearmHandIndex.REVISION,
+			"wrist_model_revision": WristMotion.REVISION,
+			"wrist_calibration": actor.call("capture_wrist_constraint_calibration", slot),
+			"wrist_profile": wrist_profile.call("as_dictionary"),
 			"slot_id": slot,
 			"shoulder_min_degrees": actor.get("authoring_shoulder_min_plane_angle_degrees"),
 			"shoulder_max_degrees": actor.get("authoring_shoulder_max_plane_angle_degrees"),
@@ -144,9 +178,14 @@ static func capture_arm_constraints(actor: Node3D, reference_world: Transform3D)
 			var chain: Array = (constants.get(prefix + role + "_TWIST_BONES", []) as Array).duplicate()
 			chains.append(chain)
 			for bone: StringName in chain:
-				if skeleton.find_bone(bone) < 0:
+				var bone_index: int = skeleton.find_bone(bone)
+				if bone_index < 0:
 					continue
-				if not neutrals.has(bone) or not (neutrals[bone] is Quaternion):
+				if role == "FOREARM":
+					# Semantic rho zero is the imported-rest forearm, independent
+					# of whichever animation established the editor's cache.
+					captured_neutrals[bone] = skeleton.get_bone_rest(bone_index).basis.orthonormalized().get_rotation_quaternion().normalized()
+				elif not neutrals.has(bone) or not (neutrals[bone] is Quaternion):
 					missing_neutrals.append(bone)
 				else:
 					captured_neutrals[bone] = neutrals[bone]
@@ -157,6 +196,9 @@ static func capture_arm_constraints(actor: Node3D, reference_world: Transform3D)
 		if not missing.is_empty() or not missing_neutrals.is_empty() or not reference_up.is_finite() or reference_up.length_squared() <= 0.00000001:
 			packet["valid"] = false
 			packet["reason"] = "arm_constraint_capture_incomplete"
+		if not packet.wrist_calibration is Dictionary or packet.wrist_calibration.is_empty() or not bool(packet.wrist_calibration.get("valid", true)):
+			packet["valid"] = false
+			packet["reason"] = "wrist_constraint_calibration_unavailable"
 		result[slot] = packet
 	return result
 

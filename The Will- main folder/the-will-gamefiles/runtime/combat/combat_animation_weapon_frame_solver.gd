@@ -7,6 +7,43 @@ const CombatOriginRecordScript = preload("res://core/models/combat_origin_record
 ## The authored segment owns weapon placement; no separate helper surface is
 ## part of this authority path.
 
+## Rotate a rigid weapon about its selected Handle station. Local landmarks
+## belong to WeaponRoot; requested Tip and the input frame share world space.
+## Preserve scale, full weapon orientation and the station's world position.
+func orbit_tip_around_grip(
+	frame: Transform3D,
+	local_tip: Vector3,
+	local_grip: Vector3,
+	requested_tip_world: Vector3,
+	local_up_reference: Vector3
+) -> Dictionary:
+	if not frame.is_finite() or not local_tip.is_finite() or not local_grip.is_finite() or not requested_tip_world.is_finite() or not local_up_reference.is_finite():
+		return {"available": false, "reason": "non_finite_tip_grip_pivot"}
+	var pivot_world: Vector3 = frame * local_grip
+	var from_direction: Vector3 = frame.basis * (local_tip - local_grip)
+	var to_direction: Vector3 = requested_tip_world - pivot_world
+	if from_direction.length_squared() <= 0.00000001 or to_direction.length_squared() <= 0.00000001:
+		return {"available": false, "reason": "degenerate_tip_grip_pivot"}
+	from_direction = from_direction.normalized()
+	to_direction = to_direction.normalized()
+	var cross_axis: Vector3 = from_direction.cross(to_direction)
+	var alignment: float = clampf(from_direction.dot(to_direction), -1.0, 1.0)
+	var rotation := Basis.IDENTITY
+	if cross_axis.length_squared() > 0.000000000001:
+		rotation = Basis(cross_axis.normalized(), atan2(cross_axis.length(), alignment))
+	elif alignment < 0.0:
+		# An exact half-turn has no unique shortest axis. Use this weapon's up
+		# reference, not a world-axis convention that flips with camera/root pose.
+		var turn_axis: Vector3 = frame.basis * local_up_reference
+		turn_axis -= from_direction * turn_axis.dot(from_direction)
+		if turn_axis.length_squared() <= 0.00000001:
+			return {"available": false, "reason": "degenerate_tip_grip_turn_axis"}
+		rotation = Basis(turn_axis.normalized(), PI)
+	var rotated_basis: Basis = rotation * frame.basis
+	return {"available": true,
+		"transform": Transform3D(rotated_basis, pivot_world - rotated_basis * local_grip),
+		"pivot_world": pivot_world}
+
 ## Encode a realized weapon frame through the same segment representation used
 ## by authoring. This is an inverse conversion, not a pose or limit policy.
 func encode_transform_for_authoring(

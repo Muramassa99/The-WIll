@@ -6,7 +6,7 @@ const CombatOriginRecordScript = preload("res://core/models/combat_origin_record
 const SCHEMA_VERSION := 10
 const SAMPLE_RATE_HZ := 60.0
 # Prepared actions start at visible node 1; Reset is not an animation segment.
-const RUNTIME_CACHE_VERSION := "runtime_cache_v13_attached_endpoint_tween"
+const RUNTIME_CACHE_VERSION := "runtime_cache_v16_semantic_wrist_motion"
 const COMPATIBLE_RUNTIME_CACHE_VERSIONS: Array[String] = [
 	RUNTIME_CACHE_VERSION,
 ]

@@ -1039,9 +1039,157 @@ NEEDS_DECISION before implementing artistic controls:
 Keep damage classification, projectiles, a general bone/graph editor and broader
 combat mechanics out of this implementation slice.
 
+## Follow-up investigation and narrow restriction, 2026-10-28
+
+The user selected two tasks: show the offending motion-node row in red, and
+prevent elbow directional flipping through appropriate restrictions. This
+supersedes the earlier wait-for-description state. It does not authorize
+unrelated wrist, grip, body-clearance or playback-rule changes. The row feedback
+is documented in the Grip Facing And Camera Control Plan; the broader anatomical
+fix remains incomplete.
+
+**Confirmed and corrected:** guarded automatic Forearm rotations checked only
+the existing 168-degree extension bound. They could cross the folded side and
+finish at an apparently legal unsigned 20-degree angle on the opposite branch.
+`_limit_authoring_forearm_extension_rotation()` now uses the existing 20-degree
+minimum as well as the existing maximum on the continuously unwrapped signed
+angle. It changes neither configured limit nor the normal weighted quaternion
+update within those signed bounds. Manual elbow orbit and endpoint-preserving
+writers retain their prior authority. This is not a universal imported-rest
+hinge constraint; an already inverted or exactly degenerate starting pose is
+not repaired by this change.
+
+Evidence and experiment boundaries:
+
+- `godot_runs/sc_elbow_20261028_hinge_before.json` and `..._hinge_after.json`:
+  real-rig isolation reproduced +20 to -20 (and the reverse) crossing on both
+  arms. Bend-normal dot changes from -1 before the correction to +1 afterward.
+  These are writer-isolation observations, not a full-grip acceptance result.
+- `godot_runs/sc_elbow_20261028_final_guard_checks.json`: 132/132 focused checks
+  pass, including both sides, partial/full weights, rotated/translated rigs,
+  the previous extension tests and representative legal out-of-plane updates.
+  Near the folded bound, signed projected-angle enforcement can still restrict
+  a direction whose unsigned 3D angle is legal; do not claim every such target
+  is unchanged.
+- A broader trial projected every automatic Forearm update into the incoming
+  bend plane. It passed isolated checks but regressed live left-arm retraction
+  (held angle about 168 degrees instead of baseline 125). That production trial
+  was withdrawn. `sc_elbow_20261028_candidate` is rejected evidence, not the
+  final implementation. Do not restore it based on its isolated pass count.
+- `sc_elbow_20261028_baseline2` captured the level R-L-R baseline (81 samples).
+  `sc_elbow_20261028_final` captured 99 samples at +20-degree elevation with an
+  outward lateral component and seeded 15/25/35/45/55-degree signed elbow
+  increments. First R is warmup; L and second R provide 66 comparison samples.
+  No re-extension occurs after the pull. Left accepted 8/8 requested pull
+  targets; right accepted 6/8, with two rejected by right-forearm clearance.
+  Completion/readiness is not certification of anatomical correctness.
+- The final right release's approximately 88-degree radial change follows a
+  rejected edit: the displayed drag frame differs from stored endpoints, so
+  release validation rejects near `right_forearm` and restores the original
+  Tip/Pommel/roll values. It then re-solves the bones. The original held elbow
+  was 124.31 degrees and the restored result 108.09; exact visual rollback is
+  therefore not established. This is not an accepted edit silently flipping.
+- Both completed live runs and the rendered feedback check have empty stderr.
+  These arm runs did not execute a full F/Save/equipped acceptance sequence.
+  The original unsaved `elbow_range_has_no_circle_solution` sequence was not
+  available; that blocker is not claimed fixed.
+
+**Remaining mechanical conflict:** unsigned bend magnitude is insufficient.
+In the final run, right step 31 has a 72.36-degree elbow angle while its bend
+normal expressed in the main Upperarm frame is nearly opposite the imported
+rest normal (dot approximately -1); left held step 19 has dot -0.408 at 72.35
+degrees. These are observations of reference-frame disagreement, not by
+themselves a mesh/anatomy certificate. Manual elbow orbit permits a full circle,
+then pure-swing shoulder correction removes main Upperarm longitudinal rotation
+and compensates Forearm orientation. Twist helper bones are siblings, not hinge
+parents. A fixed material hinge plane, zero main-Upperarm axial rotation, fixed
+wrist and unrestricted elbow orbit cannot all be enforced simultaneously.
+
+Next bounded design choice: preserve the current shoulder authority and restrict
+manual/automatic candidates to its compatible signed hinge region, or revise the
+arm's orientation authority so the material hinge can turn with the upper arm.
+Do not silently implement a fixed-rest-plane clamp or promise the remaining
+candy-wrapper problem is solved. Reconcile the same rule across editing, prepared
+arm frames and captured/replayed poses before broadening production changes.
+
+The retained diagnostic `tools/diagnose_combat_elbow_hinge_orientation.gd`
+isolates manual orbit, shoulder cleanup and guarded CCD on the real rig.
+`tools/diagnose_skill_crafter_elbow_correction.gd` now waits for the actual Reset
+baseline's prepared endpoint before setup movement; its old few-frame wait was
+insufficient for the current lifecycle. The first attempted baseline directory
+`sc_elbow_20261028_baseline` did not reach motion and is not acceptance evidence.
+Raw traces, source snapshots, summaries and screenshots remain under each run.
+
+The real player library was unchanged throughout (SHA256
+`7834B54752FDAE638CC894D989A76BC04D6D9F1790B90D9032928473626DC7D2`).
+Git savepoint `5fb7a66b19ddeba0535ade8a9c6495c9a0475689` was pushed before these
+changes; this follow-up is uncommitted.
+
+## Shoulder anatomy research and Unarmed focus, 2026-10-28
+
+Latest user direction: examine the clavicle/shoulder/upperarm relationship rather
+than assuming the visible elbow symptom is the root cause. Use Skill Crafter
+**Unarmed** and its existing controls as the first future body test. The user
+then explicitly narrowed the current pass to **research and properly saved,
+cross-referenced documentation**. No anatomical implementation or new engine
+run was performed in that documentation pass.
+
+Read [Shoulder Anatomy And Unarmed Rig Reference 2026-10-28.md](<Shoulder Anatomy And Unarmed Rig Reference 2026-10-28.md>)
+first. It links the anatomy bibliography and live rig mapping audit, explains
+coordinate conversion, swing versus axial rotation versus elbow orbit,
+posture-dependent range evidence, and a concrete future Unarmed verification
+plan. Published active/passive/functional ranges are not approved game clamps.
+
+The research does not establish a single proven culprit. The missing explicit
+scapular link, main-Upperarm pure-swing authority, sibling twist helpers,
+incoming-plane elbow guard and history-dependent writers need a consistent
+reference-frame explanation. The user's later clarification withdraws the
+triangular-return example as a requirement. Record complete inputs and calibrated
+joint frames to diagnose unexpected motion, without demanding exact loop closure.
+Keep accepted motion, rejected-edit restoration and visible skin deformation
+separate in diagnosis.
+
+The next bounded implementation, when resumed, belongs to the shared body across
+archetypes, using Unarmed for initial tests and calibration evidence. Do not
+silently restore the rejected full-plane clamp, introduce the previously skipped
+manual clavicle control, or claim the F/Save circle blocker fixed. Consider
+tolerances under the later conditional up-to-3% allowance with a defined purpose
+and reference. The earlier narrow guard and red-node feedback remain recorded
+above and in the companion task note.
+
+## Latest scope clarification and guide comparison, 2026-10-28
+
+Read [Arm Rig Guide Review and Shared Body Scope](<../Reserch/Arm Rig Guide Review and Shared Body Scope 2026-10-28.md>)
+for the current decisions and review of the user-supplied implementation guide.
+This supersedes any earlier triangular-return acceptance proposal: the user
+withdrew that example. Usable and predictable Skill Crafter body manipulation
+is the goal, with no exact closed-loop restoration requirement inferred from it.
+
+Implementation belongs to the shared body used by every current/future weapon
+archetype. Existing Unarmed mode is the initial testing setup, not a separate
+implementation. Follow the papers/guide as guidance; introduce a tolerance only
+where needed, up to the user's 3% allowance against a documented meaningful
+reference. This is not a blanket expansion of joint ranges or an adoption of
+the guide's example numerical limits. No live thresholds changed here.
+
+The guide's virtual-joint model appears representable by the current skeleton,
+but main-Upperarm pure-swing authority, elbow orbit, wrist/helper writers and
+prepared interpolation need a consistent interpretation. The review records
+calibration, profile, continuity, target-priority and capture/cache questions.
+Do not restore repeated grip solving during F or adopt generic collision/speed
+rules that override current gameplay decisions by implication.
+
+Implementation remains on hold during this comparison/documentation work.
+No new engine run or anatomical fix is certified. BODY-01 stays open.
+
 ## Technical References
 
 - [Godot 4.7 SkeletonModifier3D](https://docs.godotengine.org/en/4.7/classes/class_skeletonmodifier3d.html): modifier ordering and final-pose observation.
 - [Godot 4.7 Skeleton3D](https://docs.godotengine.org/en/4.7/classes/class_skeleton3d.html): bone global pose is skeleton-relative; convert deliberately to world space.
 - [Godot 4.7 Viewport](https://docs.godotengine.org/en/4.7/classes/class_viewport.html): capture rendered viewport textures after rendering.
 - [Godot 4.7 command line](https://docs.godotengine.org/en/4.7/tutorials/editor/command_line_tutorial.html): scripted diagnostic launch and user arguments.
+# 2026-10-28 continuation: bounded material-frame correction
+
+Current implementation/evidence entrypoint: [Arm Material Frame Implementation 2026-10-28.md](<Arm Material Frame Implementation 2026-10-28.md>). The subsequent user instruction authorized implementation, superseding the earlier comparison-only hold. User redirected tests from blocked Unarmed preparation to the established weapon fixture; Unarmed must ultimately have no weapon-only prerequisites.
+
+Shared rest-calibrated arm frames now replace the conflicting main Upperarm pure-swing rule across live posing, prepared following, stored body/entry samples and final solved-pose application.347 focused integration checks,132 existing bend-guard checks and26 node-feedback checks pass. Live R-L-R comparison confirms the material-frame mismatch is corrected, while larger retraction/clearance-related pose changes and some wrist/skin deformation remain. This is not completion of BODY-01 or proof that the original F/Save elbow-circle blocker is fixed. Read the new note before resuming older plans below.

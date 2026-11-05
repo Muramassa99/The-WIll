@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://core/defs/wrist_motion_profile_def.gd" id="1_profile"]
+
+[resource]
+script = ExtResource("1_profile")
+forearm_roll_limit_degrees = 90.0
+flexion_limit_degrees = 65.0
+extension_limit_degrees = 60.0
+ulnar_limit_degrees = 30.0
+radial_limit_degrees = 15.0
+orientation_tolerance_degrees = 0.025
+angle_epsilon_degrees = 0.05

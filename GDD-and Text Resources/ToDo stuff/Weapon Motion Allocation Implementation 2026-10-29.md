@@ -939,3 +939,519 @@ input-latency measurements establish the cause. Track under Project TODO
 PERF-01, separately from SC-14 cold opening. Current request is a Git savepoint
 while the user tests; no performance tuning or new runtime run is authorized by
 this feedback alone.
+
+### Follow-up: abrupt movement sharing versus update cadence
+
+User suspects the uneven feel occurs when movement transfers between joints at
+their limits, and requests smoother entry/exit rather than assuming FPS loss.
+Read-only code review supports investigating that distinction, not a confirmed
+cause or a completed fix:
+
+- `combat_weapon_motion_allocator.gd::_fit` and `_hold_order` use strict ordered
+  movement preferences. All included joints remain available for necessary
+  compensation; there is no literal next-bone unlock switch. Hard active limits
+  can change how movement is distributed, and there is no soft near-limit
+  recruitment curve. Boundary searches can also cost more computation.
+- Main-elbow editing uses `apply_independent_arm_edit` and the rig's direct-arm
+  reach/CCD, spline preference, manual elbow guidance and constraint passes,
+  not the weapon allocator. An allocator-only curve cannot establish an elbow fix.
+- The station's queued drag-refresh path has a 16-83 ms cooldown derived from
+  half the previous synchronous refresh cost. The cooldown starts after that
+  solve completes. Uneven pose-update cadence can coexist with changes in
+  motion response; renderer FPS alone would not distinguish them.
+
+Candidate direction: smoothly redistribute motion approaching and leaving a
+limit while preserving actual anatomical limits, acquired contact and independent
+opposite-arm isolation. Transition width/shape and effects on strict priorities
+need a bounded implementation decision and measurement. No runtime changes,
+new tests or confirmed performance result in this follow-up; user testing remains
+in progress. Relevant owners: allocator `_fit`/`_hold_order`, station
+`_get_preview_drag_refresh_interval_msec`, and rig
+`_apply_authoring_direct_arm_reach_pose`.
+
+### User clarification: pointer-to-pose stalls
+
+The latest manual observation refines the earlier description of Tip as smooth:
+some Tip movements are perfectly smooth, while movements requiring more arm,
+upper-arm and elbow participation become jittery or appear briefly frozen.
+The mouse pointer continues moving while the manipulated pose stays stationary
+for a moment. This loses placement precision and makes the control feel stuck.
+It does not by itself identify renderer FPS, solve cost, input scheduling or
+abrupt joint recruitment as the cause.
+
+Acceptance must therefore address continuous, predictable mouse-to-pose response
+across these transitions, not only a visually smoother joint-sharing curve.
+Measure pointer target, accepted pose, solve duration and update gaps together
+on the same drag. Preserve the latest intended target through delayed work;
+avoid replaying a backlog or silently discarding pointer travel. Presentation
+easing alone cannot establish that input responsiveness is fixed. No runtime
+changes made while the user continues testing.
+
+## 2026-11-05 temporary arm/spine isolation experiment
+
+User authorized a reversible diagnostic change: arm-control movement must stop
+at each clavicle's attachment to the spine. Both clavicles and arm chains remain
+available; the current spine/core pose must not translate or rotate in response
+to arm manipulation. This tests whether shared-body involvement contributes to
+the uneven control response. It is not a permanent anatomy or smoothing change.
+
+Implemented a single exported rig flag,
+`authoring_arm_spine_isolation_enabled = true`. Its query method also requires
+`authoring_preview_mode_enabled`, keeping the experiment scoped to Skill Crafter
+authoring. Set the flag to `false` to restore the earlier behavior. No settings
+menu or saved skill field was added.
+
+- `player_humanoid_rig.gd` supplies the active isolation setting to the existing
+  upper-body posing pass.
+- `player_rig_upper_body_pose_presenter.gd` skips the Waist/Spine01/Spine02 group
+  while isolated, retaining their current transforms rather than resetting them.
+  Clavicle posing still runs normally against those unchanged parent frames.
+- `combat_weapon_motion_rig_adapter.gd` omits torso degrees of freedom even for
+  two-hand Pommel/Roll while isolated. Single-hand allocation and independent
+  elbow/free-hand edits already stop at the clavicle.
+
+Reset/node restoration and playback can still apply their authored body poses;
+the switch stops new arm edits from recruiting shared ancestors. Existing joint
+limits, contact ownership, pointer scheduling and solver budgets are unchanged.
+Ordinary R/F/Save still record/use the resulting pose. No disk migration, saved
+skill rewrite or Git operation is part of this experiment.
+
+Godot 4.7 [Skeleton3D pose and hierarchy documentation](https://docs.godotengine.org/en/4.7/classes/class_skeleton3d.html)
+was consulted. Preserve parent-relative bone poses and the existing origin chain;
+do not detach/reparent bones or freeze a second skeleton in world space.
+
+Fresh focused verification:
+
+- `tools/verify_authoring_arm_spine_isolation.gd` extends the existing imported-rig
+  harness without running its broader boundary-search matrix.
+- `godot_runs/arm_spine_isolation_20261105/arm_spine_isolation_report.json`:
+  **132/132 passed**, Godot 4.7 headless exit 0. Nondefault shared ancestors stay
+  fixed under one/two-hand macro inputs on both sides while clavicles respond;
+  disabling the flag restores torso contribution. Outside preview the flag is
+  inactive and the macro retains its former behavior.
+- Allocator parameter checks cover both sides, one/two hands and Tip/Pommel/Roll,
+  with the switch on/off. Small actual one-hand movements retain attachment and
+  fixed core/opposite arm; independent-arm checks also pass.
+- Scoped diff-check passed. No player-library writes or saved skill changes.
+
+Boundaries: imported real skeleton with a synthetic rigid prop; this is not a
+fresh saved-weapon grip test, a two-hand movement matrix, full F/Save/equipped
+certification or a pointer-latency measurement. Manual control feel remains the
+user's test. Source changes and this experiment are uncommitted; the pushed
+baseline remains `29876da3`.
+
+## 2026-11-05 continuous pointer-speed diagnostic
+
+User manual follow-up: slow movement feels smooth; normal and faster movement
+become jittery or briefly frozen. The spine-isolation experiment did not remove
+the symptom, so shared-core propagation is no longer the leading explanation.
+The user explicitly requires continuous flow along an irregular mouse path;
+quick arrival at an endpoint after a pause/jump is not successful responsiveness.
+
+Read-only code findings:
+
+- The station holds one pending target, not one queued solver job per mouse
+  event. Tip updates the candidate and Pommel overwrites its requested position.
+- Larger changes can require multiple allocator substeps and repeated fitting
+  searches. This runs synchronously. The editor then waits a further 16-83 ms
+  based on half the previous refresh cost before its next queued pose update.
+- `_apply_pending_endpoint_motion_attempt` rebases the pointer to the accepted
+  pose even for a valid SCALED result. Remaining demand is discarded. That avoids
+  boundary wind-up, but does not distinguish exhausted numerical search from an
+  established anatomical boundary. A faster implementation alone would not
+  correct that input-consumption rule.
+
+Fresh bounded rendered diagnostic, no production changes in this pass:
+`tools/diagnose_skill_pointer_speed.gd`, extending the existing isolated-library
+station harness. Report: `godot_runs/skill_pointer_speed_20261105/manifest.json`.
+Same acquired Reset body/weapon pose and camera restored before each trial;
+reported baseline pose differences were zero. Right-main single-hand
+`Broken_Balde_v1`, isolated Skill 2, spine isolation enabled. Actual station
+Tip press/motion/release handlers receive a nominal 120 Hz, wall-clock-driven
+irregular six-vertex path at constant arclength speed. If the engine stalls,
+only the latest pointer position is delivered, not a backlog. This is synthetic
+input through the real UI path, not an OS input-to-display latency measurement.
+
+| Intended time for the same ~150 px path | Pose updates | Largest scene-update gap | Largest Tip movement between sampled frames |
+| --- | ---: | ---: | ---: |
+| Slow: 6 s | 158 | 32.527 ms | 2.170 px |
+| Normal: 1.5 s | 27 | 337.518 ms | 36.223 px |
+| Fast: 0.45 s | 9 | 59.215 ms | 22.593 px |
+
+The worst normal-speed update took 335 ms, of which allocation took 324.347 ms.
+It performed 54 fitting iterations, 764 kinematic evaluations (78.074 ms), and
+202 candidate validations (128.961 ms). Those validations include 201 storage
+checks (127.909 ms); do not add the nested storage time again. The result was
+SCALED to 0.7109375 with `allocator_search_exhausted`; reported active limits
+were empty, and contributing joint groups were elbow and wrist. This is numerical
+search exhaustion, not a demonstrated hard anatomical stop. Slow had 158 ACCEPTED
+results; normal had 26 ACCEPTED and one SCALED; fast had nine ACCEPTED. Delivered
+input handlers themselves peaked below 2.4 ms in these trials.
+
+The result supports real synchronous calculation stalls plus sparse pose updates,
+not just a cosmetic handoff discontinuity. It is not monotonically worse with
+speed: the normal-speed sample hit the particularly expensive search branch,
+while fast took fewer, larger accepted steps. All three gestures completed, but
+completion is not a performance pass. Raw frame/pointer/solver samples are kept
+in the report. Source library hashes remained unchanged; no skill Save occurred.
+The diagnostic exited 0 and the editor was left open.
+
+Next focused work, not implemented: separate numerical-budget partial progress
+from genuine boundary saturation, preserve appropriate pending pointer demand,
+and control expensive solving without adding scene freezes or a growing input
+backlog. Native C++ may help measured math, but is not a substitute for correct
+input ownership/scheduling. Do not change anatomy/grip acceptance or claim this
+single fixture proves every elbow/Pommel case. Isolation remains enabled pending
+the user's decision; the diagnostic made no production changes.
+
+## 2026-11-05 marker capture, precise picking and input speed tuning
+
+User chose a narrower experiment before parallelizing the solver: throttle
+incoming marker movement. During scene-marker LMB dragging, capture/hide the
+ordinary cursor and use relative motion so window edges do not end the gesture.
+Release restores the pointer at the actual marker. Only scene controls qualify;
+the duration slider, new speed slider, arrows, text inputs and menus retain the
+visible ordinary pointer. Improve sphere/cube selection against visible markers,
+including curve cubes, weapon-facing cube and arm/free-hand controls.
+
+Add a temporary left-side control matching the duration slider's visual style.
+One shared input limit for all scene-marker types, adjustable live, numerical
+readout in screen pixels per second; initial range 10-20000, step 10, default
+180. Continuous nonlinear slider gives low-speed precision; arrows hold-repeat
+as the duration widget. This regulates editing input, not saved node timing or
+playback speed. Do not bank excess pointer movement or stalled-frame time for a
+later catch-up jump. Keep existing constraints and spine-isolation experiment.
+
+Scope owners: combat_animation_station_ui.gd (capture/lifecycle/routing),
+combat_animation_motion_node_editor.gd and station_preview_presenter (picking),
+new combat_marker_drag_input.gd (bounded input), new combat_drag_speed_control.gd
+(temporary UI). Undo/Redo remains a separate deferred item. No native port or
+solver rewrite in this pass. Verification/results to follow implementation;
+the existence of a speed valve is not proof that all solver stalls are fixed.
+
+### Implementation and focused evidence
+
+The three input changes are implemented. Only a successful scene-marker pick
+captures/hides the pointer; captured relative screen movement drives the existing
+manipulator. Release returns the ordinary pointer to the rendered marker.
+Escape, focus navigation, window focus loss, editor closure and tree exit release
+capture too. Duration and speed controls retain ordinary visible-pointer input.
+Selection now intersects the visible sphere/box meshes, choosing the nearest
+surface among active controls rather than a 20/34-pixel circular pick halo.
+
+The new left-side Drag speed (px/s) widget uses a continuous logarithmic track,
+10-pixel/s increments, 200 ms initial arrow-repeat delay and 50 ms repeats. Its
+10-20000 range and default 180 are experimental tuning values. It remains shared
+by all scene controls for this editor instance; it is not saved into skill data
+or persisted across game restarts. The right-side node-duration control remains
+independent. UI and helper explicitly describe this as an input maximum: elapsed
+time per accepted input sample is capped at 1/60 second, so solver stalls/idle time
+cannot bank a large subsequent jump. At a slower update cadence the effective
+speed can be below the displayed ceiling. Excess relative motion is discarded,
+not replayed later. Existing anatomy, acquisition, F/Save and scheduling rules
+were not rewritten; temporary spine isolation is still enabled.
+
+Fresh Godot 4.7 checks under godot_runs/marker_drag_precision_20261105:
+- verify_combat_marker_picking.gd: final 55/55 passed, picking_final.json/log,
+  exit 0. Sphere/box hit surfaces, overlap/front-surface priority, parent transforms,
+  hidden/queued/decorative exclusions and all control mappings. Final 17 cases
+  cover same-frame repeated focus/selection refresh plus frame-boundary survival
+  and replacement of lightweight markers. Marker roots now detach old visuals
+  before deferred deletion; selection-only refresh rebuilds active non-endpoint
+  gizmos. This last focused fix followed the rendered station3 run and was
+  verified by these regressions, without repeating the entire station fixture.
+- verify_combat_marker_drag_input.gd: 41/41 passed, input/results.json; bounded
+  diagonal movement, reversal, no stored excess/idle budget, widget mapping,
+  numerical entry, arrow repeat and focus/hide handling. The deliberate numeric
+  overflow case emits Godot's "Exponent too high" warning and is rejected.
+- verify_skill_marker_drag.gd: rendered station3/manifest.json, exit 0, 55/55
+  checks. Isolated Broken_Balde_v1 / Skill 2 / right-main single hand; original
+  library hash unchanged, no skill Save. Marker press/release and overlay arrows
+  dispatch through Input.parse_input_event and Control hit testing; motion uses
+  synthetic relative events. Tip, Pommel, arm roll, free hand, wrist roll and
+  weapon-facing cube exercised, including focus-loss and Space-release cleanup.
+  The run does not measure physical OS input-to-display latency or certify the
+  user's manual feel. Final screenshot: station3/editor_controls.png.
+- Same ~150 px requested irregular Tip route at slow/normal/fast input durations:
+  largest sampled update gaps 35.805 / 31.871 / 31.549 ms; largest actual Tip
+  frame steps 1.897 / 3.034 / 3.166 px. These are bounded-input fixture results,
+  not identical endpoint travel or a general solver-speed guarantee. Release
+  finalization still took 805-885 ms; this pass did not optimize that separate
+  recording/refresh cost. F/Save/equipped playback were not rerun.
+
+Earlier station and station2 runs are retained as failed verifier setup evidence:
+the fixture used selection-only refresh where full focus gizmo rebuilding was
+needed, and performed redundant same-frame refreshes. Station2 measured zero
+distance between its reconstructed endpoint and actual marker, so the initially
+suspected endpoint-position mismatch was not established. Investigation exposed
+real marker lifecycle hazards as well: queued visuals still occupied fixed node
+names, and selection-only refresh removed non-endpoint gizmos. Those receive
+focused lifecycle coverage with the precise picker; no geometry/solver change.
+
+Next: user tunes the shared input limit during ordinary editing and reports the
+number plus which control/pose behaves poorly. Do not treat a low ceiling as proof
+of a complete performance fix. Leave native porting, parallel solvers, retained
+target pursuit, Undo/Redo and restoration of spine propagation for separate
+decisions. Do not silently restore spine propagation while comparing this pass.
+
+## 2026-11-05 saved Skill 3 circle/roll investigation
+
+User supplied `Broken_Balde_v1`, Skill Slot 3. Rendered observation with captured
+input at 900 px/s, F followed by repeated five-circle / three-second blue Tip
+curve-handle gestures on visible node 3. User clarified original manual test
+was node 2 and accepted blue-only use on the last node. Two runs; source library
+hash unchanged, no Reset/Save, no production solver/anatomy edits.
+
+Detailed evidence, exact source routes, limits and proposed narrow next changes:
+[Skill Crafter Curve Editing Roll Audit 2026-11-05](<Skill Crafter Curve Editing Roll Audit 2026-11-05.md>).
+
+Confirmed: curve-only editing runs full body/weapon posing, changes the displayed
+endpoint pose, then a later curve drag can commit that drift into authored Tip
+and Pommel positions. First run2 gesture moved actual Tip ~197 mm despite unchanged
+stored endpoints; second moved it ~524 mm and copied the preceding ~197 mm drift
+into the stored endpoint. Forearm roll moved from 69.74 to 89.94 degrees.
+
+Matched-baseline Tip CW/CCW both moved, with near-limit forearm states but no
+recorded allocator search exhaustion or reduced task_scale. Both release paths
+reported wrist_motion_range / APPROXIMATE. Read-only code trace found control
+identity cleared before the final pending Tip attempt, causing fallback through
+generic posing/strict validation and rollback. Do not treat retained ACCEPTED
+allocator metadata and the release error as a single allocator result.
+
+Next proposed discussion: isolate curve-field editing from endpoint posing and
+retain control identity through final drag commit. Neither correction is yet
+implemented or authorised by this audit. F completed (1.694/1.772 s preparation);
+sparse screenshot-spaced bone samples cannot certify frame-to-frame smoothness.
+Evidence: godot_runs/skill3_curve_roll_20261105/run1 and run2. Temporary spine
+isolation remains enabled. Preserve the user's original Skill 3 and dirty tree.
+
+## 2026-11-05 authorized curve-pose and release corrections
+
+Supersedes the proposed/not-authorized status in the preceding audit entry:
+the user requested implementation, plus Body Support default 0.9 instead of 0.4,
+while explicitly preserving Skill 3's existing 1.0 values for comparison.
+
+Implemented in the station UI: curve-only drags and numeric edits update visuals
+and trajectory cache state without reposing the body or weapon; release commits
+only the edited curve field. Drag control identity now survives until the final
+pending movement is evaluated, so Tip release uses Tip allocation rather than
+falling through generic posing/strict wrist validation. Geometry seed default
+is now 0.9; saved nodes, cached baselines and unarmed seed are unchanged.
+
+Focused rendered Godot 4.7 verification, `godot_runs/curve_pose_fix_20261105/run3`:
+31/31 checks, exit 0. Repeated node-3 blue-cube circles, node-2 outgoing Tip and
+incoming Pommel circles, all four numeric curve fields: zero measured live
+bone/weapon pose change; stored non-curve fields unchanged throughout input.
+F rebuilt the changed path (1.527 seconds preparation) and completed. Both Tip
+release routes retained their allocation result. Original saved library hash
+unchanged; Skill 3 visible Body Support values all remain 1.0. No Reset/Save.
+
+Residual Tip-limit/search stalls remain: the clean baseline still produced
+reduced movement and a SEARCH_EXHAUSTED sample, with instrumented update gaps
+up to 674 ms. Neither search optimization nor general anatomical changes belong
+to this correction. Temporary spine isolation remains on; no Git action.
+Final code/evidence and verifier corrections are detailed in
+[Skill Crafter Curve Editing Roll Audit 2026-11-05](<Skill Crafter Curve Editing Roll Audit 2026-11-05.md>).
+
+## 2026-11-05 timeline visibility correction
+
+User reported the motion-node list disappearing while the preview gained space.
+Confirmed layout fault: UI created SubViewportContainer with stretch=true, but
+presenter `_ensure_preview_nodes` forced false and `_sync_preview_size` copied
+the displayed size back to the viewport. That size became a minimum-size floor.
+After enlarging then shrinking the window, the preview could not shrink and
+pushed the timeline outside the clipped station panel.
+
+Narrow fix in `combat_animation_station_preview_presenter.gd`: keep stretch=true
+and skip manual viewport-size assignment while the container owns resizing.
+Existing 3:1 preview/timeline allocation and list/button behavior are unchanged.
+Engine reference: [Godot 4.7 SubViewportContainer](https://docs.godotengine.org/en/4.7/classes/class_subviewportcontainer.html).
+
+Fresh rendered layout-only reproduction, no weapon/skill changes:
+`godot_runs/timeline_layout_20261105/inspect_layout.gd`, before.log and after.log,
+plus screenshots. Actual station UI at 1280x720, 1920x1080, 2560x1440, then back
+to 1280x720. Before correction the last timeline rectangle began at y=1084 with
+height zero; after correction it returned to y=544 with height 90 and visible
+action buttons. Both runs exited normally; final screenshots inspected and
+scoped diff whitespace check passed. No full skill or grip regression run for
+this layout-only fix. No Git operations.
+
+## 2026-11-05 directional Tip stall diagnosis
+
+User supplied an exact Skill 3 / node 3 screenshot and right-left-right
+reproduction, later describing an advancing clock-face stopping point.
+Read-only source tests reproduced severe directional resistance and a shifted
+practical stopping point. The same captured rightward request is legal: keeping
+all limits and grip checks, removing only the forearm-hold preference in an
+uncommitted diagnostic solves 100% in 17 evaluations versus 7.8125% in 1,422
+evaluations under production policy. The strict preference drives large opposing
+elbow/wrist corrections through a nearly singular configuration. Increasing the
+iteration budget alone requires 5,690 evaluations and still scales the request.
+
+This is diagnosis, not a production fix. Some reverse increments succeeded;
+do not claim a universal one-way lock or a finished remedy. Original library
+unchanged; current spine isolation and Body Support values retained. No Git.
+Detailed evidence, reproduction limits and next focused decision:
+[Skill Crafter Directional Tip Stall Audit 2026-11-05](<Skill Crafter Directional Tip Stall Audit 2026-11-05.md>).
+
+## 2026-11-06 shoulder and forearm profile implementation in progress
+
+User authorized adapting `Reserch/Shoulder and Forearm Rotation Limits for Josie.md`.
+Preserve established names, bone-local ownership and explicit ancestry through
+RL_BoneRoot. The same stored pose/calibration must serve SC, F and equipped use.
+Scope: stable chest-relative humeral rotation; elbow-dependent forearm limits;
+useful distal/axial motion allocation; recorded anatomical state and focused tests.
+No grip algorithm rewrite, new wrist DOF, world-locked Tip pivot, collision-based
+editing lockout, spine-isolation change, or source weapon/Skill 3 mutation.
+
+The live elbow span is 12–160 degrees flexion. Preserve it; map the proposed
+full-flexion forearm sample to the configured full bend. The paper's forearm
+table is proposed rig tuning, not universal clinical bounds. Keep stored rho's
+geometric convention and record the thumb-up anatomical offset/sign explicitly.
+Absent separate validated clavicle limits, the document specifies holding its
+accepted local pose during allocation, while measuring composed shoulder turn
+relative to chest. Existing invalid poses remain measurable and correctable.
+
+USER DECISION: restrict shoulder rotation to documented coverage for now.
+The supplied shoulder-height sideways-to-forward interval is enforced against
+the fixed chest reference. Outside that coverage, retain the accepted humeral
+turn in a stable hold anchor; do not grant another turn allowance per mouse
+event. Other permitted channels remain editable, including aiming back toward
+documented coverage. This is deliberately limited coverage, not a completed
+whole-sphere anatomical envelope. Never invent missing clinical endpoints.
+The fixed-contact sword example is a
+test fixture, not permission to reintroduce a world-space lock for ordinary Tip.
+The combined test stops at the remaining feasible motion boundary, not necessarily
+at the first joint limit when another permitted joint can contribute.
+
+Implementation owners: existing wrist profile/calibration/resolver and prepared
+pose/replay owners; new shoulder profile/calibration/resolver; motion rig adapter,
+allocator and PlayerHumanoidRig glue. Tests/evidence will be appended after runs;
+this entry is a plan and does not establish completion or test success. No Git
+index/history changes authorized in this pass.
+
+Fresh progress evidence (2026-11-06; final integration checks still in progress):
+
+- Forearm profile and actual adapter coupling: 59/59 checks.
+- Shoulder calibration, composition, range and root-frame checks: 74/74.
+- Prepared-pose anatomy persistence/interpolation: 36/36, including explicit
+  legacy helper-neutral recovery with unchanged structural guards, current-limit
+  retention, stable hold serialization and the shared entry sampler.
+- Imported-rig movement checks: 212/212; allocator policy: 43/43.
+- Origin registry: all 17 registered origins resolve correctly through
+  RL_BoneRoot.
+- Rendered real Skill 3 right-left-right Tip gesture: all 36 samples accepted at
+  full task scale; allocation approximately 13.6-19 ms per sample. The new
+  profile caused one opening acquisition and changed the starting pose, so this
+  is evidence of current reversal working, not an identical-pose speed ratio
+  against the old stall run. Original player library unchanged. Screenshots
+  inspected; no whole-hand or whole-ROM certification implied.
+
+Evidence root: `godot_runs/shoulder_forearm_20261106`. Retain failed early runs
+alongside final results; do not present them as current regressions or erase
+their history. Current tests do not establish that every prior motion stall,
+all unsupported shoulder directions or every authored weapon/skill are fixed.
+
+Additional integration evidence and boundaries:
+
+- Imported shoulder allocation verifier: 91/91 after correcting a declared
+  fixture mismatch. Josie's authored pose translations differ from imported rest
+  translations by about 46 micrometres right / 52 micrometres left. The controlled
+  geometry fixture now explicitly uses rest translations; no production pose or
+  tolerance was altered to make this test pass. Earlier failure is retained in
+  `shoulder_allocation`; corrected result in `shoulder_allocation2`.
+- Uncovered hold constraints use `SHOULDER_HOLD`, not anatomical recovery rows.
+  Otherwise each fresh request could forgive a tiny positive residual and slowly
+  move the stopping point. The shared anatomical recovery mechanism is unchanged.
+- Real isolated SC UI: Reset/acquire, R, movement, Save, separate-process reopen,
+  F/stop, F/finish and immediate further editing passed. Cold reopened newly
+  recorded nodes needed zero acquisitions. `lifecycle_write` and `lifecycle_read`
+  contain reports. These are two-node test skills in cloned libraries; the user's
+  three-node Skill 3 and its Body Support 1.0 values were not overwritten.
+- Equipped playback passed after combat idle was prepared through its own UI
+  in the isolated library (`idle_fixture`, `equipped_ready.json`). It consumed
+  the saved skill at 60 Hz, used 160 ms entry and retained all authored body
+  channels unchanged. Earlier `equipped.json` stopped on the existing unprepared
+  combat-idle data; preserve that failed setup result, not a false playback pass.
+- Generic prepared-track tests: 70/70. Origin annotation and registry checks
+  pass. Final imported-rig run: 212/212 (`rig_final`).
+
+Remaining scope gaps, explicitly NOT complete:
+
+1. Independent elbow/free-hand/upper-arm-roll editing still takes the legacy
+   direct-arm solver route. Forearm/wrist checks are shared, but chest-relative
+   shoulder enforcement and the clavicle hold are currently integrated into
+   weapon Tip/Pommel/attached Roll allocation only. Capturing and warning about
+   independent edits does not enforce their shoulder limits. Do not claim that
+   every SC control now uses the new shoulder model. A future integration must
+   validate complete candidates and accepted UI targets; post-clamping upperarm
+   after solving can break hand contact and is not an acceptable shortcut.
+2. Unsupported shoulder directions retain their accepted turn. A controlled
+   R/L test starting outside coverage at h=100 degrees could not enter the
+   forward h=40-degree destination, whose maximum is 41 degrees. It returned no
+   progress / SEARCH_EXHAUSTED, not an invalid-start lock. This discontinuous
+   coverage/re-entry case needs an explicit future rule or more calibration.
+3. The user requested exaggerated real gestures, pushing past each apparent
+   stopping point and reversing, after observing that the hand looked stationary.
+   Small-drag input-pose data showed hand and weapon both rotating 6.64 degrees
+   with wrist position nearly fixed and attachment drift below 0.001 mm. That is
+   not final skin evidence. A separate final-skin, full-range test is pending.
+
+### Large-motion observations and handover boundary (2026-11-06)
+
+The first large rendered run is retained in `full_range`. It included physical
+mouse movement by the user during injected gestures, confirmed in chat. Do NOT
+attribute its largest jumps to the nominal 10-pixel injected requests. Of 557
+visible intervals, 522 had the intended pointer delta; their largest Tip travel
+was 10.49 pixels. The other 35 contained additional movement. The 131.69-pixel
+Tip jump accompanied an actual pointer change of (+132.85, -75.25) pixels.
+The run also contained a drain timeout; it is not a passed full-range test.
+
+Final `Skeleton3D.skeleton_updated` observations showed the held hand and weapon
+remaining attached: maximum relative variation about 0.000443 mm / 0.0000312
+degrees. This distinguishes a nearly stationary wrist position from a hand
+that fails to rotate with the weapon; no such detachment was demonstrated here.
+
+A separate remaining input-mapping issue was identified in clean intervals.
+Tip dragging raycasts onto a camera-facing plane, then normalizes the requested
+direction around the grip. Near a horizontal projected weapon direction, a
+horizontal pointer movement changes mostly radial distance, discarded by that
+normalization. At one endpoint, a reverse 10-pixel input requested only 0.059
+degrees, all accepted, and moved the Tip about 0.27 pixels. A fresh capture had
+the same response. This is not proof of another anatomical one-way stop.
+Owners: `combat_animation_motion_node_editor.gd::raycast_tip_on_view_drag_plane`
+and `combat_animation_weapon_frame_solver.gd::orbit_tip_around_grip`.
+Detailed evidence: `godot_runs/shoulder_forearm_20261106/input_mapping_findings.md`.
+No production mapping change was made during this final diagnostic pass.
+
+The user reported their OWN mouse movements during this test felt smoother than
+the previous live build, and requested prompt handover for manual testing.
+The remaining clean exaggerated limit run is deferred rather than presented as
+passed. Test-only input filtering / circular-input delivery tools are separate
+from the normal game; they do not disable or alter ordinary user mouse control.
+No additional production changes or Git operations during this wrap-up.
+
+### Research supplement received after handover (2026-11-06)
+
+Read in full and compared: `Reserch/Shoulder and Forearm Rotation Limits for
+Josie (1).md`. It adds the previously missing lowered/overhead/posterior guidance
+and a provisional coverage policy. No code changes made from this supplement yet;
+the user is testing the handed-over build.
+
+- Complete lowered-arm reference pair: [-65.1, +66.9] degrees from one protocol,
+  requiring a mapped neutral. Do not mix it with the old isolated -67 endpoint.
+- Small local coverage gaps: proposed 15-degree donor search, fixed anatomical
+  zero transport and offset correction, no chaining provisional donor rows.
+- Distant regions: inspect a fixed Josie centre and candidate endpoints at
+  10-degree authoring increments. This does not supply already inspected poses
+  or automatically authorize a +/-10-degree anatomical interval.
+- Overhead information still provides outward reference endpoints only; inward
+  limits and forward-overhead samples need rig calibration. Posterior 14.8
+  degrees is additional passive test travel, not an absolute signed endpoint.
+- Requires persistent provisional provenance, consistent bounds across reload,
+  and coordinated return into narrower intervals during region transitions.
+
+The supplement proposes broader provisional coverage than the user's earlier
+explicit decision to restrict shoulder rotation to documented coverage. Apply
+that distinction deliberately in the next implementation discussion. It does
+not itself fix independent-arm routing or camera-plane Tip input sensitivity.

@@ -29,6 +29,8 @@ const PlayerSkillSlotStateScript = preload("res://core/models/player_skill_slot_
 const UserSettingsStateScript = preload("res://core/models/user_settings_state.gd")
 const EditorSettingsStateScript = preload("res://core/models/combat_animation_editor_settings_state.gd")
 const NodeDurationControlScript = preload("res://runtime/combat/combat_node_duration_control.gd")
+const DragSpeedControlScript = preload("res://runtime/combat/combat_drag_speed_control.gd")
+const MarkerDragInputScript = preload("res://runtime/combat/combat_marker_drag_input.gd")
 const UserSettingsRuntimeScript = preload("res://runtime/system/user_settings_runtime.gd")
 const UiWindowLayerPolicyScript = preload("res://runtime/ui/ui_window_layer_policy.gd")
 
@@ -170,6 +172,9 @@ var weapon_rotation_y_spin_box: SpinBox = null
 var weapon_rotation_z_spin_box: SpinBox = null
 var preview_duration_overlay: Control = null
 var preview_duration_control = null
+var preview_drag_speed_control = null
+var marker_drag_input := MarkerDragInputScript.new()
+var _marker_previous_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_VISIBLE
 var body_support_spin_box: SpinBox = null
 var two_hand_state_option_button: OptionButton = null
 var primary_hand_option_button: OptionButton = null
@@ -233,6 +238,9 @@ var preview_camera_skip_next_orbit_motion: bool = false
 var preview_camera_orbit_guard_until_msec: int = 0
 var editor_state_dirty: bool = false
 var preview_drag_override_node: CombatAnimationMotionNode = null
+# Keep the transaction identity through finalization, after the input editor
+# ends its drag. A pending Tip sample must still use Tip's allocation route.
+var preview_drag_target: StringName = StringName()
 var preview_drag_forearm_guard_active: bool = false
 var preview_drag_independent_arm_slot: StringName = StringName()
 var preview_drag_independent_hand_proxy: bool = false
@@ -380,10 +388,14 @@ func _ready() -> void:
 	_populate_static_options()
 	_refresh_all("Select a saved weapon WIP to begin authoring.")
 	_refresh_live_editor_shortcuts(true)
+	get_window().focus_exited.connect(_on_marker_window_focus_exited)
 
 func _process(delta: float) -> void:
+	if marker_drag_input.active and (not motion_node_editor.is_dragging() or panel == null or not panel.visible or workflow_step != WORKFLOW_STEP_EDITOR):
+		_release_marker_pointer()
 	if panel != null and panel.visible and workflow_step == WORKFLOW_STEP_EDITOR:
 		_refresh_live_editor_shortcuts()
+		_flush_captured_marker_motion()
 		_flush_pending_preview_drag_refresh()
 		_refresh_grip_acquisition_status()
 		# Explicit R/navigation owns its settling window while recording. A
@@ -406,6 +418,7 @@ func _process(delta: float) -> void:
 		footer_status_label.text = "Preview finished."
 
 func _exit_tree() -> void:
+	_release_marker_pointer(false)
 	_persist_default_motion_node_duration()
 	preview_prepare_generation += 1
 	if preview_prepare_job != null:
@@ -673,6 +686,9 @@ func get_prepared_action_pose_status(draft: Resource = null) -> Dictionary:
 
 
 func _input(event: InputEvent) -> void:
+	if _handle_captured_marker_input(event):
+		get_viewport().set_input_as_handled()
+		return
 	# A release over an overlay must still end a viewport-started camera orbit.
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
 		preview_camera_orbiting = false
@@ -756,6 +772,7 @@ func open_for(player, bench_name: String) -> void:
 	preview_camera_orbiting = false
 	editor_state_dirty = false
 	preview_drag_override_node = null
+	preview_drag_target = StringName()
 	_hide_weapon_open_popups()
 	_reset_active_weapon_open_config()
 	session_state.reset()
@@ -765,6 +782,8 @@ func open_for(player, bench_name: String) -> void:
 	_refresh_all("Select a weapon to begin.")
 
 func close_ui() -> void:
+	if is_instance_valid(preview_drag_speed_control):
+		preview_drag_speed_control.finish_interaction()
 	if is_instance_valid(preview_duration_control):
 		preview_duration_control.finish_interaction()
 	_persist_default_motion_node_duration()
@@ -780,6 +799,7 @@ func close_ui() -> void:
 	editor_state_dirty = false
 	_set_manual_save_progress(0.0, "", false)
 	preview_drag_override_node = null
+	preview_drag_target = StringName()
 	panel.visible = false
 	backdrop.visible = false
 	visible = false
@@ -1821,8 +1841,7 @@ func set_selected_motion_node_tip_curve_in(
 	if motion_node.tip_curve_in_handle.is_equal_approx(curve_in_handle):
 		return false
 	motion_node.tip_curve_in_handle = curve_in_handle
-	motion_node.normalize()
-	_apply_motion_node_change(
+	_apply_curve_handle_change(
 		"Motion node tip curve-in handle updated.",
 		persist_change,
 		refresh_list,
@@ -1849,8 +1868,7 @@ func set_selected_motion_node_tip_curve_out(
 	if motion_node.tip_curve_out_handle.is_equal_approx(curve_out_handle):
 		return false
 	motion_node.tip_curve_out_handle = curve_out_handle
-	motion_node.normalize()
-	_apply_motion_node_change(
+	_apply_curve_handle_change(
 		"Motion node tip curve-out handle updated.",
 		persist_change,
 		refresh_list,
@@ -2556,6 +2574,11 @@ func _build_center_column(parent: HBoxContainer) -> void:
 	preview_duration_control.set_duration_ms(roundi(get_default_motion_node_transition_duration() * 1000.0))
 	preview_duration_control.duration_changed.connect(_on_preview_node_duration_changed)
 	preview_duration_control.edit_finished.connect(_on_preview_node_duration_edit_finished)
+	preview_drag_speed_control = DragSpeedControlScript.new()
+	preview_drag_speed_control.name = "MarkerDragSpeedControl"
+	preview_duration_overlay.add_child(preview_drag_speed_control)
+	preview_drag_speed_control.set_speed_pixels_per_second(marker_drag_input.speed_pixels_per_second)
+	preview_drag_speed_control.speed_changed.connect(_on_preview_drag_speed_changed)
 	preview_duration_overlay.resized.connect(_layout_preview_duration_control)
 	_layout_preview_duration_control.call_deferred()
 	var tl_panel := PanelContainer.new()
@@ -2592,6 +2615,12 @@ func _layout_preview_duration_control() -> void:
 	var control_height: float = minf(clampf(available.y * 0.65, 210.0, 420.0), maxf(available.y - 20.0, 190.0))
 	preview_duration_control.size = Vector2(110.0, control_height)
 	preview_duration_control.position = Vector2(maxf(available.x - 124.0, 0.0), maxf((available.y - control_height) * 0.5, 0.0))
+	if is_instance_valid(preview_drag_speed_control):
+		preview_drag_speed_control.size = Vector2(110.0, control_height)
+		preview_drag_speed_control.position = Vector2(8.0, maxf((available.y - control_height) * 0.5, 0.0))
+
+func _on_preview_drag_speed_changed(speed_pixels_per_second: float) -> void:
+	marker_drag_input.speed_pixels_per_second = speed_pixels_per_second
 
 func _on_preview_node_duration_changed(duration_ms: int) -> void:
 	if not _can_edit_selected_node_duration():
@@ -4156,6 +4185,11 @@ func _refresh_preview_scene(
 		_end_preview_authoring_lookup_scope()
 
 func _refresh_preview_scene_prepared(grip_resolve_reason: StringName) -> void:
+	if grip_resolve_reason == StringName() and preview_drag_override_node != null and _is_curve_handle_drag_target(preview_drag_target):
+		# Curve handles change the path, not the acquired endpoint pose. Sending
+		# their temporary Resource through posing would invalidate retained grip.
+		_refresh_endpoint_motion_visuals()
+		return
 	preview_presenter.prepared_authoring_context_signature_resolver = Callable(self, "_prepared_pose_context_signature")
 	_ensure_current_focus_available()
 	var baked_profile: BakedProfile = _get_active_baked_profile()
@@ -4263,7 +4297,7 @@ func _apply_pending_endpoint_motion_attempt(force: bool = false) -> bool:
 			preview_drag_refresh_pending = false
 			_rebase_endpoint_pointer_to_accepted_node()
 			return false
-	elif motion_node_editor.get_drag_target() == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP and not _is_active_unarmed_authoring_wip():
+	elif preview_drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP and not _is_active_unarmed_authoring_wip():
 		# Match numeric Tip validation at the existing throttled flush. Pointer
 		# events only rotate the candidate; no extra body solves per mouse event.
 		var orbit: Dictionary = preview_presenter.resolve_motion_node_tip_grip_orbit(
@@ -4327,7 +4361,7 @@ func _is_pommel_drag_authority_active() -> bool:
 	return (
 		preview_drag_override_node != null
 		and (
-			motion_node_editor.get_drag_target() == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_POMMEL
+			preview_drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_POMMEL
 			or preview_drag_pommel_authority_pending
 			or preview_drag_pommel_has_solved_request
 		)
@@ -6514,6 +6548,20 @@ func _resolve_draft_skill_slot_id_for_runtime_cache(draft: Resource) -> StringNa
 		return owning_skill_id
 	return StringName()
 
+func _apply_curve_handle_change(
+	status_message: String,
+	persist_change: bool = true,
+	refresh_list: bool = true,
+	refresh_fields: bool = true,
+	refresh_preview: bool = true,
+	refresh_summary: bool = true
+) -> void:
+	# Keep ordinary dirty/cache handling so F rebuilds the changed trajectory,
+	# but do not acquire or pose the body again for a curve-only change.
+	_apply_motion_node_change(status_message, persist_change, refresh_list, refresh_fields, false, refresh_summary)
+	if refresh_preview:
+		_refresh_endpoint_motion_visuals()
+
 func _apply_motion_node_change(
 	status_message: String,
 	persist_change: bool = true,
@@ -6826,6 +6874,7 @@ func _clear_preview_drag_override() -> void:
 	preview_weapon_roll_dragging = false
 	preview_weapon_facing_dragging = false
 	preview_drag_override_node = null
+	preview_drag_target = StringName()
 	preview_drag_forearm_guard_active = false
 	preview_drag_independent_arm_slot = StringName()
 	preview_drag_independent_hand_proxy = false
@@ -6841,6 +6890,7 @@ func _clear_preview_drag_override() -> void:
 
 func _begin_preview_drag_override(source_motion_node: CombatAnimationMotionNode, drag_target: StringName = StringName()) -> void:
 	_cancel_preview_preparation("Preview preparation cancelled by an edit. Press F to prepare current edits.")
+	preview_drag_target = drag_target if source_motion_node != null else StringName()
 	preview_drag_forearm_guard_active = false
 	preview_drag_independent_arm_slot = StringName()
 	preview_drag_independent_hand_proxy = false
@@ -7337,26 +7387,27 @@ func _resolve_selected_noncombat_stow_anchor_offset_local() -> Vector3:
 		return Vector3.ZERO
 	return marker_positions.get(selected_anchor_id, Vector3.ZERO) as Vector3
 
-func _apply_motion_node_curve_handle_state(target: CombatAnimationMotionNode, source: CombatAnimationMotionNode) -> bool:
+func _apply_motion_node_curve_handle_state(target: CombatAnimationMotionNode, source: CombatAnimationMotionNode, drag_target: StringName = StringName()) -> bool:
 	if target == null or source == null:
 		return false
 	var changed: bool = false
-	if not target.tip_curve_in_handle.is_equal_approx(source.tip_curve_in_handle):
-		target.tip_curve_in_handle = source.tip_curve_in_handle
-		changed = true
-	if not target.tip_curve_out_handle.is_equal_approx(source.tip_curve_out_handle):
-		target.tip_curve_out_handle = source.tip_curve_out_handle
-		changed = true
-	if not target.pommel_curve_in_handle.is_equal_approx(source.pommel_curve_in_handle):
-		target.pommel_curve_in_handle = source.pommel_curve_in_handle
-		changed = true
-	if not target.pommel_curve_out_handle.is_equal_approx(source.pommel_curve_out_handle):
-		target.pommel_curve_out_handle = source.pommel_curve_out_handle
-		changed = true
-	target.normalize()
+	for property: StringName in [&"tip_curve_in_handle", &"tip_curve_out_handle", &"pommel_curve_in_handle", &"pommel_curve_out_handle"]:
+		if drag_target != StringName() and String(property).trim_suffix("_handle") != String(drag_target):
+			continue
+		var value: Vector3 = source.get(property)
+		if not (target.get(property) as Vector3).is_equal_approx(value):
+			target.set(property, value)
+			changed = true
+	# Do not normalize or promote displayed pose fields during a path-only edit.
 	return changed
 
 func _finalize_preview_drag(status_message: String = "Motion node edit locked in.") -> void:
+	_finalize_preview_drag_prepared(status_message)
+	motion_node_editor.end_drag()
+	preview_drag_target = StringName()
+	_release_marker_pointer()
+
+func _finalize_preview_drag_prepared(status_message: String = "Motion node edit locked in.") -> void:
 	if preview_weapon_facing_dragging:
 		preview_weapon_facing_dragging = false
 		# Keep the body stationary and acquisition suspended while the cube is
@@ -7385,6 +7436,18 @@ func _finalize_preview_drag(status_message: String = "Motion node edit locked in
 		_clear_preview_drag_override()
 		if not status_message.strip_edges().is_empty():
 			footer_status_label.text = status_message
+		return
+	if _is_curve_handle_drag_target(preview_drag_target):
+		# The pick baseline contains displayed endpoints and effective automatic
+		# handles. Commit only the handle the user changed; preserve stored pose
+		# data and leave other automatic handles automatic.
+		var changed := _apply_motion_node_curve_handle_state(
+			_get_active_motion_node(), preview_drag_override_node, preview_drag_target)
+		_clear_preview_drag_override()
+		if changed:
+			_apply_curve_handle_change(status_message)
+		else:
+			_refresh_endpoint_motion_visuals()
 		return
 	if preview_drag_independent_arm_slot != StringName() and preview_drag_refresh_pending:
 		# Release may arrive before the throttled flush (or after end_drag).
@@ -8461,8 +8524,7 @@ func set_selected_motion_node_pommel_curve_in(
 	if motion_node.pommel_curve_in_handle.is_equal_approx(curve_in):
 		return false
 	motion_node.pommel_curve_in_handle = curve_in
-	motion_node.normalize()
-	_apply_motion_node_change(
+	_apply_curve_handle_change(
 		"Pommel curve-in updated.",
 		persist_change,
 		refresh_list,
@@ -8489,8 +8551,7 @@ func set_selected_motion_node_pommel_curve_out(
 	if motion_node.pommel_curve_out_handle.is_equal_approx(curve_out):
 		return false
 	motion_node.pommel_curve_out_handle = curve_out
-	motion_node.normalize()
-	_apply_motion_node_change(
+	_apply_curve_handle_change(
 		"Pommel curve-out updated.",
 		persist_change,
 		refresh_list,
@@ -8921,7 +8982,87 @@ func _on_debugger_view_toggled(enabled: bool) -> void:
 		debugger_view_enabled
 	)
 
+func _capture_marker_pointer(position: Vector2) -> void:
+	# Only called after a successful scene-marker pick, never for overlay UI.
+	marker_drag_input.begin(motion_node_editor.get_drag_target(), position, Time.get_ticks_usec())
+	_marker_previous_mouse_mode = Input.mouse_mode
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+func _handle_captured_marker_input(event: InputEvent) -> bool:
+	if not marker_drag_input.active:
+		return false
+	if event is InputEventMouseMotion:
+		var relative: Vector2 = event.screen_relative
+		if relative.is_zero_approx() and not event.relative.is_zero_approx():
+			# Direct GUI verifier events may supply only local relative movement.
+			relative = preview_view_container.get_screen_transform().basis_xform(event.relative)
+		marker_drag_input.add_motion(relative)
+		return true
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+			_flush_captured_marker_motion(true)
+			motion_node_editor.end_drag()
+			_finalize_preview_drag()
+		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+			motion_node_editor.end_drag()
+			_finalize_preview_drag()
+			preview_camera_orbiting = true
+		return true
+	if event is InputEventKey and event.is_action_pressed(&"ui_cancel"):
+		motion_node_editor.end_drag()
+		_finalize_preview_drag()
+		return true
+	return false
+
+func _flush_captured_marker_motion(force: bool = false) -> void:
+	if not marker_drag_input.active or not motion_node_editor.is_dragging():
+		return
+	if not force:
+		# Do not feed multiple capped samples into one expensive pending solve.
+		# Keep one coalesced direction, then discard excess when its turn arrives.
+		if preview_drag_refresh_pending:
+			return
+		if preview_drag_last_refresh_msec > 0 and Time.get_ticks_msec() - preview_drag_last_refresh_msec < _get_preview_drag_refresh_interval_msec():
+			return
+	var movement: Vector2 = marker_drag_input.take_motion(Time.get_ticks_usec())
+	if movement.is_zero_approx():
+		return
+	# Rate is in physical screen pixels/s; raycasting consumes preview-local
+	# coordinates. Preserve content/window scaling through the existing canvas.
+	marker_drag_input.pointer_position += preview_view_container.get_screen_transform().basis_xform_inv(movement)
+	_begin_preview_authoring_lookup_scope()
+	_handle_preview_drag(marker_drag_input.pointer_position)
+	_end_preview_authoring_lookup_scope()
+
+func _release_marker_pointer(restore_position: bool = true) -> void:
+	if not marker_drag_input.active:
+		return
+	var destination: Vector2 = marker_drag_input.pointer_position
+	if restore_position and is_instance_valid(preview_subviewport):
+		var marker_position: Variant = preview_presenter.get_authoring_marker_screen_position(preview_subviewport, _get_preview_camera(), marker_drag_input.target)
+		if marker_position is Vector2:
+			destination = marker_position
+	marker_drag_input.finish()
+	Input.mouse_mode = _marker_previous_mouse_mode
+	if restore_position and _marker_previous_mouse_mode == Input.MOUSE_MODE_VISIBLE and is_instance_valid(preview_view_container) and get_window().has_focus():
+		# warp_mouse consumes root viewport coordinates, not physical desktop ones.
+		var root_position: Vector2 = preview_view_container.get_global_transform_with_canvas() * destination
+		var visible_rect := get_viewport().get_visible_rect().grow(-2.0)
+		root_position = root_position.clamp(visible_rect.position, visible_rect.end)
+		Input.warp_mouse(root_position)
+
+func _on_marker_window_focus_exited() -> void:
+	if not marker_drag_input.active:
+		return
+	motion_node_editor.end_drag()
+	_finalize_preview_drag()
+
 func _on_preview_gui_input(event: InputEvent) -> void:
+	# Capture routes real window input through _input. This entrance also handles
+	# synthetic/local GUI events used by the focused station verifiers.
+	if _handle_captured_marker_input(event):
+		preview_view_container.accept_event()
+		return
 	var scoped_lookup: bool = (
 		(event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT)
 		or (event is InputEventMouseMotion and motion_node_editor.is_dragging() and not preview_camera_orbiting)
@@ -8929,6 +9070,8 @@ func _on_preview_gui_input(event: InputEvent) -> void:
 	if scoped_lookup:
 		_begin_preview_authoring_lookup_scope()
 	_on_preview_gui_input_prepared(event)
+	if not marker_drag_input.active and motion_node_editor.is_dragging() and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_capture_marker_pointer(event.position)
 	if scoped_lookup:
 		_end_preview_authoring_lookup_scope()
 
@@ -8976,21 +9119,9 @@ func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 						pick_motion_node,
 						hand_proxy_slot_id
 					)
-					drag_target = motion_node_editor.pick_hand_proxy_drag_target(
-						camera,
-						mb.position,
-						hand_proxy_pick_state,
-						trajectory_root,
-						hand_proxy_slot_id
-					)
-				else:
-					drag_target = motion_node_editor.pick_drag_target(
-						camera,
-						mb.position,
-						pick_motion_node,
-						trajectory_root,
-						session_state.current_focus
-					)
+				# The visible marker meshes own hit testing. Fixed screen-radius
+				# halos must not steal a neighbouring sphere/cube click.
+				drag_target = preview_presenter.pick_authoring_marker(preview_subviewport, camera, mb.position, session_state.current_focus)
 				if drag_target == StringName():
 					return
 				if (

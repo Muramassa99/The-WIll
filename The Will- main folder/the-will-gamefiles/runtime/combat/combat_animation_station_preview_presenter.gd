@@ -1441,6 +1441,101 @@ func refresh_selection_visuals(
 		active_focus,
 		active_draft
 	)
+	# Selection rebuilding clears the shared marker root, including the active
+	# non-endpoint controls. Recreate those controls without posing the actor.
+	if active_focus not in [CombatAnimationSessionStateScript.FOCUS_TIP, CombatAnimationSessionStateScript.FOCUS_POMMEL]:
+		_refresh_weapon_and_sphere_visuals(state, visible_motion_node_chain,
+			visible_selected_node_index, active_focus, null, active_draft)
+
+## Selection uses the same MeshInstances that are visible to the author. This
+## covers both full-refresh and lightweight-drag marker names; queued old
+## visuals and inactive focus groups cannot steal a click.
+func pick_authoring_marker(preview_subviewport: SubViewport, camera: Camera3D,
+		screen_position: Vector2, active_focus: StringName) -> StringName:
+	return motion_node_editor.pick_visible_marker(camera, screen_position,
+		_authoring_marker_candidates(preview_subviewport, active_focus))
+
+func get_authoring_marker_screen_position(preview_subviewport: SubViewport,
+		camera: Camera3D, drag_target: StringName) -> Variant:
+	if camera == null:
+		return null
+	var position: Variant = null
+	for candidate: Dictionary in _authoring_marker_candidates(preview_subviewport, _marker_focus_for_target(drag_target)):
+		var marker: MeshInstance3D = candidate.marker as MeshInstance3D
+		if candidate.target != drag_target or not marker.is_visible_in_tree() or camera.is_position_behind(marker.global_position):
+			continue
+		position = camera.unproject_position(marker.global_position)
+		# The wrist-roll group also has a central pivot sphere. The green handle
+		# is the useful cursor return location after that group's manipulation.
+		if drag_target != CombatAnimationMotionNodeEditorScript.DRAG_TARGET_WEAPON_ROTATION or "Normal" in String(marker.name):
+			return position
+	return position
+
+func _authoring_marker_candidates(preview_subviewport: SubViewport, active_focus: StringName) -> Array:
+	var candidates: Array = []
+	if preview_subviewport == null:
+		return candidates
+	var preview_root: Node3D = preview_subviewport.get_node_or_null(PREVIEW_ROOT_NAME) as Node3D
+	var marker_root: Node3D = preview_root.find_child(MARKER_ROOT_NAME, true, false) as Node3D if preview_root != null else null
+	if marker_root == null:
+		return candidates
+	for child: Node in marker_root.get_children():
+		var marker: MeshInstance3D = child as MeshInstance3D
+		if marker == null or marker.is_queued_for_deletion() or not marker.is_visible_in_tree():
+			continue
+		var target: StringName = _authoring_marker_target(String(marker.name), active_focus)
+		if target != StringName():
+			candidates.append({"target": target, "marker": marker})
+	return candidates
+
+func _authoring_marker_target(marker_name: String, active_focus: StringName) -> StringName:
+	var target: StringName = StringName()
+	if marker_name.begins_with("PointMarker_"):
+		if active_focus in [CombatAnimationSessionStateScript.FOCUS_TIP, CombatAnimationSessionStateScript.FOCUS_POMMEL]:
+			return active_focus
+		return target
+	var prefixes := {
+		"DragTipMarker": &"tip", "DragPommelMarker": &"pommel",
+		"DragTipInHandle": &"tip_curve_in", "TipInHandleMarker_": &"tip_curve_in",
+		"DragTipOutHandle": &"tip_curve_out", "TipOutHandleMarker_": &"tip_curve_out",
+		"DragPomInHandle": &"pommel_curve_in", "PomInHandleMarker_": &"pommel_curve_in",
+		"DragPomOutHandle": &"pommel_curve_out", "PomOutHandleMarker_": &"pommel_curve_out",
+		"DragWeaponCenterMarker": &"weapon_rotation", "WeaponCenterMarker_": &"weapon_rotation",
+		"DragWeaponNormalMarker": &"weapon_rotation", "WeaponNormalMarker_": &"weapon_rotation",
+		"DragWeaponFacingMarker": &"weapon_facing", "WeaponFacing": &"weapon_facing",
+		"RightHandProxyTipMarker_": &"right_hand_proxy_tip", "RightHandProxyPommelMarker_": &"right_hand_proxy_pommel",
+		"LeftHandProxyTipMarker_": &"left_hand_proxy_tip", "LeftHandProxyPommelMarker_": &"left_hand_proxy_pommel",
+		"RightUpperarmRollHandleMarker_": &"right_upperarm_roll", "LeftUpperarmRollHandleMarker_": &"left_upperarm_roll",
+	}
+	for prefix: String in prefixes:
+		if marker_name.begins_with(prefix):
+			target = prefixes[prefix]
+			break
+	if active_focus == _marker_focus_for_target(target):
+		return target
+	if active_focus == CombatAnimationSessionStateScript.FOCUS_ARM_ROLL and target in [&"right_upperarm_roll", &"left_upperarm_roll"]:
+		return target
+	return StringName()
+
+func _marker_focus_for_target(target: StringName) -> StringName:
+	match target:
+		&"tip", &"tip_curve_in", &"tip_curve_out":
+			return CombatAnimationSessionStateScript.FOCUS_TIP
+		&"pommel", &"pommel_curve_in", &"pommel_curve_out":
+			return CombatAnimationSessionStateScript.FOCUS_POMMEL
+		&"weapon_rotation":
+			return CombatAnimationSessionStateScript.FOCUS_WEAPON
+		&"weapon_facing":
+			return CombatAnimationSessionStateScript.FOCUS_WEAPON_FACING
+		&"right_hand_proxy_tip", &"right_hand_proxy_pommel":
+			return CombatAnimationSessionStateScript.FOCUS_RIGHT_HAND_PROXY
+		&"left_hand_proxy_tip", &"left_hand_proxy_pommel":
+			return CombatAnimationSessionStateScript.FOCUS_LEFT_HAND_PROXY
+		&"right_upperarm_roll":
+			return CombatAnimationSessionStateScript.FOCUS_RIGHT_ARM_ROLL
+		&"left_upperarm_roll":
+			return CombatAnimationSessionStateScript.FOCUS_LEFT_ARM_ROLL
+	return StringName()
 
 func resolve_upperarm_roll_drag_state(
 	preview_subviewport: SubViewport,
@@ -1456,8 +1551,8 @@ func resolve_upperarm_roll_drag_state(
 	var gizmo_state: Dictionary = _get_node_meta_or_default(preview_root, "upperarm_roll_gizmo_state", {}) as Dictionary
 	if gizmo_state.is_empty():
 		return {}
+	var picked_target: StringName = pick_authoring_marker(preview_subviewport, camera, screen_position, active_focus)
 	var best_state: Dictionary = {}
-	var best_distance: float = INF
 	for slot_key in [&"hand_right", &"hand_left"]:
 		if active_focus == CombatAnimationSessionStateScript.FOCUS_RIGHT_ARM_ROLL and slot_key != &"hand_right":
 			continue
@@ -1466,11 +1561,9 @@ func resolve_upperarm_roll_drag_state(
 		var slot_state: Dictionary = gizmo_state.get(slot_key, {}) as Dictionary
 		if slot_state.is_empty():
 			continue
-		var handle_global: Vector3 = slot_state.get("handle_global", Vector3.ZERO) as Vector3
-		var screen_distance: float = camera.unproject_position(handle_global).distance_to(screen_position)
-		if screen_distance <= UPPERARM_ROLL_PICK_RADIUS_PIXELS and screen_distance < best_distance:
+		if picked_target != StringName() and picked_target == slot_state.get("drag_target", StringName()):
 			best_state = slot_state
-			best_distance = screen_distance
+			break
 	if best_state.is_empty():
 		return {}
 	return {
@@ -2706,7 +2799,9 @@ func _ensure_preview_nodes(preview_container: SubViewportContainer, preview_subv
 	preview_subviewport.handle_input_locally = false
 	preview_subviewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	if preview_container != null:
-		preview_container.stretch = false
+		# The layout owns preview dimensions. A fixed viewport size becomes a
+		# minimum-size floor and can push the timeline offscreen after resizing.
+		preview_container.stretch = true
 	var preview_root: Node3D = preview_subviewport.get_node_or_null(PREVIEW_ROOT_NAME) as Node3D
 	if preview_root == null:
 		preview_root = Node3D.new()
@@ -2797,6 +2892,9 @@ func _ensure_preview_nodes(preview_container: SubViewportContainer, preview_subv
 
 func _sync_preview_size(preview_container: SubViewportContainer, preview_subviewport: SubViewport) -> void:
 	if preview_container == null or preview_subviewport == null:
+		return
+	if preview_container.stretch:
+		# SubViewportContainer updates its child size when stretching is enabled.
 		return
 	var target_size := Vector2i(
 		maxi(int(round(preview_container.size.x)), 1),
@@ -2941,7 +3039,7 @@ func _refresh_drag_budgeted_visuals(
 	if preview_root == null or trajectory_root == null or marker_root == null:
 		return
 	if not bool(preview_root.get_meta("drag_budgeted_markers_active", false)):
-		_clear_child_nodes(marker_root)
+		_clear_authoring_marker_nodes(marker_root)
 		_clear_child_nodes(onion_skin_root)
 		preview_root.set_meta("drag_budgeted_markers_active", true)
 	# Keep the last evaluated paths visible during the budgeted drag. Their
@@ -3025,6 +3123,15 @@ func _clear_child_nodes(root: Node) -> void:
 	if root == null:
 		return
 	for child_node: Node in root.get_children():
+		child_node.queue_free()
+
+func _clear_authoring_marker_nodes(marker_root: Node3D) -> void:
+	if marker_root == null:
+		return
+	# Fixed-name marker updates must not reuse an instance scheduled to vanish
+	# at frame end. Detach now, so same-frame rebuilds create live replacements.
+	for child_node: Node in marker_root.get_children():
+		marker_root.remove_child(child_node)
 		child_node.queue_free()
 
 func _clear_immediate_mesh(mesh_instance: MeshInstance3D) -> void:
@@ -3212,8 +3319,7 @@ func _refresh_trajectory_visuals(
 		return
 	preview_root.set_meta("drag_budgeted_markers_active", false)
 	_prepare_trajectory_root_for_authoring(state)
-	for child_node: Node in marker_root.get_children():
-		child_node.queue_free()
+	_clear_authoring_marker_nodes(marker_root)
 	if onion_skin_root != null:
 		for child_node: Node in onion_skin_root.get_children():
 			child_node.queue_free()
@@ -3362,8 +3468,7 @@ func _refresh_trajectory_selection_visuals(
 	if preview_root == null or marker_root == null or control_mesh_instance == null:
 		return
 	preview_root.set_meta("drag_budgeted_markers_active", false)
-	for child_node: Node in marker_root.get_children():
-		child_node.queue_free()
+	_clear_authoring_marker_nodes(marker_root)
 	var node_marker_count: int = 0
 	var handle_marker_count: int = 0
 	var stow_anchor_result: Dictionary = _refresh_noncombat_stow_anchor_markers(state, active_draft)
@@ -4360,6 +4465,7 @@ func _try_restore_prepared_authoring_pose(
 			"bone_rest_transforms": snapshot.bone_rest_transforms.duplicate(),
 			"arm_constraints_by_slot": snapshot.get("arm_constraints_by_slot", {}).duplicate(true),
 			"wrist_states_by_slot": snapshot.get("wrist_states_by_slot", {}).duplicate(true),
+			"shoulder_states_by_slot": snapshot.get("shoulder_states_by_slot", {}).duplicate(true),
 		},
 		"solved_replay_reference_bone_name": snapshot.get("reference_bone_name", CombatRuntimeClipScript.SOLVED_REPLAY_REFERENCE_BONE_NAME),
 		"solved_replay_reference_origin_id": snapshot.reference_origin_id,

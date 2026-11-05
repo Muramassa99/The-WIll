@@ -310,7 +310,7 @@ func _exercise_wrist_measurement(side: String) -> void:
 	forearm = frame * forearm
 	hand = frame * hand
 	var states: Array[Dictionary] = [
-		{"rho": float(profile.forearm_roll_limit_radians) + 0.15, "beta": 0.2, "gamma": 0.1},
+		{"rho": Wrist.forearm_geometry_limit(calibration, profile) + 0.15, "beta": 0.2, "gamma": 0.1},
 		{"rho": 0.1, "beta": float(profile.extension_limit_radians) * 0.9, "gamma": float(profile.radial_limit_radians) * 0.9},
 		{"rho": PI + 0.02, "beta": 0.1, "gamma": 0.05},
 	]

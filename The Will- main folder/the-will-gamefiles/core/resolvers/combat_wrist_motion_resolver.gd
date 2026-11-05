@@ -5,6 +5,7 @@ class_name CombatWristMotionResolver
 ## All input frames share a reference and the upstream wrist position is final.
 ## No IK, scene writes, mutable calibration, or inferred twist from a bent Hand.
 const REVISION := "semantic_forearm_wrist_v1"
+const ForearmRotation = preload("res://core/resolvers/combat_forearm_rotation_resolver.gd")
 const AXIS_EPSILON_SQUARED := 1.0e-12
 const ROOT_EPSILON := 1.0e-8
 # Vector3 stores float32 components; exact endpoint constants round on assignment.
@@ -14,10 +15,11 @@ const ENVELOPE_EPSILON := 1.0e-6
 const ERROR_TIE_RADIANS := 1.0e-7
 const REFINEMENT_STEPS := 16
 
-static func resolve(forearm_reference: Transform3D, requested_hand: Transform3D, calibration: Dictionary, profile: Dictionary, previous_state: Dictionary = {}) -> Dictionary:
-	var context := _context(forearm_reference, requested_hand, calibration, profile)
+static func resolve(forearm_reference: Transform3D, requested_hand: Transform3D, calibration: Dictionary, profile: Dictionary, previous_state: Dictionary = {}, elbow_bend_radians: float = NAN, full_flexion_radians: float = deg_to_rad(160.0)) -> Dictionary:
+	var context := _context(forearm_reference, requested_hand, calibration, profile, elbow_bend_radians, full_flexion_radians)
 	if not context.valid:
 		return context
+	profile = context.limits_profile
 	var prior := _project(_state_vector(previous_state), profile)
 	var candidates: Array[Vector3] = [prior, Vector3.ZERO]
 	var axis: Vector3 = context.axis
@@ -31,7 +33,7 @@ static func resolve(forearm_reference: Transform3D, requested_hand: Transform3D,
 	var a: float = n.dot(v) - c
 	var b: float = -n.dot(axis.cross(v))
 	var magnitude: float = sqrt(a * a + b * b)
-	var rho_seeds: Array[float] = [prior.x, 0.0, -float(profile.forearm_roll_limit_radians), float(profile.forearm_roll_limit_radians)]
+	var rho_seeds: Array[float] = [prior.x, clampf(0.0, profile.forearm_min_radians, profile.forearm_max_radians), float(profile.forearm_min_radians), float(profile.forearm_max_radians)]
 	var analytic_roots := 0
 	if magnitude > ROOT_EPSILON and absf(c) <= magnitude + ROOT_EPSILON:
 		var phase := atan2(b, a)
@@ -39,8 +41,8 @@ static func resolve(forearm_reference: Transform3D, requested_hand: Transform3D,
 		for root: float in [phase - separation, phase + separation]:
 			rho_seeds.append(wrapf(root, -PI, PI))
 			analytic_roots += 1
-	for step: int in range(-3, 4):
-		rho_seeds.append(float(profile.forearm_roll_limit_radians) * float(step) / 3.0)
+	for step: int in 7:
+		rho_seeds.append(lerpf(profile.forearm_min_radians, profile.forearm_max_radians, float(step) / 6.0))
 	for rho: float in rho_seeds:
 		var local: Basis = (Basis(axis, rho) * neutral).transposed() * target
 		var beta := atan2(-local.z.y, local.z.z)
@@ -51,7 +53,7 @@ static func resolve(forearm_reference: Transform3D, requested_hand: Transform3D,
 	# bounded closest-candidate search, not an unconstrained body compensation.
 	if float(best.error) > float(profile.orientation_tolerance_radians):
 		var boundary: Array[Vector3] = []
-		for rho: float in [prior.x, 0.0, -float(profile.forearm_roll_limit_radians), float(profile.forearm_roll_limit_radians)]:
+		for rho: float in [prior.x, clampf(0.0, profile.forearm_min_radians, profile.forearm_max_radians), float(profile.forearm_min_radians), float(profile.forearm_max_radians)]:
 			for step: int in 16:
 				var angle := TAU * float(step) / 16.0
 				var beta: float = cos(angle) * (float(profile.extension_limit_radians) if cos(angle) >= 0.0 else float(profile.flexion_limit_radians))
@@ -77,10 +79,11 @@ static func resolve(forearm_reference: Transform3D, requested_hand: Transform3D,
 ## accept a motion or modify a limit: the caller must validate new candidates.
 ## Equivalent 2*PI branches stay nearest the previous measured state. A prior
 ## state already matching the actual Hand is retained, even if outside ROM.
-static func measure_state(forearm_reference: Transform3D, actual_hand: Transform3D, calibration: Dictionary, profile: Dictionary, previous_state: Dictionary = {}) -> Dictionary:
-	var context := _context(forearm_reference, actual_hand, calibration, profile)
+static func measure_state(forearm_reference: Transform3D, actual_hand: Transform3D, calibration: Dictionary, profile: Dictionary, previous_state: Dictionary = {}, elbow_bend_radians: float = NAN, full_flexion_radians: float = deg_to_rad(160.0)) -> Dictionary:
+	var context := _context(forearm_reference, actual_hand, calibration, profile, elbow_bend_radians, full_flexion_radians)
 	if not context.valid:
 		return context
+	profile = context.limits_profile
 	var prior := _state_vector(previous_state)
 	var has_prior := _state_valid(previous_state) and prior.is_finite()
 	if not has_prior:
@@ -135,16 +138,18 @@ static func measure_state(forearm_reference: Transform3D, actual_hand: Transform
 	var measured: Vector3 = best.state
 	var bone: Basis = (_forward(measured, context) * (context.anatomical_in_bone as Basis).transposed()).orthonormalized()
 	diagnostics["envelope_value"] = _envelope_value(measured, profile)
+	diagnostics["forearm_interval"] = context.forearm_interval
 	return {"valid": true, "status": "MEASURED", "reason": "", "state": _state_dictionary(measured),
 		"hand_basis": bone.scaled(context.target_scale), "orientation_error_radians": best.error,
 		"within_limits": _legal(measured, profile), "diagnostics": diagnostics}
 
 ## Replay accepted scalar motion through the same forward model. An invalid
 ## state is rejected; it is never silently clamped into an accepted pose.
-static func compose(forearm_reference: Transform3D, hand_reference: Transform3D, calibration: Dictionary, profile: Dictionary, accepted_state: Dictionary) -> Dictionary:
-	var context := _context(forearm_reference, hand_reference, calibration, profile)
+static func compose(forearm_reference: Transform3D, hand_reference: Transform3D, calibration: Dictionary, profile: Dictionary, accepted_state: Dictionary, elbow_bend_radians: float = NAN, full_flexion_radians: float = deg_to_rad(160.0)) -> Dictionary:
+	var context := _context(forearm_reference, hand_reference, calibration, profile, elbow_bend_radians, full_flexion_radians)
 	if not context.valid:
 		return context
+	profile = context.limits_profile
 	if not _state_valid(accepted_state):
 		return _fail("wrist_state_invalid")
 	var state := _state_vector(accepted_state)
@@ -168,16 +173,22 @@ static func interpolate_states(from_state: Dictionary, to_state: Dictionary, wei
 ## Kinematic evaluation for constrained numerical allocation. This deliberately
 ## does not certify ROM: derivatives need samples immediately beyond a boundary.
 ## Only the allocator's complete nonlinear constraint gate may accept a sample.
-static func sample_kinematics(forearm_reference: Transform3D, hand_reference: Transform3D, calibration: Dictionary, profile: Dictionary, state: Dictionary) -> Dictionary:
-	var context := _context(forearm_reference, hand_reference, calibration, profile)
+static func sample_kinematics(forearm_reference: Transform3D, hand_reference: Transform3D, calibration: Dictionary, profile: Dictionary, state: Dictionary, elbow_bend_radians: float = NAN, full_flexion_radians: float = deg_to_rad(160.0)) -> Dictionary:
+	var context := _context(forearm_reference, hand_reference, calibration, profile, elbow_bend_radians, full_flexion_radians)
 	if not context.valid or not _state_valid(state):
 		return context if not context.valid else _fail("wrist_state_invalid")
 	var angles := _state_vector(state)
 	var anatomical := _forward(angles, context)
 	return {"valid": true, "hand_basis": (anatomical * (context.anatomical_in_bone as Basis).transposed()).orthonormalized().scaled(context.target_scale),
-		"envelope_value": _envelope_value(angles, profile), "state": state.duplicate()}
+		"envelope_value": _envelope_value(angles, profile), "state": state.duplicate(), "forearm_interval": context.forearm_interval}
 
-static func _context(forearm: Transform3D, hand: Transform3D, calibration: Dictionary, profile: Dictionary) -> Dictionary:
+static func forearm_interval(calibration: Dictionary, profile: Dictionary, elbow_bend_radians: float = NAN, full_flexion_radians: float = deg_to_rad(160.0)) -> Dictionary:
+	return ForearmRotation.interval(calibration, profile, elbow_bend_radians, full_flexion_radians)
+
+static func forearm_geometry_limit(calibration: Dictionary, profile: Dictionary) -> float:
+	return ForearmRotation.geometry_limit(calibration, profile)
+
+static func _context(forearm: Transform3D, hand: Transform3D, calibration: Dictionary, profile: Dictionary, elbow_bend_radians: float, full_flexion_radians: float) -> Dictionary:
 	if profile.get("revision", "") != REVISION:
 		return _fail("wrist_profile_revision_mismatch", "INVALID_PROFILE")
 	if not calibration.get("valid", false) or calibration.get("revision", "") != REVISION:
@@ -199,7 +210,12 @@ static func _context(forearm: Transform3D, hand: Transform3D, calibration: Dicti
 	var axis := hand.origin - forearm.origin
 	if axis.length_squared() <= AXIS_EPSILON_SQUARED:
 		return _fail("wrist_forearm_axis_degenerate")
-	return {"valid": true, "axis": axis.normalized(), "neutral": (forearm.basis.orthonormalized() * neutral_local).orthonormalized(), "anatomical_in_bone": anatomical_local.orthonormalized(), "target_anatomical": (hand.basis.orthonormalized() * anatomical_local).orthonormalized(), "target_bone": hand.basis.orthonormalized(), "target_scale": hand.basis.get_scale(), "radial_sign": radial_sign}
+	var interval := forearm_interval(calibration, profile, elbow_bend_radians, full_flexion_radians)
+	if not interval.get("valid", false): return _fail(interval.get("reason", "forearm_interval_invalid"), "INVALID_PROFILE")
+	var limits_profile := profile.duplicate()
+	limits_profile["forearm_min_radians"] = interval.rho_min
+	limits_profile["forearm_max_radians"] = interval.rho_max
+	return {"valid": true, "axis": axis.normalized(), "neutral": (forearm.basis.orthonormalized() * neutral_local).orthonormalized(), "anatomical_in_bone": anatomical_local.orthonormalized(), "target_anatomical": (hand.basis.orthonormalized() * anatomical_local).orthonormalized(), "target_bone": hand.basis.orthonormalized(), "target_scale": hand.basis.get_scale(), "radial_sign": radial_sign, "forearm_interval": interval, "limits_profile": limits_profile}
 
 static func _forward(state: Vector3, context: Dictionary) -> Basis:
 	return (Basis(context.axis, state.x) * context.neutral * Basis(Vector3.RIGHT, state.y) * Basis(Vector3.BACK, float(context.radial_sign) * state.z)).orthonormalized()
@@ -211,6 +227,7 @@ static func _result(state: Vector3, context: Dictionary, profile: Dictionary, di
 	var accepted: bool = _legal(state, profile) and error <= float(profile.orientation_tolerance_radians)
 	diagnostics["revision"] = REVISION
 	diagnostics["envelope_value"] = _envelope_value(state, profile)
+	diagnostics["forearm_interval"] = context.forearm_interval
 	diagnostics["forearm_axis_reference"] = context.axis
 	diagnostics["independent_wrist_roll"] = false
 	return {"valid": accepted, "status": "ACCEPTED" if accepted else "APPROXIMATE", "reason": "" if accepted else "wrist_motion_range", "accepted_state": _state_dictionary(state), "accepted_hand_basis": bone.scaled(context.target_scale), "orientation_error_radians": error, "residual_basis": context.target_bone * bone.transposed(), "diagnostics": diagnostics}
@@ -231,7 +248,7 @@ static func _orientation_error(a: Basis, b: Basis) -> float:
 	return 2.0 * atan2(Vector3(delta.x, delta.y, delta.z).length(), absf(delta.w))
 
 static func _project(state: Vector3, profile: Dictionary) -> Vector3:
-	state.x = clampf(state.x, -float(profile.forearm_roll_limit_radians), float(profile.forearm_roll_limit_radians))
+	state.x = clampf(state.x, float(profile.get("forearm_min_radians", -float(profile.forearm_roll_limit_radians))), float(profile.get("forearm_max_radians", float(profile.forearm_roll_limit_radians))))
 	var radius := sqrt(_envelope_value(state, profile))
 	if radius > 1.0:
 		state.y /= radius
@@ -244,7 +261,7 @@ static func _envelope_value(state: Vector3, profile: Dictionary) -> float:
 	return pow(state.y / beta_limit, 2.0) + pow(state.z / gamma_limit, 2.0)
 
 static func _legal(state: Vector3, profile: Dictionary) -> bool:
-	return state.is_finite() and absf(state.x) <= float(profile.forearm_roll_limit_radians) + SCALAR_EPSILON and _envelope_value(state, profile) <= 1.0 + ENVELOPE_EPSILON
+	return state.is_finite() and state.x >= float(profile.get("forearm_min_radians", -float(profile.forearm_roll_limit_radians))) - SCALAR_EPSILON and state.x <= float(profile.get("forearm_max_radians", float(profile.forearm_roll_limit_radians))) + SCALAR_EPSILON and _envelope_value(state, profile) <= 1.0 + ENVELOPE_EPSILON
 
 static func _state_valid(state: Dictionary) -> bool:
 	for key: String in ["rho", "beta", "gamma"]:

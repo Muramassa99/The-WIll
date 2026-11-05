@@ -56,7 +56,7 @@ func resolve_motion_seed_data(baked_profile: BakedProfile) -> Dictionary:
 		"axial_reposition_offset": 0.0,
 		"grip_seat_slide_offset": CombatAnimationMotionNode.DEFAULT_GRIP_SEAT_SLIDE_OFFSET,
 		"secondary_grip_seat_slide_offset": CombatAnimationMotionNode.DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET,
-		"body_support_blend": 0.4,
+		"body_support_blend": 0.9,
 		"grip_axis_local": baked_profile.primary_grip_slide_axis.normalized(),
 		"grip_axis_origin_id": CombatOriginRecordScript.ORIGIN_WEAPON_ROOT,
 	}

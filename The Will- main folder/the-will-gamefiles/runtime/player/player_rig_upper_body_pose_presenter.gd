@@ -149,18 +149,21 @@ func apply_upper_body_authoring_pose(
 		SHOULDER_MAX_TWO_HAND_PITCH_DEGREES if two_hand else SHOULDER_MAX_ONE_HAND_PITCH_DEGREES,
 		reach_ratio
 	)
-	_apply_bone_group(
-		skeleton,
-		TORSO_BONES,
-		pose_blend,
-		resolved_blend,
-		torso_yaw_degrees,
-		torso_pitch_degrees,
-		body_up_world,
-		body_right_world,
-		state.get("dominant_slot_id", SLOT_RIGHT) as StringName,
-		two_hand
-	)
+	# Skip the shared ancestors rather than resetting them: arm editing must
+	# retain whichever body pose was loaded, with the clavicle pivot intact.
+	if not bool(state.get("isolate_arm_motion_from_spine", false)):
+		_apply_bone_group(
+			skeleton,
+			TORSO_BONES,
+			pose_blend,
+			resolved_blend,
+			torso_yaw_degrees,
+			torso_pitch_degrees,
+			body_up_world,
+			body_right_world,
+			state.get("dominant_slot_id", SLOT_RIGHT) as StringName,
+			two_hand
+		)
 	skeleton.force_update_all_bone_transforms()
 	_apply_bone_group(
 		skeleton,

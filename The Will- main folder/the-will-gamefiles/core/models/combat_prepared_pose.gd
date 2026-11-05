@@ -65,6 +65,15 @@ static func validate(snapshot: Dictionary, context_signature: String = "") -> Di
 	if arm_packets is Dictionary:
 		for slot: Variant in arm_packets:
 			var packet: Variant = arm_packets[slot]
+			if packet is Dictionary and packet.has("shoulder_model_revision"):
+				if not _valid_shoulder_constraints(packet):
+					return _fail("prepared_pose_missing_shoulder_constraints").merged({"hand_slot": slot})
+				var shoulder_state: Variant = snapshot.get("shoulder_states_by_slot", {}).get(slot, {})
+				if not snapshot.get("shoulder_measurement_failures_by_slot", {}).has(slot):
+					if not shoulder_state is Dictionary or not _finite_number(shoulder_state.get("h")):
+						return _fail("prepared_pose_missing_shoulder_state").merged({"hand_slot": slot})
+				if shoulder_state is Dictionary and shoulder_state.has("held_h") and not _finite_number(shoulder_state.held_h):
+					return _fail("prepared_pose_invalid_shoulder_hold_state").merged({"hand_slot": slot})
 			if not packet is Dictionary or not packet.has("wrist_model_revision"):
 				continue
 			if not _valid_wrist_constraints(packet):
@@ -153,10 +162,68 @@ static func _valid_wrist_constraints(packet: Dictionary) -> bool:
 		var value: Variant = profile.get(field)
 		if not (value is float or value is int) or not is_finite(float(value)) or float(value) <= 0.0:
 			return false
+	# Additive anatomy data retains the geometric meaning of existing rho.
+	# Old snapshots keep their own complete profile; new packets must include
+	# both the interval and the mapping from thumb-up to imported-rest zero.
+	if profile.has("forearm_interval_revision"):
+		if String(profile.forearm_interval_revision).is_empty() or calibration.get("forearm_interval_revision") != profile.forearm_interval_revision:
+			return false
+		for field: String in ["forearm_thumb_up_rho_radians", "forearm_pronation_sign"]:
+			var value: Variant = calibration.get(field)
+			if not (value is float or value is int) or not is_finite(float(value)):
+				return false
+		if not is_equal_approx(absf(float(calibration.forearm_pronation_sign)), 1.0):
+			return false
+		var bends: Variant = profile.get("forearm_elbow_samples_radians")
+		if not bends is PackedFloat64Array or bends.size() < 2:
+			return false
+		for index: int in bends.size():
+			if not is_finite(bends[index]) or bends[index] < 0.0 or (index > 0 and bends[index] <= bends[index - 1]):
+				return false
+		for field: String in ["forearm_pronation_limits_radians", "forearm_supination_limits_radians"]:
+			var limits: Variant = profile.get(field)
+			if not limits is PackedFloat64Array or limits.size() != bends.size():
+				return false
+			for angle: float in limits:
+				if not is_finite(angle) or angle <= 0.0:
+					return false
 	return true
 
 static func _valid_vector(value: Variant) -> bool:
 	return value is Vector3 and value.is_finite()
+
+static func _finite_number(value: Variant) -> bool:
+	return (value is float or value is int) and is_finite(float(value))
+
+## This validates persistent data shape, not pose legality. The resolver owns
+## anatomical bounds; a measured out-of-range h is still a recordable pose.
+static func _valid_shoulder_constraints(packet: Dictionary) -> bool:
+	var revision := String(packet.get("shoulder_model_revision", ""))
+	var calibration: Variant = packet.get("shoulder_calibration")
+	var profile: Variant = packet.get("shoulder_profile")
+	if revision.is_empty() or not calibration is Dictionary or not profile is Dictionary:
+		return false
+	if not bool(calibration.get("valid", false)) or calibration.get("revision") != revision or profile.get("revision") != revision:
+		return false
+	for key: String in ["chest_bone_name", "upperarm_bone_name", "forearm_bone_name", "clavicle_bone_name", "origin_id", "parent_origin_id"]:
+		if String(calibration.get(key, "")).is_empty():
+			return false
+	for key: String in ["material_frame_in_upperarm", "chest_anatomical_in_bone"]:
+		var basis: Variant = calibration.get(key)
+		if not basis is Basis or not basis.is_finite() or basis.determinant() <= 0.000001:
+			return false
+	for key: String in ["internal_sign", "side_sign"]:
+		if not _finite_number(calibration.get(key)) or not is_equal_approx(absf(float(calibration[key])), 1.0):
+			return false
+	var samples: Variant = profile.get("plane_samples_radians")
+	var minimum: Variant = profile.get("minimum_samples_radians")
+	var maximum: Variant = profile.get("maximum_samples_radians")
+	if not samples is PackedFloat64Array or not minimum is PackedFloat64Array or not maximum is PackedFloat64Array or samples.size() < 2 or minimum.size() != samples.size() or maximum.size() != samples.size():
+		return false
+	for index: int in samples.size():
+		if not is_finite(samples[index]) or not is_finite(minimum[index]) or not is_finite(maximum[index]) or minimum[index] >= maximum[index] or (index > 0 and samples[index] <= samples[index - 1]):
+			return false
+	return true
 
 static func _valid_rotation(value: Variant) -> bool:
 	return value is Vector4 and value.is_finite() and value.length_squared() > 0.000001

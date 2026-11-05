@@ -5,6 +5,9 @@
 [resource]
 script = ExtResource("1_profile")
 forearm_roll_limit_degrees = 90.0
+forearm_elbow_samples_degrees = PackedFloat64Array(0, 45, 90, 145)
+forearm_pronation_limits_degrees = PackedFloat64Array(109, 96, 80, 54)
+forearm_supination_limits_degrees = PackedFloat64Array(39, 73, 85, 95)
 flexion_limit_degrees = 65.0
 extension_limit_degrees = 60.0
 ulnar_limit_degrees = 30.0

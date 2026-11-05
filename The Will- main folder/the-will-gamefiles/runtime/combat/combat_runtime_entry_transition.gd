@@ -10,6 +10,8 @@ const PreparedPose = preload("res://core/models/combat_prepared_pose.gd")
 const Attachment = preload("res://core/resolvers/combat_prepared_attachment_resolver.gd")
 const ArmFrame = preload("res://core/resolvers/combat_prepared_arm_frame_resolver.gd")
 const WristMotion = preload("res://core/resolvers/combat_wrist_motion_resolver.gd")
+const ForearmRotation = preload("res://core/resolvers/combat_forearm_rotation_resolver.gd")
+const ShoulderMotion = preload("res://core/resolvers/combat_shoulder_motion_resolver.gd")
 const PoseTrack = preload("res://core/resolvers/combat_prepared_pose_track_builder.gd")
 const ENTRY_DURATION_SECONDS := 0.160
 # Text-resource parsing can alter the final bits of small radian values. This
@@ -98,6 +100,7 @@ static func _supply_matching_saved_neutrals(current: Dictionary, saved: Dictiona
 			translation_differences.append({"bone": bone, "current": actual_position, "saved": saved_position})
 	var packets: Dictionary = current.get("arm_constraints_by_slot", {}).duplicate(true)
 	var restored: Array[StringName] = []
+	var legacy_anatomy_slots: Array[StringName] = []
 	for slot: Variant in packets:
 		if not saved.arm_constraints_by_slot.has(slot):
 			return {"valid": false, "reason": "neutral_calibration_slot_missing"}
@@ -105,6 +108,10 @@ static func _supply_matching_saved_neutrals(current: Dictionary, saved: Dictiona
 		var baseline: Dictionary = saved.arm_constraints_by_slot[slot]
 		if not bool(baseline.get("valid", false)) or not (actual.get("missing_bones", []) as Array).is_empty():
 			return {"valid": false, "reason": "neutral_calibration_bones_unavailable"}
+		# These additions change allowed motion, not the imported-rest meaning
+		# of the saved helper neutrals. Only recognize this exact legacy upgrade;
+		# all pre-existing geometry/profile/basis guards remain below.
+		var legacy_forearm: bool = _matching_legacy_forearm_extension(actual, baseline)
 		for field: String in ["material_hinge_revision", "forearm_hand_index_revision", "wrist_model_revision", "wrist_profile", "slot_id", "clavicle_bone", "upperarm_bone", "forearm_bone", "hand_bone", "twist_chains", "limb_twist_axis", "shoulder_min_degrees", "shoulder_max_degrees", "elbow_min_degrees", "elbow_max_degrees", "joint_epsilon_degrees", "limb_twist_limit_radians", "usable_reach_m", "contact_wrist_twist_limit_degrees", "contact_wrist_basis_enabled", "limb_twist_distribution_enabled"]:
 			if not actual.has(field) or not baseline.has(field):
 				return {"valid": false, "reason": "neutral_calibration_constraint_missing:" + field}
@@ -112,11 +119,18 @@ static func _supply_matching_saved_neutrals(current: Dictionary, saved: Dictiona
 			var b: Variant = baseline[field]
 			var matches: bool = is_equal_approx(float(a), float(b)) if (a is float or a is int) and (b is float or b is int) else a == b
 			if field == "wrist_profile":
-				matches = a is Dictionary and b is Dictionary and _matching_wrist_profile(a, b)
+				matches = a is Dictionary and b is Dictionary and (_matching_wrist_profile(a, b) or legacy_forearm)
 			if not matches:
 				return {"valid": false, "reason": "neutral_calibration_constraint_changed:" + field}
-		if not _matching_wrist_calibration(actual.get("wrist_calibration", {}), baseline.get("wrist_calibration", {})):
+		if not _matching_wrist_calibration(actual.get("wrist_calibration", {}), baseline.get("wrist_calibration", {})) and not legacy_forearm:
 			return {"valid": false, "reason": "neutral_calibration_wrist_model_changed"}
+		var legacy_shoulder: bool = (not baseline.has("shoulder_model_revision") and not baseline.has("shoulder_calibration") and not baseline.has("shoulder_profile")
+			and actual.get("shoulder_model_revision") == ShoulderMotion.REVISION and PreparedPose._valid_shoulder_constraints(actual))
+		if actual.has("shoulder_model_revision") or baseline.has("shoulder_model_revision"):
+			if not legacy_shoulder and (actual.get("shoulder_model_revision") != baseline.get("shoulder_model_revision") or not _matching_wrist_profile(actual.get("shoulder_profile", {}), baseline.get("shoulder_profile", {})) or not _matching_shoulder_calibration(actual.get("shoulder_calibration", {}), baseline.get("shoulder_calibration", {}))):
+				return {"valid": false, "reason": "neutral_calibration_shoulder_model_changed"}
+		if legacy_forearm or legacy_shoulder:
+			legacy_anatomy_slots.append(StringName(slot))
 		var neutrals: Dictionary = actual.get("twist_neutral_rotations", {})
 		for chain: Array in actual.twist_chains:
 			for bone: StringName in chain:
@@ -153,7 +167,11 @@ static func _supply_matching_saved_neutrals(current: Dictionary, saved: Dictiona
 		var hand: int = current.bone_names.find(packet.hand_bone)
 		if forearm < 0 or hand < 0:
 			return {"valid": false, "reason": "entry_wrist_bones_unavailable", "hand_slot": slot}
-		var wrist: Dictionary = WristMotion.measure_state(fk.transforms[forearm], fk.transforms[hand], packet.wrist_calibration, packet.wrist_profile, wrist_states.get(slot, {}))
+		var bend: Dictionary = ArmFrame.measure_elbow_bend(current, fk.transforms, packet)
+		if not bend.valid:
+			return bend
+		var wrist: Dictionary = WristMotion.measure_state(fk.transforms[forearm], fk.transforms[hand], packet.wrist_calibration, packet.wrist_profile, wrist_states.get(slot, {}),
+			float(bend.radians), PI - deg_to_rad(float(packet.elbow_min_degrees)))
 		if not wrist.get("valid", false):
 			if String(wrist.get("reason", "")) != "wrist_pose_not_representable":
 				return wrist.merged({"hand_slot": slot})
@@ -167,11 +185,40 @@ static func _supply_matching_saved_neutrals(current: Dictionary, saved: Dictiona
 			PoseTrack.append_quality_warning(quality_warnings, {"reason": "wrist_motion_range", "hand_slot": slot, "failure_scope": "entry", "node_index": 0})
 	current["wrist_states_by_slot"] = wrist_states
 	current["wrist_measurement_failures_by_slot"] = measurement_failures
+	var shoulder: Dictionary = ArmFrame.measure_shoulder_states(current)
+	if not shoulder.valid:
+		return shoulder
+	current["shoulder_states_by_slot"] = shoulder.states
+	for warning: Dictionary in shoulder.quality_warnings:
+		PoseTrack.append_quality_warning(quality_warnings, warning, {"failure_scope": "entry", "node_index": 0})
 	current["quality_warnings"] = quality_warnings
 	current["entry_neutral_calibration_source"] = "matching_saved_skeleton"
 	current["entry_restored_neutral_bones"] = restored
+	current["entry_legacy_anatomy_neutral_slots"] = legacy_anatomy_slots
 	current["entry_nonarm_translation_differences"] = translation_differences
 	return {"valid": true, "reason": ""}
+
+## Old v1 snapshots may predate the added elbow table and shoulder measurement.
+## This does not migrate the saved skill or replace current movement limits.
+## It only proves that its helper-neutral rotations still describe this rig.
+static func _matching_legacy_forearm_extension(current: Dictionary, saved: Dictionary) -> bool:
+	if not PreparedPose._valid_wrist_constraints(current):
+		return false
+	var profile: Dictionary = current.get("wrist_profile", {}).duplicate(true)
+	var old_profile: Dictionary = saved.get("wrist_profile", {})
+	var calibration: Dictionary = current.get("wrist_calibration", {}).duplicate(true)
+	var old_calibration: Dictionary = saved.get("wrist_calibration", {})
+	if profile.get("forearm_interval_revision") != ForearmRotation.REVISION:
+		return false
+	for field: String in ["forearm_interval_revision", "forearm_elbow_samples_radians", "forearm_pronation_limits_radians", "forearm_supination_limits_radians"]:
+		if old_profile.has(field):
+			return false
+		profile.erase(field)
+	for field: String in ["forearm_interval_revision", "forearm_thumb_up_rho_radians", "forearm_pronation_sign"]:
+		if old_calibration.has(field):
+			return false
+		calibration.erase(field)
+	return _matching_wrist_profile(profile, old_profile) and _matching_wrist_calibration(calibration, old_calibration)
 
 static func _matching_wrist_profile(current: Dictionary, saved: Dictionary) -> bool:
 	if current.is_empty() or current.size() != saved.size():
@@ -187,6 +234,12 @@ static func _matching_wrist_profile(current: Dictionary, saved: Dictionary) -> b
 			var magnitude: float = maxf(1.0, maxf(absf(float(a)), absf(float(b))))
 			if absf(float(a) - float(b)) > PROFILE_SERIALIZATION_EPSILON * magnitude:
 				return false
+		elif a is PackedFloat64Array and b is PackedFloat64Array:
+			if a.size() != b.size():
+				return false
+			for index: int in a.size():
+				if not is_finite(a[index]) or not is_finite(b[index]) or absf(a[index] - b[index]) > PROFILE_SERIALIZATION_EPSILON * maxf(1.0, maxf(absf(a[index]), absf(b[index]))):
+					return false
 		elif a != b:
 			return false
 	return true
@@ -197,6 +250,17 @@ static func _matching_wrist_calibration(current: Dictionary, saved: Dictionary) 
 	for field: String in ["revision", "radial_sign", "source_bone_names", "source_parent_bone_names"]:
 		if not current.has(field) or current.get(field) != saved.get(field):
 			return false
+	for field: String in ["forearm_interval_revision", "forearm_thumb_up_rho_radians", "forearm_pronation_sign"]:
+		if current.has(field) != saved.has(field):
+			return false
+		if current.has(field):
+			var a: Variant = current[field]
+			var b: Variant = saved[field]
+			if a is float or a is int:
+				if not (b is float or b is int) or not is_equal_approx(float(a), float(b)):
+					return false
+			elif a != b:
+				return false
 	for field: String in ["neutral_anatomical_in_forearm", "anatomical_in_hand_bone"]:
 		if not current.get(field) is Basis or not saved.get(field) is Basis or not (current[field] as Basis).is_equal_approx(saved[field]):
 			return false
@@ -206,6 +270,26 @@ static func _matching_wrist_calibration(current: Dictionary, saved: Dictionary) 
 		return false
 	for index: int in current_rests.size():
 		if not current_rests[index] is Transform3D or not saved_rests[index] is Transform3D or not (current_rests[index] as Transform3D).is_equal_approx(saved_rests[index]):
+			return false
+	return true
+
+static func _matching_shoulder_calibration(current: Dictionary, saved: Dictionary) -> bool:
+	if current.is_empty() or saved.is_empty() or not bool(current.get("valid", false)) or not bool(saved.get("valid", false)):
+		return false
+	for field: String in ["revision", "origin_id", "parent_origin_id", "chest_bone_name", "upperarm_bone_name", "forearm_bone_name", "clavicle_bone_name", "internal_sign", "side_sign", "source_bone_names", "source_parent_bone_names"]:
+		if not current.has(field) or current.get(field) != saved.get(field):
+			return false
+	if current.get("zero_convention", "") != saved.get("zero_convention", ""):
+		return false
+	for field: String in ["material_frame_in_upperarm", "chest_anatomical_in_bone"]:
+		if not current.get(field) is Basis or not saved.get(field) is Basis or not (current[field] as Basis).is_equal_approx(saved[field]):
+			return false
+	var rests: Array = current.get("source_rest_transforms", [])
+	var other_rests: Array = saved.get("source_rest_transforms", [])
+	if rests.is_empty() or rests.size() != other_rests.size():
+		return false
+	for index: int in rests.size():
+		if not rests[index] is Transform3D or not other_rests[index] is Transform3D or not (rests[index] as Transform3D).is_equal_approx(other_rests[index]):
 			return false
 	return true
 
@@ -345,18 +429,14 @@ static func _attach_prefix(combined: Resource, incoming: Dictionary, destination
 	for index: int in prefix_count:
 		var ratio: float = float(combined.baked_frame_times[index]) / ENTRY_DURATION_SECONDS
 		ratio = ratio * ratio * (3.0 - 2.0 * ratio)
-		var parents: Array[Transform3D] = []
-		for parent: int in incoming.parent_reference_transforms.size():
-			parents.append((incoming.parent_reference_transforms[parent] as Transform3D).interpolate_with(destination.parent_reference_transforms[parent], ratio))
 		var rotation: Vector4 = combined.baked_solved_weapon_rotations_reference_local[index]
 		var weapon := Transform3D(Basis(Quaternion(rotation.x, rotation.y, rotation.z, rotation.w).normalized()).scaled(combined.baked_solved_weapon_scales_reference_local[index]), combined.baked_solved_weapon_positions_reference_local[index])
-		var sample := {
-			"pose_positions": combined.baked_solved_upper_body_pose_positions[index],
-			"pose_rotations": combined.baked_solved_upper_body_pose_rotations[index],
-			"pose_scales": combined.baked_solved_upper_body_pose_scales[index],
-			"parent_reference_transforms": parents,
-			"weapon_transform": weapon,
-		}
+		var sample: Dictionary = PoseTrack.sample_pose(incoming, destination, ratio)
+		if not sample.get("valid", false):
+			return sample.merged({"frame_index": index, "entry_time_seconds": combined.baked_frame_times[index]})
+		# Use the same signed anatomy branches as the body track while retaining
+		# the established entry weapon path and its scale/attachment authority.
+		sample.weapon_transform = weapon
 		var guided: Dictionary = PoseTrack.guide_sample(sample, incoming, destination, ratio, source_node, destination_node)
 		if not guided.valid:
 			return guided.merged({"frame_index": index, "entry_time_seconds": combined.baked_frame_times[index]})

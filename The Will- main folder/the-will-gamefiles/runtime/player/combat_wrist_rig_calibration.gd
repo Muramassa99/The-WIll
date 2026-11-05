@@ -4,6 +4,7 @@ class_name CombatWristRigCalibration
 ## Read-only imported-rest adapter. The result is fixed calibration, never a
 ## neutral inferred from a posed Hand or a partially rolled deformation helper.
 const WristMotion = preload("res://core/resolvers/combat_wrist_motion_resolver.gd")
+const ForearmRotation = preload("res://core/resolvers/combat_forearm_rotation_resolver.gd")
 const DigitRules = preload("res://runtime/player/player_digit_hinge_rules.gd")
 const ROOT := &"RL_BoneRoot"
 const REVISION := WristMotion.REVISION
@@ -163,6 +164,14 @@ static func build(skeleton: Skeleton3D, slot: StringName) -> Dictionary:
 		return _fail("ambiguous_wrist_radial_reference")
 	var neutral_in_forearm: Basis = forearm_rest.basis.orthonormalized().transposed() * anatomical_rest
 	var anatomical_in_hand: Basis = hand_rest.basis.orthonormalized().transposed() * anatomical_rest
+	var forearm_rotation: Dictionary = ForearmRotation.calibrate(
+		skeleton.get_bone_rest(forearm_index), skeleton.get_bone_rest(hand_index),
+		neutral_in_forearm, signf(radial_alignment))
+	if not forearm_rotation.get("valid", false): return forearm_rotation
+	forearm_rotation.erase("valid")
+	forearm_rotation["forearm_reference_origin_id"] = forearm_name
+	forearm_rotation["forearm_reference_parent_origin_id"] = StringName(skeleton.get_bone_name(skeleton.get_bone_parent(forearm_index)))
+	forearm_rotation["forearm_reference_space"] = &"bone_frame"
 	var origin_id := StringName(String(hand_name) + "WristAnatomicalOrigin")
 	var transform_to_parent := Transform3D(anatomical_in_hand, Vector3.ZERO)
 	var origin_record := {
@@ -177,7 +186,7 @@ static func build(skeleton: Skeleton3D, slot: StringName) -> Dictionary:
 		"origin_record": origin_record, "forearm_bone_name": forearm_name, "hand_bone_name": hand_name,
 		"source_bone_names": source_names, "source_rest_transforms": source_rests,
 		"source_parent_bone_names": source_parents, "source_rest_transform_space": &"parent_bone",
-		"bone_origin_records": bone_origin_records, "closing_evidence": closing_evidence}
+		"bone_origin_records": bone_origin_records, "closing_evidence": closing_evidence}.merged(forearm_rotation)
 
 static func _descends_from(skeleton: Skeleton3D, bone_index: int, ancestor_index: int) -> bool:
 	var cursor: int = bone_index

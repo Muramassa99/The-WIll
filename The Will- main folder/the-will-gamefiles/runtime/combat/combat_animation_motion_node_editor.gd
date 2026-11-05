@@ -34,6 +34,67 @@ var _drag_target: StringName = StringName()
 var _arm_roll_drag_state: Dictionary = {}
 var _point_drag_screen_offset: Vector2 = Vector2.ZERO
 
+## Pick the rendered marker surfaces, not oversized screen-space circles.
+## Local ray transforms preserve the marker's parent scale/orientation and the
+## returned distance remains in world-ray units, so overlapping shapes compare.
+func pick_visible_marker(camera: Camera3D, screen_position: Vector2, candidates: Array) -> StringName:
+	if camera == null:
+		return StringName()
+	var origin: Vector3 = camera.project_ray_origin(screen_position)
+	var direction: Vector3 = camera.project_ray_normal(screen_position).normalized()
+	var nearest: float = INF
+	var target: StringName = StringName()
+	for candidate: Dictionary in candidates:
+		var marker: MeshInstance3D = candidate.get("marker") as MeshInstance3D
+		if not is_instance_valid(marker) or marker.is_queued_for_deletion() or not marker.is_visible_in_tree():
+			continue
+		if (camera.cull_mask & marker.layers) == 0 or camera.is_position_behind(marker.global_position):
+			continue
+		var distance: float = _marker_ray_hit_distance(marker, origin, direction)
+		if distance >= 0.0 and distance < nearest and distance <= camera.far:
+			nearest = distance
+			target = StringName(candidate.get("target", StringName()))
+	return target
+
+func _marker_ray_hit_distance(marker: MeshInstance3D, ray_origin: Vector3, ray_direction: Vector3) -> float:
+	if marker.mesh == null or absf(marker.global_basis.determinant()) < 0.00000001:
+		return INF
+	var inverse: Transform3D = marker.global_transform.affine_inverse()
+	var origin: Vector3 = inverse * ray_origin
+	var direction: Vector3 = inverse.basis * ray_direction
+	if marker.mesh is SphereMesh:
+		var sphere: SphereMesh = marker.mesh as SphereMesh
+		var radii := Vector3(sphere.radius, sphere.height * 0.5, sphere.radius)
+		if radii.x <= 0.0 or radii.y <= 0.0:
+			return INF
+		origin /= radii
+		direction /= radii
+		var a: float = direction.dot(direction)
+		var b: float = origin.dot(direction)
+		var discriminant: float = b * b - a * (origin.dot(origin) - 1.0)
+		if a <= 0.0 or discriminant < 0.0:
+			return INF
+		var first: float = (-b - sqrt(discriminant)) / a
+		var second: float = (-b + sqrt(discriminant)) / a
+		return first if first >= 0.0 else (second if second >= 0.0 else INF)
+	if marker.mesh is BoxMesh:
+		var bounds: AABB = marker.mesh.get_aabb()
+		var lower: float = 0.0
+		var upper: float = INF
+		for axis: int in 3:
+			if absf(direction[axis]) < 0.000000001:
+				if origin[axis] < bounds.position[axis] or origin[axis] > bounds.end[axis]:
+					return INF
+				continue
+			var first: float = (bounds.position[axis] - origin[axis]) / direction[axis]
+			var second: float = (bounds.end[axis] - origin[axis]) / direction[axis]
+			lower = maxf(lower, minf(first, second))
+			upper = minf(upper, maxf(first, second))
+			if lower > upper:
+				return INF
+		return lower
+	return INF
+
 ## Intersect a camera ray with a camera-facing drag plane through the current
 ## pommel. The pommel is the free translation handle for the whole weapon.
 func raycast_pommel_on_view_drag_plane(

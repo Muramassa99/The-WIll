@@ -8,6 +8,7 @@ const PreparedPose = preload("res://core/models/combat_prepared_pose.gd")
 const HingeFrame = preload("res://core/resolvers/combat_arm_hinge_frame_resolver.gd")
 const ForearmHandIndex = preload("res://core/resolvers/combat_forearm_hand_index_resolver.gd")
 const WristMotion = preload("res://core/resolvers/combat_wrist_motion_resolver.gd")
+const ShoulderMotion = preload("res://core/resolvers/combat_shoulder_motion_resolver.gd")
 
 static func capture(
 	actor: Node3D,
@@ -79,6 +80,8 @@ static func capture(
 	pose["support_hand_in_weapon"] = weapon.global_transform.affine_inverse() * skeleton.global_transform * skeleton.get_bone_global_pose(support_index) if support_index >= 0 else Transform3D.IDENTITY
 	pose["arm_constraints_by_slot"] = capture_arm_constraints(actor, reference_world)
 	pose["wrist_states_by_slot"] = {}
+	pose["shoulder_states_by_slot"] = {}
+	pose["shoulder_measurement_failures_by_slot"] = {}
 	pose["wrist_measurement_failures_by_slot"] = {}
 	pose["quality_warnings"] = []
 	if actor.has_method("capture_wrist_motion_start_state"):
@@ -98,6 +101,22 @@ static func capture(
 	elif actor.has_method("capture_wrist_constraint_state"):
 		for slot: StringName in [&"hand_right", &"hand_left"]:
 			pose.wrist_states_by_slot[slot] = actor.call("capture_wrist_constraint_state", slot)
+	if actor.has_method("capture_shoulder_motion_start_state"):
+		for slot: StringName in [&"hand_right", &"hand_left"]:
+			var measurement: Dictionary = actor.call("capture_shoulder_motion_start_state", slot)
+			if bool(measurement.get("valid", false)):
+				pose.shoulder_states_by_slot[slot] = measurement.state.duplicate(true)
+				if not bool(measurement.get("legal", true)):
+					var reason := "shoulder_motion_range" if measurement.get("covered", false) else String(measurement.get("reason", "shoulder_direction_not_calibrated"))
+					pose.quality_warnings.append({"severity": "warning", "reason": reason, "hand_slot": slot})
+				if not String(measurement.get("reference_warning", "")).is_empty():
+					pose.quality_warnings.append({"severity": "warning", "reason": measurement.reference_warning, "hand_slot": slot})
+			else:
+				# A singular measurement cannot erase finite authored bone poses.
+				# Retain the reason without manufacturing a new angular zero.
+				var reason := String(measurement.get("reason", "shoulder_pose_not_representable"))
+				pose.shoulder_measurement_failures_by_slot[slot] = reason
+				pose.quality_warnings.append({"severity": "warning", "reason": reason, "hand_slot": slot})
 	pose["grip_accepted"] = false
 	# Snapshot validity describes captured data, not a new contact certification.
 	pose["valid"] = true
@@ -166,6 +185,12 @@ static func capture_arm_constraints(actor: Node3D, reference_world: Transform3D)
 			"limb_twist_distribution_enabled": actor.get("enable_authoring_limb_twist_distribution"),
 		}
 		var missing: Array[StringName] = []
+		if actor.has_method("capture_shoulder_constraint_calibration"):
+			var shoulder_profile: Resource = actor.get("shoulder_motion_profile") as Resource
+			if shoulder_profile != null and shoulder_profile.has_method("as_dictionary"):
+				packet["shoulder_model_revision"] = ShoulderMotion.REVISION
+				packet["shoulder_calibration"] = actor.call("capture_shoulder_constraint_calibration", slot)
+				packet["shoulder_profile"] = shoulder_profile.call("as_dictionary")
 		for role: String in ["clavicle", "upperarm", "forearm", "hand"]:
 			var bone: StringName = StringName(constants.get(prefix + role.to_upper() + "_BONE", StringName()))
 			packet[role + "_bone"] = bone

@@ -162,6 +162,8 @@ func _constraint_packet(slot: StringName, hand: StringName) -> Dictionary:
 		"usable_reach_m": 1.0, "reference_up": Vector3.UP, "twist_chains": [], "twist_neutral_rotations": {},
 		"wrist_model_revision": WristMotion.REVISION, "wrist_profile": WristProfile.new().as_dictionary(),
 		"wrist_calibration": {"valid": true, "revision": WristMotion.REVISION, "radial_sign": 1.0,
+			"forearm_interval_revision": WristProfile.FOREARM_INTERVAL_REVISION,
+			"forearm_thumb_up_rho_radians": 0.0, "forearm_pronation_sign": 1.0,
 			"neutral_anatomical_in_forearm": Basis.IDENTITY, "anatomical_in_hand_bone": Basis.IDENTITY}}
 
 func _test_advisory_recorded_pose(a: Resource, b: Resource, source: Dictionary, destination: Dictionary, output_dir: String) -> void:

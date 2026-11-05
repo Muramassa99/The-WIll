@@ -23,6 +23,8 @@ static func apply(sample: Dictionary, from: Dictionary, to: Dictionary, weight: 
 	var pose: Dictionary = from.duplicate()
 	for field: String in ["pose_positions", "pose_rotations", "pose_scales", "parent_reference_transforms"]:
 		pose[field] = sample[field]
+	for field: String in ["wrist_states_by_slot", "shoulder_states_by_slot"]:
+		pose[field] = sample.get(field, from.get(field, {})).duplicate(true)
 	for kind: String in ["primary", "support"]:
 		if kind == "support" and not (bool(from.get("support_enabled", false)) and bool(to.get("support_enabled", false))):
 			continue
@@ -53,6 +55,7 @@ static func apply(sample: Dictionary, from: Dictionary, to: Dictionary, weight: 
 		if not bool(followed.get("valid", false)):
 			return followed.merged({"hand": kind, "reason": "prepared_attachment_" + String(followed.get("reason", "unavailable"))})
 		pose.pose_rotations = followed.pose_rotations
+		pose["wrist_states_by_slot"] = followed.get("wrist_states_by_slot", pose.get("wrist_states_by_slot", {})).duplicate(true)
 		result.pose_rotations = followed.pose_rotations
 		result.ik_calls += 1
 		result.relations[kind] = relation.transform

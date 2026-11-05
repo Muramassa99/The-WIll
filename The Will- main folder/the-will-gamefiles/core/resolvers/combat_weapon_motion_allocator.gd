@@ -549,7 +549,13 @@ static func _hold_order(mode: String, policy: Dictionary) -> Array:
 		return [PackedStringArray(["torso"]), PackedStringArray(["girdle", "shoulder_girdle"]), PackedStringArray(["wrist", "forearm"]), PackedStringArray(["shoulder", "shoulder_swing", "shoulder_roll", "elbow"])]
 	if mode == "roll":
 		return [PackedStringArray(["torso"]), PackedStringArray(["girdle", "shoulder_girdle"]), PackedStringArray(["shoulder", "shoulder_roll"]), PackedStringArray(["wrist", "elbow", "shoulder_swing"]), PackedStringArray(["forearm"])]
-	return [PackedStringArray(["torso"]), PackedStringArray(["girdle", "shoulder_girdle"]), PackedStringArray(["shoulder", "shoulder_swing", "shoulder_roll"]), PackedStringArray(["forearm"]), PackedStringArray(["elbow"]), PackedStringArray(["wrist"])]
+	# Tip rotation can use forearm turn before bending the elbow/wrist. Holding
+	# forearm first forced opposing distal corrections near a singular wrist
+	# configuration. Shoulder and elbow remain available when the actual task
+	# Jacobian and distal bounds require them. Keep the existing proximal hold
+	# policy so a wrist-bend correction does not become an upstream rotation.
+	# These are preferences, not per-joint travel allowances or new DOFs.
+	return [PackedStringArray(["torso"]), PackedStringArray(["girdle", "shoulder_girdle"]), PackedStringArray(["shoulder", "shoulder_swing", "shoulder_roll"]), PackedStringArray(["elbow"]), PackedStringArray(["wrist"]), PackedStringArray(["forearm"])]
 
 static func _target_at(previous: Transform3D, target: Transform3D, contact: Vector3, mode: String, weight: float, anchor: Vector3) -> Transform3D:
 	if mode == "pommel":

@@ -10,6 +10,8 @@ const ControlFields = preload("res://core/resolvers/combat_runtime_clip_incremen
 const GripTransition = preload("res://core/resolvers/combat_grip_transition_resolver.gd")
 const Attachment = preload("res://core/resolvers/combat_prepared_attachment_resolver.gd")
 const ArmFrame = preload("res://core/resolvers/combat_prepared_arm_frame_resolver.gd")
+const WristMotion = preload("res://core/resolvers/combat_wrist_motion_resolver.gd")
+const ShoulderMotion = preload("res://core/resolvers/combat_shoulder_motion_resolver.gd")
 const EPSILON := 0.000001
 
 static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dictionary:
@@ -146,7 +148,7 @@ static func is_pose_quality_failure(reason: String) -> bool:
 	return base in ["requested_hand_outside_usable_reach", "requested_hand_has_no_arm_sphere_intersection",
 		"elbow_frame_outside_reach", "shoulder_range", "elbow_circle_has_no_range_freedom",
 		"elbow_range_has_no_circle_solution", "complete_arm_frame_residual", "helper_twist_range",
-		"wrist_motion_range", "wrist_pose_not_representable", "forearm_hand_index_range",
+		"wrist_motion_range", "wrist_pose_not_representable", "forearm_hand_index_range", "shoulder_motion_range",
 		"degenerate_incoming_arm_axis", "degenerate_material_hinge", "prepared_weapon_path_has_degenerate_axis",
 		"saved_grip_outside_handle_end_bounds"]
 
@@ -190,16 +192,20 @@ static func guide_sample(sample: Dictionary, from: Dictionary, to: Dictionary, w
 	var body_pose := from.duplicate()
 	for field: String in ["pose_positions", "pose_scales", "parent_reference_transforms"]:
 		body_pose[field] = sample[field]
+	for field: String in ["wrist_states_by_slot", "shoulder_states_by_slot"]:
+		body_pose[field] = sample.get(field, {}).duplicate(true)
 	body_pose.pose_rotations = follow.pose_rotations
 	var normalized: Dictionary = ArmFrame.normalize_material_frames(body_pose)
 	if not normalized.get("valid", false):
 		return _quality_fallback(raw, normalized) if is_pose_quality_failure(String(normalized.get("reason", ""))) else normalized
 	var guided := sample.duplicate()
 	guided.pose_rotations = normalized.pose_rotations
+	guided["wrist_states_by_slot"] = normalized.get("wrist_states_by_slot", {}).duplicate(true)
+	guided["shoulder_states_by_slot"] = normalized.get("shoulder_states_by_slot", {}).duplicate(true)
 	validation = _validate_sample_channels(guided)
 	if not validation.valid:
 		return validation
-	return {"valid": true, "sample": guided, "follow": follow, "normalized": normalized, "quality_warnings": []}
+	return {"valid": true, "sample": guided, "follow": follow, "normalized": normalized, "quality_warnings": normalized.get("quality_warnings", [])}
 
 static func _quality_fallback(raw: Dictionary, failure: Dictionary) -> Dictionary:
 	return {"valid": true, "sample": raw, "quality_warnings": [failure.duplicate(true)],
@@ -300,13 +306,79 @@ static func sample_pose(from: Dictionary, to: Dictionary, weight: float) -> Dict
 	for index: int in from.parent_reference_transforms.size():
 		parents.append(_blend_transform(from.parent_reference_transforms[index], to.parent_reference_transforms[index], ratio))
 	var weapon: Transform3D = _blend_transform(_weapon_transform(from), _weapon_transform(to), ratio)
-	return {
+	var sample: Dictionary = {
 		"valid": true, "pose_positions": positions, "pose_rotations": rotations, "pose_scales": scales,
 		"parent_reference_transforms": parents, "weapon_transform": weapon,
 		"anchor_positions": _blend_vectors(from.anchor_positions_weapon_local, to.anchor_positions_weapon_local, ratio),
 		"anchor_rotations": _blend_rotations(from.anchor_rotations_weapon_local, to.anchor_rotations_weapon_local, ratio),
 		"anchor_scales": _blend_vectors(from.anchor_scales_weapon_local, to.anchor_scales_weapon_local, ratio),
 	}
+	sample["wrist_states_by_slot"] = _blend_anatomical_states(from.get("wrist_states_by_slot", {}), to.get("wrist_states_by_slot", {}), ["rho", "beta", "gamma"], ratio)
+	sample["shoulder_states_by_slot"] = _blend_anatomical_states(from.get("shoulder_states_by_slot", {}), to.get("shoulder_states_by_slot", {}), ["h"], ratio)
+	if ratio <= 0.0 or ratio >= 1.0:
+		return sample
+	return _apply_anatomical_sample(sample, from, to)
+
+static func _blend_anatomical_states(a: Dictionary, b: Dictionary, fields: Array[String], weight: float) -> Dictionary:
+	if weight <= 0.0:
+		return a.duplicate(true)
+	if weight >= 1.0:
+		return b.duplicate(true)
+	var result: Dictionary = {}
+	for slot: Variant in a:
+		if not b.has(slot):
+			continue
+		var state: Dictionary = {}
+		for field: String in fields:
+			if a[slot].has(field) and b[slot].has(field):
+				# These are signed anatomical coordinates, not periodic display
+				# angles. A quaternion shortest arc must not choose their branch.
+				state[field] = lerpf(float(a[slot][field]), float(b[slot][field]), weight)
+		if state.size() == fields.size():
+			result[slot] = state
+	return result
+
+## New anatomy packets reconstruct their scalar branches before the existing
+## shared attachment guidance. Geometry rho retains imported-rest semantics;
+## shoulder h is chest-relative. No live actor or acquisition is involved.
+static func _apply_anatomical_sample(sample: Dictionary, from: Dictionary, to: Dictionary) -> Dictionary:
+	var pose: Dictionary = from.duplicate()
+	for field: String in ["pose_positions", "pose_rotations", "pose_scales", "parent_reference_transforms", "wrist_states_by_slot", "shoulder_states_by_slot"]:
+		pose[field] = sample[field]
+	var rotations: PackedVector4Array = sample.pose_rotations.duplicate()
+	for slot: Variant in from.get("arm_constraints_by_slot", {}):
+		var packet: Dictionary = from.arm_constraints_by_slot[slot]
+		var destination: Dictionary = to.get("arm_constraints_by_slot", {}).get(slot, {})
+		if not packet.has("shoulder_model_revision") or destination.get("shoulder_model_revision") != packet.shoulder_model_revision:
+			continue
+		var fk: Dictionary = ArmFrame.forward_kinematics(pose, rotations)
+		if not fk.valid:
+			return fk
+		var calibration: Dictionary = packet.shoulder_calibration
+		var chest: int = from.bone_names.find(calibration.chest_bone_name)
+		var upper: int = from.bone_names.find(calibration.upperarm_bone_name)
+		var forearm: int = from.bone_names.find(calibration.forearm_bone_name)
+		var hand: int = from.bone_names.find(packet.hand_bone)
+		if mini(mini(chest, upper), mini(forearm, hand)) < 0:
+			return _fail("prepared_shoulder_bones_unavailable")
+		if sample.shoulder_states_by_slot.has(slot):
+			var composed: Dictionary = ShoulderMotion.compose(fk.transforms[chest], fk.transforms[upper], fk.transforms[forearm], calibration, float(sample.shoulder_states_by_slot[slot].h))
+			if composed.get("valid", false):
+				ArmFrame._set_reference_basis(pose, rotations, upper, composed.upperarm_basis)
+				fk = ArmFrame.forward_kinematics(pose, rotations)
+				if not fk.valid:
+					return fk
+		if sample.wrist_states_by_slot.has(slot):
+			var bend: Dictionary = ArmFrame.measure_elbow_bend(pose, fk.transforms, packet)
+			if not bend.valid:
+				return bend
+			var wrist: Dictionary = WristMotion.sample_kinematics(fk.transforms[forearm], fk.transforms[hand], packet.wrist_calibration, packet.wrist_profile, sample.wrist_states_by_slot[slot],
+				float(bend.radians), PI - deg_to_rad(float(packet.elbow_min_degrees)))
+			if not wrist.get("valid", false):
+				return wrist
+			ArmFrame._set_reference_basis(pose, rotations, hand, wrist.hand_basis)
+	sample.pose_rotations = rotations
+	return sample
 
 static func _sample_weapon_path(control: Resource, frame: int, from_node: Resource, to_node: Resource, from: Dictionary, to: Dictionary, weight: float) -> Dictionary:
 	var mapping: Transform3D = _blend_transform(from.trajectory_to_reference, to.trajectory_to_reference, weight)

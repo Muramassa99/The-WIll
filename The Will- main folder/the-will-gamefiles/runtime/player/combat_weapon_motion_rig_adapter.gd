@@ -8,6 +8,7 @@ class_name CombatWeaponMotionRigAdapter
 const Allocator = preload("res://core/resolvers/combat_weapon_motion_allocator.gd")
 const Policy = preload("res://core/defs/weapon_motion_policy_def.gd")
 const Wrist = preload("res://core/resolvers/combat_wrist_motion_resolver.gd")
+const Shoulder = preload("res://core/resolvers/combat_shoulder_motion_resolver.gd")
 const Hinge = preload("res://core/resolvers/combat_arm_hinge_frame_resolver.gd")
 const ForearmSkin = preload("res://core/resolvers/combat_forearm_hand_index_resolver.gd")
 const UpperBody = preload("res://runtime/player/player_rig_upper_body_pose_presenter.gd")
@@ -57,6 +58,7 @@ func allocate(owner: Node3D, motion_request: Dictionary) -> Dictionary:
 	result["accepted_pose"] = _pose_packet(payload.local_poses)
 	result["accepted_weapon_origin_id"] = &"world"
 	result["wrist_states_by_slot"] = payload.get("wrist_states_by_slot", {}).duplicate(true)
+	result["shoulder_states_by_slot"] = payload.get("shoulder_states_by_slot", {}).duplicate(true)
 	result["origin_id"] = Origin.ORIGIN_RL_BONE_ROOT
 	result["coordinate_contract"] = "world_weapon; parent_bone_local_pose; ancestry_to_RL_BoneRoot"
 	result["timings"] = _timing_result()
@@ -100,7 +102,9 @@ func _initialize(owner: Node3D, motion_request: Dictionary) -> Dictionary:
 	# ancestors would carry the untouched opposite arm through world space even
 	# though its own local pose channels did not change. Two-hand Pommel/Roll
 	# retain shared torso recruitment; Tip retains its existing clavicle boundary.
-	if support != StringName() and String(request.get("mode", "tip")) != "tip":
+	# The reversible editor experiment also removes shared torso parameters
+	# from two-hand requests. Keep their current transforms as the FK base.
+	if support != StringName() and String(request.get("mode", "tip")) != "tip" and not bool(rig.call("is_authoring_arm_spine_isolation_enabled")):
 		_build_torso(true)
 	for slot: StringName in [primary, support]:
 		if slot == StringName():
@@ -166,6 +170,7 @@ func _capture_commit_state() -> Dictionary:
 		rotations.append(skeleton.get_bone_pose_rotation(index))
 	return {"rotations": rotations, "weapon_world": weapon.global_transform,
 		"wrist_states": (rig.get("_wrist_motion_states") as Dictionary).duplicate(true),
+		"shoulder_states": (rig.get("_shoulder_motion_states") as Dictionary).duplicate(true),
 		"wrist_failures": (rig.get("_wrist_motion_failures") as Dictionary).duplicate(true)}
 
 func _restore_commit_state(before: Dictionary) -> void:
@@ -174,6 +179,7 @@ func _restore_commit_state(before: Dictionary) -> void:
 	for index: int in skeleton.get_bone_count():
 		skeleton.set_bone_pose_rotation(index, before.rotations[index])
 	rig.set("_wrist_motion_states", before.wrist_states)
+	rig.set("_shoulder_motion_states", before.get("shoulder_states", {}).duplicate(true))
 	rig.set("_wrist_motion_failures", before.wrist_failures)
 	skeleton.force_update_all_bone_transforms()
 	_refresh_hand_attachments()
@@ -273,6 +279,11 @@ func _build_arm(slot: StringName) -> Dictionary:
 	var calibrated: Dictionary = Hinge.calibration(skeleton.get_bone_rest(indices[2]), skeleton.get_bone_rest(indices[3]))
 	var wrist_calibration: Dictionary = rig.call("capture_wrist_constraint_calibration", slot)
 	var wrist_profile: Dictionary = rig.get("wrist_motion_profile").call("as_dictionary")
+	var shoulder_calibration: Dictionary = rig.call("capture_shoulder_constraint_calibration", slot)
+	var shoulder_profile: Dictionary = rig.get("shoulder_motion_profile").call("as_dictionary")
+	var shoulder_measurement: Dictionary = rig.call("capture_shoulder_motion_start_state", slot)
+	if not shoulder_calibration.get("valid", false) or not shoulder_measurement.get("valid", false):
+		return _failure("weapon_motion_invalid_shoulder_calibration", "INVALID_PROFILE")
 	if not calibrated.get("valid", false) or not wrist_calibration.get("valid", false):
 		return _failure("weapon_motion_invalid_anatomical_calibration", "INVALID_PROFILE")
 	var u: Transform3D = skeleton.get_bone_global_pose(indices[1])
@@ -289,10 +300,11 @@ func _build_arm(slot: StringName) -> Dictionary:
 	# A negative signed hinge angle describes an already inverted elbow. Keep
 	# that measured state so the existing allowance can let the user correct it.
 	var c: int = q.size()
-	# Clavicle and Upperarm already own three rotational channels in the live
-	# direct-reach chain. Geometric shoulder bounds below remain authoritative.
+	# No separately calibrated clavicle local envelope exists yet. The new
+	# profile explicitly holds its accepted pose for this control in that case;
+	# it must not provide a fresh extra allotment of shoulder turn per request.
 	for _coordinate: int in 3:
-		_append_parameter(0.0, -PI, PI, &"shoulder_girdle")
+		_append_parameter(0.0, 0.0, 0.0, &"shoulder_girdle")
 	var s: int = q.size()
 	# The imported material frame supplies the real humeral shaft (Y), hinge
 	# normal (X) and perpendicular swing direction (Z). Express these axes in
@@ -306,7 +318,10 @@ func _build_arm(slot: StringName) -> Dictionary:
 	var e: int = q.size()
 	_append_parameter(flexion, PI - deg_to_rad(float(rig.get("authoring_elbow_max_plane_angle_degrees"))), PI - deg_to_rad(float(rig.get("authoring_elbow_min_plane_angle_degrees"))), &"elbow")
 	var w: int = q.size()
-	_append_parameter(float(wrist_state.rho), -float(wrist_profile.forearm_roll_limit_radians), float(wrist_profile.forearm_roll_limit_radians), &"forearm")
+	var forearm_range: Dictionary = Wrist.forearm_interval(wrist_calibration, wrist_profile)
+	if not forearm_range.get("valid", false):
+		return _failure("weapon_motion_invalid_forearm_interval", "INVALID_PROFILE")
+	_append_parameter(float(wrist_state.rho), float(forearm_range.rho_min), float(forearm_range.rho_max), &"forearm")
 	_append_parameter(float(wrist_state.beta), -float(wrist_profile.flexion_limit_radians), float(wrist_profile.extension_limit_radians), &"wrist")
 	_append_parameter(float(wrist_state.gamma), -float(wrist_profile.ulnar_limit_radians), float(wrist_profile.radial_limit_radians), &"wrist")
 	var hand_world: Transform3D = skeleton_world * h
@@ -326,6 +341,10 @@ func _build_arm(slot: StringName) -> Dictionary:
 		"shoulder_axes": shoulder_axes,
 		"initial_flexion": flexion, "hinge_local": (calibrated.frame_in_upperarm as Basis).x,
 		"wrist_calibration": wrist_calibration, "wrist_profile": wrist_profile,
+		"full_flexion": rig.call("authoring_elbow_full_flexion_radians"),
+		"shoulder_calibration": shoulder_calibration, "shoulder_profile": shoulder_profile,
+		"shoulder_state": shoulder_measurement.state,
+		"chest_index": skeleton.find_bone(String(shoulder_calibration.chest_bone_name)),
 		"hand_in_weapon": hand_in_weapon, "hand_to_weapon": hand_in_weapon.affine_inverse(),
 		"helper_rests": [skeleton.get_bone_rest(indices[4]).basis, skeleton.get_bone_rest(indices[5]).basis, skeleton.get_bone_rest(indices[3]).basis]}
 
@@ -373,19 +392,46 @@ func _evaluate_kinematics(values: PackedFloat64Array) -> Dictionary:
 		constraints.append(absf(angles.x) / float(record.pitch_limit) - 1.0)
 		reasons.append("JOINT_RANGE:torso_pitch:" + String(names[record.index]))
 	var wrist_states: Dictionary = {}
+	var shoulder_states: Dictionary = {}
 	var weapon_frames: Array[Transform3D] = []
 	var hand_frames: Dictionary = {}
 	for arm: Dictionary in arms:
 		var i: Array = arm.indices
 		var w: int = arm.wrist_q
 		var state: Dictionary = {"rho": values[w], "beta": values[w + 1], "gamma": values[w + 2]}
-		var composed: Dictionary = Wrist.sample_kinematics(globals[i[2]], globals[i[3]], arm.wrist_calibration, arm.wrist_profile, state)
+		var composed: Dictionary = Wrist.sample_kinematics(globals[i[2]], globals[i[3]], arm.wrist_calibration, arm.wrist_profile, state, values[arm.elbow_q], float(arm.full_flexion))
 		if not composed.get("valid", false):
 			return composed
 		globals[i[3]].basis = composed.hand_basis
 		poses[i[3]].basis = globals[i[2]].basis.inverse() * globals[i[3]].basis
 		constraints.append(float(composed.envelope_value) - 1.0)
 		reasons.append("COUPLED_LIMIT:" + String(arm.slot))
+		var interval: Dictionary = Wrist.forearm_interval(arm.wrist_calibration, arm.wrist_profile, values[arm.elbow_q], float(arm.full_flexion))
+		constraints.append(float(interval.rho_min) - values[w])
+		reasons.append("JOINT_RANGE:forearm_min:" + String(arm.slot))
+		constraints.append(values[w] - float(interval.rho_max))
+		reasons.append("JOINT_RANGE:forearm_max:" + String(arm.slot))
+		var humerus: Dictionary = Shoulder.measure(globals[arm.chest_index], globals[i[1]], globals[i[2]],
+			arm.shoulder_calibration, arm.shoulder_profile, arm.shoulder_state)
+		if not humerus.get("valid", false):
+			return humerus
+		# User chose documented coverage only. Outside it hold the measured
+		# request-start axial angle, not an invented anatomical zero. Other
+		# permitted joint coordinates remain available for correction/return.
+		var covered_shoulder: bool = humerus.get("covered", false)
+		var held_h: float = arm.shoulder_state.get("held_h", arm.shoulder_state.h)
+		var shoulder_min: float = humerus.minimum_radians if covered_shoulder else held_h
+		var shoulder_max: float = humerus.maximum_radians if covered_shoulder else held_h
+		# A hold is not an anatomical overrange allowance. Offsetting its tiny
+		# residual at each fresh request would ratchet the fixed anchor outward.
+		var shoulder_reason_prefix := "JOINT_RANGE:" if covered_shoulder else "SHOULDER_HOLD:"
+		constraints.append(shoulder_min - float(humerus.state.h))
+		reasons.append(shoulder_reason_prefix + "shoulder_external:" + String(arm.slot))
+		constraints.append(float(humerus.state.h) - shoulder_max)
+		reasons.append(shoulder_reason_prefix + "shoulder_internal:" + String(arm.slot))
+		shoulder_states[arm.slot] = humerus.state
+		if not covered_shoulder:
+			shoulder_states[arm.slot]["held_h"] = held_h
 		var shoulder: float = (globals[i[0]].origin - globals[i[1]].origin).angle_to(globals[i[2]].origin - globals[i[1]].origin)
 		constraints.append(deg_to_rad(float(rig.get("authoring_shoulder_min_plane_angle_degrees"))) - shoulder)
 		reasons.append("JOINT_RANGE:shoulder_min:" + String(arm.slot))
@@ -448,7 +494,8 @@ func _evaluate_kinematics(values: PackedFloat64Array) -> Dictionary:
 		"search_constraint_reasons": search_constraint_reasons,
 		"equalities": equalities, "equality_tolerances": equality_tolerances,
 		"payload": {"local_poses": poses, "globals": globals, "hand_frames": hand_frames,
-			"wrist_states_by_slot": wrist_states, "q": values, "origin_id": Origin.ORIGIN_RL_BONE_ROOT}}
+			"wrist_states_by_slot": wrist_states, "shoulder_states_by_slot": shoulder_states,
+			"q": values, "origin_id": Origin.ORIGIN_RL_BONE_ROOT}}
 
 func _validate_candidate(evaluation: Dictionary) -> Dictionary:
 	var started: int = Time.get_ticks_usec()
@@ -495,13 +542,14 @@ func _commit(payload: Dictionary, accepted_weapon: Transform3D, record_timing: b
 		var i: Array = arm.indices
 		var state: Dictionary = payload.wrist_states_by_slot[arm.slot]
 		var skin: Dictionary = ForearmSkin.distribute(skeleton.get_bone_global_pose(i[2]), skeleton.get_bone_global_pose(i[3]),
-			arm.helper_rests[0], arm.helper_rests[1], arm.helper_rests[2], float(arm.wrist_profile.forearm_roll_limit_radians),
+			arm.helper_rests[0], arm.helper_rests[1], arm.helper_rests[2], Wrist.forearm_geometry_limit(arm.wrist_calibration, arm.wrist_profile),
 			float(arm.wrist_profile.angle_epsilon_radians), float(state.rho))
 		if skin.get("valid", false):
 			skeleton.set_bone_pose_rotation(i[4], skin.proximal_rotation)
 			skeleton.set_bone_pose_rotation(i[5], skin.distal_rotation)
 			rig.get("_wrist_motion_states")[arm.slot] = state.duplicate()
 			rig.get("_wrist_motion_failures").erase(arm.slot)
+		rig.get("_shoulder_motion_states")[arm.slot] = payload.shoulder_states_by_slot[arm.slot].duplicate(true)
 	skeleton.force_update_all_bone_transforms()
 	weapon.global_transform = accepted_weapon
 	_refresh_hand_attachments()

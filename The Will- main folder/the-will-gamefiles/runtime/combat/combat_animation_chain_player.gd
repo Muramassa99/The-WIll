@@ -521,6 +521,7 @@ func _calibration_from_prepared_pose(snapshot: Dictionary) -> Dictionary:
 		"bone_rest_transforms": snapshot.bone_rest_transforms.duplicate(),
 		"arm_constraints_by_slot": constraints.duplicate(true),
 		"wrist_states_by_slot": snapshot.get("wrist_states_by_slot", {}).duplicate(true),
+		"shoulder_states_by_slot": snapshot.get("shoulder_states_by_slot", {}).duplicate(true),
 	}
 
 func _sync_runtime_clip_origin_metadata() -> void:

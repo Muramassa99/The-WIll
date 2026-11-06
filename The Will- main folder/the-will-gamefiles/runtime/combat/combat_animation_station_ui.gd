@@ -5578,7 +5578,10 @@ func _get_active_station_state() -> Resource:
 	if active_wip == null:
 		return null
 	if preview_authoring_lookup_scope_depth == 0:
-		return active_wip.ensure_combat_animation_station_state()
+		var preparation_started: int = _marker_lifecycle_profile_now()
+		var unscoped_station: Resource = active_wip.ensure_combat_animation_station_state()
+		_marker_lifecycle_profile_step("station_prepare_unscoped", preparation_started)
+		return unscoped_station
 	# Nested draft/node getters share one preparation only within this synchronous
 	# authoring call. Selection and node values still come from the live Resources.
 	var ensure_inputs: Array = [
@@ -5592,7 +5595,9 @@ func _get_active_station_state() -> Resource:
 	]
 	if preview_authoring_lookup_station != null and ensure_inputs == preview_authoring_lookup_inputs:
 		return preview_authoring_lookup_station
+	var preparation_started: int = _marker_lifecycle_profile_now()
 	preview_authoring_lookup_station = active_wip.ensure_combat_animation_station_state()
+	_marker_lifecycle_profile_step("station_prepare_scoped", preparation_started)
 	ensure_inputs[1] = preview_authoring_lookup_station
 	preview_authoring_lookup_inputs = ensure_inputs
 	return preview_authoring_lookup_station
@@ -7402,10 +7407,18 @@ func _apply_motion_node_curve_handle_state(target: CombatAnimationMotionNode, so
 	return changed
 
 func _finalize_preview_drag(status_message: String = "Motion node edit locked in.") -> void:
+	# Captured release enters through _input, outside the GUI lookup scope.
+	# Share station preparation across this synchronous commit and its field,
+	# timeline and summary refreshes; each getter still reads live node values.
+	_begin_preview_authoring_lookup_scope()
+	var profile_started: int = _marker_lifecycle_profile_now()
 	_finalize_preview_drag_prepared(status_message)
+	profile_started = _marker_lifecycle_profile_step("release_commit_and_refresh", profile_started)
 	motion_node_editor.end_drag()
 	preview_drag_target = StringName()
 	_release_marker_pointer()
+	_marker_lifecycle_profile_step("release_pointer", profile_started)
+	_end_preview_authoring_lookup_scope()
 
 func _finalize_preview_drag_prepared(status_message: String = "Motion node edit locked in.") -> void:
 	if preview_weapon_facing_dragging:
@@ -7468,7 +7481,9 @@ func _finalize_preview_drag_prepared(status_message: String = "Motion node edit 
 	var endpoint_failure: Dictionary = preview_drag_forearm_failure.duplicate(true)
 	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
 	var preserved_camera_state: Dictionary = preview_presenter.capture_camera_state(preview_subviewport)
+	var profile_started: int = _marker_lifecycle_profile_now()
 	var commit_result: Dictionary = _resolve_preview_drag_commit_motion_node(motion_node)
+	profile_started = _marker_lifecycle_profile_step("release_resolve_commit", profile_started)
 	if not bool(commit_result.get("legal", true)):
 		var validation_result: Dictionary = commit_result.get("validation_result", {}) as Dictionary
 		_clear_preview_drag_override()
@@ -7479,16 +7494,22 @@ func _finalize_preview_drag_prepared(status_message: String = "Motion node edit 
 	var commit_motion_node: CombatAnimationMotionNode = commit_result.get("motion_node", preview_drag_override_node) as CombatAnimationMotionNode
 	var changed: bool = _apply_motion_node_state(motion_node, commit_motion_node)
 	_clear_preview_drag_override()
+	profile_started = _marker_lifecycle_profile_step("release_apply_state", profile_started)
 	if changed:
 		_stage_active_wip_edit(status_message)
+		profile_started = _marker_lifecycle_profile_step("release_stage_edit", profile_started)
 		_refresh_motion_node_list()
+		profile_started = _marker_lifecycle_profile_step("release_timeline", profile_started)
 		_refresh_editor_fields()
+		profile_started = _marker_lifecycle_profile_step("release_fields", profile_started)
 		if guarded_endpoint:
 			_refresh_endpoint_motion_visuals()
 		else:
 			_refresh_preview_scene()
 		_restore_preview_camera_after_drag_commit(preserved_camera_state)
+		profile_started = _marker_lifecycle_profile_step("release_visuals", profile_started)
 		_refresh_summary(status_message)
+		_marker_lifecycle_profile_step("release_summary", profile_started)
 	else:
 		_restore_preview_camera_after_drag_commit(preserved_camera_state)
 		if not status_message.strip_edges().is_empty():
@@ -9069,11 +9090,28 @@ func _on_preview_gui_input(event: InputEvent) -> void:
 	)
 	if scoped_lookup:
 		_begin_preview_authoring_lookup_scope()
+	var profile_started: int = _marker_lifecycle_profile_now()
 	_on_preview_gui_input_prepared(event)
+	profile_started = _marker_lifecycle_profile_step("gui_input_preparation", profile_started)
 	if not marker_drag_input.active and motion_node_editor.is_dragging() and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		_capture_marker_pointer(event.position)
+		_marker_lifecycle_profile_step("press_pointer_capture", profile_started)
 	if scoped_lookup:
 		_end_preview_authoring_lookup_scope()
+
+## Opt-in diagnostic timing; normal editing retains no profiling history.
+func _marker_lifecycle_profile_now() -> int:
+	return Time.get_ticks_usec() if bool(get_meta("marker_lifecycle_profile_enabled", false)) else 0
+
+func _marker_lifecycle_profile_step(label: String, started_usec: int) -> int:
+	if started_usec == 0:
+		return 0
+	var now_usec: int = Time.get_ticks_usec()
+	var events: Array = get_meta("marker_lifecycle_profile_events", [])
+	if events.size() < 4096:
+		events.append({"name": label, "elapsed_usec": now_usec - started_usec})
+		set_meta("marker_lifecycle_profile_events", events)
+	return now_usec
 
 func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
@@ -9100,7 +9138,9 @@ func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 			if mb.pressed:
 				var camera: Camera3D = _get_preview_camera()
 				var trajectory_root: Node3D = _get_preview_trajectory_root()
+				var profile_started: int = _marker_lifecycle_profile_now()
 				var pick_motion_node: CombatAnimationMotionNode = _build_display_motion_node_for_viewport_pick(motion_node)
+				profile_started = _marker_lifecycle_profile_step("press_display_node", profile_started)
 				var arm_roll_pick: Dictionary = {}
 				var hand_proxy_pick_state: Dictionary = {}
 				var drag_target: StringName = StringName()
@@ -9122,6 +9162,7 @@ func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 				# The visible marker meshes own hit testing. Fixed screen-radius
 				# halos must not steal a neighbouring sphere/cube click.
 				drag_target = preview_presenter.pick_authoring_marker(preview_subviewport, camera, mb.position, session_state.current_focus)
+				profile_started = _marker_lifecycle_profile_step("press_pick_marker", profile_started)
 				if drag_target == StringName():
 					return
 				if (
@@ -9151,6 +9192,7 @@ func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 					preview_view_container.accept_event()
 					return
 				_begin_preview_drag_override(pick_motion_node, drag_target)
+				_marker_lifecycle_profile_step("press_override_setup", profile_started)
 				if _is_arm_roll_focus(session_state.current_focus):
 					motion_node_editor.begin_upperarm_roll_drag(drag_target, arm_roll_pick.get("roll_state", {}) as Dictionary, camera, mb.position)
 				elif _is_hand_proxy_focus(session_state.current_focus):

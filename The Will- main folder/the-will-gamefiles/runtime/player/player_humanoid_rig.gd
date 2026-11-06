@@ -215,9 +215,9 @@ const STOW_LOWER_BACK_OFFSET_METERS := 0.20
 
 @export_category("Upper Body Authoring")
 @export var enable_upper_body_authoring_pose: bool = true
-# Temporary Skill Crafter isolation experiment. Disable to restore torso recruitment.
-# Retain the current spine pose; clavicles and their arm chains remain movable.
-@export var authoring_arm_spine_isolation_enabled: bool = true
+# Reversible Skill Crafter isolation experiment; off for normal manual testing.
+# Enabling holds the current spine pose. Separate arm/shoulder rules still apply.
+@export var authoring_arm_spine_isolation_enabled: bool = false
 @export_range(0.0, 1.0, 0.01) var upper_body_authoring_pose_strength: float = 1.0
 @export var enable_authoring_contact_wrist_basis: bool = true
 @export var enable_authoring_limb_twist_distribution: bool = true

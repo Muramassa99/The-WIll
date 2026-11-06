@@ -21,7 +21,7 @@ func _run() -> void:
 	if skeleton == null or not rig.has_method("is_authoring_arm_spine_isolation_enabled"):
 		_finish()
 		return
-	_check(bool(rig.get("authoring_arm_spine_isolation_enabled")), "temporary_isolation_defaults_on")
+	_check(not bool(rig.get("authoring_arm_spine_isolation_enabled")), "temporary_isolation_defaults_off")
 	for side: String in ["R", "L"]:
 		_seed_bent_neutral_wrist(side)
 	base_poses = _poses()

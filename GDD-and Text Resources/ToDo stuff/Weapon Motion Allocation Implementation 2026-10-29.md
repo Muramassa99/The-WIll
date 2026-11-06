@@ -1455,3 +1455,112 @@ The supplement proposes broader provisional coverage than the user's earlier
 explicit decision to restrict shoulder rotation to documented coverage. Apply
 that distinction deliberately in the next implementation discussion. It does
 not itself fix independent-arm routing or camera-plane Tip input sensitivity.
+
+### Manual feedback after checkpoint 4be15c15: sticky grab/release
+
+User reports the mouse-to-marker interaction feels sticky, with noticeable delay
+both on engagement and release. This is failed usability acceptance despite
+earlier reports that some movement during the diagnostic felt smoother.
+
+Read-only inspection: `_on_preview_gui_input` captures the pointer only after
+the pick/setup path completes. That path builds a deep display-node copy and
+creates override/accepted-node copies. Start cost has not been freshly measured.
+On release, `_handle_captured_marker_input` flushes pending motion and calls
+`_finalize_preview_drag`; that function completes synchronous commit/refresh
+work before `_release_marker_pointer` restores normal mouse control. This can
+make release visibly wait behind editing bookkeeping. Earlier marker tests
+recorded 805-885 ms release/finalization, not a new measurement of this build.
+
+Next narrow investigation: immediate engagement/release feedback and the work
+currently blocking those boundaries. Merely hiding/unhiding the pointer earlier
+will not cure a main-thread stall; preserve correct accepted-pose recording and
+input ordering while separating nonessential work. No code or solver changes,
+no engine run and no new Git push for this feedback note. Large implementations
+remain suspended at the user's request.
+
+### Focused drag-release correction (2026-11-06 02:05)
+
+User estimated 300-500 ms at both engagement and release and explicitly asked
+for responsive control. Authorized scope narrowed to these interaction boundaries.
+
+Measured on the isolated original Broken_Balde_v1 Skill 3, node 3, cap 900:
+stationary click then one 10-pixel Tip drag. Before: press 6.456 / 5.548 ms,
+stationary release 4.063 ms, changed release 898.254 ms. After: press 5.485 /
+5.786 ms, stationary release 3.480 ms, changed release 33.123 ms (~96% reduction).
+
+Root cause corrected in `combat_animation_station_ui.gd::_finalize_preview_drag`:
+captured release arrived through `_input` outside the existing scoped station
+lookup. Commit/list/field/summary getters repeatedly normalized the entire
+station. The outer synchronous finalization now shares one lookup scope. Keep
+the explicit post-mutation ensure in `_stage_active_wip_edit`; live selected
+node values remain live. No deferred stale commits, shared mutable pose-copy
+shortcut, changed solver rules, or grip/arm limit changes were introduced.
+Opt-in boundary timing is off by default and retained for focused diagnostics.
+
+Evidence: `godot_runs/marker_lifecycle_20261106/before/manifest.json` and
+`after_scope/manifest.json`; reusable `tools/diagnose_skill_marker_lifecycle.gd`.
+Both processes completed and original source hashes stayed unchanged. Stationary
+click preserved authored node/body/weapon. Changed release preserved the exact
+accepted bone and weapon transforms and copied accepted Tip/Pommel/orientation/
+roll/arm/body-support fields correctly; mouse capture ended immediately within
+the measured handler. Scoped whitespace check passed.
+
+Boundary: the reported 300-500 ms engagement delay was NOT reproduced as a press
+handler delay here. The instrumentation's movement-through-post-draw span was
+127/133 ms before/after and includes observation work; it is not hardware pointer
+latency. Do not claim all first-motion or during-drag stalls are solved. User
+manual retest is next. No additional engine run, implementation expansion or
+Git push is implied. The fix is currently local after checkpoint 4be15c15.
+
+Manual follow-up (2026-11-06 02:08): user confirmed "it works well now" and
+concluded the session. The sticky grab/release report is resolved for this
+manual retest; no additional implementation or engine run followed. This is
+interaction confirmation, not exhaustive anatomical/playback validation.
+Release fix remains local, not pushed. Resume handoff: SPS_2026_11_06_02-08.md.
+
+### Shoulder restriction report and isolation switched off (2026-11-06 22:32)
+
+User reports near-total Pommel restriction, substantial Tip restriction and
+elbow snap-back with `shoulder_direction_not_calibrated`. Static inspection:
+the exact message is advisory, but uncovered directions hold humeral h fixed;
+coverage is elevation 90 degrees +/-0.000573 degrees, plane 0..90 degrees.
+Clavicle is separately held by the newer allocation contract. Intermediate
+linear joint-parameter checks may also leave the curved fixed-h surface;
+this numerical explanation and the elbow cause are NOT runtime verified.
+
+At explicit user request, turned the reversible spine-isolation experiment OFF:
+`player_humanoid_rig.gd::authoring_arm_spine_isolation_enabled = false`.
+Updated the existing isolation verifier's default assertion, without executing
+it. No scene/resource overrides of the setting were found. This restores torso
+recruitment only where existing controls allow it; independent one-arm and Tip
+allocator boundaries, the new clavicle hold and uncovered h hold are unchanged.
+Do not describe this switch as a confirmed fix for shoulder restriction.
+
+No engine runs or tests, as requested due to low token allowance. Static diff
+inspection only. User will compare manually after restarting the game. Earlier
+pointer-speed diagnostic explicitly assumes isolation ON; re-enable it in that
+fixture if intentionally repeating the historical isolation experiment.
+No Git commit/push. Resume: SPS_2026_11_06_22-32.md.
+
+### Manual feedback and calibration comparison checkpoint (2026-11-06 23:06)
+
+After disabling temporary spine isolation, user estimates Pommel restriction
+reduced from 98% to 60%, and Tip restriction from 70% to 30%. These are user
+impressions, not measured travel limits. Save and F work in the tested setup;
+`shoulder_direction_not_calibrated` persists. Main-side edits appear to update
+in jumps around 3-15 positions/second despite reported rendering around 210 FPS.
+Do not turn those observations into a measured solver rate or a proven cause.
+
+Static diagnosis remains: uncovered h hold and separate clavicle hold restrict
+motion; intermediate joint-coordinate interpolation may violate a constant-h
+condition even between valid endpoints. No confirming run or code correction
+for that possible numerical conflict. Independent elbow snap-back remains
+unresolved. Do not claim the shoulder issue is fixed by spine-isolation removal.
+
+User requests a Git checkpoint before experimenting with the shoulder resource.
+Potential user intervention within `shoulder_motion_profile.tres` must be audited
+on resume against the exact code baseline recorded in the next SPS. Include the
+profile definition, calibration, coverage resolver, allocator, rig, editor and
+prepared-pose/replay consumers; do not assume only the .tres will change or erase
+manual changes. At this checkpoint the resource and shoulder definition/resolver
+have no local changes. No game runs/tests were requested or performed now.

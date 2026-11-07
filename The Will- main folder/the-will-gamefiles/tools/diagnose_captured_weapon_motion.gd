@@ -15,6 +15,8 @@ var request_row_index := -1
 var distance_m := 0.05
 var compare_hold := false
 var compare_checkpoint := false
+var allow_profile_change := false
+var posture_mode := ""
 
 func _initialize() -> void:
 	for argument: String in OS.get_cmdline_user_args():
@@ -25,6 +27,8 @@ func _initialize() -> void:
 		if argument.begins_with("--distance="): distance_m = float(argument.trim_prefix("--distance="))
 		if argument == "--compare-hold=true": compare_hold = true
 		if argument == "--compare-checkpoint=true": compare_checkpoint = true
+		if argument == "--allow-profile-change=true": allow_profile_change = true
+		if argument.begins_with("--posture="): posture_mode = argument.trim_prefix("--posture=")
 	call_deferred("_run")
 
 func _run() -> void:
@@ -121,6 +125,10 @@ func _run() -> void:
 		for arm: Dictionary in request_context.arms:
 			shoulder_cache[StringName(arm.slot)] = arm.shoulder_state.duplicate(true)
 		rig.set("_shoulder_motion_states", shoulder_cache)
+	if not posture_mode.is_empty():
+		var requested_policy: Dictionary = request.get("policy", {}).duplicate(true)
+		requested_policy["posture_preference_mode"] = posture_mode
+		request["policy"] = requested_policy
 	var adapter := Adapter.new()
 	var initialized: Dictionary = adapter._initialize(rig, request)
 	var baseline: Dictionary = {}
@@ -136,12 +144,13 @@ func _run() -> void:
 				same_profile = same_profile and _same_captured_value(adapter.arms[index].shoulder_profile, request_context.arms[index].shoulder_profile)
 				same_calibration = same_calibration and _same_captured_value(adapter.arms[index].shoulder_calibration, request_context.arms[index].shoulder_calibration)
 			captured_contract = {"profile_matches": same_profile, "named_calibration_matches": same_calibration,
+				"profile_change_explicitly_allowed": allow_profile_change,
 				"q_matches": _same_captured_value(adapter.q, request_context.q),
 				"lower_matches": _same_captured_value(adapter.lower, request_context.lower),
 				"upper_matches": _same_captured_value(adapter.upper, request_context.upper),
 				"prop_matches_previous_weapon": _same_captured_value(captured.weapon_world, request_context.request.previous_weapon),
 				"recorded_q": request_context.q}
-			if not same_profile or not same_calibration:
+			if (not same_profile and not allow_profile_change) or not same_calibration:
 				push_error("Captured shoulder profile/calibration differs; refusing a silently changed replay")
 				quit(1)
 				return
@@ -186,6 +195,8 @@ func _run() -> void:
 	quit(0)
 
 func _same_captured_value(actual: Variant, recorded: Variant) -> bool:
+	if actual is Quaternion:
+		return recorded is Array and recorded.size() == 4 and actual.is_equal_approx(_quat(recorded))
 	if actual is Vector3:
 		return recorded is Array and actual.distance_to(_v3(recorded)) <= 1.0e-6
 	if actual is Transform3D:

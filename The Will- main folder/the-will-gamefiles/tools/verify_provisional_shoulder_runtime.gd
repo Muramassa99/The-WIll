@@ -28,7 +28,7 @@ func _run() -> void:
 		_finish()
 		return
 	baseline = _poses()
-	_record_check(String(rig.shoulder_motion_profile.coverage_mode) == "measured_plus_provisional", "uses_enabled_live_profile")
+	_record_check(String(rig.shoulder_motion_profile.coverage_mode) == "continuous_provisional", "uses_enabled_live_profile")
 	for side: String in ["R", "L"]:
 		for spec: Vector2 in [Vector2(2.0, 0.0), Vector2(120.0, 45.0), Vector2(30.0, -90.0)]:
 			_exercise_region(side, spec)
@@ -144,7 +144,7 @@ func _exercise_region(side: String, spec: Vector2) -> void:
 	var second_pose := _read_shoulder(side, calibration)
 	# With actual animated offsets, axial material rotation can carry a tiny
 	# shaft displacement. Compare bounds at the SAME observed direction, not
-	# the centre's direction; their transported zero legitimately differs.
+	# the centre's direction; regional bounds legitimately vary with direction.
 	var repeated := Shoulder.sample_bounds(second_pose.direction_anatomical, calibration.side_sign, saved_profile, calibration.internal_sign)
 	_record_check(float(second_pose.state.h) <= float(second_pose.maximum_radians) + 0.00001
 		and repeated.covered and absf(second_pose.minimum_radians - repeated.minimum_radians) < 0.00001

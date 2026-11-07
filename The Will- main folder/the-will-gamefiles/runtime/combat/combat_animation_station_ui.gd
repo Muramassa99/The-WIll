@@ -67,6 +67,7 @@ const WORKFLOW_STEP_WEAPON_SELECT: StringName = &"workflow_weapon_select"
 const WORKFLOW_STEP_SKILL_SELECT: StringName = &"workflow_skill_select"
 const WORKFLOW_STEP_EDITOR: StringName = &"workflow_editor"
 const PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION: StringName = &"handle_position_changed"
+const PREVIEW_GRIP_RESOLVE_REASON_RESET_BASELINE: StringName = &"reset_baseline"
 
 const ACTION_PREV_NODE: StringName = &"skill_crafter_prev_motion_node"
 const ACTION_NEXT_NODE: StringName = &"skill_crafter_next_motion_node"
@@ -1342,7 +1343,7 @@ func _reset_active_draft_to_baseline(source: String) -> bool:
 		status_message = "Draft reset to default body and stow attachment."
 	_stage_active_wip_edit(status_message)
 	if active_wip != null and not _is_active_unarmed_authoring_wip() and not _is_noncombat_idle_draft(draft):
-		_refresh_all(status_message, PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION)
+		_refresh_all(status_message, PREVIEW_GRIP_RESOLVE_REASON_RESET_BASELINE)
 		_begin_baseline_preparation(source)
 	else:
 		_refresh_active_editor_surface(status_message)

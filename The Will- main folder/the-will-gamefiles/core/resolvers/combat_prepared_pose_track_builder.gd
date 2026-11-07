@@ -317,6 +317,15 @@ static func sample_pose(from: Dictionary, to: Dictionary, weight: float) -> Dict
 	sample["shoulder_states_by_slot"] = _blend_anatomical_states(from.get("shoulder_states_by_slot", {}), to.get("shoulder_states_by_slot", {}), ["h"], ratio)
 	if ratio <= 0.0 or ratio >= 1.0:
 		return sample
+	# Authored tracks share a capture context, but transient entry can bridge a
+	# current pose to an older saved skill. Scalars from different wrist frames
+	# are not comparable. Keep the existing bone-quaternion interpolation and
+	# attachment/material guidance for that hand instead of mixing their labels.
+	for slot: Variant in sample.wrist_states_by_slot.keys():
+		var source_profile: Dictionary = from.get("arm_constraints_by_slot", {}).get(slot, {}).get("wrist_profile", {})
+		var target_profile: Dictionary = to.get("arm_constraints_by_slot", {}).get(slot, {}).get("wrist_profile", {})
+		if String(source_profile.get("bend_frame", "rest_anatomical")) != String(target_profile.get("bend_frame", "rest_anatomical")):
+			sample.wrist_states_by_slot.erase(slot)
 	return _apply_anatomical_sample(sample, from, to)
 
 static func _blend_anatomical_states(a: Dictionary, b: Dictionary, fields: Array[String], weight: float) -> Dictionary:

@@ -1,383 +1,353 @@
 [gd_resource type="Resource" script_class="ShoulderMotionProfileDef" format=3 uid="uid://cecq5j5540gdn"]
 
 [ext_resource type="Script" uid="uid://qgo8g86t1o78" path="res://core/defs/shoulder_motion_profile_def.gd" id="1_profile"]
-[ext_resource type="Script" path="res://core/defs/shoulder_motion_sample_def.gd" id="2_sample"]
+[ext_resource type="Script" uid="uid://b4ktp5jqgyqn1" path="res://core/defs/shoulder_motion_sample_def.gd" id="2_sample"]
 
 [sub_resource type="Resource" id="paired_lowered_2deg"]
 script = ExtResource("2_sample")
 sample_id = &"paired_lowered_2deg"
-side = "both"
-direction_side_neutral = Vector3(0.034899497, -0.999390827, 0.000000000)
+direction_side_neutral = Vector3(0.034899496, -0.99939084, 0)
 minimum_degrees = -65.1
 maximum_degrees = 66.9
 region_id = &"lowered"
 provenance_kind = "original_reference"
 source = "Paired mean 2-degree abduction: https://www.sciencedirect.com/science/article/abs/pii/S0949265820300105 . Engineering zero mapped to Josie arm-down/forearm-forward, verified 2026-11-07 on both sides. Joint interval is not body-clearance certification."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="R_e30_p0"]
 script = ExtResource("2_sample")
 sample_id = &"R_e30_p0"
 side = "hand_right"
-direction_side_neutral = Vector3(0.500000000, -0.866025404, 0.000000000)
+direction_side_neutral = Vector3(0.5, -0.8660254, 0)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_lowered"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/R_e30_p0.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="R_e30_p45"]
 script = ExtResource("2_sample")
 sample_id = &"R_e30_p45"
 side = "hand_right"
-direction_side_neutral = Vector3(0.353553391, -0.866025404, -0.353553391)
+direction_side_neutral = Vector3(0.35355338, -0.8660254, -0.35355338)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_lowered"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/R_e30_p45.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="R_e30_p90"]
 script = ExtResource("2_sample")
 sample_id = &"R_e30_p90"
 side = "hand_right"
-direction_side_neutral = Vector3(0.000000000, -0.866025404, -0.500000000)
+direction_side_neutral = Vector3(0, -0.8660254, -0.5)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_lowered"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/R_e30_p90.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="R_e60_p0"]
 script = ExtResource("2_sample")
 sample_id = &"R_e60_p0"
 side = "hand_right"
-direction_side_neutral = Vector3(0.866025404, -0.500000000, 0.000000000)
+direction_side_neutral = Vector3(0.8660254, -0.5, 0)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_lowered"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/R_e60_p0.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="R_e60_p45"]
 script = ExtResource("2_sample")
 sample_id = &"R_e60_p45"
 side = "hand_right"
-direction_side_neutral = Vector3(0.612372436, -0.500000000, -0.612372436)
+direction_side_neutral = Vector3(0.61237246, -0.5, -0.61237246)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_lowered"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/R_e60_p45.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="R_e60_p90"]
 script = ExtResource("2_sample")
 sample_id = &"R_e60_p90"
 side = "hand_right"
-direction_side_neutral = Vector3(0.000000000, -0.500000000, -0.866025404)
+direction_side_neutral = Vector3(0, -0.5, -0.8660254)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_lowered"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/R_e60_p90.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="R_e120_p0"]
 script = ExtResource("2_sample")
 sample_id = &"R_e120_p0"
 side = "hand_right"
-direction_side_neutral = Vector3(0.866025404, 0.500000000, 0.000000000)
+direction_side_neutral = Vector3(0.8660254, 0.5, 0)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_raised"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/R_e120_p0.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="R_e120_p45"]
 script = ExtResource("2_sample")
 sample_id = &"R_e120_p45"
 side = "hand_right"
-direction_side_neutral = Vector3(0.612372436, 0.500000000, -0.612372436)
+direction_side_neutral = Vector3(0.61237246, 0.5, -0.61237246)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_raised"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/R_e120_p45.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="R_e120_p90"]
 script = ExtResource("2_sample")
 sample_id = &"R_e120_p90"
 side = "hand_right"
-direction_side_neutral = Vector3(0.000000000, 0.500000000, -0.866025404)
+direction_side_neutral = Vector3(0, 0.5, -0.8660254)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_raised"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/R_e120_p90.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="R_e150_p0"]
 script = ExtResource("2_sample")
 sample_id = &"R_e150_p0"
 side = "hand_right"
-direction_side_neutral = Vector3(0.500000000, 0.866025404, 0.000000000)
+direction_side_neutral = Vector3(0.5, 0.8660254, 0)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"overhead"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/R_e150_p0.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="R_e150_p45"]
 script = ExtResource("2_sample")
 sample_id = &"R_e150_p45"
 side = "hand_right"
-direction_side_neutral = Vector3(0.353553391, 0.866025404, -0.353553391)
+direction_side_neutral = Vector3(0.35355338, 0.8660254, -0.35355338)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"overhead"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/R_e150_p45.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="R_e150_p90"]
 script = ExtResource("2_sample")
 sample_id = &"R_e150_p90"
 side = "hand_right"
-direction_side_neutral = Vector3(0.000000000, 0.866025404, -0.500000000)
+direction_side_neutral = Vector3(0, 0.8660254, -0.5)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"overhead"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/R_e150_p90.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="R_e30_pm90"]
 script = ExtResource("2_sample")
 sample_id = &"R_e30_pm90"
 side = "hand_right"
-direction_side_neutral = Vector3(0.000000000, -0.866025404, 0.500000000)
+direction_side_neutral = Vector3(0, -0.8660254, 0.5)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"posterior"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/R_e30_pm90.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="R_e90_pm30"]
 script = ExtResource("2_sample")
 sample_id = &"R_e90_pm30"
 side = "hand_right"
-direction_side_neutral = Vector3(0.866025404, 0.000000000, 0.500000000)
+direction_side_neutral = Vector3(0.8660254, 0, 0.5)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"posterior"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/R_e90_pm30.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="L_e30_p0"]
 script = ExtResource("2_sample")
 sample_id = &"L_e30_p0"
 side = "hand_left"
-direction_side_neutral = Vector3(0.500000000, -0.866025404, 0.000000000)
+direction_side_neutral = Vector3(0.5, -0.8660254, 0)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_lowered"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/L_e30_p0.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="L_e30_p45"]
 script = ExtResource("2_sample")
 sample_id = &"L_e30_p45"
 side = "hand_left"
-direction_side_neutral = Vector3(0.353553391, -0.866025404, -0.353553391)
+direction_side_neutral = Vector3(0.35355338, -0.8660254, -0.35355338)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_lowered"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/L_e30_p45.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="L_e30_p90"]
 script = ExtResource("2_sample")
 sample_id = &"L_e30_p90"
 side = "hand_left"
-direction_side_neutral = Vector3(0.000000000, -0.866025404, -0.500000000)
+direction_side_neutral = Vector3(0, -0.8660254, -0.5)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_lowered"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/L_e30_p90.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="L_e60_p0"]
 script = ExtResource("2_sample")
 sample_id = &"L_e60_p0"
 side = "hand_left"
-direction_side_neutral = Vector3(0.866025404, -0.500000000, 0.000000000)
+direction_side_neutral = Vector3(0.8660254, -0.5, 0)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_lowered"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/L_e60_p0.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="L_e60_p45"]
 script = ExtResource("2_sample")
 sample_id = &"L_e60_p45"
 side = "hand_left"
-direction_side_neutral = Vector3(0.612372436, -0.500000000, -0.612372436)
+direction_side_neutral = Vector3(0.61237246, -0.5, -0.61237246)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_lowered"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/L_e60_p45.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="L_e60_p90"]
 script = ExtResource("2_sample")
 sample_id = &"L_e60_p90"
 side = "hand_left"
-direction_side_neutral = Vector3(0.000000000, -0.500000000, -0.866025404)
+direction_side_neutral = Vector3(0, -0.5, -0.8660254)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_lowered"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/L_e60_p90.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="L_e120_p0"]
 script = ExtResource("2_sample")
 sample_id = &"L_e120_p0"
 side = "hand_left"
-direction_side_neutral = Vector3(0.866025404, 0.500000000, 0.000000000)
+direction_side_neutral = Vector3(0.8660254, 0.5, 0)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_raised"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/L_e120_p0.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="L_e120_p45"]
 script = ExtResource("2_sample")
 sample_id = &"L_e120_p45"
 side = "hand_left"
-direction_side_neutral = Vector3(0.612372436, 0.500000000, -0.612372436)
+direction_side_neutral = Vector3(0.61237246, 0.5, -0.61237246)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_raised"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/L_e120_p45.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="L_e120_p90"]
 script = ExtResource("2_sample")
 sample_id = &"L_e120_p90"
 side = "hand_left"
-direction_side_neutral = Vector3(0.000000000, 0.500000000, -0.866025404)
+direction_side_neutral = Vector3(0, 0.5, -0.8660254)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"anterior_raised"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/L_e120_p90.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="L_e150_p0"]
 script = ExtResource("2_sample")
 sample_id = &"L_e150_p0"
 side = "hand_left"
-direction_side_neutral = Vector3(0.500000000, 0.866025404, 0.000000000)
+direction_side_neutral = Vector3(0.5, 0.8660254, 0)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"overhead"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/L_e150_p0.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="L_e150_p45"]
 script = ExtResource("2_sample")
 sample_id = &"L_e150_p45"
 side = "hand_left"
-direction_side_neutral = Vector3(0.353553391, 0.866025404, -0.353553391)
+direction_side_neutral = Vector3(0.35355338, 0.8660254, -0.35355338)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"overhead"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/L_e150_p45.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="L_e150_p90"]
 script = ExtResource("2_sample")
 sample_id = &"L_e150_p90"
 side = "hand_left"
-direction_side_neutral = Vector3(0.000000000, 0.866025404, -0.500000000)
+direction_side_neutral = Vector3(0, 0.8660254, -0.5)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"overhead"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/L_e150_p90.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="L_e30_pm90"]
 script = ExtResource("2_sample")
 sample_id = &"L_e30_pm90"
 side = "hand_left"
-direction_side_neutral = Vector3(0.000000000, -0.866025404, 0.500000000)
+direction_side_neutral = Vector3(0, -0.8660254, 0.5)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"posterior"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/L_e30_pm90.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [sub_resource type="Resource" id="L_e90_pm30"]
 script = ExtResource("2_sample")
 sample_id = &"L_e90_pm30"
 side = "hand_left"
-direction_side_neutral = Vector3(0.866025404, 0.000000000, 0.500000000)
+direction_side_neutral = Vector3(0.8660254, 0, 0.5)
 minimum_degrees = -10.0
 maximum_degrees = 10.0
 region_id = &"posterior"
 provenance_kind = "checked_rig"
 source = "Fixed Josie h=0 with elbow90 and neutral wrist, -10/0/+10 inspected front and side; 2026-11-07 provisional_pose_review/L_e90_pm30.png and report.json. No illegal body-proxy overlap in these three poses. Research supplement local-pose rule; not a measured human endpoint or whole-neighborhood clearance guarantee."
-provisional = true
 can_donate = true
 
 [resource]
@@ -385,6 +355,5 @@ script = ExtResource("1_profile")
 plane_samples_degrees = PackedFloat64Array(0, 32.5, 90)
 external_samples_degrees = PackedFloat64Array(107, 103, 113)
 internal_samples_degrees = PackedFloat64Array(73, 65, 41)
-coverage_mode = "measured_plus_provisional"
-maximum_borrow_angle_degrees = 15.0
+coverage_mode = "continuous_provisional"
 provisional_samples = Array[ExtResource("2_sample")]([SubResource("paired_lowered_2deg"), SubResource("R_e30_p0"), SubResource("R_e30_p45"), SubResource("R_e30_p90"), SubResource("R_e60_p0"), SubResource("R_e60_p45"), SubResource("R_e60_p90"), SubResource("R_e120_p0"), SubResource("R_e120_p45"), SubResource("R_e120_p90"), SubResource("R_e150_p0"), SubResource("R_e150_p45"), SubResource("R_e150_p90"), SubResource("R_e30_pm90"), SubResource("R_e90_pm30"), SubResource("L_e30_p0"), SubResource("L_e30_p45"), SubResource("L_e30_p90"), SubResource("L_e60_p0"), SubResource("L_e60_p45"), SubResource("L_e60_p90"), SubResource("L_e120_p0"), SubResource("L_e120_p45"), SubResource("L_e120_p90"), SubResource("L_e150_p0"), SubResource("L_e150_p45"), SubResource("L_e150_p90"), SubResource("L_e30_pm90"), SubResource("L_e90_pm30")])

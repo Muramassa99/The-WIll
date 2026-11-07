@@ -20,6 +20,12 @@ class_name CombatWeaponMotionAllocator
 ## Optional translation_reach_bound caps a Pommel request on its original
 ## path. The adapter supplies a conservative FK envelope in the SAME origin;
 ## this only prunes impossible targets and never replaces candidate legality.
+## Generic pose/position modes let independent arm tasks use the same mechanical
+## solver. Historical weapon_frame keys then name a caller-owned task frame in
+## input.origin_id; position addresses its origin, pose its full transform.
+## Optional posture_spans normalizes preference travel only, never joint bounds.
+## A position task may supply task_path={kind:"orbit", center, axis,
+## angle_radians}; all path points remain on that caller-defined rigid orbit.
 const PolicyDef = preload("res://core/defs/weapon_motion_policy_def.gd")
 const REVISION := "weapon_motion_allocation_v1"
 const NUMERIC_EPSILON := 1.0e-8
@@ -50,12 +56,21 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 		if not is_finite(float(policy[key])) or float(policy[key]) <= 0.0:
 			return result
 	var mode := str(input.get("mode", ""))
-	if mode not in ["tip", "pommel", "roll"] or not input.get("target_weapon") is Transform3D or not input.get("contact_local") is Vector3:
+	if mode not in ["tip", "pommel", "roll", "pose", "position"] or not input.get("target_weapon") is Transform3D or not input.get("contact_local") is Vector3:
+		return result
+	var posture := _posture_diagonal(input, groups, lower, upper, mode, policy)
+	if not posture.valid:
+		result.reason = posture.reason
 		return result
 	var target: Transform3D = input.target_weapon
 	var contact: Vector3 = input.contact_local
 	if not previous.is_finite() or not target.is_finite() or not contact.is_finite() or previous.basis.determinant() <= 0.0 or target.basis.determinant() <= 0.0:
 		return result
+	var path_validation := _validate_task_path(input, mode, previous, target, policy)
+	if not path_validation.valid:
+		result.reason = path_validation.reason
+		return result
+	var task_path: Dictionary = path_validation.path
 	var anchor: Vector3 = previous * contact
 	if mode == "roll" and input.has("contact_anchor"):
 		if not input.contact_anchor is Vector3 or not (input.contact_anchor as Vector3).is_finite():
@@ -103,8 +118,12 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 				return result
 			maximum_fraction = float(fraction)
 			result["translation_reach_bound"] = supplied.duplicate(true)
-	var angle := _rotation_vector(target.basis, previous.basis).length()
+	var angle := 0.0 if mode == "position" else _rotation_vector(target.basis, previous.basis).length()
 	var distance := 0.0 if mode == "tip" else (target * contact).distance_to(previous * contact)
+	if mode in ["pose", "position"]:
+		distance = target.origin.distance_to(previous.origin)
+	if not task_path.is_empty():
+		distance = float(path_validation.arc_length)
 	var count := maxi(1, int(ceil(maxf(angle / float(policy.max_rotation_step), distance / float(policy.max_translation_step)))))
 	var accepted_fraction := 0.0
 	var accepted_eval := initial
@@ -119,7 +138,7 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 		# Keep count and fractions relative to the ORIGINAL demand. Rescaling
 		# the target itself would report 100% despite only partial movement.
 		var requested_fraction := minf(float(step + 1) / float(count), maximum_fraction)
-		var requested := _target_at(previous, target, contact, mode, requested_fraction, anchor)
+		var requested := _target_at(previous, target, contact, mode, requested_fraction, anchor, task_path)
 		while true:
 			var fit_start_q := q.duplicate()
 			var attempted := _fit(q, requested, contact, groups, lower, upper, input, permitted_evaluate, policy)
@@ -145,7 +164,7 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 			var coverage_failure := attempted.has("shoulder_boundary_diagnostics")
 			for search: int in maxi(0, int(policy.scale_search_steps)):
 				var middle := (low + high) * 0.5
-				var smaller := _fit(start_q, _target_at(previous, target, contact, mode, middle, anchor), contact, groups, lower, upper, input, permitted_evaluate, policy)
+				var smaller := _fit(start_q, _target_at(previous, target, contact, mode, middle, anchor, task_path), contact, groups, lower, upper, input, permitted_evaluate, policy)
 				result.iterations += int(smaller.iterations)
 				if smaller.valid:
 					low = middle
@@ -169,7 +188,7 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 			break
 	if reach_bound_reached:
 		attempted_failure = "arm_extension_reach_limit"
-	var requested_error := _pose_error(previous, target, contact)
+	var requested_error := _task_pose_error(previous, target, contact, mode)
 	if q == PackedFloat64Array(input.q) and ((mode != "tip" and requested_error.position > float(policy.position_tolerance)) or requested_error.angle > float(policy.orientation_tolerance)):
 		# Scaling a real command down inside the fit tolerance is not movement.
 		# Report no progress instead of certifying an unchanged joint packet.
@@ -185,17 +204,18 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 	result.reason = "" if result.status == "ACCEPTED" else (attempted_failure if not attempted_failure.is_empty() else "allocator_substep_budget")
 	if result.has("translation_reach_bound"):
 		result.translation_reach_bound["reached"] = reach_bound_reached
-	var accepted_target := _target_at(previous, target, contact, mode, accepted_fraction, anchor)
-	var errors := _pose_error(accepted_eval.weapon_frame, accepted_target, contact)
+	var accepted_target := _target_at(previous, target, contact, mode, accepted_fraction, anchor, task_path)
+	var errors := _task_pose_error(accepted_eval.weapon_frame, accepted_target, contact, mode)
 	# Keep physical displacement visible without turning Tip translation into
 	# a task or pivot-lock condition. Accepted_weapon is always actual joint FK.
 	result.pivot_error = errors.position
 	result.position_constrained = mode != "tip"
+	result.orientation_constrained = mode != "position"
 	result.contact_displacement = ((accepted_eval.weapon_frame as Transform3D) * contact).distance_to(previous * contact)
 	result.contact_anchor = anchor if mode == "roll" else (accepted_eval.weapon_frame as Transform3D) * contact
 	result.contact_anchor_origin_id = input.origin_id
 	result.orientation_error = errors.angle
-	result.remaining_task_error = _pose_error(accepted_eval.weapon_frame, target, contact)
+	result.remaining_task_error = _task_pose_error(accepted_eval.weapon_frame, target, contact, mode)
 	if mode == "tip":
 		result.remaining_task_error.position = 0.0
 	result.contributing_joint_groups = _contributing_groups(PackedFloat64Array(input.q), q, groups)
@@ -319,6 +339,10 @@ static func _fit(start: PackedFloat64Array, target: Transform3D, contact: Vector
 	var validator: Callable = input.get("validate_candidate", Callable())
 	var mode := String(input.mode)
 	var response := {"valid": false, "q": start, "evaluation": evaluation, "iterations": 0, "reason": "allocator_search_exhausted"}
+	var posture := _posture_diagonal(input, groups, lower, upper, mode, policy)
+	if not posture.valid:
+		response.reason = posture.reason
+		return response
 	var shoulder_crossing_iterations := 0
 	# Diagnostic-only, opt-in through the per-request policy override. No
 	# persistent logs or additional candidate/scene evaluations are introduced.
@@ -328,7 +352,7 @@ static func _fit(start: PackedFloat64Array, target: Transform3D, contact: Vector
 		response["rejection_examples"] = []
 	for iteration: int in maxi(1, int(policy.max_iterations)):
 		response.iterations = iteration + 1
-		var error := _pose_error(evaluation.weapon_frame, target, contact)
+		var error := _task_pose_error(evaluation.weapon_frame, target, contact, mode)
 		if _legal(q, evaluation, lower, upper) and (mode == "tip" or error.position <= float(policy.position_tolerance)) and error.angle <= float(policy.orientation_tolerance):
 			if not _candidate_valid(evaluation, validator):
 				response.reason = "allocator_candidate_collision_or_context_invalid"
@@ -370,10 +394,24 @@ static func _fit(start: PackedFloat64Array, target: Transform3D, contact: Vector
 			response["qp_diagnostics"] = {"stage": "task", "reason": optimized.get("reason", ""), "active": optimized.get("active", []), "trace": optimized.get("trace", [])}
 			return response
 		var delta: PackedFloat64Array = optimized.x
-		# Each lower-priority QP preserves the already achieved higher-priority
-		# task exactly. No huge finite weights masquerading as strict priority.
+		# The task remains strict priority. A single finite positive posture QP
+		# only redistributes its achieved step within that same task nullspace.
 		var equalities: Array = jacobian.duplicate()
-		for tier: PackedStringArray in _hold_order(str(input.mode), policy):
+		if not _uses_exact_hold_order(mode, policy):
+			var h := _matrix(q.size(), q.size())
+			var g := _zeros(q.size())
+			for i: int in q.size():
+				h[i][i] = posture.diagonal[i]
+				g[i] = (q[i] - start[i]) * float(posture.diagonal[i])
+			var preferred := _qp(h, g, equalities, inequalities, limits, delta)
+			if not preferred.valid:
+				response.reason = "allocator_posture_search_exhausted"
+				response["qp_diagnostics"] = {"stage": "posture", "reason": preferred.get("reason", ""), "active": preferred.get("active", []), "trace": preferred.get("trace", [])}
+				return response
+			delta = preferred.x
+		# Explicit diagnostic/fixture overrides retain exact historical tiers.
+		var hold_order: Array = _hold_order(mode, policy) if _uses_exact_hold_order(mode, policy) else []
+		for tier: PackedStringArray in hold_order:
 			var indices := PackedInt32Array()
 			for i: int in groups.size():
 				if groups[i] in tier and upper[i] - lower[i] > NUMERIC_EPSILON:
@@ -431,7 +469,7 @@ static func _fit(start: PackedFloat64Array, target: Transform3D, contact: Vector
 				# of FK calls without reaching the task. Bound only that repeated
 				# Pommel search, then let the ordinary path-fraction search retain
 				# a legal boundary pose. Do not rebase h inside candidate evaluation.
-				if mode == "pommel" and not crossed_shoulder_coverage and _enters_shoulder_hold(evaluation, trial_eval):
+				if mode in ["pommel", "pose", "position"] and not crossed_shoulder_coverage and _enters_shoulder_hold(evaluation, trial_eval):
 					crossed_shoulder_coverage = true
 					shoulder_crossing_iterations += 1
 					if shoulder_crossing_iterations >= MAX_SHOULDER_COVERAGE_CROSSING_ITERATIONS:
@@ -552,7 +590,7 @@ static func _restore_feasible(candidate: PackedFloat64Array, candidate_eval: Dic
 static func _differentiate(q: PackedFloat64Array, evaluation: Dictionary, contact: Vector3, evaluate: Callable, policy: Dictionary, lower: PackedFloat64Array, upper: PackedFloat64Array, mode: String = "") -> Dictionary:
 	var base_constraints := _search_constraints(evaluation)
 	var custom_search: bool = evaluation.has("search_constraints")
-	var task_rows := 3 if mode == "tip" else 6
+	var task_rows := 3 if mode in ["tip", "position"] else 6
 	var j := _matrix(task_rows, q.size())
 	var c := _matrix(base_constraints.size(), q.size())
 	var epsilon := float(policy.finite_difference)
@@ -707,12 +745,55 @@ static func _linear_solve(matrix: Array, rhs: PackedFloat64Array) -> Dictionary:
 		answer[pivots[row]] = a[row][count]
 	return {"valid": true, "x": answer}
 
+static func _uses_exact_hold_order(mode: String, policy: Dictionary) -> bool:
+	return policy.get("hold_order_by_mode", {}).has(mode) or String(policy.get("posture_preference_mode", "weighted")) == "lexicographic"
+
+## Costs normalize travel by a fixed coordinate span, not distance to a moving
+## limit. Anatomical coupled constraints remain the actual feasibility owner.
+## An adapter can supply a cone's true span when its exponential coordinates
+## have a much wider search box. No input/resource is modified here.
+static func _posture_diagonal(input: Dictionary, groups: PackedStringArray, lower: PackedFloat64Array, upper: PackedFloat64Array, mode: String, policy: Dictionary) -> Dictionary:
+	if String(policy.get("posture_preference_mode", "weighted")) not in ["weighted", "lexicographic"]:
+		return {"valid": false, "reason": "allocator_posture_mode_invalid"}
+	if not policy.get("hold_order_by_mode", {}) is Dictionary:
+		return {"valid": false, "reason": "allocator_posture_hold_override_invalid"}
+	if _uses_exact_hold_order(mode, policy):
+		return {"valid": true, "diagonal": PackedFloat64Array()}
+	var spans := PackedFloat64Array()
+	if input.has("posture_spans"):
+		if not input.posture_spans is PackedFloat64Array or input.posture_spans.size() != groups.size():
+			return {"valid": false, "reason": "allocator_posture_spans_invalid"}
+		spans = input.posture_spans
+		for span: float in spans:
+			if not is_finite(span) or span <= 0.0:
+				return {"valid": false, "reason": "allocator_posture_spans_invalid"}
+	var all_costs: Variant = policy.get("posture_group_costs_by_mode", {})
+	if not all_costs is Dictionary:
+		return {"valid": false, "reason": "allocator_posture_costs_invalid"}
+	var default_mode := "pommel" if mode in ["pose", "position"] else mode
+	var costs: Variant = all_costs.get(mode, all_costs.get(default_mode, {}))
+	if not costs is Dictionary:
+		return {"valid": false, "reason": "allocator_posture_costs_invalid"}
+	var diagonal := PackedFloat64Array()
+	for i: int in groups.size():
+		var cost: Variant = costs.get(groups[i], 1.0)
+		if typeof(cost) not in [TYPE_FLOAT, TYPE_INT] or not is_finite(float(cost)) or float(cost) <= 0.0:
+			return {"valid": false, "reason": "allocator_posture_costs_invalid"}
+		var span := spans[i] if not spans.is_empty() else maxf(upper[i] - lower[i], 0.0001)
+		# Locked coordinates have zero feasible motion; avoid a giant meaningless
+		# diagonal while retaining a positive-definite preference Hessian.
+		var weight := 1.0 if lower[i] == upper[i] else float(cost) / (span * span)
+		if not is_finite(weight) or weight <= 0.0:
+			return {"valid": false, "reason": "allocator_posture_costs_invalid"}
+		diagonal.append(weight)
+	return {"valid": true, "diagonal": diagonal}
+
 static func _hold_order(mode: String, policy: Dictionary) -> Array:
 	if policy.get("hold_order_by_mode", {}).has(mode):
 		return policy.hold_order_by_mode[mode]
 	# Ordered minimization is the reverse of preferred contribution. These
 	# groups remain available for necessary geometric compensation at every step.
-	if mode == "pommel":
+	if mode in ["pommel", "pose", "position"]:
 		return [PackedStringArray(["torso"]), PackedStringArray(["girdle", "shoulder_girdle"]), PackedStringArray(["wrist", "forearm"]), PackedStringArray(["shoulder", "shoulder_swing", "shoulder_roll", "elbow"])]
 	if mode == "roll":
 		return [PackedStringArray(["torso"]), PackedStringArray(["girdle", "shoulder_girdle"]), PackedStringArray(["shoulder", "shoulder_roll"]), PackedStringArray(["wrist", "elbow", "shoulder_swing"]), PackedStringArray(["forearm"])]
@@ -724,25 +805,65 @@ static func _hold_order(mode: String, policy: Dictionary) -> Array:
 	# These are preferences, not per-joint travel allowances or new DOFs.
 	return [PackedStringArray(["torso"]), PackedStringArray(["girdle", "shoulder_girdle"]), PackedStringArray(["shoulder", "shoulder_swing", "shoulder_roll"]), PackedStringArray(["elbow"]), PackedStringArray(["wrist"]), PackedStringArray(["forearm"])]
 
-static func _target_at(previous: Transform3D, target: Transform3D, contact: Vector3, mode: String, weight: float, anchor: Vector3) -> Transform3D:
-	if mode == "pommel":
+## Path data is request-local geometry in input.origin_id, never a new bone
+## reference or a pose limit. Normalize only after checking the supplied axis;
+## confirm the complete orbit reaches the caller's requested endpoint.
+static func _validate_task_path(input: Dictionary, mode: String, previous: Transform3D, target: Transform3D, policy: Dictionary) -> Dictionary:
+	if not input.has("task_path"):
+		return {"valid": true, "path": {}}
+	if mode != "position":
+		return {"valid": false, "reason": "allocator_task_path_mode_invalid"}
+	var supplied: Variant = input.task_path
+	if not supplied is Dictionary or String(supplied.get("kind", "")) != "orbit":
+		return {"valid": false, "reason": "allocator_task_path_invalid"}
+	var center: Variant = supplied.get("center")
+	var axis: Variant = supplied.get("axis")
+	var angle: Variant = supplied.get("angle_radians")
+	if not center is Vector3 or not center.is_finite() or not axis is Vector3 or not axis.is_finite() or axis.length_squared() <= 1.0e-12:
+		return {"valid": false, "reason": "allocator_task_path_geometry_invalid"}
+	if typeof(angle) not in [TYPE_FLOAT, TYPE_INT] or not is_finite(float(angle)):
+		return {"valid": false, "reason": "allocator_task_path_angle_invalid"}
+	var direction: Vector3 = (axis as Vector3).normalized()
+	var offset: Vector3 = previous.origin - center
+	var endpoint: Vector3 = center + Basis(direction, float(angle)) * offset
+	if not endpoint.is_finite() or endpoint.distance_to(target.origin) > float(policy.position_tolerance):
+		return {"valid": false, "reason": "allocator_task_path_endpoint_mismatch"}
+	var radius: float = (offset - direction * offset.dot(direction)).length()
+	var arc_length: float = radius * absf(float(angle))
+	if not is_finite(arc_length):
+		return {"valid": false, "reason": "allocator_task_path_geometry_invalid"}
+	return {"valid": true, "path": {"kind": "orbit", "center": center, "axis": direction, "angle_radians": float(angle)},
+		"arc_length": arc_length}
+
+static func _target_at(previous: Transform3D, target: Transform3D, contact: Vector3, mode: String, weight: float, anchor: Vector3, path: Dictionary = {}) -> Transform3D:
+	if mode == "position" and not path.is_empty():
+		return Transform3D(previous.basis, (path.center as Vector3) + Basis(path.axis, float(path.angle_radians) * weight) * (previous.origin - (path.center as Vector3)))
+	if mode in ["pommel", "position"]:
 		return Transform3D(previous.basis, previous.origin.lerp(target.origin, weight))
 	var rotation := previous.basis.orthonormalized().get_rotation_quaternion().slerp(target.basis.orthonormalized().get_rotation_quaternion(), weight)
 	var basis := Basis(rotation).scaled(previous.basis.get_scale())
-	if mode == "tip":
-		# This origin is descriptive only. Tip's residual/Jacobian contain no
-		# translation rows; no weapon point is pinned in space by this target.
+	if mode in ["tip", "pose"]:
+		# Pose interpolates its frame origin; Tip keeps that origin descriptive
+		# only because its residual/Jacobian contain no translation rows.
 		return Transform3D(basis, previous.origin.lerp(target.origin, weight))
 	return Transform3D(basis, anchor - basis * contact)
 
 static func _pose_error(current: Transform3D, target: Transform3D, contact: Vector3) -> Dictionary:
 	return {"position": (current * contact).distance_to(target * contact), "angle": _rotation_vector(target.basis, current.basis).length()}
 
+static func _task_pose_error(current: Transform3D, target: Transform3D, contact: Vector3, mode: String) -> Dictionary:
+	if mode in ["pose", "position"]:
+		return {"position": current.origin.distance_to(target.origin),
+			"angle": 0.0 if mode == "position" else _rotation_vector(target.basis, current.basis).length()}
+	return _pose_error(current, target, contact)
+
 static func _task_vector(current: Transform3D, target: Transform3D, contact: Vector3, length_scale: float, mode: String = "") -> PackedFloat64Array:
 	var angular := _rotation_vector(target.basis, current.basis)
 	if mode == "tip":
 		return PackedFloat64Array([angular.x, angular.y, angular.z])
-	var position := (target * contact - current * contact) / length_scale
+	var position := (target.origin - current.origin) / length_scale if mode in ["pose", "position"] else (target * contact - current * contact) / length_scale
+	if mode == "position":
+		return PackedFloat64Array([position.x, position.y, position.z])
 	return PackedFloat64Array([position.x, position.y, position.z, angular.x, angular.y, angular.z])
 
 static func _rotation_vector(target: Basis, current: Basis) -> Vector3:

@@ -1,16 +1,10 @@
-[gd_resource type="Resource" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="WristMotionProfileDef" format=3 uid="uid://c3enav2d1berp"]
 
-[ext_resource type="Script" path="res://core/defs/wrist_motion_profile_def.gd" id="1_profile"]
+[ext_resource type="Script" uid="uid://cc1xkqor3hagi" path="res://core/defs/wrist_motion_profile_def.gd" id="1_profile"]
 
 [resource]
 script = ExtResource("1_profile")
-forearm_roll_limit_degrees = 90.0
+bend_frame = "hand_parent_local_xz"
 forearm_elbow_samples_degrees = PackedFloat64Array(0, 45, 90, 145)
 forearm_pronation_limits_degrees = PackedFloat64Array(109, 96, 80, 54)
 forearm_supination_limits_degrees = PackedFloat64Array(39, 73, 85, 95)
-flexion_limit_degrees = 65.0
-extension_limit_degrees = 60.0
-ulnar_limit_degrees = 30.0
-radial_limit_degrees = 15.0
-orientation_tolerance_degrees = 0.025
-angle_epsilon_degrees = 0.05

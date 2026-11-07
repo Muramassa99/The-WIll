@@ -82,6 +82,7 @@ func _run() -> void:
 		_expect(replay.get("valid", false) and _rotations_match(replay.pose_rotations, sample.pose_rotations), "disk_loaded_and_editor_samples_match")
 	_test_legacy_cold_entry()
 	_test_entry_scalar_sampling()
+	_test_wrist_bend_frame_transition_guard()
 	var ok := not checks.values().has(false)
 	var report := {"ok": ok, "count": checks.size(), "checks": checks, "scope": "Synthetic prepared anatomy persistence and root-invariant shared sampling; no scene or acquisition."}
 	var file := FileAccess.open(output.path_join("report.json"), FileAccess.WRITE)
@@ -89,6 +90,48 @@ func _run() -> void:
 		file.store_string(JSON.stringify(report, "\t"))
 	print(JSON.stringify(report))
 	quit(0 if ok else 1)
+
+func _test_wrist_bend_frame_transition_guard() -> void:
+	var a := _pose(0.0, -20.0)
+	var b := _pose(0.0, 40.0)
+	# This companion slot checks per-hand scalar dispatch only; no second arm
+	# FK or visual correctness is claimed by this synthetic fixture.
+	a.wrist_states_by_slot[&"hand_left"] = {"rho": 0.1, "beta": -0.2, "gamma": 0.3}
+	b.wrist_states_by_slot[&"hand_left"] = {"rho": 0.3, "beta": -0.1, "gamma": 0.5}
+	a.arm_constraints_by_slot[&"hand_left"] = {"wrist_profile": {}}
+	b.arm_constraints_by_slot[&"hand_left"] = {"wrist_profile": {"bend_frame": "rest_anatomical"}}
+	for frame: String in ["rest_anatomical", "hand_parent_local_xz"]:
+		a.arm_constraints_by_slot.hand_right.wrist_profile.bend_frame = frame
+		b.arm_constraints_by_slot.hand_right.wrist_profile.bend_frame = frame
+		var matched: Dictionary = Track.sample_pose(a, b, 0.5)
+		_expect(matched.get("valid", false) and matched.wrist_states_by_slot.has(&"hand_right")
+			and is_equal_approx(matched.wrist_states_by_slot.hand_right.rho, deg_to_rad(10.0)), "matched_wrist_frame_keeps_scalar_interpolation_" + frame)
+	a.arm_constraints_by_slot.hand_right.wrist_profile.erase("bend_frame")
+	b.arm_constraints_by_slot.hand_right.wrist_profile.bend_frame = "rest_anatomical"
+	var legacy: Dictionary = Track.sample_pose(a, b, 0.5)
+	_expect(legacy.get("valid", false) and legacy.wrist_states_by_slot.has(&"hand_right"), "missing_bend_frame_is_legacy_rest_anatomical")
+	b.arm_constraints_by_slot.hand_right.wrist_profile.bend_frame = "hand_parent_local_xz"
+	var originals := var_to_bytes([a, b])
+	for reverse: bool in [false, true]:
+		var source: Dictionary = b if reverse else a
+		var destination: Dictionary = a if reverse else b
+		var label := "new_to_old" if reverse else "old_to_new"
+		var mixed: Dictionary = Track.sample_pose(source, destination, 0.5)
+		_expect(mixed.get("valid", false) and not mixed.wrist_states_by_slot.has(&"hand_right"), "mixed_wrist_frame_omits_unrelated_scalars_" + label)
+		_expect(mixed.wrist_states_by_slot.has(&"hand_left")
+			and is_equal_approx(mixed.wrist_states_by_slot.hand_left.gamma, 0.4), "mixed_wrist_frame_keeps_other_hand_scalars_" + label)
+		var hand: int = source.bone_names.find(&"Hand")
+		var x: Vector4 = source.pose_rotations[hand]
+		var y: Vector4 = destination.pose_rotations[hand]
+		var expected := Quaternion(x.x, x.y, x.z, x.w).slerp(Quaternion(y.x, y.y, y.z, y.w), 0.5).normalized()
+		var actual: Vector4 = mixed.pose_rotations[hand]
+		_expect(absf(expected.dot(Quaternion(actual.x, actual.y, actual.z, actual.w).normalized())) > 0.999999, "mixed_wrist_frame_retains_bone_quaternion_path_" + label)
+		for weight: float in [0.0, 1.0]:
+			var endpoint: Dictionary = Track.sample_pose(source, destination, weight)
+			var original: Dictionary = source if weight == 0.0 else destination
+			_expect(endpoint.pose_rotations == original.pose_rotations
+				and endpoint.wrist_states_by_slot == original.wrist_states_by_slot, "mixed_wrist_frame_exact_endpoint_%s_%d" % [label, int(weight)])
+	_expect(var_to_bytes([a, b]) == originals, "mixed_wrist_frame_preserves_source_packets")
 
 func _pose(h_degrees: float, rho_degrees: float) -> Dictionary:
 	var names: Array[StringName] = [&"RL_BoneRoot", &"Chest", &"Clavicle", &"Upper", &"Forearm", &"Hand", &"Twist1", &"Twist2"]

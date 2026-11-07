@@ -8,6 +8,7 @@ const REVISION := "chest_relative_shoulder_v1"
 const EPSILON_SQUARED := 1.0e-12
 const ANTIPODE_EPSILON := 1.0e-6
 const COVERAGE_SCHEMA := "fixed_shoulder_neighborhoods_v1"
+const CONTINUOUS_COVERAGE_SCHEMA := "fixed_shoulder_regions_v1"
 const ANATOMICAL_ORIGIN := "CC_Base_Spine02ShoulderAnatomicalOrigin"
 const ZERO_CONVENTION := "sideways_upperarm_forearm_forward_shortest_swing"
 
@@ -32,8 +33,10 @@ static func validate_profile(profile: Dictionary) -> Dictionary:
 	if float(profile.angle_epsilon_radians) < 0.0:
 		return _fail("shoulder_profile_negative_epsilon")
 	var coverage := String(profile.get("coverage_mode", ""))
-	if coverage not in ["measured_band_only", "measured_plus_provisional"]:
+	if coverage not in ["measured_band_only", "measured_plus_provisional", "continuous_provisional"]:
 		return _fail("shoulder_profile_unknown_coverage")
+	if coverage == "continuous_provisional":
+		return _validate_continuous_regions(profile)
 	if coverage == "measured_plus_provisional":
 		if String(profile.get("coverage_schema", "")) != COVERAGE_SCHEMA:
 			return _fail("shoulder_profile_coverage_schema")
@@ -78,7 +81,7 @@ static func measure(chest: Transform3D, upperarm: Transform3D, forearm: Transfor
 	var context := _context(chest, upperarm, forearm, calibration)
 	if not context.valid:
 		return context
-	if String(profile.get("coverage_mode", "")) == "measured_plus_provisional" and String(calibration.get("origin_id", "")) != ANATOMICAL_ORIGIN:
+	if String(profile.get("coverage_mode", "")) != "measured_band_only" and String(calibration.get("origin_id", "")) != ANATOMICAL_ORIGIN:
 		return _fail("shoulder_profile_calibration_origin_mismatch")
 	var hinge: Vector3 = context.chest_frame.transposed() * upperarm.basis.orthonormalized() * (calibration.material_frame_in_upperarm as Basis).x
 	var shaft: Vector3 = context.direction
@@ -129,15 +132,17 @@ static func compose(chest: Transform3D, upperarm: Transform3D, forearm: Transfor
 		"reference_chart": context.reference_chart, "reference_warning": context.reference_warning}
 
 static func sample_bounds(direction_anatomical: Vector3, side_sign: float, profile: Dictionary, internal_sign: float = 0.0) -> Dictionary:
-	var u := direction_anatomical.normalized()
-	var plane: float = atan2(-u.z, u.x * side_sign)
-	var elevation: float = acos(clampf(-u.y, -1.0, 1.0))
 	var result := {"covered": false, "minimum_radians": 0.0, "maximum_radians": 0.0,
-		"plane_radians": plane, "elevation_radians": elevation,
+		"plane_radians": 0.0, "elevation_radians": 0.0,
 		"coverage_kind": "uncovered", "provisional": false, "coverage_sources": [],
 		"reason": "shoulder_direction_not_calibrated"}
 	if not direction_anatomical.is_finite() or direction_anatomical.length_squared() <= EPSILON_SQUARED or absf(side_sign) != 1.0:
 		return result
+	var u := direction_anatomical.normalized()
+	var plane: float = atan2(-u.z, u.x * side_sign)
+	var elevation: float = acos(clampf(-u.y, -1.0, 1.0))
+	result.plane_radians = plane
+	result.elevation_radians = elevation
 	if internal_sign == 0.0:
 		# The named Josie reference exercise defines this relation. Runtime
 		# passes its calibrated sign explicitly; pure profile callers may omit it.
@@ -157,6 +162,8 @@ static func sample_bounds(direction_anatomical: Vector3, side_sign: float, profi
 		# A checked nearby fallback must not silently narrow an authoritative
 		# measured direction. Local borrowing applies only to missing coverage.
 		return result
+	if String(profile.get("coverage_mode", "")) == "continuous_provisional":
+		return _continuous_bounds(result, profile)
 	if String(profile.get("coverage_mode", "measured_band_only")) != "measured_plus_provisional":
 		return result
 	var radius: float = profile.maximum_borrow_angle_radians
@@ -207,6 +214,79 @@ static func sample_bounds(direction_anatomical: Vector3, side_sign: float, profi
 	result.reason = ""
 	result.coverage_kind = "provisional" if result.provisional else "checked"
 	return result
+
+## A finite engineering envelope in the SAME fixed h convention used by
+## measure/compose. Direction selects bounds, never a new zero or drag budget.
+## The old +/-10 inspected poses remain evidence; their donor disks no longer
+## cut holes or intersect the broad lowered reference during ordinary reach.
+static func _validate_continuous_regions(profile: Dictionary) -> Dictionary:
+	if String(profile.get("coverage_schema", "")) != CONTINUOUS_COVERAGE_SCHEMA:
+		return _fail("shoulder_profile_coverage_schema")
+	var regions: Variant = profile.get("continuous_regions")
+	if not regions is Dictionary:
+		return _fail("shoulder_profile_continuous_regions")
+	for field: String in ["lower_elevation_radians", "upper_elevation_radians", "posterior_transition_plane_radians"]:
+		if not is_finite(float(regions.get(field, NAN))):
+			return _fail("shoulder_profile_missing_" + field)
+	var height: float = profile.sampled_elevation_radians
+	if regions.lower_elevation_radians < 0.0 or regions.lower_elevation_radians >= height or regions.upper_elevation_radians <= height or regions.upper_elevation_radians > PI:
+		return _fail("shoulder_profile_region_elevations")
+	var planes: PackedFloat64Array = profile.plane_samples_radians
+	if planes[0] != 0.0 or planes[-1] >= PI or regions.posterior_transition_plane_radians <= -PI or regions.posterior_transition_plane_radians >= planes[0]:
+		return _fail("shoulder_profile_region_planes")
+	for region: String in ["lower", "upper", "posterior"]:
+		var minimum: float = float(regions.get(region + "_minimum_radians", NAN))
+		var maximum: float = float(regions.get(region + "_maximum_radians", NAN))
+		if not is_finite(minimum) or not is_finite(maximum) or minimum >= maximum or maximum - minimum >= TAU:
+			return _fail("shoulder_profile_region_interval")
+		if String(regions.get(region + "_source", "")).strip_edges().is_empty():
+			return _fail("shoulder_profile_region_source")
+	if String(regions.get("zero_convention", "")) != ZERO_CONVENTION or String(regions.get("origin_id", "")) != ANATOMICAL_ORIGIN or String(regions.get("machine_origin_id", "")) != "RL_BoneRoot":
+		return _fail("shoulder_profile_region_reference")
+	return {"valid": true, "reason": ""}
+
+static func _continuous_bounds(result: Dictionary, profile: Dictionary) -> Dictionary:
+	var regions: Dictionary = profile.continuous_regions
+	var planes: PackedFloat64Array = profile.plane_samples_radians
+	var plane: float = result.plane_radians
+	var elevation: float = result.elevation_radians
+	var posterior := Vector2(regions.posterior_minimum_radians, regions.posterior_maximum_radians)
+	var horizontal: Vector2
+	if plane < planes[0]:
+		var side := _measured_interval(planes[0], profile)
+		horizontal = posterior.lerp(Vector2(side.minimum_radians, side.maximum_radians),
+			_region_blend(regions.posterior_transition_plane_radians, planes[0], plane))
+	elif plane > planes[-1]:
+		var front := _measured_interval(planes[-1], profile)
+		horizontal = Vector2(front.minimum_radians, front.maximum_radians).lerp(posterior,
+			_region_blend(planes[-1], PI, plane))
+	else:
+		var measured := _measured_interval(plane, profile)
+		horizontal = Vector2(measured.minimum_radians, measured.maximum_radians)
+	var bounds: Vector2
+	var region: String
+	if elevation <= float(profile.sampled_elevation_radians):
+		bounds = Vector2(regions.lower_minimum_radians, regions.lower_maximum_radians).lerp(horizontal,
+			_region_blend(regions.lower_elevation_radians, profile.sampled_elevation_radians, elevation))
+		region = "lower_to_shoulder_height"
+	else:
+		bounds = horizontal.lerp(Vector2(regions.upper_minimum_radians, regions.upper_maximum_radians),
+			_region_blend(profile.sampled_elevation_radians, regions.upper_elevation_radians, elevation))
+		region = "shoulder_height_to_upper"
+	# Both poles have one fixed interval; atan2's arbitrary azimuth there must
+	# not change the limits. All regions are immutable profile data, not donors
+	# recursively derived from prior poses. This is provisional, not clinical ROM.
+	result.merge({"covered": true, "reason": "", "coverage_kind": "provisional_continuous",
+		"provisional": true, "minimum_radians": float(bounds.x), "maximum_radians": float(bounds.y),
+		"coverage_sources": [{"sample_id": region, "provenance_kind": "provisional",
+			"origin_id": ANATOMICAL_ORIGIN, "machine_origin_id": "RL_BoneRoot",
+			"zero_convention": ZERO_CONVENTION, "source": regions.lower_source + "; " + String(profile.get("source", "")) + "; " + regions.upper_source + "; " + regions.posterior_source,
+			"provisional": true}]}, true)
+	return result
+
+static func _region_blend(start: float, end: float, value: float) -> float:
+	var t := clampf((value - start) / (end - start), 0.0, 1.0)
+	return t * t * (3.0 - 2.0 * t)
 
 static func _measured_interval(plane: float, profile: Dictionary) -> Dictionary:
 	var planes: PackedFloat64Array = profile.plane_samples_radians

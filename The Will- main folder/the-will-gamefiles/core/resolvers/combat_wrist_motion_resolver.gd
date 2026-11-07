@@ -5,6 +5,7 @@ class_name CombatWristMotionResolver
 ## All input frames share a reference and the upstream wrist position is final.
 ## No IK, scene writes, mutable calibration, or inferred twist from a bent Hand.
 const REVISION := "semantic_forearm_wrist_v1"
+const Profile = preload("res://core/defs/wrist_motion_profile_def.gd")
 const ForearmRotation = preload("res://core/resolvers/combat_forearm_rotation_resolver.gd")
 const AXIS_EPSILON_SQUARED := 1.0e-12
 const ROOT_EPSILON := 1.0e-8
@@ -131,7 +132,7 @@ static func measure_state(forearm_reference: Transform3D, actual_hand: Transform
 			best = {"found": true, "state": state, "error": error, "distance": distance}
 	var diagnostics := {"revision": REVISION, "analytic_root_count": analytic_roots,
 		"rho_equation_underdetermined": magnitude <= ROOT_EPSILON and absf(c) <= ROOT_EPSILON,
-		"independent_wrist_roll": false, "measurement_only": true}
+		"independent_wrist_roll": false, "measurement_only": true, "bend_frame": context.bend_frame}
 	if not best.found:
 		return {"valid": false, "status": "UNREPRESENTABLE", "reason": "wrist_pose_not_representable",
 			"orientation_error_radians": minimum_error, "diagnostics": diagnostics}
@@ -205,6 +206,17 @@ static func _context(forearm: Transform3D, hand: Transform3D, calibration: Dicti
 	var radial_sign: float = float(calibration.get("radial_sign", 0.0))
 	if not is_finite(radial_sign) or absf(absf(radial_sign) - 1.0) > ROOT_EPSILON or not _rotation_basis(neutral_local) or not _rotation_basis(anatomical_local):
 		return _fail("wrist_calibration_invalid")
+	var bend_frame: String = String(profile.get("bend_frame", Profile.BEND_FRAME_REST_ANATOMICAL))
+	if bend_frame == Profile.BEND_FRAME_HAND_PARENT_LOCAL_XZ:
+		# Literal Hand-parent local X/Z, as in the editor recordings. The
+		# Forearm bone is the named reference in the existing calibration chain
+		# through RL_BoneRoot. Identity is its axes, not a world-space zero and
+		# not a neutral recaptured from the latest accepted pose.
+		neutral_local = Basis.IDENTITY
+		anatomical_local = Basis.IDENTITY
+		radial_sign = 1.0
+	elif bend_frame != Profile.BEND_FRAME_REST_ANATOMICAL:
+		return _fail("wrist_bend_frame_unknown", "INVALID_PROFILE")
 	if not forearm.is_finite() or not hand.is_finite() or not _uniform_basis(forearm.basis) or not _uniform_basis(hand.basis):
 		return _fail("wrist_reference_invalid")
 	var axis := hand.origin - forearm.origin
@@ -215,7 +227,7 @@ static func _context(forearm: Transform3D, hand: Transform3D, calibration: Dicti
 	var limits_profile := profile.duplicate()
 	limits_profile["forearm_min_radians"] = interval.rho_min
 	limits_profile["forearm_max_radians"] = interval.rho_max
-	return {"valid": true, "axis": axis.normalized(), "neutral": (forearm.basis.orthonormalized() * neutral_local).orthonormalized(), "anatomical_in_bone": anatomical_local.orthonormalized(), "target_anatomical": (hand.basis.orthonormalized() * anatomical_local).orthonormalized(), "target_bone": hand.basis.orthonormalized(), "target_scale": hand.basis.get_scale(), "radial_sign": radial_sign, "forearm_interval": interval, "limits_profile": limits_profile}
+	return {"valid": true, "axis": axis.normalized(), "neutral": (forearm.basis.orthonormalized() * neutral_local).orthonormalized(), "anatomical_in_bone": anatomical_local.orthonormalized(), "target_anatomical": (hand.basis.orthonormalized() * anatomical_local).orthonormalized(), "target_bone": hand.basis.orthonormalized(), "target_scale": hand.basis.get_scale(), "radial_sign": radial_sign, "forearm_interval": interval, "limits_profile": limits_profile, "bend_frame": bend_frame}
 
 static func _forward(state: Vector3, context: Dictionary) -> Basis:
 	return (Basis(context.axis, state.x) * context.neutral * Basis(Vector3.RIGHT, state.y) * Basis(Vector3.BACK, float(context.radial_sign) * state.z)).orthonormalized()
@@ -230,6 +242,7 @@ static func _result(state: Vector3, context: Dictionary, profile: Dictionary, di
 	diagnostics["forearm_interval"] = context.forearm_interval
 	diagnostics["forearm_axis_reference"] = context.axis
 	diagnostics["independent_wrist_roll"] = false
+	diagnostics["bend_frame"] = context.bend_frame
 	return {"valid": accepted, "status": "ACCEPTED" if accepted else "APPROXIMATE", "reason": "" if accepted else "wrist_motion_range", "accepted_state": _state_dictionary(state), "accepted_hand_basis": bone.scaled(context.target_scale), "orientation_error_radians": error, "residual_basis": context.target_bone * bone.transposed(), "diagnostics": diagnostics}
 
 static func _best(candidates: Array[Vector3], context: Dictionary, profile: Dictionary, prior: Vector3) -> Dictionary:

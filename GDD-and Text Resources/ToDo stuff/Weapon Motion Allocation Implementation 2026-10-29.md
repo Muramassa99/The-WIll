@@ -1831,3 +1831,48 @@ inclusion/intersection boundaries; this pass fixes accepted-state handoff, not
 all spatial interval discontinuities. Remaining56–78ms ordinary updates are
 still above a smooth interactive frame budget. Keep those limitations explicit
 and use manual feedback before expanding the next implementation.
+
+### 2026-11-07: coordinated arm mechanics and fixed Idle clavicle home
+
+Pre-change savepoint pushed and remote verified:
+`c8a38b996c2521bdd0ee39782c8b0299d667251d`, **Skill Crafter provisional shoulder
+calibration and body movement savepoint part 2**. New changes below remain local.
+
+See [Skill Crafter Upper Body Coordination 2026-11-07.md](<Skill Crafter Upper Body Coordination 2026-11-07.md>)
+for the exact decisions, implementation, failures, fresh evidence and read-only
+reference audit. It supersedes the previous control-contributor table above:
+clavicle now has two constrained swing coordinates shared by weapon and
+independent-arm controls; independent controls no longer use their separate CCD
+path. Shared ancestors/opposite arm remain frozen for independent edits.
+
+User replaced the provisional6degree cone with10degrees either side of the
+fixed Idle pose (20degrees across opposite extremes), and supplied exact left
+and right bone-local XYZW rotations. Those immutable references are now in the
+profile. Rest geometry still defines bone lengths/axes. No current-pose re-zero,
+no extra clavicle axial-roll freedom, no extra humeral roll allowance.
+
+Analytic elbow swivels retain the same Hand world pose across repeated edits,
+pass through common anatomy/readback checks, and preserve the existing control
+meaning. Free-hand edits share the constrained arm model. Posture preference
+is finite/weighted within the task nullspace; historical exact-tier mode remains
+a diagnostic option. Grip acquisition and Save/F systems were not changed.
+
+Fresh evidence under `godot_runs/upper_body_coordination_20261107`: clavicle561/561,
+preferences29/29, actual imported-rig274/274. Large20degree elbow moves reached
+their targets at approximately38-41ms with17-18 FK evaluations. Repeated original
+Hand pin, root/scale transformation, opposite arm, family handoff and shared
+two-hand contacts passed. These are body-focused checks, not lifecycle proof.
+
+**Remaining blocker to claiming smooth movement:** rendered Skill3's inherited
+out-of-cone clavicle/near-extension Pommel requests can still cost4.5-6.9seconds.
+The full trace and exact pose/request rows are in the companion. Restoring a
+stagnation guard alone did not fix it and was withdrawn. Valid endpoints can
+fail the current joint-coordinate interpolation because it does not preserve
+the shoulder-h constraint between them. Do not fix this by moving the anatomical
+zero or weakening contact limits. This is the next concrete coordination target.
+
+User additionally requested audit of other limits: primary arm references are
+fixed, but torso support-blended neutral/current-pose fallback, unchecked torso
+third rotation, numerical allowance creep and shoulder continuity-anchor lifecycle
+need review. They are documented risks, not all reproduced defects. Asymmetric
+or clipped cone diagrams specify intent, not new numerical joint limits.

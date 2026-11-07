@@ -1564,3 +1564,157 @@ profile definition, calibration, coverage resolver, allocator, rig, editor and
 prepared-pose/replay consumers; do not assume only the .tres will change or erase
 manual changes. At this checkpoint the resource and shoulder definition/resolver
 have no local changes. No game runs/tests were requested or performed now.
+
+## 2026-11-07 resumed shoulder movement correction
+
+User lifted the no-run rule and requested working motion. Read the latest SPS
+including its appended calibration example and the Coordinated Arm Motion and
+Posture Selection Guide. Scope begins with the existing shoulder hold/solver
+interaction, not a whole-guide compiler rewrite. Existing Save/F advisory
+quality policy, grip bindings and fixed anatomical references remain authority.
+
+Fresh comparison against `154a6db2`: all three profile sample arrays had been
+emptied after the SPS append, with three unknown null properties added. This
+fails `shoulder_profile_sample_count`, independently of uncovered directions.
+Preserved that exact resource and user scene in
+`godot_runs/shoulder_motion_20261107/user_*_before.*`; restored the documented
+sample arrays and removed the unknown null properties. Scene changes are only
+resource/node UID metadata and remain untouched.
+
+Initial hypothesis was to separate shoulder swing coordinates from fixed-reference
+humeral rotation. Targeted tests did not reproduce the proposed large curved-h
+transition failure, so that production rewrite was NOT made. Actual Josie axial
+calibration passed 105/105 checks; allocation checks passed 107/107 with added
+held-h swing cases. These establish those fixtures only, not complete usability.
+
+Isolated real Broken_Balde_v1 Skill 3: Tip right/left/right accepted all tested
+requests (roughly 215/221/219 pixels), whereas Pommel vertical travel reproduced
+the stall. First 10-pixel request took 549.815 ms / 782 evaluations for about
+0.104 pixels of movement. Source library hashes remained unchanged. Evidence:
+`godot_runs/shoulder_motion_20261107/before_live` and `before_pommel`.
+
+A captured-pose reproduction (named local bones, same scaled/rotated skeleton;
+declared 50-mm camera-plane target; no external collision callback) reproduced
+SCALED 0.0104167. Opt-in rejection diagnostics showed task-error stagnation,
+not intermediate shoulder-h violation. The arm was already at elbow extension
+minimum: 11.995 degrees versus nominal 12. The requested direction increases
+shoulder-to-wrist distance; the reverse 50-mm direction succeeds fully. The
+original 50-mm target exceeds even a completely straight arm's reach.
+
+Current narrow correction: a conservative analytic reach bound for single-arm
+Pommel translation with a fixed shoulder socket. Use actual posed offsets,
+existing elbow interval plus original invalid-start allowance, and explicit
+world/RL_BoneRoot provenance. It only excludes proven unreachable task fractions;
+normal FK, contact, anatomy, storage and collision checks remain authoritative.
+Do not call this wider shoulder calibration or a complete smoothness fix.
+Fresh verification pending while implementation is in progress.
+
+User subsequently chose **Build provisional coverage from the research guidance**.
+This supersedes the earlier strict measured-band-only selection for the live
+profile. Existing coordinate zeros and signed angle conventions stay fixed.
+Use the paired lowered-arm reference and explicitly checked local Josie rows;
+borrow only within 15 degrees of original/checked donors, transport donor zeros,
+and intersect overlapping intervals. Do not chain provisional donors around the
+shoulder or claim that local geometry checks establish clinical anatomy.
+
+User also permits alteration of all saved skills for testing and intends to
+rebuild them later. Existing isolated evidence may still be reused where convenient;
+no requirement to preserve a particular experimental skill blocks this work.
+
+Stage A fresh evidence: pure reach 87/87, allocator policy 67/67, actual rig
+250/250, shoulder strict-mode regression 109/109. The rig report emitted one
+NaN-to-null JSON diagnostic warning; no assertion failed. Captured blocked
+Pommel: 590.203 ms / 862 evaluations -> 148.575 ms / 252, within unchanged pose
+tolerances. Real editor first update: 549.815 -> 209.307 ms. This remains too
+slow for smooth continuous manipulation and is not a whole-solver speed claim.
+The reverse captured 50-mm motion remains fully accepted with identical endpoint.
+Real Save/cold reopen/F/stop/edit/Save/finish cycle: 10 write + 31 read checks,
+source library hash unchanged. Evidence folders: `reach_*`, `shoulder_final_clean`,
+`captured_pommel*_final`, `after_pommel`, `lifecycle_write`, `lifecycle_read`.
+
+Stage B in progress: extend `shoulder_motion_profile_def.gd`, add a typed sample
+definition, extend shared `combat_shoulder_motion_resolver.gd`, then populate
+the live Josie resource only from inspected fixed-pose trials. Prepared captures
+must retain the same profile data/provenance used by editing and equipped playback.
+
+Stage B enabled the fixed `measured_plus_provisional` policy and 29 typed rows:
+one paired lowered reference (2-degree abduction, -65.1/+66.9 degrees in our
+internal-positive convention), plus 14 inspected centres per arm with -10/+10
+degree initial intervals. The two 180-degree overhead candidates overlap the
+head and were NOT enabled. The other 28 centres were inspected at all three
+trial angles, front and side, with no illegal body-proxy overlap in those poses.
+This does not certify the complete 15-degree neighborhood, all elbow bends,
+weapon contact, skin under clothing, or clinical anatomy. The lowered-right
+zero fixture overlaps an abdomen proxy; its published joint interval is not a
+claim of collision-free whole-body motion. Evidence: `provisional_pose_review`.
+
+Fixed references remain `CC_Base_Spine02ShoulderAnatomicalOrigin` ->
+`CC_Base_Spine02` -> named parent chain -> `RL_BoneRoot`. Prepared arm constraints
+capture the complete same profile. Original measured directions keep priority;
+local borrowing transports both endpoints by the same zero offset, intersects
+overlapping donors, stops beyond 15 degrees and cannot chain provisional donors.
+Coverage remains incomplete. Ten degrees is an inspected authoring increment,
+not an invented human endpoint or a final desired motion range.
+
+Fresh checks after enabling: pure provisional policy 41/41; imported profile
+strict regression 74/74; general imported rig 250/250; strict allocation109/109;
+live provisional endpoint/backoff/regrab/capture checks104/104. The latter uses
+actual imported offsets and current-direction intervals; tiny shaft changes
+must stay within existing 0.025-degree/50-micrometre tolerances. Earlier failed
+test attempts remain as evidence, not passes (initial helper arity parse error;
+then comparing different shaft directions as though their bounds were identical).
+
+Real isolated station lifecycle: Save10/10, cold reopen/F/stop/edit/Save/finish
+31/31, no new acquisition during that F/edit cycle. Save1.58s with two advisory
+pose warnings. Existing real player source unchanged. Equipped test initially
+stopped at an OLD Combat Idle packet (`saved_grip_end_bounds_anchor_missing`),
+before skill activation. Prepare that idle through its own normal editor page
+for the fixture; do not add idle work to production skill Save.
+
+Live saved Skill3 Pommel test after coverage: first reach-bound request203.779ms,
+172 evaluations. Most later accepted steps about70-100ms, but one2,282.344ms
+step/4,870 evaluations at the 15-degree donor boundary. Direction moved from
+13.906 to14.991 degrees from the forward measured arc endpoint, then the next
+step crossed15.559degrees and entered the old fixed-h hold. This is distinct
+from StageA full reach: elbow about30.55degrees, reach fraction cap1. The covered
+candidate can change h, but an uncovered candidate abruptly must use request-
+start h. Boundary search still needs attention; NOT a smoothness pass.
+
+### Final bounded body pass and current scope (2026-11-07 20:26)
+
+Added a search-only cap for repeated Pommel covered-to-held shoulder trials:
+after three iterations encountering an actual same-arm SHOULDER_HOLD violation,
+stop that fit and retain the ordinary legal path-fraction result. Unrelated
+constraint failures do not count. No limit, anatomical zero, acquired binding,
+candidate validation or evaluator state was changed by this cap. This is a
+bounded search improvement, not a continuous handoff between coverage regions.
+
+Recorded-request reproduction restores named bones from trace row104 and request/
+binding from row106. Its q/bounds/profile/calibration/previous-weapon comparisons
+match. It omits the external scene collision validator and reconstructs JSON
+transforms, so do not call it an exact full-UI replay. Before:3,182.103ms/7,355
+evaluations, accepted0.91015625. Final:383.724ms/551, accepted0.87890625 (about
+0.47mm less of this15mm request). Physical acceptance tolerances unchanged.
+Evidence: `captured_boundary_before`, `captured_boundary_final`.
+
+Real body-only drag comparison:2,282.344ms ->387.282ms at the difficult step;
+next steps continue, including return movement. Other accepted steps about70-100ms;
+this remains visibly slower than smooth rendering. Evidence:`final_live_pommel`.
+That rendered run preceded the final stricter same-arm violation classifier;
+the final classifier passed the captured comparison and74/74 allocator checks.
+The actual player library hash remained unchanged throughout.
+
+Earlier lifecycle checks are recorded above and need NOT be repeated during
+further body refinement. Equipped sampling passed after independently preparing
+Combat Idle via its own UI page (fixture14/14, Skill3 unchanged); acquired no new
+grip during playback. Both freshly saved Skill3 node warnings were
+`weapon_body_intersection` at `right_thigh`, not shoulder calibration failures.
+Red text is a generic pose warning, not proof that every warning is calibration.
+
+User clarified final scope: focus on BODY movement, fixed ranges, reversal,
+coverage transitions and cost. Group related body changes and test those together.
+Treat Save/F as established; do not run a full workflow after each body edit.
+Revisit those systems only after direct changes or a reported manual regression.
+All experimental saved skills may be altered; isolated fixtures are optional.
+Next body target is the covered/uncovered shoulder transition, not persistence,
+idle lifecycle, grip redesign, UI or full Coordinated Guide compiler work.

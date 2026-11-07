@@ -17,12 +17,17 @@ class_name CombatWeaponMotionAllocator
 ## Tip commands orientation only; grip position follows the legal joint FK.
 ## Roll alone retains a world contact_anchor in the SAME origin_id as the
 ## weapon frames. Omitting it starts Roll at the previous contact position.
+## Optional translation_reach_bound caps a Pommel request on its original
+## path. The adapter supplies a conservative FK envelope in the SAME origin;
+## this only prunes impossible targets and never replaces candidate legality.
 const PolicyDef = preload("res://core/defs/weapon_motion_policy_def.gd")
 const REVISION := "weapon_motion_allocation_v1"
 const NUMERIC_EPSILON := 1.0e-8
 const CONSTRAINT_EPSILON := 1.0e-6
 const PIVOT_EPSILON := 1.0e-10
 const QP_ITERATIONS := 80
+# Search effort only: never an anatomical limit or a new shoulder reference.
+const MAX_SHOULDER_COVERAGE_CROSSING_ITERATIONS := 3
 
 static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary = {}) -> Dictionary:
 	var policy: Dictionary = PolicyDef.new().as_dictionary()
@@ -82,16 +87,34 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 	elif mode == "roll" and (target * contact).distance_to(anchor) > float(policy.position_tolerance):
 		result.reason = "allocator_rotation_changed_contact_anchor"
 		return result
+	var maximum_fraction := 1.0
+	if mode == "pommel" and input.has("translation_reach_bound"):
+		var supplied: Variant = input.translation_reach_bound
+		if not supplied is Dictionary:
+			result.reason = "allocator_translation_reach_bound_invalid"
+			return result
+		if bool(supplied.get("valid", false)):
+			var fraction: Variant = supplied.get("maximum_fraction")
+			if typeof(fraction) not in [TYPE_FLOAT, TYPE_INT] or not is_finite(float(fraction)) or float(fraction) < 0.0 or float(fraction) > 1.0 or str(supplied.get("origin_id", "")) != str(input.origin_id):
+				result.reason = "allocator_translation_reach_bound_invalid"
+				return result
+			maximum_fraction = float(fraction)
+			result["translation_reach_bound"] = supplied.duplicate(true)
 	var angle := _rotation_vector(target.basis, previous.basis).length()
 	var distance := 0.0 if mode == "tip" else (target * contact).distance_to(previous * contact)
 	var count := maxi(1, int(ceil(maxf(angle / float(policy.max_rotation_step), distance / float(policy.max_translation_step)))))
 	var accepted_fraction := 0.0
 	var accepted_eval := initial
 	var attempted_failure := ""
+	var reach_bound_reached := maximum_fraction == 0.0
 	result["search_failures"] = []
 	var max_substeps := maxi(1, int(policy.max_substeps))
 	for step: int in mini(count, max_substeps):
-		var requested_fraction := float(step + 1) / float(count)
+		if reach_bound_reached:
+			break
+		# Keep count and fractions relative to the ORIGINAL demand. Rescaling
+		# the target itself would report 100% despite only partial movement.
+		var requested_fraction := minf(float(step + 1) / float(count), maximum_fraction)
 		var requested := _target_at(previous, target, contact, mode, requested_fraction, anchor)
 		var attempted := _fit(q, requested, contact, groups, lower, upper, input, permitted_evaluate, policy)
 		result.iterations += int(attempted.iterations)
@@ -99,6 +122,7 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 			q = attempted.q
 			accepted_eval = attempted.evaluation
 			accepted_fraction = requested_fraction
+			reach_bound_reached = maximum_fraction < 1.0 and requested_fraction >= maximum_fraction
 			continue
 		attempted_failure = attempted.reason
 		result.search_failures.append(_attempt_diagnostics(attempted, requested_fraction))
@@ -121,12 +145,15 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 					result.search_failures.append(_attempt_diagnostics(smaller, middle))
 		accepted_fraction = low
 		break
+	if reach_bound_reached:
+		attempted_failure = "arm_extension_reach_limit"
 	var requested_error := _pose_error(previous, target, contact)
 	if q == PackedFloat64Array(input.q) and ((mode != "tip" and requested_error.position > float(policy.position_tolerance)) or requested_error.angle > float(policy.orientation_tolerance)):
 		# Scaling a real command down inside the fit tolerance is not movement.
 		# Report no progress instead of certifying an unchanged joint packet.
 		accepted_fraction = 0.0
-		attempted_failure = "allocator_no_task_progress"
+		if not reach_bound_reached:
+			attempted_failure = "allocator_no_task_progress"
 	result.accepted_q = q
 	result.accepted_weapon = accepted_eval.weapon_frame
 	result.accepted_payload = accepted_eval.get("payload", {})
@@ -134,6 +161,8 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 	result.valid = accepted_fraction > NUMERIC_EPSILON
 	result.status = "ACCEPTED" if accepted_fraction >= 1.0 - NUMERIC_EPSILON else ("SCALED" if result.valid else "SEARCH_EXHAUSTED")
 	result.reason = "" if result.status == "ACCEPTED" else (attempted_failure if not attempted_failure.is_empty() else "allocator_substep_budget")
+	if result.has("translation_reach_bound"):
+		result.translation_reach_bound["reached"] = reach_bound_reached
 	var accepted_target := _target_at(previous, target, contact, mode, accepted_fraction, anchor)
 	var errors := _pose_error(accepted_eval.weapon_frame, accepted_target, contact)
 	# Keep physical displacement visible without turning Tip translation into
@@ -156,8 +185,17 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 	return result
 
 static func _attempt_diagnostics(attempt: Dictionary, fraction: float) -> Dictionary:
-	return {"fraction": fraction, "reason": attempt.reason, "iterations": attempt.iterations,
+	var result := {"fraction": fraction, "reason": attempt.reason, "iterations": attempt.iterations,
 		"qp": attempt.get("qp_diagnostics", {})}
+	if attempt.has("rejection_counts"):
+		result["rejection_counts"] = attempt.rejection_counts
+		result["rejection_examples"] = attempt.rejection_examples
+		result["initial_task_error_squared"] = attempt.get("initial_task_error_squared", 0.0)
+	if attempt.has("stagnation_diagnostics"):
+		result["stagnation_diagnostics"] = attempt.stagnation_diagnostics
+	if attempt.has("shoulder_boundary_diagnostics"):
+		result["shoulder_boundary_diagnostics"] = attempt.shoulder_boundary_diagnostics
+	return result
 
 ## A current authored pose is input, not a new accepted candidate. Preserve
 ## finite/calibrated attachment checks, but describe anatomical excess instead
@@ -252,6 +290,13 @@ static func _fit(start: PackedFloat64Array, target: Transform3D, contact: Vector
 	var validator: Callable = input.get("validate_candidate", Callable())
 	var mode := String(input.mode)
 	var response := {"valid": false, "q": start, "evaluation": evaluation, "iterations": 0, "reason": "allocator_search_exhausted"}
+	var shoulder_crossing_iterations := 0
+	# Diagnostic-only, opt-in through the per-request policy override. No
+	# persistent logs or additional candidate/scene evaluations are introduced.
+	var trace_rejections := bool(policy.get("trace_rejections", false))
+	if trace_rejections:
+		response["rejection_counts"] = {}
+		response["rejection_examples"] = []
 	for iteration: int in maxi(1, int(policy.max_iterations)):
 		response.iterations = iteration + 1
 		var error := _pose_error(evaluation.weapon_frame, target, contact)
@@ -269,6 +314,8 @@ static func _fit(start: PackedFloat64Array, target: Transform3D, contact: Vector
 			return response
 		var jacobian: Array = differential.jacobian
 		var residual := _task_vector(evaluation.weapon_frame, target, contact, float(policy.position_normalization), mode)
+		if trace_rejections and not response.has("initial_task_error_squared"):
+			response["initial_task_error_squared"] = _norm_squared(residual)
 		var inequalities: Array = []
 		var limits := PackedFloat64Array()
 		var step_sizes := PackedFloat64Array(input.get("step_sizes", []))
@@ -324,27 +371,112 @@ static func _fit(start: PackedFloat64Array, target: Transform3D, contact: Vector
 			response.reason = "allocator_no_local_progress"
 			return response
 		var old_error := _norm_squared(residual)
+		if mode == "pommel" and bool(input.get("translation_reach_bound", {}).get("valid", false)):
+			# At the fixed-shoulder reach boundary a nonzero joint step can
+			# improve only finite-difference noise. Do not spend ten nonlinear
+			# trials on progress below 1/1000 of the existing task tolerances.
+			# This stops a search; it never accepts or loosens a pose. The outer
+			# path-fraction search can still find a genuinely reachable target.
+			var linear_residual := residual.duplicate()
+			for row: int in jacobian.size():
+				linear_residual[row] -= _dot(jacobian[row], delta)
+			var predicted_gain := sqrt(old_error) - sqrt(_norm_squared(linear_residual))
+			var progress_floor := minf(float(policy.orientation_tolerance), float(policy.position_tolerance) / float(policy.position_normalization)) * 0.001
+			if predicted_gain <= progress_floor:
+				response.reason = "allocator_numerical_stagnation"
+				response["stagnation_diagnostics"] = {"predicted_residual_gain": predicted_gain,
+					"progress_floor": progress_floor, "delta_squared": _norm_squared(delta),
+					"old_task_error_squared": old_error, "predicted_task_error_squared": _norm_squared(linear_residual)}
+				return response
 		var advanced := false
 		var fraction := 1.0
+		var crossed_shoulder_coverage := false
 		for line_search: int in 10:
 			var trial := _add(q, delta, fraction)
 			var trial_eval: Dictionary = evaluate.call(trial)
+			var before_restore: Dictionary = {}
 			if _evaluation_valid(trial_eval) and not _legal(trial, trial_eval, lower, upper):
+				# A covered shoulder can change h, but an uncovered trial must
+				# retain the request's fixed h anchor. Repeatedly crossing that
+				# discontinuity and restoring the old anchor can consume thousands
+				# of FK calls without reaching the task. Bound only that repeated
+				# Pommel search, then let the ordinary path-fraction search retain
+				# a legal boundary pose. Do not rebase h inside candidate evaluation.
+				if mode == "pommel" and not crossed_shoulder_coverage and _enters_shoulder_hold(evaluation, trial_eval):
+					crossed_shoulder_coverage = true
+					shoulder_crossing_iterations += 1
+					if shoulder_crossing_iterations >= MAX_SHOULDER_COVERAGE_CROSSING_ITERATIONS:
+						response.reason = "allocator_shoulder_coverage_boundary"
+						response["shoulder_boundary_diagnostics"] = {"crossing_iterations": shoulder_crossing_iterations,
+							"iteration": iteration, "line_search": line_search,
+							"current_shoulder_states": evaluation.get("payload", {}).get("shoulder_states_by_slot", {}),
+							"trial_shoulder_states": trial_eval.get("payload", {}).get("shoulder_states_by_slot", {})}
+						return response
+				if trace_rejections and response.rejection_examples.size() < 8:
+					before_restore = _initial_diagnostics(trial, trial_eval, lower, upper, groups)
 				var restored := _restore_feasible(trial, trial_eval, evaluate, lower, upper, policy)
 				trial = restored.q
 				trial_eval = restored.evaluation
+			var rejected_stage := "nonlinear_bounds_or_fk"
+			var transition_detail: Dictionary = {}
+			var next_error := INF
 			if _evaluation_valid(trial_eval) and _legal(trial, trial_eval, lower, upper):
-				var next_error := _norm_squared(_task_vector(trial_eval.weapon_frame, target, contact, float(policy.position_normalization), mode))
-				if next_error < old_error - 1.0e-16 and _candidate_valid(trial_eval, validator) and _transition_legal(q, trial, evaluate, lower, upper, validator):
-					q = trial
-					evaluation = trial_eval
-					advanced = true
-					break
+				next_error = _norm_squared(_task_vector(trial_eval.weapon_frame, target, contact, float(policy.position_normalization), mode))
+				rejected_stage = "task_error_did_not_improve"
+				if next_error < old_error - 1.0e-16:
+					rejected_stage = "candidate_storage_or_collision"
+					if _candidate_valid(trial_eval, validator):
+						rejected_stage = "intermediate_transition"
+						if trace_rejections:
+							transition_detail["enabled"] = true
+						if _transition_legal(q, trial, evaluate, lower, upper, validator, transition_detail):
+							q = trial
+							evaluation = trial_eval
+							advanced = true
+							break
+			if trace_rejections:
+				response.rejection_counts[rejected_stage] = int(response.rejection_counts.get(rejected_stage, 0)) + 1
+				if response.rejection_examples.size() < 8:
+					# _task_vector is target minus current: J*delta reduces that
+					# residual. Use the existing linearization, with no FK calls.
+					var predicted := residual.duplicate()
+					var restored_prediction := residual.duplicate()
+					var restored_delta := trial.duplicate()
+					for column: int in q.size():
+						restored_delta[column] -= q[column]
+					for row: int in jacobian.size():
+						predicted[row] -= fraction * _dot(jacobian[row], delta)
+						restored_prediction[row] -= _dot(jacobian[row], restored_delta)
+					response.rejection_examples.append({"stage": rejected_stage, "iteration": iteration,
+						"line_search": line_search, "step_fraction": fraction, "old_task_error_squared": old_error,
+						"predicted_task_error_squared": _norm_squared(predicted),
+						"restored_linear_task_error_squared": _norm_squared(restored_prediction),
+						"delta_squared": _norm_squared(delta),
+						"new_task_error_squared": next_error, "before_restore": before_restore,
+						"after_restore": _initial_diagnostics(trial, trial_eval, lower, upper, groups),
+						"shoulder_states": trial_eval.get("payload", {}).get("shoulder_states_by_slot", {}),
+						"transition": transition_detail})
 			fraction *= 0.5
 		if not advanced:
 			response.reason = "allocator_nonlinear_step_blocked"
 			return response
 	return response
+
+static func _enters_shoulder_hold(before: Dictionary, after: Dictionary) -> bool:
+	var previous_states: Dictionary = before.get("payload", {}).get("shoulder_states_by_slot", {})
+	var next_states: Dictionary = after.get("payload", {}).get("shoulder_states_by_slot", {})
+	var values := _constraints(after)
+	var reasons := PackedStringArray(after.get("constraint_reasons", []))
+	for slot: Variant in next_states:
+		if previous_states.get(slot) is Dictionary and next_states[slot] is Dictionary:
+			if not previous_states[slot].has("held_h") and next_states[slot].has("held_h"):
+				# Entering uncovered space alone is not a failed transition. The
+				# fixed h may already be satisfied while another joint is illegal.
+				# Only this same arm's active hold can consume this search budget.
+				for index: int in mini(values.size(), reasons.size()):
+					if values[index] > CONSTRAINT_EPSILON and reasons[index].begins_with("SHOULDER_HOLD:") and reasons[index].ends_with(":" + String(slot)):
+						return true
+	return false
 
 ## A tangent to a curved inequality can lie outside it at second order.
 ## Retract that *internal candidate* to the nonlinear feasible region, then
@@ -669,13 +801,25 @@ static func _candidate_valid(evaluation: Dictionary, validator: Callable) -> boo
 	var validation: Dictionary = validator.call(evaluation)
 	return bool(validation.get("valid", false))
 
-static func _transition_legal(from: PackedFloat64Array, to: PackedFloat64Array, evaluate: Callable, lower: PackedFloat64Array, upper: PackedFloat64Array, validator: Callable) -> bool:
+static func _transition_legal(from: PackedFloat64Array, to: PackedFloat64Array, evaluate: Callable, lower: PackedFloat64Array, upper: PackedFloat64Array, validator: Callable, diagnostics: Dictionary = {}) -> bool:
 	for weight: float in [0.25, 0.5, 0.75]:
 		var intermediate := from.duplicate()
 		for i: int in from.size():
 			intermediate[i] = lerpf(from[i], to[i], weight)
 		var evaluation: Dictionary = evaluate.call(intermediate)
-		if not _evaluation_valid(evaluation) or not _legal(intermediate, evaluation, lower, upper) or not _candidate_valid(evaluation, validator):
+		if not _evaluation_valid(evaluation) or not _legal(intermediate, evaluation, lower, upper):
+			if bool(diagnostics.get("enabled", false)):
+				var groups := PackedStringArray()
+				groups.resize(intermediate.size())
+				diagnostics["stage"] = "intermediate_bounds_or_fk"
+				diagnostics["weight"] = weight
+				diagnostics["violations"] = _initial_diagnostics(intermediate, evaluation, lower, upper, groups)
+				diagnostics["shoulder_states"] = evaluation.get("payload", {}).get("shoulder_states_by_slot", {})
+			return false
+		if not _candidate_valid(evaluation, validator):
+			if bool(diagnostics.get("enabled", false)):
+				diagnostics["stage"] = "intermediate_storage_or_collision"
+				diagnostics["weight"] = weight
 			return false
 	return true
 

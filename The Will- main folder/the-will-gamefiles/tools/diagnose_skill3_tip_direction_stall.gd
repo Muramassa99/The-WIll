@@ -9,6 +9,7 @@ extends "res://tools/diagnose_skill3_curve_roll.gd"
 ## --right-px=100 --right-seconds=1 --left-px=35 --left-seconds=0.35
 ## --step-px=3 --right-steps=12 --left-steps=12 selects fixed sample counts.
 ## --separate-holds=true repeats from the complete pre-gesture checkpoint.
+## Optional --control=tip|pommel --drag-axis=x|y --first-direction=-1 (default +1).
 var direction_sample_serial := 0
 var trace_file: FileAccess
 
@@ -17,7 +18,8 @@ func _reopen_write(ui: CombatAnimationStationUI, side: String) -> void:
 	root.size = Vector2i(2476, 1364)
 	root.content_scale_size = Vector2i(2476, 1364)
 	await _wait_frames(3)
-	allocation_report["scope"] = "Read-only source; isolated saved Skill3 node3 Tip right-left-right with actual captured input. No optimization, Reset, Save, F or authored-pose overrides."
+	allocation_report["scope"] = "Read-only source; isolated saved Skill3 node3 selected-marker forward/reverse/forward with actual captured input. No optimization, Reset, Save, F or authored-pose overrides."
+	allocation_report["input_selection"] = {"control": String(_control_target()), "axis": options.get("drag-axis", "x"), "first_direction": float(options.get("first-direction", "1"))}
 	allocation_report["opening_grip"] = await _reopen_await_bound(ui, side)
 	circle_actor = _get_preview_actor(ui) as PlayerHumanoidRig
 	circle_weapon = _get_preview_held_item(ui)
@@ -103,6 +105,21 @@ func _reopen_write(ui: CombatAnimationStationUI, side: String) -> void:
 		trace_file.close()
 		trace_file = null
 
+func _control_target() -> StringName:
+	return &"pommel" if String(options.get("control", "tip")) == "pommel" else &"tip"
+
+func _drag_delta(distance_px: float) -> Vector2:
+	return Vector2(0.0, distance_px) if String(options.get("drag-axis", "x")) == "y" else Vector2(distance_px, 0.0)
+
+func _focus_tip() -> void:
+	circle_ui.session_state.current_focus = _control_target()
+	circle_ui.preview_presenter.refresh_focus_visuals(circle_ui.preview_view_container, circle_ui.preview_subviewport,
+		circle_ui.call("_get_active_draft"), circle_ui.get_selected_motion_node_index(), _control_target(), circle_ui.call("_get_active_baked_profile"))
+
+func _controlled_screen_now() -> Variant:
+	var point: Vector3 = circle_weapon.to_global(circle_weapon.get_meta("weapon_" + String(_control_target()) + "_local", Vector3.ZERO))
+	return null if circle_camera.is_position_behind(point) else circle_camera.unproject_position(point)
+
 func _direction_sequence(label: String, separate_holds: bool) -> Dictionary:
 	var result := {"label": label, "separate_holds": separate_holds, "stages": [], "engaged": false}
 	var press_position := Vector2.ZERO
@@ -112,20 +129,21 @@ func _direction_sequence(label: String, separate_holds: bool) -> Dictionary:
 	var left_seconds := maxf(float(options.get("left-seconds", "0.35")), 0.05)
 	var stages := [["right_first", right_px, right_seconds],
 		["left_backtrack", -left_px, left_seconds], ["right_again", right_px, right_seconds]]
+	for stage: Array in stages: stage[1] *= -1.0 if float(options.get("first-direction", "1")) < 0.0 else 1.0
 	for stage_index: int in stages.size():
 		var spec: Array = stages[stage_index]
 		var stage_label := label + "_" + String(spec[0])
 		if stage_index == 0 or separate_holds:
 			var marker: Variant = circle_ui.preview_presenter.get_authoring_marker_screen_position(
-				circle_ui.preview_subviewport, circle_camera, &"tip")
-			_check_allocation(marker is Vector2, stage_label + "_visible_tip_marker")
+				circle_ui.preview_subviewport, circle_camera, _control_target())
+			_check_allocation(marker is Vector2, stage_label + "_visible_" + String(_control_target()) + "_marker")
 			if not marker is Vector2:
 				break
 			press_position = marker
 			_snapshot(stage_label + "_before_press")
 			_engine_button(press_position, true)
-			var engaged: bool = circle_ui.motion_node_editor.get_drag_target() == &"tip" and circle_ui.marker_drag_input.active
-			_check_allocation(engaged, stage_label + "_engaged_tip",
+			var engaged: bool = circle_ui.motion_node_editor.get_drag_target() == _control_target() and circle_ui.marker_drag_input.active
+			_check_allocation(engaged, stage_label + "_engaged_" + String(_control_target()),
 				{"picked": String(circle_ui.motion_node_editor.get_drag_target()), "position": _vec(press_position)})
 			result.engaged = engaged
 			_sample(stage_label + "_pressed")
@@ -167,7 +185,7 @@ func _linear_input(label: String, distance_px: float, seconds: float) -> Diction
 		last = now
 		var ratio := clampf(float(now - started) / (seconds * 1000000.0), 0.0, 1.0)
 		var offset := distance_px * ratio
-		var delta := Vector2(offset - previous, 0.0)
+		var delta := _drag_delta(offset - previous)
 		previous = offset
 		var before: Dictionary = _sample(label + "_before_input", {"stage_fraction": ratio})
 		var event := InputEventMouseMotion.new()
@@ -178,16 +196,16 @@ func _linear_input(label: String, distance_px: float, seconds: float) -> Diction
 		Input.flush_buffered_events()
 		samples += 1
 		_sample(label + "_after_input", {"stage_fraction": ratio, "requested_relative_px": _vec(delta), "requested_total_px": offset})
-		if before.tip_screen is Array and first_row.tip_screen is Array:
-			var point := Vector2(before.tip_screen[0], before.tip_screen[1])
-			var start := Vector2(first_row.tip_screen[0], first_row.tip_screen[1])
+		if before.controlled_screen is Array and first_row.controlled_screen is Array:
+			var point := Vector2(before.controlled_screen[0], before.controlled_screen[1])
+			var start := Vector2(first_row.controlled_screen[0], first_row.controlled_screen[1])
 			max_screen_distance = maxf(max_screen_distance, point.distance_to(start))
 		if ratio >= 1.0:
 			break
 	_check_allocation(samples > 0, label + "_input_delivered", {"samples": samples})
 	return {"label": label, "requested_distance_px": distance_px, "requested_seconds": seconds,
 		"delivered_samples": samples, "elapsed_ms": float(Time.get_ticks_usec() - started) / 1000.0,
-		"max_frame_gap_ms": largest_gap_ms, "observed_max_tip_screen_displacement_px": max_screen_distance}
+		"max_frame_gap_ms": largest_gap_ms, "observed_max_controlled_screen_displacement_px": max_screen_distance}
 
 func _fixed_step_input(label: String, direction: float) -> Dictionary:
 	var step_px := maxf(float(options.get("step-px", "3")), 0.01)
@@ -201,11 +219,11 @@ func _fixed_step_input(label: String, direction: float) -> Dictionary:
 		# Wall-clock stalls therefore cannot erase the left/backtrack stage.
 		await process_frame
 		var details := {"step_index": step_index + 1, "requested_steps": count,
-			"requested_relative_px": [step_px * direction, 0.0],
+			"requested_relative_px": _vec(_drag_delta(step_px * direction)),
 			"requested_total_px": (step_index + 1) * step_px * direction}
 		_sample(label + "_before_input", details)
 		var event := InputEventMouseMotion.new()
-		event.screen_relative = Vector2(step_px * direction, 0.0)
+		event.screen_relative = _drag_delta(step_px * direction)
 		event.relative = event.screen_relative
 		event.button_mask = MOUSE_BUTTON_MASK_LEFT
 		Input.parse_input_event(event)
@@ -255,6 +273,9 @@ func _sample(label: String, extra: Dictionary = {}) -> Dictionary:
 	row["forearm_failure"] = _json(circle_ui.preview_drag_forearm_failure)
 	var tip_world: Vector3 = circle_weapon.to_global(circle_weapon.get_meta("weapon_tip_local", Vector3.ZERO))
 	row["tip_screen"] = _vec(circle_camera.unproject_position(tip_world)) if not circle_camera.is_position_behind(tip_world) else null
+	var controlled: Variant = _controlled_screen_now()
+	row["controlled_screen"] = _vec(controlled) if controlled is Vector2 else null
+	row["controlled_marker"] = String(_control_target())
 	row["manipulator"] = _json(circle_ui.preview_presenter.weapon_motion_manipulator.capture_state())
 	var allocation: Dictionary = circle_root.get_meta("weapon_motion_allocation_result", {})
 	var adapter: Variant = allocation.get("motion_adapter")

@@ -5,7 +5,6 @@ extends "res://tools/verify_combat_weapon_motion_rig.gd"
 ## wrist/elbow compensation cannot conceal a shoulder-boundary failure.
 ## Coverage re-entry is an explicit diagnostic, not a claim of solved motion.
 const Shoulder = preload("res://core/resolvers/combat_shoulder_motion_resolver.gd")
-const MotionAdapter = preload("res://runtime/player/combat_weapon_motion_rig_adapter.gd")
 const MotionAllocator = preload("res://core/resolvers/combat_weapon_motion_allocator.gd")
 var coverage_diagnostics: Array[Dictionary] = []
 
@@ -13,6 +12,10 @@ func _run() -> void:
 	actor_parent = Node3D.new()
 	root.add_child(actor_parent)
 	rig = RigScene.instantiate() as PlayerHumanoidRig
+	# This verifier preserves the strict coverage/hold contract as a supported
+	# policy. The separate provisional verifier exercises the expanded live data.
+	rig.shoulder_motion_profile = rig.shoulder_motion_profile.duplicate(true)
+	rig.shoulder_motion_profile.set("coverage_mode", "measured_band_only")
 	actor_parent.add_child(rig)
 	await process_frame
 	await process_frame
@@ -33,6 +36,8 @@ func _run() -> void:
 		_check_boundary_motion(side, -113.0, -1.0)
 		_check_boundary_motion(side, 41.0, 1.0)
 		_check_held_reference(side)
+		_check_held_swing_transition(side)
+		_record_held_swing_chords(side)
 		_check_root_transform(side)
 		_record_coverage_reentry(side)
 	_finish()
@@ -266,6 +271,124 @@ func _check_hold_allowance(side: String, adapter: CombatWeaponMotionRigAdapter) 
 	var valid_large: Dictionary = MotionAllocator.validate_with_start_allowance(input, evaluated, adapter.policy, renewed)
 	_check(not renewed.offsets.has(reasons[row]) and not bool(valid_large.get("valid", false)),
 		side + "_hold_large_residual_cannot_renew_allowance", valid_large)
+
+## Both endpoint bases have the SAME fixed-reference h. A change in shaft
+## direction must not manufacture axial turn solely because the allocator
+## interpolates its internal coordinates between those legal endpoints.
+func _check_held_swing_transition(side: String) -> void:
+	var fixture := _fixture(side, Vector3(0.0, -sin(deg_to_rad(20.0)), -cos(deg_to_rad(20.0))), 35.0)
+	if not fixture.get("valid", false):
+		_check(false, side + "_held_swing_fixture", fixture)
+		return
+	var prop := _prop(side)
+	var adapter := _adapter(side, prop)
+	if adapter == null:
+		prop.free()
+		return
+	var arm: Dictionary = adapter.arms[0]
+	var chest := skeleton.get_bone_global_pose(arm.chest_index)
+	var upperarm := skeleton.get_bone_global_pose(arm.indices[1])
+	var distal := skeleton.get_bone_global_pose(arm.indices[2])
+	var original_basis := upperarm.basis
+	var start_h: float = arm.shoulder_state.h
+	var chest_frame: Basis = chest.basis.orthonormalized() * (arm.shoulder_calibration.chest_anatomical_in_bone as Basis)
+	var target_direction: Vector3 = (fixture.direction_anatomical + Vector3(0.15 * float(arm.shoulder_calibration.side_sign), -0.08, 0.03)).normalized()
+	distal.origin = upperarm.origin + chest_frame * target_direction * upperarm.origin.distance_to(distal.origin)
+	var endpoint: Dictionary = Shoulder.compose(chest, upperarm, distal, arm.shoulder_calibration, start_h)
+	_check(endpoint.get("valid", false), side + "_held_swing_destination", endpoint)
+	if not endpoint.get("valid", false):
+		prop.free()
+		return
+	var target_q := _q_for_shoulder_basis(adapter, endpoint.upperarm_basis, start_h)
+	var max_error := 0.0
+	var all_legal := true
+	for weight: float in [0.0, 0.25, 0.5, 0.75, 1.0]:
+		var sample_q: PackedFloat64Array = adapter.q.duplicate()
+		for index: int in sample_q.size():
+			sample_q[index] = lerpf(sample_q[index], target_q[index], weight)
+		var evaluated: Dictionary = adapter._evaluate_kinematics(sample_q)
+		var rows := _shoulder_rows(evaluated, side)
+		var actual_h := _measured_h(adapter, evaluated, side)
+		max_error = maxf(max_error, absf(actual_h - start_h))
+		all_legal = all_legal and rows.size() == 2 and maxf(float(rows.get("shoulder_internal", INF)), float(rows.get("shoulder_external", INF))) <= MotionAllocator.CONSTRAINT_EPSILON
+		if weight in [0.0, 1.0]:
+			_check(is_finite(actual_h) and absf(actual_h - start_h) <= MotionAllocator.CONSTRAINT_EPSILON,
+				side + "_held_swing_endpoint_same_h_" + str(weight), {"h": actual_h, "expected_h": start_h})
+	_check(all_legal and max_error <= MotionAllocator.CONSTRAINT_EPSILON,
+		side + "_held_swing_intermediate_h_remains_fixed", {"maximum_h_error_radians": max_error})
+	var released := PackedInt32Array([arm.shoulder_q, arm.shoulder_q + 1, arm.shoulder_q + 2])
+	var result := _isolated_solve(adapter, target_q, released)
+	var committed: bool = bool(result.get("valid", false)) and float(result.get("task_scale", 0.0)) > 0.99 and adapter.commit_result(result)
+	_check(committed, side + "_held_swing_full_request_commits", _compact_result(result))
+	if committed:
+		var reverse := _adapter(side, prop)
+		if reverse != null:
+			var return_q := _q_for_shoulder_basis(reverse, original_basis, start_h)
+			var reversed := _isolated_solve(reverse, return_q, released)
+			_check(bool(reversed.get("valid", false)) and float(reversed.get("task_scale", 0.0)) > 0.99 and reverse.commit_result(reversed),
+				side + "_held_swing_reversal_commits", _compact_result(reversed))
+	prop.free()
+
+## Encode a declared physical endpoint in the adapter's current internal
+## coordinates. Endpoint construction above is independent of this encoding.
+func _q_for_shoulder_basis(adapter: CombatWeaponMotionRigAdapter, desired_global: Basis, _desired_h: float) -> PackedFloat64Array:
+	var arm: Dictionary = adapter.arms[0]
+	var parent_basis := skeleton.get_bone_global_pose(skeleton.get_bone_parent(arm.indices[1])).basis.orthonormalized()
+	var desired_local: Basis = parent_basis.transposed() * desired_global.orthonormalized()
+	var rotation: Quaternion = (desired_local * adapter.local_poses[arm.indices[1]].basis.orthonormalized().transposed()).get_rotation_quaternion().normalized()
+	var vector := rotation.get_axis() * rotation.get_angle()
+	var result: PackedFloat64Array = adapter.q.duplicate()
+	result[arm.shoulder_q] = vector.dot((arm.shoulder_axes as Basis).x)
+	result[arm.shoulder_q + 1] = vector.dot((arm.shoulder_axes as Basis).z)
+	result[arm.shoulder_q + 2] = vector.dot((arm.shoulder_axes as Basis).y)
+	return result
+
+## Bounded diagnostic of LATER Newton transitions: both ends have nonzero q
+## relative to the same accepted pose. Linear rotation-vector interpolation is
+## no longer the first-step SLERP. This records any disagreement with the h hold
+## without claiming that the complete poses are otherwise feasible or that a
+## live input actually takes one of these chords.
+func _record_held_swing_chords(side: String) -> void:
+	var fixture := _fixture(side, Vector3(0.0, -sin(deg_to_rad(20.0)), -cos(deg_to_rad(20.0))), 35.0)
+	if not fixture.get("valid", false): return
+	var prop := _prop(side)
+	var adapter := _adapter(side, prop)
+	if adapter == null:
+		prop.free()
+		return
+	var arm: Dictionary = adapter.arms[0]
+	var chest := skeleton.get_bone_global_pose(arm.chest_index)
+	var upperarm := skeleton.get_bone_global_pose(arm.indices[1])
+	var distal := skeleton.get_bone_global_pose(arm.indices[2])
+	var segment_length := upperarm.origin.distance_to(distal.origin)
+	var chest_frame: Basis = chest.basis.orthonormalized() * (arm.shoulder_calibration.chest_anatomical_in_bone as Basis)
+	var h: float = arm.shoulder_state.h
+	var side_sign: float = arm.shoulder_calibration.side_sign
+	var directions: Array[Vector3] = [Vector3(0.60, -0.55, -0.58), Vector3(-0.45, -0.60, -0.66),
+		Vector3(0.70, 0.20, -0.68), Vector3(0.15, -0.95, -0.20), Vector3(0.80, -0.10, 0.59)]
+	var endpoints: Array[PackedFloat64Array] = []
+	for direction: Vector3 in directions:
+		direction.x *= side_sign
+		distal.origin = upperarm.origin + chest_frame * direction.normalized() * segment_length
+		var composed: Dictionary = Shoulder.compose(chest, upperarm, distal, arm.shoulder_calibration, h)
+		if not composed.get("valid", false): continue
+		endpoints.append(_q_for_shoulder_basis(adapter, composed.upperarm_basis, h))
+	var records: Array[Dictionary] = []
+	for first: int in endpoints.size():
+		for second: int in range(first + 1, endpoints.size()):
+			var maximum_error := 0.0
+			var endpoint_error := 0.0
+			for weight: float in [0.0, 0.25, 0.5, 0.75, 1.0]:
+				var sample_q: PackedFloat64Array = endpoints[first].duplicate()
+				for index: int in sample_q.size(): sample_q[index] = lerpf(sample_q[index], endpoints[second][index], weight)
+				var evaluated: Dictionary = adapter._evaluate_kinematics(sample_q)
+				var error := absf(_measured_h(adapter, evaluated, side) - h)
+				maximum_error = maxf(maximum_error, error)
+				if weight in [0.0, 1.0]: endpoint_error = maxf(endpoint_error, error)
+			records.append({"from_index": first, "to_index": second, "maximum_h_error_radians": maximum_error,
+				"endpoint_h_error_radians": endpoint_error, "constraint_epsilon": MotionAllocator.CONSTRAINT_EPSILON})
+	samples.append({"case": side + "_nonzero_q_held_h_chord_diagnostic", "chords": records})
+	prop.free()
 
 func _check_root_transform(side: String) -> void:
 	var fixture := _fixture(side, Vector3.FORWARD, 25.0)

@@ -9,6 +9,7 @@ const Allocator = preload("res://core/resolvers/combat_weapon_motion_allocator.g
 const Policy = preload("res://core/defs/weapon_motion_policy_def.gd")
 const Wrist = preload("res://core/resolvers/combat_wrist_motion_resolver.gd")
 const Shoulder = preload("res://core/resolvers/combat_shoulder_motion_resolver.gd")
+const ArmReach = preload("res://core/resolvers/combat_arm_reach_resolver.gd")
 const Hinge = preload("res://core/resolvers/combat_arm_hinge_frame_resolver.gd")
 const ForearmSkin = preload("res://core/resolvers/combat_forearm_hand_index_resolver.gd")
 const UpperBody = preload("res://runtime/player/player_rig_upper_body_pose_presenter.gd")
@@ -39,6 +40,7 @@ var allocation_start_usec: int = 0
 var start_allowance: Dictionary = {}
 var storage_validation_failures: Dictionary = {}
 var storage_validation_last_failure: Dictionary = {}
+var translation_reach_bound: Dictionary = {}
 
 func allocate(owner: Node3D, motion_request: Dictionary) -> Dictionary:
 	allocation_start_usec = Time.get_ticks_usec()
@@ -117,6 +119,7 @@ func _initialize(owner: Node3D, motion_request: Dictionary) -> Dictionary:
 	# Retain this original allowance for every temporary write and final readback;
 	# a fresh adapter must not grant a candidate its own larger allowance.
 	start_allowance = Allocator.build_start_allowance(_allocator_input(), _evaluate_kinematics(q))
+	translation_reach_bound = _capture_translation_reach_bound()
 	return {"valid": true}
 
 func _allocator_input() -> Dictionary:
@@ -132,7 +135,68 @@ func _allocator_input() -> Dictionary:
 	# separately; only attached Roll owns a retained spatial pivot.
 	if String(request.get("mode", "tip")) == "roll" and request.has("contact_anchor_world"):
 		input["contact_anchor"] = request.contact_anchor_world
+	if not translation_reach_bound.is_empty():
+		input["translation_reach_bound"] = translation_reach_bound
 	return input
+
+## A fixed shoulder cannot translate its wrist beyond the arm's actual FK
+## envelope. Bound impossible Pommel travel before iterative fitting; this is
+## only a necessary condition, never acceptance of a pose or a new ROM limit.
+## Other constraints, acquired grip, storage and collision checks still run.
+func _capture_translation_reach_bound() -> Dictionary:
+	if String(request.get("mode", "")) != "pommel" or arms.size() != 1 or not torso.is_empty():
+		return {}
+	var arm: Dictionary = arms[0]
+	for index: int in range(arm.clavicle_q, arm.clavicle_q + 3):
+		if absf(q[index]) > EPSILON or absf(lower[index]) > EPSILON or absf(upper[index]) > EPSILON:
+			return {}
+	var indices: Array = arm.indices
+	var elbow: int = arm.elbow_q
+	# The original correction allowance is authoritative for an authored pose
+	# that already exceeds a limit. Do not trap it behind the nominal boundary.
+	var permitted_lower: PackedFloat64Array = start_allowance.get("lower", lower)
+	var permitted_upper: PackedFloat64Array = start_allowance.get("upper", upper)
+	var maximum: Dictionary = ArmReach.maximum_radius(local_poses[indices[2]].origin,
+		local_poses[indices[2]].basis * local_poses[indices[3]].origin, arm.hinge_local,
+		permitted_lower[elbow] - float(arm.initial_flexion),
+		permitted_upper[elbow] - float(arm.initial_flexion))
+	if not maximum.get("valid", false):
+		return {}
+	var parent_world: Transform3D = skeleton_world * skeleton.get_bone_global_pose(indices[0])
+	var center: Vector3 = (parent_world * local_poses[indices[1]]).origin
+	# Candidate Upperarm basis = parent * shoulder_rotation * initial_local.
+	# Operator-norm bounds remain conservative even with small imported scale
+	# differences; a unit shoulder rotation cannot increase that product.
+	var scale_bound: float = _basis_norm_upper_bound(parent_world.basis) * _basis_norm_upper_bound(local_poses[indices[1]].basis)
+	var radius: float = float(maximum.radius) * scale_bound
+	var hand_in_weapon: Transform3D = arm.hand_in_weapon
+	var start: Vector3 = previous_weapon * hand_in_weapon.origin
+	var destination: Vector3 = start + (request.target_weapon as Transform3D).origin - previous_weapon.origin
+	var lever: float = (previous_weapon.basis * (hand_in_weapon.origin - (request.contact_local as Vector3))).length()
+	var task_allowance: float = float(policy.position_tolerance) + 2.0 * lever * sin(float(policy.orientation_tolerance) * 0.5)
+	# Float32 transform arithmetic needs an outward numerical envelope. This
+	# scales with represented coordinates, not with a fresh anatomical allowance.
+	var magnitude: float = maxf(radius, center.abs()[center.abs().max_axis_index()])
+	magnitude = maxf(magnitude, maxf(start.abs()[start.abs().max_axis_index()], destination.abs()[destination.abs().max_axis_index()]))
+	var rounding_allowance: float = magnitude * 8.0 * 1.1920928955078125e-7
+	var bound: Dictionary = ArmReach.translation_fraction(center, start, destination, radius + task_allowance + rounding_allowance)
+	if not bound.get("valid", false):
+		return {}
+	bound.merge({"reason": "arm_extension_reach_limit", "origin_id": &"world",
+		"machine_origin_id": Origin.ORIGIN_RL_BONE_ROOT, "slot": arm.slot,
+		"shoulder_bone": names[indices[1]], "elbow_bone": names[indices[2]], "wrist_bone": names[indices[3]],
+		"center": center, "radius": radius, "task_allowance": task_allowance,
+		"rounding_allowance": rounding_allowance, "hinge_interval": Vector2(permitted_lower[elbow], permitted_upper[elbow])}, true)
+	return bound
+
+## sqrt(max row sum of |B^T B|) bounds the largest singular value. For the
+## normal uniform character scale it equals that scale up to rounding.
+static func _basis_norm_upper_bound(value: Basis) -> float:
+	var gram: Basis = value.transposed() * value
+	var row_bound := 0.0
+	for row: int in 3:
+		row_bound = maxf(row_bound, absf(gram.x[row]) + absf(gram.y[row]) + absf(gram.z[row]))
+	return sqrt(row_bound)
 
 ## Complete the already evaluated packet after the UI encodes its exact frame.
 ## There is no yield between allocation/encoding/commit and no second solve.
@@ -415,9 +479,9 @@ func _evaluate_kinematics(values: PackedFloat64Array) -> Dictionary:
 			arm.shoulder_calibration, arm.shoulder_profile, arm.shoulder_state)
 		if not humerus.get("valid", false):
 			return humerus
-		# User chose documented coverage only. Outside it hold the measured
-		# request-start axial angle, not an invented anatomical zero. Other
-		# permitted joint coordinates remain available for correction/return.
+		# The captured profile owns measured/provisional coverage. Outside every
+		# supported neighborhood hold the existing axial reference, never invent
+		# an interval or a new zero. Other coordinates remain available to return.
 		var covered_shoulder: bool = humerus.get("covered", false)
 		var held_h: float = arm.shoulder_state.get("held_h", arm.shoulder_state.h)
 		var shoulder_min: float = humerus.minimum_radians if covered_shoulder else held_h

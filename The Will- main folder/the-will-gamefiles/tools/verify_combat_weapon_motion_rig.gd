@@ -6,6 +6,7 @@ const RigScene = preload("res://scenes/player/player_humanoid_rig.tscn")
 const Hinge = preload("res://core/resolvers/combat_arm_hinge_frame_resolver.gd")
 const Wrist = preload("res://core/resolvers/combat_wrist_motion_resolver.gd")
 const Capture = preload("res://runtime/combat/combat_prepared_pose_capture.gd")
+const MotionAdapter = preload("res://runtime/player/combat_weapon_motion_rig_adapter.gd")
 const POSITION_EPSILON := 0.00005
 const ANGLE_EPSILON := deg_to_rad(0.025)
 var output_dir := "C:/WORKSPACE/godot_runs/weapon_motion_allocator"
@@ -49,6 +50,7 @@ func _run() -> void:
 		_exercise_wrist_boundary(side)
 		_exercise_wrist_measurement(side)
 		_exercise_independent_arm(side)
+		_exercise_reach_bound(side)
 	_exercise_two_hands()
 	_exercise_outside_shoulder_recovery()
 	_exercise_stale_wrist_failure()
@@ -88,6 +90,65 @@ func _seed_bent_neutral_wrist(side: String) -> void:
 	_check(accepted.get("valid", false), side + "_fixture_neutral_wrist_accepted", accepted)
 	if accepted.get("valid", false):
 		rig.call("_write_authoring_forearm_hand_index", _slot(side), accepted)
+
+func _exercise_reach_bound(side: String) -> void:
+	# Read-only adapter/FK checks on the declared bent fixture. Root scale must
+	# not silently become another anatomical degree of freedom or shrink reach.
+	var rotation := Basis.from_euler(Vector3(0.2, -0.6, 0.1))
+	var roots: Array[Transform3D] = [Transform3D.IDENTITY,
+		Transform3D(rotation * Basis.from_scale(Vector3.ONE * 1.7), Vector3(2, 1, -3)),
+		Transform3D(rotation * Basis.from_scale(Vector3(0.7, 1.6, 1.2)), Vector3(-2, 3, 1))]
+	for fixture: int in roots.size():
+		_restore()
+		actor_parent.transform = roots[fixture]
+		var label := "%s_reach_fixture_%d" % [side, fixture]
+		var before := var_to_bytes(_poses())
+		var prop := Node3D.new()
+		root.add_child(prop)
+		prop.global_transform = _hand_world(side) * Transform3D(Basis.IDENTITY, Vector3(0, 0.08, 0))
+		prop.set_meta("fixture_hand_in_weapon", {_slot(side): prop.global_transform.affine_inverse() * _hand_world(side)})
+		var adapter := MotionAdapter.new()
+		var initialized := adapter._initialize(rig, _request(side, prop, prop.global_transform, "pommel"))
+		var bound: Dictionary = adapter.translation_reach_bound
+		_check(initialized.get("valid", false) and not bound.is_empty(), label + "_single_pommel_has_bound", initialized)
+		if not bound.is_empty():
+			_check(bound.origin_id == &"world" and bound.machine_origin_id == &"RL_BoneRoot", label + "_declares_coordinate_roots")
+			var arm: Dictionary = adapter.arms[0]
+			var indices: Array = arm.indices
+			var elbow: int = arm.elbow_q
+			var lower: PackedFloat64Array = adapter.start_allowance.lower
+			var upper: PackedFloat64Array = adapter.start_allowance.upper
+			_check(absf(bound.hinge_interval.x - lower[elbow]) < 0.000001 and absf(bound.hinge_interval.y - upper[elbow]) < 0.000001,
+				label + "_uses_effective_elbow_range")
+			var largest := 0.0
+			# Independently compose actual child offsets at endpoint/interior hinge
+			# angles and shoulder rotations; no anatomical acceptance is asserted.
+			for sample: int in 9:
+				for axis: Vector3 in [Vector3.RIGHT, Vector3.UP, Vector3.FORWARD]:
+					var poses: Array[Transform3D] = adapter.local_poses.duplicate()
+					var angle := lerpf(lower[elbow], upper[elbow], float(sample) / 8.0)
+					poses[indices[1]].basis = Basis(axis, 0.8) * poses[indices[1]].basis
+					poses[indices[2]].basis = Basis(arm.hinge_local, angle - float(arm.initial_flexion)) * poses[indices[2]].basis
+					var globals: Array[Transform3D] = adapter._forward(poses)
+					var wrist: Vector3 = (adapter.skeleton_world * globals[indices[3]]).origin
+					largest = maxf(largest, wrist.distance_to(bound.center))
+			_check(largest <= float(bound.radius) + float(bound.rounding_allowance), label + "_fk_grid_within_bound",
+				{"maximum_sampled_radius": largest, "bound": bound})
+		if fixture == 0:
+			for mode: String in ["tip", "roll", "shared_pommel"]:
+				var request := _request(side, prop, prop.global_transform, "pommel" if mode == "shared_pommel" else mode)
+				if mode == "shared_pommel":
+					var other := "L" if side == "R" else "R"
+					request.support_slot = _slot(other)
+					request.hand_in_weapon_by_slot = (request.hand_in_weapon_by_slot as Dictionary).duplicate()
+					request.hand_in_weapon_by_slot[_slot(other)] = prop.global_transform.affine_inverse() * _hand_world(other)
+				var excluded := MotionAdapter.new()
+				var setup := excluded._initialize(rig, request)
+				_check(setup.get("valid", false) and excluded.translation_reach_bound.is_empty(), label + "_no_bound_for_" + mode, setup)
+		_check(before == var_to_bytes(_poses()), label + "_does_not_write_bones")
+		prop.queue_free()
+	actor_parent.transform = Transform3D.IDENTITY
+	_restore()
 
 func _exercise(side: String, transformed: bool) -> void:
 	_restore()
@@ -487,6 +548,13 @@ func _exercise_inverted_elbow_recovery() -> void:
 	prop.set_meta("fixture_hand_in_weapon", {&"hand_right": binding})
 	var spine := _proximal_spine_poses()
 	var bones := _poses()
+	var reach_adapter := MotionAdapter.new()
+	var reach_setup := reach_adapter._initialize(rig, _request("R", prop, prop.global_transform, "pommel"))
+	var reach_bound: Dictionary = reach_adapter.translation_reach_bound
+	_check(reach_setup.get("valid", false) and not reach_bound.is_empty(), "inverted_elbow_reach_bound_available", reach_setup)
+	if not reach_bound.is_empty():
+		_check(reach_bound.hinge_interval.x <= _signed_elbow_flexion("R") + 0.000001,
+			"inverted_elbow_reach_bound_preserves_original_start_allowance", reach_bound)
 	var held: Dictionary = _allocate(_request("R", prop, prop.global_transform, "tip"))
 	_check(held.get("valid", false) and _poses_close(bones, _poses()), "inverted_elbow_zero_input_does_not_recentre")
 	var hold_order: Array = [PackedStringArray(["shoulder_girdle"]),

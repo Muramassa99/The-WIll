@@ -52,7 +52,7 @@ func _reopen_write(ui: CombatAnimationStationUI, side: String) -> void:
 	if not options.has("step-px"): options["step-px"] = "10"
 	if not options.has("separate-holds"): options["separate-holds"] = "false"
 	await super._reopen_write(ui, side)
-	allocation_report["scope"] = "Read-only source Skill3, isolated saved node3, large right-left-right Tip sweeps with one continuous captured drag. No Reset, Save, F or reacquisition between sweeps. Captures final Skeleton3D.skeleton_updated poses separately from input poses."
+	allocation_report["scope"] = "Read-only source Skill3, isolated saved node3, selected-marker forward/reverse/forward sweeps with one continuous captured drag. No Reset, Save, F or reacquisition between sweeps. Captures final Skeleton3D.skeleton_updated poses separately from input poses."
 	allocation_report["final_skin_signal_count"] = final_skin_sequence
 	allocation_report["input_isolation"] = _mouse_isolation_statistics()
 	allocation_report["range_limits"] = {"max_events_per_stage": _maximum_events(),
@@ -205,6 +205,7 @@ func _fixed_step_input(label: String, direction: float) -> Dictionary:
 	var stalls := 0
 	var warmup_stalls := 0
 	var total_travel := 0.0
+	var total_tip_travel := 0.0
 	var largest_gap_ms := 0.0
 	var reason := "event_cap"
 	var first_stall_step := -1
@@ -218,16 +219,17 @@ func _fixed_step_input(label: String, direction: float) -> Dictionary:
 		await process_frame
 		await RenderingServer.frame_post_draw
 		var before_tip: Variant = _tip_screen_now()
+		var before_marker: Variant = _controlled_screen_now()
 		var before_sequence := final_skin_sequence
 		var step_started := Time.get_ticks_usec()
 		var details := {"step_index": step_index + 1, "maximum_events": maximum,
 			"warmup": step_index < _warmup_events(),
-			"requested_relative_px": [step_px * direction, 0.0],
+			"requested_relative_px": _vec(_drag_delta(step_px * direction)),
 			"requested_total_px": (step_index + 1) * step_px * direction}
 		_sample(label + "_before_input", details)
 		var event := InputEventMouseMotion.new()
 		event.device = TEST_MOUSE_DEVICE
-		event.screen_relative = Vector2(step_px * direction, 0.0)
+		event.screen_relative = _drag_delta(step_px * direction)
 		event.relative = event.screen_relative
 		event.button_mask = MOUSE_BUTTON_MASK_LEFT
 		Input.parse_input_event(event)
@@ -239,10 +241,13 @@ func _fixed_step_input(label: String, direction: float) -> Dictionary:
 		# weapon and the latest actual post-modifier skeleton signal together.
 		await RenderingServer.frame_post_draw
 		var after_tip: Variant = _tip_screen_now()
+		var after_marker: Variant = _controlled_screen_now()
 		var travel := INF
-		if before_tip is Vector2 and after_tip is Vector2:
-			travel = (before_tip as Vector2).distance_to(after_tip)
+		if before_marker is Vector2 and after_marker is Vector2:
+			travel = (before_marker as Vector2).distance_to(after_marker)
 			total_travel += travel
+		var tip_travel: float = (before_tip as Vector2).distance_to(after_tip) if before_tip is Vector2 and after_tip is Vector2 else INF
+		if is_finite(tip_travel): total_tip_travel += tip_travel
 		var elapsed_ms := float(Time.get_ticks_usec() - step_started) / 1000.0
 		largest_gap_ms = maxf(largest_gap_ms, elapsed_ms)
 		var small := is_finite(travel) and travel < _stall_pixels()
@@ -257,7 +262,8 @@ func _fixed_step_input(label: String, direction: float) -> Dictionary:
 		var step := {"step_index": step_index + 1, "drain": drain,
 			"tip_before": _vec(before_tip) if before_tip is Vector2 else null,
 			"tip_after": _vec(after_tip) if after_tip is Vector2 else null,
-			"actual_tip_travel_px": travel if is_finite(travel) else null,
+			"actual_tip_travel_px": tip_travel if is_finite(tip_travel) else null,
+			"controlled_marker": String(_control_target()), "actual_controlled_travel_px": travel if is_finite(travel) else null,
 			"consecutive_stalls": stalls, "warmup": step_index < _warmup_events(),
 			"overpush": first_stall_step >= 0, "overpush_delivered": overpush_delivered,
 			"elapsed_ms": elapsed_ms, "final_signal_before": before_sequence,
@@ -271,8 +277,8 @@ func _fixed_step_input(label: String, direction: float) -> Dictionary:
 		if not bool(drain.drained):
 			reason = "input_drain_timeout"
 			break
-		if not after_tip is Vector2:
-			reason = "tip_behind_camera"
+		if not after_marker is Vector2:
+			reason = String(_control_target()) + "_behind_camera"
 			break
 		if first_stall_step < 0 and stalls >= _stall_events():
 			first_stall_step = step_index + 1
@@ -286,7 +292,7 @@ func _fixed_step_input(label: String, direction: float) -> Dictionary:
 	return {"label": label, "mode": "bounded_range_sweep", "step_px": step_px * direction,
 		"maximum_events": maximum, "delivered_samples": delivered,
 		"requested_distance_px": delivered * step_px * direction,
-		"actual_tip_travel_px": total_travel, "warmup_stall_events": warmup_stalls,
+		"actual_tip_travel_px": total_tip_travel, "actual_controlled_travel_px": total_travel, "warmup_stall_events": warmup_stalls,
 		"first_sustained_stop_event": first_stall_step, "overpush_delivered": overpush_delivered,
 		"overpush_regained_progress": overpush_regained_progress,
 		"final_consecutive_stalls": stalls, "stop_reason": reason,

@@ -24,7 +24,7 @@ func _run() -> void:
 		var skeleton := candidates[0] as Skeleton3D
 		for slot: StringName in [&"hand_right", &"hand_left"]:
 			_exercise(skeleton, slot)
-	var invalid: Dictionary = Profile.as_dictionary()
+	var invalid: Dictionary = _strict_profile()
 	invalid.maximum_samples_radians = PackedFloat64Array([1.0])
 	_check(not Resolver.validate_profile(invalid).valid, "incomplete_profile_rejected")
 	var passed := true
@@ -48,7 +48,7 @@ func _exercise(skeleton: Skeleton3D, slot: StringName) -> void:
 	_check(calibration.get("valid", false), label + "_immutable_rest_calibration", calibration.get("reason", ""))
 	if not calibration.get("valid", false):
 		return
-	var profile: Dictionary = Profile.as_dictionary()
+	var profile: Dictionary = _strict_profile()
 	var chest_index: int = skeleton.find_bone(String(calibration.chest_bone_name))
 	var upper_index: int = skeleton.find_bone(String(calibration.upperarm_bone_name))
 	var chest: Transform3D = skeleton.get_bone_global_rest(chest_index)
@@ -97,3 +97,10 @@ func _check(passed: bool, label: String, detail: Variant = null) -> void:
 	checks.append({"passed": passed, "label": label, "detail": detail})
 	if not passed:
 		push_error(label + ": " + str(detail))
+
+func _strict_profile() -> Dictionary:
+	# Preserve the original measured-band assertions when the live definition
+	# opts into separately verified provisional neighborhoods.
+	var profile: Dictionary = Profile.as_dictionary()
+	profile.coverage_mode = "measured_band_only"
+	return profile

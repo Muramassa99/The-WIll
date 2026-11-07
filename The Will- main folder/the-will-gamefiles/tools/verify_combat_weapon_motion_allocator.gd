@@ -20,6 +20,10 @@ func _run() -> void:
 	_test_tip_releases_spatial_pivot()
 	_test_roll_priority()
 	_test_pommel_translation()
+	_test_pommel_reach_bound()
+	_test_bounded_pommel_stagnation()
+	_test_shoulder_coverage_boundary()
+	_test_shoulder_hold_crossing_classification()
 	_test_coupled_boundary()
 	_test_existing_anatomy_can_be_corrected()
 	_test_existing_coupled_limit_can_be_corrected()
@@ -192,9 +196,122 @@ func _test_pommel_translation() -> void:
 	if result.get("valid", false):
 		_check((result.accepted_weapon * contact - previous * contact).distance_to(target.origin - previous.origin) <= POSITION_EPSILON, "pommel_moves_contact_with_weapon")
 
+func _test_pommel_reach_bound() -> void:
+	var q := PackedFloat64Array([0.1, 0.2, 0.3])
+	var previous: Transform3D = _translation_frame(q).weapon_frame
+	var target := previous
+	target.origin.x += 0.08
+	var request := _input(q, PackedStringArray(["elbow", "shoulder", "shoulder"]), previous, target, Vector3(0.04, 0.1, 0.01), "pommel")
+	var unbounded: Dictionary = _solve(request, _translation_frame)
+	var bounded := request.duplicate(true)
+	bounded.translation_reach_bound = {"valid": true, "maximum_fraction": 0.375,
+		"origin_id": request.origin_id, "reason": "arm_extension_reach_limit", "evidence": "analytical fixture"}
+	var before := var_to_bytes(bounded)
+	var result: Dictionary = _solve(bounded, _translation_frame)
+	_record("pommel_analytical_reach_cap", result)
+	_check(var_to_bytes(bounded) == before, "reach_bound_does_not_mutate_input")
+	_check(result.get("valid", false) and result.status == "SCALED" and result.reason == "arm_extension_reach_limit",
+		"reach_cap_reports_partial_original_request")
+	var expected := previous
+	expected.origin = previous.origin.lerp(target.origin, 0.375)
+	_check(_reached(result, expected) and absf(float(result.task_scale) - 0.375) < 1.0e-10,
+		"reach_cap_preserves_original_path_fraction", {"fraction": result.task_scale})
+	_check(absf(float(result.remaining_task_error.position) - previous.origin.distance_to(target.origin) * 0.625) < POSITION_EPSILON,
+		"reach_cap_keeps_error_to_original_target", {"error": result.remaining_task_error})
+	_check(result.get("translation_reach_bound", {}).get("reached", false) and result.get("search_failures", []).is_empty(),
+		"reach_cap_stops_before_impossible_fit")
+	for unused_bound: Dictionary in [{}, {"valid": false, "maximum_fraction": 0.0}]:
+		var ignored := request.duplicate(true)
+		ignored.translation_reach_bound = unused_bound
+		_check(var_to_bytes(_solve(ignored, _translation_frame)) == var_to_bytes(unbounded),
+			"inactive_reach_bound_preserves_unbounded_result", {"bound": unused_bound})
+	var full := request.duplicate(true)
+	full.translation_reach_bound = {"valid": true, "maximum_fraction": 1.0, "origin_id": request.origin_id}
+	var full_result: Dictionary = _solve(full, _translation_frame)
+	full_result.erase("translation_reach_bound")
+	_check(var_to_bytes(full_result) == var_to_bytes(unbounded), "full_reach_bound_preserves_solver_result")
+	# The cap is a necessary envelope only: scalar/collision checks retain the
+	# authority to stop earlier, and initial contact/context still validate.
+	var limited := bounded.duplicate(true)
+	limited.upper[0] = 0.105
+	var limited_result: Dictionary = _solve(limited, _translation_frame)
+	_check(float(limited_result.task_scale) < 0.375 and limited_result.reason != "arm_extension_reach_limit"
+		and not bool(limited_result.translation_reach_bound.reached), "earlier_joint_limit_keeps_its_failure")
+	var collision := bounded.duplicate(true)
+	collision.validate_candidate = func(evaluation: Dictionary) -> Dictionary:
+		return {"valid": (evaluation.weapon_frame as Transform3D).origin.x <= 0.105}
+	var collision_result: Dictionary = _solve(collision, _translation_frame)
+	_check(float(collision_result.task_scale) < 0.375 and collision_result.reason != "arm_extension_reach_limit",
+		"reach_cap_does_not_bypass_candidate_validation")
+	var budget: Dictionary = Allocator.solve(bounded, _translation_frame, {"max_substeps": 1})
+	_check(float(budget.task_scale) < 0.375 and budget.reason == "allocator_substep_budget"
+		and not bool(budget.translation_reach_bound.reached), "budget_before_reach_cap_retains_budget_reason")
+	var zero := bounded.duplicate(true)
+	zero.translation_reach_bound.maximum_fraction = 0.0
+	var calls := [0]
+	var counted: Callable = func(values: PackedFloat64Array) -> Dictionary:
+		calls[0] += 1
+		var evaluation := _translation_frame(values)
+		evaluation.payload = {"proof": "initial FK retained"}
+		return evaluation
+	var zero_result: Dictionary = _solve(zero, counted)
+	_check(not zero_result.valid and zero_result.status == "SEARCH_EXHAUSTED" and zero_result.reason == "arm_extension_reach_limit"
+		and zero_result.task_scale == 0.0 and zero_result.accepted_q == q,
+		"zero_reach_bound_reports_unchanged_reach_stop")
+	_check(zero_result.iterations == 0 and calls[0] == 2 and zero_result.accepted_payload == {"proof": "initial FK retained"},
+		"zero_reach_bound_validates_initial_and_skips_all_fit_search", {"evaluations": calls[0], "iterations": zero_result.iterations})
+	zero.validate_candidate = func(_evaluation: Dictionary) -> Dictionary: return {"valid": false}
+	var rejected_start: Dictionary = _solve(zero, _translation_frame)
+	_check(rejected_start.reason == "allocator_initial_collision_or_context_invalid", "zero_reach_bound_cannot_bypass_initial_validation")
+	for fraction: Variant in [-0.1, 1.1, NAN, "0.5", null]:
+		var invalid := bounded.duplicate(true)
+		invalid.translation_reach_bound.maximum_fraction = fraction
+		var invalid_result: Dictionary = _solve(invalid, _translation_frame)
+		_check(not invalid_result.valid and invalid_result.reason == "allocator_translation_reach_bound_invalid",
+			"invalid_reach_fraction_is_rejected", {"reason": invalid_result.reason})
+	var wrong_origin := bounded.duplicate(true)
+	wrong_origin.translation_reach_bound.origin_id = "different origin"
+	var wrong_result: Dictionary = _solve(wrong_origin, _translation_frame)
+	_check(not wrong_result.valid and wrong_result.reason == "allocator_translation_reach_bound_invalid",
+		"reach_bound_requires_same_declared_origin")
+	# Tip ignores translation, including bounds supplied for a different task.
+	var tip := request.duplicate(true)
+	tip.mode = "tip"
+	var tip_result: Dictionary = _solve(tip, _translation_frame)
+	tip.translation_reach_bound = wrong_origin.translation_reach_bound
+	_check(var_to_bytes(_solve(tip, _translation_frame)) == var_to_bytes(tip_result), "tip_does_not_consume_translation_bound")
+
 func _coupled_frame(q: PackedFloat64Array) -> Dictionary:
 	return {"valid": true, "weapon_frame": Transform3D(Basis(Vector3.RIGHT, q[0] + q[2]) * Basis(Vector3.BACK, q[1]), Vector3.ZERO),
 		"constraints": PackedFloat64Array([q[0] * q[0] / 0.25 + q[1] * q[1] / 0.25 - 1.0]), "payload": {}}
+
+func _test_bounded_pommel_stagnation() -> void:
+	# Only Y can move. An unreachable X demand dominates the residual while
+	# the tiny Y correction gives the QP a real, nonzero joint step. That step
+	# improves task norm below the noise floor and cannot reach the target.
+	var calls := [0]
+	var evaluate: Callable = func(values: PackedFloat64Array) -> Dictionary:
+		calls[0] += 1
+		return {"valid": true, "weapon_frame": Transform3D(Basis.IDENTITY, Vector3(0.0, values[0], 0.0)),
+			"constraints": PackedFloat64Array(), "payload": {}}
+	var request := _input(PackedFloat64Array([0.0]), PackedStringArray(["shoulder"]), Transform3D.IDENTITY,
+		Transform3D(Basis.IDENTITY, Vector3(0.1, 0.00001, 0.0)), Vector3.ZERO, "pommel")
+	var policy := {"max_substeps": 1, "max_translation_step": 1.0, "scale_search_steps": 0}
+	var unbounded: Dictionary = Allocator.solve(request, evaluate, policy)
+	var unbounded_calls: int = calls[0]
+	calls[0] = 0
+	request.translation_reach_bound = {"valid": true, "maximum_fraction": 1.0, "origin_id": request.origin_id}
+	var result: Dictionary = Allocator.solve(request, evaluate, policy)
+	_record("bounded_pommel_unreachable_residual", result)
+	var failures: Array = result.get("search_failures", [])
+	var failure: Dictionary = failures[0] if not failures.is_empty() else {}
+	var details: Dictionary = failure.get("stagnation_diagnostics", {})
+	_check(not result.valid and result.accepted_q == request.q and failure.get("reason", "") == "allocator_numerical_stagnation",
+		"bounded_pommel_stagnation_never_accepts_unsolved_pose")
+	_check(float(details.get("delta_squared", 0.0)) > 1.0e-16 and float(details.get("predicted_residual_gain", INF)) <= float(details.get("progress_floor", 0.0)),
+		"stagnation_detects_nonzero_joint_step_with_negligible_task_gain", details)
+	_check(calls[0] < unbounded_calls and not unbounded.valid,
+		"stagnation_prunes_wasted_trials_without_changing_feasibility", {"bounded_calls": calls[0], "unbounded_calls": unbounded_calls})
 
 func _test_coupled_boundary() -> void:
 	var q := PackedFloat64Array([0.5, 0.0, 0.0])
@@ -205,6 +322,55 @@ func _test_coupled_boundary() -> void:
 	if result.get("valid", false):
 		var accepted: Dictionary = _coupled_frame(result.accepted_q)
 		_check(accepted.constraints[0] <= 0.000001, "final_nonlinear_wrist_envelope_is_legal", {"constraint": accepted.constraints[0]})
+
+func _coverage_boundary_frame(q: PackedFloat64Array) -> Dictionary:
+	# A deliberately small nonlinear task with a discontinuous missing-coverage
+	# hold. Past 0.45, h must equal its original 0.1. Candidate evaluation never
+	# changes that anchor. Repeated Newton trials otherwise cross and retract.
+	var state: Dictionary = {"h": q[0]}
+	var constraint := -1.0
+	if q[0] > 0.45:
+		state["held_h"] = 0.1
+		constraint = absf(q[0] - 0.1)
+	return {"valid": true, "weapon_frame": Transform3D(Basis.IDENTITY, Vector3(q[0] * q[0], 0.0, 0.0)),
+		"constraints": PackedFloat64Array([constraint]),
+		"constraint_reasons": PackedStringArray(["SHOULDER_HOLD:fixture:hand_right"]),
+		"payload": {"shoulder_states_by_slot": {"hand_right": state}}}
+
+func _test_shoulder_coverage_boundary() -> void:
+	var q := PackedFloat64Array([0.1])
+	var previous: Transform3D = _coverage_boundary_frame(q).weapon_frame
+	var target := Transform3D(Basis.IDENTITY, Vector3(0.25, 0.0, 0.0))
+	var request := _input(q, PackedStringArray(["shoulder_roll"]), previous, target, Vector3.ZERO, "pommel")
+	request.step_sizes = PackedFloat64Array([1.0])
+	var policy := {"max_substeps": 1, "max_translation_step": 1.0}
+	var result: Dictionary = Allocator.solve(request, _coverage_boundary_frame, policy)
+	_record("shoulder_coverage_boundary", result)
+	var bounded_failure := false
+	for failure: Dictionary in result.get("search_failures", []):
+		bounded_failure = bounded_failure or failure.reason == "allocator_shoulder_coverage_boundary"
+	_check(bounded_failure, "coverage_crossing_search_stops_repeated_restore_cycles")
+	_check(result.get("status", "") == "SCALED" and result.accepted_q[0] > q[0] and result.accepted_q[0] <= 0.45,
+		"coverage_boundary_retains_legal_progress_without_changing_hold", {"q": result.get("accepted_q", []), "scale": result.get("task_scale", 0.0)})
+	var reverse := _input(result.accepted_q, PackedStringArray(["shoulder_roll"]), result.accepted_weapon, previous, Vector3.ZERO, "pommel")
+	reverse.step_sizes = PackedFloat64Array([1.0])
+	var backoff: Dictionary = Allocator.solve(reverse, _coverage_boundary_frame, policy)
+	_check(backoff.get("status", "") == "ACCEPTED" and absf(backoff.accepted_q[0] - 0.1) < 0.001,
+		"coverage_boundary_still_allows_inward_backoff")
+
+func _test_shoulder_hold_crossing_classification() -> void:
+	var before := {"payload": {"shoulder_states_by_slot": {"hand_right": {"h": 0.1}}}}
+	var after := {"payload": {"shoulder_states_by_slot": {"hand_right": {"h": 0.1, "held_h": 0.1}}},
+		"constraints": PackedFloat64Array([0.2, 0.0]),
+		"constraint_reasons": PackedStringArray(["JOINT_RANGE:elbow:hand_right", "SHOULDER_HOLD:external:hand_right"])}
+	_check(not Allocator._enters_shoulder_hold(before, after), "unrelated_elbow_illegality_does_not_consume_coverage_search_budget")
+	after.constraints[1] = 0.2
+	after.constraint_reasons[1] = "SHOULDER_HOLD:external:hand_left"
+	_check(not Allocator._enters_shoulder_hold(before, after), "opposite_arm_hold_does_not_count_as_new_same_arm_coverage_failure")
+	after.constraint_reasons[1] = "SHOULDER_HOLD:external:hand_right"
+	_check(Allocator._enters_shoulder_hold(before, after), "only_active_same_arm_hold_counts_as_failed_coverage_crossing")
+	after.constraints[1] = 0.0000005
+	_check(not Allocator._enters_shoulder_hold(before, after), "hold_residual_inside_existing_epsilon_does_not_count_as_coverage_failure")
 
 func _test_existing_anatomy_can_be_corrected() -> void:
 	var context := {"reference": Transform3D.IDENTITY, "anchor": Vector3.ZERO, "contact": Vector3.ZERO}

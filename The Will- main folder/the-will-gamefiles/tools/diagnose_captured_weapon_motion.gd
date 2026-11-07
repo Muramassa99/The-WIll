@@ -14,6 +14,7 @@ var row_index := 5
 var request_row_index := -1
 var distance_m := 0.05
 var compare_hold := false
+var compare_checkpoint := false
 
 func _initialize() -> void:
 	for argument: String in OS.get_cmdline_user_args():
@@ -23,6 +24,7 @@ func _initialize() -> void:
 		if argument.begins_with("--request-row="): request_row_index = int(argument.trim_prefix("--request-row="))
 		if argument.begins_with("--distance="): distance_m = float(argument.trim_prefix("--distance="))
 		if argument == "--compare-hold=true": compare_hold = true
+		if argument == "--compare-checkpoint=true": compare_checkpoint = true
 	call_deferred("_run")
 
 func _run() -> void:
@@ -146,6 +148,17 @@ func _run() -> void:
 	var result: Dictionary = Adapter.new().allocate(rig, request)
 	for key: String in ["motion_adapter", "accepted_payload", "accepted_pose"]: result.erase(key)
 	var comparison: Dictionary = {}
+	if compare_checkpoint and initialized.get("valid", false):
+		# Same recorded pose, profile, derivative implementation and physical
+		# checks. Only accepted-checkpoint continuation is disabled in this
+		# diagnostic control run; neither request commits a final scene pose.
+		var control_input := adapter._allocator_input()
+		control_input.erase("advance_accepted_checkpoint")
+		adapter.allocation_start_usec = Time.get_ticks_usec()
+		var control := Allocator.solve(control_input, Callable(adapter, "_evaluate"), adapter.policy)
+		control["timings"] = adapter._timing_result()
+		control.erase("accepted_payload")
+		comparison["without_accepted_checkpoints"] = control
 	if compare_hold and initialized.get("valid", false):
 		# Deliberate diagnostic counterfactual, NEVER committed. Both runs skip
 		# storage/context validation equally; only the named shoulder-hold rows

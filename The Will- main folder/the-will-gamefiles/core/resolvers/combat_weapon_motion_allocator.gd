@@ -28,6 +28,9 @@ const PIVOT_EPSILON := 1.0e-10
 const QP_ITERATIONS := 80
 # Search effort only: never an anatomical limit or a new shoulder reference.
 const MAX_SHOULDER_COVERAGE_CROSSING_ITERATIONS := 3
+# A request can continue from a certified coverage-edge task checkpoint. This
+# budget is deliberately separate from Newton trials and does not grant ROM.
+const MAX_COVERAGE_HANDOFFS_PER_REQUEST := 2
 
 static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary = {}) -> Dictionary:
 	var policy: Dictionary = PolicyDef.new().as_dictionary()
@@ -108,6 +111,7 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 	var attempted_failure := ""
 	var reach_bound_reached := maximum_fraction == 0.0
 	result["search_failures"] = []
+	result["coverage_handoffs"] = []
 	var max_substeps := maxi(1, int(policy.max_substeps))
 	for step: int in mini(count, max_substeps):
 		if reach_bound_reached:
@@ -116,35 +120,53 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 		# the target itself would report 100% despite only partial movement.
 		var requested_fraction := minf(float(step + 1) / float(count), maximum_fraction)
 		var requested := _target_at(previous, target, contact, mode, requested_fraction, anchor)
-		var attempted := _fit(q, requested, contact, groups, lower, upper, input, permitted_evaluate, policy)
-		result.iterations += int(attempted.iterations)
-		if attempted.valid:
-			q = attempted.q
-			accepted_eval = attempted.evaluation
-			accepted_fraction = requested_fraction
-			reach_bound_reached = maximum_fraction < 1.0 and requested_fraction >= maximum_fraction
-			continue
-		attempted_failure = attempted.reason
-		result.search_failures.append(_attempt_diagnostics(attempted, requested_fraction))
-		# Common task scaling preserves the commanded path. Never scale the
-		# joint vector and claim the nonlinear contact stayed fixed.
-		var low := accepted_fraction
-		var high := requested_fraction
-		var start_q := q.duplicate()
-		for search: int in maxi(0, int(policy.scale_search_steps)):
-			var middle := (low + high) * 0.5
-			var smaller := _fit(start_q, _target_at(previous, target, contact, mode, middle, anchor), contact, groups, lower, upper, input, permitted_evaluate, policy)
-			result.iterations += int(smaller.iterations)
-			if smaller.valid:
-				low = middle
-				q = smaller.q
-				accepted_eval = smaller.evaluation
-			else:
-				high = middle
-				if result.search_failures.size() < 8:
-					result.search_failures.append(_attempt_diagnostics(smaller, middle))
-		accepted_fraction = low
-		break
+		while true:
+			var fit_start_q := q.duplicate()
+			var attempted := _fit(q, requested, contact, groups, lower, upper, input, permitted_evaluate, policy)
+			result.iterations += int(attempted.iterations)
+			if attempted.valid:
+				attempted_failure = ""
+				q = attempted.q
+				accepted_eval = attempted.evaluation
+				accepted_fraction = requested_fraction
+				if q != fit_start_q:
+					_advance_accepted_checkpoint(input, accepted_eval)
+				reach_bound_reached = maximum_fraction < 1.0 and requested_fraction >= maximum_fraction
+				break
+			attempted_failure = attempted.reason
+			if result.search_failures.size() < 8:
+				result.search_failures.append(_attempt_diagnostics(attempted, requested_fraction))
+			# Common task scaling preserves the commanded path. Never scale the
+			# joint vector and claim the nonlinear contact stayed fixed.
+			var low := accepted_fraction
+			var high := requested_fraction
+			var start_fraction := accepted_fraction
+			var start_q := q.duplicate()
+			var coverage_failure := attempted.has("shoulder_boundary_diagnostics")
+			for search: int in maxi(0, int(policy.scale_search_steps)):
+				var middle := (low + high) * 0.5
+				var smaller := _fit(start_q, _target_at(previous, target, contact, mode, middle, anchor), contact, groups, lower, upper, input, permitted_evaluate, policy)
+				result.iterations += int(smaller.iterations)
+				if smaller.valid:
+					low = middle
+					q = smaller.q
+					accepted_eval = smaller.evaluation
+				else:
+					coverage_failure = coverage_failure or smaller.has("shoulder_boundary_diagnostics")
+					high = middle
+					if result.search_failures.size() < 8:
+						result.search_failures.append(_attempt_diagnostics(smaller, middle))
+			accepted_fraction = low
+			# Only a completed task-path fit may advance continuation state. The
+			# adapter never changes its hold during FK probes, line search or the
+			# bisection above. Keep the original target, tolerances and allowance.
+			if coverage_failure and low > start_fraction + NUMERIC_EPSILON and q != start_q and result.coverage_handoffs.size() < MAX_COVERAGE_HANDOFFS_PER_REQUEST and _advance_accepted_checkpoint(input, accepted_eval):
+				result.coverage_handoffs.append({"fraction": low,
+					"shoulder_states": accepted_eval.get("payload", {}).get("shoulder_states_by_slot", {}).duplicate(true)})
+				continue
+			break
+		if accepted_fraction < requested_fraction - NUMERIC_EPSILON:
+			break
 	if reach_bound_reached:
 		attempted_failure = "arm_extension_reach_limit"
 	var requested_error := _pose_error(previous, target, contact)
@@ -183,6 +205,13 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 	result.pose_warning = _pose_warning(q, actual_evaluation, original_lower, original_upper, groups)
 	result.active_limits = _active_limits(q, original_lower, original_upper, actual_evaluation)
 	return result
+
+## Optional adapter-owned continuation, invoked only between accepted fits.
+## It may retain a boundary hold; it must not rebase anatomical references,
+## mutate shared definitions, install bones or grant a new start allowance.
+static func _advance_accepted_checkpoint(input: Dictionary, evaluation: Dictionary) -> bool:
+	var advance: Callable = input.get("advance_accepted_checkpoint", Callable())
+	return bool(advance.call(evaluation)) if advance.is_valid() else false
 
 static func _attempt_diagnostics(attempt: Dictionary, fraction: float) -> Dictionary:
 	var result := {"fraction": fraction, "reason": attempt.reason, "iterations": attempt.iterations,
@@ -308,7 +337,7 @@ static func _fit(start: PackedFloat64Array, target: Transform3D, contact: Vector
 			response.q = q
 			response.evaluation = evaluation
 			return response
-		var differential := _differentiate(q, evaluation, contact, evaluate, policy, mode)
+		var differential := _differentiate(q, evaluation, contact, evaluate, policy, lower, upper, mode)
 		if not differential.valid:
 			response.reason = "allocator_invalid_forward_sample"
 			return response
@@ -520,7 +549,7 @@ static func _restore_feasible(candidate: PackedFloat64Array, candidate_eval: Dic
 	evaluation = evaluate.call(q)
 	return {"q": q, "evaluation": evaluation}
 
-static func _differentiate(q: PackedFloat64Array, evaluation: Dictionary, contact: Vector3, evaluate: Callable, policy: Dictionary, mode: String = "") -> Dictionary:
+static func _differentiate(q: PackedFloat64Array, evaluation: Dictionary, contact: Vector3, evaluate: Callable, policy: Dictionary, lower: PackedFloat64Array, upper: PackedFloat64Array, mode: String = "") -> Dictionary:
 	var base_constraints := _search_constraints(evaluation)
 	var custom_search: bool = evaluation.has("search_constraints")
 	var task_rows := 3 if mode == "tip" else 6
@@ -528,6 +557,12 @@ static func _differentiate(q: PackedFloat64Array, evaluation: Dictionary, contac
 	var c := _matrix(base_constraints.size(), q.size())
 	var epsilon := float(policy.finite_difference)
 	for column: int in q.size():
+		# Effective bounds already include the original-pose correction allowance.
+		# A genuinely fixed coordinate has no feasible delta: retain its zero
+		# column without evaluating an impossible perturbation. Do not round a
+		# narrow but nonzero interval into a lock.
+		if lower[column] == upper[column]:
+			continue
 		var altered := q.duplicate()
 		altered[column] += epsilon
 		var sample: Dictionary = evaluate.call(altered)

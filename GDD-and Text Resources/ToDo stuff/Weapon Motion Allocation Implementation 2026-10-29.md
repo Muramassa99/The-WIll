@@ -1718,3 +1718,116 @@ Revisit those systems only after direct changes or a reported manual regression.
 All experimental saved skills may be altered; isolated fixtures are optional.
 Next body target is the covered/uncovered shoulder transition, not persistence,
 idle lifecycle, grip redesign, UI or full Coordinated Guide compiler work.
+
+### 2026-11-07 accepted shoulder checkpoints and upper-body chain audit
+
+User requested a Git savepoint before continuing movement work. Committed and
+pushed `222a4c73fd2ae43740fcf9fbb971ae80aaa8a2ef` on
+`recovery/stable-92b8a24-chat14` (remote verified). It contains the preceding
+calibration/search work and evidence tools, not the changes below. Unrelated
+editor settings, scene UID metadata, generated test libraries and worldbuilding
+notes were left outside that commit. Subsequent body corrections remain local.
+
+Latest scope clarification: research is guidance to adapt to Josie's real bones,
+not an instruction to replace working systems. Inspect the full upper-body chain
+to RL_BoneRoot, excluding legs, because an older surrounding mechanism can cause
+a bad handoff. Grip acquisition remains protected. Save/F/equipped playback are
+established consumers; do not repeatedly retest their complete lifecycle during
+body-only refinement. Shared definitions and fixed anatomical origins remain
+authoritative; no new anatomical endpoints were invented in this pass.
+
+#### Confirmed mechanical cause and correction
+
+The allocator already splits movement into bounded task substeps. However, its
+adapter kept the shoulder hold reference from the beginning of the entire
+request even after completing an accepted substep. A subsequent trial outside
+calibrated coverage then tried to return to that older h, undoing legitimate
+progress and causing repeated searches.
+
+- `CombatWeaponMotionAllocator` now notifies an optional adapter checkpoint only
+  after a completed, validated fit on the ORIGINAL requested task path and actual
+  q progress. FK probes, line search and bisection trials cannot advance it.
+- `CombatWeaponMotionRigAdapter` updates only request-local accepted shoulder
+  continuation state. Covered poses supply the current h; an existing uncovered
+  `held_h` stays fixed until covered re-entry. No anatomical zero, profile, grip,
+  bone pose or persistent rig state is written by this notification.
+- When a coverage failure yields a validated partial task checkpoint, at most
+  two bounded continuations can resume the remaining original request. Original
+  fractions, contact tolerances and original invalid-start allowance remain.
+- Fixed-coordinate finite-difference columns are now left zero without full FK
+  evaluations. Equality is exact on EFFECTIVE bounds: narrow nonzero intervals
+  and recovery allowance still remain movable.
+- Cleared a recovered failure diagnostic so a later substep-budget stop does
+  not incorrectly report an earlier resolved coverage failure.
+
+Production files touched in this slice: `core/resolvers/combat_weapon_motion_allocator.gd`
+and `runtime/player/combat_weapon_motion_rig_adapter.gd`. Existing anatomy,
+profile rows, opposite-arm isolation and shared two-hand authority were retained.
+Official Godot4.7 Callable, Skeleton3D and Transform3D docs were consulted;
+Skeleton3D global bone poses remain skeleton-relative, with explicit root/world
+conversion through the existing adapter.
+
+#### Fresh focused evidence
+
+Root: `godot_runs/shoulder_continuity_20261107`.
+
+- `fixed_coordinates`:32/32; locked-column work, mixed/reduced equivalence,
+  reversal, narrow intervals, recovery allowance and all-fixed inputs.
+- `allocator_policy`:74/74 existing movement/contact/coverage policy checks.
+- `continuation_policy_affine`:54/54. A small serial mechanism stops at75%
+  without continuation and reaches100% with it; hold remains unchanged through
+  repeated outside regrabs, reverse/re-cross succeed, invalid/rejected/stationary
+  inputs generate no checkpoint. This is API/constraint proof, not human anatomy.
+  Earlier `continuation_policy` used an ill-conditioned synthetic helical
+  fixture and failed before reaching coverage; it remains recorded as a failed
+  fixture, not a passing body result. Production was not changed to force it.
+- `imported_endpoints`:104/104 actual imported R/L lowered/raised/posterior
+  endpoint, reversal, regrab and constraint-capture checks. No full lifecycle run.
+- `captured_control_comparison`:same recorded real pose/request and unchanged
+  profile/calibration/contact. New handoff ACCEPTED100%,91.979ms/112evaluations.
+  With only the checkpoint callback removed (fixed-column optimization still
+  present), SCALED87.890625%,311.823ms/485evaluations. This separates the handoff
+  correction from the derivative optimization. This diagnostic omits external
+  scene collision and reconstructs JSON transforms; it is not a full UI replay.
+- `live_pommel`:actual saved Broken_Balde_v1 Skill3 node3, same rendered
+  forward/reverse/forward input sequence as previous pass. Previously troublesome
+  return step8:partial387.282ms/555evaluations -> full74.733ms/66. Following
+  steps also fully accepted at about66–78ms; retained held_h stayed constant
+  within1e-6radians. Other ordinary return steps about56–60ms. Separate initial
+  near-extension demand still reaches a real limit and costs131.655ms; it is
+  not evidence that the entire solver is now smooth.
+- Live root/hip/torso/opposite-arm comparison at each drag end:9named bones,
+  maximum world-position difference0.000000894m, zero reported angular change.
+  User source library unchanged. No Godot process left running.
+- Live run preceded only the final no-op-checkpoint guard and recovered-failure
+  reporting cleanup. Final synthetic verifier covers those changes. Do not call
+  that rendered run proof of unrelated grip, Save/F or equipped workflows.
+
+#### Full upper-body audit: what remains
+
+Current control paths are not mechanically identical:
+
+| Control | Contributors |
+| --- | --- |
+| Single-hand Tip/Pommel/attached Roll | Shoulder, elbow, forearm, wrist; clavicle and torso held |
+| Two-hand Tip | Both arms; clavicles and shared torso held |
+| Two-hand Pommel/Roll | Both arms plus existing shared torso yaw/pitch; clavicles held |
+| Independent elbow/free hand | Older selected-arm CCD, including clavicle movement |
+
+Independent elbow/free-hand CCD does not apply the new shoulder envelope during
+its solve and has no separately calibrated clavicle envelope. It can therefore
+produce a pose the next weapon-control edit treats as an invalid-start pose.
+That is a genuine coordination gap, separate from the reproduced Pommel hitch.
+The old body's accepted-allocation guards suppress late direct-IK/torso writers;
+no evidence was found of ordinary late torso overwrite causing this reproduction.
+
+Single-arm torso exclusion protects the user's opposite-arm world-space freeze.
+Do not simply unlock torso and drag that arm along. The next coordinated-body
+slice should reconcile shoulder/clavicle constraints across control paths using
+actual rig reference axes and a declared local clavicle envelope. Older heuristic
+pose-direction weights are NOT independently calibrated clavicle ROM limits.
+Root and legs were not altered. The shoulder donor field still has abrupt
+inclusion/intersection boundaries; this pass fixes accepted-state handoff, not
+all spatial interval discontinuities. Remaining56–78ms ordinary updates are
+still above a smooth interactive frame budget. Keep those limitations explicit
+and use manual feedback before expanding the next implementation.

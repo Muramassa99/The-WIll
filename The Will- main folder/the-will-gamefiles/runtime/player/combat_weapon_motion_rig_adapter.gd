@@ -130,6 +130,7 @@ func _allocator_input() -> Dictionary:
 		"machine_origin_id": Origin.ORIGIN_RL_BONE_ROOT,
 		"machine_to_world": skeleton_world * skeleton.get_bone_global_pose(skeleton.find_bone(String(Origin.ORIGIN_RL_BONE_ROOT))),
 		"validate_candidate": Callable(self, "_validate_candidate"),
+		"advance_accepted_checkpoint": Callable(self, "_advance_accepted_checkpoint"),
 	}
 	# A Tip edit may carry the hand/grip through space. Its attachment is checked
 	# separately; only attached Roll owns a retained spatial pivot.
@@ -138,6 +139,28 @@ func _allocator_input() -> Dictionary:
 	if not translation_reach_bound.is_empty():
 		input["translation_reach_bound"] = translation_reach_bound
 	return input
+
+## Request-local continuation only, after a validated fit on the original task
+## path. Uncovered motion keeps its existing held_h; covered motion can supply
+## the actual boundary h for the next exit. Trials never call this function.
+## No bone, profile, calibration, grip or persistent rig state is written here.
+func _advance_accepted_checkpoint(evaluation: Dictionary) -> bool:
+	var states: Dictionary = evaluation.get("payload", {}).get("shoulder_states_by_slot", {})
+	var changed := false
+	for arm: Dictionary in arms:
+		if not states.get(arm.slot) is Dictionary:
+			continue
+		var next: Dictionary = states[arm.slot]
+		if not is_finite(float(next.get("h", NAN))):
+			continue
+		var previous: Dictionary = arm.shoulder_state
+		# Never move an established uncovered anchor forward with tolerance
+		# drift. A measured re-entry is what releases that retained hold.
+		if next.has("held_h") and previous.has("held_h"):
+			continue
+		changed = changed or previous.has("held_h") != next.has("held_h") or absf(float(previous.h) - float(next.h)) > EPSILON
+		arm.shoulder_state = next.duplicate(true)
+	return changed
 
 ## A fixed shoulder cannot translate its wrist beyond the arm's actual FK
 ## envelope. Bound impossible Pommel travel before iterative fitting; this is

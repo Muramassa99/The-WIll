@@ -154,6 +154,12 @@ add_library(grip_contact SHARED
     src/grip_skin_point_kernel.h
     src/combat_body_collision_kernel.cpp
     src/combat_body_collision_kernel.h
+    src/combat_motion_math_kernel.cpp
+    src/combat_motion_math_kernel.h
+    src/combat_motion_anatomy_kernel.cpp
+    src/combat_motion_anatomy_kernel.h
+    src/combat_forearm_clearance_kernel.cpp
+    src/combat_forearm_clearance_kernel.h
     src/register_types.cpp
     src/register_types.h
 )

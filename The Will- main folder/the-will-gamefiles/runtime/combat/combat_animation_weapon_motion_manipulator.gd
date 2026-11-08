@@ -72,6 +72,11 @@ func apply(context: Dictionary, motion: Resource, mode: StringName,
 		"previous_weapon": weapon.global_transform, "target_weapon": target_world,
 		"contact_local": contact_local, "primary_slot": primary_slot,
 		"support_slot": support_slot, "validate_pose": validate_pose, "commit": false}
+	# The requested landmark and acquired handle station have different jobs.
+	# Pommel follows the pointer while the rigid weapon may rotate with the arm.
+	if mode == &"pommel":
+		request["task_point_local"] = pommel
+		request["trailing_tip_local"] = tip
 	# Tip requests orientation with a freely travelling grip. Only attached Roll
 	# retains a world-space contact pivot; the acquired grip itself stays rigid.
 	if mode == &"roll":

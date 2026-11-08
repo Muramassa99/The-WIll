@@ -92,8 +92,10 @@ func _seed_bent_neutral_wrist(side: String) -> void:
 		rig.call("_write_authoring_forearm_hand_index", _slot(side), accepted)
 
 func _exercise_reach_bound(side: String) -> void:
-	# Read-only adapter/FK checks on the declared bent fixture. Root scale must
-	# not silently become another anatomical degree of freedom or shrink reach.
+	# Read-only initialization checks on the declared bent fixture. Pommel now
+	# follows its point while orientation remains free; the former fixed-wrist
+	# translation envelope is not a valid bound for this task. Keep root/scale
+	# and no-mutation coverage without certifying that obsolete envelope.
 	var rotation := Basis.from_euler(Vector3(0.2, -0.6, 0.1))
 	var roots: Array[Transform3D] = [Transform3D.IDENTITY,
 		Transform3D(rotation * Basis.from_scale(Vector3.ONE * 1.7), Vector3(2, 1, -3)),
@@ -108,43 +110,33 @@ func _exercise_reach_bound(side: String) -> void:
 		prop.global_transform = _hand_world(side) * Transform3D(Basis.IDENTITY, Vector3(0, 0.08, 0))
 		prop.set_meta("fixture_hand_in_weapon", {_slot(side): prop.global_transform.affine_inverse() * _hand_world(side)})
 		var adapter := MotionAdapter.new()
-		var initialized := adapter._initialize(rig, _request(side, prop, prop.global_transform, "pommel"))
-		var bound: Dictionary = adapter.translation_reach_bound
-		_check(initialized.get("valid", false) and not bound.is_empty(), label + "_single_pommel_has_bound", initialized)
-		if not bound.is_empty():
-			_check(bound.origin_id == &"world" and bound.machine_origin_id == &"RL_BoneRoot", label + "_declares_coordinate_roots")
-			var arm: Dictionary = adapter.arms[0]
-			var indices: Array = arm.indices
-			var elbow: int = arm.elbow_q
-			var lower: PackedFloat64Array = adapter.start_allowance.lower
-			var upper: PackedFloat64Array = adapter.start_allowance.upper
-			_check(absf(bound.hinge_interval.x - lower[elbow]) < 0.000001 and absf(bound.hinge_interval.y - upper[elbow]) < 0.000001,
-				label + "_uses_effective_elbow_range")
-			var largest := 0.0
-			# Independently compose actual child offsets at endpoint/interior hinge
-			# angles and shoulder rotations; no anatomical acceptance is asserted.
-			for sample: int in 9:
-				for axis: Vector3 in [Vector3.RIGHT, Vector3.UP, Vector3.FORWARD]:
-					var poses: Array[Transform3D] = adapter.local_poses.duplicate()
-					var angle := lerpf(lower[elbow], upper[elbow], float(sample) / 8.0)
-					poses[indices[1]].basis = Basis(axis, 0.8) * poses[indices[1]].basis
-					poses[indices[2]].basis = Basis(arm.hinge_local, angle - float(arm.initial_flexion)) * poses[indices[2]].basis
-					var globals: Array[Transform3D] = adapter._forward(poses)
-					var wrist: Vector3 = (adapter.skeleton_world * globals[indices[3]]).origin
-					largest = maxf(largest, wrist.distance_to(bound.center))
-			_check(largest <= float(bound.radius) + float(bound.rounding_allowance), label + "_fk_grid_within_bound",
-				{"maximum_sampled_radius": largest, "bound": bound})
+		var request := _request(side, prop, prop.global_transform, "pommel")
+		request.task_point_local = Vector3(0.03, -0.11, 0.02)
+		var prop_before := prop.global_transform
+		var initialized := adapter._initialize(rig, request)
+		_check(initialized.get("valid", false), label + "_single_pommel_initializes", initialized)
+		if initialized.get("valid", false):
+			var input: Dictionary = adapter._allocator_input()
+			_check(not input.has("translation_reach_bound"), label + "_single_pommel_has_no_fixed_orientation_bound")
+			_check(input.origin_id == &"world" and input.machine_origin_id == &"RL_BoneRoot", label + "_declares_coordinate_roots")
+			var machine_world := skeleton.global_transform * skeleton.get_bone_global_pose(skeleton.find_bone("RL_BoneRoot"))
+			_check((input.machine_to_world as Transform3D).is_equal_approx(machine_world) and adapter.skeleton_world.is_equal_approx(skeleton.global_transform),
+				label + "_retains_current_root_transform")
+			_check((input.previous_weapon as Transform3D).is_equal_approx(prop_before) and prop.global_transform.is_equal_approx(prop_before),
+				label + "_retains_initial_weapon_frame")
+			_check(input.task_point_local == request.task_point_local and input.contact_local == request.contact_local,
+				label + "_keeps_task_point_separate_from_acquired_contact")
 		if fixture == 0:
 			for mode: String in ["tip", "roll", "shared_pommel"]:
-				var request := _request(side, prop, prop.global_transform, "pommel" if mode == "shared_pommel" else mode)
+				var other_request := _request(side, prop, prop.global_transform, "pommel" if mode == "shared_pommel" else mode)
 				if mode == "shared_pommel":
 					var other := "L" if side == "R" else "R"
-					request.support_slot = _slot(other)
-					request.hand_in_weapon_by_slot = (request.hand_in_weapon_by_slot as Dictionary).duplicate()
-					request.hand_in_weapon_by_slot[_slot(other)] = prop.global_transform.affine_inverse() * _hand_world(other)
+					other_request.support_slot = _slot(other)
+					other_request.hand_in_weapon_by_slot = (other_request.hand_in_weapon_by_slot as Dictionary).duplicate()
+					other_request.hand_in_weapon_by_slot[_slot(other)] = prop.global_transform.affine_inverse() * _hand_world(other)
 				var excluded := MotionAdapter.new()
-				var setup := excluded._initialize(rig, request)
-				_check(setup.get("valid", false) and excluded.translation_reach_bound.is_empty(), label + "_no_bound_for_" + mode, setup)
+				var setup := excluded._initialize(rig, other_request)
+				_check(setup.get("valid", false) and not excluded._allocator_input().has("translation_reach_bound"), label + "_no_bound_for_" + mode, setup)
 		_check(before == var_to_bytes(_poses()), label + "_does_not_write_bones")
 		prop.queue_free()
 	actor_parent.transform = Transform3D.IDENTITY
@@ -550,11 +542,12 @@ func _exercise_inverted_elbow_recovery() -> void:
 	var bones := _poses()
 	var reach_adapter := MotionAdapter.new()
 	var reach_setup := reach_adapter._initialize(rig, _request("R", prop, prop.global_transform, "pommel"))
-	var reach_bound: Dictionary = reach_adapter.translation_reach_bound
-	_check(reach_setup.get("valid", false) and not reach_bound.is_empty(), "inverted_elbow_reach_bound_available", reach_setup)
-	if not reach_bound.is_empty():
-		_check(reach_bound.hinge_interval.x <= _signed_elbow_flexion("R") + 0.000001,
-			"inverted_elbow_reach_bound_preserves_original_start_allowance", reach_bound)
+	_check(reach_setup.get("valid", false), "inverted_elbow_pommel_initializes", reach_setup)
+	if reach_setup.get("valid", false):
+		_check(not reach_adapter._allocator_input().has("translation_reach_bound"), "inverted_elbow_pommel_has_no_fixed_orientation_bound")
+		var elbow_q: int = reach_adapter.arms[0].elbow_q
+		_check(float(reach_adapter.start_allowance.lower[elbow_q]) <= _signed_elbow_flexion("R") + 0.000001,
+			"inverted_elbow_pommel_preserves_original_start_allowance")
 	var held: Dictionary = _allocate(_request("R", prop, prop.global_transform, "tip"))
 	_check(held.get("valid", false) and _poses_close(bones, _poses()), "inverted_elbow_zero_input_does_not_recentre")
 	var hold_order: Array = [PackedStringArray(["shoulder_girdle"]),

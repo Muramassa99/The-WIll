@@ -6,13 +6,14 @@ class_name CombatWeaponMotionRigAdapter
 ## task itself is world-space; local grip transforms are Hand -> WeaponRoot.
 ## No finger search, bone translation, rest rewrite or world-axis elbow pole.
 const Allocator = preload("res://core/resolvers/combat_weapon_motion_allocator.gd")
+const MotionMath = preload("res://core/resolvers/combat_motion_math_backend.gd")
 const Policy = preload("res://core/defs/weapon_motion_policy_def.gd")
 const Wrist = preload("res://core/resolvers/combat_wrist_motion_resolver.gd")
 const Shoulder = preload("res://core/resolvers/combat_shoulder_motion_resolver.gd")
 const Clavicle = preload("res://core/resolvers/combat_clavicle_motion_resolver.gd")
-const ArmReach = preload("res://core/resolvers/combat_arm_reach_resolver.gd")
 const Hinge = preload("res://core/resolvers/combat_arm_hinge_frame_resolver.gd")
 const ForearmSkin = preload("res://core/resolvers/combat_forearm_hand_index_resolver.gd")
+const ForearmClearance = preload("res://runtime/player/combat_forearm_clearance_snapshot.gd")
 const UpperBody = preload("res://runtime/player/player_rig_upper_body_pose_presenter.gd")
 const Origin = preload("res://core/models/combat_origin_record.gd")
 const SLOT_RIGHT := &"hand_right"
@@ -41,7 +42,8 @@ var allocation_start_usec: int = 0
 var start_allowance: Dictionary = {}
 var storage_validation_failures: Dictionary = {}
 var storage_validation_last_failure: Dictionary = {}
-var translation_reach_bound: Dictionary = {}
+var forearm_clearance_snapshot: Dictionary = {}
+var evaluation_phase_us: Dictionary = {"compose": 0, "forward": 0, "anatomy": 0, "clearance": 0, "packet": 0}
 
 func allocate(owner: Node3D, motion_request: Dictionary) -> Dictionary:
 	allocation_start_usec = Time.get_ticks_usec()
@@ -80,6 +82,10 @@ func _initialize(owner: Node3D, motion_request: Dictionary) -> Dictionary:
 		return _failure("missing_weapon_motion_rig", "INVALID_PROFILE")
 	if not request.get("previous_weapon") is Transform3D or not request.get("target_weapon") is Transform3D or not request.get("contact_local") is Vector3:
 		return _failure("missing_weapon_motion_frames", "INVALID_PROFILE")
+	if request.has("task_point_local") and (not request.task_point_local is Vector3 or not request.task_point_local.is_finite()):
+		return _failure("weapon_motion_invalid_task_point", "INVALID_PROFILE")
+	if request.has("trailing_tip_local") and (not request.trailing_tip_local is Vector3 or not request.trailing_tip_local.is_finite()):
+		return _failure("weapon_motion_invalid_trailing_tip", "INVALID_PROFILE")
 	previous_weapon = request.previous_weapon
 	var target: Transform3D = request.target_weapon
 	if not previous_weapon.is_finite() or not target.is_finite():
@@ -115,12 +121,30 @@ func _initialize(owner: Node3D, motion_request: Dictionary) -> Dictionary:
 		var built: Dictionary = _build_arm(slot)
 		if not built.get("valid", false):
 			return built
+		if bool(policy.get("prepared_anatomy", true)):
+			var wrist_prepared := Wrist.prepare_kinematics(built.wrist_calibration, built.wrist_profile)
+			if not wrist_prepared.get("valid", false):
+				return wrist_prepared
+			var shoulder_prepared := Shoulder.prepare_measurement(built.shoulder_calibration, built.shoulder_profile)
+			if not shoulder_prepared.get("valid", false):
+				return shoulder_prepared
+			built["prepared_wrist"] = wrist_prepared.prepared
+			built["prepared_shoulder"] = shoulder_prepared.prepared
 		arms.append(built)
+	if bool(policy.get("forearm_clearance_enabled", true)):
+		# Storage readback uses the original request's shape/metric snapshot too.
+		# It cannot redefine an overlap or an origin from a candidate pose.
+		forearm_clearance_snapshot = request.get("_forearm_clearance_snapshot", {})
+		if forearm_clearance_snapshot.is_empty():
+			# Keep both sides: an untouched forearm can meet the edited upper arm.
+			# Constant rows cannot enable sliding; the allocator checks gradients.
+			forearm_clearance_snapshot = ForearmClearance.capture(rig)
+		if not forearm_clearance_snapshot.get("valid", false):
+			return _failure(String(forearm_clearance_snapshot.get("reason", "forearm_clearance_unavailable")), "INVALID_PROFILE")
 	# The current pose is the user's correction baseline, not an input lock.
 	# Retain this original allowance for every temporary write and final readback;
 	# a fresh adapter must not grant a candidate its own larger allowance.
 	start_allowance = Allocator.build_start_allowance(_allocator_input(), _evaluate_kinematics(q))
-	translation_reach_bound = _capture_translation_reach_bound()
 	return {"valid": true}
 
 func _allocator_input() -> Dictionary:
@@ -128,10 +152,13 @@ func _allocator_input() -> Dictionary:
 		"mode": String(request.get("mode", "tip")), "q": q, "lower": lower, "upper": upper,
 		"joint_groups": groups, "previous_weapon": previous_weapon, "target_weapon": request.target_weapon,
 		"contact_local": request.contact_local, "origin_id": &"world",
+		# WeaponRoot-local landmark; do not replace the acquired grip station.
+		"task_point_local": request.get("task_point_local", request.contact_local),
 		"machine_origin_id": Origin.ORIGIN_RL_BONE_ROOT,
 		"machine_to_world": skeleton_world * skeleton.get_bone_global_pose(skeleton.find_bone(String(Origin.ORIGIN_RL_BONE_ROOT))),
 		"validate_candidate": Callable(self, "_validate_candidate"),
 		"advance_accepted_checkpoint": Callable(self, "_advance_accepted_checkpoint"),
+		"allow_forearm_slide": not forearm_clearance_snapshot.is_empty(),
 	}
 	# Clavicle's coordinate chart is broad so an older out-of-cone pose can
 	# recover in any non-worsening direction. Preference normalization uses the
@@ -145,12 +172,12 @@ func _allocator_input() -> Dictionary:
 	input["posture_spans"] = spans
 	if request.get("task_path") is Dictionary:
 		input["task_path"] = request.task_path
+	if String(request.get("mode", "tip")) == "pommel" and request.has("trailing_tip_local"):
+		input["trailing_tip_local"] = request.trailing_tip_local
 	# A Tip edit may carry the hand/grip through space. Its attachment is checked
 	# separately; only attached Roll owns a retained spatial pivot.
 	if String(request.get("mode", "tip")) == "roll" and request.has("contact_anchor_world"):
 		input["contact_anchor"] = request.contact_anchor_world
-	if not translation_reach_bound.is_empty():
-		input["translation_reach_bound"] = translation_reach_bound
 	return input
 
 ## Independent arm tasks share FK/constraints, but have no weapon to move.
@@ -185,65 +212,6 @@ func _advance_accepted_checkpoint(evaluation: Dictionary) -> bool:
 		changed = changed or previous.has("held_h") != next.has("held_h") or absf(float(previous.h) - float(next.h)) > EPSILON
 		arm.shoulder_state = next.duplicate(true)
 	return changed
-
-## A fixed shoulder cannot translate its wrist beyond the arm's actual FK
-## envelope. Bound impossible Pommel travel before iterative fitting; this is
-## only a necessary condition, never acceptance of a pose or a new ROM limit.
-## Other constraints, acquired grip, storage and collision checks still run.
-func _capture_translation_reach_bound() -> Dictionary:
-	if String(request.get("mode", "")) != "pommel" or arms.size() != 1 or not torso.is_empty():
-		return {}
-	var arm: Dictionary = arms[0]
-	for index: int in range(arm.clavicle_q, arm.clavicle_q + 2):
-		if absf(q[index]) > EPSILON or absf(lower[index]) > EPSILON or absf(upper[index]) > EPSILON:
-			return {}
-	var indices: Array = arm.indices
-	var elbow: int = arm.elbow_q
-	# The original correction allowance is authoritative for an authored pose
-	# that already exceeds a limit. Do not trap it behind the nominal boundary.
-	var permitted_lower: PackedFloat64Array = start_allowance.get("lower", lower)
-	var permitted_upper: PackedFloat64Array = start_allowance.get("upper", upper)
-	var maximum: Dictionary = ArmReach.maximum_radius(local_poses[indices[2]].origin,
-		local_poses[indices[2]].basis * local_poses[indices[3]].origin, arm.hinge_local,
-		permitted_lower[elbow] - float(arm.initial_flexion),
-		permitted_upper[elbow] - float(arm.initial_flexion))
-	if not maximum.get("valid", false):
-		return {}
-	var parent_world: Transform3D = skeleton_world * skeleton.get_bone_global_pose(indices[0])
-	var center: Vector3 = (parent_world * local_poses[indices[1]]).origin
-	# Candidate Upperarm basis = parent * shoulder_rotation * initial_local.
-	# Operator-norm bounds remain conservative even with small imported scale
-	# differences; a unit shoulder rotation cannot increase that product.
-	var scale_bound: float = _basis_norm_upper_bound(parent_world.basis) * _basis_norm_upper_bound(local_poses[indices[1]].basis)
-	var radius: float = float(maximum.radius) * scale_bound
-	var hand_in_weapon: Transform3D = arm.hand_in_weapon
-	var start: Vector3 = previous_weapon * hand_in_weapon.origin
-	var destination: Vector3 = start + (request.target_weapon as Transform3D).origin - previous_weapon.origin
-	var lever: float = (previous_weapon.basis * (hand_in_weapon.origin - (request.contact_local as Vector3))).length()
-	var task_allowance: float = float(policy.position_tolerance) + 2.0 * lever * sin(float(policy.orientation_tolerance) * 0.5)
-	# Float32 transform arithmetic needs an outward numerical envelope. This
-	# scales with represented coordinates, not with a fresh anatomical allowance.
-	var magnitude: float = maxf(radius, center.abs()[center.abs().max_axis_index()])
-	magnitude = maxf(magnitude, maxf(start.abs()[start.abs().max_axis_index()], destination.abs()[destination.abs().max_axis_index()]))
-	var rounding_allowance: float = magnitude * 8.0 * 1.1920928955078125e-7
-	var bound: Dictionary = ArmReach.translation_fraction(center, start, destination, radius + task_allowance + rounding_allowance)
-	if not bound.get("valid", false):
-		return {}
-	bound.merge({"reason": "arm_extension_reach_limit", "origin_id": &"world",
-		"machine_origin_id": Origin.ORIGIN_RL_BONE_ROOT, "slot": arm.slot,
-		"shoulder_bone": names[indices[1]], "elbow_bone": names[indices[2]], "wrist_bone": names[indices[3]],
-		"center": center, "radius": radius, "task_allowance": task_allowance,
-		"rounding_allowance": rounding_allowance, "hinge_interval": Vector2(permitted_lower[elbow], permitted_upper[elbow])}, true)
-	return bound
-
-## sqrt(max row sum of |B^T B|) bounds the largest singular value. For the
-## normal uniform character scale it equals that scale up to rounding.
-static func _basis_norm_upper_bound(value: Basis) -> float:
-	var gram: Basis = value.transposed() * value
-	var row_bound := 0.0
-	for row: int in 3:
-		row_bound = maxf(row_bound, absf(gram.x[row]) + absf(gram.y[row]) + absf(gram.z[row]))
-	return sqrt(row_bound)
 
 ## Complete the already evaluated packet after the UI encodes its exact frame.
 ## There is no yield between allocation/encoding/commit and no second solve.
@@ -321,15 +289,130 @@ func _validate_committed_pose(accepted_weapon: Transform3D, enforce_task_anchor:
 	next_request["target_weapon"] = weapon.global_transform
 	next_request["hand_in_weapon_by_slot"] = fixed_bindings
 	next_request["commit"] = false
+	if not forearm_clearance_snapshot.is_empty():
+		next_request["_forearm_clearance_snapshot"] = forearm_clearance_snapshot
 	if not enforce_task_anchor:
 		# Internal Newton/transition samples must be legal and storable, but can
 		# still carry task error. Only the finished task uses the retained pivot.
 		next_request.erase("contact_anchor_world")
 	var readback := CombatWeaponMotionRigAdapter.new()
-	var initialized := readback._initialize(rig, next_request)
+	# Read actual stored poses in both paths. The cache only avoids rebuilding
+	# fixed imported anatomy/profile data inside this synchronous request.
+	var initialized: Dictionary = readback._initialize_storage_readback(self, next_request) \
+		if bool(policy.get("cached_storage_readback", true)) else readback._initialize(rig, next_request)
 	if not initialized.get("valid", false):
 		return initialized
 	return Allocator.validate_with_start_allowance(readback._allocator_input(), readback._evaluate_kinematics(readback.q), readback.policy, start_allowance)
+
+## Request-local storage readback, not a second movement solve. Scene writes,
+## actual Skeleton3D TRS reads, fixed acquired contacts and final live readback
+## remain unchanged. No newly measured pose becomes a new allowance or origin.
+func _initialize_storage_readback(source: CombatWeaponMotionRigAdapter, motion_request: Dictionary) -> Dictionary:
+	# Shared torso reference selection has its own fallback semantics. Keep the
+	# original initializer there until a separate equivalence check covers it.
+	if not source.torso.is_empty():
+		return _initialize(source.rig, motion_request)
+	rig = source.rig
+	skeleton = rig.get("skeleton") as Skeleton3D
+	request = motion_request
+	weapon = request.get("weapon") as Node3D
+	if not is_instance_valid(skeleton) or skeleton != source.skeleton or not is_instance_valid(weapon) \
+		or skeleton.get_bone_count() != source.local_poses.size():
+		return _failure("missing_weapon_motion_rig", "INVALID_PROFILE")
+	previous_weapon = request.previous_weapon
+	var target: Transform3D = request.target_weapon
+	if not previous_weapon.is_finite() or not target.is_finite():
+		return _failure("nonfinite_weapon_motion_frame", "INVALID_PROFILE")
+	skeleton.force_update_all_bone_transforms()
+	skeleton_world = skeleton.global_transform
+	if not skeleton_world.is_finite() or skeleton_world.basis.determinant() <= 0.0:
+		return _failure("invalid_weapon_motion_origin", "INVALID_PROFILE")
+	# Names, parents, calibration and resource snapshots were validated at this
+	# request's entry. There is no yield or live resource edit during readback.
+	parents = source.parents
+	names = source.names
+	for index: int in skeleton.get_bone_count():
+		local_poses.append(skeleton.get_bone_pose(index))
+	policy = source.policy
+	collision_validator = source.collision_validator
+	forearm_clearance_snapshot = source.forearm_clearance_snapshot
+	q = source.q.duplicate()
+	lower = source.lower.duplicate()
+	upper = source.upper.duplicate()
+	groups = source.groups
+	for original: Dictionary in source.arms:
+		var rebuilt := _storage_readback_arm(original)
+		if not rebuilt.get("valid", false):
+			return rebuilt
+		arms.append(rebuilt)
+	# In particular, do not rebuild allowance from the just-written candidate.
+	start_allowance = source.start_allowance
+	return {"valid": true}
+
+func _storage_readback_arm(original: Dictionary) -> Dictionary:
+	var arm := original.duplicate()
+	var slot: StringName = arm.slot
+	var indices: Array = arm.indices
+	var upper_pose: Transform3D = skeleton.get_bone_global_pose(indices[1])
+	var forearm_pose: Transform3D = skeleton.get_bone_global_pose(indices[2])
+	var hand_pose: Transform3D = skeleton.get_bone_global_pose(indices[3])
+	# This material frame is exactly the imported-rest hinge calibration used
+	# by _build_arm, also retained in the shoulder calibration's provenance.
+	var material: Basis = arm.shoulder_calibration.material_frame_in_upperarm
+	var shaft: Vector3 = (forearm_pose.origin - upper_pose.origin).normalized()
+	var distal: Vector3 = (hand_pose.origin - forearm_pose.origin).normalized()
+	var hinge_axis: Vector3 = upper_pose.basis.orthonormalized() * material.x
+	var flexion: float = atan2(hinge_axis.dot(shaft.cross(distal)), shaft.dot(distal))
+	var prior_shoulder: Dictionary = (rig.get("_shoulder_motion_states") as Dictionary).get(slot, {})
+	var measured_shoulder: Dictionary = Shoulder.measure(skeleton.get_bone_global_pose(arm.chest_index),
+		upper_pose, forearm_pose, arm.shoulder_calibration, arm.shoulder_profile, prior_shoulder)
+	if not measured_shoulder.get("valid", false):
+		return _failure("weapon_motion_invalid_shoulder_calibration", "INVALID_PROFILE")
+	# Same branch/held-h retention as capture_shoulder_motion_start_state.
+	if not measured_shoulder.get("covered", false) and prior_shoulder.has("held_h") \
+		and absf(float(measured_shoulder.state.h) - float(prior_shoulder.get("h", INF))) <= 0.00001:
+		measured_shoulder.state["held_h"] = prior_shoulder.held_h
+	var measured_wrist: Dictionary = Wrist.measure_state(forearm_pose, hand_pose,
+		arm.wrist_calibration, arm.wrist_profile, (rig.get("_wrist_motion_states") as Dictionary).get(slot, {}),
+		flexion, float(arm.full_flexion))
+	if not measured_wrist.get("valid", false):
+		return _failure(String(measured_wrist.get("reason", "weapon_motion_wrist_measurement_failed")), "INVALID_PROFILE")
+	var measured_clavicle: Dictionary = Clavicle.measure(local_poses[indices[0]], arm.clavicle_calibration, arm.clavicle_half_angle_degrees)
+	if not measured_clavicle.get("valid", false):
+		return _failure("weapon_motion_invalid_clavicle_calibration", "INVALID_PROFILE")
+	var c: int = arm.clavicle_q
+	var s: int = arm.shoulder_q
+	var e: int = arm.elbow_q
+	var w: int = arm.wrist_q
+	q[c] = float(measured_clavicle.swing_x)
+	q[c + 1] = float(measured_clavicle.swing_y)
+	q[s] = 0.0
+	q[s + 1] = 0.0
+	q[s + 2] = 0.0
+	q[e] = flexion
+	q[w] = float(measured_wrist.state.rho)
+	q[w + 1] = float(measured_wrist.state.beta)
+	q[w + 2] = float(measured_wrist.state.gamma)
+	arm.initial_flexion = flexion
+	arm.shoulder_axes = local_poses[indices[1]].basis.orthonormalized() * material
+	arm.clavicle_held_twist = measured_clavicle.twist
+	arm.shoulder_state = measured_shoulder.state
+	# The ordinary initializer freezes these coordinates at the measured stored
+	# values. Preserve that representation; validation still uses SOURCE bounds
+	# and its original recovery allowance, never these new values as permission.
+	if String(request.get("mode", "tip")) == "pommel":
+		lower[w] = q[w]
+		upper[w] = q[w]
+	if String(arm.wrist_profile.get("bend_frame", "")) == "hand_parent_local_xz":
+		var mode := String(request.get("mode", "tip"))
+		if mode in ["tip", "pommel"]:
+			lower[w + 2] = q[w + 2]
+			upper[w + 2] = q[w + 2]
+		elif mode == "roll" and slot == StringName(request.get("primary_slot", SLOT_RIGHT)):
+			for held: int in range(w + 2):
+				lower[held] = q[held]
+				upper[held] = q[held]
+	return arm
 
 func _refresh_hand_attachments() -> void:
 	for arm: Dictionary in arms:
@@ -442,6 +525,12 @@ func _build_arm(slot: StringName) -> Dictionary:
 	_append_parameter(float(wrist_state.rho), float(forearm_range.rho_min), float(forearm_range.rho_max), &"forearm")
 	_append_parameter(float(wrist_state.beta), -float(wrist_profile.flexion_limit_radians), float(wrist_profile.extension_limit_radians), &"wrist")
 	_append_parameter(float(wrist_state.gamma), -float(wrist_profile.ulnar_limit_radians), float(wrist_profile.radial_limit_radians), &"wrist")
+	# Pommel carries the forearm's existing axial setting with the upper arm.
+	# Tip remains free to author rho afterwards. This holds a semantic relative
+	# angle, not a world-space bone frame or a new anatomical home reference.
+	if String(request.get("mode", "tip")) == "pommel":
+		lower[w] = q[w]
+		upper[w] = q[w]
 	if String(wrist_profile.get("bend_frame", "")) == "hand_parent_local_xz":
 		# Z is an explicit green-control decision. Tip/Pommel must not consume
 		# that bend to improve their fit and silently change the blade's edge.
@@ -501,6 +590,8 @@ func _evaluate(values: PackedFloat64Array) -> Dictionary:
 func _evaluate_kinematics(values: PackedFloat64Array) -> Dictionary:
 	if values.size() != q.size():
 		return {"valid": false, "reason": "weapon_motion_parameter_count"}
+	var trace_phases: bool = bool(policy.get("trace_evaluation_phases", false))
+	var phase_started: int = Time.get_ticks_usec() if trace_phases else 0
 	var poses: Array[Transform3D] = local_poses.duplicate()
 	for record: Dictionary in torso:
 		var index: int = record.index
@@ -516,7 +607,13 @@ func _evaluate_kinematics(values: PackedFloat64Array) -> Dictionary:
 		var shoulder_vector: Vector3 = shoulder_axes.x * values[arm.shoulder_q] + shoulder_axes.z * values[arm.shoulder_q + 1] + shoulder_axes.y * values[arm.shoulder_q + 2]
 		poses[indices[1]].basis = _rotation_from_vector(shoulder_vector) * local_poses[indices[1]].basis
 		poses[indices[2]].basis = Basis(arm.hinge_local, values[arm.elbow_q] - float(arm.initial_flexion)) * local_poses[indices[2]].basis
+	if trace_phases:
+		evaluation_phase_us.compose += Time.get_ticks_usec() - phase_started
+		phase_started = Time.get_ticks_usec()
 	var globals: Array[Transform3D] = _forward(poses)
+	if trace_phases:
+		evaluation_phase_us.forward += Time.get_ticks_usec() - phase_started
+		phase_started = Time.get_ticks_usec()
 	var constraints := PackedFloat64Array()
 	var reasons := PackedStringArray()
 	# Absolute bounds refer to the fixed cached animation baseline. A repeated
@@ -545,20 +642,27 @@ func _evaluate_kinematics(values: PackedFloat64Array) -> Dictionary:
 		reasons.append("JOINT_RANGE:clavicle_swing:" + String(arm.slot))
 		var w: int = arm.wrist_q
 		var state: Dictionary = {"rho": values[w], "beta": values[w + 1], "gamma": values[w + 2]}
-		var composed: Dictionary = Wrist.sample_kinematics(globals[i[2]], globals[i[3]], arm.wrist_calibration, arm.wrist_profile, state, values[arm.elbow_q], float(arm.full_flexion))
+		var composed: Dictionary
+		if arm.has("prepared_wrist"):
+			composed = Wrist.sample_kinematics_prepared(globals[i[2]], globals[i[3]], arm.prepared_wrist, state, values[arm.elbow_q], float(arm.full_flexion))
+		else:
+			composed = Wrist.sample_kinematics(globals[i[2]], globals[i[3]], arm.wrist_calibration, arm.wrist_profile, state, values[arm.elbow_q], float(arm.full_flexion))
 		if not composed.get("valid", false):
 			return composed
 		globals[i[3]].basis = composed.hand_basis
 		poses[i[3]].basis = globals[i[2]].basis.inverse() * globals[i[3]].basis
 		constraints.append(float(composed.envelope_value) - 1.0)
 		reasons.append("COUPLED_LIMIT:" + String(arm.slot))
-		var interval: Dictionary = Wrist.forearm_interval(arm.wrist_calibration, arm.wrist_profile, values[arm.elbow_q], float(arm.full_flexion))
+		var interval: Dictionary = composed.forearm_interval
 		constraints.append(float(interval.rho_min) - values[w])
 		reasons.append("JOINT_RANGE:forearm_min:" + String(arm.slot))
 		constraints.append(values[w] - float(interval.rho_max))
 		reasons.append("JOINT_RANGE:forearm_max:" + String(arm.slot))
-		var humerus: Dictionary = Shoulder.measure(globals[arm.chest_index], globals[i[1]], globals[i[2]],
-			arm.shoulder_calibration, arm.shoulder_profile, arm.shoulder_state)
+		var humerus: Dictionary
+		if arm.has("prepared_shoulder"):
+			humerus = Shoulder.measure_prepared(globals[arm.chest_index], globals[i[1]], globals[i[2]], arm.prepared_shoulder, arm.shoulder_state)
+		else:
+			humerus = Shoulder.measure(globals[arm.chest_index], globals[i[1]], globals[i[2]], arm.shoulder_calibration, arm.shoulder_profile, arm.shoulder_state)
 		if not humerus.get("valid", false):
 			return humerus
 		# The captured profile owns measured/provisional coverage. Outside every
@@ -587,6 +691,20 @@ func _evaluate_kinematics(values: PackedFloat64Array) -> Dictionary:
 		weapon_frames.append(hand_world * (arm.hand_to_weapon as Transform3D))
 		hand_frames[arm.slot] = hand_world
 		wrist_states[arm.slot] = state
+	if trace_phases:
+		evaluation_phase_us.anatomy += Time.get_ticks_usec() - phase_started
+		phase_started = Time.get_ticks_usec()
+	var clearance: Dictionary = {}
+	var clearance_start_row: int = constraints.size()
+	if not forearm_clearance_snapshot.is_empty():
+		clearance = ForearmClearance.evaluate_constraints(forearm_clearance_snapshot, globals)
+		if not clearance.get("valid", false):
+			return clearance
+		constraints.append_array(clearance.constraints)
+		reasons.append_array(clearance.constraint_reasons)
+	if trace_phases:
+		evaluation_phase_us.clearance += Time.get_ticks_usec() - phase_started
+		phase_started = Time.get_ticks_usec()
 	var equalities := PackedFloat64Array()
 	var equality_tolerances := PackedFloat64Array()
 	var squared_norm_residuals: Dictionary = {}
@@ -630,7 +748,21 @@ func _evaluate_kinematics(values: PackedFloat64Array) -> Dictionary:
 			search_constraints.append(-normalized_angle[axis] - 1.0 / sqrt(3.0))
 			search_constraint_reasons.append("CONTACT_SEARCH_ORIENTATION:" + str(axis) + ":positive")
 			search_constraint_reasons.append("CONTACT_SEARCH_ORIENTATION:" + str(axis) + ":negative")
+	if trace_phases:
+		evaluation_phase_us.packet += Time.get_ticks_usec() - phase_started
+	var row_tolerances := PackedFloat64Array()
+	if not clearance.is_empty():
+		row_tolerances.resize(constraints.size())
+		row_tolerances.fill(Allocator.CONSTRAINT_EPSILON)
+		# Same 0.05 mm numerical allowance already used for stored contact.
+		# The QP still aims at nonpenetrating geometry (constraint <= 0).
+		# Only these collision rows receive the world-metre storage tolerance.
+		var clearance_tolerance: float = float(policy.position_tolerance) / float(forearm_clearance_snapshot.normalization_meters)
+		for row: int in range(clearance_start_row, clearance_start_row + clearance.constraints.size()):
+			row_tolerances[row] = clearance_tolerance
 	return {"valid": true, "weapon_frame": weapon_frames[0], "weapon_transform": weapon_frames[0],
+		"forearm_clearance": clearance,
+		"constraint_tolerances": row_tolerances,
 		"constraints": constraints, "constraint_values": constraints, "constraint_reasons": reasons,
 		"squared_norm_residuals": squared_norm_residuals,
 		# Coordinate slabs guide the linear search without duplicating curved
@@ -712,7 +844,8 @@ func _timing_result() -> Dictionary:
 		"evaluate_count": timings.evaluate_count, "evaluate_ms": float(timings.evaluate_us) / 1000.0,
 		"validate_candidate_count": timings.validate_candidate_count, "validate_candidate_ms": float(timings.validate_candidate_us) / 1000.0,
 		"storage_validation_count": timings.storage_validation_count, "storage_validation_ms": float(timings.storage_validation_us) / 1000.0,
-		"commit_ms": float(timings.commit_us) / 1000.0, "parameter_count": q.size(), "bone_count": local_poses.size()}
+		"commit_ms": float(timings.commit_us) / 1000.0, "parameter_count": q.size(), "bone_count": local_poses.size(),
+		"evaluation_phase_us": evaluation_phase_us.duplicate()}
 
 func _apply_local_poses(poses: Array) -> void:
 	for index: int in poses.size():
@@ -720,24 +853,7 @@ func _apply_local_poses(poses: Array) -> void:
 	skeleton.force_update_all_bone_transforms()
 
 func _forward(poses: Array[Transform3D]) -> Array[Transform3D]:
-	var globals: Array[Transform3D] = []
-	globals.resize(poses.size())
-	var done := PackedByteArray()
-	done.resize(poses.size())
-	for index: int in poses.size():
-		_forward_bone(index, poses, globals, done)
-	return globals
-
-func _forward_bone(index: int, poses: Array[Transform3D], globals: Array[Transform3D], done: PackedByteArray) -> void:
-	if done[index] != 0:
-		return
-	var parent: int = parents[index]
-	if parent >= 0:
-		_forward_bone(parent, poses, globals, done)
-		globals[index] = globals[parent] * poses[index]
-	else:
-		globals[index] = poses[index]
-	done[index] = 1
+	return MotionMath.forward(poses, parents)
 
 func _pose_packet(poses: Array) -> Dictionary:
 	var positions := PackedVector3Array()

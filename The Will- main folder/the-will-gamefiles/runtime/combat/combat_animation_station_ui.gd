@@ -2706,7 +2706,7 @@ func _build_right_inspector(parent: HBoxContainer) -> void:
 	var pommel_section: Dictionary = _build_foldable_section(vbox, "POMMEL POSITION", true)
 	pommel_section_foldable = pommel_section.get("foldable", null) as FoldableContainer
 	var pommel_content: VBoxContainer = pommel_section.get("content", null) as VBoxContainer
-	_build_helper_text(pommel_content, "Pommel translates the whole weapon. Tip rotates it around the primary grip; Pommel follows that rotation.")
+	_build_helper_text(pommel_content, "Pommel leads and Tip trails with the arm. Forearm roll stays set during Pommel movement; use Tip to adjust it.")
 	_build_field_label(pommel_content, "Position (X / Y / Z)")
 	var pom_pos: Array[SpinBox] = _build_vec3_row(pommel_content, -4.0, 4.0, 0.01)
 	pommel_x_spin_box = pom_pos[0]
@@ -4201,6 +4201,10 @@ func _refresh_preview_scene_prepared(grip_resolve_reason: StringName) -> void:
 			true, preview_drag_independent_hand_proxy)
 		if not arm_result.get("valid", false):
 			_set_preview_drag_blocked_status(arm_result)
+			if arm_result.get("retained_previous_pose", false):
+				# The presenter reconciled the requested proxy to the hand that
+				# stayed in place. Draw that result even when no motion was accepted.
+				_refresh_endpoint_motion_visuals()
 			return
 	if grip_resolve_reason != StringName():
 		# This cause belongs to this synchronous refresh only. It must never survive
@@ -6593,7 +6597,13 @@ func _apply_motion_node_change(
 				preview_subviewport, _get_active_motion_node(), independent_arm_slot, false, independent_hand_proxy)
 			if not arm_result.get("valid", false):
 				_set_preview_drag_blocked_status(arm_result)
+				if arm_result.get("retained_previous_pose", false):
+					_refresh_editor_fields()
+					_refresh_endpoint_motion_visuals()
 				return
+			# Numeric hand edits also display the reached value, not the request.
+			if refresh_fields:
+				_refresh_editor_fields()
 		_refresh_preview_scene(preview_grip_resolve_reason)
 	if refresh_summary:
 		_refresh_summary(status_message)
@@ -7284,6 +7294,8 @@ func _resolve_motion_node_segment_for_pommel_target(
 	var resolved_pommel_origin_id: StringName = _normalize_seed_origin_id(requested_pommel_position_origin_id, current_pommel_origin_id)
 	var resolved_tip_origin_id: StringName = _normalize_seed_origin_id(motion_node.tip_position_origin_id, resolved_pommel_origin_id)
 	var pommel_translation: Vector3 = requested_pommel_position_local - motion_node.pommel_position_local
+	# Translation seeds the requested landmark position only. The allocator may
+	# turn the weapon with the arm and returns both actual endpoints/orientation.
 	var resolved_segment := {
 		"tip_position_local": motion_node.tip_position_local + pommel_translation,
 		"tip_position_origin_id": resolved_tip_origin_id,

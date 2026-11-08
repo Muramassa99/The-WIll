@@ -15,6 +15,29 @@ const SCALAR_EPSILON := 1.0e-6
 const ENVELOPE_EPSILON := 1.0e-6
 const ERROR_TIE_RADIANS := 1.0e-7
 const REFINEMENT_STEPS := 16
+static var _native_prepared_enabled := true
+static var _native_prepared_kernel: RefCounted
+static var _native_prepared_missing_warned := false
+static var _prepared_backend_stats := {"native_calls": 0, "reference_calls": 0}
+
+static func configure_native_prepared(enabled: bool) -> void:
+	_native_prepared_enabled = enabled
+
+static func get_prepared_backend_stats() -> Dictionary:
+	return _prepared_backend_stats.duplicate()
+
+static func reset_prepared_backend_stats() -> void:
+	_prepared_backend_stats = {"native_calls": 0, "reference_calls": 0}
+
+static func _prepared_native_kernel() -> RefCounted:
+	if not _native_prepared_enabled:
+		return null
+	if _native_prepared_kernel == null and ClassDB.class_exists(&"CombatMotionAnatomyKernel"):
+		_native_prepared_kernel = ClassDB.instantiate(&"CombatMotionAnatomyKernel") as RefCounted
+	if _native_prepared_kernel == null and not _native_prepared_missing_warned:
+		_native_prepared_missing_warned = true
+		push_warning("Native prepared wrist math unavailable; using the GDScript reference.")
+	return _native_prepared_kernel
 
 static func resolve(forearm_reference: Transform3D, requested_hand: Transform3D, calibration: Dictionary, profile: Dictionary, previous_state: Dictionary = {}, elbow_bend_radians: float = NAN, full_flexion_radians: float = deg_to_rad(160.0)) -> Dictionary:
 	var context := _context(forearm_reference, requested_hand, calibration, profile, elbow_bend_radians, full_flexion_radians)
@@ -176,6 +199,42 @@ static func interpolate_states(from_state: Dictionary, to_state: Dictionary, wei
 ## Only the allocator's complete nonlinear constraint gate may accept a sample.
 static func sample_kinematics(forearm_reference: Transform3D, hand_reference: Transform3D, calibration: Dictionary, profile: Dictionary, state: Dictionary, elbow_bend_radians: float = NAN, full_flexion_radians: float = deg_to_rad(160.0)) -> Dictionary:
 	var context := _context(forearm_reference, hand_reference, calibration, profile, elbow_bend_radians, full_flexion_radians)
+	return _sample_from_context(context, state, profile)
+
+## Capture immutable configuration once per request. Actual Hand/Forearm
+## transforms, the elbow-conditioned interval and candidate state stay dynamic.
+static func prepare_kinematics(calibration: Dictionary, profile: Dictionary) -> Dictionary:
+	var configuration := _configuration(calibration, profile)
+	if not configuration.valid:
+		return configuration
+	var prepared := {"owner": "wrist_kinematics_v1", "calibration": calibration.duplicate(true),
+		"profile": profile.duplicate(true), "configuration": configuration}
+	_lock_prepared_containers(prepared)
+	return {"valid": true, "prepared": prepared}
+
+static func sample_kinematics_prepared(forearm_reference: Transform3D, hand_reference: Transform3D,
+		prepared: Dictionary, state: Dictionary, elbow_bend_radians: float = NAN,
+		full_flexion_radians: float = deg_to_rad(160.0)) -> Dictionary:
+	if prepared.get("owner", "") != "wrist_kinematics_v1":
+		return _fail("wrist_prepared_context_invalid")
+	var kernel := _prepared_native_kernel()
+	if kernel != null:
+		_prepared_backend_stats.native_calls += 1
+		# Candidate sampling does not certify or widen any motion limit.
+		return kernel.call(&"sample_wrist", forearm_reference, hand_reference, prepared, state, elbow_bend_radians, full_flexion_radians)
+	_prepared_backend_stats.reference_calls += 1
+	return sample_kinematics_prepared_reference(forearm_reference, hand_reference, prepared, state, elbow_bend_radians, full_flexion_radians)
+
+static func sample_kinematics_prepared_reference(forearm_reference: Transform3D, hand_reference: Transform3D,
+		prepared: Dictionary, state: Dictionary, elbow_bend_radians: float = NAN,
+		full_flexion_radians: float = deg_to_rad(160.0)) -> Dictionary:
+	if prepared.get("owner", "") != "wrist_kinematics_v1":
+		return _fail("wrist_prepared_context_invalid")
+	var context := _context_geometry(forearm_reference, hand_reference, prepared.calibration,
+		prepared.profile, prepared.configuration, elbow_bend_radians, full_flexion_radians, false)
+	return _sample_from_context(context, state, prepared.profile)
+
+static func _sample_from_context(context: Dictionary, state: Dictionary, profile: Dictionary) -> Dictionary:
 	if not context.valid or not _state_valid(state):
 		return context if not context.valid else _fail("wrist_state_invalid")
 	var angles := _state_vector(state)
@@ -190,6 +249,12 @@ static func forearm_geometry_limit(calibration: Dictionary, profile: Dictionary)
 	return ForearmRotation.geometry_limit(calibration, profile)
 
 static func _context(forearm: Transform3D, hand: Transform3D, calibration: Dictionary, profile: Dictionary, elbow_bend_radians: float, full_flexion_radians: float) -> Dictionary:
+	var configuration := _configuration(calibration, profile)
+	if not configuration.valid:
+		return configuration
+	return _context_geometry(forearm, hand, calibration, profile, configuration, elbow_bend_radians, full_flexion_radians)
+
+static func _configuration(calibration: Dictionary, profile: Dictionary) -> Dictionary:
 	if profile.get("revision", "") != REVISION:
 		return _fail("wrist_profile_revision_mismatch", "INVALID_PROFILE")
 	if not calibration.get("valid", false) or calibration.get("revision", "") != REVISION:
@@ -217,6 +282,12 @@ static func _context(forearm: Transform3D, hand: Transform3D, calibration: Dicti
 		radial_sign = 1.0
 	elif bend_frame != Profile.BEND_FRAME_REST_ANATOMICAL:
 		return _fail("wrist_bend_frame_unknown", "INVALID_PROFILE")
+	return {"valid": true, "neutral_local": neutral_local, "anatomical_local": anatomical_local,
+		"anatomical_in_bone": anatomical_local.orthonormalized(), "radial_sign": radial_sign, "bend_frame": bend_frame}
+
+static func _context_geometry(forearm: Transform3D, hand: Transform3D, calibration: Dictionary,
+		profile: Dictionary, configuration: Dictionary, elbow_bend_radians: float,
+		full_flexion_radians: float, full_context: bool = true) -> Dictionary:
 	if not forearm.is_finite() or not hand.is_finite() or not _uniform_basis(forearm.basis) or not _uniform_basis(hand.basis):
 		return _fail("wrist_reference_invalid")
 	var axis := hand.origin - forearm.origin
@@ -224,10 +295,30 @@ static func _context(forearm: Transform3D, hand: Transform3D, calibration: Dicti
 		return _fail("wrist_forearm_axis_degenerate")
 	var interval := forearm_interval(calibration, profile, elbow_bend_radians, full_flexion_radians)
 	if not interval.get("valid", false): return _fail(interval.get("reason", "forearm_interval_invalid"), "INVALID_PROFILE")
+	var neutral_local: Basis = configuration.neutral_local
+	var anatomical_local: Basis = configuration.anatomical_local
+	var result := {"valid": true, "axis": axis.normalized(), "neutral": (forearm.basis.orthonormalized() * neutral_local).orthonormalized(),
+		"anatomical_in_bone": configuration.anatomical_in_bone, "target_scale": hand.basis.get_scale(),
+		"radial_sign": configuration.radial_sign, "forearm_interval": interval, "bend_frame": configuration.bend_frame}
+	if not full_context:
+		return result
 	var limits_profile := profile.duplicate()
 	limits_profile["forearm_min_radians"] = interval.rho_min
 	limits_profile["forearm_max_radians"] = interval.rho_max
-	return {"valid": true, "axis": axis.normalized(), "neutral": (forearm.basis.orthonormalized() * neutral_local).orthonormalized(), "anatomical_in_bone": anatomical_local.orthonormalized(), "target_anatomical": (hand.basis.orthonormalized() * anatomical_local).orthonormalized(), "target_bone": hand.basis.orthonormalized(), "target_scale": hand.basis.get_scale(), "radial_sign": radial_sign, "forearm_interval": interval, "limits_profile": limits_profile, "bend_frame": bend_frame}
+	result["target_anatomical"] = (hand.basis.orthonormalized() * anatomical_local).orthonormalized()
+	result["target_bone"] = hand.basis.orthonormalized()
+	result["limits_profile"] = limits_profile
+	return result
+
+static func _lock_prepared_containers(value: Variant) -> void:
+	if value is Dictionary:
+		for key: Variant in value:
+			_lock_prepared_containers(value[key])
+		value.make_read_only()
+	elif value is Array:
+		for item: Variant in value:
+			_lock_prepared_containers(item)
+		value.make_read_only()
 
 static func _forward(state: Vector3, context: Dictionary) -> Basis:
 	return (Basis(context.axis, state.x) * context.neutral * Basis(Vector3.RIGHT, state.y) * Basis(Vector3.BACK, float(context.radial_sign) * state.z)).orthonormalized()

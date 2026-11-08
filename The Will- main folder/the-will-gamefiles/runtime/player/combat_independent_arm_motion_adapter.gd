@@ -276,6 +276,8 @@ func _validate_committed_pose(accepted_frame: Transform3D, _enforce_task_anchor:
 	next_request.previous_weapon = _controlled_frame_world()
 	next_request.target_weapon = next_request.previous_weapon
 	next_request.commit = false
+	if not forearm_clearance_snapshot.is_empty():
+		next_request["_forearm_clearance_snapshot"] = forearm_clearance_snapshot
 	var readback := CombatIndependentArmMotionAdapter.new()
 	var initialized: Dictionary = readback._initialize(rig, next_request)
 	if not initialized.get("valid", false):

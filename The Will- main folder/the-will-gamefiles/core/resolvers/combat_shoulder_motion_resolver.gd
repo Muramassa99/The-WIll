@@ -11,6 +11,32 @@ const COVERAGE_SCHEMA := "fixed_shoulder_neighborhoods_v1"
 const CONTINUOUS_COVERAGE_SCHEMA := "fixed_shoulder_regions_v1"
 const ANATOMICAL_ORIGIN := "CC_Base_Spine02ShoulderAnatomicalOrigin"
 const ZERO_CONVENTION := "sideways_upperarm_forearm_forward_shortest_swing"
+# Keep the prepared reference default until full-output native sampling earns
+# its place in the request benchmark; unsupported historic donor modes remain
+# explicit reference fallbacks even when native is enabled for profiling.
+static var _native_prepared_enabled := false
+static var _native_prepared_kernel: RefCounted
+static var _native_prepared_missing_warned := false
+static var _prepared_backend_stats := {"native_calls": 0, "reference_calls": 0, "unsupported_coverage_fallbacks": 0}
+
+static func configure_native_prepared(enabled: bool) -> void:
+	_native_prepared_enabled = enabled
+
+static func get_prepared_backend_stats() -> Dictionary:
+	return _prepared_backend_stats.duplicate()
+
+static func reset_prepared_backend_stats() -> void:
+	_prepared_backend_stats = {"native_calls": 0, "reference_calls": 0, "unsupported_coverage_fallbacks": 0}
+
+static func _prepared_native_kernel() -> RefCounted:
+	if not _native_prepared_enabled:
+		return null
+	if _native_prepared_kernel == null and ClassDB.class_exists(&"CombatMotionAnatomyKernel"):
+		_native_prepared_kernel = ClassDB.instantiate(&"CombatMotionAnatomyKernel") as RefCounted
+	if _native_prepared_kernel == null and not _native_prepared_missing_warned:
+		_native_prepared_missing_warned = true
+		push_warning("Native prepared shoulder math unavailable; using the GDScript reference.")
+	return _native_prepared_kernel
 
 static func validate_profile(profile: Dictionary) -> Dictionary:
 	if String(profile.get("revision", "")) != REVISION:
@@ -83,6 +109,58 @@ static func measure(chest: Transform3D, upperarm: Transform3D, forearm: Transfor
 		return context
 	if String(profile.get("coverage_mode", "")) != "measured_band_only" and String(calibration.get("origin_id", "")) != ANATOMICAL_ORIGIN:
 		return _fail("shoulder_profile_calibration_origin_mismatch")
+	return _measure_with_context(upperarm, calibration, profile, previous_state, context)
+
+## One request owns this copied profile/calibration. Only invariant validation
+## is prepared; poses, direction-dependent bounds and angular branches are not.
+static func prepare_measurement(calibration: Dictionary, profile: Dictionary) -> Dictionary:
+	var validation := validate_profile(profile)
+	if not validation.valid:
+		return validation
+	if not calibration.get("valid", false) or String(calibration.get("revision", "")) != REVISION:
+		return _fail("shoulder_calibration_invalid")
+	validation = _validate_calibration_values(calibration)
+	if not validation.valid:
+		return validation
+	if String(profile.get("coverage_mode", "")) != "measured_band_only" and String(calibration.get("origin_id", "")) != ANATOMICAL_ORIGIN:
+		return _fail("shoulder_profile_calibration_origin_mismatch")
+	var prepared := {"owner": "shoulder_measurement_v1", "calibration": calibration.duplicate(true), "profile": profile.duplicate(true)}
+	_lock_prepared_containers(prepared)
+	return {"valid": true, "prepared": prepared}
+
+static func measure_prepared(chest: Transform3D, upperarm: Transform3D, forearm: Transform3D,
+		prepared: Dictionary, previous_state: Dictionary = {}) -> Dictionary:
+	if prepared.get("owner", "") != "shoulder_measurement_v1":
+		return _fail("shoulder_prepared_context_invalid")
+	var mode := String(prepared.profile.get("coverage_mode", ""))
+	if mode in ["continuous_provisional", "measured_band_only"]:
+		var kernel := _prepared_native_kernel()
+		if kernel != null:
+			_prepared_backend_stats.native_calls += 1
+			# A native numerical rejection remains a rejection, never a retry.
+			return kernel.call(&"measure_shoulder", chest, upperarm, forearm, prepared, previous_state)
+	elif _native_prepared_enabled:
+		# Historical donor-neighborhood profiles deliberately retain their
+		# complete reference calculation; no partial native approximation.
+		_prepared_backend_stats.unsupported_coverage_fallbacks += 1
+	_prepared_backend_stats.reference_calls += 1
+	return measure_prepared_reference(chest, upperarm, forearm, prepared, previous_state)
+
+static func measure_prepared_reference(chest: Transform3D, upperarm: Transform3D, forearm: Transform3D,
+		prepared: Dictionary, previous_state: Dictionary = {}) -> Dictionary:
+	if prepared.get("owner", "") != "shoulder_measurement_v1":
+		return _fail("shoulder_prepared_context_invalid")
+	# Dynamic transform checks remain identical to the ordinary entry point.
+	for frame: Transform3D in [chest, upperarm, forearm]:
+		if not frame.is_finite() or frame.basis.determinant() <= 0.0 or not frame.basis.is_conformal():
+			return _fail("shoulder_pose_nonrigid")
+	var context := _context_geometry(chest, upperarm, forearm, prepared.calibration)
+	if not context.valid:
+		return context
+	return _measure_with_context(upperarm, prepared.calibration, prepared.profile, previous_state, context)
+
+static func _measure_with_context(upperarm: Transform3D, calibration: Dictionary, profile: Dictionary,
+		previous_state: Dictionary, context: Dictionary) -> Dictionary:
 	var hinge: Vector3 = context.chest_frame.transposed() * upperarm.basis.orthonormalized() * (calibration.material_frame_in_upperarm as Basis).x
 	var shaft: Vector3 = context.direction
 	hinge -= shaft * hinge.dot(shaft)
@@ -339,6 +417,12 @@ static func _context(chest: Transform3D, upperarm: Transform3D, forearm: Transfo
 	for frame: Transform3D in [chest, upperarm, forearm]:
 		if not frame.is_finite() or frame.basis.determinant() <= 0.0 or not frame.basis.is_conformal():
 			return _fail("shoulder_pose_nonrigid")
+	var validation := _validate_calibration_values(calibration)
+	if not validation.valid:
+		return validation
+	return _context_geometry(chest, upperarm, forearm, calibration)
+
+static func _validate_calibration_values(calibration: Dictionary) -> Dictionary:
 	for field: String in ["chest_anatomical_in_bone", "material_frame_in_upperarm"]:
 		var value: Variant = calibration.get(field)
 		if not value is Basis or not value.is_finite() or not value.is_equal_approx(value.orthonormalized()) or value.determinant() <= 0.0:
@@ -347,16 +431,29 @@ static func _context(chest: Transform3D, upperarm: Transform3D, forearm: Transfo
 	var internal: float = float(calibration.get("internal_sign", 0.0))
 	if absf(side) != 1.0 or absf(internal) != 1.0:
 		return _fail("shoulder_calibration_invalid_sign")
+	return {"valid": true}
+
+static func _context_geometry(chest: Transform3D, upperarm: Transform3D, forearm: Transform3D, calibration: Dictionary) -> Dictionary:
 	var chest_frame: Basis = chest.basis.orthonormalized() * (calibration.chest_anatomical_in_bone as Basis)
 	var shaft := forearm.origin - upperarm.origin
 	if shaft.length_squared() <= EPSILON_SQUARED:
 		return _fail("shoulder_zero_length_upperarm")
 	var u: Vector3 = (chest_frame.transposed() * shaft).normalized()
-	var reference := fixed_reference(u, side)
+	var reference := fixed_reference(u, float(calibration.side_sign))
 	if not reference.valid:
 		return reference
 	return {"valid": true, "chest_frame": chest_frame, "direction": u, "zero_hinge": reference.zero_hinge,
 		"reference_chart": reference.reference_chart, "reference_warning": reference.reference_warning}
+
+static func _lock_prepared_containers(value: Variant) -> void:
+	if value is Dictionary:
+		for key: Variant in value:
+			_lock_prepared_containers(value[key])
+		value.make_read_only()
+	elif value is Array:
+		for item: Variant in value:
+			_lock_prepared_containers(item)
+		value.make_read_only()
 
 ## Shared by measuring, composing and donor alignment. Input axes belong to
 ## CC_Base_Spine02ShoulderAnatomicalOrigin, whose parent chain reaches root.

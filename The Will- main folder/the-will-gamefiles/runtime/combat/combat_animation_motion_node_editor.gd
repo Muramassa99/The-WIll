@@ -96,7 +96,7 @@ func _marker_ray_hit_distance(marker: MeshInstance3D, ray_origin: Vector3, ray_d
 	return INF
 
 ## Intersect a camera ray with a camera-facing drag plane through the current
-## pommel. The pommel is the free translation handle for the whole weapon.
+## pommel. This supplies its position target; the arm may turn the weapon.
 func raycast_pommel_on_view_drag_plane(
 	camera: Camera3D,
 	screen_position: Vector2,

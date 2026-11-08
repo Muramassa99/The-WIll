@@ -12,6 +12,9 @@ class_name WeaponMotionPolicyDef
 @export var max_iterations: int = 12
 @export var scale_search_steps: int = 7
 @export var finite_difference_radians: float = 0.0001
+## Pommel-only secondary preference: resist Tip displacement while following
+## the requested Pommel point. A finite weight never makes Tip another target.
+@export_range(0.0, 100.0, 0.1) var pommel_tip_trailing_weight: float = 1.0
 ## Finite travel costs allow coordinated recruitment before a distal joint hits
 ## its boundary. These are controller preferences, never anatomical limits.
 ## Lexicographic is retained for counterfactual diagnostics and older fixtures.
@@ -36,6 +39,7 @@ func as_dictionary(character_scale: float = 1.0) -> Dictionary:
 		"max_substeps": max_substeps, "max_iterations": max_iterations,
 		"scale_search_steps": scale_search_steps,
 		"finite_difference": finite_difference_radians,
+		"pommel_tip_trailing_weight": pommel_tip_trailing_weight,
 		"posture_preference_mode": posture_preference_mode,
 		"posture_group_costs_by_mode": posture_group_costs_by_mode.duplicate(true),
 	}

@@ -15,17 +15,25 @@ class_name CombatWeaponMotionAllocator
 ## they may never exceed that starting excess. Acquired contact stays strict.
 ## No persistent raw target: every request starts from the last accepted state.
 ## Tip commands orientation only; grip position follows the legal joint FK.
+## Pommel commands only its WeaponRoot-local task_point_local position. If
+## omitted, generic callers retain contact_local as their addressed point.
+## Its orientation follows legal FK; acquired contact_local remains distinct.
+## Optional trailing_tip_local is another WeaponRoot-local landmark. Weighted
+## Pommel posture selection prefers keeping it near its previous actual world
+## position; it adds no endpoint, angular, timing or contact constraint.
 ## Roll alone retains a world contact_anchor in the SAME origin_id as the
 ## weapon frames. Omitting it starts Roll at the previous contact position.
-## Optional translation_reach_bound caps a Pommel request on its original
-## path. The adapter supplies a conservative FK envelope in the SAME origin;
-## this only prunes impossible targets and never replaces candidate legality.
+## Optional translation_reach_bound must conservatively cover the addressed
+## point including its free orientation, in the SAME origin. The live adapter
+## no longer supplies its old fixed-orientation wrist bound for Pommel.
+## An explicit caller bound only prunes targets; it never replaces legality.
 ## Generic pose/position modes let independent arm tasks use the same mechanical
 ## solver. Historical weapon_frame keys then name a caller-owned task frame in
 ## input.origin_id; position addresses its origin, pose its full transform.
 ## Optional posture_spans normalizes preference travel only, never joint bounds.
 ## A position task may supply task_path={kind:"orbit", center, axis,
 ## angle_radians}; all path points remain on that caller-defined rigid orbit.
+const MotionMath = preload("res://core/resolvers/combat_motion_math_backend.gd")
 const PolicyDef = preload("res://core/defs/weapon_motion_policy_def.gd")
 const REVISION := "weapon_motion_allocation_v1"
 const NUMERIC_EPSILON := 1.0e-8
@@ -66,6 +74,20 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 	var contact: Vector3 = input.contact_local
 	if not previous.is_finite() or not target.is_finite() or not contact.is_finite() or previous.basis.determinant() <= 0.0 or target.basis.determinant() <= 0.0:
 		return result
+	var task_point := contact
+	if mode == "pommel" and input.has("task_point_local"):
+		if not input.task_point_local is Vector3 or not (input.task_point_local as Vector3).is_finite():
+			result.reason = "allocator_task_point_invalid"
+			return result
+		task_point = input.task_point_local
+	if mode == "pommel" and input.has("trailing_tip_local"):
+		if not input.trailing_tip_local is Vector3 or not (input.trailing_tip_local as Vector3).is_finite():
+			result.reason = "allocator_trailing_tip_invalid"
+			return result
+		var trailing_weight := float(policy.get("pommel_tip_trailing_weight", 1.0))
+		if not is_finite(trailing_weight) or trailing_weight < 0.0:
+			result.reason = "allocator_trailing_weight_invalid"
+			return result
 	var path_validation := _validate_task_path(input, mode, previous, target, policy)
 	if not path_validation.valid:
 		result.reason = path_validation.reason
@@ -98,11 +120,7 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 	if not previous.basis.get_scale().is_equal_approx(target.basis.get_scale()):
 		result.reason = "allocator_scale_change_forbidden"
 		return result
-	if mode == "pommel":
-		if _rotation_vector(target.basis, previous.basis).length() > float(policy.orientation_tolerance):
-			result.reason = "allocator_translation_changed_orientation"
-			return result
-	elif mode == "roll" and (target * contact).distance_to(anchor) > float(policy.position_tolerance):
+	if mode == "roll" and (target * contact).distance_to(anchor) > float(policy.position_tolerance):
 		result.reason = "allocator_rotation_changed_contact_anchor"
 		return result
 	var maximum_fraction := 1.0
@@ -118,8 +136,8 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 				return result
 			maximum_fraction = float(fraction)
 			result["translation_reach_bound"] = supplied.duplicate(true)
-	var angle := 0.0 if mode == "position" else _rotation_vector(target.basis, previous.basis).length()
-	var distance := 0.0 if mode == "tip" else (target * contact).distance_to(previous * contact)
+	var angle := 0.0 if mode in ["pommel", "position"] else _rotation_vector(target.basis, previous.basis).length()
+	var distance := 0.0 if mode == "tip" else (target * task_point).distance_to(previous * task_point)
 	if mode in ["pose", "position"]:
 		distance = target.origin.distance_to(previous.origin)
 	if not task_path.is_empty():
@@ -127,6 +145,8 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 	var count := maxi(1, int(ceil(maxf(angle / float(policy.max_rotation_step), distance / float(policy.max_translation_step)))))
 	var accepted_fraction := 0.0
 	var accepted_eval := initial
+	var accepted_trailing_anchor: Variant = null
+	var slide_target: Variant = null
 	var attempted_failure := ""
 	var reach_bound_reached := maximum_fraction == 0.0
 	result["search_failures"] = []
@@ -138,15 +158,16 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 		# Keep count and fractions relative to the ORIGINAL demand. Rescaling
 		# the target itself would report 100% despite only partial movement.
 		var requested_fraction := minf(float(step + 1) / float(count), maximum_fraction)
-		var requested := _target_at(previous, target, contact, mode, requested_fraction, anchor, task_path)
+		var requested := _target_at(previous, target, task_point, mode, requested_fraction, anchor, task_path)
 		while true:
 			var fit_start_q := q.duplicate()
-			var attempted := _fit(q, requested, contact, groups, lower, upper, input, permitted_evaluate, policy)
+			var attempted := _fit(q, requested, task_point, groups, lower, upper, input, permitted_evaluate, policy)
 			result.iterations += int(attempted.iterations)
 			if attempted.valid:
 				attempted_failure = ""
 				q = attempted.q
 				accepted_eval = attempted.evaluation
+				accepted_trailing_anchor = attempted.get("trailing_tip_anchor_world")
 				accepted_fraction = requested_fraction
 				if q != fit_start_q:
 					_advance_accepted_checkpoint(input, accepted_eval)
@@ -155,6 +176,31 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 			attempted_failure = attempted.reason
 			if result.search_failures.size() < 8:
 				result.search_failures.append(_attempt_diagnostics(attempted, requested_fraction))
+			# Forearm contact may make the exact pointer path impossible while
+			# its tangential component remains usable. Retain only a fully legal,
+			# improving contact-guided pose; never relax a grip or anatomical row.
+			var slide := _try_clearance_slide(attempted, fit_start_q, requested, task_point,
+				groups, lower, upper, input, permitted_evaluate, policy)
+			if bool(input.get("allow_forearm_slide", false)) and bool(attempted.get("clearance_encountered", false)):
+				if not result.has("clearance_slide_attempts"):
+					result["clearance_slide_attempts"] = []
+				if result.clearance_slide_attempts.size() < 8:
+					result.clearance_slide_attempts.append({"fraction": requested_fraction,
+						"valid": slide.get("valid", false), "reason": slide.get("slide_reason", ""),
+						"detail": slide.get("slide_diagnostics", {})})
+			if slide.get("valid", false):
+				q = slide.q
+				accepted_eval = slide.evaluation
+				accepted_trailing_anchor = slide.get("trailing_tip_anchor_world")
+				slide_target = slide.target
+				var full_task := _task_vector(previous, target, task_point, float(policy.position_normalization), mode)
+				var moved_task := _task_vector(previous, accepted_eval.weapon_frame, task_point, float(policy.position_normalization), mode)
+				accepted_fraction = clampf(_dot(full_task, moved_task) / maxf(_norm_squared(full_task), NUMERIC_EPSILON), 0.0, 1.0)
+				result.iterations += int(slide.get("iterations", 0))
+				result["clearance_slide"] = true
+				attempted_failure = "forearm_clearance_slide"
+				_advance_accepted_checkpoint(input, accepted_eval)
+				break
 			# Common task scaling preserves the commanded path. Never scale the
 			# joint vector and claim the nonlinear contact stayed fixed.
 			var low := accepted_fraction
@@ -164,12 +210,13 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 			var coverage_failure := attempted.has("shoulder_boundary_diagnostics")
 			for search: int in maxi(0, int(policy.scale_search_steps)):
 				var middle := (low + high) * 0.5
-				var smaller := _fit(start_q, _target_at(previous, target, contact, mode, middle, anchor, task_path), contact, groups, lower, upper, input, permitted_evaluate, policy)
+				var smaller := _fit(start_q, _target_at(previous, target, task_point, mode, middle, anchor, task_path), task_point, groups, lower, upper, input, permitted_evaluate, policy)
 				result.iterations += int(smaller.iterations)
 				if smaller.valid:
 					low = middle
 					q = smaller.q
 					accepted_eval = smaller.evaluation
+					accepted_trailing_anchor = smaller.get("trailing_tip_anchor_world")
 				else:
 					coverage_failure = coverage_failure or smaller.has("shoulder_boundary_diagnostics")
 					high = middle
@@ -184,11 +231,11 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 					"shoulder_states": accepted_eval.get("payload", {}).get("shoulder_states_by_slot", {}).duplicate(true)})
 				continue
 			break
-		if accepted_fraction < requested_fraction - NUMERIC_EPSILON:
+		if slide_target is Transform3D or accepted_fraction < requested_fraction - NUMERIC_EPSILON:
 			break
 	if reach_bound_reached:
 		attempted_failure = "arm_extension_reach_limit"
-	var requested_error := _task_pose_error(previous, target, contact, mode)
+	var requested_error := _task_pose_error(previous, target, task_point, mode)
 	if q == PackedFloat64Array(input.q) and ((mode != "tip" and requested_error.position > float(policy.position_tolerance)) or requested_error.angle > float(policy.orientation_tolerance)):
 		# Scaling a real command down inside the fit tolerance is not movement.
 		# Report no progress instead of certifying an unchanged joint packet.
@@ -200,22 +247,32 @@ static func solve(input: Dictionary, evaluate: Callable, overrides: Dictionary =
 	result.accepted_payload = accepted_eval.get("payload", {})
 	result.task_scale = accepted_fraction
 	result.valid = accepted_fraction > NUMERIC_EPSILON
-	result.status = "ACCEPTED" if accepted_fraction >= 1.0 - NUMERIC_EPSILON else ("SCALED" if result.valid else "SEARCH_EXHAUSTED")
+	result.status = "ACCEPTED" if accepted_fraction >= 1.0 - NUMERIC_EPSILON and not bool(result.get("clearance_slide", false)) else ("SCALED" if result.valid else "SEARCH_EXHAUSTED")
 	result.reason = "" if result.status == "ACCEPTED" else (attempted_failure if not attempted_failure.is_empty() else "allocator_substep_budget")
 	if result.has("translation_reach_bound"):
 		result.translation_reach_bound["reached"] = reach_bound_reached
-	var accepted_target := _target_at(previous, target, contact, mode, accepted_fraction, anchor, task_path)
-	var errors := _task_pose_error(accepted_eval.weapon_frame, accepted_target, contact, mode)
+	var accepted_target := _target_at(previous, target, task_point, mode, accepted_fraction, anchor, task_path)
+	if slide_target is Transform3D:
+		accepted_target = slide_target
+	var errors := _task_pose_error(accepted_eval.weapon_frame, accepted_target, task_point, mode)
 	# Keep physical displacement visible without turning Tip translation into
 	# a task or pivot-lock condition. Accepted_weapon is always actual joint FK.
 	result.pivot_error = errors.position
 	result.position_constrained = mode != "tip"
-	result.orientation_constrained = mode != "position"
+	result.orientation_constrained = mode not in ["pommel", "position"]
+	if mode == "pommel":
+		result.task_point_local = task_point
+		result.task_point_world = (accepted_eval.weapon_frame as Transform3D) * task_point
+		result.task_point_world_origin_id = input.origin_id
+		if accepted_trailing_anchor is Vector3:
+			result.trailing_tip_anchor_world = accepted_trailing_anchor
+			result.trailing_tip_world = (accepted_eval.weapon_frame as Transform3D) * (input.trailing_tip_local as Vector3)
+			result.trailing_tip_world_origin_id = input.origin_id
 	result.contact_displacement = ((accepted_eval.weapon_frame as Transform3D) * contact).distance_to(previous * contact)
 	result.contact_anchor = anchor if mode == "roll" else (accepted_eval.weapon_frame as Transform3D) * contact
 	result.contact_anchor_origin_id = input.origin_id
 	result.orientation_error = errors.angle
-	result.remaining_task_error = _task_pose_error(accepted_eval.weapon_frame, target, contact, mode)
+	result.remaining_task_error = _task_pose_error(accepted_eval.weapon_frame, target, task_point, mode)
 	if mode == "tip":
 		result.remaining_task_error.position = 0.0
 	result.contributing_joint_groups = _contributing_groups(PackedFloat64Array(input.q), q, groups)
@@ -244,6 +301,8 @@ static func _attempt_diagnostics(attempt: Dictionary, fraction: float) -> Dictio
 		result["stagnation_diagnostics"] = attempt.stagnation_diagnostics
 	if attempt.has("shoulder_boundary_diagnostics"):
 		result["shoulder_boundary_diagnostics"] = attempt.shoulder_boundary_diagnostics
+	if attempt.has("trailing_tip_anchor_world"):
+		result["trailing_tip_anchor_world"] = attempt.trailing_tip_anchor_world
 	return result
 
 ## A current authored pose is input, not a new accepted candidate. Preserve
@@ -272,7 +331,10 @@ static func build_start_allowance(input: Dictionary, evaluation: Dictionary) -> 
 		if _anatomical_constraint(names[i]) and is_finite(values[i]) and values[i] > 0.0:
 			# Reasons identify the same anatomical row in physical and search
 			# arrays. Runtime supplies unique names, including side and joint.
-			offsets[names[i]] = values[i]
+			# Collision tolerance is an absolute small allowance at the surface,
+			# not extra penetration granted on each new request. If already deep,
+			# the permitted maximum remains exactly the inherited starting depth.
+			offsets[names[i]] = maxf(0.0, values[i] - _constraint_tolerance(evaluation, i)) if names[i].begins_with("FOREARM_CLEARANCE:") else values[i]
 	return {"lower": permitted_lower, "upper": permitted_upper, "offsets": offsets,
 		"joint_groups": PackedStringArray(input.get("joint_groups", []))}
 
@@ -328,7 +390,90 @@ static func validate_with_start_allowance(input: Dictionary, evaluation: Diction
 	return {"valid": true, "initial_warning": warning, "pose_warning": warning}
 
 static func _anatomical_constraint(name: String) -> bool:
-	return name.begins_with("JOINT_RANGE:") or name.begins_with("COUPLED_LIMIT:")
+	# Forearm penetration inherited at request start is a recovery allowance,
+	# never permission to deepen it. Contact and shoulder-hold rows stay strict.
+	return name.begins_with("JOINT_RANGE:") or name.begins_with("COUPLED_LIMIT:") or name.begins_with("FOREARM_CLEARANCE:")
+
+static func _touches_forearm_clearance(evaluation: Dictionary, threshold: float = 0.0001) -> bool:
+	var values := _constraints(evaluation)
+	var reasons := PackedStringArray(evaluation.get("constraint_reasons", []))
+	for index: int in mini(values.size(), reasons.size()):
+		if reasons[index].begins_with("FOREARM_CLEARANCE:") and values[index] >= -threshold:
+			return true
+	return false
+
+static func _moving_forearm_boundary(evaluation: Dictionary, gradients: Array) -> bool:
+	var values := _search_constraints(evaluation)
+	var reasons := PackedStringArray(evaluation.get("search_constraint_reasons", evaluation.get("constraint_reasons", [])))
+	for index: int in mini(values.size(), reasons.size()):
+		if reasons[index].begins_with("FOREARM_CLEARANCE:") and values[index] >= -0.0001 and index < gradients.size() and _norm_squared(gradients[index]) > NUMERIC_EPSILON:
+			return true
+	return false
+
+static func _moving_forearm_step_blocked(before: Dictionary, after: Dictionary) -> bool:
+	if not _evaluation_valid(after):
+		return false
+	var first := _constraints(before)
+	var second := _constraints(after)
+	var reasons := PackedStringArray(after.get("constraint_reasons", []))
+	for index: int in mini(mini(first.size(), second.size()), reasons.size()):
+		if reasons[index].begins_with("FOREARM_CLEARANCE:") and second[index] > _constraint_tolerance(after, index) and second[index] > first[index] + NUMERIC_EPSILON:
+			return true
+	return false
+
+## A contact-guided partial task is deliberately separate from ordinary task
+## scaling. Pommel follows its controlled point; Roll keeps its anchor.
+## This branch cannot run unless a real forearm clearance row was encountered.
+static func _try_clearance_slide(attempt: Dictionary, start: PackedFloat64Array,
+		target: Transform3D, contact: Vector3, groups: PackedStringArray,
+		lower: PackedFloat64Array, upper: PackedFloat64Array, input: Dictionary,
+		evaluate: Callable, policy: Dictionary) -> Dictionary:
+	if not bool(input.get("allow_forearm_slide", false)) or not bool(attempt.get("clearance_encountered", false)):
+		return {"valid": false, "slide_reason": "no_moving_clearance_encounter"}
+	var best := PackedFloat64Array(attempt.get("best_q", start))
+	var evaluation: Dictionary = attempt.get("best_evaluation", {})
+	var diagnostics := {"best_available": attempt.has("best_q"), "best_changed": best != start,
+		"best_evaluation_valid": _evaluation_valid(evaluation)}
+	if best == start or not _evaluation_valid(evaluation):
+		return {"valid": false, "slide_reason": "no_valid_partial_progress", "slide_diagnostics": diagnostics}
+	diagnostics["best_legal"] = _legal(best, evaluation, lower, upper)
+	diagnostics["best_touches_clearance"] = _touches_forearm_clearance(evaluation)
+	diagnostics["best_task_error"] = _task_pose_error(evaluation.weapon_frame, target, contact, String(input.mode))
+	diagnostics["best_constraints"] = _initial_diagnostics(best, evaluation, lower, upper, groups)
+	var clearance_rows: Array[Dictionary] = []
+	var values := _constraints(evaluation)
+	var reasons := PackedStringArray(evaluation.get("constraint_reasons", []))
+	for index: int in mini(values.size(), reasons.size()):
+		if reasons[index].begins_with("FOREARM_CLEARANCE:") and values[index] >= -0.01:
+			clearance_rows.append({"reason": reasons[index], "value": values[index],
+				"tolerance": _constraint_tolerance(evaluation, index)})
+	diagnostics["near_clearance_rows"] = clearance_rows
+	if not diagnostics.best_legal:
+		return {"valid": false, "slide_reason": "partial_not_legal", "slide_diagnostics": diagnostics}
+	var mode := String(input.mode)
+	var projected: Transform3D = evaluation.weapon_frame
+	if mode == "roll":
+		var anchor: Vector3 = input.get("contact_anchor", (input.previous_weapon as Transform3D) * contact)
+		projected.origin = anchor - projected.basis * contact
+	var polished := _fit(best, projected, contact, groups, lower, upper, input, evaluate, policy)
+	if not polished.valid or PackedFloat64Array(polished.q) == start:
+		diagnostics["polish_reason"] = polished.get("reason", "")
+		diagnostics["polish_iterations"] = polished.get("iterations", 0)
+		diagnostics["polish_best_available"] = polished.has("best_q")
+		if _evaluation_valid(polished.get("best_evaluation", {})):
+			diagnostics["polish_best_error"] = _task_pose_error(polished.best_evaluation.weapon_frame, projected, contact, mode)
+		return {"valid": false, "slide_reason": "strict_projected_pose_polish_failed", "slide_diagnostics": diagnostics}
+	var from: Dictionary = evaluate.call(start)
+	var old_error := _norm_squared(_task_vector(from.weapon_frame, target, contact, float(policy.position_normalization), mode))
+	var new_error := _norm_squared(_task_vector(polished.evaluation.weapon_frame, target, contact, float(policy.position_normalization), mode))
+	if new_error >= old_error - 1.0e-16:
+		return {"valid": false, "slide_reason": "projected_pose_did_not_improve", "slide_diagnostics": diagnostics}
+	polished["target"] = projected
+	polished["slide_reason"] = "legal_projected_pose"
+	polished["slide_diagnostics"] = diagnostics
+	if attempt.has("trailing_tip_anchor_world"):
+		polished["trailing_tip_anchor_world"] = attempt.trailing_tip_anchor_world
+	return polished
 
 static func _pose_warning(q: PackedFloat64Array, evaluation: Dictionary, lower: PackedFloat64Array, upper: PackedFloat64Array, groups: PackedStringArray) -> Dictionary:
 	return {} if _evaluation_valid(evaluation) and _legal(q, evaluation, lower, upper) else _initial_diagnostics(q, evaluation, lower, upper, groups)
@@ -339,10 +484,21 @@ static func _fit(start: PackedFloat64Array, target: Transform3D, contact: Vector
 	var validator: Callable = input.get("validate_candidate", Callable())
 	var mode := String(input.mode)
 	var response := {"valid": false, "q": start, "evaluation": evaluation, "iterations": 0, "reason": "allocator_search_exhausted"}
+	var allow_clearance_slide: bool = bool(input.get("allow_forearm_slide", false))
+	response["clearance_encountered"] = false
 	var posture := _posture_diagonal(input, groups, lower, upper, mode, policy)
 	if not posture.valid:
 		response.reason = posture.reason
 		return response
+	var trailing_weight := float(policy.get("pommel_tip_trailing_weight", 1.0))
+	var trailing_tip: Variant = input.get("trailing_tip_local") if mode == "pommel" and trailing_weight > 0.0 and not _uses_exact_hold_order(mode, policy) else null
+	# The reference belongs to this fit's accepted starting frame in the same
+	# input.origin_id as FK. Newton/trials cannot move it; each next accepted
+	# spatial substep starts a fresh fit. No time lag or new anatomical zero.
+	var previous_tip := Vector3.ZERO
+	if trailing_tip is Vector3:
+		previous_tip = (evaluation.weapon_frame as Transform3D) * (trailing_tip as Vector3)
+		response["trailing_tip_anchor_world"] = previous_tip
 	var shoulder_crossing_iterations := 0
 	# Diagnostic-only, opt-in through the per-request policy override. No
 	# persistent logs or additional candidate/scene evaluations are introduced.
@@ -361,10 +517,11 @@ static func _fit(start: PackedFloat64Array, target: Transform3D, contact: Vector
 			response.q = q
 			response.evaluation = evaluation
 			return response
-		var differential := _differentiate(q, evaluation, contact, evaluate, policy, lower, upper, mode)
+		var differential := _differentiate(q, evaluation, contact, evaluate, policy, lower, upper, mode, trailing_tip)
 		if not differential.valid:
 			response.reason = "allocator_invalid_forward_sample"
 			return response
+		response.clearance_encountered = response.clearance_encountered or (allow_clearance_slide and _moving_forearm_boundary(evaluation, differential.constraints))
 		var jacobian: Array = differential.jacobian
 		var residual := _task_vector(evaluation.weapon_frame, target, contact, float(policy.position_normalization), mode)
 		if trace_rejections and not response.has("initial_task_error_squared"):
@@ -403,7 +560,27 @@ static func _fit(start: PackedFloat64Array, target: Transform3D, contact: Vector
 			for i: int in q.size():
 				h[i][i] = posture.diagonal[i]
 				g[i] = (q[i] - start[i]) * float(posture.diagonal[i])
+			var fallback_h: Array = []
+			var fallback_g := PackedFloat64Array()
+			if trailing_tip is Vector3:
+				fallback_h = h.duplicate(true)
+				fallback_g = g.duplicate()
+				var tip_jacobian: Array = differential.trailing_tip_jacobian
+				var tip_error: Vector3 = ((evaluation.weapon_frame as Transform3D) * (trailing_tip as Vector3) - previous_tip) / float(policy.position_normalization)
+				# Finite weight, dimensionless like the primary position task. This is
+				# a soft geometric preference alongside joint posture; the three
+				# primary task rows above preserve Pommel's achieved linear step.
+				var tip_h := _gram(tip_jacobian, q.size())
+				var tip_g := _transpose_product(tip_jacobian, PackedFloat64Array([tip_error.x, tip_error.y, tip_error.z]), 1.0)
+				for i: int in q.size():
+					g[i] += tip_g[i] * trailing_weight
+					for j: int in q.size():
+						h[i][j] += tip_h[i][j] * trailing_weight
 			var preferred := _qp(h, g, equalities, inequalities, limits, delta)
+			if not preferred.valid and trailing_tip is Vector3:
+				# A secondary preference must not turn a previously usable primary
+				# step into a blocker if this extra objective is ill-conditioned.
+				preferred = _qp(fallback_h, fallback_g, equalities, inequalities, limits, delta)
 			if not preferred.valid:
 				response.reason = "allocator_posture_search_exhausted"
 				response["qp_diagnostics"] = {"stage": "posture", "reason": preferred.get("reason", ""), "active": preferred.get("active", []), "trace": preferred.get("trace", [])}
@@ -461,6 +638,7 @@ static func _fit(start: PackedFloat64Array, target: Transform3D, contact: Vector
 		for line_search: int in 10:
 			var trial := _add(q, delta, fraction)
 			var trial_eval: Dictionary = evaluate.call(trial)
+			response.clearance_encountered = response.clearance_encountered or (allow_clearance_slide and _moving_forearm_step_blocked(evaluation, trial_eval))
 			var before_restore: Dictionary = {}
 			if _evaluation_valid(trial_eval) and not _legal(trial, trial_eval, lower, upper):
 				# A covered shoulder can change h, but an uncovered trial must
@@ -499,6 +677,8 @@ static func _fit(start: PackedFloat64Array, target: Transform3D, contact: Vector
 						if _transition_legal(q, trial, evaluate, lower, upper, validator, transition_detail):
 							q = trial
 							evaluation = trial_eval
+							response["best_q"] = q
+							response["best_evaluation"] = evaluation
 							advanced = true
 							break
 			if trace_rejections:
@@ -563,7 +743,7 @@ static func _restore_feasible(candidate: PackedFloat64Array, candidate_eval: Dic
 		var worst := -1
 		var excess := CONSTRAINT_EPSILON
 		for row: int in values.size():
-			if values[row] > excess:
+			if values[row] > _constraint_tolerance(evaluation, row) and values[row] > excess:
 				excess = values[row]
 				worst = row
 		if worst < 0:
@@ -587,12 +767,16 @@ static func _restore_feasible(candidate: PackedFloat64Array, candidate_eval: Dic
 	evaluation = evaluate.call(q)
 	return {"q": q, "evaluation": evaluation}
 
-static func _differentiate(q: PackedFloat64Array, evaluation: Dictionary, contact: Vector3, evaluate: Callable, policy: Dictionary, lower: PackedFloat64Array, upper: PackedFloat64Array, mode: String = "") -> Dictionary:
+static func _differentiate(q: PackedFloat64Array, evaluation: Dictionary, contact: Vector3, evaluate: Callable, policy: Dictionary, lower: PackedFloat64Array, upper: PackedFloat64Array, mode: String = "", trailing_tip: Variant = null) -> Dictionary:
 	var base_constraints := _search_constraints(evaluation)
 	var custom_search: bool = evaluation.has("search_constraints")
-	var task_rows := 3 if mode in ["tip", "position"] else 6
+	var task_rows := 3 if mode in ["tip", "pommel", "position"] else 6
 	var j := _matrix(task_rows, q.size())
 	var c := _matrix(base_constraints.size(), q.size())
+	var tip_jacobian: Array = _matrix(3, q.size()) if trailing_tip is Vector3 else []
+	var tip_origin := Vector3.ZERO
+	if trailing_tip is Vector3:
+		tip_origin = (evaluation.weapon_frame as Transform3D) * (trailing_tip as Vector3)
 	var epsilon := float(policy.finite_difference)
 	for column: int in q.size():
 		# Effective bounds already include the original-pose correction allowance.
@@ -612,11 +796,19 @@ static func _differentiate(q: PackedFloat64Array, evaluation: Dictionary, contac
 		var displacement := _task_vector(evaluation.weapon_frame, sample.weapon_frame, contact, float(policy.position_normalization), mode)
 		for row: int in task_rows:
 			j[row][column] = displacement[row] / epsilon
+		if trailing_tip is Vector3:
+			# Reuse this exact FK sample; trailing adds no scene evaluation.
+			var tip_delta: Vector3 = ((sample.weapon_frame as Transform3D) * (trailing_tip as Vector3) - tip_origin) / (float(policy.position_normalization) * epsilon)
+			for row: int in 3:
+				tip_jacobian[row][column] = tip_delta[row]
 		for row: int in values.size():
 			# Custom search rows have their own indexing. Physical norm metadata
 			# must never be applied to a search slab at the same numeric index.
 			c[row][column] = (values[row] - base_constraints[row]) / epsilon if custom_search else _constraint_slope(evaluation, sample, row, base_constraints[row], values[row], epsilon)
-	return {"valid": true, "jacobian": j, "constraints": c}
+	var result := {"valid": true, "jacobian": j, "constraints": c}
+	if trailing_tip is Vector3:
+		result["trailing_tip_jacobian"] = tip_jacobian
+	return result
 
 static func _constraint_slope(base: Dictionary, sample: Dictionary, row: int, base_value: float, sample_value: float, epsilon: float) -> float:
 	var base_residuals: Dictionary = base.get("squared_norm_residuals", {})
@@ -631,119 +823,7 @@ static func _constraint_slope(base: Dictionary, sample: Dictionary, row: int, ba
 ## intentional for lexicographic groups; rank-revealing elimination handles
 ## free variables without adding a competing regularization objective.
 static func _qp(h: Array, g: PackedFloat64Array, equalities: Array, inequalities: Array, limits: PackedFloat64Array, initial: PackedFloat64Array) -> Dictionary:
-	var x := initial.duplicate()
-	var active := PackedInt32Array()
-	var trace: Array[Dictionary] = []
-	for i: int in inequalities.size():
-		if _dot(inequalities[i], x) > limits[i] + CONSTRAINT_EPSILON:
-			return {"valid": false, "x": initial, "reason": "infeasible_start", "active": [i]}
-	for iteration: int in QP_ITERATIONS:
-		var rows: Array = equalities.duplicate()
-		for index: int in active:
-			rows.append(inequalities[index])
-		var dimension := x.size() + rows.size()
-		var system := _matrix(dimension, dimension)
-		var rhs := _zeros(dimension)
-		var row_scales := PackedFloat64Array()
-		for i: int in x.size():
-			for k: int in x.size():
-				system[i][k] = h[i][k]
-			rhs[i] = -g[i] - _dot(h[i], x)
-		for row: int in rows.size():
-			# Contact derivatives are in normalized micrometre/radian units while
-			# joint bounds have unit normals. Normalize only the KKT equations to
-			# avoid conditioning loss; original bounds and line search stay intact.
-			var row_norm := sqrt(_norm_squared(rows[row]))
-			var row_scale := row_norm if row_norm > PIVOT_EPSILON else 1.0
-			row_scales.append(row_scale)
-			for column: int in x.size():
-				system[x.size() + row][column] = rows[row][column] / row_scale
-				system[column][x.size() + row] = rows[row][column] / row_scale
-		var solved := _linear_solve(system, rhs)
-		if not solved.valid:
-			return {"valid": false, "x": x, "reason": "inconsistent_linear_system", "active": active, "trace": trace}
-		var solution: PackedFloat64Array = solved.x
-		var direction := solution.slice(0, x.size())
-		var step_trace := {"iteration": iteration, "active": active.duplicate(), "direction_squared": _norm_squared(direction)}
-		if _norm_squared(direction) <= 1.0e-18:
-			var remove := -1
-			var minimum := -1.0e-8
-			for i: int in active.size():
-				var multiplier := solution[x.size() + equalities.size() + i] / row_scales[equalities.size() + i]
-				if multiplier < minimum:
-					minimum = multiplier
-					remove = i
-			if remove < 0:
-				return {"valid": true, "x": x}
-			step_trace["remove"] = active[remove]
-			trace.append(step_trace)
-			if trace.size() > 8:
-				trace.pop_front()
-			active.remove_at(remove)
-			continue
-		var fraction := 1.0
-		var blocker := -1
-		for i: int in inequalities.size():
-			if i in active:
-				continue
-			var travel := _dot(inequalities[i], direction)
-			if travel <= PIVOT_EPSILON:
-				continue
-			var available := maxf(0.0, limits[i] - _dot(inequalities[i], x)) / travel
-			if available < fraction:
-				fraction = available
-				blocker = i
-		x = _add(x, direction, fraction)
-		step_trace["fraction"] = fraction
-		step_trace["blocker"] = blocker
-		trace.append(step_trace)
-		if trace.size() > 8:
-			trace.pop_front()
-		if blocker >= 0:
-			active.append(blocker)
-	return {"valid": false, "x": x, "reason": "iteration_budget", "active": active, "trace": trace}
-
-static func _linear_solve(matrix: Array, rhs: PackedFloat64Array) -> Dictionary:
-	var count := rhs.size()
-	var a: Array = []
-	for i: int in count:
-		var row: PackedFloat64Array = matrix[i].duplicate()
-		row.append(rhs[i])
-		a.append(row)
-	var pivots := PackedInt32Array()
-	var rank := 0
-	for column: int in count:
-		var pivot := rank
-		for row: int in range(rank, count):
-			if absf(a[row][column]) > absf(a[pivot][column]):
-				pivot = row
-		if absf(a[pivot][column]) <= PIVOT_EPSILON:
-			continue
-		var swap: PackedFloat64Array = a[rank]
-		a[rank] = a[pivot]
-		a[pivot] = swap
-		var divisor: float = a[rank][column]
-		for k: int in range(column, count + 1):
-			a[rank][k] /= divisor
-		for row: int in count:
-			if row == rank:
-				continue
-			var factor: float = a[row][column]
-			if absf(factor) <= PIVOT_EPSILON:
-				continue
-			for k: int in range(column, count + 1):
-				a[row][k] -= factor * a[rank][k]
-		pivots.append(column)
-		rank += 1
-		if rank == count:
-			break
-	for row: int in range(rank, count):
-		if absf(a[row][count]) > 1.0e-7:
-			return {"valid": false}
-	var answer := _zeros(count)
-	for row: int in rank:
-		answer[pivots[row]] = a[row][count]
-	return {"valid": true, "x": answer}
+	return MotionMath.qp(h, g, equalities, inequalities, limits, initial)
 
 static func _uses_exact_hold_order(mode: String, policy: Dictionary) -> bool:
 	return policy.get("hold_order_by_mode", {}).has(mode) or String(policy.get("posture_preference_mode", "weighted")) == "lexicographic"
@@ -838,7 +918,13 @@ static func _validate_task_path(input: Dictionary, mode: String, previous: Trans
 static func _target_at(previous: Transform3D, target: Transform3D, contact: Vector3, mode: String, weight: float, anchor: Vector3, path: Dictionary = {}) -> Transform3D:
 	if mode == "position" and not path.is_empty():
 		return Transform3D(previous.basis, (path.center as Vector3) + Basis(path.axis, float(path.angle_radians) * weight) * (previous.origin - (path.center as Vector3)))
-	if mode in ["pommel", "position"]:
+	if mode == "pommel":
+		# Basis is descriptive here, never an angular task. Interpolate the
+		# addressed WeaponRoot-local point so rotation cannot move the marker
+		# away from its pointer path or substitute handle travel for Pommel travel.
+		var point: Vector3 = (previous * contact).lerp(target * contact, weight)
+		return Transform3D(previous.basis, point - previous.basis * contact)
+	if mode == "position":
 		return Transform3D(previous.basis, previous.origin.lerp(target.origin, weight))
 	var rotation := previous.basis.orthonormalized().get_rotation_quaternion().slerp(target.basis.orthonormalized().get_rotation_quaternion(), weight)
 	var basis := Basis(rotation).scaled(previous.basis.get_scale())
@@ -852,6 +938,8 @@ static func _pose_error(current: Transform3D, target: Transform3D, contact: Vect
 	return {"position": (current * contact).distance_to(target * contact), "angle": _rotation_vector(target.basis, current.basis).length()}
 
 static func _task_pose_error(current: Transform3D, target: Transform3D, contact: Vector3, mode: String) -> Dictionary:
+	if mode == "pommel":
+		return {"position": (current * contact).distance_to(target * contact), "angle": 0.0}
 	if mode in ["pose", "position"]:
 		return {"position": current.origin.distance_to(target.origin),
 			"angle": 0.0 if mode == "position" else _rotation_vector(target.basis, current.basis).length()}
@@ -862,7 +950,7 @@ static func _task_vector(current: Transform3D, target: Transform3D, contact: Vec
 	if mode == "tip":
 		return PackedFloat64Array([angular.x, angular.y, angular.z])
 	var position := (target.origin - current.origin) / length_scale if mode in ["pose", "position"] else (target * contact - current * contact) / length_scale
-	if mode == "position":
+	if mode in ["pommel", "position"]:
 		return PackedFloat64Array([position.x, position.y, position.z])
 	return PackedFloat64Array([position.x, position.y, position.z, angular.x, angular.y, angular.z])
 
@@ -901,12 +989,19 @@ static func _evaluation_valid(evaluation: Dictionary) -> bool:
 			return false
 	return true
 
+static func _constraint_tolerance(evaluation: Dictionary, index: int) -> float:
+	var tolerances := PackedFloat64Array(evaluation.get("constraint_tolerances", []))
+	return maxf(CONSTRAINT_EPSILON, tolerances[index]) if index < tolerances.size() else CONSTRAINT_EPSILON
+
 static func _legal(q: PackedFloat64Array, evaluation: Dictionary, lower: PackedFloat64Array, upper: PackedFloat64Array) -> bool:
 	for i: int in q.size():
 		if not is_finite(q[i]) or q[i] < lower[i] - CONSTRAINT_EPSILON or q[i] > upper[i] + CONSTRAINT_EPSILON:
 			return false
-	for value: float in _constraints(evaluation):
-		if value > CONSTRAINT_EPSILON:
+	var values := _constraints(evaluation)
+	var tolerances := PackedFloat64Array(evaluation.get("constraint_tolerances", []))
+	for index: int in values.size():
+		var tolerance: float = maxf(CONSTRAINT_EPSILON, tolerances[index]) if index < tolerances.size() else CONSTRAINT_EPSILON
+		if values[index] - tolerance > (NUMERIC_EPSILON if tolerance > CONSTRAINT_EPSILON else 0.0):
 			return false
 	return true
 
@@ -936,12 +1031,12 @@ static func _initial_diagnostics(q: PackedFloat64Array, evaluation: Dictionary, 
 	var equalities := PackedFloat64Array(evaluation.get("equalities", []))
 	var equality_tolerances := PackedFloat64Array(evaluation.get("equality_tolerances", []))
 	for i: int in values.size():
-		if not is_finite(values[i]) or values[i] > CONSTRAINT_EPSILON:
+		if not is_finite(values[i]) or values[i] > _constraint_tolerance(evaluation, i):
 			diagnostics.constraint_count += 1
 			if not is_finite(values[i]) and "constraint_nonfinite" not in failures:
 				failures.append("constraint_nonfinite")
 			if diagnostics.constraints.size() < 8:
-				var violation := {"index": i, "name": reasons[i] if i < reasons.size() else "COUPLED_LIMIT:" + str(i), "value": values[i], "tolerance": CONSTRAINT_EPSILON}
+				var violation := {"index": i, "name": reasons[i] if i < reasons.size() else "COUPLED_LIMIT:" + str(i), "value": values[i], "tolerance": _constraint_tolerance(evaluation, i)}
 				if i >= inequality_count:
 					var equality_index := int((i - inequality_count) / 2)
 					violation.name = "EQUALITY:" + str(equality_index) + (":positive" if (i - inequality_count) % 2 == 0 else ":negative")

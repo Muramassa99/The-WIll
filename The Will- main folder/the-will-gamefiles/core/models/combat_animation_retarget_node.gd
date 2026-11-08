@@ -6,7 +6,7 @@ const CombatOriginRecordScript = preload("res://core/models/combat_origin_record
 const SCHEMA_ID: StringName = &"combat_animation_retarget_node_v1"
 const ORIGIN_SPACE_PRIMARY_SHOULDER: StringName = &"primary_shoulder"
 const ORIGIN_SPACE_TORSO_FRAME: StringName = &"torso_frame"
-const DEFAULT_GRIP_SEAT_SLIDE_OFFSET: float = 0.2
+const DEFAULT_GRIP_SEAT_SLIDE_OFFSET: float = 0.5
 const DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET: float = 0.0
 
 @export var schema_id: StringName = SCHEMA_ID

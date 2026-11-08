@@ -1942,13 +1942,32 @@ func resolve_hand_proxy_authoring_segment_state(
 	var actor: Node3D = preview_root.get_node_or_null(PREVIEW_ACTOR_PIVOT_NAME + "/" + PREVIEW_ACTOR_NAME) as Node3D
 	var trajectory_root: Node3D = preview_root.find_child(TRAJECTORY_ROOT_NAME, true, false) as Node3D
 	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
-	return _resolve_hand_proxy_authoring_segment_state(
+	return _resolve_hand_proxy_control_segment_state(
 		actor,
 		held_item,
 		trajectory_root,
 		motion_node,
 		slot_id
 	)
+
+func _resolve_hand_proxy_control_segment_state(
+	actor: Node3D,
+	held_item: Node3D,
+	trajectory_root: Node3D,
+	motion_node: CombatAnimationMotionNode,
+	slot_id: StringName
+) -> Dictionary:
+	# Drawing, picking and drag seeding share the physical hand. Authored proxy
+	# endpoints are solver requests and may be outside the arm's usable range.
+	if motion_node == null or not _is_hand_proxy_authoring_slot_available(held_item, motion_node, slot_id):
+		return {"available": false}
+	var segment: Dictionary = _resolve_hand_proxy_default_trajectory_segment_state(actor, trajectory_root, slot_id)
+	if segment.is_empty():
+		return {"available": false}
+	segment["slot_id"] = slot_id
+	segment["uses_primary_motion_segment"] = _is_unarmed_preview_item(held_item) and slot_id == _resolve_preview_dominant_slot_id()
+	segment["authored"] = bool(segment.uses_primary_motion_segment) or _motion_node_has_hand_proxy_authoring(motion_node, slot_id)
+	return segment
 
 func _resolve_hand_proxy_authoring_segment_state(
 	actor: Node3D,
@@ -4136,18 +4155,24 @@ func apply_independent_arm_edit(preview_subviewport: SubViewport,
 	context.root.set_meta("independent_arm_edit_result", result)
 	if not result.get("valid", false) and not result.get("retained_previous_pose", false):
 		return result
-	# Persist the pose actually reached, not an unreachable requested control.
-	# Positions keep their existing TrajectoryAuthoring origin; no World values
-	# are silently written into a motion-node local field.
-	if hand_proxy_edit and result.get("requested_hand_world") is Transform3D and result.get("accepted_hand_world") is Transform3D:
-		var correction: Transform3D = result.accepted_hand_world * (result.requested_hand_world as Transform3D).affine_inverse()
-		var side := "left" if slot_id == &"hand_left" else "right"
-		for endpoint: String in ["tip", "pommel"]:
-			var field := side + "_hand_proxy_" + endpoint + "_position_local"
-			var origin_field := side + "_hand_proxy_" + endpoint + "_position_origin_id"
-			if motion.get(origin_field) == CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING:
-				motion.set(field, context.trajectory.to_local(correction * context.trajectory.to_global(motion.get(field))))
-	elif not hand_proxy_edit and not result.get("accepted_elbow_control", {}).is_empty():
+	# The rig's requested Hand frame already includes body/reach projection.
+	# A correction relative to that frame misses the original proxy overshoot.
+	# Read the reached bone geometry instead, including a retained previous pose.
+	if hand_proxy_edit or _motion_node_has_hand_proxy_authoring(motion, slot_id):
+		skeleton.force_update_all_bone_transforms()
+		var anchor: Node3D = _resolve_preview_mount_anchor_for_slot(context.actor, slot_id)
+		var attachment: BoneAttachment3D = anchor.get_parent() as BoneAttachment3D if is_instance_valid(anchor) else null
+		if attachment != null and not attachment.override_pose:
+			attachment.on_skeleton_update()
+		var reached: Dictionary = _resolve_hand_proxy_control_segment_state(context.actor, context.weapon, context.trajectory, motion, slot_id)
+		if reached.get("available", false):
+			var prefix := "left_hand_proxy_" if slot_id == &"hand_left" else "right_hand_proxy_"
+			if reached.get("uses_primary_motion_segment", false):
+				prefix = ""
+			for endpoint: String in ["tip", "pommel"]:
+				motion.set(prefix + endpoint + "_position_local", reached[endpoint + "_position_local"])
+				motion.set(prefix + endpoint + "_position_origin_id", CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING)
+	if not hand_proxy_edit and not result.get("accepted_elbow_control", {}).is_empty():
 		var field := "left_upperarm_roll_degrees" if slot_id == &"hand_left" else "right_upperarm_roll_degrees"
 		motion.set(field, float(result.accepted_elbow_control.initial_roll_degrees))
 	_remember_live_preview_attachment(context.actor)
@@ -4298,8 +4323,9 @@ func _allocate_weapon_motion(context: Dictionary, motion: CombatAnimationMotionN
 		if not contact_override_weapon_local is Vector3 or not contact_override_weapon_local.is_finite():
 			return {"available": false, "legal": false, "reason": "weapon_motion_contact_override_invalid"}
 		contact_local = contact_override_weapon_local
-	# Collision/no-go checks belong to path evaluation, not permission to use
-	# a control point. The rig adapter still validates anatomy and attachment.
+	# Do not restore the old all-or-nothing collision callback: an intersecting
+	# start must remain editable. The rig adapter owns anatomy, attachment and
+	# signed forearm-clearance guidance, including outward recovery/sliding.
 	var result: Dictionary = weapon_motion_manipulator.apply(context, motion, mode, target_world,
 		contact_local, local_up, primary, support, Callable(), requested_roll)
 	result["legal"] = bool(result.get("available", false))
@@ -10611,14 +10637,12 @@ func _create_hand_proxy_gizmo_markers(state: Dictionary, motion_node: CombatAnim
 		return 0
 	var actor: Node3D = actor_pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D
 	var held_item: Node3D = _get_node_meta_or_default(preview_root, "preview_held_item", null) as Node3D
-	var resolved_state: Dictionary = _get_node_meta_or_default(preview_root, "resolved_playback_state", {}) as Dictionary
-	var segment_state: Dictionary = _resolve_hand_proxy_authoring_segment_state(
+	var segment_state: Dictionary = _resolve_hand_proxy_control_segment_state(
 		actor,
 		held_item,
 		trajectory_root,
 		motion_node,
-		slot_id,
-		resolved_state
+		slot_id
 	)
 	if not bool(segment_state.get("available", false)):
 		preview_root.set_meta("hand_proxy_gizmo_state", {})

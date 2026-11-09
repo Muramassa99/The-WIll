@@ -160,6 +160,8 @@ add_library(grip_contact SHARED
     src/combat_motion_anatomy_kernel.h
     src/combat_forearm_clearance_kernel.cpp
     src/combat_forearm_clearance_kernel.h
+    src/combat_pose_capture_kernel.cpp
+    src/combat_pose_capture_kernel.h
     src/register_types.cpp
     src/register_types.h
 )

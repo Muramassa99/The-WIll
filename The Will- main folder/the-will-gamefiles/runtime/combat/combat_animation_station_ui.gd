@@ -31,6 +31,7 @@ const EditorSettingsStateScript = preload("res://core/models/combat_animation_ed
 const NodeDurationControlScript = preload("res://runtime/combat/combat_node_duration_control.gd")
 const DragSpeedControlScript = preload("res://runtime/combat/combat_drag_speed_control.gd")
 const MarkerDragInputScript = preload("res://runtime/combat/combat_marker_drag_input.gd")
+const EmptyHandFingerControlScript = preload("res://runtime/combat/combat_empty_hand_finger_control.gd")
 const UserSettingsRuntimeScript = preload("res://runtime/system/user_settings_runtime.gd")
 const UiWindowLayerPolicyScript = preload("res://runtime/ui/ui_window_layer_policy.gd")
 
@@ -249,8 +250,12 @@ var preview_drag_last_accepted_node: CombatAnimationMotionNode = null
 var preview_drag_forearm_failure: Dictionary = {}
 var preview_drag_has_moved: bool = false
 var preview_weapon_roll_dragging: bool = false
+var preview_empty_hand_wrist_slot: StringName = StringName()
+var preview_empty_hand_wrist_start_degrees: float = 0.0
 var _endpoint_pointer_latest: Vector2 = Vector2.ZERO
 var preview_weapon_facing_dragging: bool = false
+var preview_finger_drag_state: Dictionary = {}
+var preview_finger_drag_changed: bool = false
 var preview_weapon_roll_pointer_start: Vector2
 var preview_weapon_roll_degrees_start: float = 0.0
 var preview_drag_refresh_pending: bool = false
@@ -302,6 +307,8 @@ var _prepared_pose_candidate_frame: int = -1
 var _prepared_pose_completed_key: String = ""
 var _prepared_pose_completed_input_key: String = ""
 var _prepared_pose_observed_acquisition_key: String = ""
+var _background_prepared_pose_capture_pending: bool = false
+var _background_prepared_pose_capture_request_serial: int = 0
 var _motion_node_recording_pending: bool = false
 var _motion_node_recording_followup: StringName = StringName()
 var _baseline_preparation: Dictionary = {}
@@ -402,7 +409,7 @@ func _process(delta: float) -> void:
 		# Explicit R/navigation owns its settling window while recording. A
 		# background capture can reject quality warnings and reset that window.
 		if not preview_prepare_in_progress and not manual_save_in_progress and not _motion_node_recording_pending and not session_state.playback_active:
-			capture_selected_prepared_pose()
+			_process_background_prepared_pose_capture()
 	if not chain_player.is_playing():
 		return
 	chain_player.advance(delta)
@@ -435,7 +442,7 @@ func _refresh_grip_acquisition_status() -> void:
 	for capture_slot: StringName in states:
 		var capture_state: Dictionary = states[capture_slot]
 		capture_states.append([capture_slot, capture_state.get("serial", -1), capture_state.get("status", "")])
-	_prepared_pose_observed_acquisition_key = var_to_bytes(capture_states).hex_encode().sha256_text()
+	_observe_prepared_pose_acquisition_key(var_to_bytes(capture_states).hex_encode().sha256_text())
 	var lines: PackedStringArray = []
 	for slot: StringName in states:
 		var state: Dictionary = states[slot]
@@ -492,10 +499,48 @@ func _refresh_grip_acquisition_status() -> void:
 	if grip_reacquire_button != null:
 		grip_reacquire_button.visible = not states.is_empty() and not session_state.playback_active
 
+func _request_background_prepared_pose_capture() -> void:
+	_background_prepared_pose_capture_pending = true
+	_background_prepared_pose_capture_request_serial += 1
+
+func _observe_prepared_pose_acquisition_key(key: String) -> void:
+	if key == _prepared_pose_observed_acquisition_key:
+		return
+	_prepared_pose_observed_acquisition_key = key
+	_request_background_prepared_pose_capture()
+
+func _process_background_prepared_pose_capture() -> void:
+	# Camera motion never requests recording. Once a pose is captured (or a
+	# finite attempt fails), sleep until an authored edit/refresh or acquisition
+	# change. Explicit R/F/Save calls below remain independent of this gate.
+	if not _background_prepared_pose_capture_pending:
+		return
+	if motion_node_editor.is_dragging() or preview_weapon_roll_dragging or preview_weapon_facing_dragging or preview_drag_override_node != null or preview_drag_refresh_pending:
+		return
+	if preview_presenter.is_grip_acquisition_pending(preview_subviewport):
+		return
+	var request_serial := _background_prepared_pose_capture_request_serial
+	var started := _marker_lifecycle_profile_now()
+	var result := capture_selected_prepared_pose()
+	_marker_lifecycle_profile_step("background_pose_capture", started)
+	if request_serial != _background_prepared_pose_capture_request_serial:
+		return # Recording itself may have presented a new baseline.
+	if result.get("reason", "") in ["prepared_pose_settling", "prepared_pose_grip_pending", "prepared_pose_editor_busy", "prepared_pose_edit_in_progress"]:
+		return
+	_background_prepared_pose_capture_pending = false
+
 ## Snapshot the result already displayed by the editor. Two complete idle
 ## frames separate a changed selection/input or finished acquisition from
 ## capture. Calling this method never advances a solver or waits for one.
 func capture_selected_prepared_pose(allow_preparation: bool = false, allow_quality_warnings: bool = false) -> Dictionary:
+	# One preparation per actual capture request, shared by its nested getters.
+	# Unchanged background frames do not enter this method at all.
+	_begin_preview_authoring_lookup_scope()
+	var result := _capture_selected_prepared_pose_prepared(allow_preparation, allow_quality_warnings)
+	_end_preview_authoring_lookup_scope()
+	return result
+
+func _capture_selected_prepared_pose_prepared(allow_preparation: bool, allow_quality_warnings: bool) -> Dictionary:
 	if panel == null or not panel.visible or workflow_step != WORKFLOW_STEP_EDITOR or active_wip == null:
 		return _prepared_pose_capture_unavailable("prepared_pose_editor_not_active")
 	if ((manual_save_in_progress or preview_prepare_in_progress) and not allow_preparation) or chain_player.is_playing() or session_state.playback_active:
@@ -613,6 +658,7 @@ func capture_selected_prepared_pose(allow_preparation: bool = false, allow_quali
 
 
 func _begin_baseline_preparation(source: String) -> void:
+	_request_background_prepared_pose_capture()
 	var node: CombatAnimationMotionNode = _get_active_motion_node()
 	var draft: Resource = _get_active_draft()
 	_baseline_preparation = {"source": source, "wip": active_wip.get_instance_id(),
@@ -1390,6 +1436,13 @@ func _set_selected_motion_node_tip_position_prepared(
 	if _is_motion_node_authoring_locked(motion_node):
 		_reject_locked_motion_node_edit()
 		return false
+	if _is_active_unarmed_authoring_wip():
+		var slot := _resolve_active_motion_node_primary_slot_id()
+		var physical: Dictionary = preview_presenter.resolve_hand_proxy_authoring_segment_state(preview_subviewport, motion_node, slot)
+		if not physical.get("available", false):
+			return false
+		return set_selected_motion_node_hand_proxy_segment(slot, tip_position, physical.pommel_position_local,
+			persist_change, refresh_list, refresh_fields, refresh_preview, refresh_summary, "tip")
 	var baseline_motion_node: CombatAnimationMotionNode = _build_motion_node_segment_baseline_for_direct_edit(motion_node)
 	if (
 		motion_node.tip_position_local.is_equal_approx(tip_position)
@@ -1562,8 +1615,11 @@ func set_selected_motion_node_hand_proxy_segment(
 	refresh_list: bool = true,
 	refresh_fields: bool = true,
 	refresh_preview: bool = true,
-	refresh_summary: bool = true
+	refresh_summary: bool = true,
+	hand_control_mode: String = "pose"
 ) -> bool:
+	if hand_control_mode not in ["tip", "pommel", "pose"]:
+		return false
 	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
 	if motion_node == null:
 		return false
@@ -1585,7 +1641,8 @@ func set_selected_motion_node_hand_proxy_segment(
 		refresh_summary,
 		StringName(),
 		slot_id,
-		true
+		true,
+		hand_control_mode
 	)
 	return true
 
@@ -2167,7 +2224,7 @@ func _build_preview_shortcut_overlay_text() -> String:
 		_get_action_binding_label(ACTION_NEW_NODE),
 		_get_action_binding_label(ACTION_DELETE_NODE),
 	])
-	lines.append("%s  Cycle Tip / Pommel / Wrist Roll / Weapon Facing / Arms / Free Hands (Shift: reverse)" % _get_action_binding_label(ACTION_CYCLE_FOCUS))
+	lines.append("%s  Cycle Tip / Pommel / Wrist Roll / Weapon Facing / Arms / Fingers / Free Hands (Shift: reverse)" % _get_action_binding_label(ACTION_CYCLE_FOCUS))
 	lines.append("%s  Preview / Stop" % _get_action_binding_label(ACTION_PREVIEW_PLAYBACK))
 	lines.append("LMB  Drag Active Control / Bezier Handles")
 	lines.append("Green Orb  Wrist Roll  |  Dark Green Cube  Weapon-only Roll")
@@ -2176,6 +2233,12 @@ func _build_preview_shortcut_overlay_text() -> String:
 	return "\n".join(lines)
 
 func _get_focus_display_name(focus_id: StringName) -> String:
+	var wrist_slot := CombatAnimationSessionStateScript.empty_hand_wrist_slot(focus_id)
+	if wrist_slot != StringName():
+		return "Left Wrist Bend" if wrist_slot == HAND_SLOT_LEFT else "Right Wrist Bend"
+	var finger: Dictionary = EmptyHandFingerControlScript.decode_focus(focus_id)
+	if not finger.is_empty():
+		return "%s %s Curl" % ["Left" if finger.slot == HAND_SLOT_LEFT else "Right", String(finger.digit).capitalize()]
 	match focus_id:
 		CombatAnimationSessionStateScript.FOCUS_TIP:
 			return "Tip"
@@ -3700,7 +3763,10 @@ func _refresh_editor_fields() -> void:
 	pommel_curve_out_x_spin_box.editable = motion_node_curve_editable
 	pommel_curve_out_y_spin_box.editable = motion_node_curve_editable
 	pommel_curve_out_z_spin_box.editable = motion_node_curve_editable
-	weapon_roll_spin_box.editable = motion_node_editable
+	weapon_roll_spin_box.editable = motion_node_editable and not _is_active_unarmed_authoring_wip()
+	# Empty wrists have their own measured green-ball controls. This legacy
+	# weapon scalar is still part of orientation encoding, not their bend value.
+	weapon_roll_spin_box.get_parent().visible = not _is_active_unarmed_authoring_wip()
 	_refresh_weapon_roll_control_bounds(motion_node)
 	axial_reposition_spin_box.editable = motion_node_editable
 	grip_seat_slide_spin_box.editable = motion_node_editable
@@ -4174,6 +4240,7 @@ func _refresh_preview_scene(
 	grip_resolve_reason: StringName = StringName()
 ) -> void:
 	_prepared_pose_refresh_generation += 1
+	_request_background_prepared_pose_capture()
 	var scoped_lookup: bool = motion_node_editor.is_dragging()
 	if scoped_lookup:
 		_begin_preview_authoring_lookup_scope()
@@ -4198,7 +4265,8 @@ func _refresh_preview_scene_prepared(grip_resolve_reason: StringName) -> void:
 	if preview_drag_override_node != null and preview_drag_independent_arm_slot != StringName():
 		var arm_result: Dictionary = preview_presenter.apply_independent_arm_edit(
 			preview_subviewport, preview_drag_override_node, preview_drag_independent_arm_slot,
-			true, preview_drag_independent_hand_proxy)
+			true, preview_drag_independent_hand_proxy,
+			"tip" if _is_hand_proxy_tip_drag_target(preview_drag_target) else "pommel")
 		if not arm_result.get("valid", false):
 			_set_preview_drag_blocked_status(arm_result)
 			if arm_result.get("retained_previous_pose", false):
@@ -4365,6 +4433,7 @@ func _get_preview_drag_refresh_interval_msec() -> int:
 func _is_pommel_drag_authority_active() -> bool:
 	return (
 		preview_drag_override_node != null
+		and not preview_drag_independent_hand_proxy
 		and (
 			preview_drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_POMMEL
 			or preview_drag_pommel_authority_pending
@@ -5761,6 +5830,7 @@ func _stage_active_wip_edit(
 	status_message: String = "",
 	runtime_cache_mode: StringName = PERSIST_RUNTIME_CACHE_DIRTY_ACTIVE
 ) -> void:
+	_request_background_prepared_pose_capture()
 	_cancel_preview_preparation("Preview preparation cancelled by an edit. Press F to prepare current edits.")
 	# Keep advisory markers until fresh recording/rendering confirms the edit
 	# improved them. Merely touching a control is not a successful validation.
@@ -6490,6 +6560,11 @@ func _build_motion_node_runtime_cache_signature(motion_node: CombatAnimationMoti
 	parts.append(String(motion_node.left_hand_proxy_tip_position_origin_id))
 	parts.append(str(motion_node.left_hand_proxy_pommel_position_local.snapped(Vector3(0.0001, 0.0001, 0.0001))))
 	parts.append(String(motion_node.left_hand_proxy_pommel_position_origin_id))
+	for slot: StringName in [HAND_SLOT_RIGHT, HAND_SLOT_LEFT]:
+		var curls: Dictionary = EmptyHandFingerControlScript.get_curls(motion_node, slot)
+		for digit: StringName in EmptyHandFingerControlScript.DIGITS:
+			if curls.has(digit):
+				parts.append("%s:%s:%s" % [slot, digit, curls[digit]])
 	parts.append(String(motion_node.preferred_grip_style_mode))
 	parts.append(String(motion_node.two_hand_state))
 	parts.append(String(motion_node.primary_hand_slot))
@@ -6581,7 +6656,8 @@ func _apply_motion_node_change(
 	refresh_summary: bool = true,
 	preview_grip_resolve_reason: StringName = StringName(),
 	independent_arm_slot: StringName = StringName(),
-	independent_hand_proxy: bool = false
+	independent_hand_proxy: bool = false,
+	independent_hand_control_mode: String = "pose"
 ) -> void:
 	if persist_change:
 		_stage_active_wip_edit(status_message)
@@ -6594,7 +6670,7 @@ func _apply_motion_node_change(
 	if refresh_preview:
 		if independent_arm_slot != StringName():
 			var arm_result: Dictionary = preview_presenter.apply_independent_arm_edit(
-				preview_subviewport, _get_active_motion_node(), independent_arm_slot, false, independent_hand_proxy)
+				preview_subviewport, _get_active_motion_node(), independent_arm_slot, false, independent_hand_proxy, independent_hand_control_mode)
 			if not arm_result.get("valid", false):
 				_set_preview_drag_blocked_status(arm_result)
 				if arm_result.get("retained_previous_pose", false):
@@ -6887,6 +6963,9 @@ func _ensure_preview_drag_motion_chain_cache() -> Dictionary:
 	}
 
 func _clear_preview_drag_override() -> void:
+	preview_empty_hand_wrist_slot = StringName()
+	preview_finger_drag_state.clear()
+	preview_finger_drag_changed = false
 	preview_weapon_roll_dragging = false
 	preview_weapon_facing_dragging = false
 	preview_drag_override_node = null
@@ -6939,7 +7018,7 @@ func _begin_preview_drag_override(source_motion_node: CombatAnimationMotionNode,
 		elif _is_hand_proxy_drag_target(drag_target):
 			preview_drag_independent_arm_slot = _resolve_hand_proxy_drag_slot(drag_target)
 			preview_drag_independent_hand_proxy = true
-		preview_drag_forearm_guard_active = drag_target in [CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP, CombatAnimationMotionNodeEditorScript.DRAG_TARGET_POMMEL] and not _is_noncombat_idle_draft(_get_active_draft())
+		preview_drag_forearm_guard_active = not preview_drag_independent_hand_proxy and drag_target in [CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP, CombatAnimationMotionNodeEditorScript.DRAG_TARGET_POMMEL] and not _is_noncombat_idle_draft(_get_active_draft())
 		preview_drag_last_accepted_node = preview_drag_override_node.duplicate(true) as CombatAnimationMotionNode
 
 func _get_effective_preview_motion_node() -> CombatAnimationMotionNode:
@@ -7317,6 +7396,11 @@ func _apply_motion_node_state(target: CombatAnimationMotionNode, source: CombatA
 		return _apply_motion_node_curve_handle_state(target, source)
 	var stored_source: CombatAnimationMotionNode = _build_stored_motion_node_state_from_preview_state(source)
 	var changed: bool = false
+	for property: StringName in [&"right_hand_finger_curl_degrees", &"left_hand_finger_curl_degrees"]:
+		var curls: Dictionary = stored_source.get(property)
+		if target.get(property) != curls:
+			target.set(property, curls.duplicate(true))
+			changed = true
 	# Releasing a drag transfers the accepted override to the stored node.
 	# Preserve every encoded weapon field exactly so ownership survives that
 	# transfer; change detection must not decide which pose fields are copied.
@@ -7434,6 +7518,18 @@ func _finalize_preview_drag(status_message: String = "Motion node edit locked in
 	_end_preview_authoring_lookup_scope()
 
 func _finalize_preview_drag_prepared(status_message: String = "Motion node edit locked in.") -> void:
+	if preview_empty_hand_wrist_slot != StringName():
+		preview_empty_hand_wrist_slot = StringName()
+		_refresh_motion_node_list()
+		_refresh_editor_fields()
+		_refresh_summary()
+		return
+	if not preview_finger_drag_state.is_empty():
+		preview_finger_drag_state.clear()
+		if preview_finger_drag_changed:
+			_commit_empty_hand_finger_edit()
+		preview_finger_drag_changed = false
+		return
 	if preview_weapon_facing_dragging:
 		preview_weapon_facing_dragging = false
 		# Keep the body stationary and acquisition suspended while the cube is
@@ -8141,7 +8237,13 @@ func _resolve_available_focus_ids() -> Array[StringName]:
 	var motion_node: CombatAnimationMotionNode = _get_active_motion_node()
 	if active_wip != null and not _is_active_unarmed_authoring_wip() and not _is_noncombat_idle_draft(_get_active_draft()):
 		focus_ids.insert(3, CombatAnimationSessionStateScript.FOCUS_WEAPON_FACING)
+	if _is_active_unarmed_authoring_wip():
+		focus_ids[2] = CombatAnimationSessionStateScript.empty_hand_wrist_focus(_resolve_active_motion_node_primary_slot_id())
 	for slot_id: StringName in _resolve_available_hand_proxy_slots(motion_node):
+		var wrist_focus := CombatAnimationSessionStateScript.empty_hand_wrist_focus(slot_id)
+		if not focus_ids.has(wrist_focus):
+			focus_ids.append(wrist_focus)
+		focus_ids.append_array(EmptyHandFingerControlScript.focus_ids(slot_id))
 		focus_ids.append(
 			CombatAnimationSessionStateScript.FOCUS_LEFT_HAND_PROXY
 			if slot_id == HAND_SLOT_LEFT
@@ -8508,6 +8610,14 @@ func _set_selected_motion_node_pommel_position_prepared(
 	if _is_motion_node_authoring_locked(motion_node):
 		_reject_locked_motion_node_edit()
 		return false
+	if _is_active_unarmed_authoring_wip():
+		var slot := _resolve_active_motion_node_primary_slot_id()
+		var physical: Dictionary = preview_presenter.resolve_hand_proxy_authoring_segment_state(preview_subviewport, motion_node, slot)
+		if not physical.get("available", false):
+			return false
+		var delta: Vector3 = pommel_position - (physical.pommel_position_local as Vector3)
+		return set_selected_motion_node_hand_proxy_segment(slot, physical.tip_position_local + delta, pommel_position,
+			persist_change, refresh_list, refresh_fields, refresh_preview, refresh_summary, "pommel")
 	var baseline_motion_node: CombatAnimationMotionNode = _build_motion_node_segment_baseline_for_direct_edit(motion_node)
 	if (
 		motion_node.pommel_position_local.is_equal_approx(pommel_position)
@@ -8622,6 +8732,72 @@ func _refresh_weapon_roll_control_bounds(motion_node: CombatAnimationMotionNode)
 
 ## Cumulative angle from the start of this weapon-only gesture. Final facing
 ## uses the existing node orientation; wrist Roll remains a separate coordinate.
+## Empty-hand controls edit only the selected finger. Normal endpoint recording
+## captures these named bone rotations together with the rest of the node.
+func set_selected_motion_node_finger_curl(slot: StringName, digit: StringName, degrees: float, commit: bool = true) -> bool:
+	_begin_preview_authoring_lookup_scope()
+	var changed := _set_selected_motion_node_finger_curl_prepared(slot, digit, degrees, commit)
+	_end_preview_authoring_lookup_scope()
+	return changed
+
+func _set_selected_motion_node_finger_curl_prepared(slot: StringName, digit: StringName, degrees: float, commit: bool) -> bool:
+	var motion: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion == null or chain_player.is_playing() or _is_motion_node_authoring_locked(motion) or not is_finite(degrees):
+		return false
+	if not _resolve_available_hand_proxy_slots(motion).has(slot) or not EmptyHandFingerControlScript.DIGITS.has(digit):
+		return false
+	var focus := StringName(("left_finger_" if slot == HAND_SLOT_LEFT else "right_finger_") + String(digit))
+	var curls: Dictionary = EmptyHandFingerControlScript.get_curls(motion, slot)
+	var bounded := clampf(degrees, 0.0, 180.0)
+	if curls.has(digit) and is_equal_approx(float(curls[digit]), bounded):
+		return false
+	var result: Dictionary = preview_presenter.apply_empty_hand_finger_control(preview_subviewport, motion, focus, bounded)
+	if not bool(result.get("accepted", false)):
+		footer_status_label.text = "Could not adjust finger: %s." % result.get("reason", "unavailable")
+		return false
+	_request_background_prepared_pose_capture()
+	preview_presenter.refresh_empty_hand_finger_visuals(preview_view_container, preview_subviewport, motion, session_state.current_focus)
+	footer_status_label.text = "%s: %.0f degrees (0 open, 180 curled)." % [_get_focus_display_name(focus), bounded]
+	if commit:
+		_commit_empty_hand_finger_edit()
+	return true
+
+func _commit_empty_hand_finger_edit() -> void:
+	_stage_active_wip_edit("Finger pose adjusted.")
+	_refresh_motion_node_list()
+	_refresh_editor_fields()
+	_refresh_summary("Finger pose adjusted.")
+
+func set_selected_motion_node_empty_hand_wrist_bend(slot: StringName, gamma_degrees: float) -> bool:
+	_begin_preview_authoring_lookup_scope()
+	var changed := _set_selected_empty_hand_wrist_bend_prepared(slot, gamma_degrees)
+	_end_preview_authoring_lookup_scope()
+	return changed
+
+func _set_selected_empty_hand_wrist_bend_prepared(slot: StringName, gamma_degrees: float) -> bool:
+	var motion: CombatAnimationMotionNode = _get_active_motion_node()
+	if motion == null or chain_player.is_playing() or _is_motion_node_authoring_locked(motion) or not is_finite(gamma_degrees):
+		return false
+	if not _resolve_available_hand_proxy_slots(motion).has(slot):
+		return false
+	var control: Dictionary = preview_presenter.describe_empty_hand_wrist_control(preview_subviewport, motion, slot)
+	if not control.get("available", false):
+		return false
+	var bounded: float = clampf(gamma_degrees, control.minimum_degrees, control.maximum_degrees)
+	if is_equal_approx(bounded, float(control.angle_degrees)):
+		return false
+	var result: Dictionary = preview_presenter.apply_empty_hand_wrist_bend(preview_subviewport, motion, slot, bounded)
+	if not result.get("valid", false):
+		_set_preview_drag_blocked_status(result)
+		return false
+	_stage_active_wip_edit("Wrist bend adjusted.")
+	# The independent-arm owner retains the attained pose; visuals only observe it.
+	_refresh_endpoint_motion_visuals()
+	if preview_empty_hand_wrist_slot == StringName():
+		_refresh_motion_node_list()
+		_refresh_editor_fields()
+	return true
+
 func apply_selected_motion_node_weapon_facing_delta(delta_degrees: float, begin_gesture: bool = false) -> bool:
 	var motion: CombatAnimationMotionNode = _get_active_motion_node()
 	if motion == null or _is_motion_node_authoring_locked(motion) or chain_player.is_playing() or not is_finite(delta_degrees):
@@ -8677,6 +8853,8 @@ func _set_selected_motion_node_weapon_roll_prepared(
 	if _is_motion_node_authoring_locked(motion_node):
 		_reject_locked_motion_node_edit()
 		return false
+	if _is_active_unarmed_authoring_wip():
+		return _set_selected_empty_hand_wrist_bend_prepared(_resolve_active_motion_node_primary_slot_id(), roll_degrees)
 	if not is_finite(roll_degrees) or is_equal_approx(motion_node.weapon_roll_degrees, roll_degrees):
 		return false
 	var limits: Dictionary = _get_weapon_roll_edit_limits(motion_node)
@@ -9188,6 +9366,28 @@ func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 					_reject_locked_motion_node_edit()
 					preview_view_container.accept_event()
 					return
+				if not EmptyHandFingerControlScript.decode_focus(drag_target).is_empty():
+					var control: Dictionary = preview_presenter.describe_empty_hand_finger_control(preview_subviewport, motion_node, drag_target)
+					if bool(control.get("available", false)):
+						_cancel_preview_preparation("Preview preparation cancelled by a finger edit.")
+						preview_finger_drag_state = EmptyHandFingerControlScript.begin_drag(camera, control, mb.position, float(control.angle_degrees))
+						preview_finger_drag_changed = false
+						motion_node_editor.begin_drag(drag_target, mb.position, motion_node)
+						footer_status_label.text = "%s: drag around the hand, 0 degrees open to 180 degrees curled." % _get_focus_display_name(drag_target)
+					preview_view_container.accept_event()
+					return
+				var wrist_slot := CombatAnimationSessionStateScript.empty_hand_wrist_slot(drag_target)
+				if wrist_slot != StringName():
+					var control: Dictionary = preview_presenter.describe_empty_hand_wrist_control(preview_subviewport, motion_node, wrist_slot)
+					if control.get("available", false):
+						_cancel_preview_preparation("Preview preparation cancelled by a wrist edit.")
+						preview_empty_hand_wrist_slot = wrist_slot
+						preview_empty_hand_wrist_start_degrees = control.angle_degrees
+						preview_weapon_roll_pointer_start = mb.position
+						motion_node_editor.begin_drag(drag_target, mb.position, motion_node)
+						footer_status_label.text = "Drag left or right to bend this wrist."
+						preview_view_container.accept_event()
+					return
 				if drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_WEAPON_FACING:
 					if apply_selected_motion_node_weapon_facing_delta(0.0, true):
 						preview_weapon_facing_dragging = true
@@ -9273,6 +9473,21 @@ func _on_preview_gui_input_prepared(event: InputEvent) -> void:
 
 func _handle_preview_drag(screen_position: Vector2) -> void:
 	_endpoint_pointer_latest = screen_position
+	if preview_empty_hand_wrist_slot != StringName():
+		var requested := preview_empty_hand_wrist_start_degrees + (screen_position.x - preview_weapon_roll_pointer_start.x) * 0.5
+		set_selected_motion_node_empty_hand_wrist_bend(preview_empty_hand_wrist_slot, requested)
+		# Consume rejected travel too, so reversing at a limit responds immediately.
+		preview_weapon_roll_pointer_start = screen_position
+		var control: Dictionary = preview_presenter.describe_empty_hand_wrist_control(preview_subviewport, _get_active_motion_node(), preview_empty_hand_wrist_slot)
+		if control.get("available", false):
+			preview_empty_hand_wrist_start_degrees = control.angle_degrees
+		return
+	if not preview_finger_drag_state.is_empty():
+		var angle: float = EmptyHandFingerControlScript.update_drag(preview_finger_drag_state, _get_preview_camera(), screen_position)
+		var finger: Dictionary = EmptyHandFingerControlScript.decode_focus(motion_node_editor.get_drag_target())
+		if not finger.is_empty():
+			preview_finger_drag_changed = set_selected_motion_node_finger_curl(finger.slot, finger.digit, angle, false) or preview_finger_drag_changed
+		return
 	if preview_weapon_facing_dragging:
 		apply_selected_motion_node_weapon_facing_delta((screen_position.x - preview_weapon_roll_pointer_start.x) * 0.5)
 		return
@@ -9484,15 +9699,21 @@ func _is_arm_roll_focus(focus_id: StringName) -> bool:
 	)
 
 func _is_hand_proxy_focus(focus_id: StringName) -> bool:
+	if _is_active_unarmed_authoring_wip() and focus_id in [CombatAnimationSessionStateScript.FOCUS_TIP, CombatAnimationSessionStateScript.FOCUS_POMMEL]:
+		return true
 	return (
 		focus_id == CombatAnimationSessionStateScript.FOCUS_RIGHT_HAND_PROXY
 		or focus_id == CombatAnimationSessionStateScript.FOCUS_LEFT_HAND_PROXY
 	)
 
 func _resolve_hand_proxy_focus_slot(focus_id: StringName) -> StringName:
+	if _is_active_unarmed_authoring_wip() and focus_id in [CombatAnimationSessionStateScript.FOCUS_TIP, CombatAnimationSessionStateScript.FOCUS_POMMEL]:
+		return _resolve_active_motion_node_primary_slot_id()
 	return HAND_SLOT_LEFT if focus_id == CombatAnimationSessionStateScript.FOCUS_LEFT_HAND_PROXY else HAND_SLOT_RIGHT
 
 func _is_hand_proxy_drag_target(drag_target: StringName) -> bool:
+	if _is_active_unarmed_authoring_wip() and drag_target in [CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP, CombatAnimationMotionNodeEditorScript.DRAG_TARGET_POMMEL]:
+		return true
 	return (
 		drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_RIGHT_HAND_PROXY_TIP
 		or drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_RIGHT_HAND_PROXY_POMMEL
@@ -9504,9 +9725,12 @@ func _is_hand_proxy_tip_drag_target(drag_target: StringName) -> bool:
 	return (
 		drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_RIGHT_HAND_PROXY_TIP
 		or drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_LEFT_HAND_PROXY_TIP
+		or (_is_active_unarmed_authoring_wip() and drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP)
 	)
 
 func _resolve_hand_proxy_drag_slot(drag_target: StringName) -> StringName:
+	if _is_active_unarmed_authoring_wip() and drag_target in [CombatAnimationMotionNodeEditorScript.DRAG_TARGET_TIP, CombatAnimationMotionNodeEditorScript.DRAG_TARGET_POMMEL]:
+		return _resolve_active_motion_node_primary_slot_id()
 	if drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_LEFT_HAND_PROXY_TIP or drag_target == CombatAnimationMotionNodeEditorScript.DRAG_TARGET_LEFT_HAND_PROXY_POMMEL:
 		return HAND_SLOT_LEFT
 	return HAND_SLOT_RIGHT

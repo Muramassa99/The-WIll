@@ -783,6 +783,11 @@ func _validate_supported_body(
 	for path_roll: float in body.get("path_roll_degrees") as PackedFloat64Array:
 		if not is_finite(path_roll) or not is_zero_approx(path_roll):
 			return {"ok": false, "error": "chunked_field_path_roll_unsupported"}
+	for profile_scale: Vector2 in body.get("path_profile_scales") as PackedVector2Array:
+		if not profile_scale.is_finite() or not profile_scale.is_equal_approx(Vector2.ONE):
+			return {"ok": false, "error": "chunked_field_path_scale_unsupported"}
+	if not (body.get("path_profile_transform_ranges") as Array).is_empty():
+		return {"ok": false, "error": "chunked_field_path_transform_ranges_unsupported"}
 	for point: Vector3 in path_points:
 		if not _is_finite_vector3(point):
 			return {

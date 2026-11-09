@@ -817,14 +817,8 @@ func _commit(payload: Dictionary, accepted_weapon: Transform3D, record_timing: b
 	# Skin helpers consume accepted semantic rho. They cannot alter main bone
 	# frames, the weapon task, or the calibrated rigid contact relationship.
 	for arm: Dictionary in arms:
-		var i: Array = arm.indices
 		var state: Dictionary = payload.wrist_states_by_slot[arm.slot]
-		var skin: Dictionary = ForearmSkin.distribute(skeleton.get_bone_global_pose(i[2]), skeleton.get_bone_global_pose(i[3]),
-			arm.helper_rests[0], arm.helper_rests[1], arm.helper_rests[2], Wrist.forearm_geometry_limit(arm.wrist_calibration, arm.wrist_profile),
-			float(arm.wrist_profile.angle_epsilon_radians), float(state.rho))
-		if skin.get("valid", false):
-			skeleton.set_bone_pose_rotation(i[4], skin.proximal_rotation)
-			skeleton.set_bone_pose_rotation(i[5], skin.distal_rotation)
+		if _update_forearm_skin(arm, state):
 			rig.get("_wrist_motion_states")[arm.slot] = state.duplicate()
 			rig.get("_wrist_motion_failures").erase(arm.slot)
 		rig.get("_shoulder_motion_states")[arm.slot] = payload.shoulder_states_by_slot[arm.slot].duplicate(true)
@@ -838,6 +832,17 @@ func _commit(payload: Dictionary, accepted_weapon: Transform3D, record_timing: b
 		payload.local_poses[index] = skeleton.get_bone_pose(index)
 	if record_timing:
 		timings.commit_us += Time.get_ticks_usec() - started
+
+func _update_forearm_skin(arm: Dictionary, state: Dictionary) -> bool:
+	var i: Array = arm.indices
+	var skin: Dictionary = ForearmSkin.distribute(skeleton.get_bone_global_pose(i[2]), skeleton.get_bone_global_pose(i[3]),
+		arm.helper_rests[0], arm.helper_rests[1], arm.helper_rests[2], Wrist.forearm_geometry_limit(arm.wrist_calibration, arm.wrist_profile),
+		float(arm.wrist_profile.angle_epsilon_radians), float(state.rho))
+	if not skin.get("valid", false):
+		return false
+	skeleton.set_bone_pose_rotation(i[4], skin.proximal_rotation)
+	skeleton.set_bone_pose_rotation(i[5], skin.distal_rotation)
+	return true
 
 func _timing_result() -> Dictionary:
 	return {"allocate_ms": float(Time.get_ticks_usec() - allocation_start_usec) / 1000.0,

@@ -5,6 +5,7 @@ const CraftedItemWIPScript = preload("res://core/models/crafted_item_wip.gd")
 const ForgeV2ProfileShapeLibraryScript = preload("res://runtime/forge_v2/forge_v2_profile_shape_library.gd")
 const ForgeV2VolumeStrokeScript = preload("res://runtime/forge_v2/forge_v2_volume_stroke.gd")
 const ForgeV2PathRollScript = preload("res://runtime/forge_v2/forge_v2_path_roll.gd")
+const ForgeV2PathScaleScript = preload("res://runtime/forge_v2/forge_v2_path_scale.gd")
 
 const BODY_KIND_VOLUME_STROKE := &"body_kind_volume_stroke"
 const BODY_KIND_PLATFORM_SEED := &"body_kind_platform_seed"
@@ -41,6 +42,8 @@ const MATERIAL_UNIT_SCALE := 100
 @export var path_points: PackedVector3Array = PackedVector3Array()
 @export var path_surface_normals: PackedVector3Array = PackedVector3Array()
 @export var path_roll_degrees: PackedFloat64Array = PackedFloat64Array()
+@export var path_profile_scales: PackedVector2Array = PackedVector2Array()
+@export var path_profile_transform_ranges: Array[Dictionary] = []
 @export var path_contact_directions: PackedVector3Array = PackedVector3Array()
 @export var surface_target_kind: StringName = StringName()
 @export var surface_target_id: StringName = StringName()
@@ -119,6 +122,17 @@ func normalize() -> void:
 			path_points.size()
 		)
 	_normalize_path_contact_directions()
+	# Handles retain their existing geometry and grip-target contract.
+	if body_kind == BODY_KIND_HANDLE_PROFILE:
+		path_profile_scales = PackedVector2Array()
+		path_profile_transform_ranges = []
+	else:
+		path_profile_scales = ForgeV2PathScaleScript.normalize(
+			path_profile_scales, path_points.size()
+		)
+		path_profile_transform_ranges = ForgeV2PathScaleScript.normalize_ranges(
+			path_profile_transform_ranges, path_points.size()
+		)
 	if _is_profile_shape_kind():
 		_ensure_profile_data()
 	radius_meters = maxf(radius_meters, 0.001)
@@ -176,11 +190,12 @@ func _calculate_capsule_path_volume_meters_cubed() -> float:
 	var radius: float = maxf(radius_meters, 0.001)
 	if path_points.size() == 1:
 		return _sphere_volume(radius)
-	var path_length: float = 0.0
-	for point_index in range(path_points.size() - 1):
-		path_length += path_points[point_index].distance_to(path_points[point_index + 1])
+	var path_length := ForgeV2PathScaleScript.weighted_body_path_length(self)
 	var cylinder_volume: float = PI * radius * radius * path_length
 	var endpoint_volume: float = _sphere_volume(radius)
+	if ForgeV2PathScaleScript.has_scale(self):
+		# Transformed paths use the shared flat-cap profile sweep.
+		endpoint_volume = 0.0
 	return cylinder_volume + endpoint_volume
 
 func _sphere_volume(radius: float) -> float:
@@ -190,9 +205,7 @@ func _calculate_profile_path_volume_meters_cubed() -> float:
 	var profile_area: float = ForgeV2ProfileShapeLibraryScript.calculate_polygon_area_meters_squared(profile_polygon_2d_meters)
 	if profile_area <= 0.0 or path_points.size() < 2:
 		return 0.0
-	var path_length := 0.0
-	for point_index in range(path_points.size() - 1):
-		path_length += path_points[point_index].distance_to(path_points[point_index + 1])
+	var path_length := ForgeV2PathScaleScript.weighted_body_path_length(self)
 	return profile_area * path_length
 
 func _normalize_body_kind(next_body_kind: StringName) -> StringName:

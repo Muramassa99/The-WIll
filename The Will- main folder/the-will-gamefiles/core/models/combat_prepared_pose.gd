@@ -1,6 +1,10 @@
 extends RefCounted
 class_name CombatPreparedPose
 
+const MotionNode = preload("res://core/models/combat_animation_motion_node.gd")
+const EMPTY_HAND_CURL_FIELDS: Array[StringName] = [
+	&"right_hand_finger_curl_degrees", &"left_hand_finger_curl_degrees",
+]
 ## Value contract for a pose already solved and captured during editing.
 # Semantic wrist authority replaces the former Hand swing-twist snapshots.
 # Retain authored controls, but do not silently restore their obsolete solve.
@@ -10,17 +14,53 @@ const NON_POSE_FIELDS: Array[StringName] = [
 	&"prepared_pose", &"prepared_pose_signature", &"transition_duration_seconds",
 	&"tip_curve_in_handle", &"tip_curve_out_handle",
 	&"pommel_curve_in_handle", &"pommel_curve_out_handle", &"locked_for_authoring",
+	# Empty controls did not exist in older signatures. Append only authored
+	# digits below, so adding this feature preserves untouched prepared poses.
+	&"right_hand_finger_curl_degrees", &"left_hand_finger_curl_degrees",
 ]
+static var _native_pose_capture_kernel: RefCounted
 
 static func node_pose_signature(node: Resource) -> String:
 	if node == null:
 		return ""
+	# The signature format remains unchanged. Sparse-control policy stays with
+	# MotionNode; native code only assembles and hashes the same Variant payload.
+	# Arbitrary Resources retain the generic script path, which discovers fields.
+	if node is MotionNode:
+		if _native_pose_capture_kernel == null and ClassDB.class_exists(&"CombatPoseCaptureKernel"):
+			_native_pose_capture_kernel = ClassDB.instantiate(&"CombatPoseCaptureKernel") as RefCounted
+		if _native_pose_capture_kernel != null:
+			var normalized_curls: Dictionary = {}
+			for field: StringName in EMPTY_HAND_CURL_FIELDS:
+				normalized_curls[field] = MotionNode.normalize_empty_hand_finger_curls(node.get(field))
+			return _native_pose_capture_kernel.call("node_pose_signature", node,
+				NON_POSE_FIELDS, EMPTY_HAND_CURL_FIELDS, MotionNode.EMPTY_HAND_FINGER_IDS,
+				normalized_curls, PROPERTY_USAGE_SCRIPT_VARIABLE | PROPERTY_USAGE_STORAGE)
+	return _node_pose_signature_script(node)
+
+static func _node_pose_signature_script(node: Resource) -> String:
+	if node == null:
+		return ""
 	var values: Array = []
+	var curl_fields: Dictionary = {}
 	for property: Dictionary in node.get_property_list():
 		var name: StringName = StringName(property.name)
+		if name in EMPTY_HAND_CURL_FIELDS:
+			var authored: Variant = node.get(name)
+			if authored is Dictionary:
+				curl_fields[name] = MotionNode.normalize_empty_hand_finger_curls(authored)
 		if (int(property.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE) == 0 or (int(property.usage) & PROPERTY_USAGE_STORAGE) == 0 or name in NON_POSE_FIELDS:
 			continue
 		values.append([name, node.get(name)])
+	for field: StringName in EMPTY_HAND_CURL_FIELDS:
+		var curls: Dictionary = curl_fields.get(field, {})
+		if curls.is_empty():
+			continue
+		var ordered: Array = []
+		for digit: StringName in MotionNode.EMPTY_HAND_FINGER_IDS:
+			if curls.has(digit):
+				ordered.append([digit, curls[digit]])
+		values.append([field, ordered])
 	return var_to_bytes(values).hex_encode().sha256_text()
 
 static func validate(snapshot: Dictionary, context_signature: String = "") -> Dictionary:

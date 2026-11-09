@@ -1,0 +1,399 @@
+extends SceneTree
+
+# Export-only geometry checks. Reads saved sources, never writes player assets.
+# Surface deviation is deterministic bidirectional sampling, not a Hausdorff proof.
+const Simplifier = preload("res://runtime/forge_v2/forge_v2_runtime_mesh_simplifier.gd")
+const State = preload("res://runtime/forge_v2/forge_v2_authoring_state.gd")
+const Presenter = preload("res://runtime/forge_v2/forge_v2_volume_preview_presenter.gd")
+const ProfileLibrary = preload("res://core/models/player_tool_profile_library_state.gd")
+const ARTIFACT_ROOT := "C:/WORKSPACE/godot_runs/forge_v2_taper_test"
+const REPORT := "C:/WORKSPACE/godot_runs/forge_v2_export_simplification.json"
+const TOLERANCE_M := 0.0001
+const NUMERICAL_ALLOWANCE_M := 0.000002
+const SURFACE_TRIANGLE_SAMPLES := 384
+
+var checks := 0
+var failures := PackedStringArray()
+var evidence: Array[Dictionary] = []
+var presenter: Node3D
+
+
+# Test-only spatial index: midpoint partitions and nearest triangle queries.
+# It shares no simplification/error code with the production native backend.
+class SurfaceTree extends RefCounted:
+	var vertices := PackedVector3Array()
+	var indices := PackedInt32Array()
+	var triangle_bounds: Array[AABB] = []
+	var centers := PackedVector3Array()
+	var nodes: Array[Dictionary] = []
+
+	func _init(source_vertices: PackedVector3Array, source_indices: PackedInt32Array) -> void:
+		vertices = source_vertices
+		indices = source_indices
+		var ids := PackedInt32Array()
+		for offset in range(0, indices.size(), 3):
+			var a := vertices[indices[offset]]
+			var b := vertices[indices[offset + 1]]
+			var c := vertices[indices[offset + 2]]
+			triangle_bounds.append(AABB(a, Vector3.ZERO).expand(b).expand(c))
+			centers.append((a + b + c) / 3.0)
+			ids.append(offset / 3)
+		_build(ids, 0)
+
+	func _build(ids: PackedInt32Array, depth: int) -> int:
+		var bounds: AABB = triangle_bounds[ids[0]]
+		var center_bounds := AABB(centers[ids[0]], Vector3.ZERO)
+		for id: int in ids:
+			bounds = bounds.merge(triangle_bounds[id])
+			center_bounds = center_bounds.expand(centers[id])
+		var node_id := nodes.size()
+		nodes.append({"bounds": bounds, "left": -1, "right": -1, "triangles": ids})
+		if ids.size() <= 24 or depth >= 32:
+			return node_id
+		var extent := center_bounds.size
+		var axis := 0 if extent.x >= extent.y and extent.x >= extent.z else (1 if extent.y >= extent.z else 2)
+		var split := center_bounds.get_center()[axis]
+		var left := PackedInt32Array()
+		var right := PackedInt32Array()
+		for id: int in ids:
+			if centers[id][axis] < split:
+				left.append(id)
+			else:
+				right.append(id)
+		if left.is_empty() or right.is_empty():
+			return node_id
+		var left_id := _build(left, depth + 1)
+		var right_id := _build(right, depth + 1)
+		nodes[node_id] = {"bounds": bounds, "left": left_id, "right": right_id, "triangles": PackedInt32Array()}
+		return node_id
+
+	func distance_squared(point: Vector3) -> float:
+		var best := INF
+		var stack := PackedInt32Array([0])
+		while not stack.is_empty():
+			var id := stack[stack.size() - 1]
+			stack.resize(stack.size() - 1)
+			var node: Dictionary = nodes[id]
+			if _bounds_distance_squared(point, node.bounds) >= best:
+				continue
+			var left := int(node.left)
+			if left < 0:
+				for triangle: int in node.triangles:
+					var offset := triangle * 3
+					best = minf(best, _triangle_distance_squared(point,
+						vertices[indices[offset]], vertices[indices[offset + 1]], vertices[indices[offset + 2]]))
+			else:
+				var right := int(node.right)
+				var left_distance := _bounds_distance_squared(point, nodes[left].bounds)
+				var right_distance := _bounds_distance_squared(point, nodes[right].bounds)
+				# LIFO visits the nearer child first, improving pruning.
+				stack.append(right if left_distance < right_distance else left)
+				stack.append(left if left_distance < right_distance else right)
+		return best
+
+	func _bounds_distance_squared(point: Vector3, bounds: AABB) -> float:
+		var nearest := point.clamp(bounds.position, bounds.end)
+		return point.distance_squared_to(nearest)
+
+	func _triangle_distance_squared(p: Vector3, a: Vector3, b: Vector3, c: Vector3) -> float:
+		var ab := b - a
+		var ac := c - a
+		var ap := p - a
+		var d1 := ab.dot(ap)
+		var d2 := ac.dot(ap)
+		if d1 <= 0.0 and d2 <= 0.0:
+			return ap.length_squared()
+		var bp := p - b
+		var d3 := ab.dot(bp)
+		var d4 := ac.dot(bp)
+		if d3 >= 0.0 and d4 <= d3:
+			return bp.length_squared()
+		var vc := d1 * d4 - d3 * d2
+		if vc <= 0.0 and d1 >= 0.0 and d3 <= 0.0:
+			return p.distance_squared_to(a + ab * d1 / (d1 - d3))
+		var cp := p - c
+		var d5 := ab.dot(cp)
+		var d6 := ac.dot(cp)
+		if d6 >= 0.0 and d5 <= d6:
+			return cp.length_squared()
+		var vb := d5 * d2 - d1 * d6
+		if vb <= 0.0 and d2 >= 0.0 and d6 <= 0.0:
+			return p.distance_squared_to(a + ac * d2 / (d2 - d6))
+		var va := d3 * d6 - d5 * d4
+		if va <= 0.0 and d4 >= d3 and d5 >= d6:
+			return p.distance_squared_to(b + (c - b) * (d4 - d3) / ((d4 - d3) + (d5 - d6)))
+		var denominator := va + vb + vc
+		if absf(denominator) < 1e-30:
+			return minf(ap.length_squared(), minf(bp.length_squared(), cp.length_squared()))
+		return p.distance_squared_to(a + ab * (vb / denominator) + ac * (vc / denominator))
+
+
+func _init() -> void:
+	call_deferred("_run")
+
+
+func _run() -> void:
+	var started := Time.get_ticks_usec()
+	presenter = Presenter.new()
+	root.add_child(presenter)
+	if _check(ClassDB.class_exists(&"ForgeV2ManifoldBoolean"), "native export geometry backend is available"):
+		_test_distance_oracle()
+		var cube := _subdivided_cube(8)
+		_verify_mesh("planar_subdivided_cube", cube.vertices, cube.indices, 0.90, 12)
+		_test_saved_taper_body()
+		_test_saved_handle_bodies()
+		_test_real_twisted_fluted_profile()
+	presenter.free()
+	var report_path := OS.get_environment("THE_WILL_EXPORT_SIMPLIFICATION_REPORT").strip_edges()
+	if report_path.is_empty():
+		report_path = REPORT
+	DirAccess.make_dir_recursive_absolute(report_path.get_base_dir())
+	var file := FileAccess.open(report_path, FileAccess.WRITE)
+	if file != null:
+		file.store_string(JSON.stringify({"ok": failures.is_empty(), "checks": checks, "failures": failures,
+			"tolerance_meters": TOLERANCE_M, "numerical_allowance_meters": NUMERICAL_ALLOWANCE_M,
+			"distance_method": "Deterministic two-way surface samples with independent triangle BVH; not an exact Hausdorff guarantee.",
+			"evidence": evidence, "duration_ms": float(Time.get_ticks_usec() - started) / 1000.0}, "\t") + "\n")
+	for failure: String in failures:
+		push_error(failure)
+	print("Forge V2 export simplification: %d checks, %d failures; %s" % [checks, failures.size(), report_path])
+	quit(0 if failures.is_empty() else 1)
+
+
+func _test_distance_oracle() -> void:
+	var tree := SurfaceTree.new(PackedVector3Array([Vector3.ZERO, Vector3.RIGHT, Vector3.UP]), PackedInt32Array([0, 1, 2]))
+	_check(absf(sqrt(tree.distance_squared(Vector3(0.2, 0.2, 0.003))) - 0.003) < 0.0000001,
+		"independent triangle-distance oracle detects a known 3 mm displacement")
+	_check(tree.distance_squared(Vector3(0.25, 0.25, 0)) < 1e-14,
+		"independent triangle-distance oracle accepts a face-interior point")
+	_check(absf(tree.distance_squared(Vector3(-1, 0, 0)) - 1.0) < 0.000001,
+		"independent triangle-distance oracle includes finite edge and vertex regions")
+
+
+func _test_saved_taper_body() -> void:
+	var path := ARTIFACT_ROOT.path_join("blade_body.tres")
+	var body := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE_DEEP) as Resource
+	if not _check(body != null, "saved Taper_test blade authoring source is available"):
+		return
+	_verify_body("Taper_test_blade", body, 0.20)
+
+
+func _test_saved_handle_bodies() -> void:
+	var source := ResourceLoader.load(ARTIFACT_ROOT.path_join("handle_body.tres"), "", ResourceLoader.CACHE_MODE_IGNORE_DEEP) as Resource
+	if not _check(source != null, "saved rounded Handle profile source is available"):
+		return
+	var snapshot_owner := State.new()
+	var source_before := var_to_bytes(snapshot_owner.call("_build_material_body_export_snapshot", source))
+	for turns: float in [0.0, 30.0]:
+		var body := source.duplicate(true)
+		# User's long two-point Handle scenario: all source profile data is retained.
+		body.set("path_points", PackedVector3Array([Vector3(-2.1, 0, 0), Vector3(2.1, 0, 0)]))
+		body.set("path_surface_normals", PackedVector3Array([Vector3.UP, Vector3.UP]))
+		body.set("path_roll_degrees", PackedFloat64Array([0.0, turns * 360.0]))
+		body.call("normalize")
+		_verify_body("rounded_Handle_%d_turns" % int(turns), body, 0.20)
+	_check(var_to_bytes(snapshot_owner.call("_build_material_body_export_snapshot", source)) == source_before,
+		"0/30-turn export checks preserve the original saved Handle authoring source")
+
+
+func _test_real_twisted_fluted_profile() -> void:
+	var library := ResourceLoader.load(ProfileLibrary.DEFAULT_SAVE_FILE_PATH, "", ResourceLoader.CACHE_MODE_IGNORE_DEEP) as Resource
+	if not _check(library != null, "real profile library is available read-only"):
+		return
+	var profiles: Array = library.get("saved_profiles")
+	var profiles_before := var_to_bytes(profiles)
+	var fluted: Dictionary = {}
+	for entry: Dictionary in profiles:
+		if String(entry.get("label", "")).to_lower() == "fluted blade":
+			fluted = entry.duplicate(true)
+			break
+	if not _check(not fluted.is_empty(), "real Fluted Blade profile is present"):
+		return
+	var state := State.new()
+	state.reset_new_draft("Export simplification verification")
+	state.set_active_tool_id(State.TOOL_SPLINE_LINE)
+	if not _check(state.select_active_saved_basic_profile(fluted), "real Fluted Blade profile applies to isolated draft"):
+		return
+	for index in range(5):
+		state.append_spline_line_point(Vector3(float(index) * 0.2, 0.025 * sin(float(index)), 0), Vector3.UP)
+		state.set_spline_line_point_roll_degrees(index, float(index) * 180.0)
+	state.set_spline_line_profile_transform(PackedInt32Array([0, 2, 4]), Vector2(1.5, 0.75))
+	var authoring_before := var_to_bytes(state.capture_editor_transient_snapshot())
+	var body := state.build_spline_roll_preview_body() as Resource
+	if _check(body != null, "real twisted Fluted Blade prepares original production source"):
+		_verify_body("real_Fluted_Blade_twisted", body, 0.20)
+	_check(var_to_bytes(state.capture_editor_transient_snapshot()) == authoring_before,
+		"export simplification preserves detailed points, twist, profile and range authoring data")
+	_check(var_to_bytes(profiles) == profiles_before, "real saved profile library remains unchanged")
+
+
+func _verify_body(label: String, body: Resource, minimum_reduction: float) -> void:
+	var snapshot_owner := State.new()
+	var before := var_to_bytes(snapshot_owner.call("_build_material_body_export_snapshot", body))
+	var mesh := presenter.call("_build_active_material_body_sweep_mesh", body) as ArrayMesh
+	if not _check(mesh != null and mesh.get_surface_count() == 1, label + " generates its original Presenter sweep"):
+		return
+	var arrays := mesh.surface_get_arrays(0)
+	_verify_mesh(label, arrays[Mesh.ARRAY_VERTEX], arrays[Mesh.ARRAY_INDEX], minimum_reduction)
+	_check(var_to_bytes(snapshot_owner.call("_build_material_body_export_snapshot", body)) == before,
+		label + " leaves detailed authoring snapshot unchanged")
+	var after := mesh.surface_get_arrays(0)
+	_check(after[Mesh.ARRAY_VERTEX] == arrays[Mesh.ARRAY_VERTEX] and after[Mesh.ARRAY_INDEX] == arrays[Mesh.ARRAY_INDEX],
+		label + " leaves original editable mesh arrays unchanged")
+
+
+func _verify_mesh(label: String, vertices: PackedVector3Array, indices: PackedInt32Array,
+		minimum_reduction: float, maximum_triangles: int = 0) -> void:
+	var before_vertices := vertices.to_byte_array()
+	var before_indices := indices.to_byte_array()
+	var source := _mesh_statistics(vertices, indices)
+	if not _check(bool(source.valid), label + " source has finite, nondegenerate closed geometry"):
+		return
+	var started := Time.get_ticks_usec()
+	var result: Dictionary = Simplifier.simplify(vertices, indices)
+	var elapsed_ms := float(Time.get_ticks_usec() - started) / 1000.0
+	if not _check(bool(result.get("ok", false)), label + " export helper returns usable geometry: " + str(result.get("reason", ""))):
+		return
+	var output_vertices: PackedVector3Array = result.get("vertices", PackedVector3Array())
+	var output_indices: PackedInt32Array = result.get("indices", PackedInt32Array())
+	var output := _mesh_statistics(output_vertices, output_indices)
+	if not _check(bool(output.valid), label + " output has finite, nondegenerate closed geometry"):
+		return
+	_check(vertices.to_byte_array() == before_vertices and indices.to_byte_array() == before_indices,
+		label + " helper does not mutate caller source arrays")
+	var source_count := indices.size() / 3
+	var output_count := output_indices.size() / 3
+	var reduction := 1.0 - float(output_count) / float(source_count)
+	_check(reduction >= minimum_reduction, label + " reduces triangles by at least %d%% (actual %.2f%%)" % [roundi(minimum_reduction * 100.0), reduction * 100.0])
+	if maximum_triangles > 0:
+		_check(output_count <= maximum_triangles, label + " collapses flat cube faces to two triangles each")
+	_check(int(result.get("source_triangle_count", -1)) == source_count and int(result.get("output_triangle_count", -1)) == output_count,
+		label + " reports accurate source/output triangle counts")
+	_check(absf(float(result.get("tolerance_meters", 0.0)) - TOLERANCE_M) < 1e-10,
+		label + " uses the approved 0.1 mm tolerance in metre space")
+	var source_bounds: AABB = source.bounds
+	var output_bounds: AABB = output.bounds
+	var bounds_error := maxf(_max_component((source_bounds.position - output_bounds.position).abs()),
+		_max_component((source_bounds.end - output_bounds.end).abs()))
+	_check(bounds_error <= TOLERANCE_M + NUMERICAL_ALLOWANCE_M,
+		label + " preserves all six bounds within surface tolerance")
+	var volume_error := absf(float(output.volume) - float(source.volume))
+	# First-order displaced shell bound plus a small second-order allowance.
+	var volume_allowance := float(source.area) * (TOLERANCE_M + NUMERICAL_ALLOWANCE_M) * 1.1
+	_check(volume_error <= volume_allowance, label + " volume change fits the 0.1 mm surface displacement envelope")
+	var source_tree := SurfaceTree.new(vertices, indices)
+	var output_tree := SurfaceTree.new(output_vertices, output_indices)
+	var forward := _sample_distance(vertices, indices, output_tree)
+	var reverse := _sample_distance(output_vertices, output_indices, source_tree)
+	var deviation := maxf(float(forward.maximum_m), float(reverse.maximum_m))
+	_check(deviation <= TOLERANCE_M + NUMERICAL_ALLOWANCE_M,
+		label + " bidirectional sampled deviation <= 0.1 mm + 2 um (actual %.6f mm)" % (deviation * 1000.0))
+	var backend := ClassDB.instantiate(&"ForgeV2ManifoldBoolean") as RefCounted
+	var acceptance: Dictionary = backend.call("reset_mesh", output_vertices, output_indices)
+	_check(bool(acceptance.get("ok", false)) and float(acceptance.get("manifold_volume_m3", 0.0)) > 0.0,
+		label + " simplified export remains a positive-volume native solid")
+	evidence.append({"case": label, "source_triangles": source_count, "output_triangles": output_count,
+		"reduction_percent": reduction * 100.0, "simplify_ms": elapsed_ms, "reason": result.get("reason", ""),
+		"source_volume_m3": source.volume, "output_volume_m3": output.volume, "volume_error_m3": volume_error,
+		"volume_envelope_m3": volume_allowance, "bounds_error_m": bounds_error,
+		"original_to_simplified": forward, "simplified_to_original": reverse,
+		"source_closed": source.closed, "output_closed": output.closed})
+
+
+func _mesh_statistics(vertices: PackedVector3Array, indices: PackedInt32Array) -> Dictionary:
+	var result := {"valid": false, "closed": false, "volume": 0.0, "area": 0.0, "bounds": AABB()}
+	if vertices.is_empty() or indices.is_empty() or indices.size() % 3 != 0:
+		return result
+	var bounds := AABB(vertices[0], Vector3.ZERO)
+	var welded: Dictionary = {}
+	var vertex_ids := PackedInt32Array()
+	for vertex: Vector3 in vertices:
+		if not vertex.is_finite():
+			return result
+		bounds = bounds.expand(vertex)
+		# Exact coincident vertices may be duplicated by shading seams.
+		if not welded.has(vertex):
+			welded[vertex] = welded.size()
+		vertex_ids.append(int(welded[vertex]))
+	var edges: Dictionary = {}
+	var signed_volume := 0.0
+	var area := 0.0
+	for offset in range(0, indices.size(), 3):
+		var ia := indices[offset]
+		var ib := indices[offset + 1]
+		var ic := indices[offset + 2]
+		if mini(ia, mini(ib, ic)) < 0 or maxi(ia, maxi(ib, ic)) >= vertices.size():
+			return result
+		var a := vertices[ia]
+		var b := vertices[ib]
+		var c := vertices[ic]
+		var cross := (b - a).cross(c - a)
+		if cross.length_squared() <= 0.0:
+			return result
+		area += cross.length() * 0.5
+		signed_volume += a.dot(b.cross(c)) / 6.0
+		for edge: Vector2i in [Vector2i(vertex_ids[ia], vertex_ids[ib]), Vector2i(vertex_ids[ib], vertex_ids[ic]), Vector2i(vertex_ids[ic], vertex_ids[ia])]:
+			var key := Vector2i(mini(edge.x, edge.y), maxi(edge.x, edge.y))
+			var incidence: Vector2i = edges.get(key, Vector2i.ZERO)
+			incidence.x += 1
+			incidence.y += 1 if edge.x < edge.y else -1
+			edges[key] = incidence
+	var closed := not edges.is_empty()
+	for incidence: Vector2i in edges.values():
+		closed = closed and incidence == Vector2i(2, 0)
+	return {"valid": closed and is_finite(signed_volume) and absf(signed_volume) > 0.0,
+		"closed": closed, "volume": absf(signed_volume), "area": area, "bounds": bounds}
+
+
+func _sample_distance(vertices: PackedVector3Array, indices: PackedInt32Array, target: SurfaceTree) -> Dictionary:
+	var maximum := 0.0
+	var worst := Vector3.ZERO
+	var samples := 0
+	var triangle_count := indices.size() / 3
+	var triangle_budget := mini(triangle_count, SURFACE_TRIANGLE_SAMPLES)
+	for step in range(triangle_budget):
+		var triangle := mini(int((float(step) + 0.5) * float(triangle_count) / float(triangle_budget)), triangle_count - 1)
+		var a := vertices[indices[triangle * 3]]
+		var b := vertices[indices[triangle * 3 + 1]]
+		var c := vertices[indices[triangle * 3 + 2]]
+		for sample: Vector3 in [a, b, c, (a + b + c) / 3.0, (a + b) * 0.5, a * 0.2 + b * 0.3 + c * 0.5]:
+			var distance := sqrt(target.distance_squared(sample))
+			if distance > maximum:
+				maximum = distance
+				worst = sample
+			samples += 1
+	return {"maximum_m": maximum, "sample_count": samples, "worst_sample_m": worst}
+
+
+func _subdivided_cube(divisions: int) -> Dictionary:
+	var vertices := PackedVector3Array()
+	var indices := PackedInt32Array()
+	var frames: Array[Basis] = [
+		Basis(Vector3.UP, Vector3.BACK, Vector3.RIGHT), Basis(Vector3.DOWN, Vector3.BACK, Vector3.LEFT),
+		Basis(Vector3.BACK, Vector3.RIGHT, Vector3.UP), Basis(Vector3.FORWARD, Vector3.RIGHT, Vector3.DOWN),
+		Basis(Vector3.RIGHT, Vector3.UP, Vector3.BACK), Basis(Vector3.LEFT, Vector3.UP, Vector3.FORWARD)]
+	for frame: Basis in frames:
+		var start := vertices.size()
+		for row in range(divisions + 1):
+			for column in range(divisions + 1):
+				vertices.append(frame.z * 0.1 + frame.x * (-0.1 + 0.2 * float(column) / divisions)
+					+ frame.y * (-0.1 + 0.2 * float(row) / divisions))
+		for row in range(divisions):
+			for column in range(divisions):
+				var a := start + row * (divisions + 1) + column
+				var b := a + 1
+				var c := b + divisions + 1
+				var d := a + divisions + 1
+				indices.append_array(PackedInt32Array([a, b, c, a, c, d]))
+	return {"vertices": vertices, "indices": indices}
+
+
+func _max_component(value: Vector3) -> float:
+	return maxf(value.x, maxf(value.y, value.z))
+
+
+func _check(condition: bool, message: String) -> bool:
+	checks += 1
+	if not condition:
+		failures.append(message)
+	return condition

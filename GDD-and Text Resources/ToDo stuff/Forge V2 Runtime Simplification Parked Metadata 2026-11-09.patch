@@ -1,0 +1,50 @@
+diff --git a/The Will- main folder/the-will-gamefiles/core/models/stage2_item_state.gd b/The Will- main folder/the-will-gamefiles/core/models/stage2_item_state.gd
+index eefd66fa..8af75db0 100644
+--- a/The Will- main folder/the-will-gamefiles/core/models/stage2_item_state.gd	
++++ b/The Will- main folder/the-will-gamefiles/core/models/stage2_item_state.gd	
+@@ -20,6 +20,12 @@ const EDGE_V_MAX: StringName = &"edge_v_max"
+ @export var current_local_aabb_size: Vector3 = Vector3.ZERO
+ @export var baseline_editable_mesh_state: Resource
+ @export var current_editable_mesh_state: Resource
++## Forge V2 runtime export derivation, separate from detailed Forge authoring.
++## Schema 1 stores source_metrics in metres, original/output triangle counts,
++## tolerance_meters, simplified/reason and geometry_sha256 of CURRENT saved
++## mesh cell-unit vertices/indices. Source metrics remain authoritative only
++## while that geometry signature matches; runtime rebakes do not decimate again.
++@export var forge_v2_runtime_mesh_metadata: Dictionary = {}
+ @export var primary_grip_handle_mesh_state: Resource
+ @export var primary_grip_handle_mesh_source: StringName = &""
+ @export var primary_grip_handle_body_signature: String = ""
+diff --git a/The Will- main folder/the-will-gamefiles/services/forge_service.gd b/The Will- main folder/the-will-gamefiles/services/forge_service.gd
+index ef6298fd..f609bfe0 100644
+--- a/The Will- main folder/the-will-gamefiles/services/forge_service.gd	
++++ b/The Will- main folder/the-will-gamefiles/services/forge_service.gd	
+@@ -6,6 +6,9 @@ const MaterialRuntimeResolverScript = preload("res://core/resolvers/material_run
+ const ForgeV2WipCompatibilityAdapterScript = preload(
+ 	"res://runtime/forge_v2/forge_v2_wip_compatibility_adapter.gd"
+ )
++const ForgeV2RuntimeMeshSimplifierScript = preload(
++	"res://runtime/forge_v2/forge_v2_runtime_mesh_simplifier.gd"
++)
+ const PrimaryGripHandleMeshPacketScript = preload(
+ 	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
+ )
+@@ -210,6 +213,18 @@ func _build_forge_v2_runtime_mesh_packet(wip: CraftedItemWIP) -> Dictionary:
+ 		"watertight": true,
+ 		"source": &"stage2_authoritative_editable_mesh",
+ 	}
++	var runtime_metadata: Variant = stage2_item_state.get("forge_v2_runtime_mesh_metadata")
++	if (
++		runtime_metadata is Dictionary
++		and int(runtime_metadata.get("schema_version", 0)) == 1
++		and String(runtime_metadata.get("geometry_sha256", ""))
++		== ForgeV2RuntimeMeshSimplifierScript.geometry_signature(vertices_cell_units, indices)
++	):
++		# These are already prepared output triangles. Preserve the detailed
++		# source metrics and derivation instead of simplifying the same mesh
++		# again during equip/Skill Crafter rebakes. Changed geometry omits this
++		# metadata and follows the ordinary fresh-geometry path in the adapter.
++		runtime_mesh_packet["forge_v2_runtime_mesh_metadata"] = runtime_metadata.duplicate(true)
+ 	var primary_grip_handle_mesh_state := stage2_item_state.get(
+ 		"primary_grip_handle_mesh_state"
+ 	) as Resource

@@ -2,6 +2,7 @@ extends RefCounted
 class_name ForgeV2MaterialVolumeResolver
 
 const ForgeV2PathRollScript = preload("res://runtime/forge_v2/forge_v2_path_roll.gd")
+const ForgeV2PathScaleScript = preload("res://runtime/forge_v2/forge_v2_path_scale.gd")
 const ForgeV2MaterialBodyScript = preload("res://runtime/forge_v2/forge_v2_material_body.gd")
 const ForgeV2MaterialCompositionPolicyScript = preload(
 	"res://runtime/forge_v2/forge_v2_material_composition_policy.gd"
@@ -1135,6 +1136,8 @@ func _build_body_cache_tokens(bodies: Array) -> Array[Dictionary]:
 			),
 			"path_point_count": _read_body_path_points(body).size(),
 			"path_roll_degrees": _read_body_variant(body, "path_roll_degrees", PackedFloat64Array()),
+			"path_profile_scales": _read_body_variant(body, "path_profile_scales", PackedVector2Array()),
+			"path_profile_transform_ranges": _read_body_variant(body, "path_profile_transform_ranges", []),
 			"path_contact_direction_count": _read_body_vector3_array(
 				body,
 				"path_contact_directions"
@@ -1484,6 +1487,8 @@ func _resolve_body_sample_points(body: Variant, sample_cell_size_meters: float) 
 	return _deduplicate_points(path_points)
 
 func _is_profile_body_shape(body: Variant) -> bool:
+	if ForgeV2PathScaleScript.has_scale(body):
+		return true
 	var shape_kind: StringName = _read_body_string_name(body, "shape_kind")
 	return (
 		shape_kind == ForgeV2MaterialBodyScript.SHAPE_KIND_PROFILE_PATH
@@ -1678,13 +1683,16 @@ func _mark_rolled_profile_path_cells(
 	var points: PackedVector3Array = data.get("points")
 	var axes_x: PackedVector3Array = data.get("axis_x")
 	var axes_y: PackedVector3Array = data.get("axis_y")
+	var scales: PackedVector2Array = data.get("profile_scales")
 	var polygon := _resolve_body_profile_polygon(body)
 	for index in range(points.size() - 1):
 		_mark_profile_segment_cells(
 			occupied_cells, points[index], points[index + 1], polygon,
 			amount_ratio, sample_cell_size_meters, Vector3.FORWARD,
 			Vector2.DOWN, Vector2.ZERO, Vector3.ZERO, 0.0, false, true,
-			axes_x[index], axes_y[index], axes_x[index + 1], axes_y[index + 1]
+			axes_x[index] * scales[index].x, axes_y[index] * scales[index].y,
+			axes_x[index + 1] * scales[index + 1].x, axes_y[index + 1] * scales[index + 1].y,
+			true
 		)
 
 
@@ -1707,7 +1715,8 @@ func _mark_profile_segment_cells(
 	explicit_from_axis_x: Vector3 = Vector3.ZERO,
 	explicit_from_axis_y: Vector3 = Vector3.ZERO,
 	explicit_to_axis_x: Vector3 = Vector3.ZERO,
-	explicit_to_axis_y: Vector3 = Vector3.ZERO
+	explicit_to_axis_y: Vector3 = Vector3.ZERO,
+	allow_collapsed_endpoint: bool = false
 ) -> void:
 	var segment: Vector3 = to_point - from_point
 	var segment_length: float = segment.length()
@@ -1717,11 +1726,11 @@ func _mark_profile_segment_cells(
 	var normal: Vector3 = _resolve_perpendicular_normal(tangent)
 	var binormal: Vector3 = tangent.cross(normal).normalized()
 	var use_interpolated_explicit_frames := (
-		use_explicit_surface_frame
+		allow_collapsed_endpoint or (use_explicit_surface_frame
 		and explicit_from_axis_x.length_squared() > 0.000001
 		and explicit_from_axis_y.length_squared() > 0.000001
 		and explicit_to_axis_x.length_squared() > 0.000001
-		and explicit_to_axis_y.length_squared() > 0.000001
+		and explicit_to_axis_y.length_squared() > 0.000001)
 	)
 	if use_explicit_surface_frame and not use_interpolated_explicit_frames:
 		var explicit_frame := (

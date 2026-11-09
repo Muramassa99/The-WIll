@@ -12,6 +12,8 @@ const ForgeV2SplinePathSamplerScript = preload(
 	"res://runtime/forge_v2/forge_v2_spline_path_sampler.gd"
 )
 const ForgeV2PathRollScript = preload("res://runtime/forge_v2/forge_v2_path_roll.gd")
+const ForgeV2PathScaleScript = preload("res://runtime/forge_v2/forge_v2_path_scale.gd")
+const ForgeV2ProfileSweepJoinScript = preload("res://runtime/forge_v2/forge_v2_profile_sweep_join.gd")
 const HandleLengthPolicyScript = preload("res://core/resolvers/handle_length_policy.gd")
 const PrimaryGripHandleMeshPacketScript = preload(
 	"res://core/resolvers/primary_grip_handle_mesh_packet.gd"
@@ -939,7 +941,7 @@ func get_spline_roll_gizmo(authoring_state: Resource = null) -> Dictionary:
 
 
 func _spline_roll_gizmo_for_body(body: Resource, selected_index: int) -> Dictionary:
-	if body == null:
+	if body == null or StringName(body.get("body_kind")) == ForgeV2MaterialBodyScript.BODY_KIND_DETAILING_BRUSH:
 		return {"valid": false}
 	var points: PackedVector3Array = body.get("path_points")
 	if selected_index < 0 or selected_index >= points.size() or points.size() < 2:
@@ -983,6 +985,7 @@ func _sync_spline_roll_preview(authoring_state: Resource) -> void:
 	var points: PackedVector3Array = data.get("points")
 	var axes_x: PackedVector3Array = data.get("axis_x")
 	var axes_y: PackedVector3Array = data.get("axis_y")
+	var scales: PackedVector2Array = data.get("profile_scales")
 	var polygon := _resolve_active_body_sweep_polygon(body)
 	if polygon.is_empty():
 		return
@@ -997,10 +1000,21 @@ func _sync_spline_roll_preview(authoring_state: Resource) -> void:
 	var surface := SurfaceTool.new()
 	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var vertex_count := 0
-	for edge_point: Vector2 in [outer, opposite]:
+	var guide_vertices: Array[Vector2] = [outer, opposite]
+	if ForgeV2PathScaleScript.has_scale(body):
+		# Independent dimensions can change without moving the longest pair.
+		# Include each profile-axis extreme so both changes remain visible.
+		for direction: Vector2 in [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]:
+			var extreme := polygon[0]
+			for point: Vector2 in polygon:
+				if point.dot(direction) > extreme.dot(direction):
+					extreme = point
+			if not guide_vertices.has(extreme):
+				guide_vertices.append(extreme)
+	for edge_point: Vector2 in guide_vertices:
 		for index in range(points.size() - 1):
-			var from := points[index] + axes_x[index] * edge_point.x + axes_y[index] * edge_point.y
-			var to := points[index + 1] + axes_x[index + 1] * edge_point.x + axes_y[index + 1] * edge_point.y
+			var from := points[index] + axes_x[index] * edge_point.x * scales[index].x + axes_y[index] * edge_point.y * scales[index].y
+			var to := points[index + 1] + axes_x[index + 1] * edge_point.x * scales[index + 1].x + axes_y[index + 1] * edge_point.y * scales[index + 1].y
 			vertex_count += _append_tube_segment(surface, from, to, SPLINE_ROLL_TRACE_RADIUS_METERS, SPLINE_ROLL_TRACE_COLOR)
 	var gizmo := _spline_roll_gizmo_for_body(body, int(authoring_state.get("selected_spline_point_index")))
 	if bool(gizmo.get("valid", false)):
@@ -3690,6 +3704,8 @@ func _build_native_static_body_signature(body: Resource) -> String:
 		body.get("profile_rotation_bias_degrees"),
 		body.get("profile_twist_degrees_per_meter"),
 		body.get("path_roll_degrees"),
+		body.get("path_profile_scales"),
+		body.get("path_profile_transform_ranges"),
 	]
 	var exact_hash := var_to_bytes(exact_geometry).hex_encode().sha256_text()
 	return "%s|exact:%s" % [_build_csg_body_signature(body), exact_hash]
@@ -8729,6 +8745,7 @@ func _build_csg_body_bounds(body: Resource) -> AABB:
 		max_point.y = maxf(max_point.y, point.y)
 		max_point.z = maxf(max_point.z, point.z)
 	var radius := maxf(float(body.get("radius_meters")), 0.001)
+	radius *= ForgeV2PathScaleScript.max_body_scale(body)
 	var margin := Vector3.ONE * radius
 	return AABB(min_point - margin, (max_point - min_point) + (margin * 2.0))
 
@@ -8828,6 +8845,8 @@ func _build_csg_body_signature(body: Resource) -> String:
 		str(float(body.get("profile_rotation_bias_degrees"))),
 		str(float(body.get("profile_twist_degrees_per_meter"))),
 		var_to_bytes(body.get("path_roll_degrees")).hex_encode(),
+		var_to_bytes(body.get("path_profile_scales")).hex_encode(),
+		var_to_bytes(body.get("path_profile_transform_ranges")).hex_encode(),
 		str(StringName(body.get("committed_layer_id"))),
 		str(bool(body.get("layer_active"))),
 		str(float(body.get("updated_timestamp"))),
@@ -9206,6 +9225,13 @@ func _build_active_material_body_sweep_mesh(body: Resource) -> ArrayMesh:
 	if profile_polygon.size() < 3:
 		return ArrayMesh.new()
 	profile_polygon = _ensure_counter_clockwise_profile_polygon(profile_polygon)
+	var roll_curve := sweep_path.get("roll_curve") as Curve3D
+	if roll_curve != null:
+		var frames: Dictionary = roll_curve.get_meta(ForgeV2PathRollScript.FRAME_METADATA)
+		var sections: PackedInt32Array = frames.get("section_starts", PackedInt32Array([0]))
+		if sections.size() > 1:
+			return _build_sectioned_profile_sweep(body, profile_polygon, path_points,
+				path_surface_normals, roll_curve, sections)
 	var surface_tool := SurfaceTool.new()
 	surface_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var preview_color := _resolve_active_material_body_preview_color(body)
@@ -9384,15 +9410,15 @@ func _append_linear_profile_sweep_preview(
 	color: Color,
 	path_points: PackedVector3Array,
 	path_surface_normals: PackedVector3Array,
-	roll_curve: Curve3D = null
+	roll_curve: Curve3D = null,
+	first_ring: int = 0,
+	end_ring: int = -1
 ) -> int:
-	if path_points.size() < 2:
+	var stop := path_points.size() if end_ring < 0 else mini(end_ring, path_points.size())
+	if stop - first_ring < 2:
 		return 0
 	var rings: Array[PackedVector3Array] = []
-	var roll_distances := PackedFloat64Array()
-	if roll_curve != null:
-		roll_distances = (roll_curve.get_meta(ForgeV2PathRollScript.FRAME_METADATA) as Dictionary).get("distances")
-	for point_index in range(path_points.size()):
+	for point_index in range(first_ring, stop):
 		rings.append(_build_profile_sweep_ring(
 			body,
 			profile_polygon,
@@ -9400,9 +9426,10 @@ func _append_linear_profile_sweep_preview(
 			_resolve_linear_path_point_tangent(path_points, point_index),
 			path_points,
 			path_surface_normals,
-			ForgeV2PathRollScript.sample_frame(roll_curve, roll_distances[point_index]) if roll_curve != null else {}
+			ForgeV2PathRollScript.sample_frame_at_index(roll_curve, point_index) if roll_curve != null else {}
 		))
 	var cap_indices := Geometry2D.triangulate_polygon(profile_polygon)
+	var scaled := ForgeV2PathScaleScript.has_scale(body)
 	var added_vertices := 0
 	for ring_index in range(rings.size() - 1):
 		var from_ring: PackedVector3Array = rings[ring_index]
@@ -9411,37 +9438,75 @@ func _append_linear_profile_sweep_preview(
 			var next_profile_index := (
 				(profile_index + 1) % profile_polygon.size()
 			)
-			added_vertices += _append_triangle(
+			added_vertices += _append_sweep_side_triangle(
 				surface_tool,
 				from_ring[profile_index],
 				to_ring[next_profile_index],
 				to_ring[profile_index],
-				color
+				color, scaled
 			)
-			added_vertices += _append_triangle(
+			added_vertices += _append_sweep_side_triangle(
 				surface_tool,
 				from_ring[profile_index],
 				from_ring[next_profile_index],
 				to_ring[next_profile_index],
-				color
+				color, scaled
 			)
-	added_vertices += _append_profile_sweep_caps(
-		surface_tool,
-		rings[0],
-		profile_polygon,
-		color,
-		false,
-		cap_indices
-	)
-	added_vertices += _append_profile_sweep_caps(
-		surface_tool,
-		rings[rings.size() - 1],
-		profile_polygon,
-		color,
-		true,
-		cap_indices
-	)
+	var first_scale := Vector2.ONE
+	var last_scale := Vector2.ONE
+	if roll_curve != null:
+		first_scale = ForgeV2PathRollScript.sample_frame_at_index(roll_curve, first_ring).get("profile_scale", Vector2.ONE)
+		last_scale = ForgeV2PathRollScript.sample_frame_at_index(roll_curve, stop - 1).get("profile_scale", Vector2.ONE)
+	if first_scale.x > 0.0 and first_scale.y > 0.0:
+		added_vertices += _append_profile_sweep_caps(
+			surface_tool, rings[0], profile_polygon, color, false, cap_indices
+		)
+	if last_scale.x > 0.0 and last_scale.y > 0.0:
+		added_vertices += _append_profile_sweep_caps(
+			surface_tool, rings[rings.size() - 1], profile_polygon, color, true, cap_indices
+		)
 	return added_vertices
+
+func _build_sectioned_profile_sweep(body: Resource, polygon: PackedVector2Array,
+	points: PackedVector3Array, normals: PackedVector3Array, curve: Curve3D,
+	starts: PackedInt32Array) -> ArrayMesh:
+	# A hard size boundary has two different rings at one path position.
+	# Cap each continuous section and union them, including crossing X/Y
+	# profiles, rather than creating self-intersecting annular quads.
+	var sections: Array[ArrayMesh] = []
+	var color := _resolve_active_material_body_preview_color(body)
+	for index in range(starts.size()):
+		var stop := starts[index + 1] if index + 1 < starts.size() else points.size()
+		var surface := SurfaceTool.new()
+		surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+		if _append_linear_profile_sweep_preview(surface, body, polygon, color,
+			points, normals, curve, starts[index], stop) <= 0:
+			continue
+		surface.index()
+		surface.generate_normals()
+		sections.append(surface.commit())
+	var joined := ForgeV2ProfileSweepJoinScript.join_sections(sections)
+	if not bool(joined.get("ok", false)):
+		push_error("Profile transform section join failed: %s" % joined.get("error", "unknown"))
+		return ArrayMesh.new()
+	var vertices: PackedVector3Array = joined.get("vertices", PackedVector3Array())
+	var indices: PackedInt32Array = joined.get("indices", PackedInt32Array())
+	if indices.is_empty():
+		return ArrayMesh.new()
+	var result := SurfaceTool.new()
+	result.begin(Mesh.PRIMITIVE_TRIANGLES)
+	result.set_color(color)
+	for vertex_index: int in indices:
+		result.add_vertex(vertices[vertex_index])
+	result.index()
+	result.generate_normals()
+	return result.commit()
+
+func _append_sweep_side_triangle(surface: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, color: Color, scaled: bool) -> int:
+	# A collapsed ring contributes one triangle per side instead of a quad.
+	if scaled and (b - a).cross(c - a).length_squared() <= 1.0e-24:
+		return 0
+	return _append_triangle(surface, a, b, c, color)
 
 func _build_profile_sweep_ring(
 	body: Resource,
@@ -9484,6 +9549,9 @@ func _build_profile_sweep_ring(
 		)
 	var axis_x: Vector3 = frame.get("axis_x", Vector3.RIGHT) as Vector3
 	var axis_y: Vector3 = frame.get("axis_y", Vector3.UP) as Vector3
+	var profile_scale: Vector2 = frame.get("profile_scale", Vector2.ONE)
+	axis_x *= profile_scale.x
+	axis_y *= profile_scale.y
 	var center_point: Vector3 = path_points[point_index]
 	var ring := PackedVector3Array()
 	for profile_point: Vector2 in profile_polygon:

@@ -72,6 +72,11 @@ public:
         const PackedVector3Array &operand_vertices,
         const PackedInt32Array &operand_indices
     ) const;
+    Dictionary simplify_export_mesh(
+        const PackedVector3Array &vertices,
+        const PackedInt32Array &indices,
+        double tolerance_meters
+    ) const;
 
 private:
     static constexpr size_t kHistoryWindowCapacity = 5U;

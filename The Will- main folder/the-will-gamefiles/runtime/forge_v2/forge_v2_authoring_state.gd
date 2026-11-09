@@ -20,6 +20,7 @@ const ForgeV2PlatformContractScript = preload("res://runtime/forge_v2/forge_v2_p
 const ForgeV2PrimitiveCatalogScript = preload("res://runtime/forge_v2/forge_v2_primitive_catalog.gd")
 const ForgeV2VolumeStrokeScript = preload("res://runtime/forge_v2/forge_v2_volume_stroke.gd")
 const ForgeV2PathRollScript = preload("res://runtime/forge_v2/forge_v2_path_roll.gd")
+const ForgeV2PathScaleScript = preload("res://runtime/forge_v2/forge_v2_path_scale.gd")
 
 const SCHEMA_VERSION := 6
 const SCHEMA_ID := &"forge_stage1_v2"
@@ -128,6 +129,8 @@ const PROTECTED_HANDLE_SNAPSHOT_SCHEMA_ID := (
 @export var spline_line_points: PackedVector3Array = PackedVector3Array()
 @export var spline_line_surface_normals: PackedVector3Array = PackedVector3Array()
 @export var spline_line_roll_degrees: PackedFloat64Array = PackedFloat64Array()
+@export var spline_line_profile_scales: PackedVector2Array = PackedVector2Array()
+@export var spline_line_profile_transform_ranges: Array[Dictionary] = []
 @export var spline_line_finished: bool = false
 @export var selected_spline_point_index: int = -1
 @export var spline_line_csg_noodle_enabled: bool = false
@@ -158,6 +161,12 @@ var _spline_roll_last_edit_reason: StringName = StringName()
 
 var material_usage_summary_cache: Dictionary = {}
 var material_usage_summary_cache_dirty: bool = true
+# Cursor motion reads this derived value frequently. Keep an independent deep
+# snapshot so same-ID profile edits invalidate it without relying on a hash.
+var _deposition_envelope_cache_source: StringName = StringName()
+var _deposition_envelope_cache_profile: Dictionary = {}
+var _deposition_envelope_cache_profile_valid: bool = false
+var _deposition_envelope_cache_radius_meters: float = 0.0
 var committed_volume_resolver: RefCounted = null
 var committed_volume_cache_diagnostics: Dictionary = {}
 var _bounded_history_transition: Dictionary = {}
@@ -272,6 +281,9 @@ func begin_retained_spline_change(body_id: StringName) -> Dictionary:
 	spline_line_points = (body.get("path_points") as PackedVector3Array).duplicate()
 	spline_line_surface_normals = (body.get("path_surface_normals") as PackedVector3Array).duplicate()
 	spline_line_roll_degrees = (body.get("path_roll_degrees") as PackedFloat64Array).duplicate()
+	spline_line_profile_scales = (body.get("path_profile_scales") as PackedVector2Array).duplicate()
+	spline_line_profile_transform_ranges.assign((body.get("path_profile_transform_ranges") as Array).duplicate(true))
+	_normalize_spline_profile_scales()
 	selected_spline_point_index = 0 if not spline_line_points.is_empty() else -1
 	selected_material_body_id = body_id
 	_retained_spline_change["initial_profile"] = _capture_active_tool_profile()
@@ -329,6 +341,8 @@ func _build_retained_spline_working_source() -> Resource:
 	source.set("path_points", spline_line_points.duplicate())
 	source.set("path_surface_normals", spline_line_surface_normals.duplicate())
 	source.set("path_roll_degrees", spline_line_roll_degrees.duplicate())
+	source.set("path_profile_scales", spline_line_profile_scales.duplicate())
+	source.set("path_profile_transform_ranges", spline_line_profile_transform_ranges.duplicate(true))
 	source.set("updated_timestamp", Time.get_unix_time_from_system())
 	source.call("normalize")
 	return source
@@ -364,6 +378,11 @@ func build_retained_spline_replacement_candidate(
 	]:
 		replacement.set(field, original.get(field))
 	replacement.call("normalize")
+	if (
+		ForgeV2PathScaleScript.has_scale(replacement)
+		and ForgeV2PathScaleScript.weighted_body_path_length(replacement) <= 0.0
+	):
+		return {"ok": false, "reason": &"retained_spline_transform_zero_volume"}
 	if (
 		StringName(replacement.get("shape_kind")) not in [
 			ForgeV2MaterialBodyScript.SHAPE_KIND_SPLINE_CAPSULE_PATH,
@@ -657,6 +676,8 @@ func reset_new_draft(next_project_name: String = "Stage 1 V2 Draft") -> void:
 	spline_line_points = PackedVector3Array()
 	spline_line_surface_normals = PackedVector3Array()
 	spline_line_roll_degrees = PackedFloat64Array()
+	spline_line_profile_scales = PackedVector2Array()
+	spline_line_profile_transform_ranges = []
 	spline_line_finished = false
 	selected_spline_point_index = -1
 	spline_line_csg_noodle_enabled = false
@@ -787,6 +808,8 @@ func capture_editor_transient_snapshot() -> Dictionary:
 		),
 		"spline_line_points": spline_line_points.duplicate(),
 		"spline_line_roll_degrees": spline_line_roll_degrees.duplicate(),
+		"spline_line_profile_scales": spline_line_profile_scales.duplicate(),
+		"spline_line_profile_transform_ranges": spline_line_profile_transform_ranges.duplicate(true),
 		"spline_line_surface_normals": (
 			spline_line_surface_normals.duplicate()
 		),
@@ -957,6 +980,13 @@ func restore_editor_transient_snapshot(snapshot: Dictionary) -> bool:
 	spline_line_roll_degrees = (
 		(snapshot.get("spline_line_roll_degrees", PackedFloat64Array())
 		as PackedFloat64Array).duplicate()
+	)
+	spline_line_profile_scales = (
+		(snapshot.get("spline_line_profile_scales", PackedVector2Array())
+		as PackedVector2Array).duplicate()
+	)
+	spline_line_profile_transform_ranges.assign(
+		(snapshot.get("spline_line_profile_transform_ranges", []) as Array).duplicate(true)
 	)
 	selected_spline_point_index = int(snapshot.get(
 		"selected_spline_point_index",
@@ -2787,10 +2817,12 @@ func replace_detailing_brush_path_solution(
 		or resolved_selected_point_index >= control_points.size()
 	):
 		return false
+	var previous_point_count := spline_line_points.size()
 	spline_line_points = validated.get(
 		"control_points",
 		PackedVector3Array()
 	) as PackedVector3Array
+	_update_spline_profile_scales_for_point_count(previous_point_count)
 	spline_line_surface_normals = validated.get(
 		"control_surface_normals",
 		PackedVector3Array()
@@ -2861,8 +2893,10 @@ func append_spline_line_point(
 	if not bool(roll_validation.get("valid", false)):
 		_spline_roll_last_edit_reason = StringName(roll_validation.get("reason", StringName()))
 		return -1
+	var previous_point_count := spline_line_points.size()
 	spline_line_points = candidate_points
 	spline_line_roll_degrees = candidate_rolls
+	_update_spline_profile_scales_for_point_count(previous_point_count)
 	_spline_roll_last_edit_reason = StringName()
 	spline_line_surface_normals.append(
 		_normalize_path_surface_normal(local_surface_normal)
@@ -2916,6 +2950,212 @@ func get_spline_line_point_roll_degrees(point_index: int) -> float:
 	if point_index < 0 or point_index >= spline_line_roll_degrees.size():
 		return 0.0
 	return spline_line_roll_degrees[point_index]
+
+
+func get_spline_line_point_profile_scale(point_index: int) -> Vector2:
+	var resolved := get_spline_line_resolved_profile_scales()
+	if point_index < 0 or point_index >= resolved.size():
+		return Vector2.ONE
+	return resolved[point_index]
+
+
+func get_spline_line_resolved_profile_scales() -> PackedVector2Array:
+	var values := ForgeV2PathScaleScript.normalize(spline_line_profile_scales, spline_line_points.size())
+	if spline_line_profile_transform_ranges.is_empty():
+		return values
+	var offsets := _spline_profile_control_offsets()
+	var profile_extents := _spline_profile_extents()
+	var result := values.duplicate()
+	for index in range(result.size()):
+		result[index] = ForgeV2PathScaleScript.sample_span(
+			values, offsets, spline_line_profile_transform_ranges,
+			maxi(index - 1, 0), 1.0 if index > 0 else 0.0,
+			profile_extents
+		)
+	return result
+
+
+func get_spline_line_profile_transform_scale(selection: PackedInt32Array) -> Vector2:
+	if not _spline_profile_transform_selection_valid(selection):
+		return Vector2.ONE
+	var matching := _find_spline_profile_transform_range(selection)
+	if matching >= 0:
+		return spline_line_profile_transform_ranges[matching].get("scale", Vector2.ONE) as Vector2
+	return _spline_profile_boundary_scale(selection[1], selection[0])
+
+
+func _spline_profile_boundary_scale(boundary: int, toward: int) -> Vector2:
+	var values := ForgeV2PathScaleScript.normalize(spline_line_profile_scales, spline_line_points.size())
+	return ForgeV2PathScaleScript.sample_span(
+		values, _spline_profile_control_offsets(), spline_line_profile_transform_ranges,
+		boundary if toward > boundary else boundary - 1,
+		0.0 if toward > boundary else 1.0, _spline_profile_extents()
+	)
+
+
+func _spline_profile_extents() -> Vector2:
+	if active_tool_id == TOOL_HANDLES:
+		return Vector2.ZERO
+	if (
+		is_retained_spline_change_active()
+		and _capture_active_tool_profile() == _retained_spline_change.get("initial_profile", {})
+	):
+		return ForgeV2PathScaleScript.profile_extents(_retained_spline_change["before_source"])
+	# Match the body builder's unscaled deposition polygon. It is already
+	# anchor-relative; neither subtract the anchor again nor use UI dimensions.
+	var profile_source := {"radius_meters": active_brush_radius_meters}
+	if is_saved_basic_profile_shape_active():
+		var runtime_data := _get_active_saved_basic_profile_runtime_data()
+		profile_source["profile_polygon_2d_meters"] = runtime_data.get(
+			"deposition_polygon_2d_meters", PackedVector2Array()
+		)
+	return ForgeV2PathScaleScript.profile_extents(profile_source)
+
+
+func _spline_profile_transform_selection_valid(selection: PackedInt32Array) -> bool:
+	if selection.size() not in [2, 3]:
+		return false
+	var seen := PackedInt32Array()
+	for index: int in selection:
+		if index < 0 or index >= spline_line_points.size() or seen.has(index):
+			return false
+		seen.append(index)
+	return selection.size() == 2 or (
+		selection[1] > mini(selection[0], selection[2])
+		and selection[1] < maxi(selection[0], selection[2])
+	)
+
+
+func _find_spline_profile_transform_range(selection: PackedInt32Array) -> int:
+	var fixed_b := selection[2] if selection.size() == 3 else -1
+	for index in range(spline_line_profile_transform_ranges.size() - 1, -1, -1):
+		var record := spline_line_profile_transform_ranges[index]
+		if int(record.get("fixed_a", -1)) == selection[0] and int(record.get("scaled", -1)) == selection[1] and int(record.get("fixed_b", -1)) == fixed_b:
+			return index
+	return -1
+
+
+func _spline_profile_control_offsets() -> PackedFloat64Array:
+	var offsets := PackedFloat64Array()
+	if spline_line_points.is_empty():
+		return offsets
+	offsets.append(0.0)
+	if active_tool_id == TOOL_DETAILING_BRUSH and detailing_span_offsets.size() == spline_line_points.size():
+		var resolved_offsets := PackedFloat64Array([0.0])
+		var distance := 0.0
+		for index in range(detailing_resolved_path_points.size() - 1):
+			distance += detailing_resolved_path_points[index].distance_to(detailing_resolved_path_points[index + 1])
+			resolved_offsets.append(distance)
+		var valid := true
+		offsets.clear()
+		for index: int in detailing_span_offsets:
+			if index < 0 or index >= resolved_offsets.size():
+				valid = false
+				break
+			offsets.append(resolved_offsets[index])
+		if valid:
+			return offsets
+		offsets = PackedFloat64Array([0.0])
+	var total := 0.0
+	for length: float in ForgeV2PathRollScript.span_lengths_meters(spline_line_points, active_tool_id == TOOL_DETAILING_BRUSH):
+		total += length
+		offsets.append(total)
+	return offsets
+
+
+func set_spline_line_point_profile_scale(point_index: int, value: Vector2) -> bool:
+	if active_tool_id not in [TOOL_SPLINE_LINE, TOOL_DETAILING_BRUSH] or not value.is_finite():
+		return false
+	_normalize_spline_profile_scales()
+	if point_index < 0 or point_index >= spline_line_points.size():
+		return false
+	var minimum := 0.0 if point_index in [0, spline_line_points.size() - 1] else 0.05
+	var accepted := ForgeV2PathScaleScript.normalize_scale(
+		Vector2(clampf(value.x, minimum, 2.0), clampf(value.y, minimum, 2.0))
+	)
+	if spline_line_profile_scales[point_index] == accepted:
+		return false
+	spline_line_profile_scales[point_index] = accepted
+	selected_spline_point_index = point_index
+	mark_updated()
+	return true
+
+
+func set_spline_line_profile_transform(selection: PackedInt32Array, value: Vector2) -> bool:
+	if active_tool_id not in [TOOL_SPLINE_LINE, TOOL_DETAILING_BRUSH] or not value.is_finite():
+		return false
+	if not _spline_profile_transform_selection_valid(selection):
+		return false
+	_normalize_spline_profile_scales()
+	var target := selection[1]
+	var minimum := 0.0 if target in [0, spline_line_points.size() - 1] else 0.05
+	var accepted := ForgeV2PathScaleScript.normalize_scale(
+		Vector2(clampf(value.x, minimum, 2.0), clampf(value.y, minimum, 2.0))
+	)
+	var matching := _find_spline_profile_transform_range(selection)
+	var record: Dictionary
+	if matching >= 0:
+		record = spline_line_profile_transform_ranges[matching].duplicate(true)
+		if record.get("scale", Vector2.ONE) == accepted and matching == spline_line_profile_transform_ranges.size() - 1:
+			return false
+		spline_line_profile_transform_ranges.remove_at(matching)
+	else:
+		var fixed_b := selection[2] if selection.size() == 3 else -1
+		record = {
+			"fixed_a": selection[0], "scaled": target, "fixed_b": fixed_b,
+			"fixed_a_scale": _spline_profile_boundary_scale(selection[0], target),
+			"fixed_b_scale": _spline_profile_boundary_scale(fixed_b, target) if fixed_b >= 0 else Vector2.ONE,
+		}
+	record["scale"] = accepted
+	spline_line_profile_transform_ranges.append(record)
+	selected_spline_point_index = target
+	mark_updated()
+	return true
+
+
+func _normalize_spline_profile_scales() -> void:
+	if active_tool_id == TOOL_HANDLES:
+		spline_line_profile_scales = PackedVector2Array()
+		spline_line_profile_transform_ranges = []
+		return
+	if active_tool_id not in [TOOL_SPLINE_LINE, TOOL_DETAILING_BRUSH]:
+		return
+	spline_line_profile_scales = ForgeV2PathScaleScript.normalize(
+		spline_line_profile_scales, spline_line_points.size()
+	)
+	spline_line_profile_transform_ranges = ForgeV2PathScaleScript.normalize_ranges(
+		spline_line_profile_transform_ranges, spline_line_points.size()
+	)
+	# Only authored interior controls have the 5% floor. Dense resolved samples
+	# approaching a zero-size endpoint may legitimately be smaller than that.
+	for point_index in range(1, spline_line_profile_scales.size() - 1):
+		var value := spline_line_profile_scales[point_index]
+		spline_line_profile_scales[point_index] = Vector2(maxf(value.x, 0.05), maxf(value.y, 0.05))
+
+
+func _update_spline_profile_scales_for_point_count(previous_count: int) -> void:
+	_normalize_spline_profile_scales()
+	if active_tool_id not in [TOOL_SPLINE_LINE, TOOL_DETAILING_BRUSH]:
+		return
+	var count := spline_line_points.size()
+	if count <= previous_count:
+		return
+	if previous_count >= 2:
+		var old_endpoint := spline_line_profile_scales[previous_count - 1]
+		spline_line_profile_scales[previous_count - 1] = Vector2(maxf(old_endpoint.x, 0.05), maxf(old_endpoint.y, 0.05))
+		for range_index in range(spline_line_profile_transform_ranges.size()):
+			var record := spline_line_profile_transform_ranges[range_index]
+			if int(record.get("scaled", -1)) == previous_count - 1:
+				var previous_scale := record.get("scale", Vector2.ONE) as Vector2
+				record["scale"] = Vector2(maxf(previous_scale.x, 0.05), maxf(previous_scale.y, 0.05))
+			# Fixed snapshots can also reference a formerly collapsed endpoint.
+			# Promote every side of that actual point to the interior minimum;
+			# leave all other derived taper samples and boundaries untouched.
+			for boundary_key: String in ["fixed_a", "fixed_b"]:
+				if int(record.get(boundary_key, -1)) == previous_count - 1:
+					var scale_key := boundary_key + "_scale"
+					var boundary_scale := record.get(scale_key, Vector2.ONE) as Vector2
+					record[scale_key] = Vector2(maxf(boundary_scale.x, 0.05), maxf(boundary_scale.y, 0.05))
 
 func get_spline_line_point_roll_limits(point_index: int) -> Vector2:
 	return ForgeV2PathRollScript.point_roll_bounds_degrees(
@@ -2977,10 +3217,12 @@ func _spline_roll_uses_linear_path() -> bool:
 
 func build_spline_roll_preview_body() -> Resource:
 	if (
-		active_tool_id not in [TOOL_SPLINE_LINE, TOOL_HANDLES]
+		active_tool_id not in [TOOL_SPLINE_LINE, TOOL_HANDLES, TOOL_DETAILING_BRUSH]
 		or spline_line_points.size() < 2
 	):
 		return null
+	if active_tool_id == TOOL_DETAILING_BRUSH:
+		return _build_detailing_brush_material_body(false) if can_generate_detailing_brush() else null
 	if active_tool_id == TOOL_HANDLES:
 		if (
 			is_handle_change_active()
@@ -3047,7 +3289,42 @@ func can_generate_spline_line_csg_noodle() -> bool:
 		spline_line_points.size() >= 2
 		and _calculate_spline_line_path_length() > 0.000001
 		and bool(get_spline_line_roll_status().get("valid", false))
+		and _spline_profile_has_volume()
 	)
+
+
+func _spline_profile_has_volume() -> bool:
+	if active_tool_id == TOOL_DETAILING_BRUSH:
+		var resolved_scales := ForgeV2PathScaleScript.resolve_detail_scales(
+			spline_line_profile_scales, detailing_resolved_path_points, detailing_span_offsets
+		)
+		return ForgeV2PathScaleScript.weighted_transformed_path_length(
+			detailing_resolved_path_points, resolved_scales, _detail_profile_transform_ranges(),
+			PackedFloat64Array(), _spline_profile_extents()
+		) > 0.0
+	if active_tool_id == TOOL_SPLINE_LINE:
+		return ForgeV2PathScaleScript.weighted_transformed_path_length(
+			spline_line_points, spline_line_profile_scales,
+			spline_line_profile_transform_ranges, _spline_profile_control_offsets(),
+			_spline_profile_extents()
+		) > 0.0
+	return true
+
+
+func _detail_profile_transform_ranges() -> Array[Dictionary]:
+	var ranges: Array[Dictionary] = []
+	if detailing_span_offsets.size() != spline_line_points.size():
+		return ranges
+	for authored: Dictionary in ForgeV2PathScaleScript.normalize_ranges(
+		spline_line_profile_transform_ranges, spline_line_points.size()
+	):
+		var resolved := authored.duplicate(true)
+		resolved["fixed_a"] = detailing_span_offsets[int(authored["fixed_a"])]
+		resolved["scaled"] = detailing_span_offsets[int(authored["scaled"])]
+		var fixed_b := int(authored.get("fixed_b", -1))
+		resolved["fixed_b"] = detailing_span_offsets[fixed_b] if fixed_b >= 0 else -1
+		ranges.append(resolved)
+	return ranges
 
 func can_generate_profile_extrusion_from_spline() -> bool:
 	_normalize_spline_line()
@@ -3082,6 +3359,8 @@ func generate_spline_line_csg_noodle() -> bool:
 	spline_line_points = PackedVector3Array()
 	spline_line_surface_normals = PackedVector3Array()
 	spline_line_roll_degrees = PackedFloat64Array()
+	spline_line_profile_scales = PackedVector2Array()
+	spline_line_profile_transform_ranges = []
 	spline_line_finished = false
 	selected_spline_point_index = -1
 	spline_line_csg_noodle_enabled = false
@@ -3115,11 +3394,22 @@ func can_generate_detailing_brush() -> bool:
 		and _calculate_polyline_path_length(
 			detailing_resolved_path_points
 		) > 0.000001
+		and _spline_profile_has_volume()
 	)
 
 func generate_detailing_brush() -> bool:
 	if not can_generate_detailing_brush():
 		return false
+	var body := _build_detailing_brush_material_body(true)
+	if body == null:
+		return false
+	_clear_spline_transient_state()
+	selected_material_body_id = StringName(body.get("body_id"))
+	mark_updated()
+	return true
+
+
+func _build_detailing_brush_material_body(publish_to_state: bool) -> Resource:
 	var body: Resource = null
 	if is_saved_basic_profile_shape_active():
 		body = _append_active_saved_basic_profile_material_body(
@@ -3130,7 +3420,8 @@ func generate_detailing_brush() -> bool:
 			ForgeV2MaterialBodyScript.BODY_KIND_DETAILING_BRUSH,
 			detailing_surface_target_kind,
 			detailing_surface_target_id,
-			detailing_resolved_contact_directions
+			detailing_resolved_contact_directions,
+			publish_to_state
 		)
 	else:
 		body = _append_material_body_record(
@@ -3152,14 +3443,17 @@ func generate_detailing_brush() -> bool:
 			0,
 			0.0,
 			detailing_surface_target_kind,
-			detailing_surface_target_id
+			detailing_surface_target_id,
+			detailing_resolved_contact_directions,
+			publish_to_state
 		)
-	if body == null:
-		return false
-	_clear_spline_transient_state()
-	selected_material_body_id = StringName(body.get("body_id"))
-	mark_updated()
-	return true
+	if body != null:
+		body.set("path_profile_scales", ForgeV2PathScaleScript.resolve_detail_scales(
+			spline_line_profile_scales, detailing_resolved_path_points, detailing_span_offsets
+		))
+		body.set("path_profile_transform_ranges", _detail_profile_transform_ranges())
+		body.call("normalize")
+	return body
 
 func generate_profile_extrusion_from_spline() -> bool:
 	_normalize_spline_line()
@@ -3175,6 +3469,8 @@ func generate_profile_extrusion_from_spline() -> bool:
 	spline_line_points = PackedVector3Array()
 	spline_line_surface_normals = PackedVector3Array()
 	spline_line_roll_degrees = PackedFloat64Array()
+	spline_line_profile_scales = PackedVector2Array()
+	spline_line_profile_transform_ranges = []
 	spline_line_finished = false
 	selected_spline_point_index = -1
 	spline_line_csg_noodle_enabled = false
@@ -3212,6 +3508,8 @@ func get_spline_line_csg_noodle_status_label() -> String:
 		return "CSG noodle: needs nonzero path length"
 	if not bool(get_spline_line_roll_status().get("valid", false)):
 		return "CSG noodle: increase spacing or reduce Twist."
+	if not _spline_profile_has_volume():
+		return "CSG noodle: Transform leaves no volume; expand the cross-section at a point."
 	var shape_label := (
 		get_active_basic_shape_size_label()
 		if active_tool_id != TOOL_HANDLES
@@ -3275,6 +3573,8 @@ func get_detailing_brush_status_label() -> String:
 		if reason_label.is_empty() or detailing_solution_reason == DETAIL_SOLUTION_REASON_NONE:
 			reason_label = "surface path invalid"
 		return "Detailing Brush: invalid - %s" % reason_label
+	if not _spline_profile_has_volume():
+		return "Detailing Brush: Transform leaves no volume; expand the cross-section at a point."
 	if not can_generate_detailing_brush():
 		return "Detailing Brush: resolved path is not generation-ready"
 	return "Detailing Brush: ready, %d controls / %d surface samples" % [
@@ -3289,6 +3589,8 @@ func get_detailing_brush_summary() -> Dictionary:
 			"control_points": PackedVector3Array(),
 			"control_surface_normals": PackedVector3Array(),
 			"control_contact_directions": PackedVector3Array(),
+			"profile_scales": PackedVector2Array(),
+			"profile_transform_ranges": [],
 			"locked_target_kind": StringName(),
 			"locked_target_id": StringName(),
 			"resolved_path_points": PackedVector3Array(),
@@ -3309,6 +3611,8 @@ func get_detailing_brush_summary() -> Dictionary:
 		"control_points": spline_line_points,
 		"control_surface_normals": spline_line_surface_normals,
 		"control_contact_directions": detailing_control_contact_directions,
+		"profile_scales": get_spline_line_resolved_profile_scales(),
+		"profile_transform_ranges": spline_line_profile_transform_ranges.duplicate(true),
 		"locked_target_kind": detailing_surface_target_kind,
 		"locked_target_id": detailing_surface_target_id,
 		"resolved_path_points": detailing_resolved_path_points,
@@ -3331,6 +3635,8 @@ func get_spline_line_summary() -> Dictionary:
 		"points": spline_line_points,
 		"surface_normals": spline_line_surface_normals,
 		"roll_degrees": spline_line_roll_degrees,
+		"profile_scales": get_spline_line_resolved_profile_scales(),
+		"profile_transform_ranges": spline_line_profile_transform_ranges.duplicate(true),
 		"point_count": spline_line_points.size(),
 		"finished": spline_line_finished,
 		"selected_point_index": selected_spline_point_index,
@@ -4133,19 +4439,33 @@ func get_active_basic_shape_size_label() -> String:
 func get_active_deposition_envelope_radius_meters() -> float:
 	if (
 		active_tool_id == TOOL_HANDLES
-		or not is_saved_basic_profile_shape_active()
+		or active_basic_shape_source_id != BASIC_SHAPE_SOURCE_SAVED_PROFILE
 	):
 		return active_brush_radius_meters
-	var runtime_data := _get_active_saved_basic_profile_runtime_data()
-	var polygon: PackedVector2Array = runtime_data.get(
-		"deposition_polygon_2d_meters",
-		PackedVector2Array()
-	)
-	return maxf(
-		ForgeV2ProfileShapeLibraryScript.calculate_polygon_max_radius_meters(
-			polygon
-		),
-		0.001
+	if (
+		_deposition_envelope_cache_source != active_basic_shape_source_id
+		or _deposition_envelope_cache_profile != active_saved_basic_profile_data
+	):
+		_deposition_envelope_cache_source = active_basic_shape_source_id
+		_deposition_envelope_cache_profile = active_saved_basic_profile_data.duplicate(true)
+		_deposition_envelope_cache_profile_valid = is_saved_basic_profile_shape_active()
+		_deposition_envelope_cache_radius_meters = 0.0
+		if _deposition_envelope_cache_profile_valid:
+			var runtime_data: Dictionary = active_saved_basic_profile_data.get(
+				"compiled_profile", {}
+			) as Dictionary
+			var polygon: PackedVector2Array = runtime_data.get(
+				"deposition_polygon_2d_meters", PackedVector2Array()
+			) as PackedVector2Array
+			_deposition_envelope_cache_radius_meters = maxf(
+				ForgeV2ProfileShapeLibraryScript.calculate_polygon_max_radius_meters(polygon),
+				0.001
+			)
+	# Invalid saved data still follows the current brush size; do not cache that
+	# fallback value, since the user can change it without changing the profile.
+	return (
+		_deposition_envelope_cache_radius_meters
+		if _deposition_envelope_cache_profile_valid else active_brush_radius_meters
 	)
 
 func get_active_deposition_sample_radius_meters() -> float:
@@ -4941,6 +5261,9 @@ func _append_spline_line_material_body(publish_to_state: bool = true) -> Resourc
 		)
 		if profile_body != null:
 			profile_body.set("path_roll_degrees", spline_line_roll_degrees.duplicate())
+			profile_body.set("path_profile_scales", spline_line_profile_scales.duplicate())
+			profile_body.set("path_profile_transform_ranges", spline_line_profile_transform_ranges.duplicate(true))
+			profile_body.call("normalize")
 		return profile_body
 	var body := _append_material_body_record(
 		spline_line_points,
@@ -4962,6 +5285,9 @@ func _append_spline_line_material_body(publish_to_state: bool = true) -> Resourc
 	)
 	if body != null:
 		body.set("path_roll_degrees", spline_line_roll_degrees.duplicate())
+		body.set("path_profile_scales", spline_line_profile_scales.duplicate())
+		body.set("path_profile_transform_ranges", spline_line_profile_transform_ranges.duplicate(true))
+		body.call("normalize")
 	return body
 
 func _append_profile_extrusion_material_body(
@@ -5228,6 +5554,8 @@ func _build_material_body_export_snapshot(body: Resource) -> Dictionary:
 		"path_points": body.get("path_points"),
 		"path_surface_normals": body.get("path_surface_normals"),
 		"path_roll_degrees": body.get("path_roll_degrees"),
+		"path_profile_scales": body.get("path_profile_scales"),
+		"path_profile_transform_ranges": body.get("path_profile_transform_ranges"),
 		"path_contact_directions": body.get("path_contact_directions"),
 		"surface_target_kind": StringName(body.get("surface_target_kind")),
 		"surface_target_id": StringName(body.get("surface_target_id")),
@@ -7856,6 +8184,7 @@ func _normalize_spline_line() -> void:
 	spline_line_roll_degrees = ForgeV2PathRollScript.normalize_roll_degrees(
 		spline_line_roll_degrees, spline_line_points.size()
 	)
+	_normalize_spline_profile_scales()
 	if selected_spline_point_index >= spline_line_points.size():
 		selected_spline_point_index = -1
 	if selected_spline_point_index < -1:
@@ -8075,6 +8404,8 @@ func _clear_spline_transient_state() -> void:
 	spline_line_points = PackedVector3Array()
 	spline_line_surface_normals = PackedVector3Array()
 	spline_line_roll_degrees = PackedFloat64Array()
+	spline_line_profile_scales = PackedVector2Array()
+	spline_line_profile_transform_ranges = []
 	_spline_roll_last_edit_reason = StringName()
 	spline_line_finished = false
 	selected_spline_point_index = -1

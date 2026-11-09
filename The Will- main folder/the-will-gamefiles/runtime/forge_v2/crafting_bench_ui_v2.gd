@@ -1037,6 +1037,24 @@ var spline_roll_degrees_spin_box: SpinBox = null
 var spline_roll_twist_spin_box: SpinBox = null
 var spline_roll_shortcut_label: Label = null
 var is_refreshing_spline_roll_ui := false
+var spline_transform_popup: PopupPanel = null
+var spline_transform_point_index := -1
+var spline_transform_state: Resource = null
+var spline_transform_tool_id: StringName = StringName()
+var spline_transform_points := PackedVector3Array()
+var spline_transform_x: SpinBox = null
+var spline_transform_y: SpinBox = null
+var spline_transform_pending_text := Vector2i.ZERO
+var spline_transform_transaction_active := false
+var is_applying_spline_transform := false
+# Role order is independent of spline placement order: Point 1 is fixed,
+# Point 2 changes size, and optional Point 3 is fixed across Point 2.
+var spline_transform_selection := PackedInt32Array()
+var spline_transform_selection_state: Resource = null
+var spline_transform_selection_tool: StringName = StringName()
+var spline_transform_selection_draft: StringName = StringName()
+var spline_transform_selection_body: StringName = StringName()
+var spline_transform_selection_count := 0
 var workspace_action_transaction_active := false
 var workspace_spline_drag_point_index := -1
 var workspace_spline_drag_plane_origin_local: Vector3 = Vector3.ZERO
@@ -1165,6 +1183,8 @@ func _finish_workspace_input_after_focus_loss() -> void:
 	_settle_profile_builder_edit_gesture()
 
 func close_ui() -> void:
+	_close_spline_transform_popup()
+	_clear_spline_transform_selection()
 	if _is_retained_edit_pending():
 		_set_v2_action_status_text("Finishing the shape edit before closing Forge.")
 		return
@@ -5077,7 +5097,9 @@ func _refresh_workspace_view_status() -> void:
 func _on_workspace_view_state_changed() -> void:
 	_sync_workspace_spline_work_plane_context()
 	_refresh_workspace_view_status()
-	_refresh_spline_roll_controls()
+	# Camera motion changes editability during a view tween, not authored roll
+	# limits. Rebuilding those limits here re-bakes the unchanged spline.
+	_refresh_spline_roll_editability()
 
 func _ensure_workspace_view_radial() -> void:
 	if workspace_view_radial != null or workspace_frame_host == null:
@@ -5619,15 +5641,8 @@ func _is_v2_detailing_brush_active() -> bool:
 	return _get_active_v2_tool_id() == &"tool_detailing_brush"
 
 func _get_active_v2_tool_id() -> StringName:
-	if (
-		active_stage_controller == null
-		or not active_stage_controller.has_method("get_status_summary")
-	):
-		return StringName()
-	var summary: Dictionary = active_stage_controller.call(
-		"get_status_summary"
-	) as Dictionary
-	return StringName(summary.get("active_tool", StringName()))
+	var state := _get_spline_roll_authoring_state()
+	return StringName(state.get("active_tool_id")) if state != null else StringName()
 
 func _ensure_fullscreen_workspace_layout() -> void:
 	if body_margin == null or body_scroll == null or body_vbox == null or workspace_panel == null:
@@ -5806,6 +5821,358 @@ func _select_retained_edit_surface(screen_position: Vector2) -> void:
 	_refresh_profile_builder_popup()
 	_set_v2_action_status_text("Shape opened for editing. Move points or adjust Twist; S opens Apply / Cancel.")
 
+func _try_open_spline_transform_popup(screen_position: Vector2) -> bool:
+	if (
+		v2_save_in_progress or _is_retained_edit_pending()
+		or _is_workspace_view_transitioning() or active_stage_controller == null
+		or not active_stage_controller.has_method("set_spline_line_profile_transform")
+	):
+		return false
+	var state := _get_spline_roll_authoring_state()
+	if state == null or StringName(state.get("active_tool_id")) not in [
+		&"tool_spline_line", &"tool_detailing_brush",
+	]:
+		return false
+	var point_index := _find_nearest_spline_point_at_screen(screen_position)
+	if point_index < 0:
+		return false
+	_end_action_history_hold()
+	_settle_profile_builder_edit_gesture()
+	_finish_workspace_spline_point_drag()
+	if workspace_brush_stroke_active:
+		_finish_workspace_brush_stroke(Vector2.ZERO, false)
+	workspace_drag_active = false
+	_close_spline_transform_popup()
+	_sync_spline_transform_selection()
+	# Selection is context, not an authored geometry edit.
+	active_stage_controller.call("select_spline_line_point", point_index)
+	if spline_transform_selection.size() >= 2 and spline_transform_selection[1] == point_index:
+		spline_transform_transaction_active = bool(active_stage_controller.call(
+			"begin_editor_action_transaction", "Transform Path Range"
+		))
+		if not spline_transform_transaction_active:
+			return true
+	spline_transform_state = state
+	spline_transform_tool_id = StringName(state.get("active_tool_id"))
+	spline_transform_point_index = point_index
+	spline_transform_points = (state.get("spline_line_points") as PackedVector3Array).duplicate()
+	spline_transform_popup = _build_spline_transform_popup()
+	add_child(spline_transform_popup)
+	if not UiWindowLayerPolicyScript.attach_owned_popup(get_window(), spline_transform_popup):
+		_close_spline_transform_popup()
+		return true
+	var pointer_position := UiWindowLayerPolicyScript.get_control_pointer_screen_position(workspace_view_container)
+	spline_transform_popup.popup(Rect2i(pointer_position, Vector2i(290, 0)))
+	return true
+
+func _build_spline_transform_popup() -> PopupPanel:
+	var popup := PopupPanel.new()
+	popup.name = "SplinePointTransformPopup"
+	popup.unresizable = true
+	UiWindowLayerPolicyScript.configure_owned_popup(popup)
+	_apply_v2_popup_theme(popup)
+	popup.popup_hide.connect(_on_spline_transform_popup_hidden.bind(popup))
+	popup.window_input.connect(_on_spline_transform_popup_input)
+	var margin := MarginContainer.new()
+	_apply_margin(margin, 8)
+	popup.add_child(margin)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 6)
+	margin.add_child(column)
+	var title := Label.new()
+	title.text = "Transform | Spline point %d" % (spline_transform_point_index + 1)
+	column.add_child(title)
+	var roles := Label.new()
+	roles.name = "TransformRoles"
+	roles.text = _spline_transform_selection_label()
+	column.add_child(roles)
+	var select_first := _build_profile_context_button("Select for Transform: Point 1", _select_spline_transform_role.bind(0))
+	select_first.name = "SelectTransformPoint1"
+	select_first.tooltip_text = "Begin a new selection with this point as the fixed boundary."
+	column.add_child(select_first)
+	if (
+		not spline_transform_selection.is_empty()
+		and spline_transform_point_index != spline_transform_selection[0]
+		and (spline_transform_selection.size() < 2 or spline_transform_point_index != spline_transform_selection[1])
+	):
+		var select_second := _build_profile_context_button("Select for Transform: Point 2", _select_spline_transform_role.bind(1))
+		select_second.name = "SelectTransformPoint2"
+		select_second.tooltip_text = "This point will expand or contract; points between it and Point 1 follow the taper."
+		column.add_child(select_second)
+	if _can_select_spline_transform_third(spline_transform_point_index):
+		var select_third := _build_profile_context_button("Select for Transform: Point 3", _select_spline_transform_role.bind(2))
+		select_third.name = "SelectTransformPoint3"
+		select_third.tooltip_text = "Add the fixed boundary on the other side of Point 2."
+		column.add_child(select_third)
+	if spline_transform_selection.size() >= 2 and spline_transform_selection[1] == spline_transform_point_index:
+		_add_spline_transform_expansion_fields(column)
+	if not spline_transform_selection.is_empty():
+		var clear := _build_profile_context_button("Clear Transform Selection", _on_clear_spline_transform_selection)
+		clear.name = "ClearTransformSelection"
+		clear.tooltip_text = "Clear only the selected roles; keep the authored geometry."
+		column.add_child(clear)
+	var done := Button.new()
+	done.name = "Done"
+	done.text = "Done"
+	done.pressed.connect(_on_spline_transform_done_pressed)
+	column.add_child(done)
+	return popup
+
+func _add_spline_transform_expansion_fields(column: VBoxContainer) -> void:
+	var point_scale: Vector2 = spline_transform_state.call(
+		"get_spline_line_profile_transform_scale", spline_transform_selection
+	)
+	var is_endpoint := spline_transform_point_index in [0, spline_transform_points.size() - 1]
+	for axis_index in range(2):
+		var row := HBoxContainer.new()
+		column.add_child(row)
+		var label := Label.new()
+		label.text = "Expand X" if axis_index == 0 else "Expand Y"
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(label)
+		var value := SpinBox.new()
+		value.name = "ExpandX" if axis_index == 0 else "ExpandY"
+		value.min_value = -100.0 if is_endpoint else -95.0
+		value.max_value = 100.0
+		value.step = 1.0
+		value.suffix = "%"
+		value.custom_minimum_size.x = 108.0
+		value.select_all_on_focus = true
+		value.tooltip_text = "Change from the original profile on its %s axis. 0%% keeps its original size; positive expands, negative contracts." % ("X" if axis_index == 0 else "Y")
+		value.set_value_no_signal((point_scale[axis_index] - 1.0) * 100.0)
+		row.add_child(value)
+		value.value_changed.connect(_on_spline_transform_value_changed.bind(axis_index))
+		value.get_line_edit().text_changed.connect(_on_spline_transform_text_changed.bind(axis_index))
+		if axis_index == 0:
+			spline_transform_x = value
+		else:
+			spline_transform_y = value
+	var hint := Label.new()
+	hint.text = "Profile axes | 0%% = unchanged\nCtrl+Z / Ctrl+Y: undo / redo geometry\n%s: Apply / Cancel current task" % _get_v2_binding_label(ForgeV2KeybindingStateScript.ACTION_CONTEXT_ACTIONS)
+	hint.tooltip_text = "Undo/Redo applies pending numerical input first, closes this popup, and uses Forge's geometry history."
+	if is_endpoint:
+		hint.text += "\n-100% makes a point on both axes"
+		hint.tooltip_text += " At an endpoint, -100% on either axis collapses both. Raising either value reopens both equally; further edits are independent."
+	column.add_child(hint)
+
+func _spline_transform_selection_label() -> String:
+	if spline_transform_selection.is_empty():
+		return "Select Point 1, then Point 2."
+	var labels := PackedStringArray()
+	for role in range(spline_transform_selection.size()):
+		labels.append("Point %d: spline point %d (%s)" % [
+			role + 1, spline_transform_selection[role] + 1,
+			"expand" if role == 1 else "fixed",
+		])
+	return "\n".join(labels)
+
+func _can_select_spline_transform_third(point_index: int) -> bool:
+	return (
+		spline_transform_selection.size() >= 2
+		and point_index >= 0
+		and point_index < spline_transform_selection_count
+		and (spline_transform_selection[0] - spline_transform_selection[1])
+			* (point_index - spline_transform_selection[1]) < 0
+	)
+
+func _select_spline_transform_role(role: int) -> void:
+	if not _spline_transform_target_is_current():
+		_close_spline_transform_popup()
+		return
+	var point_index := spline_transform_point_index
+	if role == 1 and (spline_transform_selection.is_empty() or point_index == spline_transform_selection[0]):
+		return
+	if role == 2 and not _can_select_spline_transform_third(point_index):
+		return
+	var state := spline_transform_state
+	_finish_spline_transform_popup()
+	if role == 0:
+		spline_transform_selection = PackedInt32Array([point_index])
+		spline_transform_selection_state = state
+		spline_transform_selection_tool = StringName(state.get("active_tool_id"))
+		spline_transform_selection_draft = StringName(state.get("draft_id"))
+		spline_transform_selection_body = StringName(state.get("selected_material_body_id"))
+		spline_transform_selection_count = (state.get("spline_line_points") as PackedVector3Array).size()
+	elif role == 1:
+		spline_transform_selection = PackedInt32Array([spline_transform_selection[0], point_index])
+	else:
+		spline_transform_selection = PackedInt32Array([spline_transform_selection[0], spline_transform_selection[1], point_index])
+	_set_v2_action_status_text(
+		"Transform Point 1 set. Right-click another spline point to choose Point 2."
+		if spline_transform_selection.size() == 1 else
+		"Transform selection ready. Right-click spline point %d for Expand X / Expand Y." % (spline_transform_selection[1] + 1)
+	)
+
+func _on_clear_spline_transform_selection() -> void:
+	_finish_spline_transform_popup()
+	_clear_spline_transform_selection()
+	_set_v2_action_status_text("Transform selection cleared; geometry retained.")
+
+func _clear_spline_transform_selection() -> void:
+	spline_transform_selection = PackedInt32Array()
+	spline_transform_selection_state = null
+	spline_transform_selection_tool = StringName()
+	spline_transform_selection_draft = StringName()
+	spline_transform_selection_body = StringName()
+	spline_transform_selection_count = 0
+
+func _sync_spline_transform_selection() -> void:
+	if spline_transform_selection.is_empty():
+		return
+	var state := _get_spline_roll_authoring_state()
+	if (
+		state == null or state != spline_transform_selection_state
+		or StringName(state.get("active_tool_id")) != spline_transform_selection_tool
+		or StringName(state.get("draft_id")) != spline_transform_selection_draft
+		or StringName(state.get("selected_material_body_id")) != spline_transform_selection_body
+		or (state.get("spline_line_points") as PackedVector3Array).size() != spline_transform_selection_count
+	):
+		_clear_spline_transform_selection()
+
+func _spline_transform_target_is_current() -> bool:
+	var state := _get_spline_roll_authoring_state()
+	return (
+		state != null and state == spline_transform_state
+		and StringName(state.get("active_tool_id")) == spline_transform_tool_id
+		and spline_transform_tool_id in [&"tool_spline_line", &"tool_detailing_brush"]
+		and int(state.get("selected_spline_point_index")) == spline_transform_point_index
+		and (state.get("spline_line_points") as PackedVector3Array) == spline_transform_points
+		and spline_transform_point_index >= 0
+		and spline_transform_point_index < spline_transform_points.size()
+	)
+
+func _on_spline_transform_text_changed(_text: String, axis_index: int) -> void:
+	spline_transform_pending_text[axis_index] = 1
+
+func _on_spline_transform_value_changed(_value: float, axis_index: int) -> void:
+	if is_applying_spline_transform or not is_instance_valid(spline_transform_popup):
+		return
+	if (
+		not _spline_transform_target_is_current() or v2_save_in_progress or _is_retained_edit_pending()
+		or spline_transform_selection.size() < 2
+		or spline_transform_selection[1] != spline_transform_point_index
+	):
+		_close_spline_transform_popup()
+		return
+	spline_transform_pending_text[axis_index] = 0
+	var requested := Vector2(1.0 + spline_transform_x.value / 100.0, 1.0 + spline_transform_y.value / 100.0)
+	var current: Vector2 = spline_transform_state.call(
+		"get_spline_line_profile_transform_scale", spline_transform_selection
+	)
+	if requested[axis_index] <= 0.0:
+		# Exact collapse represents a point, never a zero-thickness cross-section.
+		requested = Vector2.ZERO
+		spline_transform_pending_text = Vector2i.ZERO
+	elif current == Vector2.ZERO:
+		# Reopen a point from either input before independent axis editing resumes.
+		requested = Vector2.ONE * requested[axis_index]
+		spline_transform_pending_text = Vector2i.ZERO
+	is_applying_spline_transform = true
+	active_stage_controller.call(
+		"set_spline_line_profile_transform", spline_transform_selection.duplicate(),
+		requested
+	)
+	var actual: Vector2 = spline_transform_state.call(
+		"get_spline_line_profile_transform_scale", spline_transform_selection
+	)
+	spline_transform_x.set_value_no_signal((actual.x - 1.0) * 100.0)
+	spline_transform_y.set_value_no_signal((actual.y - 1.0) * 100.0)
+	is_applying_spline_transform = false
+
+func _finish_spline_transform_popup() -> void:
+	# SpinBox refreshes its displayed text during drawing. Only apply actual
+	# typed edits: untouched text can lag an arrow/numeric update by one frame.
+	if spline_transform_pending_text.x != 0 and is_instance_valid(spline_transform_x):
+		spline_transform_x.apply()
+	if spline_transform_pending_text.y != 0 and is_instance_valid(spline_transform_y):
+		spline_transform_y.apply()
+	_close_spline_transform_popup()
+
+func _on_spline_transform_done_pressed() -> void:
+	_finish_spline_transform_popup()
+	_clear_spline_transform_selection()
+	_restore_v2_workspace_input_after_top_menu()
+
+func _on_spline_transform_popup_input(event: InputEvent) -> void:
+	if _handle_spline_transform_context_input(event):
+		return
+	if _handle_spline_transform_history_input(event):
+		return
+	if event.is_action_pressed(&"ui_cancel"):
+		var popup := spline_transform_popup
+		if is_instance_valid(popup):
+			popup.set_input_as_handled()
+		_close_spline_transform_popup()
+
+func _handle_spline_transform_context_input(event: InputEvent) -> bool:
+	if (
+		not is_instance_valid(spline_transform_popup) or not spline_transform_popup.visible
+		or not event is InputEventKey or active_stage_controller == null
+		or workspace_action_menu == null or v2_save_in_progress or _is_retained_edit_pending()
+	):
+		return false
+	var key_event := event as InputEventKey
+	if not key_event.pressed or key_event.echo or not _v2_event_matches_binding(
+		ForgeV2KeybindingStateScript.ACTION_CONTEXT_ACTIONS, event
+	):
+		return false
+	# These numbers edit the current Spline/Detail draft (including an E edit).
+	# Finish their input transaction before handing S to the existing task menu;
+	# its context owns generation/replacement and whole-task cancellation.
+	spline_transform_popup.set_input_as_handled()
+	get_viewport().set_input_as_handled()
+	_finish_spline_transform_popup()
+	_clear_spline_transform_selection()
+	_finish_workspace_edit_before_view_change()
+	workspace_action_menu.call("open_context_popup")
+	return true
+
+func _handle_spline_transform_history_input(event: InputEvent) -> bool:
+	if (
+		not is_instance_valid(spline_transform_popup) or not spline_transform_popup.visible
+		or not event is InputEventKey
+		or active_stage_controller == null or v2_save_in_progress or _is_retained_edit_pending()
+	):
+		return false
+	var key_event := event as InputEventKey
+	if not key_event.pressed or key_event.echo:
+		return false
+	var undo_requested := _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_UNDO, event)
+	var redo_requested := _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_REDO, event)
+	if not undo_requested and not redo_requested:
+		return false
+	# Transform numbers are direct geometry controls. Commit pending text, close
+	# only this popup, then undo/redo the grouped geometry edit. Do not let a
+	# LineEdit-only undo make the displayed number disagree with its geometry.
+	spline_transform_popup.set_input_as_handled()
+	get_viewport().set_input_as_handled()
+	_finish_spline_transform_popup()
+	active_stage_controller.call("undo_latest_action" if undo_requested else "redo_latest_action")
+	_sync_spline_transform_selection()
+	return true
+
+func _on_spline_transform_popup_hidden(popup: PopupPanel) -> void:
+	if spline_transform_popup == popup:
+		_finish_spline_transform_popup()
+
+func _close_spline_transform_popup() -> void:
+	var popup := spline_transform_popup
+	spline_transform_popup = null
+	spline_transform_point_index = -1
+	spline_transform_state = null
+	spline_transform_tool_id = StringName()
+	spline_transform_points = PackedVector3Array()
+	spline_transform_x = null
+	spline_transform_y = null
+	spline_transform_pending_text = Vector2i.ZERO
+	if is_instance_valid(popup):
+		popup.hide()
+		popup.queue_free()
+	var finish_transaction := spline_transform_transaction_active
+	spline_transform_transaction_active = false
+	if finish_transaction and active_stage_controller != null:
+		active_stage_controller.call("finish_editor_action_transaction")
+
 func _ensure_spline_roll_controls() -> void:
 	if spline_roll_controls != null or workspace_vbox == null:
 		return
@@ -5856,6 +6223,25 @@ func _is_spline_roll_tool_active() -> bool:
 	var active_tool := StringName(state.get("active_tool_id"))
 	return active_tool == &"tool_spline_line" or active_tool == &"tool_handles"
 
+func _refresh_spline_roll_editability() -> void:
+	if spline_roll_degrees_spin_box == null or spline_roll_twist_spin_box == null:
+		return
+	var state := _get_spline_roll_authoring_state()
+	var points: PackedVector3Array = (
+		state.get("spline_line_points") as PackedVector3Array
+		if state != null else PackedVector3Array()
+	)
+	var selected_index := int(state.get("selected_spline_point_index")) if state != null else -1
+	var editable := (
+		selected_index >= 0
+		and selected_index < points.size()
+		and not v2_save_in_progress
+		and not _is_retained_edit_pending()
+		and not _is_workspace_view_transitioning()
+	)
+	spline_roll_degrees_spin_box.editable = editable
+	spline_roll_twist_spin_box.editable = editable
+
 func _refresh_spline_roll_controls() -> void:
 	_ensure_spline_roll_controls()
 	if spline_roll_controls == null:
@@ -5878,11 +6264,7 @@ func _refresh_spline_roll_controls() -> void:
 		_get_v2_binding_label(ForgeV2KeybindingStateScript.ACTION_SPLINE_POINT_NEXT),
 		_get_v2_binding_label(ForgeV2KeybindingStateScript.ACTION_SPLINE_POINT_PREVIOUS),
 	]
-	spline_roll_degrees_spin_box.editable = has_selected_point and not v2_save_in_progress and not _is_retained_edit_pending()
-	spline_roll_twist_spin_box.editable = has_selected_point and not v2_save_in_progress and not _is_retained_edit_pending()
-	if _is_workspace_view_transitioning():
-		spline_roll_degrees_spin_box.editable = false
-		spline_roll_twist_spin_box.editable = false
+	_refresh_spline_roll_editability()
 	if not has_selected_point:
 		return
 	var roll_degrees := float(state.call("get_spline_line_point_roll_degrees", selected_index))
@@ -5963,6 +6345,18 @@ func _try_handle_spline_point_cycle_input(event: InputEvent) -> bool:
 func _input(event: InputEvent) -> void:
 	if not is_open():
 		return
+	if is_instance_valid(spline_transform_popup) and spline_transform_popup.visible:
+		if _handle_spline_transform_context_input(event):
+			return
+		if _handle_spline_transform_history_input(event):
+			return
+		# The numerical popup owns other keys; do not open Q/V or edit the path
+		# behind its SpinBoxes. Native popup input still receives text/navigation.
+		if event is InputEventKey:
+			if event.is_action_pressed(&"ui_cancel"):
+				_close_spline_transform_popup()
+				get_viewport().set_input_as_handled()
+			return
 	if workspace_view_radial_active:
 		_handle_workspace_view_radial_input(event)
 		get_viewport().set_input_as_handled()
@@ -6244,6 +6638,7 @@ func _close_focused_temporary_window_layer() -> bool:
 		workspace_action_menu.call("dismiss")
 		return true
 	var temporary_layers: Array[Window] = [
+		spline_transform_popup,
 		profile_fillet_popup,
 		profile_canvas_context_panel,
 		keybindings_popup,
@@ -6288,7 +6683,9 @@ func _close_focused_temporary_window_layer() -> bool:
 					break
 	if target_layer == null:
 		return false
-	if target_layer == profile_fillet_popup:
+	if target_layer == spline_transform_popup:
+		_close_spline_transform_popup()
+	elif target_layer == profile_fillet_popup:
 		_close_profile_fillet_popup(true)
 	elif target_layer == profile_canvas_context_panel:
 		_hide_profile_canvas_context_menu()
@@ -6329,6 +6726,7 @@ func _has_focused_window_layer() -> bool:
 	if workspace_action_menu != null and bool(workspace_action_menu.call("is_popup_open")):
 		return true
 	var window_layers: Array[Window] = [
+		spline_transform_popup,
 		profile_fillet_popup,
 		profile_canvas_context_panel,
 		keybindings_popup,
@@ -6855,6 +7253,10 @@ func _select_option_by_metadata(option_button: OptionButton, target_metadata: Va
 			return
 
 func _on_authoring_state_changed(_state) -> void:
+	if is_instance_valid(spline_transform_popup) and not is_applying_spline_transform:
+		# A tool, node, history, or document change invalidates the popup target.
+		_close_spline_transform_popup()
+	_sync_spline_transform_selection()
 	_refresh_from_controller()
 
 func _on_new_draft_pressed() -> void:
@@ -6954,6 +7356,7 @@ func _can_redo_v2_action(summary: Dictionary) -> bool:
 	return int(summary.get("action_redo_count", 0)) > 0
 
 func _on_undo_pressed() -> void:
+	_close_spline_transform_popup()
 	if (
 		active_stage_controller == null
 		or not active_stage_controller.has_method("undo_latest_action")
@@ -6962,6 +7365,7 @@ func _on_undo_pressed() -> void:
 	active_stage_controller.call("undo_latest_action")
 
 func _on_redo_pressed() -> void:
+	_close_spline_transform_popup()
 	if (
 		active_stage_controller == null
 		or not active_stage_controller.has_method("redo_latest_action")
@@ -7049,6 +7453,17 @@ func _handle_workspace_mouse_button(mouse_button_event: InputEventMouseButton) -
 	var pan_mouse_button := _get_v2_binding_mouse_button(ForgeV2KeybindingStateScript.ACTION_VIEW_PAN)
 	var pan_secondary_mouse_button := _get_v2_binding_mouse_button(ForgeV2KeybindingStateScript.ACTION_VIEW_PAN_SECONDARY)
 	var paint_mouse_button := _get_v2_binding_mouse_button(ForgeV2KeybindingStateScript.ACTION_PAINT_MATERIAL)
+	if (
+		mouse_button_event.button_index == MOUSE_BUTTON_RIGHT
+		and mouse_button_event.pressed
+		and not mouse_button_event.double_click
+		and not _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_VIEW_PAN, mouse_button_event)
+		and not _v2_event_matches_binding(ForgeV2KeybindingStateScript.ACTION_VIEW_PAN_SECONDARY, mouse_button_event)
+	):
+		_close_spline_transform_popup()
+		if _try_open_spline_transform_popup(mouse_button_event.position):
+			workspace_view_container.accept_event()
+			return
 	if (
 		mouse_button_event.button_index == orbit_mouse_button
 		or mouse_button_event.button_index == pan_mouse_button
@@ -7403,31 +7818,28 @@ func _get_spline_point_local_position(point_index: int, fallback_local_position:
 	return spline_points[point_index]
 
 func _get_spline_points() -> PackedVector3Array:
-	if active_stage_controller == null or not active_stage_controller.has_method("get_status_summary"):
-		return PackedVector3Array()
-	var summary: Dictionary = active_stage_controller.call("get_status_summary") as Dictionary
-	if StringName(summary.get("active_tool", StringName())) == &"tool_detailing_brush":
-		var detailing_summary: Dictionary = summary.get(
-			"detailing_brush",
-			{}
-		) as Dictionary
-		return detailing_summary.get(
-			"control_points",
-			PackedVector3Array()
-		) as PackedVector3Array
-	var spline_summary: Dictionary = summary.get("spline_line", {}) as Dictionary
-	return spline_summary.get("points", PackedVector3Array())
+	# Spline, Handle and Detail controls share the same authored point array.
+	# Mouse hover/orbit must not build status, volume or generation summaries.
+	var state := _get_spline_roll_authoring_state()
+	return (
+		state.get("spline_line_points") as PackedVector3Array
+		if state != null else PackedVector3Array()
+	)
 
 func _get_detailing_brush_summary() -> Dictionary:
-	if (
-		active_stage_controller == null
-		or not active_stage_controller.has_method("get_status_summary")
-	):
+	var state := _get_spline_roll_authoring_state()
+	if state == null or StringName(state.get("active_tool_id")) != &"tool_detailing_brush":
 		return {}
-	var summary: Dictionary = active_stage_controller.call(
-		"get_status_summary"
-	) as Dictionary
-	return summary.get("detailing_brush", {}) as Dictionary
+	# Only input/target data is needed by picking and placement. Generation
+	# validation remains in the authoring update and commit paths.
+	return {
+		"control_points": state.get("spline_line_points"),
+		"control_surface_normals": state.get("spline_line_surface_normals"),
+		"control_contact_directions": state.get("detailing_control_contact_directions"),
+		"locked_target_kind": state.get("detailing_surface_target_kind"),
+		"locked_target_id": state.get("detailing_surface_target_id"),
+		"finished": state.get("spline_line_finished"),
+	}
 
 func _apply_detailing_brush_control_candidate(
 	screen_position: Vector2,

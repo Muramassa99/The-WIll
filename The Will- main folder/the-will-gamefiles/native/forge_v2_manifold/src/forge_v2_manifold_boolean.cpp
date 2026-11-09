@@ -659,6 +659,10 @@ void ForgeV2ManifoldBoolean::activate_history_state(size_t cursor) {
 }
 
 void ForgeV2ManifoldBoolean::_bind_methods() {
+    ClassDB::bind_method(
+        D_METHOD("simplify_export_mesh", "vertices", "indices", "tolerance_meters"),
+        &ForgeV2ManifoldBoolean::simplify_export_mesh
+    );
     ClassDB::bind_method(D_METHOD("get_backend_info"), &ForgeV2ManifoldBoolean::get_backend_info);
     ClassDB::bind_method(D_METHOD("get_state_info"), &ForgeV2ManifoldBoolean::get_state_info);
     ClassDB::bind_method(D_METHOD("get_history_info"), &ForgeV2ManifoldBoolean::get_history_info);
@@ -2502,6 +2506,138 @@ Dictionary ForgeV2ManifoldBoolean::redo_state() {
         commit_end,
         target_initialized
     );
+    return result;
+}
+
+Dictionary ForgeV2ManifoldBoolean::simplify_export_mesh(
+    const PackedVector3Array &vertices,
+    const PackedInt32Array &indices,
+    double tolerance_meters
+) const {
+    const Clock::time_point total_start = Clock::now();
+    Dictionary result = failure_result("", "");
+    result["mode"] = "detached_export_simplification";
+    result["input_vertex_count"] = vertices.size();
+    result["input_triangle_count"] = indices.size() / 3;
+    result["tolerance_meters"] = tolerance_meters;
+    result["history_mutated"] = false;
+    result["export_provenance_rebuilt"] = true;
+    result["pack_ms"] = 0.0;
+    result["import_ms"] = 0.0;
+    result["simplify_ms"] = 0.0;
+    result["validation_ms"] = 0.0;
+    result["export_ms"] = 0.0;
+    auto fail = [&](const String &code, const String &message, const String &status) {
+        result["error_code"] = code;
+        result["error_message"] = message;
+        result["status"] = status;
+        result["total_native_ms"] = elapsed_ms(total_start, Clock::now());
+        return result;
+    };
+    if (!std::isfinite(tolerance_meters) || tolerance_meters <= 0.0) {
+        return fail("INVALID_SIMPLIFICATION_TOLERANCE",
+            "export simplification requires a finite positive tolerance in meters", "NotRun");
+    }
+
+    const uint32_t original_id = manifold::Manifold::ReserveIDs(1);
+    PackedInput input;
+    String error;
+    const Clock::time_point pack_start = Clock::now();
+    const bool packed = pack_input(vertices, indices, original_id,
+        kGodotCsgMeshTolerance, input, error);
+    result["pack_ms"] = elapsed_ms(pack_start, Clock::now());
+    if (!packed) {
+        return fail("INVALID_SIMPLIFICATION_SOURCE", error, "NotRun");
+    }
+    // The finalized Stage2 visual mesh is a single surface with no persisted
+    // per-triangle provenance. Drop its copied triangle IDs so Manifold can
+    // derive tolerance-based face groups. Never change the live solid, its
+    // history/checkpoint IDs, or the separate exact Handle/grip-source packet.
+    input.mesh.faceID.clear();
+    const Clock::time_point import_start = Clock::now();
+    manifold::Manifold source(input.mesh);
+    const manifold::Manifold::Error source_status = source.Status();
+    result["import_ms"] = elapsed_ms(import_start, Clock::now());
+    result["input_winding_reversed"] = input.winding_reversed;
+    if (source_status != manifold::Manifold::Error::NoError) {
+        return fail("SIMPLIFICATION_SOURCE_" + String(status_name(source_status)),
+            "export source is not a valid closed Manifold solid", status_name(source_status));
+    }
+    const double source_volume = source.Volume();
+    result["source_volume_m3"] = source_volume;
+    if (!std::isfinite(source_volume) || source_volume <= 0.0) {
+        return fail("SIMPLIFICATION_SOURCE_VOLUME_INVALID",
+            "export source must have finite positive volume", "InvalidVolume");
+    }
+    if (source.GetTolerance() > tolerance_meters) {
+        return fail("SIMPLIFICATION_TOLERANCE_BELOW_SOURCE_PRECISION",
+            "source precision exceeds the requested export error allowance", "PrecisionLimit");
+    }
+
+    const Clock::time_point source_validation_start = Clock::now();
+    const int64_t source_components = static_cast<int64_t>(source.Decompose().size());
+    const int source_genus = source.Genus();
+    double validation_ms = elapsed_ms(source_validation_start, Clock::now());
+    result["source_component_count"] = source_components;
+    result["source_genus"] = source_genus;
+    const Clock::time_point simplify_start = Clock::now();
+    manifold::Manifold simplified = source.Simplify(tolerance_meters);
+    const manifold::Manifold::Error simplified_status = simplified.Status();
+    result["simplify_ms"] = elapsed_ms(simplify_start, Clock::now());
+    if (simplified_status != manifold::Manifold::Error::NoError) {
+        return fail("SIMPLIFICATION_OUTPUT_" + String(status_name(simplified_status)),
+            "simplification did not produce a valid closed Manifold solid", status_name(simplified_status));
+    }
+    const Clock::time_point output_validation_start = Clock::now();
+    const double output_volume = simplified.Volume();
+    const int64_t output_components = static_cast<int64_t>(simplified.Decompose().size());
+    const int output_genus = simplified.Genus();
+    validation_ms += elapsed_ms(output_validation_start, Clock::now());
+    result["validation_ms"] = validation_ms;
+    result["output_component_count"] = output_components;
+    result["output_genus"] = output_genus;
+    result["manifold_volume_m3"] = output_volume;
+    result["volume_delta_m3"] = output_volume - source_volume;
+    if (!std::isfinite(output_volume) || output_volume <= 0.0) {
+        return fail("SIMPLIFICATION_OUTPUT_VOLUME_INVALID",
+            "simplification must retain finite positive volume", "InvalidVolume");
+    }
+    if (output_components != source_components || output_genus != source_genus) {
+        return fail("SIMPLIFICATION_TOPOLOGY_CHANGED",
+            "simplification changed the number of connected components or handles", "TopologyChanged");
+    }
+
+    ExportPacket packet;
+    String export_error_code;
+    String export_error_message;
+    const Clock::time_point export_start = Clock::now();
+    const bool exported = export_stateful_solid(simplified, original_id, false,
+        packet, export_error_code, export_error_message);
+    result["export_ms"] = elapsed_ms(export_start, Clock::now());
+    if (!exported) {
+        return fail(export_error_code, export_error_message, "ExportFailed");
+    }
+    // Double-to-Godot conversion must not turn a legal native triangle into
+    // a zero-area face. A rejected candidate leaves the caller's source intact.
+    for (int64_t index = 0; index < packet.indices.size(); index += 3) {
+        const Vector3 a = packet.vertices[packet.indices[index]];
+        const Vector3 b = packet.vertices[packet.indices[index + 1]];
+        const Vector3 c = packet.vertices[packet.indices[index + 2]];
+        const Vector3 cross = (b - a).cross(c - a);
+        if (!cross.is_finite() || cross.length_squared() <= 0.0) {
+            return fail("SIMPLIFICATION_OUTPUT_PRECISION_DEGENERATE",
+                "Godot-precision conversion produced a degenerate triangle", "ExportFailed");
+        }
+    }
+    result["ok"] = true;
+    result["status"] = "NoError";
+    result["empty"] = false;
+    result["vertices"] = packet.vertices;
+    result["indices"] = packet.indices;
+    result["output_vertex_count"] = packet.vertex_count;
+    result["output_triangle_count"] = packet.triangle_count;
+    result["simplified"] = packet.triangle_count < indices.size() / 3;
+    result["total_native_ms"] = elapsed_ms(total_start, Clock::now());
     return result;
 }
 

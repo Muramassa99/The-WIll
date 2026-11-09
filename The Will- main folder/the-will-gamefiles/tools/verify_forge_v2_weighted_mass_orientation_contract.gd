@@ -357,19 +357,19 @@ func _verify_mirrored_unequal_density(
 	)
 	_check(
 		dense_right.primary_grip_handle_coordinate_mode
-		== BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_DIRECTIONAL_POMMEL_TO_TIP
+		== BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_BALANCED_SIGNED
 		and dense_left.primary_grip_handle_coordinate_mode
-		== BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_DIRECTIONAL_POMMEL_TO_TIP
-		and dense_right.primary_grip_handle_zero_axis_ratio_from_span_start
+		== BakedProfile.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_BALANCED_SIGNED
+		and absf(dense_right.primary_grip_handle_zero_axis_ratio_from_span_start - 0.5)
 		<= RATIO_TOLERANCE
-		and dense_left.primary_grip_handle_zero_axis_ratio_from_span_start
-		>= 1.0 - RATIO_TOLERANCE,
-		"directional Handle zero selects the Pommel-side endcap"
+		and absf(dense_left.primary_grip_handle_zero_axis_ratio_from_span_start - 0.5)
+		<= RATIO_TOLERANCE,
+		"off-centre COM inside the Handle selects midpoint-zero coordinates in both mirrors"
 	)
 	_check(
-		(dense_right.primary_grip_handle_zero_position * CELL_SIZE_METERS).x < 0.0
-		and (dense_left.primary_grip_handle_zero_position * CELL_SIZE_METERS).x > 0.0,
-		"directional Handle zero position is published on the opposite side from Tip"
+		(dense_right.primary_grip_handle_zero_position * CELL_SIZE_METERS).distance_to(HANDLE_MIDDLE) <= POSITION_TOLERANCE_METERS
+		and (dense_left.primary_grip_handle_zero_position * CELL_SIZE_METERS).distance_to(HANDLE_MIDDLE) <= POSITION_TOLERANCE_METERS,
+		"centred Handle display zero stays at the Handle midpoint despite asymmetric mass"
 	)
 
 

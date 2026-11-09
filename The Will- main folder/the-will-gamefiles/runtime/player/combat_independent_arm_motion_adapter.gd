@@ -9,16 +9,28 @@ const ELBOW_BOUNDARY_SEARCH_STEPS := 7
 ## world Hand frame for a free-hand task or world Elbow origin for a swivel.
 ## No weapon object, acquired-grip change, finger search or shared ancestor edit.
 
-func move_hand(owner: Node3D, slot: StringName, target_world: Transform3D) -> Dictionary:
+func move_hand(owner: Node3D, slot: StringName, target_world: Transform3D,
+		mode: String = "pose", task_point_hand_local: Vector3 = Vector3.ZERO,
+		trailing_tip_hand_local: Variant = null) -> Dictionary:
+	if mode not in ["tip", "pommel", "pose", "roll"]:
+		return _failure("independent_hand_control_mode_invalid", "INVALID_PROFILE")
 	var skel: Skeleton3D = owner.get("skeleton") as Skeleton3D
 	var prefix := "CC_Base_L_" if slot == SLOT_LEFT else "CC_Base_R_"
 	var index: int = skel.find_bone(prefix + "Hand") if skel != null else -1
 	if index < 0:
 		return _failure("independent_hand_frame_missing", "INVALID_PROFILE")
 	var current: Transform3D = skel.global_transform * skel.get_bone_global_pose(index)
-	return allocate(owner, {"mode": "pose", "primary_slot": slot,
+	# The controlled frame is Hand, not a weapon or an IK target. Proxy points
+	# are Hand-local landmarks; Pommel owns position, Tip owns orientation.
+	var motion_request := {"mode": mode, "primary_slot": slot,
 		"previous_weapon": current, "target_weapon": target_world,
-		"contact_local": Vector3.ZERO, "hand_in_weapon_by_slot": {slot: Transform3D.IDENTITY}})
+		"contact_local": Vector3.ZERO, "task_point_local": task_point_hand_local,
+		"hand_in_weapon_by_slot": {slot: Transform3D.IDENTITY}}
+	if mode == "pommel" and trailing_tip_hand_local is Vector3:
+		motion_request["trailing_tip_local"] = trailing_tip_hand_local
+	var result := allocate(owner, motion_request)
+	result["hand_control_mode"] = mode
+	return result
 
 func move_elbow(owner: Node3D, slot: StringName, target_world: Vector3, retained_hand_world: Variant = null) -> Dictionary:
 	var skel: Skeleton3D = owner.get("skeleton") as Skeleton3D
@@ -200,6 +212,17 @@ func _elbow_orbit_candidate(fraction: float, base: Dictionary) -> Dictionary:
 
 func _requires_weapon_node() -> bool:
 	return false
+
+func _update_forearm_skin(arm: Dictionary, state: Dictionary) -> bool:
+	if String(request.get("mode", "")) == "roll" \
+			and String(arm.wrist_profile.get("bend_frame", "")) == "hand_parent_local_xz" \
+			and arm.slot == StringName(request.get("primary_slot", SLOT_RIGHT)):
+		# This control changes gamma only; rho and every upstream coordinate are
+		# fixed. Keep the captured helper poses too, instead of reseating existing
+		# forearm skin on the first bend. Shared commit still publishes wrist state
+		# and reads all final bones back into the prepared-pose payload.
+		return true
+	return super._update_forearm_skin(arm, state)
 
 func _controlled_frame_world() -> Transform3D:
 	var arm: Dictionary = arms[0]

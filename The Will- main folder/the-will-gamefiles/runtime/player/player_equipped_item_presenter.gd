@@ -25,6 +25,8 @@ const EQUIPPED_REANCHOR_SOURCE_ORIGIN_META := "equipped_reanchor_source_origin_i
 const EQUIPPED_REANCHOR_TARGET_ORIGIN_META := "equipped_reanchor_target_origin_id"
 const WEAPON_CLEARANCE_PROXY_OFFSET_METERS := 0.005
 const MAX_WEAPON_BODY_PROXY_SURFACE_SAMPLES := 128
+const WEAPON_PROXY_SAMPLE_MERGE_DISTANCE_SQUARED := 0.00000025
+const WEAPON_PROXY_SAMPLE_BUCKET_SIZE_METERS := 0.001
 const STOW_AUTHORING_ROOT_BONE := &"RL_BoneRoot"
 
 var weapon_grip_anchor_provider = WeaponGripAnchorProviderScript.new()
@@ -1656,6 +1658,9 @@ func _append_visual_mesh_proxy_samples(
 		resolved_grip_center_origin_id
 	)
 	var mesh_positions: Array[Vector3] = []
+	# Local to this build, in the same grip-relative meter space as mesh_positions.
+	# Index accepted points before downsampling; retain the existing greedy order.
+	var mesh_position_buckets: Dictionary = {}
 	for surface_index: int in range(visual_mesh.get_surface_count()):
 		var surface_arrays: Array = visual_mesh.surface_get_arrays(surface_index)
 		if surface_arrays.size() <= Mesh.ARRAY_VERTEX:
@@ -1667,8 +1672,9 @@ func _append_visual_mesh_proxy_samples(
 		for vertex: Vector3 in vertices:
 			var proxy_surface_position_origin_id: StringName = resolved_grip_center_origin_id
 			var proxy_surface_position_local: Vector3 = (vertex - resolved_grip_center_local) * cell_world_size
-			_append_unique_proxy_sample(
+			_append_unique_proxy_mesh_sample(
 				mesh_positions,
+				mesh_position_buckets,
 				_expand_weapon_proxy_surface_point(
 					proxy_surface_position_local,
 					clearance_offset_meters,
@@ -1677,6 +1683,7 @@ func _append_visual_mesh_proxy_samples(
 			)
 		_append_visual_mesh_triangle_centroid_samples(
 			mesh_positions,
+			mesh_position_buckets,
 			surface_arrays,
 			resolved_grip_center_local,
 			resolved_grip_center_origin_id,
@@ -1696,6 +1703,7 @@ func _append_visual_mesh_proxy_samples(
 
 func _append_visual_mesh_triangle_centroid_samples(
 	mesh_positions: Array[Vector3],
+	mesh_position_buckets: Dictionary,
 	surface_arrays: Array,
 	grip_center_local: Vector3,
 	grip_center_origin_id: StringName,
@@ -1741,8 +1749,9 @@ func _append_visual_mesh_triangle_centroid_samples(
 			var centroid: Vector3 = (vertices[a_index] + vertices[b_index] + vertices[c_index]) / 3.0
 			var proxy_surface_position_origin_id: StringName = resolved_grip_center_origin_id
 			var proxy_surface_position_local: Vector3 = (centroid - resolved_grip_center_local) * cell_world_size
-			_append_unique_proxy_sample(
+			_append_unique_proxy_mesh_sample(
 				mesh_positions,
+				mesh_position_buckets,
 				_expand_weapon_proxy_surface_point(
 					proxy_surface_position_local,
 					clearance_offset_meters,
@@ -1754,8 +1763,9 @@ func _append_visual_mesh_triangle_centroid_samples(
 		var centroid: Vector3 = (vertices[vertex_offset] + vertices[vertex_offset + 1] + vertices[vertex_offset + 2]) / 3.0
 		var proxy_surface_position_origin_id: StringName = resolved_grip_center_origin_id
 		var proxy_surface_position_local: Vector3 = (centroid - resolved_grip_center_local) * cell_world_size
-		_append_unique_proxy_sample(
+		_append_unique_proxy_mesh_sample(
 			mesh_positions,
+			mesh_position_buckets,
 			_expand_weapon_proxy_surface_point(
 				proxy_surface_position_local,
 				clearance_offset_meters,
@@ -1814,9 +1824,36 @@ func _append_extreme_proxy_samples(samples: Array[Vector3], mesh_positions: Arra
 	for extreme_position: Vector3 in [min_x, max_x, min_y, max_y, min_z, max_z]:
 		_append_unique_proxy_sample(samples, extreme_position)
 
+func _append_unique_proxy_mesh_sample(
+	samples: Array[Vector3],
+	sample_buckets: Dictionary,
+	sample_position: Vector3
+) -> void:
+	# A 1 mm cell is twice the unchanged 0.5 mm merge radius. Check neighbours
+	# using the exact distance predicate, including negative-coordinate cells.
+	# This avoids comparing every vertex/centroid with the entire mesh on open.
+	var cell := Vector3i(
+		floori(sample_position.x / WEAPON_PROXY_SAMPLE_BUCKET_SIZE_METERS),
+		floori(sample_position.y / WEAPON_PROXY_SAMPLE_BUCKET_SIZE_METERS),
+		floori(sample_position.z / WEAPON_PROXY_SAMPLE_BUCKET_SIZE_METERS)
+	)
+	for x: int in range(-1, 2):
+		for y: int in range(-1, 2):
+			for z: int in range(-1, 2):
+				var neighbour := cell + Vector3i(x, y, z)
+				if not sample_buckets.has(neighbour):
+					continue
+				for existing: Vector3 in sample_buckets[neighbour]:
+					if existing.distance_squared_to(sample_position) <= WEAPON_PROXY_SAMPLE_MERGE_DISTANCE_SQUARED:
+						return
+	if not sample_buckets.has(cell):
+		sample_buckets[cell] = []
+	sample_buckets[cell].append(sample_position)
+	samples.append(sample_position)
+
 func _append_unique_proxy_sample(samples: Array[Vector3], sample_position: Vector3) -> void:
 	for existing: Vector3 in samples:
-		if existing.distance_squared_to(sample_position) <= 0.00000025:
+		if existing.distance_squared_to(sample_position) <= WEAPON_PROXY_SAMPLE_MERGE_DISTANCE_SQUARED:
 			return
 	samples.append(sample_position)
 

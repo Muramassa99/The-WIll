@@ -65,7 +65,9 @@ static func capture(
 	# Godot bone poses are already local parent-relative transforms. Rest is
 	# retained as topology/provenance, never multiplied into the pose a second time.
 	pose["schema_version"] = PreparedPose.SCHEMA_VERSION
-	pose["attachment_required"] = true
+	# Unarmed's virtual positioning frame has no physical hand-to-weapon mate.
+	# Keep its named body/finger poses and origins, without requiring a grip.
+	pose["attachment_required"] = not bool(weapon.get_meta("unarmed_hand_proxy", false))
 	pose["capture_source"] = &"settled_editor_pose"
 	pose["context_signature"] = context_signature
 	pose["parent_indices"] = parents

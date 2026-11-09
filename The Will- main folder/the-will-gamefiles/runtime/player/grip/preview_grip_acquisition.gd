@@ -10,6 +10,7 @@ const Origins = preload("res://core/models/combat_origin_record.gd")
 const Chronology = preload("res://runtime/player/grip/grip_chronology.gd")
 const HingeRules = preload("res://runtime/player/player_digit_hinge_rules.gd")
 const PrimarySeat = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
+const MotionPolicy = preload("res://core/defs/weapon_motion_policy_def.gd")
 const NODE_NAME := "PreparedGripAcquisition"
 const SEAT_AXIAL_GUARD_M := 0.00001
 const FRAME_GUARD_M := 0.000005
@@ -22,6 +23,7 @@ const RENDER_CHECKPOINT_FIELDS := [
 	&"_pose_epoch", &"_primary_seat", &"_replay_pose_cache", &"_support_motion_snapshot",
 	&"_support_motion_clamp_count", &"_last_support_motion_clamp",
 	&"_manual_reacquisition_required",
+	&"_allocated_motion_identity",
 ]
 signal primary_seat_applied(weapon: Node3D, actor: Node3D)
 
@@ -54,6 +56,8 @@ var _support_motion_clamp_count := 0
 var _last_support_motion_clamp: Dictionary = {}
 var _replay_preparation_context: Dictionary = {}
 var _manual_reacquisition_required := false
+var _allocated_motion_identity: Dictionary = {}
+var _motion_policy := MotionPolicy.new()
 
 ## These tokens are private, in-memory continuations of this exact owner. They
 ## include the cache at this frame: later acquisitions must not leak backward.
@@ -239,6 +243,7 @@ func restore_authoring_grip(saved: Dictionary, context_signature: String,
 			return _discard_authoring_grip_import(slots, String(plan.get("reason", "authoring_grip_preflight_failed")))
 		if not _authoring_grip_matches_pose(slot, plan):
 			return _discard_authoring_grip_import(slots, "authoring_grip_pose_mismatch")
+	_release_allocated_motion_authority()
 	for slot: StringName in slots:
 		var applied: Dictionary = _actor.apply_planar_grip_pose(slot, _weapon, keys[slot], packets[slot])
 		if not applied.get("valid", false):
@@ -270,6 +275,7 @@ func restore_authoring_grip(saved: Dictionary, context_signature: String,
 	return {"valid": true, "restored": true, "solved_relationships": 0}
 
 func _discard_authoring_grip_import(slots: Array[StringName], reason: String) -> Dictionary:
+	_release_allocated_motion_authority()
 	var released: Array[StringName] = _slots.duplicate()
 	for slot: StringName in slots:
 		if slot not in released: released.append(slot)
@@ -624,6 +630,7 @@ func synchronize(slots: Array[StringName], dominant: StringName, force_reason: S
 		var force_reacquire := force_reason not in [StringName(), &"handle_position_changed"]
 		if previous.get("key", "") == key and not force_reacquire:
 			continue
+		_release_allocated_motion_authority()
 		if Chronology.enabled() and not previous.is_empty():
 			var old_fields: Array = bytes_to_var(String(previous.key).hex_decode())
 			var new_fields: Array = bytes_to_var(key.hex_decode())
@@ -704,6 +711,66 @@ func retain_roll() -> void:
 				"actual_assessment_current": false, "actual_3d_grip_verified": false}
 	_publish()
 
+## Adopt an already validated motion-engine commit, never a new grip. The
+## numerical finger solve and immutable Hand -> WeaponRoot mates stay untouched.
+## Publish before skeleton_updated so it cannot restore an acquisition-time pose.
+func accept_authoring_weapon_motion() -> bool:
+	if _manual_reacquisition_required or _busy or _closing or not _queue.is_empty() \
+		or not is_instance_valid(_actor) or not is_instance_valid(_weapon) or not is_instance_valid(_skeleton) \
+		or not _actor.has_authoring_weapon_motion_authority() or _slots.is_empty() or _dominant not in _slots:
+		return false
+	var tolerances: Dictionary = _motion_contact_tolerances()
+	for slot: StringName in _slots:
+		if not owns(slot) or not _actor.get_planar_grip_pose_state(slot).get("has_grip_pose", false):
+			return false
+		var binding: Dictionary = _actor.planar_grip_pose_binding.relationship(slot, _weapon)
+		if binding.get("relationship_key", "") != _requests[slot].key or not binding.get("hand_in_weapon") is Transform3D:
+			return false
+		var error := _motion_contact_error(slot, binding.hand_in_weapon)
+		if error.position > tolerances.position_tolerance or error.angle > tolerances.orientation_tolerance:
+			return false
+	_allocated_motion_identity = {"requests": _requests.duplicate(true), "slots": _slots.duplicate(),
+		"dominant": _dominant, "geometry_epoch": _geometry_epoch}
+	if not _primary_seat.is_empty():
+		_primary_seat.last_applied_world = _weapon.global_transform
+	for slot: StringName in _slots:
+		if slot == _dominant:
+			continue
+		_actor.remember_prepared_support_wrist_posture(slot, _requests[slot].key)
+		_capture_support_motion_snapshot(slot)
+		_status[slot]["motion_retention"] = {"valid": true, "motion_clamped": false,
+			"owner": &"weapon_motion_allocator"}
+	return true
+
+func _owns_allocated_motion() -> bool:
+	return not _allocated_motion_identity.is_empty() and not _manual_reacquisition_required \
+		and not _busy and _queue.is_empty() and is_instance_valid(_actor) \
+		and _actor.has_authoring_weapon_motion_authority() \
+		and _allocated_motion_identity.requests == _requests and _allocated_motion_identity.slots == _slots \
+		and _allocated_motion_identity.dominant == _dominant and _allocated_motion_identity.geometry_epoch == _geometry_epoch
+
+func _release_allocated_motion_authority() -> void:
+	if not _allocated_motion_identity.is_empty() and is_instance_valid(_actor):
+		_actor.clear_authoring_weapon_motion_authority()
+	_allocated_motion_identity.clear()
+
+func _motion_contact_tolerances() -> Dictionary:
+	return _motion_policy.as_dictionary(float(_actor.get("standing_height_meters")) / 2.0)
+
+func _motion_contact_error(slot: StringName, hand_in_weapon: Transform3D) -> Dictionary:
+	var hand_index := _skeleton.find_bone("CC_Base_L_Hand" if slot == &"hand_left" else "CC_Base_R_Hand")
+	if hand_index < 0:
+		return {"position": INF, "angle": INF}
+	# Compare in World, exactly as the allocator commit readback does. An inverse
+	# WeaponRoot round trip adds rounding at the physical contact boundary.
+	var actual: Transform3D = _skeleton.global_transform * _skeleton.get_bone_global_pose(hand_index)
+	var expected: Transform3D = _weapon.global_transform * hand_in_weapon
+	if not actual.is_finite() or not expected.is_finite():
+		return {"position": INF, "angle": INF}
+	var delta := (actual.basis.orthonormalized().get_rotation_quaternion().inverse() * expected.basis.orthonormalized().get_rotation_quaternion()).normalized()
+	return {"position": actual.origin.distance_to(expected.origin),
+		"angle": 2.0 * atan2(Vector3(delta.x, delta.y, delta.z).length(), absf(delta.w))}
+
 ## Weapon-only facing deliberately breaks the old mate. Keep the current bones
 ## and weapon untouched, invalidate its jobs/bindings, and await explicit input.
 ## The owner/configuration survives so reacquire() can use this exact live pose.
@@ -714,6 +781,7 @@ func suspend_for_weapon_facing() -> Dictionary:
 		return {"valid": false, "reason": "missing_weapon_facing_grip_slots"}
 	if _manual_reacquisition_required:
 		return {"valid": true, "reason": "manual_grip_reacquisition_required"}
+	_release_allocated_motion_authority()
 	_manual_reacquisition_required = true
 	_pose_epoch += 1
 	_serial += 1
@@ -754,6 +822,7 @@ func reacquire() -> void:
 
 func clear() -> void:
 	Chronology.event("owner.clear", {"owner_id":str(get_instance_id()),"busy":_busy,"queue_size":_queue.size(),"serial":_serial})
+	_release_allocated_motion_authority()
 	_manual_reacquisition_required = false
 	_pose_epoch += 1
 	if is_instance_valid(_skeleton) and _skeleton.skeleton_updated.is_connected(_retain_final_skeleton_grip):
@@ -797,6 +866,7 @@ func _geometry_changed() -> void:
 	_settle_ready = true
 
 func _release(slot: StringName) -> void:
+	_release_allocated_motion_authority()
 	_support_motion_snapshot.clear()
 	_support_macro_primary_serial = -1
 	_record_request("owner.release",slot,_requests.get(slot,{}))
@@ -1271,6 +1341,10 @@ func recompose_primary_seat() -> Dictionary:
 	var binding: Dictionary = _actor.planar_grip_pose_binding.relationship(_dominant, _weapon)
 	if binding.is_empty() or binding.relationship_key != _primary_seat.key:
 		return {"valid": false, "applied": false, "reason": "primary_relationship_not_bound"}
+	if _owns_allocated_motion():
+		# The motion engine committed both body and weapon. Even a tiny second
+		# seat rewrite can put the support contact outside its accepted boundary.
+		return _seat_report(_weapon.global_transform, _weapon.global_transform)
 	var wrist: Dictionary = _actor.capture_authoring_wrist_origin(_dominant)
 	if not wrist.get("available", false):
 		return {"valid": false, "applied": false, "reason": "missing_named_final_wrist"}
@@ -1298,6 +1372,8 @@ func _retain_final_skeleton_grip() -> void:
 func retain_support_motion() -> Dictionary:
 	if _manual_reacquisition_required:
 		return {"valid": false, "applied": false, "reason": "manual_grip_reacquisition_required"}
+	if _owns_allocated_motion():
+		return {"valid": true, "applied": false, "motion_clamped": false, "owner": &"weapon_motion_allocator"}
 	if _support_motion_snapshot.is_empty() or _restoring_support_motion or _busy or _closing:
 		return {"valid": true, "applied": false}
 	var saved: Dictionary = _support_motion_snapshot
@@ -1318,20 +1394,20 @@ func retain_support_motion() -> Dictionary:
 	if binding.is_empty():
 		_support_motion_snapshot.clear()
 		return {"valid": false, "reason": "support_relationship_not_bound"}
-	var actual: Transform3D = _weapon.global_transform.affine_inverse() * _skeleton.global_transform * _skeleton.get_bone_global_pose(saved.hand_index)
 	var expected: Transform3D = binding.hand_in_weapon
-	var position_error := (_weapon.global_basis * (actual.origin - expected.origin)).length()
-	var relative_rotation := (actual.basis.orthonormalized().get_rotation_quaternion().inverse() * expected.basis.orthonormalized().get_rotation_quaternion()).normalized()
-	var orientation_error := 2.0 * atan2(Vector3(relative_rotation.x, relative_rotation.y, relative_rotation.z).length(), absf(relative_rotation.w))
+	var error := _motion_contact_error(slot, expected)
+	var position_error: float = error.position
+	var orientation_error: float = error.angle
+	var tolerances := _motion_contact_tolerances()
 	var frame_realization: Dictionary = {}
-	if position_error > 0.00005 or orientation_error > 0.00005:
+	if position_error > tolerances.position_tolerance or orientation_error > tolerances.orientation_tolerance:
 		_restoring_support_motion = true
 		frame_realization = _actor.realize_prepared_support_hand_frame(slot, _weapon.global_transform * expected, saved.poses[saved.hand_index])
 		_restoring_support_motion = false
 		if frame_realization.get("valid", false):
 			position_error = frame_realization.position_error_m
 			orientation_error = frame_realization.orientation_error_rad
-	if position_error <= 0.00005 and orientation_error <= 0.00005:
+	if position_error <= tolerances.position_tolerance and orientation_error <= tolerances.orientation_tolerance:
 		var moved: bool = not _weapon.global_transform.is_equal_approx(saved.weapon_world)
 		_capture_support_motion_snapshot(slot)
 		if moved and _status[slot].has("motion_retention"):
@@ -1361,6 +1437,8 @@ func _write_support_motion_snapshot(saved: Dictionary) -> void:
 	for index: int in saved.poses.size():
 		if not _skeleton.get_bone_pose(index).is_equal_approx(saved.poses[index]):
 			_skeleton.set_bone_pose(index, saved.poses[index])
+	for property: StringName in saved.get("rig_motion_state", {}):
+		_actor.set(property, saved.rig_motion_state[property].duplicate(true))
 	for control: Dictionary in saved.controls:
 		if is_instance_valid(control.node): control.node.global_transform = control.world
 
@@ -1382,7 +1460,9 @@ func _capture_support_motion_snapshot(slot: StringName) -> void:
 	_support_motion_snapshot = {"slot": slot, "key": _requests[slot].key, "geometry_epoch": _geometry_epoch,
 		"skeleton_version": _skeleton.get_version(), "hand_index": _skeleton.find_bone("CC_Base_R_Hand" if slot == &"hand_right" else "CC_Base_L_Hand"),
 		"actor_world": _actor.global_transform, "skeleton_local": _skeleton.transform, "weapon_world": _weapon.global_transform,
-		"poses": poses, "controls": controls, "digit_dimensions": dimensions}
+		"poses": poses, "controls": controls, "digit_dimensions": dimensions, "rig_motion_state": {}}
+	for property: StringName in [&"_wrist_motion_states", &"_shoulder_motion_states", &"_wrist_motion_failures", &"_prepared_support_wrist_postures"]:
+		_support_motion_snapshot.rig_motion_state[property] = (_actor.get(property) as Dictionary).duplicate(true)
 
 
 func _seat_report(base: Transform3D, final: Transform3D) -> Dictionary:

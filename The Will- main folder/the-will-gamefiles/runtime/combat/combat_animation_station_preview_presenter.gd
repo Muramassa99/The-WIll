@@ -23,6 +23,7 @@ const PreparedPoseCaptureScript = preload("res://runtime/combat/combat_prepared_
 const CombatAnimationWeaponFrameSolverScript = preload("res://runtime/combat/combat_animation_weapon_frame_solver.gd")
 const GripTransitionResolver = preload("res://core/resolvers/combat_grip_transition_resolver.gd")
 const CombatAnimationMotionNodeEditorScript = preload("res://runtime/combat/combat_animation_motion_node_editor.gd")
+const EmptyHandFingerControl = preload("res://runtime/combat/combat_empty_hand_finger_control.gd")
 const CombatAnimationTrajectoryVolumeResolverScript = preload("res://core/resolvers/combat_animation_trajectory_volume_resolver.gd")
 const CombatAnimationSpeedStateSamplerScript = preload("res://core/resolvers/combat_animation_speed_state_sampler.gd")
 const CombatCollisionLegalityResolverScript = preload("res://runtime/combat/combat_collision_legality_resolver.gd")
@@ -30,6 +31,7 @@ const CombatOriginRecordScript = preload("res://core/models/combat_origin_record
 const WeaponRollManipulatorScript = preload("res://runtime/combat/combat_animation_weapon_roll_manipulator.gd")
 var weapon_roll_manipulator = WeaponRollManipulatorScript.new()
 const WeaponMotionManipulatorScript = preload("res://runtime/combat/combat_animation_weapon_motion_manipulator.gd")
+const WeaponMotionPolicyScript = preload("res://core/defs/weapon_motion_policy_def.gd")
 var weapon_motion_manipulator = WeaponMotionManipulatorScript.new()
 const WeaponFacingManipulatorScript = preload("res://runtime/combat/combat_animation_weapon_facing_manipulator.gd")
 var weapon_facing_manipulator = WeaponFacingManipulatorScript.new()
@@ -405,6 +407,7 @@ func refresh_preview(
 	live_motion_node_override: CombatAnimationMotionNode = null
 ) -> void:
 	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
+	_clear_empty_hand_finger_overlay(state)
 	_sync_preview_size(preview_container, preview_subviewport)
 	var cached_effective_chain: Array = playback_state.get("authoring_drag_effective_motion_node_chain", []) as Array
 	var effective_motion_node_chain: Array = (
@@ -482,6 +485,7 @@ func refresh_preview(
 				live_motion_node_override != null
 			)
 		)
+	_sync_empty_hand_finger_overlay(state, playback_motion_node, playback_state)
 	var debugger_view_enabled: bool = _resolve_debugger_view_enabled(state, resolved_playback_state)
 	var display_motion_node_chain: Array = visible_motion_node_chain
 	if not (bool(resolved_playback_state.get("authoring_drag_budgeted_visuals", false)) and live_motion_node_override != null):
@@ -536,6 +540,7 @@ func sync_preview_pose(
 	var trace: Array = []
 	var trace_step_usec: int = Time.get_ticks_usec()
 	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
+	_clear_empty_hand_finger_overlay(state)
 	_sync_preview_size(preview_container, preview_subviewport)
 	if trace_enabled:
 		trace_step_usec = _append_latency_trace_elapsed(trace, "ensure_nodes_and_size", trace_step_usec)
@@ -624,6 +629,7 @@ func sync_preview_pose(
 		)
 	if trace_enabled:
 		trace_step_usec = _append_latency_trace_elapsed(trace, "apply_authoring_pose", trace_step_usec)
+	_sync_empty_hand_finger_overlay(state, playback_motion_node, playback_state)
 	var debugger_view_enabled: bool = _resolve_debugger_view_enabled(state, resolved_playback_state)
 	var display_motion_node_chain: Array = visible_motion_node_chain
 	if not (bool(resolved_playback_state.get("authoring_drag_budgeted_visuals", false)) and live_motion_node_override != null):
@@ -689,6 +695,8 @@ func sync_playback_pose(
 	_clear_independent_arm_edit()
 	cancel_grip_acquisition(preview_subviewport)
 	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
+	_clear_empty_hand_finger_overlay(state)
+	_clear_empty_hand_finger_gizmo_markers(state.get("marker_root") as Node3D)
 	_sync_preview_size(preview_container, preview_subviewport)
 	if bool(playback_state.get("runtime_clip_playback", false)) and bool(playback_state.get("solved_replay_available", false)):
 		var fast_playback_state: Dictionary = _apply_solved_runtime_clip_preview_pose(state, active_wip, playback_state)
@@ -1503,6 +1511,10 @@ func _authoring_marker_candidates(preview_subviewport: SubViewport, active_focus
 
 func _authoring_marker_target(marker_name: String, active_focus: StringName) -> StringName:
 	var target: StringName = StringName()
+	if marker_name == "EmptyHandWristMarker_" + String(active_focus) and CombatAnimationSessionStateScript.empty_hand_wrist_slot(active_focus) != StringName():
+		return active_focus
+	if marker_name == "FingerCurlMarker_" + String(active_focus) and not EmptyHandFingerControl.decode_focus(active_focus).is_empty():
+		return active_focus
 	if marker_name.begins_with("PointMarker_"):
 		if active_focus in [CombatAnimationSessionStateScript.FOCUS_TIP, CombatAnimationSessionStateScript.FOCUS_POMMEL]:
 			return active_focus
@@ -1531,6 +1543,10 @@ func _authoring_marker_target(marker_name: String, active_focus: StringName) -> 
 	return StringName()
 
 func _marker_focus_for_target(target: StringName) -> StringName:
+	if CombatAnimationSessionStateScript.empty_hand_wrist_slot(target) != StringName():
+		return target
+	if not EmptyHandFingerControl.decode_focus(target).is_empty():
+		return target
 	match target:
 		&"tip", &"tip_curve_in", &"tip_curve_out":
 			return CombatAnimationSessionStateScript.FOCUS_TIP
@@ -2128,6 +2144,121 @@ func _is_hand_proxy_authoring_slot_available(
 	if _should_preview_use_support_hand(held_item, motion_node):
 		return false
 	return resolved_slot_id != _resolve_preview_dominant_slot_id()
+
+## Finger controls are an empty-hand local-pose edit. They never move Hand,
+## the arm, or the weapon and never request grip acquisition.
+func refresh_empty_hand_finger_visuals(preview_container: SubViewportContainer,
+		preview_subviewport: SubViewport, motion: CombatAnimationMotionNode, focus: StringName) -> void:
+	var state: Dictionary = _ensure_preview_nodes(preview_container, preview_subviewport)
+	_clear_empty_hand_finger_gizmo_markers(state.get("marker_root") as Node3D)
+	_create_empty_hand_finger_gizmo_markers(state, motion, focus)
+
+func describe_empty_hand_finger_control(preview_subviewport: SubViewport,
+		motion: CombatAnimationMotionNode, focus: StringName) -> Dictionary:
+	var decoded: Dictionary = EmptyHandFingerControl.decode_focus(focus)
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if decoded.is_empty() or context.is_empty() or motion == null:
+		return {"available": false, "reason": "empty_hand_finger_context_missing"}
+	if not _is_hand_proxy_authoring_slot_available(context.weapon, motion, decoded.slot):
+		return {"available": false, "reason": "empty_hand_finger_hand_occupied"}
+	var skeleton: Skeleton3D = context.actor.get("skeleton") as Skeleton3D
+	if skeleton == null or not context.actor.has_method("describe_empty_hand_finger_curl"):
+		return {"available": false, "reason": "empty_hand_finger_rig_unavailable"}
+	var curls: Dictionary = EmptyHandFingerControl.get_curls(motion, decoded.slot)
+	var angle := 0.0
+	if curls.has(decoded.digit) or curls.has(String(decoded.digit)):
+		angle = float(curls.get(decoded.digit, curls.get(String(decoded.digit), 0.0)))
+	else:
+		var current: Dictionary = context.actor.call("describe_empty_hand_finger_curl", decoded.slot, decoded.digit)
+		if not current.get("valid", false):
+			return {"available": false, "reason": current.get("reason", "empty_hand_finger_angle_unavailable")}
+		angle = float(current.get("angle_degrees", 0.0))
+	skeleton.force_update_all_bone_transforms()
+	var result: Dictionary = EmptyHandFingerControl.frame(skeleton, decoded.slot, angle)
+	if result.is_empty():
+		return {"available": false, "reason": "empty_hand_finger_frame_unavailable"}
+	result["available"] = true
+	result["angle_degrees"] = clampf(angle, 0.0, 180.0)
+	result["slot"] = decoded.slot
+	result["digit"] = decoded.digit
+	result["origin_id"] = &"world"
+	return result
+
+func apply_empty_hand_finger_control(preview_subviewport: SubViewport,
+		motion: CombatAnimationMotionNode, focus: StringName, degrees: float) -> Dictionary:
+	var description := describe_empty_hand_finger_control(preview_subviewport, motion, focus)
+	if not description.get("available", false) or not is_finite(degrees):
+		return {"accepted": false, "reason": description.get("reason", "empty_hand_finger_angle_invalid")}
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if not context.actor.has_method("apply_authoring_empty_hand_finger_curls"):
+		return {"accepted": false, "reason": "empty_hand_finger_rig_unavailable"}
+	var before_signature: String = PreparedPoseScript.node_pose_signature(motion)
+	var curls: Dictionary = EmptyHandFingerControl.get_curls(motion, description.slot).duplicate()
+	curls[description.digit] = clampf(degrees, 0.0, 180.0)
+	# A prepared node's stored pose remains in place. Only release the playback
+	# writer so a deliberate authored finger edit can own those phalanges.
+	_clear_preview_runtime_solved_replay_state(context.actor, context.root)
+	var applied: Dictionary = context.actor.call("apply_authoring_empty_hand_finger_curls", description.slot, curls)
+	if not applied.get("valid", false):
+		return {"accepted": false, "reason": applied.get("reason", "empty_hand_finger_pose_not_applied")}
+	var accepted: Dictionary = applied.get("angles_degrees", curls).duplicate()
+	if description.slot == &"hand_left":
+		motion.left_hand_finger_curl_degrees = accepted
+	else:
+		motion.right_hand_finger_curl_degrees = accepted
+	_rebind_empty_hand_finger_pose_authorities(context, motion, before_signature)
+	return {"accepted": true, "angle_degrees": float(accepted.get(description.digit, curls[description.digit])),
+		"slot": description.slot, "digit": description.digit}
+
+func _rebind_empty_hand_finger_pose_authorities(context: Dictionary,
+		motion: CombatAnimationMotionNode, before_signature: String) -> void:
+	# Finger-only edits change the node fingerprint, not its accepted Hand,
+	# weapon or arm transforms. Retain each existing owner across that change.
+	var signature: String = PreparedPoseScript.node_pose_signature(motion)
+	var skeleton: Skeleton3D = context.actor.get("skeleton") as Skeleton3D
+	var retained: Dictionary = weapon_motion_manipulator.capture_state()
+	if not retained.is_empty() and retained.get("actor") == context.actor and retained.get("node_id") == motion.node_id \
+		and retained.get("signature") == before_signature:
+		retained["signature"] = signature
+		if skeleton != null:
+			retained["skeleton_version"] = skeleton.get_version()
+		weapon_motion_manipulator.restore_state(retained)
+	var independent: Dictionary = context.root.get_meta(INDEPENDENT_ARM_EDIT_META, {})
+	if not independent.is_empty() and independent.get("actor") == context.actor and independent.get("node_id") == motion.node_id \
+		and independent.get("signature") == before_signature:
+		independent["signature"] = signature
+		if skeleton != null:
+			independent["skeleton_version"] = skeleton.get_version()
+		context.root.set_meta(INDEPENDENT_ARM_EDIT_META, independent)
+	var restored: Dictionary = context.root.get_meta(RESTORED_AUTHORING_GRIP_META, {})
+	if not restored.is_empty() and restored.get("node") == motion and restored.get("signature") == before_signature:
+		restored["signature"] = signature
+		context.root.set_meta(RESTORED_AUTHORING_GRIP_META, restored)
+
+func _empty_hand_finger_actor(state: Dictionary) -> Node3D:
+	var pivot: Node3D = state.get("actor_pivot") as Node3D
+	return pivot.get_node_or_null(PREVIEW_ACTOR_NAME) as Node3D if is_instance_valid(pivot) else null
+
+func _clear_empty_hand_finger_overlay(state: Dictionary) -> void:
+	var actor := _empty_hand_finger_actor(state)
+	if is_instance_valid(actor) and actor.has_method("clear_authoring_empty_hand_finger_curls"):
+		actor.call("clear_authoring_empty_hand_finger_curls")
+
+func _sync_empty_hand_finger_overlay(state: Dictionary, motion: CombatAnimationMotionNode, playback: Dictionary) -> void:
+	var actor := _empty_hand_finger_actor(state)
+	if not is_instance_valid(actor) or motion == null or not actor.has_method("apply_authoring_empty_hand_finger_curls"):
+		return
+	if bool(playback.get("active", false)) or bool(playback.get("runtime_clip_playback", false)):
+		actor.call("clear_authoring_empty_hand_finger_curls")
+		return
+	var root: Node3D = state.get("preview_root") as Node3D
+	var weapon: Node3D = _get_node_meta_or_default(root, "preview_held_item", null) as Node3D
+	for slot: StringName in [&"hand_right", &"hand_left"]:
+		if _is_hand_proxy_authoring_slot_available(weapon, motion, slot):
+			var curls: Dictionary = EmptyHandFingerControl.get_curls(motion, slot)
+			actor.call("apply_authoring_empty_hand_finger_curls", slot, curls)
+		else:
+			actor.call("clear_authoring_empty_hand_finger_curls", slot)
 
 func _motion_node_has_hand_proxy_authoring(
 	motion_node: CombatAnimationMotionNode,
@@ -3137,11 +3268,14 @@ func _refresh_drag_budgeted_visuals(
 	var upperarm_marker_count: int = 0
 	_clear_hand_proxy_gizmo_markers(marker_root)
 	_clear_upperarm_roll_gizmo_markers(marker_root)
+	_clear_empty_hand_finger_gizmo_markers(marker_root)
 	if active_focus == CombatAnimationSessionStateScript.FOCUS_ARM_ROLL:
 		upperarm_marker_count = _create_upperarm_roll_gizmo_markers(state, motion_node, active_focus)
 	elif active_focus == CombatAnimationSessionStateScript.FOCUS_RIGHT_ARM_ROLL or active_focus == CombatAnimationSessionStateScript.FOCUS_LEFT_ARM_ROLL:
 		upperarm_marker_count = _create_upperarm_roll_gizmo_markers(state, motion_node, active_focus)
 	var hand_proxy_marker_count: int = _create_hand_proxy_gizmo_markers(state, motion_node, active_focus)
+	var finger_marker_count: int = _create_empty_hand_finger_gizmo_markers(state, motion_node, active_focus)
+	var wrist_marker_count: int = _create_empty_hand_wrist_gizmo_markers(state, motion_node, active_focus)
 	var point_marker_count: int = 1 if tip_active or pommel_active else 0
 	var weapon_marker_count: int = 2 if active_focus == CombatAnimationSessionStateScript.FOCUS_WEAPON else 0
 	if active_focus == CombatAnimationSessionStateScript.FOCUS_WEAPON_FACING:
@@ -3149,7 +3283,7 @@ func _refresh_drag_budgeted_visuals(
 	preview_root.set_meta("motion_node_marker_count", point_marker_count)
 	preview_root.set_meta("point_marker_count", point_marker_count)
 	preview_root.set_meta("control_handle_marker_count", handle_marker_count)
-	preview_root.set_meta("weapon_gizmo_marker_count", weapon_marker_count + upperarm_marker_count + hand_proxy_marker_count)
+	preview_root.set_meta("weapon_gizmo_marker_count", weapon_marker_count + upperarm_marker_count + hand_proxy_marker_count + finger_marker_count + wrist_marker_count)
 
 func _clear_child_nodes(root: Node) -> void:
 	if root == null:
@@ -3295,9 +3429,17 @@ func _clear_hand_proxy_gizmo_markers(marker_root: Node3D) -> void:
 		return
 	for child_node: Node in marker_root.get_children():
 		var child_name: String = String(child_node.name)
-		if child_name.begins_with("RightHandProxy") or child_name.begins_with("LeftHandProxy"):
+		if child_name.begins_with("RightHandProxy") or child_name.begins_with("LeftHandProxy") or child_name.begins_with("EmptyHandWrist"):
 			marker_root.remove_child(child_node)
 			child_node.queue_free()
+
+func _clear_empty_hand_finger_gizmo_markers(marker_root: Node3D) -> void:
+	if marker_root == null:
+		return
+	for child: Node in marker_root.get_children():
+		if String(child.name).begins_with("FingerCurl"):
+			marker_root.remove_child(child)
+			child.queue_free()
 
 func _clear_stow_anchor_markers(marker_root: Node3D) -> void:
 	if marker_root == null:
@@ -4133,12 +4275,18 @@ func _publish_retained_weapon_facing_pose(context: Dictionary, motion: CombatAni
 ## arm are already displayed; neither is a target for this edit's solve.
 func apply_independent_arm_edit(preview_subviewport: SubViewport,
 		motion: CombatAnimationMotionNode, slot_id: StringName, use_drag_frame: bool = true,
-		hand_proxy_edit: bool = false) -> Dictionary:
+		hand_proxy_edit: bool = false, hand_control_mode: String = "pose",
+		requested_wrist_degrees: float = 0.0) -> Dictionary:
 	var context: Dictionary = _weapon_roll_context(preview_subviewport)
 	if context.is_empty() or motion == null or slot_id not in [&"hand_right", &"hand_left"]:
 		return {"valid": false, "reason": "independent_arm_context_missing"}
 	if not context.actor.has_method("apply_authoring_independent_arm_frame_now"):
 		return {"valid": false, "reason": "independent_arm_solver_unavailable"}
+	var hand_request: Dictionary = {}
+	if hand_proxy_edit:
+		hand_request = _build_empty_hand_motion_request(context, motion, slot_id, hand_control_mode, requested_wrist_degrees)
+		if not hand_request.get("valid", false):
+			return hand_request
 	var skeleton: Skeleton3D = context.actor.get("skeleton") as Skeleton3D
 	var payload: Dictionary = _build_preview_upper_body_authoring_payload(context.weapon, motion)
 	if skeleton == null or payload.is_empty():
@@ -4151,13 +4299,12 @@ func apply_independent_arm_edit(preview_subviewport: SubViewport,
 	context.actor.call("set_upper_body_authoring_state", payload)
 	if hand_proxy_edit:
 		_apply_hand_authoring_slot_proxy_preview_state(context.actor, context.weapon, motion, {}, slot_id)
-	var result: Dictionary = context.actor.call("apply_authoring_independent_arm_frame_now", slot_id, use_drag_frame, hand_proxy_edit)
+	var result: Dictionary = context.actor.call("apply_authoring_independent_arm_frame_now", slot_id, use_drag_frame, hand_proxy_edit, hand_request)
 	context.root.set_meta("independent_arm_edit_result", result)
 	if not result.get("valid", false) and not result.get("retained_previous_pose", false):
 		return result
-	# The rig's requested Hand frame already includes body/reach projection.
-	# A correction relative to that frame misses the original proxy overshoot.
-	# Read the reached bone geometry instead, including a retained previous pose.
+	# The requested proxy is intent, never attained pose truth. Read the reached
+	# bone geometry, including a retained previous pose at an anatomical limit.
 	if hand_proxy_edit or _motion_node_has_hand_proxy_authoring(motion, slot_id):
 		skeleton.force_update_all_bone_transforms()
 		var anchor: Node3D = _resolve_preview_mount_anchor_for_slot(context.actor, slot_id)
@@ -4175,6 +4322,18 @@ func apply_independent_arm_edit(preview_subviewport: SubViewport,
 	if not hand_proxy_edit and not result.get("accepted_elbow_control", {}).is_empty():
 		var field := "left_upperarm_roll_degrees" if slot_id == &"hand_left" else "right_upperarm_roll_degrees"
 		motion.set(field, float(result.accepted_elbow_control.initial_roll_degrees))
+	if _is_unarmed_preview_item(context.weapon) and slot_id == _resolve_preview_dominant_slot_id():
+		# Unarmed has no real weapon to keep stationary. Its display proxy must
+		# follow the attained Hand before publishing/recording endpoint truth.
+		_apply_preview_hand_mounted_transform(context.actor, context.weapon)
+		var encoded: Dictionary = _encode_prepared_grip_display_state(context.weapon, context.trajectory, motion.weapon_roll_degrees)
+		if encoded.get("available", false):
+			# Retain the attained up-reference as well as the endpoints. Otherwise
+			# a later reconstruction can recover the axis with an obsolete twist.
+			for field: StringName in [&"tip_position_local", &"tip_position_origin_id", &"pommel_position_local", &"pommel_position_origin_id", &"weapon_orientation_degrees", &"weapon_orientation_authored", &"weapon_roll_degrees"]:
+				motion.set(field, encoded[field])
+		else:
+			result["authoring_frame_warning"] = encoded.get("reason", "unarmed_frame_encode_failed")
 	_remember_live_preview_attachment(context.actor)
 	# Identity and frames only: the rig holds the live pose; normal R/F/Save
 	# capture owns the durable full-body packet. Root metadata is checkpointed.
@@ -4189,6 +4348,68 @@ func apply_independent_arm_edit(preview_subviewport: SubViewport,
 		"skeleton_version": skeleton.get_version()})
 	_publish_retained_weapon_roll_pose(context.root, context.actor, context.trajectory, context.weapon, motion, {})
 	return result
+
+func _build_empty_hand_motion_request(context: Dictionary, motion: CombatAnimationMotionNode,
+		slot_id: StringName, mode: String, requested_wrist_degrees: float = 0.0) -> Dictionary:
+	if mode not in ["tip", "pommel", "pose", "wrist"]:
+		return {"valid": false, "reason": "independent_hand_control_mode_invalid"}
+	if not _is_hand_proxy_authoring_slot_available(context.weapon, motion, slot_id):
+		return {"valid": false, "reason": "independent_hand_is_occupied"}
+	if mode == "wrist":
+		var bend: Dictionary = _capture_wrist_bend_control(context, slot_id)
+		if not bend.get("available", false) or not is_finite(requested_wrist_degrees):
+			return {"valid": false, "reason": bend.get("reason", "empty_wrist_bend_unavailable")}
+		var gamma_degrees: float = rad_to_deg(bend.state.gamma)
+		var limits: Dictionary = _wrist_bend_input_limits(gamma_degrees, bend)
+		var requested: float = clampf(requested_wrist_degrees, limits.minimum_degrees, limits.maximum_degrees)
+		var target: Transform3D = bend.hand_world
+		# Same gamma-only mode as the occupied green ball. Hand is the task frame;
+		# its origin is the pivot. No weapon seat or finger acquisition is needed.
+		target.basis = target.basis * Basis(Vector3.BACK, deg_to_rad(requested - gamma_degrees))
+		return {"valid": true, "mode": "roll", "target_hand_world": target,
+			"task_point_hand_local": Vector3.ZERO}
+	var skeleton: Skeleton3D = context.actor.get("skeleton") as Skeleton3D
+	var hand_name := "CC_Base_L_Hand" if slot_id == &"hand_left" else "CC_Base_R_Hand"
+	var hand_index: int = skeleton.find_bone(hand_name) if skeleton != null else -1
+	if hand_index < 0:
+		return {"valid": false, "reason": "independent_hand_frame_missing"}
+	skeleton.force_update_all_bone_transforms()
+	var actual: Dictionary = _resolve_hand_proxy_control_segment_state(context.actor, context.weapon, context.trajectory, motion, slot_id)
+	var wanted: Dictionary = _resolve_hand_proxy_authoring_segment_state(context.actor, context.weapon, context.trajectory, motion, slot_id)
+	if not actual.get("available", false) or not wanted.get("available", false):
+		return {"valid": false, "reason": "independent_hand_segment_missing"}
+	# Endpoints are trajectory-authoring coordinates. Hand global pose is
+	# skeleton-local; compose to world before deriving Hand-local task landmarks.
+	for segment: Dictionary in [actual, wanted]:
+		for endpoint: String in ["tip", "pommel"]:
+			if segment.get(endpoint + "_position_origin_id") != CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING:
+				return {"valid": false, "reason": "independent_hand_segment_origin_mismatch"}
+	var hand_world: Transform3D = skeleton.global_transform * skeleton.get_bone_global_pose(hand_index)
+	var trajectory_world: Transform3D = context.trajectory.global_transform
+	var current_tip: Vector3 = trajectory_world * (actual.tip_position_local as Vector3)
+	var current_pommel: Vector3 = trajectory_world * (actual.pommel_position_local as Vector3)
+	var target_tip: Vector3 = trajectory_world * (wanted.tip_position_local as Vector3)
+	var target_pommel: Vector3 = trajectory_world * (wanted.pommel_position_local as Vector3)
+	var world_to_hand := hand_world.affine_inverse()
+	var tip_in_hand: Vector3 = world_to_hand * current_tip
+	var pommel_in_hand: Vector3 = world_to_hand * current_pommel
+	var target_hand := hand_world
+	if mode == "pommel":
+		target_hand.origin += target_pommel - current_pommel
+	else:
+		# Reuse the same minimal turn as weapon Tip. Its construction pivot is
+		# descriptive only: Tip has no retained position row in the allocator.
+		var turn: Dictionary = weapon_frame_solver.orbit_tip_around_grip(hand_world,
+			tip_in_hand, pommel_in_hand, current_pommel + target_tip - target_pommel, Vector3.UP)
+		if not turn.get("available", false):
+			return {"valid": false, "reason": turn.get("reason", "independent_hand_axis_invalid")}
+		target_hand = turn.transform
+		if mode == "pose":
+			# Explicit combined placement retains both requested endpoints. This
+			# is a separate API intent, never inferred from a mouse translation.
+			target_hand.origin += target_pommel - current_pommel
+	return {"valid": true, "mode": mode, "target_hand_world": target_hand,
+		"task_point_hand_local": pommel_in_hand, "trailing_tip_hand_local": tip_in_hand}
 
 func _prepare_independent_elbow_guidance(context: Dictionary, slot_id: StringName) -> bool:
 	var anchor: Node3D = _resolve_preview_mount_anchor_for_slot(context.actor, slot_id)
@@ -4351,6 +4572,7 @@ func _validate_weapon_motion_bindings(context: Dictionary, primary: StringName, 
 	var skeleton: Skeleton3D = context.actor.get("skeleton") as Skeleton3D
 	if skeleton == null:
 		return {"valid": false, "reason": "weapon_motion_skeleton_missing"}
+	var tolerances: Dictionary = WeaponMotionPolicyScript.new().as_dictionary(float(context.actor.get("standing_height_meters")) / 2.0)
 	for slot: StringName in [primary, support]:
 		if slot == &"":
 			continue
@@ -4364,9 +4586,11 @@ func _validate_weapon_motion_bindings(context: Dictionary, primary: StringName, 
 			return {"valid": false, "reason": "weapon_motion_hand_bone_missing", "slot": slot}
 		var actual: Transform3D = skeleton.global_transform * skeleton.get_bone_global_pose(index)
 		var expected: Transform3D = context.weapon.global_transform * (binding.hand_in_weapon as Transform3D)
-		var delta: Quaternion = (expected.basis.orthonormalized().get_rotation_quaternion() * actual.basis.orthonormalized().get_rotation_quaternion().inverse()).normalized()
+		# Use the allocator's same scalar readback, including quaternion order;
+		# alternate equivalent expressions can round differently at the boundary.
+		var delta: Quaternion = (actual.basis.orthonormalized().get_rotation_quaternion().inverse() * expected.basis.orthonormalized().get_rotation_quaternion()).normalized()
 		var angle: float = 2.0 * atan2(Vector3(delta.x, delta.y, delta.z).length(), absf(delta.w))
-		if actual.origin.distance_to(expected.origin) > 0.00005 or angle > deg_to_rad(0.025):
+		if actual.origin.distance_to(expected.origin) > tolerances.position_tolerance or angle > tolerances.orientation_tolerance:
 			return {"valid": false, "reason": "weapon_motion_acquired_grip_mismatch", "slot": slot,
 				"position_error_m": actual.origin.distance_to(expected.origin), "angle_error_degrees": rad_to_deg(angle)}
 	return {"valid": true}
@@ -4439,13 +4663,15 @@ func apply_weapon_roll_manipulation(preview_subviewport: SubViewport, motion: Co
 ## the named Forearm -> Hand chain in Skeleton3D, resolving through RL_BoneRoot;
 ## this is not the weapon's longitudinal axis or a new grip alignment reference.
 func _capture_primary_wrist_bend_control(context: Dictionary) -> Dictionary:
+	return _capture_wrist_bend_control(context, _resolve_preview_dominant_slot_id())
+
+func _capture_wrist_bend_control(context: Dictionary, slot: StringName) -> Dictionary:
 	var resource: Resource = context.actor.get("wrist_motion_profile") as Resource
 	if resource == null or not resource.has_method("as_dictionary"):
 		return {"enabled": false}
 	var profile: Dictionary = resource.call("as_dictionary")
 	if String(profile.get("bend_frame", "rest_anatomical")) != "hand_parent_local_xz":
 		return {"enabled": false}
-	var slot: StringName = _resolve_preview_dominant_slot_id()
 	var measured: Dictionary = context.actor.capture_wrist_motion_start_state(slot)
 	if not measured.get("valid", false):
 		return measured.merged({"enabled": true, "available": false})
@@ -4459,6 +4685,9 @@ func _capture_primary_wrist_bend_control(context: Dictionary) -> Dictionary:
 		"slot": slot, "hand_world": skeleton.global_transform * skeleton.get_bone_global_pose(hand_index)}
 
 func _primary_wrist_bend_input_limits(motion: CombatAnimationMotionNode, bend: Dictionary) -> Dictionary:
+	return _wrist_bend_input_limits(motion.weapon_roll_degrees, bend)
+
+func _wrist_bend_input_limits(current: float, bend: Dictionary) -> Dictionary:
 	if not bend.get("available", false):
 		return bend
 	var profile: Dictionary = bend.profile
@@ -4468,7 +4697,6 @@ func _primary_wrist_bend_input_limits(motion: CombatAnimationMotionNode, bend: D
 	var remaining: float = sqrt(maxf(0.0, 1.0 - pow(beta / beta_limit, 2.0)))
 	var minimum_gamma: float = -float(profile.ulnar_limit_radians) * remaining
 	var maximum_gamma: float = float(profile.radial_limit_radians) * remaining
-	var current: float = motion.weapon_roll_degrees
 	# Keep the stored UI scalar, but derive its available travel from the fixed
 	# local-Z limits. An already invalid pose may move inward without granting
 	# another outward increment or recentering the anatomical interval per drag.
@@ -4477,6 +4705,68 @@ func _primary_wrist_bend_input_limits(motion: CombatAnimationMotionNode, bend: D
 		"center_degrees": current - rad_to_deg(gamma), "allocation_limits": true,
 		"wrist_bend_axis": "hand_parent_local_z", "current_gamma_radians": gamma,
 		"minimum_gamma_radians": minimum_gamma, "maximum_gamma_radians": maximum_gamma}
+
+func describe_empty_hand_wrist_control(preview_subviewport: SubViewport,
+		motion: CombatAnimationMotionNode, slot: StringName) -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or motion == null or slot not in [&"hand_left", &"hand_right"]:
+		return {"available": false, "reason": "missing_empty_hand_context"}
+	if not _is_hand_proxy_authoring_slot_available(context.weapon, motion, slot):
+		return {"available": false, "reason": "independent_hand_is_occupied"}
+	var bend: Dictionary = _capture_wrist_bend_control(context, slot)
+	if not bend.get("available", false):
+		return bend.merged({"available": false})
+	var gamma: float = rad_to_deg(bend.state.gamma)
+	var limits: Dictionary = _wrist_bend_input_limits(gamma, bend)
+	var segment: Dictionary = _resolve_hand_proxy_control_segment_state(context.actor, context.weapon, context.trajectory, motion, slot)
+	if not segment.get("available", false):
+		return {"available": false, "reason": "empty_hand_segment_missing"}
+	var tip: Vector3 = context.trajectory.to_global(segment.tip_position_local)
+	var pommel: Vector3 = context.trajectory.to_global(segment.pommel_position_local)
+	var hand: Transform3D = bend.hand_world
+	var radius: float = tip.distance_to(pommel) * 0.65
+	return limits.merged({"slot": slot, "angle_degrees": gamma, "origin": hand.origin,
+		"axis": hand.basis.z.normalized(), "radius": radius,
+		"marker_position": hand.origin + hand.basis.x.normalized() * radius})
+
+func apply_empty_hand_wrist_bend(preview_subviewport: SubViewport,
+		motion: CombatAnimationMotionNode, slot: StringName, gamma_degrees: float) -> Dictionary:
+	var context: Dictionary = _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or motion == null:
+		return {"valid": false, "reason": "missing_empty_hand_context"}
+	var segment: Dictionary = _resolve_hand_proxy_control_segment_state(context.actor, context.weapon, context.trajectory, motion, slot)
+	if not segment.get("available", false):
+		return {"valid": false, "reason": "empty_hand_segment_missing"}
+	# A first wrist edit must work before the hand's position has been authored.
+	# Seed only temporary guidance from the actual Hand, never an old/default aim.
+	var candidate: CombatAnimationMotionNode = motion.duplicate_node()
+	var fields: Array[StringName] = []
+	var prefix := "left_hand_proxy_" if slot == &"hand_left" else "right_hand_proxy_"
+	if segment.get("uses_primary_motion_segment", false):
+		prefix = ""
+		fields.assign([&"weapon_orientation_degrees", &"weapon_orientation_authored", &"weapon_roll_degrees"])
+	else:
+		var authored_field := StringName(prefix + "authored")
+		candidate.set(authored_field, true)
+		fields.append(authored_field)
+	for endpoint: String in ["tip", "pommel"]:
+		for suffix: String in ["_position_local", "_position_origin_id"]:
+			var field := StringName(prefix + endpoint + suffix)
+			candidate.set(field, segment[endpoint + suffix])
+			fields.append(field)
+	var result: Dictionary = apply_independent_arm_edit(preview_subviewport, candidate, slot, false, true, "wrist", gamma_degrees)
+	if result.get("valid", false):
+		for field: StringName in fields:
+			motion.set(field, candidate.get(field))
+	elif result.get("retained_previous_pose", false):
+		# A rejected attempt retains the displayed pose, but does not promote the
+		# temporary guidance into this node's authored fields.
+		var retained: Dictionary = context.root.get_meta(INDEPENDENT_ARM_EDIT_META, {})
+		if not retained.is_empty():
+			retained.signature = PreparedPoseScript.node_pose_signature(motion)
+			context.root.set_meta(INDEPENDENT_ARM_EDIT_META, retained)
+		_publish_retained_weapon_roll_pose(context.root, context.actor, context.trajectory, context.weapon, motion, {})
+	return result
 
 func _apply_primary_wrist_z_bend(context: Dictionary, motion: CombatAnimationMotionNode,
 		requested_degrees: float, bend: Dictionary) -> Dictionary:
@@ -4809,8 +5099,11 @@ func acknowledge_recorded_grip_frame(context: Dictionary) -> void:
 func capture_prepared_authoring_pose(context: Dictionary, context_signature: String) -> Dictionary:
 	if not bool(context.get("valid", false)):
 		return {"valid": false, "reason": "invalid_prepared_pose_context"}
+	# Unarmed has a positioning proxy, not weapon grip anchors. Record only its
+	# existing proxy frames; keep the complete required anchor list for weapons.
+	var anchor_paths: Array = _resolve_solved_replay_anchor_node_paths(context.weapon) if _is_unarmed_preview_item(context.weapon) else SOLVED_REPLAY_ANCHOR_NODE_PATHS
 	var snapshot: Dictionary = PreparedPoseCaptureScript.capture(context.actor, context.weapon,
-		context.dominant_slot, SOLVED_REPLAY_ANCHOR_NODE_PATHS, context.support_enabled, context_signature)
+		context.dominant_slot, anchor_paths, context.support_enabled, context_signature)
 	if not bool(snapshot.get("valid", false)):
 		return snapshot
 	snapshot["quality_warnings"].append_array(context.get("quality_warnings", []))
@@ -4846,6 +5139,8 @@ func capture_prepared_authoring_pose(context: Dictionary, context_signature: Str
 	return snapshot
 
 func _capture_prepared_handle_path(weapon: Node3D) -> Dictionary:
+	if _is_unarmed_preview_item(weapon):
+		return {"valid": false, "reason": "unarmed_no_handle"}
 	var ratios: Variant = weapon.get_meta("primary_grip_slice_axis_ratios_from_span_start", null)
 	var centers: Variant = weapon.get_meta("primary_grip_slice_centers_local", null)
 	var axis: Variant = weapon.get_meta("primary_grip_slide_axis_local", null)
@@ -4865,6 +5160,8 @@ func _capture_prepared_handle_path(weapon: Node3D) -> Dictionary:
 	}
 
 func _capture_prepared_handle_seat(weapon: Node3D, support: bool) -> Dictionary:
+	if _is_unarmed_preview_item(weapon):
+		return {"valid": false, "reason": "unarmed_no_handle"}
 	var position: Variant = weapon.get_meta(PREVIEW_SUPPORT_GRIP_SEAT_LOCAL_META if support else PREVIEW_PRIMARY_GRIP_SEAT_LOCAL_META, null)
 	var ratio: Variant = weapon.get_meta(PREVIEW_SUPPORT_GRIP_SEAT_RATIO_META if support else PREVIEW_PRIMARY_GRIP_SEAT_RATIO_META, null)
 	var position_origin: StringName = _resolve_origin_meta_value(weapon, StringName(PREVIEW_SUPPORT_GRIP_SEAT_ORIGIN_META if support else PREVIEW_PRIMARY_GRIP_SEAT_ORIGIN_META), StringName())
@@ -10280,6 +10577,16 @@ func _resolve_preview_hand_mounted_transform(
 func _apply_preview_hand_mounted_transform(actor: Node3D, held_item: Node3D) -> void:
 	if held_item == null or not is_instance_valid(held_item):
 		return
+	if _is_unarmed_preview_item(held_item):
+		# These proxy points already use the grip-alignment origin. The ordinary
+		# real-weapon seat would subtract their contact-center offset a second
+		# time, detaching generic Tip/Pommel markers even at the opening pose.
+		var points: Dictionary = _resolve_hand_authoring_proxy_points_state(actor, _resolve_preview_dominant_slot_id())
+		_configure_hand_authoring_proxy_node(held_item,
+			_resolve_hand_authoring_local_tip(points), _resolve_hand_authoring_local_pommel(points),
+			_resolve_hand_authoring_contact_center(points), CombatOriginRecordScript.ORIGIN_HAND_GRIP_ALIGNMENT)
+		held_item.global_transform = _resolve_preview_hand_mounted_transform(actor, held_item, Vector3.ZERO)
+		return
 	held_item.global_transform = _resolve_preview_hand_mounted_transform(actor, held_item)
 
 func _should_preview_use_support_hand(held_item: Node3D, motion_node: CombatAnimationMotionNode) -> bool:
@@ -10566,6 +10873,7 @@ func _refresh_weapon_and_sphere_visuals(state: Dictionary, motion_node_chain: Ar
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D
 	var marker_root: Node3D = state.get("marker_root", null) as Node3D
 	var sphere_viz_mesh: MeshInstance3D = state.get("sphere_viz_mesh", null) as MeshInstance3D
+	_clear_empty_hand_finger_gizmo_markers(marker_root)
 	if sphere_viz_mesh != null and sphere_viz_mesh.mesh is ImmediateMesh:
 		(sphere_viz_mesh.mesh as ImmediateMesh).clear_surfaces()
 	if preview_root != null:
@@ -10592,6 +10900,8 @@ func _refresh_weapon_and_sphere_visuals(state: Dictionary, motion_node_chain: Ar
 			gizmo_marker_count += 1
 		gizmo_marker_count += _create_upperarm_roll_gizmo_markers(state, motion_node, active_focus)
 		gizmo_marker_count += _create_hand_proxy_gizmo_markers(state, motion_node, active_focus)
+		gizmo_marker_count += _create_empty_hand_finger_gizmo_markers(state, motion_node, active_focus)
+		gizmo_marker_count += _create_empty_hand_wrist_gizmo_markers(state, motion_node, active_focus)
 		if preview_root != null:
 			preview_root.set_meta("weapon_gizmo_marker_count", gizmo_marker_count)
 	if sphere_viz_mesh != null and active_focus == CombatAnimationSessionStateScript.FOCUS_TIP:
@@ -10618,6 +10928,69 @@ func _create_weapon_rotation_gizmo_markers(marker_root: Node3D, motion_node: Com
 	var normal_color: Color = Color(0.42, 0.98, 0.72, 1.0) if weapon_focus_active else Color(0.28, 0.72, 0.56, 0.95)
 	_create_control_gizmo_marker(marker_root, weapon_center, center_color, 0.019 if weapon_focus_active else 0.016, "WeaponCenter", WEAPON_ROLL_MARKER_EXTRA_SCALE)
 	_create_control_gizmo_marker(marker_root, weapon_normal_handle, normal_color, 0.021 if weapon_focus_active else 0.018, "WeaponNormal")
+
+func _create_empty_hand_finger_gizmo_markers(state: Dictionary, motion_node: CombatAnimationMotionNode, active_focus: StringName) -> int:
+	var marker_root: Node3D = state.get("marker_root") as Node3D
+	var preview_root: Node3D = state.get("preview_root") as Node3D
+	if marker_root == null or preview_root == null or EmptyHandFingerControl.decode_focus(active_focus).is_empty():
+		return 0
+	var playback: Dictionary = preview_root.get_meta("resolved_playback_state", {})
+	if bool(playback.get("active", false)):
+		return 0
+	var viewport: SubViewport = preview_root.get_parent() as SubViewport
+	var description := describe_empty_hand_finger_control(viewport, motion_node, active_focus)
+	if not description.get("available", false):
+		return 0
+	var origin: Vector3 = description.origin
+	var axis: Vector3 = description.axis
+	var radial: Vector3 = description.radial
+	var radius: float = description.radius
+	var color := Color(0.25, 0.72, 1.0, 0.95) if description.slot == &"hand_left" else Color(0.3, 0.95, 0.45, 0.95)
+	var arc := MeshInstance3D.new()
+	arc.name = "FingerCurlArc"
+	var line_mesh := ImmediateMesh.new()
+	line_mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+	for segment: int in 32:
+		for endpoint: int in [segment, segment + 1]:
+			var point := origin + radial.rotated(axis, PI * float(endpoint) / 32.0) * radius
+			line_mesh.surface_set_color(color)
+			line_mesh.surface_add_vertex(marker_root.to_local(point))
+	line_mesh.surface_end()
+	arc.mesh = line_mesh
+	arc.material_override = _build_line_material(Color(color.r, color.g, color.b, 0.65))
+	marker_root.add_child(arc)
+	var marker_position: Vector3 = description.marker_position
+	_create_line_gizmo_marker(marker_root, marker_root.to_local(origin), marker_root.to_local(marker_position), color, "FingerCurlRod")
+	var marker := MeshInstance3D.new()
+	marker.name = "FingerCurlMarker_" + String(active_focus)
+	var cube := BoxMesh.new()
+	# Radius is derived from actual world-space hand width. Convert its modest
+	# cube size into the marker parent's local axes; root scale is never guessed.
+	var parent_scale := marker_root.global_basis.get_scale().abs()
+	var side := radius * 0.2
+	cube.size = Vector3(side / maxf(parent_scale.x, 0.000001), side / maxf(parent_scale.y, 0.000001), side / maxf(parent_scale.z, 0.000001))
+	marker.mesh = cube
+	marker.position = marker_root.to_local(marker_position)
+	marker.material_override = _build_overlay_surface_material(color, 0.24)
+	marker_root.add_child(marker)
+	return 3
+
+func _create_empty_hand_wrist_gizmo_markers(state: Dictionary, motion: CombatAnimationMotionNode, focus: StringName) -> int:
+	var slot: StringName = CombatAnimationSessionStateScript.empty_hand_wrist_slot(focus)
+	var marker_root: Node3D = state.get("marker_root") as Node3D
+	var preview_root: Node3D = state.get("preview_root") as Node3D
+	if slot == StringName() or marker_root == null or preview_root == null:
+		return 0
+	if bool((preview_root.get_meta("resolved_playback_state", {}) as Dictionary).get("active", false)):
+		return 0
+	var control: Dictionary = describe_empty_hand_wrist_control(preview_root.get_parent() as SubViewport, motion, slot)
+	if not control.get("available", false):
+		return 0
+	var color := Color(0.42, 0.98, 0.72, 1.0)
+	var point: Vector3 = marker_root.to_local(control.marker_position)
+	_create_line_gizmo_marker(marker_root, marker_root.to_local(control.origin), point, color, "EmptyHandWristRod")
+	_update_drag_gizmo_marker(marker_root, "EmptyHandWristMarker_" + String(focus), point, color, true)
+	return 2
 
 func _create_hand_proxy_gizmo_markers(state: Dictionary, motion_node: CombatAnimationMotionNode, active_focus: StringName) -> int:
 	var preview_root: Node3D = state.get("preview_root", null) as Node3D

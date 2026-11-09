@@ -36,6 +36,8 @@ const PRIMARY_GRIP_HANDLE_COORDINATE_MODE_AUTHORITY_WEAPON_INTRINSIC_COM := (
 # Authoring-display hint only. Grip positions remain normalized 0..1 in saved
 # and runtime data. balanced_signed merely asks the UI to display that same
 # percentage as -1..1 so the Handle midpoint reads as zero.
+# Forge V2 selects this display when the intrinsic-COM plane intersects the
+# Handle span; the separate center_balance verdict still owns legacy layout.
 @export var primary_grip_handle_coordinate_mode: StringName = StringName()
 @export var primary_grip_handle_coordinate_mode_authority_source: StringName = StringName()
 @export var primary_grip_handle_zero_axis_ratio_from_span_start: float = 0.0

@@ -20,6 +20,7 @@ const TRANSITION_DURATION_STEP_SECONDS := 0.01
 const LEGACY_SERIALIZED_TRANSITION_DURATION_SECONDS := 0.18
 const DEFAULT_GRIP_SEAT_SLIDE_OFFSET: float = 0.5
 const DEFAULT_SECONDARY_GRIP_SEAT_SLIDE_OFFSET: float = 0.0
+const EMPTY_HAND_FINGER_IDS: Array[StringName] = [&"index", &"middle", &"ring", &"pinky"]
 const GRIP_SEAT_COORDINATE_SCHEMA_LEGACY_DISPLAY_VALUE := 1
 const GRIP_SEAT_COORDINATE_SCHEMA_NORMALIZED_HANDLE := 2
 const GRIP_SEAT_COORDINATE_SCHEMA_VERSION := (
@@ -86,6 +87,12 @@ const GRIP_SEAT_COORDINATE_SCHEMA_VERSION := (
 @export var left_hand_proxy_pommel_position_local: Vector3 = Vector3.ZERO
 @export var left_hand_proxy_pommel_position_origin_id: StringName = CombatOriginRecordScript.ORIGIN_TRAJECTORY_AUTHORING
 
+## Empty-hand finger controls. A missing digit is unauthored: preserve its
+## existing pose. Values describe the user control, not a grip solve or a
+## per-phalanx angle. The resolver owns their fixed-reference joint mapping.
+@export var right_hand_finger_curl_degrees: Dictionary = {}
+@export var left_hand_finger_curl_degrees: Dictionary = {}
+
 ## Optional normalized motion intent used by retarget-aware resolvers.
 @export var retarget_node: Resource = null
 
@@ -124,6 +131,15 @@ static func normalize_primary_hand_slot(slot_id: StringName) -> StringName:
 	if get_primary_hand_slot_ids().has(slot_id):
 		return slot_id
 	return PRIMARY_HAND_AUTO
+
+static func normalize_empty_hand_finger_curls(values: Dictionary) -> Dictionary:
+	var normalized: Dictionary = {}
+	for digit: StringName in EMPTY_HAND_FINGER_IDS:
+		var value: Variant = values.get(digit, values.get(String(digit), null))
+		if not (value is int or value is float) or not is_finite(float(value)):
+			continue
+		normalized[digit] = clampf(float(value), 0.0, 180.0)
+	return normalized
 
 static func get_generated_transition_kind_ids() -> Array[StringName]:
 	return [
@@ -182,6 +198,8 @@ func normalize() -> void:
 		weapon_roll_degrees = 0.0
 	right_upperarm_roll_degrees = clampf(right_upperarm_roll_degrees, -180.0, 180.0)
 	left_upperarm_roll_degrees = clampf(left_upperarm_roll_degrees, -180.0, 180.0)
+	right_hand_finger_curl_degrees = normalize_empty_hand_finger_curls(right_hand_finger_curl_degrees)
+	left_hand_finger_curl_degrees = normalize_empty_hand_finger_curls(left_hand_finger_curl_degrees)
 	if transition_duration_seconds < 0.0:
 		transition_duration_seconds = 0.0
 	if not get_generated_transition_kind_ids().has(generated_transition_kind):

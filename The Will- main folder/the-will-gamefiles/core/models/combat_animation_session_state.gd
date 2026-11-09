@@ -10,6 +10,18 @@ const FOCUS_RIGHT_ARM_ROLL: StringName = &"right_arm_roll"
 const FOCUS_LEFT_ARM_ROLL: StringName = &"left_arm_roll"
 const FOCUS_RIGHT_HAND_PROXY: StringName = &"right_hand_proxy"
 const FOCUS_LEFT_HAND_PROXY: StringName = &"left_hand_proxy"
+const FOCUS_RIGHT_HAND_WRIST: StringName = &"right_hand_wrist"
+const FOCUS_LEFT_HAND_WRIST: StringName = &"left_hand_wrist"
+
+static func empty_hand_wrist_focus(slot: StringName) -> StringName:
+	return FOCUS_LEFT_HAND_WRIST if slot == &"hand_left" else FOCUS_RIGHT_HAND_WRIST
+
+static func empty_hand_wrist_slot(focus: StringName) -> StringName:
+	if focus == FOCUS_LEFT_HAND_WRIST:
+		return &"hand_left"
+	if focus == FOCUS_RIGHT_HAND_WRIST:
+		return &"hand_right"
+	return StringName()
 
 var current_weapon_wip_id: StringName = StringName()
 var current_draft_ref: Resource = null

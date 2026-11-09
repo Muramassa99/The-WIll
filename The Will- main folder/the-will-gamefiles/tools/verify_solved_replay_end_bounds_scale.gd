@@ -168,7 +168,7 @@ func _expect_frame(frame: Dictionary, expected: bool, label: String, reason: Str
 	_check(var_to_bytes(_presenter.weapon.get_meta("preview_handle_span_measurement", {})) == cache_before, label + ":measurement_cache_unchanged")
 	_check(var_to_bytes(frame) == packet_before, label + ":saved_anchors_unchanged")
 
-func _expect_ui(frames: Array[Dictionary], expected: bool, label: String) -> void:
+func _expect_ui(frames: Array[Dictionary], expected_quality_ok: bool, label: String) -> void:
 	var ui := FixtureUI.new()
 	ui.preview_presenter = _presenter
 	var clip := ClipScript.new()
@@ -185,7 +185,18 @@ func _expect_ui(frames: Array[Dictionary], expected: bool, label: String) -> voi
 	var transform_before := _presenter.weapon.global_transform
 	var measurement_before := var_to_bytes(_presenter.weapon.get_meta("preview_handle_span_measurement", {}))
 	var clip_before := _clip_bytes(clip)
-	_check(ui._runtime_clip_respects_handle_ends(clip) == expected, label)
+	# All fixtures passed here are structurally readable. End overruns and a
+	# too-short Handle are quality warnings under the current editor contract;
+	# they must remain visible without blocking playback or rewriting anchors.
+	var inspection: Dictionary = ui._inspect_runtime_clip_handle_ends(clip)
+	_check(bool(inspection.get("valid", false)), label + ":quality_does_not_block_playback")
+	_check(ui._runtime_clip_respects_handle_ends(clip), label + ":playback_gate_accepts_readable_clip")
+	var warnings: Array = inspection.get("quality_warnings", [])
+	_check(warnings.is_empty() == expected_quality_ok, label + ":quality_warning_matches_bounds")
+	for warning: Dictionary in warnings:
+		_check(warning.get("severity", "") == "warning" and String(warning.get("reason", "")) in [
+			"saved_grip_outside_handle_end_bounds", "handle_shorter_than_hand_footprint"
+		], label + ":warning_identifies_end_bound_issue")
 	_check(_clip_bytes(clip) == clip_before, label + ":runtime_cache_unchanged")
 	_check(_presenter.weapon.global_transform == transform_before, label + ":live_transform_unchanged")
 	_check(var_to_bytes(_presenter.weapon.get_meta("preview_handle_span_measurement", {})) == measurement_before, label + ":measurement_cache_unchanged")

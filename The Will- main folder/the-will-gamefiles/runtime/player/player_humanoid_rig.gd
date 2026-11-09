@@ -19,6 +19,7 @@ const PlayerRigGripLayoutPresenterScript = preload("res://runtime/player/player_
 const PlayerRigSupportArmIkPresenterScript = preload("res://runtime/player/player_rig_support_arm_ik_presenter.gd")
 const PlayerRigFingerGripPresenterScript = preload("res://runtime/player/player_rig_finger_grip_presenter.gd")
 const PlayerDigitHingeRulesScript = preload("res://runtime/player/player_digit_hinge_rules.gd")
+const PlayerEmptyHandFingerPoseScript = preload("res://runtime/player/player_empty_hand_finger_pose.gd")
 const PlayerRigUpperBodyPosePresenterScript = preload("res://runtime/player/player_rig_upper_body_pose_presenter.gd")
 const PlayerCombatAuthoringModifier3DScript = preload("res://runtime/player/player_combat_authoring_modifier_3d.gd")
 const PlayerRuntimeSolvedReplayModifier3DScript = preload("res://runtime/player/player_runtime_solved_replay_modifier_3d.gd")
@@ -361,6 +362,10 @@ var combat_authoring_modifier_processing: bool = false
 var runtime_solved_replay_modifier_processing: bool = false
 var runtime_solved_replay_pose_state: Dictionary = {}
 var runtime_solved_replay_weapon_state: Dictionary = {}
+## Editing-only overrides. Prepared/runtime pose packets own their recorded
+## fingers; these maps are never a grip claim or a separate playback channel.
+var _authoring_empty_hand_finger_overlays: Dictionary = {}
+var _empty_hand_finger_idle_packets: Dictionary = {}
 var runtime_debug_visuals_visible: bool = false
 
 const RENDER_CHECKPOINT_RIG_FIELDS := [
@@ -375,6 +380,7 @@ const RENDER_CHECKPOINT_RIG_FIELDS := [
 	&"last_two_hand_solve_result", &"finger_grip_source_lookup", &"finger_grip_target_lookup",
 	&"finger_grip_modifier_lookup", &"upper_body_authoring_auto_apply_enabled", &"authoring_preview_mode_enabled",
 	&"authoring_preview_baseline_animation_name", &"runtime_solved_replay_pose_state", &"runtime_solved_replay_weapon_state",
+	&"_authoring_empty_hand_finger_overlays",
 ]
 const RENDER_CHECKPOINT_FINGER_FIELDS := [
 	&"surface_grasp_state_lookup", &"weapon_surface_seat_state_lookup", &"weapon_surface_seat_prepared_attempt_lookup",
@@ -650,6 +656,7 @@ func _process(delta: float) -> void:
 	_refresh_runtime_body_restriction_sync_modifier_state()
 	_refresh_runtime_bone_debug_modifier_state()
 	if _has_retained_authoring_pose_authority() and authoring_preview_mode_enabled:
+		_apply_authoring_empty_hand_finger_overlays()
 		_sync_authoring_joint_range_debug_if_pose_changed()
 		return
 	if _uses_direct_authoring_solver_mode() and not authoring_preview_mode_enabled:
@@ -1195,6 +1202,11 @@ func _remember_authoring_weapon_motion_authority(result: Dictionary) -> void:
 		"origin_id": CombatOriginRecordScript.ORIGIN_RL_BONE_ROOT,
 	}
 	_refresh_support_arm_ik_influences()
+	# Ownership handoff is part of this synchronous, validated commit. Otherwise
+	# the delayed skeleton callback can restore an old acquisition-time pose.
+	var grip_owner: Node = get_node_or_null("PreparedGripAcquisition")
+	if grip_owner != null:
+		result["grip_motion_retention_adopted"] = grip_owner.accept_authoring_weapon_motion()
 
 func has_authoring_weapon_motion_authority() -> bool:
 	return _weapon_motion_authority_active
@@ -1717,6 +1729,8 @@ func set_finger_grip_target(slot_id: StringName, guide_node: Node3D) -> void:
 	if slot_id != &"hand_right" and slot_id != &"hand_left":
 		return
 	finger_grip_source_lookup[slot_id] = guide_node
+	if not _is_authoring_empty_hand_finger_slot_free(slot_id):
+		clear_authoring_empty_hand_finger_curls(slot_id)
 	if finger_grip_presenter.has_method("note_grip_source_assigned"):
 		finger_grip_presenter.call("note_grip_source_assigned", slot_id, guide_node)
 	_refresh_finger_grip_ik_influences()
@@ -1737,6 +1751,7 @@ func claim_planar_grip_pose(slot_id: StringName, weapon: Node3D, relationship_ke
 	if not finger_grip_presenter.set_planar_grip_rotations(skeleton, slot_id, claim.rotations):
 		planar_grip_pose_binding.release(slot_id)
 		return {"valid": false, "reason": "cannot_claim_all_fifteen_digit_rotations", "grip_accepted": false}
+	clear_authoring_empty_hand_finger_curls(slot_id)
 	return claim
 
 
@@ -2187,6 +2202,7 @@ func restore_prepared_authoring_pose_frame(
 	if not _apply_runtime_solved_upper_body_pose_values(bone_names, bone_pose_positions,
 		bone_pose_rotations, bone_pose_scales, strength, forearm_hand_calibration, false):
 		return false
+	clear_authoring_empty_hand_finger_curls()
 	clear_authoring_baseline_pose_authority()
 	# Subsequent edits must continue this endpoint's angular branch, not the
 	# previous node's cached wrist state. Missing states remain unclaimed.
@@ -2241,6 +2257,7 @@ func apply_runtime_solved_upper_body_pose_frame(
 	}
 	if not _apply_runtime_solved_upper_body_pose_state(candidate):
 		return false
+	clear_authoring_empty_hand_finger_curls()
 	runtime_solved_replay_pose_state = candidate
 	_refresh_runtime_solved_replay_modifier_state()
 	return true
@@ -2769,7 +2786,8 @@ func apply_upper_body_authoring_pose_now() -> void:
 func apply_authoring_independent_arm_frame_now(
 	slot_id: StringName,
 	_use_drag_frame: bool = true,
-	hand_proxy_edit: bool = true
+	hand_proxy_edit: bool = true,
+	hand_control_request: Dictionary = {}
 ) -> Dictionary:
 	if skeleton == null or slot_id not in [&"hand_right", &"hand_left"]:
 		return {"valid": false, "reason": "independent_arm_context_unavailable"}
@@ -2784,7 +2802,15 @@ func apply_authoring_independent_arm_frame_now(
 	clear_runtime_solved_replay_pose_frame()
 	var adapter := IndependentArmMotionAdapter.new()
 	var result: Dictionary
-	if hand_proxy_edit:
+	if hand_proxy_edit and not hand_control_request.is_empty():
+		# Interactive empty-hand targets already use the actual Hand frame and
+		# explicit marker intent. Do not project them through the legacy reach /
+		# contact-basis preparation below before the shared anatomical allocator.
+		result = adapter.move_hand(self, slot_id, hand_control_request.target_hand_world,
+			String(hand_control_request.mode), hand_control_request.task_point_hand_local,
+			hand_control_request.get("trailing_tip_hand_local"))
+		result["requested_hand_world"] = hand_control_request.target_hand_world
+	elif hand_proxy_edit:
 		# Reuse the established proxy-contact -> Hand-origin conversion, but not
 		# the old CCD pose writer. Shared anatomical FK owns the resulting pose.
 		var support_snap_delta: float = 1.0 / maxf(support_arm_ik_target_smoothing_speed, 0.001)
@@ -2857,6 +2883,7 @@ func apply_authoring_independent_arm_frame_now(
 
 func apply_authoring_preview_frame_now(allow_exact_surface_solve: bool = false) -> void:
 	if _has_retained_authoring_pose_authority():
+		_apply_authoring_empty_hand_finger_overlays()
 		return
 	_apply_upper_body_authoring_pose()
 	_refresh_support_arm_ik_influences()
@@ -2873,6 +2900,7 @@ func apply_authoring_preview_frame_now(allow_exact_surface_solve: bool = false) 
 
 func apply_authoring_preview_drag_frame_now(allow_exact_surface_solve: bool = false) -> void:
 	if _has_retained_authoring_pose_authority():
+		_apply_authoring_empty_hand_finger_overlays()
 		return
 	_apply_upper_body_authoring_pose()
 	_refresh_support_arm_ik_influences()
@@ -2934,6 +2962,7 @@ func _apply_combat_authoring_overlay_frame(delta: float) -> void:
 		skeleton.force_update_all_bone_transforms()
 
 func reset_authoring_preview_baseline_pose(baseline_animation_name: StringName = StringName()) -> void:
+	clear_authoring_empty_hand_finger_curls()
 	clear_authoring_weapon_motion_authority()
 	clear_upper_body_authoring_state()
 	clear_authoring_contact_anchor_bases()
@@ -2964,6 +2993,7 @@ func reset_authoring_preview_baseline_pose(baseline_animation_name: StringName =
 
 func set_authoring_preview_mode_enabled(enabled: bool, baseline_animation_name: StringName = StringName()) -> void:
 	if not enabled:
+		clear_authoring_empty_hand_finger_curls()
 		clear_authoring_baseline_pose_authority()
 		clear_authoring_weapon_motion_authority()
 	authoring_preview_mode_enabled = enabled
@@ -2981,6 +3011,7 @@ func set_authoring_preview_mode_enabled(enabled: bool, baseline_animation_name: 
 		locomotion_grounded = true
 		locomotion_vertical_velocity = 0.0
 		if baseline_animation_name != authoring_preview_baseline_animation_name:
+			clear_authoring_empty_hand_finger_curls()
 			_apply_authoring_preview_baseline_pose(baseline_animation_name)
 			_cache_authoring_limb_twist_neutral_pose()
 			_cache_authoring_digit_hinge_neutral_pose()
@@ -3015,6 +3046,89 @@ func _advance_skeleton_modifiers_now(delta: float) -> void:
 	if not skeleton.has_method("advance"):
 		return
 	skeleton.call("advance", maxf(delta, 0.0))
+	# Authoring uses manual modifier advancement. Apply only explicitly authored
+	# free digits after animation/IK; no modifier or grip ownership is added.
+	_apply_authoring_empty_hand_finger_overlays()
+
+
+func apply_authoring_empty_hand_finger_curls(slot: StringName, curls: Dictionary) -> Dictionary:
+	if slot not in [&"hand_right", &"hand_left"]:
+		return {"valid": false, "reason": "empty_hand_finger_slot_invalid"}
+	if curls.is_empty():
+		clear_authoring_empty_hand_finger_curls(slot)
+		return {"valid": true, "hand_slot": slot, "angles_degrees": {}}
+	if not authoring_preview_mode_enabled or skeleton == null:
+		return {"valid": false, "reason": "empty_hand_finger_authoring_unavailable"}
+	if not runtime_solved_replay_pose_state.is_empty() or not runtime_solved_replay_weapon_state.is_empty():
+		return {"valid": false, "reason": "empty_hand_finger_replay_owns_pose"}
+	if not _is_authoring_empty_hand_finger_slot_free(slot):
+		clear_authoring_empty_hand_finger_curls(slot)
+		return {"valid": false, "reason": "empty_hand_finger_hand_occupied"}
+	var packet: Dictionary = PlayerEmptyHandFingerPoseScript.compose(skeleton, slot, curls, _resolve_empty_hand_finger_idle_packet(slot))
+	if not packet.get("valid", false):
+		return packet
+	if not PlayerEmptyHandFingerPoseScript.apply(skeleton, packet):
+		return {"valid": false, "reason": "empty_hand_finger_pose_not_applied"}
+	_authoring_empty_hand_finger_overlays[slot] = packet
+	return packet.duplicate(true)
+
+
+## Releasing an editing override never resets fingers. A subsequent captured
+## node, animation or grip owner is responsible for the next pose.
+func clear_authoring_empty_hand_finger_curls(slot: StringName = StringName()) -> void:
+	if slot == StringName():
+		_authoring_empty_hand_finger_overlays.clear()
+	else:
+		_authoring_empty_hand_finger_overlays.erase(slot)
+
+
+func describe_empty_hand_finger_curl(slot: StringName, digit: StringName) -> Dictionary:
+	return PlayerEmptyHandFingerPoseScript.describe(skeleton, slot, digit,
+		_resolve_empty_hand_finger_idle_packet(slot), _authoring_empty_hand_finger_overlays.get(slot, {}))
+
+
+func _resolve_empty_hand_finger_idle_packet(slot: StringName) -> Dictionary:
+	if _empty_hand_finger_idle_packets.has(slot):
+		return _empty_hand_finger_idle_packets[slot]
+	# The existing owner samples the source Idle clip, never the current edited
+	# fingers. Its public packet decodes that fixed Hand-relative cache into the
+	# named bones' parent-local rotations; the Hand frame cancels in the decode.
+	finger_grip_presenter._ensure_animation_grip_baseline_cache()
+	var packet: Dictionary = finger_grip_presenter.capture_default_open_finger_rotations(skeleton, slot)
+	if packet.get("valid", false):
+		_empty_hand_finger_idle_packets[slot] = packet.duplicate(true)
+	return packet
+
+
+func _is_authoring_empty_hand_finger_slot_free(slot: StringName) -> bool:
+	if planar_grip_pose_binding.owns(slot):
+		return false
+	var source: Node = finger_grip_source_lookup.get(slot) as Node
+	if not is_instance_valid(source):
+		return true
+	# Unarmed's positioning proxy is not a physical weapon. An actual grip
+	# guide, including acquisition before a binding is committed, owns digits.
+	var ancestor: Node = source
+	while ancestor != null:
+		if bool(ancestor.get_meta("unarmed_hand_proxy", false)):
+			return true
+		if bool(ancestor.get_meta("hand_authoring_slot_proxy", false)) and StringName(ancestor.get_meta("slot_id", StringName())) == slot:
+			return true
+		ancestor = ancestor.get_parent()
+	return false
+
+
+func _apply_authoring_empty_hand_finger_overlays() -> void:
+	if _authoring_empty_hand_finger_overlays.is_empty():
+		return
+	if not authoring_preview_mode_enabled or skeleton == null \
+		or not runtime_solved_replay_pose_state.is_empty() or not runtime_solved_replay_weapon_state.is_empty():
+		clear_authoring_empty_hand_finger_curls()
+		return
+	for slot: StringName in _authoring_empty_hand_finger_overlays.keys():
+		if not _is_authoring_empty_hand_finger_slot_free(slot) \
+			or not PlayerEmptyHandFingerPoseScript.apply(skeleton, _authoring_empty_hand_finger_overlays[slot]):
+			_authoring_empty_hand_finger_overlays.erase(slot)
 
 func _apply_authoring_contact_alignment_pose(
 	pass_count: int = 3,

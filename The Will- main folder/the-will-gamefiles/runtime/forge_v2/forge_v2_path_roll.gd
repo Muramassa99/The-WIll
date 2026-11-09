@@ -3,6 +3,7 @@ class_name ForgeV2PathRoll
 
 const PathSampler = preload("res://runtime/forge_v2/forge_v2_spline_path_sampler.gd")
 const ProfileLibrary = preload("res://runtime/forge_v2/forge_v2_profile_shape_library.gd")
+const PathScale = preload("res://runtime/forge_v2/forge_v2_path_scale.gd")
 
 # Authored angles are unwrapped totals. Positive is clockwise looking from
 # the end of the path back toward its beginning.
@@ -13,7 +14,7 @@ const MAX_ROLL_CHORD_ERROR_METERS := 0.00005
 const ARC_BAKE_INTERVAL_METERS := 0.0001
 const BASE_BAKE_INTERVAL_METERS := 0.0005
 const FRAME_METADATA := &"forge_v2_path_roll_frames"
-const SWEEP_REVISION := 2
+const SWEEP_REVISION := 3
 const EPSILON := 0.000000001
 
 
@@ -40,7 +41,7 @@ static func has_roll(body: Variant) -> bool:
 
 
 static func uses_shared_sweep(body: Variant) -> bool:
-	return body != null and (has_roll(body)
+	return body != null and (has_roll(body) or PathScale.has_scale(body)
 		or StringName(body.get("body_kind")) == &"body_kind_handle_profile"
 		or StringName(body.get("shape_kind")) in [
 			&"shape_kind_spline_profile_path", &"shape_kind_spline_capsule_path"])
@@ -302,6 +303,8 @@ static func control_offsets(body: Variant, curve: Curve3D) -> PackedFloat64Array
 static func build_body_curve(body: Variant, sample_spacing_meters: float) -> Curve3D:
 	if body == null:
 		return null
+	if StringName(body.get("body_kind")) == &"body_kind_detailing_brush":
+		return _build_detail_body_curve(body)
 	var points: PackedVector3Array = body.get("path_points")
 	var rolls: PackedFloat64Array = body.get("path_roll_degrees")
 	var linear := uses_linear_path(body)
@@ -310,6 +313,10 @@ static func build_body_curve(body: Variant, sample_spacing_meters: float) -> Cur
 	rolls = normalize_roll_degrees(rolls, points.size())
 	var base_curve := build_base_curve(body, sample_spacing_meters)
 	var base_offsets := control_offsets(body, base_curve)
+	var scale_values: Variant = body.get("path_profile_scales")
+	var scales := PathScale.normalize(scale_values if scale_values is PackedVector2Array else PackedVector2Array(), points.size())
+	var ranges := PathScale.body_ranges(body)
+	var extents := PathScale.profile_extents(body)
 	var lengths := PackedFloat64Array()
 	for i in range(base_offsets.size() - 1):
 		lengths.append(base_offsets[i + 1] - base_offsets[i])
@@ -317,11 +324,14 @@ static func build_body_curve(body: Variant, sample_spacing_meters: float) -> Cur
 	# The established Handle CSG path maps profile +X opposite to the
 	# authored sweep frame. Preserve that convention when a roll is added.
 	var mirror_profile_x := StringName(body.get("body_kind")) == &"body_kind_handle_profile"
+	if mirror_profile_x:
+		scales = PathScale.normalize(PackedVector2Array(), points.size())
 	var radius := maxf(float(body.get("radius_meters")), MAX_ROLL_CHORD_ERROR_METERS)
 	var polygon: Variant = body.get("profile_polygon_2d_meters")
 	if polygon is PackedVector2Array:
 		for vertex: Vector2 in polygon:
 			radius = maxf(radius, vertex.length())
+	radius *= PathScale.max_body_scale(body)
 	var angular_step := minf(MAX_SAMPLE_ROLL_DEGREES, rad_to_deg(2.0 * acos(clampf(1.0 - MAX_ROLL_CHORD_ERROR_METERS / radius, -1.0, 1.0))))
 	var curve := Curve3D.new()
 	curve.bake_interval = ARC_BAKE_INTERVAL_METERS
@@ -330,8 +340,10 @@ static func build_body_curve(body: Variant, sample_spacing_meters: float) -> Cur
 	var axes_x := PackedVector3Array()
 	var axes_y := PackedVector3Array()
 	var sampled_rolls := PackedFloat64Array()
+	var sampled_scales := PackedVector2Array()
 	var distances := PackedFloat64Array()
 	var source_offsets := PackedFloat64Array([0.0])
+	var section_starts := PackedInt32Array([0])
 	var traveled := 0.0
 	for span in range(points.size() - 1):
 		var length := base_offsets[span + 1] - base_offsets[span]
@@ -341,8 +353,16 @@ static func build_body_curve(body: Variant, sample_spacing_meters: float) -> Cur
 		var count := maxi(1, int(ceil(length / maxf(sample_spacing_meters, ARC_BAKE_INTERVAL_METERS))))
 		var peak_rate := _peak_roll_rate(rolls[span], rolls[span + 1], slopes[span], slopes[span + 1], length)
 		count = maxi(count, int(ceil(peak_rate * length / angular_step)))
-		for step in range(0 if sampled_points.is_empty() else 1, count + 1):
-			var ratio := float(step) / float(count)
+		var ratios := PathScale.span_sample_ratios(base_offsets, ranges, span, extents, count)
+		var first_step := 0 if sampled_points.is_empty() else 1
+		var outgoing_scale := PathScale.sample_span(scales, base_offsets, ranges, span, 0.0, extents)
+		if not sampled_scales.is_empty() and not sampled_scales[-1].is_equal_approx(outgoing_scale):
+			# The incoming and outgoing profiles belong to separate closed
+			# sections. Do not join unlike profiles across a zero-length strip.
+			section_starts.append(sampled_points.size())
+			first_step = 0
+		for step in range(first_step, ratios.size()):
+			var ratio := ratios[step]
 			var offset := lerpf(base_offsets[span], base_offsets[span + 1], ratio)
 			var frame := sample_base_frame(base_curve, offset, mirror_profile_x)
 			var position: Vector3 = frame.get("position")
@@ -358,6 +378,7 @@ static func build_body_curve(body: Variant, sample_spacing_meters: float) -> Cur
 			axes_x.append(axis_x)
 			axes_y.append(axis_y)
 			sampled_rolls.append(roll)
+			sampled_scales.append(PathScale.sample_span(scales, base_offsets, ranges, span, ratio, extents))
 			distances.append(traveled)
 			curve.add_point(position)
 		source_offsets.append(traveled)
@@ -365,10 +386,105 @@ static func build_body_curve(body: Variant, sample_spacing_meters: float) -> Cur
 		"points": sampled_points, "tangents": tangents,
 		"axis_x": axes_x, "axis_y": axes_y,
 		"roll_degrees": sampled_rolls, "distances": distances,
+		"profile_scales": sampled_scales,
 		"source_offsets": source_offsets,
+		"section_starts": section_starts,
 		"mirror_profile_x": mirror_profile_x,
 	})
 	return curve
+
+
+static func _build_detail_body_curve(body: Variant) -> Curve3D:
+	# These are already surface-resolved samples. Retain their positions and
+	# existing per-sample contact frame rather than fitting another spline.
+	var points: PackedVector3Array = body.get("path_points")
+	if points.size() < 2:
+		return null
+	var normals: PackedVector3Array = body.get("path_surface_normals")
+	var contacts: PackedVector3Array = body.get("path_contact_directions")
+	var explicit := StringName(body.get("shape_kind")) == &"shape_kind_profile_path" and int(body.get("profile_runtime_schema_version")) > 0 and contacts.size() >= points.size()
+	var axes_x := PackedVector3Array()
+	var axes_y := PackedVector3Array()
+	var tangents := PackedVector3Array()
+	var sampled_points := PackedVector3Array()
+	var distances := PackedFloat64Array()
+	var rolls := PackedFloat64Array()
+	var sampled_scales := PackedVector2Array()
+	var source_offsets := PathScale.polyline_offsets(points)
+	var scale_values: Variant = body.get("path_profile_scales")
+	var scales := PathScale.normalize(scale_values if scale_values is PackedVector2Array else PackedVector2Array(), points.size())
+	var ranges := PathScale.body_ranges(body)
+	var extents := PathScale.profile_extents(body)
+	var section_starts := PackedInt32Array([0])
+	var source_frames: Array[Dictionary] = []
+	var curve := Curve3D.new()
+	curve.bake_interval = ARC_BAKE_INTERVAL_METERS
+	for i in range(points.size()):
+		var tangent := ProfileLibrary.resolve_linear_path_point_tangent(points, i)
+		var normal := normals[i] if i < normals.size() else Vector3.FORWARD
+		var frame: Dictionary
+		if explicit:
+			frame = ProfileLibrary.resolve_explicit_surface_profile_path_frame(tangent, normal,
+				body.get("profile_contact_direction_2d") as Vector2,
+				body.get("profile_contact_point_relative_2d_meters") as Vector2,
+				contacts[i], float(body.get("profile_rotation_bias_degrees")))
+		else:
+			frame = ProfileLibrary.resolve_profile_path_frame(tangent, normal,
+				body.get("profile_contact_direction_2d") as Vector2, float(body.get("profile_rotation_bias_degrees")))
+		frame["tangent"] = tangent
+		source_frames.append(frame)
+	for span in range(points.size() - 1):
+		if source_offsets[span + 1] - source_offsets[span] <= EPSILON:
+			continue
+		var first_step := 0 if sampled_points.is_empty() else 1
+		var outgoing_scale := PathScale.sample_span(scales, source_offsets, ranges, span, 0.0, extents)
+		if not sampled_scales.is_empty() and not sampled_scales[-1].is_equal_approx(outgoing_scale):
+			section_starts.append(sampled_points.size())
+			first_step = 0
+		var ratios := PathScale.span_sample_ratios(source_offsets, ranges, span, extents)
+		for step in range(first_step, ratios.size()):
+			var ratio := ratios[step]
+			var start: Dictionary = source_frames[span]
+			var end: Dictionary = source_frames[span + 1]
+			# Subdivide the already-resolved surface polyline, never refit it.
+			# Contact axes can be oblique; retain the same interpolation used
+			# by sample_frame instead of orthonormalizing a new surface frame.
+			var position := points[span].lerp(points[span + 1], ratio)
+			sampled_points.append(position)
+			axes_x.append((start.axis_x as Vector3).lerp(end.axis_x, ratio))
+			axes_y.append((start.axis_y as Vector3).lerp(end.axis_y, ratio))
+			tangents.append((start.tangent as Vector3).lerp(end.tangent, ratio))
+			distances.append(lerpf(source_offsets[span], source_offsets[span + 1], ratio))
+			rolls.append(0.0)
+			sampled_scales.append(PathScale.sample_span(scales, source_offsets, ranges, span, ratio, extents))
+			curve.add_point(position)
+	curve.set_meta(FRAME_METADATA, {"points": sampled_points, "tangents": tangents,
+		"axis_x": axes_x, "axis_y": axes_y, "roll_degrees": rolls,
+		"distances": distances, "source_offsets": source_offsets,
+		"profile_scales": sampled_scales, "mirror_profile_x": false,
+		"section_starts": section_starts,
+		"surface_frames": true})
+	return curve
+
+
+static func sample_frame_at_index(curve: Curve3D, index: int) -> Dictionary:
+	# A section boundary has two rings at one distance. An indexed lookup is
+	# required whenever the caller needs one exact side of that boundary.
+	if curve == null or not curve.has_meta(FRAME_METADATA):
+		return {}
+	var data: Dictionary = curve.get_meta(FRAME_METADATA)
+	var points: PackedVector3Array = data.get("points")
+	if index < 0 or index >= points.size():
+		return {}
+	var tangents: PackedVector3Array = data.get("tangents")
+	var axes_x: PackedVector3Array = data.get("axis_x")
+	var axes_y: PackedVector3Array = data.get("axis_y")
+	var rolls: PackedFloat64Array = data.get("roll_degrees")
+	var scales: PackedVector2Array = data.get("profile_scales", PackedVector2Array())
+	return {"position": points[index], "tangent": tangents[index],
+		"axis_x": axes_x[index], "axis_y": axes_y[index],
+		"roll_degrees": rolls[index],
+		"profile_scale": scales[index] if scales.size() == points.size() else Vector2.ONE}
 
 
 static func sample_frame(curve: Curve3D, offset: float) -> Dictionary:
@@ -393,6 +509,17 @@ static func sample_frame(curve: Curve3D, offset: float) -> Dictionary:
 	var axes_x: PackedVector3Array = data.get("axis_x")
 	var axes_y: PackedVector3Array = data.get("axis_y")
 	var rolls: PackedFloat64Array = data.get("roll_degrees")
+	var scales: PackedVector2Array = data.get("profile_scales", PackedVector2Array())
+	var profile_scale := scales[low].lerp(scales[high], ratio) if scales.size() == points.size() else Vector2.ONE
+	if bool(data.get("surface_frames", false)):
+		# Surface frames may be oblique. Their axes are the existing mesh
+		# authority, not a rotation matrix to orthonormalize.
+		var tangents: PackedVector3Array = data.get("tangents")
+		return {"position": points[low].lerp(points[high], ratio),
+			"tangent": tangents[low].lerp(tangents[high], ratio),
+			"axis_x": axes_x[low].lerp(axes_x[high], ratio),
+			"axis_y": axes_y[low].lerp(axes_y[high], ratio),
+			"roll_degrees": 0.0, "profile_scale": profile_scale}
 	# Interpolate a proper rotation, then restore the profile reflection.
 	# Independent normalized axis lerps need not stay perpendicular in 3D.
 	var from := Basis(axes_x[low], axes_y[low], axes_x[low].cross(axes_y[low]).normalized()).get_rotation_quaternion()
@@ -404,6 +531,7 @@ static func sample_frame(curve: Curve3D, offset: float) -> Dictionary:
 		"axis_x": orientation.x,
 		"axis_y": orientation.y,
 		"roll_degrees": lerpf(rolls[low], rolls[high], ratio),
+		"profile_scale": profile_scale,
 	}
 
 

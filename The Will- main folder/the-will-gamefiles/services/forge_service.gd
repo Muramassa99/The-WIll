@@ -60,6 +60,9 @@ func get_cached_profile_for_runtime(
 	if profile.validation_error == "forge_v2_primary_handle_span_below_0_25_meters":
 		return bake_wip(wip, material_lookup)
 	if profile.primary_grip_valid:
+		# Refresh the display policy on this private copy. Keep the saved profile
+		# available to interpret any legacy schema-1 signed grip coordinates.
+		ForgeV2WipCompatibilityAdapterScript.refresh_handle_coordinate_display_mode(profile)
 		var cell_size_meters := forge_rules.cell_world_size_meters
 		if wip.stage2_item_state != null:
 			var saved_cell_size_meters := float(wip.stage2_item_state.get("cell_world_size_meters"))

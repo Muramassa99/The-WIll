@@ -1769,6 +1769,19 @@ func append_spline_line_point(
 	var before_roll_count := (
 		state.get("spline_line_roll_degrees") as PackedFloat64Array
 	).size()
+	var before_scales := state.get("spline_line_profile_scales") as PackedVector2Array
+	var before_scale_count := before_scales.size()
+	var scale_snapshot_required := (
+		StringName(state.get("active_tool_id")) == ForgeV2AuthoringStateScript.TOOL_SPLINE_LINE
+		and (
+			before_scale_count != before_point_count
+			or not (state.get("spline_line_profile_transform_ranges") as Array).is_empty()
+			or (before_point_count >= 2
+				and (before_scales[before_scale_count - 1].x < 0.05
+					or before_scales[before_scale_count - 1].y < 0.05))
+		)
+	)
+	var action_before := _capture_editor_transient_snapshot() if scale_snapshot_required else {}
 	var before_selected_index := int(state.get("selected_spline_point_index"))
 	var point_index: int = int(state.call(
 		"append_spline_line_point",
@@ -1784,6 +1797,7 @@ func append_spline_line_point(
 				"spline_line_surface_normals"
 			) as PackedVector3Array
 			var after_rolls := state.get("spline_line_roll_degrees") as PackedFloat64Array
+			var after_scales := state.get("spline_line_profile_scales") as PackedVector2Array
 			var changes := {
 				"spline_line_points": _build_known_action_sequence_splice(
 					TYPE_PACKED_VECTOR3_ARRAY,
@@ -1816,7 +1830,18 @@ func append_spline_line_point(
 					[], [after_rolls[point_index]]
 				),
 			}
-			_record_known_transient_delta("Place Path Point", changes)
+			if after_scales.size() == after_points.size():
+				changes["spline_line_profile_scales"] = _build_known_action_sequence_splice(
+					TYPE_PACKED_VECTOR2_ARRAY,
+					before_scale_count, after_scales.size(), before_scale_count, 0,
+					[], [after_scales[point_index]]
+				)
+			if scale_snapshot_required:
+				# A former zero-size end becomes an interior control with a 5% floor.
+				# Capture both that adjustment and the append as one undoable action.
+				_record_transient_action("Place Path Point", action_before)
+			else:
+				_record_known_transient_delta("Place Path Point", changes)
 		_emit_state_changed()
 	elif StringName((state.call("get_spline_line_roll_status") as Dictionary).get(
 		"last_edit_reason", StringName()
@@ -1941,6 +1966,30 @@ func set_spline_line_point_roll_degrees(
 	))
 	if changed:
 		_record_transient_action("Twist Path Point", action_before)
+		_emit_state_changed()
+	return changed
+
+
+func set_spline_line_point_profile_scale(point_index: int, value: Vector2) -> bool:
+	if is_retained_spline_change_pending():
+		return false
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
+	var changed := bool(state.call("set_spline_line_point_profile_scale", point_index, value))
+	if changed:
+		_record_transient_action("Transform Path Point", action_before)
+		_emit_state_changed()
+	return changed
+
+
+func set_spline_line_profile_transform(selection: PackedInt32Array, value: Vector2) -> bool:
+	if is_retained_spline_change_pending():
+		return false
+	var state: Resource = ensure_authoring_state(default_project_name)
+	var action_before := _capture_editor_transient_snapshot()
+	var changed := bool(state.call("set_spline_line_profile_transform", selection, value))
+	if changed:
+		_record_transient_action("Transform Path Range", action_before)
 		_emit_state_changed()
 	return changed
 

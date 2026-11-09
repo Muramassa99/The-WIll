@@ -420,6 +420,17 @@ static func build_mesh_slice_center_path(
 		)),
 		1
 	)
+	# All stations share one axis. Index triangle projection intervals once,
+	# rather than scanning the entire protected Handle at every millimetre.
+	# This is only a conservative broad phase: the existing section/centroid
+	# calculation (including singular limiting slices) remains authoritative.
+	var candidates := _build_mesh_slice_candidates(
+		vertices_meters, indices, axis_start_meters, axis_normal,
+		axis_length, sample_count
+	)
+	if candidates.has("error"):
+		return {"valid": false, "error": candidates.error, "sample_index": 0, "ratio": 0.0}
+	var active_triangles: Dictionary = {}
 	var ratios := PackedFloat32Array()
 	var centers := PackedVector3Array()
 	ratios.resize(sample_count + 1)
@@ -427,9 +438,24 @@ static func build_mesh_slice_center_path(
 	for sample_index: int in range(sample_count + 1):
 		var ratio := float(sample_index) / float(sample_count)
 		var plane_origin := axis_start_meters + axis_span * ratio
+		var slice_indices := indices
+		if not candidates.is_empty():
+			for offset: int in candidates.ends[sample_index]:
+				active_triangles.erase(offset)
+			for offset: int in candidates.starts[sample_index]:
+				active_triangles[offset] = true
+			# Preserve source triangle order, hence contour welding/rounding order.
+			var offsets := active_triangles.keys()
+			offsets.sort()
+			slice_indices = PackedInt32Array()
+			slice_indices.resize(offsets.size() * 3)
+			for candidate_index: int in range(offsets.size()):
+				var offset: int = offsets[candidate_index]
+				for corner: int in range(3):
+					slice_indices[candidate_index * 3 + corner] = indices[offset + corner]
 		var slice_state := resolve_mesh_plane_slice_center(
 			vertices_meters,
-			indices,
+			slice_indices,
 			plane_origin,
 			axis_normal
 		)
@@ -443,7 +469,7 @@ static func build_mesh_slice_center_path(
 			# and project their centers back onto this unchanged nominal station.
 			slice_state = _resolve_singular_mesh_plane_slice_center(
 				vertices_meters,
-				indices,
+				slice_indices,
 				plane_origin,
 				axis_normal
 			)
@@ -470,6 +496,55 @@ static func build_mesh_slice_center_path(
 		"axis_end_meters": axis_end_meters,
 		"axis_normal": axis_normal,
 	}
+
+
+static func _build_mesh_slice_candidates(
+	vertices_meters: PackedVector3Array,
+	indices: PackedInt32Array,
+	axis_start_meters: Vector3,
+	axis_normal: Vector3,
+	axis_length: float,
+	sample_count: int
+) -> Dictionary:
+	var projections := PackedFloat64Array()
+	projections.resize(vertices_meters.size())
+	var coordinate_extent := axis_start_meters.length() + axis_length
+	for vertex_index: int in range(vertices_meters.size()):
+		var vertex := vertices_meters[vertex_index]
+		if not vertex.is_finite():
+			# Leave malformed numeric geometry to the existing exact resolver.
+			return {}
+		coordinate_extent = maxf(coordinate_extent, vertex.length())
+		projections[vertex_index] = axis_normal.dot(vertex - axis_start_meters)
+	var starts: Array[Array] = []
+	var ends: Array[Array] = []
+	starts.resize(sample_count + 1)
+	ends.resize(sample_count + 2)
+	for station: int in range(sample_count + 2):
+		if station <= sample_count:
+			starts[station] = []
+		ends[station] = []
+	# Include the on-plane band, both +/-2 epsilon singular probes, float32
+	# vector arithmetic error and one extra station on each end. This may admit
+	# extra triangles; it never changes the exact resolver's tolerance.
+	var margin := SLICE_DISTANCE_EPSILON_METERS * 3.0 + coordinate_extent * 0.000001
+	var stations_per_meter := float(sample_count) / axis_length
+	for offset: int in range(0, indices.size(), 3):
+		var low := INF
+		var high := -INF
+		for corner: int in range(3):
+			var vertex_index := indices[offset + corner]
+			if vertex_index < 0 or vertex_index >= projections.size():
+				return {"error": "slice_mesh_index_invalid"}
+			low = minf(low, projections[vertex_index])
+			high = maxf(high, projections[vertex_index])
+		var first := maxi(0, int(floor((low - margin) * stations_per_meter)) - 1)
+		var last := mini(sample_count, int(ceil((high + margin) * stations_per_meter)) + 1)
+		if first > last:
+			continue
+		starts[first].append(offset)
+		ends[last + 1].append(offset)
+	return {"starts": starts, "ends": ends}
 
 
 static func _resolve_singular_mesh_plane_slice_center(

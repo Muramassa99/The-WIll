@@ -55,6 +55,49 @@ const HANDLE_GRIP_CURVE_BAKE_INTERVAL_METERS := 0.001
 const HANDLE_FINAL_PROFILE_AXIS_X_SIGN := -1.0
 
 
+# Display coordinates depend on whether the intrinsic-COM plane intersects the
+# Handle span, not on proximity to its midpoint. This does not change the
+# separate balance verdict used by existing two-hand layout calculations.
+static func refresh_handle_coordinate_display_mode(profile: BakedProfile) -> void:
+	if profile == null or not profile.primary_grip_valid:
+		return
+	if (
+		not profile.weapon_intrinsic_center_of_mass_spatial_material_valid
+		or profile.weapon_intrinsic_center_of_mass_authority_source
+		!= WEAPON_INTRINSIC_CENTER_OF_MASS_AUTHORITY_SOURCE
+		or not profile.get_weapon_intrinsic_center_of_mass_weapon_root_cells().is_finite()
+		or not profile.primary_grip_span_start.is_finite()
+		or not profile.primary_grip_span_end.is_finite()
+		or profile.primary_grip_span_start.distance_squared_to(profile.primary_grip_span_end)
+		<= GEOMETRY_EPSILON * GEOMETRY_EPSILON
+	):
+		return
+	var com_ratio := profile.weapon_intrinsic_center_of_mass_handle_axis_ratio_from_span_start_unclamped
+	if not is_finite(com_ratio):
+		return
+	var com_plane_intersects_handle := com_ratio >= 0.0 and com_ratio <= 1.0
+	var zero_position := profile.primary_grip_far_side_position
+	if com_plane_intersects_handle:
+		var midpoint := PrimaryGripSeatResolverScript.resolve_profile_seat(profile, 0.5)
+		if not bool(midpoint.get("valid", false)):
+			return
+		zero_position = midpoint["position"]
+	profile.primary_grip_handle_coordinate_mode = (
+		BakedProfileScript.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_BALANCED_SIGNED
+		if com_plane_intersects_handle
+		else BakedProfileScript.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_DIRECTIONAL_POMMEL_TO_TIP
+	)
+	profile.primary_grip_handle_coordinate_mode_authority_source = (
+		BakedProfileScript.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_AUTHORITY_WEAPON_INTRINSIC_COM
+	)
+	profile.primary_grip_handle_zero_axis_ratio_from_span_start = (
+		0.5 if com_plane_intersects_handle
+		else 1.0 - profile.primary_grip_handle_tip_side_axis_ratio_from_span_start
+	)
+	profile.primary_grip_handle_zero_position = zero_position
+	profile.primary_grip_handle_zero_position_origin_id = PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
+
+
 # Called for newly baked profiles and private copies of legacy V2 snapshots.
 # Legacy coordinates retain their serialization units; capacity uses exact metres.
 static func refresh_metric_handle_capacity(
@@ -1302,28 +1345,6 @@ static func _populate_primary_grip_profile(
 		and profile.primary_grip_center_balance_offset_percent
 		<= CENTER_BALANCE_TOLERANCE_RATIO
 	)
-	profile.primary_grip_handle_coordinate_mode = (
-		BakedProfileScript.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_BALANCED_SIGNED
-		if profile.primary_grip_center_balance_valid
-		else BakedProfileScript.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_DIRECTIONAL_POMMEL_TO_TIP
-	)
-	profile.primary_grip_handle_coordinate_mode_authority_source = (
-		BakedProfileScript
-		.PRIMARY_GRIP_HANDLE_COORDINATE_MODE_AUTHORITY_WEAPON_INTRINSIC_COM
-	)
-	profile.primary_grip_handle_zero_axis_ratio_from_span_start = (
-		0.5
-		if profile.primary_grip_center_balance_valid
-		else 1.0 - tip_side_ratio
-	)
-	profile.primary_grip_handle_zero_position = (
-		sampled_midpoint_meters / cell_size_meters
-		if profile.primary_grip_center_balance_valid
-		else profile.primary_grip_far_side_position
-	)
-	profile.primary_grip_handle_zero_position_origin_id = (
-		PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
-	)
 	if profile.primary_grip_center_balance_valid:
 		profile.primary_grip_center_balance_origin = (
 			sampled_midpoint_meters / cell_size_meters
@@ -1332,6 +1353,7 @@ static func _populate_primary_grip_profile(
 			PrimaryGripHandleMeshPacketScript.VERTICES_ORIGIN_ID
 		)
 
+	refresh_handle_coordinate_display_mode(profile)
 	refresh_metric_handle_capacity(profile, wip, cell_size_meters)
 
 	var extremities := _resolve_weapon_extremities(

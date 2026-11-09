@@ -335,6 +335,8 @@ func _append_body_record(body: Resource) -> void:
 		"path_points": body.get("path_points"),
 		"path_surface_normals": body.get("path_surface_normals"),
 		"path_roll_degrees": body.get("path_roll_degrees"),
+		"path_profile_scales": body.get("path_profile_scales"),
+		"path_profile_transform_ranges": body.get("path_profile_transform_ranges"),
 		"path_contact_directions": body.get("path_contact_directions"),
 		"surface_target_kind": StringName(body.get("surface_target_kind")),
 		"surface_target_id": StringName(body.get("surface_target_id")),

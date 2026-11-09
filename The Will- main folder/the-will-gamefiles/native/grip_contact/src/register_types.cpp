@@ -10,6 +10,7 @@
 #include "combat_motion_math_kernel.h"
 #include "combat_motion_anatomy_kernel.h"
 #include "combat_forearm_clearance_kernel.h"
+#include "combat_pose_capture_kernel.h"
 
 #include <godot_cpp/godot.hpp>
 #include <godot_cpp/variant/vector2.hpp>
@@ -34,6 +35,7 @@ void initialize_grip_contact(ModuleInitializationLevel level) {
     GDREGISTER_CLASS(CombatMotionMathKernel);
     GDREGISTER_CLASS(CombatMotionAnatomyKernel);
     GDREGISTER_CLASS(CombatForearmClearanceKernel);
+    GDREGISTER_CLASS(CombatPoseCaptureKernel);
 }
 
 void uninitialize_grip_contact(ModuleInitializationLevel level) {

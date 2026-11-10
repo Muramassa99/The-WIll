@@ -181,39 +181,165 @@ func pending_authoring_frame_serial() -> int:
 		return -1
 	return int(entry.get("serial", -1))
 
+func pending_authoring_frame_reason() -> StringName:
+	return StringName(_status.get(_dominant, {}).get("authoring_frame_reason", StringName()))
+
 func acknowledge_authoring_frame(serial: int) -> void:
 	if serial >= 0 and pending_authoring_frame_serial() == serial:
 		_status[_dominant].erase("authoring_frame_pending")
 
 ## Durable acquisition provenance, separate from a merely observed body pose.
 ## Session keys, Nodes, WeakRefs and world-space continuation snapshots stay out.
-func export_authoring_grip(context_signature: String) -> Dictionary:
+func export_authoring_grip(context_signature: String, grip_context_signature: String = "") -> Dictionary:
 	if context_signature.is_empty() or not _render_checkpoint_idle() or _manual_reacquisition_required \
 			or _slots.is_empty() or _dominant not in _slots:
 		return {}
 	var packets: Dictionary = {}
+	var slot_signatures: Dictionary = {}
 	for slot: StringName in _slots:
 		var key: String = _requests.get(slot, {}).get("key", "")
 		if key.is_empty() or key != relationship_key(_weapon, slot, _dominant, _data.anatomy.get("source_signature"), _geometry_epoch) \
 				or _status.get(slot, {}).get("status", "") != "preview_applied" \
 				or not _actor.get_planar_grip_pose_state(slot).get("has_grip_pose", false):
-			return {}
+			continue
 		var packet: Dictionary = _compact_authoring_grip_packet(_replay_pose_cache.get(key, {}).get("packet", {}))
-		if packet.is_empty(): return {}
+		if packet.is_empty(): continue
 		var plan: Dictionary = _actor.planar_grip_pose_binding.prepare(_skeleton, slot, _weapon, key, packet)
-		if not plan.get("valid", false) or not _authoring_grip_matches_pose(slot, plan): return {}
+		if not plan.get("valid", false) or not _authoring_grip_matches_pose(slot, plan): continue
 		packets[slot] = packet
-	return {"schema_version": 1, "context_signature": context_signature,
+		slot_signatures[slot] = _authoring_slot_signature(slot, _dominant)
+	if packets.is_empty():
+		return {}
+	return {"schema_version": 2, "context_signature": context_signature,
+		"grip_context_signature": grip_context_signature, "slot_signatures": slot_signatures,
 		"dominant": _dominant, "slots": _slots.duplicate(), "packets": packets,
 		"grip_signature": _authoring_grip_signature(_slots, _dominant)}
+
+func _authoring_slot_signature(slot: StringName, dominant: StringName) -> String:
+	# Support identity includes the primary station it joins. Adding support
+	# does not invalidate an unchanged primary Hand/seat/style relationship.
+	var identity_slots: Array[StringName] = [dominant]
+	if slot != dominant:
+		identity_slots.append(slot)
+	return _authoring_grip_signature(identity_slots, dominant)
+
+func _saved_authoring_grip_context_matches(saved: Dictionary, context_signature: String,
+		grip_context_signature: String, dominant: StringName) -> bool:
+	if bool(saved.get("reuse_invalidated", false)) or saved.get("schema_version", 0) not in [1, 2] \
+		or saved.get("dominant", &"") != dominant or not saved.get("packets") is Dictionary \
+		or not saved.get("slots") is Array:
+		return false
+	var saved_slots: Array = saved.slots
+	if saved_slots.is_empty() or saved_slots.size() > 2 or dominant not in saved_slots:
+		return false
+	for slot: Variant in saved_slots:
+		if slot not in [&"hand_right", &"hand_left"] or saved_slots.count(slot) != 1:
+			return false
+	if saved.get("schema_version", 0) == 2 and not saved.get("slot_signatures") is Dictionary:
+		return false
+	var context_value: Variant = saved.get("grip_context_signature", "")
+	if not context_value is String:
+		return false
+	var saved_grip_context: String = context_value
+	if not saved_grip_context.is_empty() and not grip_context_signature.is_empty():
+		return saved_grip_context == grip_context_signature
+	# Legacy packets have only the broader geometry/rig/arm context. Reuse them
+	# only when that original context still matches; do not invent provenance.
+	return not context_signature.is_empty() and saved.get("context_signature", "") == context_signature
+
+func _saved_authoring_grip_slot_matches(saved: Dictionary, slot: StringName, dominant: StringName) -> bool:
+	if not saved.get("packets", {}).has(slot):
+		return false
+	if saved.get("schema_version", 0) == 2:
+		return saved.get("slot_signatures", {}).get(slot, "") == _authoring_slot_signature(slot, dominant)
+	var saved_slots: Array[StringName] = []
+	saved_slots.assign(saved.get("slots", []))
+	return slot in saved_slots and saved.get("grip_signature", "") == _authoring_grip_signature(saved_slots, dominant)
+
+## Reuse an acquired LOCAL relationship before the existing arm/body posing
+## pass. No Hand/weapon placement, fitting, certification, or closure work runs
+## here. Unlike exact-pose restoration, an old world/body pose is not required.
+func reuse_authoring_grip(saved: Dictionary, context_signature: String,
+		slots: Array[StringName], dominant: StringName, grip_context_signature: String = "") -> Dictionary:
+	if not _render_checkpoint_idle() or not _data.get("valid", false) or _manual_reacquisition_required:
+		return {"valid": false, "reason": "authoring_grip_owner_not_ready"}
+	if slots.is_empty() or dominant not in slots or not _saved_authoring_grip_context_matches(saved, context_signature, grip_context_signature, dominant):
+		return {"valid": false, "reason": "authoring_grip_context_changed"}
+	var reused: Array[StringName] = []
+	var rejected: Dictionary = {}
+	for slot: StringName in slots:
+		if slot not in [&"hand_right", &"hand_left"] or not _saved_authoring_grip_slot_matches(saved, slot, dominant):
+			continue
+		if not saved.packets[slot] is Dictionary:
+			rejected[slot] = "authoring_grip_packet_invalid"
+			continue
+		var packet: Dictionary = _compact_authoring_grip_packet(saved.packets[slot])
+		if packet.is_empty() or packet.anatomy_signature != _data.anatomy.get("source_signature"):
+			rejected[slot] = "authoring_grip_packet_invalid"
+			continue
+		var key: String = relationship_key(_weapon, slot, dominant, _data.anatomy.get("source_signature"), _geometry_epoch)
+		if key.is_empty():
+			continue
+		if _requests.get(slot, {}).get("key", "") == key and _status.get(slot, {}).get("status", "") == "preview_applied" \
+			and _replay_pose_cache.get(key, {}).get("packet", {}) == packet:
+			reused.append(slot)
+			continue
+		var claim: Dictionary = _actor.claim_planar_grip_pose(slot, _weapon, key)
+		if not claim.get("valid", false):
+			rejected[slot] = claim.get("reason", "authoring_grip_claim_failed")
+			continue
+		# The ordinary binding owner checks all digit dimensions, hinge limits,
+		# named origins and packet provenance before writing the existing angles.
+		var applied: Dictionary = _actor.apply_planar_grip_pose(slot, _weapon, key, packet)
+		if not applied.get("valid", false):
+			_actor.release_planar_grip_pose(slot)
+			rejected[slot] = applied.get("reason", "authoring_grip_reuse_failed")
+			continue
+		_release_allocated_motion_authority()
+		_serial += 1
+		_requests[slot] = {"key": key, "serial": _serial, "dominant": dominant}
+		_status[slot] = {"status": "preview_applied", "serial": _serial,
+			"reason": "authoring_acquisition_reused", "acquisition_method": ACQUISITION_METHOD,
+			"actual_assessment_current": false, "actual_3d_grip_verified": false,
+			"contact_condition_met": false, "grip_accepted": false}
+		_replay_pose_cache[key] = {"packet": packet, "status": _status[slot].duplicate(true)}
+		_queue.erase(slot)
+		if slot == dominant:
+			_primary_seat = {"key": key, "slot": slot}
+		reused.append(slot)
+	if reused.is_empty():
+		return {"valid": false, "reason": "authoring_grip_no_compatible_slots", "rejected_slots": rejected}
+	for old_slot: StringName in _slots.duplicate():
+		if old_slot not in slots:
+			_release(old_slot)
+	_slots.assign(slots)
+	_dominant = dominant
+	_support_motion_snapshot.clear()
+	_support_macro_primary_serial = -1
+	_settle_ready = false
+	_publish()
+	return {"valid": true, "reused_slots": reused, "rejected_slots": rejected, "solved_relationships": 0}
 
 ## The caller has restored the saved body/weapon pose, seat metadata and hand
 ## guidance. Reattach its proven acquisition without moving or solving the rig.
 func restore_authoring_grip(saved: Dictionary, context_signature: String,
-		slots: Array[StringName], dominant: StringName) -> Dictionary:
+		slots: Array[StringName], dominant: StringName, grip_context_signature: String = "") -> Dictionary:
 	if not _render_checkpoint_idle() or not _data.get("valid", false) or _manual_reacquisition_required:
 		return {"valid": false, "reason": "authoring_grip_owner_not_ready"}
+	if saved.get("schema_version", 0) == 2 and _saved_authoring_grip_context_matches(saved, context_signature, grip_context_signature, dominant):
+		var all_slots_match := true
+		var packets: Dictionary = {}
+		for slot: StringName in slots:
+			all_slots_match = all_slots_match and _saved_authoring_grip_slot_matches(saved, slot, dominant)
+			if saved.packets.has(slot):
+				packets[slot] = saved.packets[slot]
+		if all_slots_match:
+			saved = saved.duplicate(true)
+			saved.merge({"schema_version": 1, "context_signature": context_signature,
+				"slots": slots.duplicate(), "packets": packets,
+				"grip_signature": _authoring_grip_signature(slots, dominant)}, true)
 	if context_signature.is_empty() or saved.get("schema_version", 0) != 1 \
+			or bool(saved.get("reuse_invalidated", false)) \
 			or saved.get("context_signature", "") != context_signature \
 			or saved.get("dominant", &"") != dominant or saved.get("slots", []) != slots \
 			or slots.is_empty() or slots.size() > 2 or dominant not in slots \
@@ -652,7 +778,8 @@ func synchronize(slots: Array[StringName], dominant: StringName, force_reason: S
 		if not claimed.get("valid", false):
 			_status[slot] = {"status": "unavailable", "reason": claimed.get("reason", "cannot_claim_hand")}
 			continue
-		_requests[slot] = {"key": key, "serial": _serial, "dominant": dominant}
+		_requests[slot] = {"key": key, "serial": _serial, "dominant": dominant,
+			"reason": force_reason if force_reason != StringName() else &"saved_grip_recovery"}
 		_record_request("owner.request_created",slot,_requests[slot])
 		if slot not in _queue:
 			_queue.append(slot)
@@ -861,7 +988,7 @@ func _geometry_changed() -> void:
 	_geometry_epoch += 1
 	if _manual_reacquisition_required:
 		return
-	synchronize(_slots.duplicate(), _dominant)
+	synchronize(_slots.duplicate(), _dominant, &"geometry_changed")
 	# Geometry notifications occur after the current synchronous editing action.
 	_settle_ready = true
 
@@ -1025,6 +1152,7 @@ func _run_next(synchronous: bool = false) -> void:
 	# station consumes it after recording the settled pose and matching controls.
 	if slot == _dominant and not synchronous and _replay_preparation_context.is_empty():
 		_status[slot]["authoring_frame_pending"] = true
+		_status[slot]["authoring_frame_reason"] = request.get("reason", &"saved_grip_recovery")
 	_busy = false
 	_running_slot = StringName()
 	_record_request("owner.preview_applied",slot,request)

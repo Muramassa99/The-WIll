@@ -26,6 +26,7 @@ func record(station: Node, drafts: Array, request_current: Callable) -> Dictiona
 	# its endpoint normalization may leak into the user's authored resources.
 	var work_wip: CraftedItemWIP = source_wip.duplicate(true) as CraftedItemWIP
 	var presenter = PreviewPresenter.new()
+	presenter.prepared_authoring_context_signature_resolver = Callable(station, "_prepared_pose_context_signature")
 	var container := SubViewportContainer.new()
 	container.name = "EndpointRecordingPreview"
 	container.size = Vector2(64.0, 64.0)
@@ -60,8 +61,7 @@ func _record_pending(station: Node, request_current: Callable, presenter,
 	var playback_state: Dictionary = station.call("_build_preview_playback_state")
 	# The helper presents authored endpoints, never the current playback frame.
 	playback_state = {"debugger_view_enabled": false,
-		"open_mount_seed": playback_state.get("open_mount_seed", {}).duplicate(true),
-		"grip_resolve_reason": PreviewPresenter.GRIP_RESOLVE_REASON_HANDLE_POSITION}
+		"open_mount_seed": playback_state.get("open_mount_seed", {}).duplicate(true)}
 	for item: Dictionary in pending:
 		if not _request_is_current(station, request_current):
 			return _failure("endpoint_recording_cancelled")
@@ -87,8 +87,12 @@ func _record_pending(station: Node, request_current: Callable, presenter,
 			if Time.get_ticks_usec() >= next_progress_usec:
 				_report_progress(station, staged.size(), pending.size(), item, _acquisition_label(states))
 				next_progress_usec = Time.get_ticks_usec() + 250000
-			# Capture the displayed finite endpoint after the same brief settling
-			# window. Grip acquisition/pose quality is diagnostic, not a wait gate.
+			# The helper owns this acquisition. Let it complete once before its
+			# private rig is destroyed. A completed failure is still a finite pose
+			# with warnings; contact/anatomical quality never blocks publication.
+			if presenter.is_grip_acquisition_pending(viewport):
+				candidate_key = ""
+				continue
 			var context: Dictionary = presenter.get_prepared_pose_capture_context(viewport, motion)
 			if not bool(context.get("valid", false)):
 				return _failure(String(context.get("reason", "endpoint_recording_pose_unavailable")), item, states)
@@ -121,6 +125,7 @@ func _record_pending(station: Node, request_current: Callable, presenter,
 	# No yields during publication: either every requested endpoint becomes
 	# available together, or none of the staged packets replaces existing data.
 	for packet: Dictionary in staged:
+		PreparedPose.retain_acquired_grip(packet.node, packet.pose)
 		packet.node.prepared_pose = packet.pose
 		packet.node.prepared_pose_signature = packet.signature
 	return {"valid": true, "reason": "", "recorded_node_count": staged.size(),
@@ -147,7 +152,8 @@ func _gather_missing(drafts: Array, context_signature: String) -> Dictionary:
 				return _failure("endpoint_recording_missing_node")
 			var signature: String = PreparedPose.node_pose_signature(node)
 			signatures.append(signature)
-			if node.prepared_pose_signature == signature and bool(PreparedPose.validate(node.prepared_pose, context_signature).get("valid", false)):
+			if node.prepared_pose_signature == signature and bool(PreparedPose.validate(node.prepared_pose, context_signature).get("valid", false)) \
+				and not PreparedPose.acquisition_was_pending(node.prepared_pose):
 				continue
 			if copy_draft == null:
 				copy_draft = draft.duplicate(false)

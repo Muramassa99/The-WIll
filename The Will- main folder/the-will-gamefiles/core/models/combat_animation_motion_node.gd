@@ -112,6 +112,9 @@ const GRIP_SEAT_COORDINATE_SCHEMA_VERSION := (
 # Captured only after ordinary editing has settled; F consumes these values.
 @export_storage var prepared_pose: Dictionary = {}
 @export_storage var prepared_pose_signature: String = ""
+## Proven local grip data survives ordinary body/weapon motion and a pending
+## pose capture. It is mutable node state, never a shared definition/cache.
+@export_storage var prepared_grip: Dictionary = {}
 
 static func get_two_hand_state_ids() -> Array[StringName]:
 	return [

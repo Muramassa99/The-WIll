@@ -11,7 +11,7 @@ const EMPTY_HAND_CURL_FIELDS: Array[StringName] = [
 const SCHEMA_VERSION := 4
 const NON_POSE_FIELDS: Array[StringName] = [
 	&"node_id", &"node_index", &"draft_notes", &"retarget_node",
-	&"prepared_pose", &"prepared_pose_signature", &"transition_duration_seconds",
+	&"prepared_pose", &"prepared_pose_signature", &"prepared_grip", &"transition_duration_seconds",
 	&"tip_curve_in_handle", &"tip_curve_out_handle",
 	&"pommel_curve_in_handle", &"pommel_curve_out_handle", &"locked_for_authoring",
 	# Empty controls did not exist in older signatures. Append only authored
@@ -19,6 +19,59 @@ const NON_POSE_FIELDS: Array[StringName] = [
 	&"right_hand_finger_curl_degrees", &"left_hand_finger_curl_degrees",
 ]
 static var _native_pose_capture_kernel: RefCounted
+
+static func acquired_grip_for_node(node: MotionNode) -> Dictionary:
+	if node == null:
+		return {}
+	var saved: Dictionary = node.prepared_grip
+	if saved.is_empty():
+		var legacy: Variant = node.prepared_pose.get("acquired_grip", {})
+		if not legacy is Dictionary:
+			return {}
+		saved = legacy
+	return {} if bool(saved.get("reuse_invalidated", false)) else saved
+
+## A finite observed pose may be recorded while acquisition is pending or has
+## failed. Such a capture must never erase an earlier completed local grip.
+static func retain_acquired_grip(node: MotionNode, snapshot: Dictionary) -> void:
+	if node == null:
+		return
+	if node.prepared_grip.is_empty():
+		node.prepared_grip = acquired_grip_for_node(node).duplicate(true)
+	var candidate: Variant = snapshot.get("acquired_grip", {})
+	if not candidate is Dictionary:
+		return
+	var acquired: Dictionary = candidate
+	if acquired.is_empty():
+		return
+	var retained: Dictionary = node.prepared_grip
+	var next: Dictionary = acquired.duplicate(true)
+	if not bool(retained.get("reuse_invalidated", false)) and retained.get("schema_version", 0) == 2 \
+		and next.get("schema_version", 0) == 2 and retained.get("dominant") == next.get("dominant") \
+		and retained.get("grip_context_signature", "") == next.get("grip_context_signature", "") \
+		and retained.get("packets") is Dictionary and retained.get("slot_signatures") is Dictionary \
+		and next.get("packets") is Dictionary and next.get("slot_signatures") is Dictionary:
+		for slot: Variant in retained.get("packets", {}):
+			if not next.packets.has(slot):
+				next.packets[slot] = retained.packets[slot].duplicate(true)
+				next.slot_signatures[slot] = retained.slot_signatures.get(slot, "")
+	node.prepared_grip = next
+
+static func invalidate_acquired_grip(node: MotionNode, reason: String) -> void:
+	if node == null:
+		return
+	var retained: Dictionary = node.prepared_grip if not node.prepared_grip.is_empty() else acquired_grip_for_node(node)
+	node.prepared_grip = retained.duplicate(true)
+	node.prepared_grip["reuse_invalidated"] = true
+	node.prepared_grip["invalidation_reason"] = reason
+
+static func acquisition_was_pending(snapshot: Dictionary) -> bool:
+	if snapshot.has("grip_acquisition_finished"):
+		return not bool(snapshot.grip_acquisition_finished)
+	for warning: Dictionary in snapshot.get("quality_warnings", []):
+		if warning.get("reason", "") == "prepared_pose_grip_pending":
+			return true
+	return false
 
 static func node_pose_signature(node: Resource) -> String:
 	if node == null:

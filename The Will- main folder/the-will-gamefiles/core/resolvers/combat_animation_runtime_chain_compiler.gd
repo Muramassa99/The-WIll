@@ -238,6 +238,7 @@ func _build_primary_hand_swap_bridge(from_node, to_node, two_hand_allowed: bool)
 	# stored pose captured for a different hand relationship.
 	bridge_node.prepared_pose = {}
 	bridge_node.prepared_pose_signature = ""
+	bridge_node.prepared_grip = {}
 	bridge_node.node_id = StringName("generated_primary_hand_swap_%02d" % int(to_node.node_index))
 	bridge_node.transition_duration_seconds = HAND_SWAP_BRIDGE_DURATION_SECONDS
 	bridge_node.tip_curve_in_handle = Vector3.ZERO

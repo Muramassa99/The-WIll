@@ -4931,13 +4931,25 @@ func _try_restore_prepared_authoring_pose(
 		if context.support_enabled:
 			slots.append(&"hand_left" if context.dominant_slot == &"hand_right" else &"hand_right")
 		var restored: Dictionary = owner.restore_authoring_grip(
-			snapshot.get("acquired_grip", {}), String(context_signature), slots, context.dominant_slot)
+			PreparedPoseScript.acquired_grip_for_node(motion), String(context_signature), slots, context.dominant_slot,
+			String(context.get("grip_context_signature", "")))
+		if not restored.get("valid", false):
+			var reused: Dictionary = owner.reuse_authoring_grip(PreparedPoseScript.acquired_grip_for_node(motion),
+				String(context_signature), slots, context.dominant_slot, String(context.get("grip_context_signature", "")))
+			if reused.get("valid", false):
+				# A finite old pose may predate completed acquisition. Keep the proven
+				# local grip and let ordinary arm positioning consume that relationship.
+				owner.set_meta("prepared_grip_motion", motion)
+				applied = _apply_authored_weapon_pose(state, motion, playback, update_camera,
+					AUTHORING_PREVIEW_DOMINANT_SEAT_LOCK_STRENGTH, true, active_draft)
+				restored = reused
 		if not restored.get("valid", false):
 			# Includes old weapon-facing poses saved before automatic acquisition.
 			# Legacy/missing acquisition data gets one attempt for this selection.
 			# Repeated redraws retain that worker (including a failed result).
-			owner.synchronize(slots, context.dominant_slot, &"reacquire")
+			owner.synchronize(slots, context.dominant_slot, &"saved_grip_recovery")
 			owner.settle_ready()
+		owner.set_meta("prepared_grip_motion", motion)
 		# Root metadata participates in the existing render checkpoint, so Save/F
 		# suspension restores the selected endpoint's ownership alongside its pose.
 		root.set_meta(RESTORED_AUTHORING_GRIP_META, {"node": motion, "signature": PreparedPoseScript.node_pose_signature(motion),
@@ -4948,6 +4960,45 @@ func _try_restore_prepared_authoring_pose(
 	if update_camera:
 		_update_camera(root, weapon_grip_anchor_provider.get_primary_grip_anchor(context.weapon))
 	return applied
+
+
+## A role toggle changes which arm joins the current weapon. It is not a new
+## weapon-pose request: preserve the acquired primary and settle only support.
+## The retained display below is transient; normal recording captures the new
+## body pose and no prepared-pose packet is promoted by this operation.
+func apply_authoring_hand_state_change(preview_subviewport: SubViewport,
+		motion: CombatAnimationMotionNode) -> bool:
+	var context := _weapon_roll_context(preview_subviewport)
+	if context.is_empty() or motion == null or _is_unarmed_preview_item(context.weapon) \
+		or not prepared_authoring_context_signature_resolver.is_valid() \
+		or not context.actor.get_meta("prepared_grip_preview_enabled", false):
+		return false
+	var owner: Node = context.actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
+	var dominant := _resolve_preview_dominant_slot_id()
+	if owner == null or not owner.owns(dominant) or owner.is_manual_reacquisition_required() \
+		or String(owner.status().get(dominant, {}).get("status", "")) != "preview_applied" \
+		or not _has_preview_primary_grip_binding(context.actor):
+		return false
+	var captured := get_prepared_pose_capture_context(preview_subviewport, motion, false)
+	if not captured.get("valid", false):
+		return false
+	var signature: Variant = prepared_authoring_context_signature_resolver.call(captured)
+	if not signature is String or String(signature).is_empty():
+		return false
+	var support := &"hand_left" if dominant == &"hand_right" else &"hand_right"
+	# Release free-hand overlay ownership before a reused support packet takes
+	# responsibility for the joining hand's digits.
+	context.actor.call("clear_authoring_empty_hand_finger_curls", support)
+	_clear_independent_arm_edit()
+	_apply_preview_motion_grip_state(context.weapon, motion, {}, context.actor, false)
+	_apply_two_hand_preview_state(context.actor, context.weapon, motion)
+	_apply_hand_authoring_slot_proxy_preview_state(context.actor, context.weapon, motion, {}, support)
+	# Role synchronization releases any old support-motion snapshot. Reuse may
+	# bind a completed support packet without queuing acquisition, so it still
+	# needs the same explicit support-only arm settling as a first acquisition.
+	_sync_prepared_preview_grip(context.actor, context.weapon, motion, {})
+	_settle_preview_digits_on_resolved_weapon(context.actor, context.weapon, true)
+	return retain_primary_station_edit_pose(preview_subviewport, motion)
 
 
 ## A primary Handle-% edit already moved the weapon and renewed the acquisition
@@ -5080,11 +5131,21 @@ func get_prepared_pose_capture_context(preview_subviewport: SubViewport, motion:
 		weapon.transform.basis.get_scale().snapped(scale_precision)]
 	context["valid"] = true
 	context["context_signature"] = var_to_bytes(persistent_context).hex_encode().sha256_text()
+	# Local grip validity depends on geometry/anatomy/scale and the selected
+	# seats/style, not shoulder/wrist pose or arm guidance settings. Seats/style
+	# are checked separately by the acquisition owner for each hand.
+	var grip_context: Array = ["prepared_local_grip_v1", _prepared_pose_geometry_cache_signature, rig_shape,
+		"unarmed" if unarmed else _prepared_pose_anatomy_cache.signature,
+		{} if unarmed else _prepared_pose_anatomy_cache.config, handle_context,
+		weapon.transform.basis.get_scale().snapped(scale_precision)]
+	context["grip_context_signature"] = var_to_bytes(grip_context).hex_encode().sha256_text()
 	context["dominant_slot"] = dominant
 	context["support_enabled"] = support_enabled
 	context["settle_serial"] = int(owner._serial) if owner != null else 0
 	context["primary_acquisition_frame_serial"] = owner.pending_authoring_frame_serial() if owner != null else -1
+	context["primary_acquisition_frame_reason"] = owner.pending_authoring_frame_reason() if owner != null else StringName()
 	context["quality_warnings"] = quality_warnings
+	context["grip_acquisition_pending"] = is_grip_acquisition_pending(preview_subviewport)
 	return context
 
 func acknowledge_recorded_grip_frame(context: Dictionary) -> void:
@@ -5107,11 +5168,12 @@ func capture_prepared_authoring_pose(context: Dictionary, context_signature: Str
 	if not bool(snapshot.get("valid", false)):
 		return snapshot
 	snapshot["quality_warnings"].append_array(context.get("quality_warnings", []))
+	snapshot["grip_acquisition_finished"] = not bool(context.get("grip_acquisition_pending", false))
 	var actor: Node3D = context.actor
 	var weapon: Node3D = context.weapon
 	var grip_owner: Node = actor.get_node_or_null(PreviewGripAcquisition.NODE_NAME)
 	if grip_owner != null and not _is_unarmed_preview_item(weapon):
-		snapshot["acquired_grip"] = grip_owner.export_authoring_grip(context_signature)
+		snapshot["acquired_grip"] = grip_owner.export_authoring_grip(context_signature, String(context.get("grip_context_signature", "")))
 	var skeleton: Skeleton3D = actor.get("skeleton") as Skeleton3D
 	var reference_bone: int = skeleton.find_bone(snapshot.reference_bone_name)
 	if not _is_unarmed_preview_item(weapon):
@@ -6644,6 +6706,12 @@ func _sync_prepared_preview_grip(actor: Node3D, held_item: Node3D, motion: Comba
 		_clear_prepared_preview_grip(actor)
 		return
 	var owner: Node = _get_or_create_prepared_preview_grip(actor)
+	if motion != null and owner.get_meta("prepared_grip_motion", null) != motion \
+		and not bool(playback.get("authoring_drag_active", false)) and not bool(playback.get("prepared_grip_bake", false)):
+		# Selection changes the local grip provenance even if the station happens
+		# to match. Do not borrow an unrelated node's manually acquired fit.
+		owner.clear()
+		owner.set_meta("prepared_grip_motion", motion)
 	if not owner.configure(actor, held_item):
 		return
 	var slots: Array[StringName] = [_resolve_preview_dominant_slot_id()]
@@ -6651,6 +6719,19 @@ func _sync_prepared_preview_grip(actor: Node3D, held_item: Node3D, motion: Comba
 	# The same V6 owner handles its finger closure, with weapon seating disabled.
 	if _should_preview_use_support_hand(held_item, motion):
 		slots.append(&"hand_left" if slots[0] == &"hand_right" else &"hand_right")
+	var reason: StringName = StringName(playback.get("grip_resolve_reason", StringName()))
+	if motion != null and reason in [StringName(), GRIP_RESOLVE_REASON_HANDLE_POSITION] \
+		and not bool(playback.get("active", false)) and not bool(playback.get("authoring_drag_active", false)):
+		var saved: Dictionary = PreparedPoseScript.acquired_grip_for_node(motion)
+		if not saved.is_empty():
+			var viewport: SubViewport = actor.get_viewport() as SubViewport
+			var context: Dictionary = get_prepared_pose_capture_context(viewport, motion, false)
+			if context.get("valid", false):
+				var pose_context: String = String(prepared_authoring_context_signature_resolver.call(context)) \
+					if prepared_authoring_context_signature_resolver.is_valid() else String(context.context_signature)
+				var reused: Dictionary = owner.reuse_authoring_grip(saved, pose_context,
+					slots, slots[0], String(context.get("grip_context_signature", "")))
+				context.root.set_meta("prepared_authoring_grip_reuse", reused)
 	owner.synchronize(slots, _resolve_preview_dominant_slot_id(), StringName(playback.get("grip_resolve_reason", StringName())))
 	if bool(playback.get("prepared_grip_bake", false)):
 		owner.restore_cached_primary_binding_for_replay()

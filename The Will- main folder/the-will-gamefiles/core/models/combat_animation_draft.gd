@@ -170,7 +170,7 @@ func get_saved_content_signature() -> String:
 		values.append([property_name, value])
 	for motion_node: Resource in get_action_motion_node_chain():
 		if motion_node != null:
-			values.append([motion_node.get("prepared_pose_signature"), motion_node.get("prepared_pose")])
+			values.append([motion_node.get("prepared_pose_signature"), motion_node.get("prepared_pose"), motion_node.get("prepared_grip")])
 	return var_to_bytes(values).hex_encode().sha256_text()
 
 func _build_action_baseline_signature() -> String:
@@ -186,7 +186,7 @@ func _build_action_baseline_signature() -> String:
 				if (
 					(int(property.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE) == 0
 					or (int(property.usage) & PROPERTY_USAGE_STORAGE) == 0
-					or property_name in [&"node_id", &"node_index", &"retarget_node", &"prepared_pose", &"prepared_pose_signature"]
+					or property_name in [&"node_id", &"node_index", &"retarget_node", &"prepared_pose", &"prepared_pose_signature", &"prepared_grip"]
 				):
 					continue
 				node_values.append([property_name, motion_node.get(property_name)])

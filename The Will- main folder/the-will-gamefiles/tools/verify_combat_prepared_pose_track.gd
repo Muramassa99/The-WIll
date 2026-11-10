@@ -11,6 +11,7 @@ const Capture = preload("res://runtime/combat/combat_prepared_pose_capture.gd")
 const Attachment = preload("res://core/resolvers/combat_prepared_attachment_resolver.gd")
 const WristProfile = preload("res://core/defs/wrist_motion_profile_def.gd")
 const WristMotion = preload("res://core/resolvers/combat_wrist_motion_resolver.gd")
+const ArmFrame = preload("res://core/resolvers/combat_prepared_arm_frame_resolver.gd")
 var checks: Dictionary = {}
 
 func _init() -> void:
@@ -25,6 +26,7 @@ func _run() -> void:
 	var a: Resource = _node(0, Vector3.ZERO, 1.0)
 	var b: Resource = _node(1, Vector3(1, 0, 0), 0.137)
 	var c: Resource = _node(2, Vector3(2, 0, 0), 0.219)
+	a.prepared_grip = {"verification_marker": "authored_source_only"}
 	a.tip_curve_out_handle = Vector3(0, 0.3, 0)
 	a.pommel_curve_out_handle = Vector3(0, 0.3, 0)
 	b.tip_curve_in_handle = Vector3(0, 0.3, 0)
@@ -56,6 +58,10 @@ func _run() -> void:
 		_expect(not result.diagnostics.interior_contact_validated, "diagnostics_do_not_claim_new_contact_validation")
 		_expect(clip.baked_solved_anchor_positions_weapon_local[0] == snapshots[0].anchor_positions_weapon_local, "weapon_local_anchor_is_preserved")
 		_expect(clip.baked_solved_anchor_node_paths.size() == 1 and clip.baked_solved_anchor_node_paths[0] == &"Grip", "nodepath_anchor_name_is_normalized_and_preserved")
+		_expect(clip.motion_node_chain[0].prepared_grip.is_empty()
+			and a.prepared_grip.get("verification_marker") == "authored_source_only"
+			and control.motion_node_chain[0].prepared_grip.get("verification_marker") == "authored_source_only",
+			"derived_clip_strips_grip_payload_without_mutating_authored_sources")
 	_expect(var_to_bytes(snapshots) == inputs_before, "builder_does_not_mutate_captured_snapshots")
 	_expect(control.baked_frame_times == control_times and control.baked_tip_positions_local == control_tips and control.baked_solved_replay_frame_available.is_empty(), "builder_does_not_mutate_input_control_clip")
 	var single: Resource = Baker.new().bake_from_motion_node_chain([a])
@@ -80,6 +86,7 @@ func _run() -> void:
 	_test_finger_style_transition()
 	_test_primary_hand_swap_compilation()
 	_test_advisory_recorded_pose(a, b, snapshots[0], snapshots[1], output_dir)
+	_test_advisory_primary_contact(a, b, snapshots[0], snapshots[1])
 	_test_warning_collections()
 	var ok := true
 	for passed: bool in checks.values():
@@ -196,6 +203,51 @@ func _test_advisory_recorded_pose(a: Resource, b: Resource, source: Dictionary, 
 	_expect(Builder.is_pose_quality_failure("prepared_attachment_elbow_range_has_no_circle_solution")
 		and not Builder.is_pose_quality_failure("prepared_attachment_missing_constraint_forearm_bone"),
 		"mechanical_quality_is_separate_from_missing_data")
+
+func _test_advisory_primary_contact(a: Resource, b: Resource, source: Dictionary, destination: Dictionary) -> void:
+	# Isolate the failure policy from arm search: these finite value fixtures
+	# explicitly mark an unrepresentable wrist, as a captured warning can do.
+	var first := source.duplicate(true)
+	var last := destination.duplicate(true)
+	for endpoint: Dictionary in [first, last]:
+		endpoint.attachment_required = true
+		endpoint.support_enabled = false
+	first["wrist_measurement_failures_by_slot"] = {&"hand_right": "wrist_pose_not_representable"}
+	var before := var_to_bytes([first, last])
+	var raw: Dictionary = Builder.sample_pose(first, last, 0.5)
+	var original_weapon: Transform3D = raw.weapon_transform
+	var guided := Builder.guide_sample(raw, first, last, 0.5, a, b)
+	_expect(guided.valid, "warned_attached_interior_remains_playable")
+	if guided.valid:
+		var pose := first.duplicate(true)
+		pose.pose_rotations = guided.sample.pose_rotations
+		pose.pose_positions = guided.sample.pose_positions
+		pose.pose_scales = guided.sample.pose_scales
+		pose.parent_reference_transforms = guided.sample.parent_reference_transforms
+		var fk := ArmFrame.forward_kinematics(pose)
+		var index: int = pose.bone_names.find(pose.primary_hand_bone_name)
+		var relation := Attachment.sample_relationship(first, last, "primary", 0.5, guided.sample.weapon_transform.basis)
+		var expected: Transform3D = guided.sample.weapon_transform * relation.transform
+		_expect(fk.valid and expected.is_equal_approx(fk.transforms[index]), "warned_interior_preserves_complete_primary_mate")
+		_expect(guided.sample.pose_rotations == raw.pose_rotations and guided.sample.pose_positions == raw.pose_positions,
+			"primary_recomposition_preserves_body_and_finger_channels")
+		_expect(not guided.sample.weapon_transform.is_equal_approx(original_weapon)
+			and guided.follow.diagnostics.weapon_path_position_deviation_reference_units > 0.0,
+			"infeasible_interior_path_yield_is_measured")
+		_expect(guided.quality_warnings[0].get("primary_contact_preserved", false)
+			and guided.quality_warnings[0].reason == "wrist_pose_not_representable", "contact_priority_keeps_anatomical_warning")
+	for weight: float in [0.0, 1.0]:
+		var endpoint := Builder.sample_pose(first, last, weight)
+		var exact := Builder.guide_sample(endpoint, first, last, weight, a, b)
+		_expect(exact.valid and var_to_bytes(exact.sample) == var_to_bytes(endpoint), "warned_endpoint_remains_exact_" + str(weight))
+	var partial := {"pose_rotations": raw.pose_rotations.duplicate(), "ik_calls": 1,
+		"relations": {}, "diagnostics": {"primary": {"valid": true}}}
+	partial.pose_rotations[2] = Vector4(0.0, sin(0.15), 0.0, cos(0.15))
+	var retained := Builder._quality_fallback(raw, {"reason": "wrist_motion_range", "hand": "support"},
+		first, last, 0.5, a, b, partial)
+	_expect(retained.valid and retained.sample.pose_rotations == partial.pose_rotations
+		and retained.follow.ik_calls == 1, "later_quality_failure_retains_successful_primary_arm")
+	_expect(var_to_bytes([first, last]) == before, "contact_priority_does_not_mutate_captured_endpoints")
 
 func _test_attachment_relationship_sampling() -> void:
 	var basis := Basis(Quaternion(Vector3(1, 2, 3).normalized(), 0.63)).scaled(Vector3.ONE * 0.764)

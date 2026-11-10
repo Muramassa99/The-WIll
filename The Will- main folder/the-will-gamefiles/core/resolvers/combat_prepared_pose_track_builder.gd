@@ -12,6 +12,7 @@ const Attachment = preload("res://core/resolvers/combat_prepared_attachment_reso
 const ArmFrame = preload("res://core/resolvers/combat_prepared_arm_frame_resolver.gd")
 const WristMotion = preload("res://core/resolvers/combat_wrist_motion_resolver.gd")
 const ShoulderMotion = preload("res://core/resolvers/combat_shoulder_motion_resolver.gd")
+const REVISION := "contact_continuity_v2"
 const EPSILON := 0.000001
 
 static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dictionary:
@@ -59,6 +60,7 @@ static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dicti
 		output.baked_solved_anchor_node_paths.append(StringName(str(path)))
 	output.baked_solved_anchor_origin_id = first.anchor_origin_id
 	var diagnostics := {
+		"revision": REVISION,
 		"source": "captured_editor_endpoint_attachment_follow", "acquisition_calls": 0,
 		"ik_calls": 0, "endpoint_count": snapshots.size(), "frame_count": output.get_frame_count(),
 		"additional_endpoint_samples": output.get_frame_count() - control_clip.get_frame_count(),
@@ -72,6 +74,11 @@ static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dicti
 		"material_frame_corrected_samples": 0,
 		"max_wrist_twist_change_radians": 0.0,
 		"quality_fallback_samples": 0,
+		"quality_warning_samples": 0,
+		"primary_contact_recomposition_samples": 0,
+		"unresolved_support_samples": 0,
+		"max_weapon_path_position_deviation_reference_units": 0.0,
+		"max_weapon_path_angle_deviation_radians": 0.0,
 	}
 	var segment := 0
 	for frame_index: int in output.get_frame_count():
@@ -111,7 +118,15 @@ static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dicti
 		for warning: Dictionary in guided.quality_warnings:
 			append_quality_warning(quality_warnings, _locate_sample_failure(warning, chain, segment, next, weight, frame_index))
 		if not guided.quality_warnings.is_empty():
+			diagnostics.quality_warning_samples += 1
+		if bool(follow.diagnostics.get("quality_fallback", false)):
 			diagnostics.quality_fallback_samples += 1
+		if bool(follow.diagnostics.get("primary_contact_recomposed", false)):
+			diagnostics.primary_contact_recomposition_samples += 1
+		if bool(follow.diagnostics.get("support_contact_unresolved", false)):
+			diagnostics.unresolved_support_samples += 1
+		diagnostics.max_weapon_path_position_deviation_reference_units = maxf(diagnostics.max_weapon_path_position_deviation_reference_units, float(follow.diagnostics.get("weapon_path_position_deviation_reference_units", 0.0)))
+		diagnostics.max_weapon_path_angle_deviation_radians = maxf(diagnostics.max_weapon_path_angle_deviation_radians, float(follow.diagnostics.get("weapon_path_angle_deviation_radians", 0.0)))
 		if normalized.diagnostics.changed:
 			diagnostics.material_frame_corrected_samples += 1
 		diagnostics.ik_calls += int(follow.ik_calls)
@@ -135,6 +150,7 @@ static func build(control_clip: Resource, snapshots: Array[Dictionary]) -> Dicti
 	for node: Resource in output.motion_node_chain:
 		node.set("prepared_pose", {})
 		node.set("prepared_pose_signature", "")
+		node.set("prepared_grip", {})
 	output.set_meta("prepared_endpoint_track_diagnostics", diagnostics.duplicate(true))
 	for warning: Dictionary in quality_warnings:
 		output.compile_diagnostics.append(warning.duplicate(true))
@@ -174,30 +190,36 @@ static func append_quality_warning(warnings: Array, source: Dictionary, location
 			return
 	warnings.append(warning)
 
-## Shared with the transient entry. A failed guide never leaks its partially
-## modified arm into the fallback; all original finite channels stay together.
+## Shared with the transient entry. Keep authored endpoints exact. Interior
+## guidance may yield the weapon path to its established primary mate, never
+## silently detach the weapon because an anatomical guide could not follow.
 static func guide_sample(sample: Dictionary, from: Dictionary, to: Dictionary, weight: float, from_node: Resource = null, to_node: Resource = null) -> Dictionary:
 	var validation := _validate_sample_channels(sample)
 	if not validation.valid:
 		return validation
 	var raw := sample.duplicate(true)
+	if weight <= 0.0 or weight >= 1.0:
+		return {"valid": true, "sample": raw, "quality_warnings": [],
+			"follow": {"ik_calls": 0, "diagnostics": {}, "relations": {}},
+			"normalized": {"diagnostics": {"changed": false}}}
 	for endpoint: Dictionary in [from, to]:
 		for slot: Variant in endpoint.get("wrist_measurement_failures_by_slot", {}):
 			var reason := String(endpoint.wrist_measurement_failures_by_slot[slot])
 			if reason == "wrist_pose_not_representable":
-				return _quality_fallback(raw, {"reason": reason, "hand_slot": slot})
+				return _quality_fallback(raw, {"reason": reason, "hand_slot": slot}, from, to, weight, from_node, to_node)
 	var follow: Dictionary = Attachment.apply(sample, from, to, weight, from_node, to_node)
 	if not follow.get("valid", false):
-		return _quality_fallback(raw, follow) if is_pose_quality_failure(String(follow.get("reason", ""))) else follow
+		return _quality_fallback(raw, follow, from, to, weight, from_node, to_node, follow) if is_pose_quality_failure(String(follow.get("reason", ""))) else follow
 	var body_pose := from.duplicate()
 	for field: String in ["pose_positions", "pose_scales", "parent_reference_transforms"]:
 		body_pose[field] = sample[field]
 	for field: String in ["wrist_states_by_slot", "shoulder_states_by_slot"]:
 		body_pose[field] = sample.get(field, {}).duplicate(true)
+	body_pose.wrist_states_by_slot = follow.get("wrist_states_by_slot", body_pose.wrist_states_by_slot).duplicate(true)
 	body_pose.pose_rotations = follow.pose_rotations
 	var normalized: Dictionary = ArmFrame.normalize_material_frames(body_pose)
 	if not normalized.get("valid", false):
-		return _quality_fallback(raw, normalized) if is_pose_quality_failure(String(normalized.get("reason", ""))) else normalized
+		return _quality_fallback(raw, normalized, from, to, weight, from_node, to_node, follow) if is_pose_quality_failure(String(normalized.get("reason", ""))) else normalized
 	var guided := sample.duplicate()
 	guided.pose_rotations = normalized.pose_rotations
 	guided["wrist_states_by_slot"] = normalized.get("wrist_states_by_slot", {}).duplicate(true)
@@ -207,9 +229,48 @@ static func guide_sample(sample: Dictionary, from: Dictionary, to: Dictionary, w
 		return validation
 	return {"valid": true, "sample": guided, "follow": follow, "normalized": normalized, "quality_warnings": normalized.get("quality_warnings", [])}
 
-static func _quality_fallback(raw: Dictionary, failure: Dictionary) -> Dictionary:
-	return {"valid": true, "sample": raw, "quality_warnings": [failure.duplicate(true)],
-		"follow": {"ik_calls": 0, "diagnostics": {"quality_fallback": true}, "relations": {}},
+static func _quality_fallback(raw: Dictionary, failure: Dictionary, from: Dictionary, to: Dictionary, weight: float, from_node: Resource, to_node: Resource, partial_follow: Dictionary = {}) -> Dictionary:
+	var kept := raw.duplicate(true)
+	if partial_follow.has("pose_rotations"):
+		kept.pose_rotations = partial_follow.pose_rotations
+		kept["wrist_states_by_slot"] = partial_follow.get("wrist_states_by_slot", kept.get("wrist_states_by_slot", {})).duplicate(true)
+	var follow := {"ik_calls": int(partial_follow.get("ik_calls", 0)),
+		"diagnostics": partial_follow.get("diagnostics", {}).duplicate(true),
+		"relations": partial_follow.get("relations", {}).duplicate(true)}
+	follow.diagnostics["quality_fallback"] = true
+	var warning := failure.duplicate(true)
+	# Keep diagnostics small; pose payloads belong to the sampled track.
+	for field: String in ["pose_rotations", "wrist_states_by_slot", "diagnostics", "relations", "failure"]:
+		warning.erase(field)
+	var warnings: Array[Dictionary] = [warning]
+	var recomposed := Attachment.recompose_primary_contact(kept, from, to, weight, from_node, to_node)
+	if not recomposed.get("valid", false):
+		return recomposed
+	if recomposed.applied:
+		kept = recomposed.sample
+		follow.relations.merge(recomposed.relations, true)
+		follow.diagnostics.merge(recomposed.diagnostics, true)
+		warnings[0]["primary_contact_preserved"] = true
+		warnings[0]["weapon_path_position_deviation_reference_units"] = recomposed.diagnostics.weapon_path_position_deviation_reference_units
+		warnings[0]["weapon_path_angle_deviation_radians"] = recomposed.diagnostics.weapon_path_angle_deviation_radians
+		# One bounded retry against the recomposed weapon. The existing resolver
+		# decides anatomical feasibility; a joining/free hand is excluded there.
+		var support := Attachment.apply(kept, from, to, weight, from_node, to_node, ["support"])
+		follow.ik_calls += int(support.get("ik_calls", 0))
+		follow.relations.merge(support.get("relations", {}), true)
+		if support.get("valid", false):
+			kept.pose_rotations = support.pose_rotations
+			kept["wrist_states_by_slot"] = support.wrist_states_by_slot
+			follow.diagnostics.merge(support.diagnostics, true)
+		elif is_pose_quality_failure(String(support.get("reason", ""))):
+			follow.diagnostics["support_contact_unresolved"] = true
+			warnings.append({"reason": support.reason, "hand": "support", "support_contact_unresolved": true})
+		else:
+			return support
+	var validation := _validate_sample_channels(kept)
+	if not validation.valid:
+		return validation
+	return {"valid": true, "sample": kept, "quality_warnings": warnings, "follow": follow,
 		"normalized": {"diagnostics": {"changed": false, "quality_fallback": true}}}
 
 static func _validate_sample_channels(sample: Dictionary) -> Dictionary:

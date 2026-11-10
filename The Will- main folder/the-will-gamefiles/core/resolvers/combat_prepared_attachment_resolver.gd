@@ -8,8 +8,9 @@ const Seat = preload("res://core/resolvers/primary_grip_seat_resolver.gd")
 const GripTransition = preload("res://core/resolvers/combat_grip_transition_resolver.gd")
 const Origins = preload("res://core/models/combat_origin_record.gd")
 
-static func apply(sample: Dictionary, from: Dictionary, to: Dictionary, weight: float, from_node: Resource = null, to_node: Resource = null) -> Dictionary:
+static func apply(sample: Dictionary, from: Dictionary, to: Dictionary, weight: float, from_node: Resource = null, to_node: Resource = null, kinds: Array = ["primary", "support"]) -> Dictionary:
 	var result := {"valid": true, "reason": "", "pose_rotations": sample.pose_rotations,
+		"wrist_states_by_slot": sample.get("wrist_states_by_slot", {}).duplicate(true),
 		"ik_calls": 0, "relations": {}, "diagnostics": {}}
 	# Authored destinations and the actual incoming pose are not new targets to
 	# optimize. Keeping their captured values also avoids endpoint drift.
@@ -25,7 +26,7 @@ static func apply(sample: Dictionary, from: Dictionary, to: Dictionary, weight: 
 		pose[field] = sample[field]
 	for field: String in ["wrist_states_by_slot", "shoulder_states_by_slot"]:
 		pose[field] = sample.get(field, from.get(field, {})).duplicate(true)
-	for kind: String in ["primary", "support"]:
+	for kind: String in kinds:
 		if kind == "support" and not (bool(from.get("support_enabled", false)) and bool(to.get("support_enabled", false))):
 			continue
 		if from.get(kind + "_hand_bone_name") != to.get(kind + "_hand_bone_name"):
@@ -52,17 +53,74 @@ static func apply(sample: Dictionary, from: Dictionary, to: Dictionary, weight: 
 			return relation.merged({"hand": kind})
 		var target: Transform3D = sample.weapon_transform * relation.transform
 		var followed: Dictionary = Arm.resolve(pose, target, constraints)
+		result.relations[kind] = relation.transform
 		if not bool(followed.get("valid", false)):
-			return followed.merged({"hand": kind, "reason": "prepared_attachment_" + String(followed.get("reason", "unavailable"))})
+			# A later support failure must not discard a primary arm already
+			# following its captured mate. Only successful solver payloads enter
+			# result; the failing resolver's partial work remains private.
+			result.merge({"valid": false, "hand": kind,
+				"reason": "prepared_attachment_" + String(followed.get("reason", "unavailable")),
+				"failure": followed}, true)
+			return result
 		pose.pose_rotations = followed.pose_rotations
 		pose["wrist_states_by_slot"] = followed.get("wrist_states_by_slot", pose.get("wrist_states_by_slot", {})).duplicate(true)
 		result.pose_rotations = followed.pose_rotations
+		result.wrist_states_by_slot = pose.wrist_states_by_slot
 		result.ik_calls += 1
-		result.relations[kind] = relation.transform
 		var metrics: Dictionary = followed.duplicate()
 		metrics.erase("pose_rotations")
 		metrics["handle_path_used"] = relation.get("handle_path_used", false)
 		result.diagnostics[kind] = metrics
+	return result
+
+## Same authority as the live primary-seat owner: the captured Hand-in-weapon
+## frame remains fixed when the interior weapon request cannot be followed.
+## This changes no bone or anatomical limit and never rewrites an endpoint.
+static func recompose_primary_contact(sample: Dictionary, from: Dictionary, to: Dictionary, weight: float, from_node: Resource = null, to_node: Resource = null) -> Dictionary:
+	var result := {"valid": true, "applied": false, "sample": sample,
+		"relations": {}, "diagnostics": {}}
+	if weight <= 0.0 or weight >= 1.0:
+		return result
+	if not bool(from.get("attachment_required", true)) and not bool(to.get("attachment_required", true)):
+		return result
+	if from_node != null and to_node != null and GripTransition.is_style_swap(from_node.preferred_grip_style_mode, to_node.preferred_grip_style_mode):
+		return result
+	if from.get("primary_hand_bone_name") != to.get("primary_hand_bone_name"):
+		return result
+	var pose := from.duplicate()
+	for field: String in ["pose_positions", "pose_rotations", "pose_scales", "parent_reference_transforms"]:
+		pose[field] = sample[field]
+	var fk := Arm.forward_kinematics(pose, pose.pose_rotations)
+	if not fk.get("valid", false):
+		return fk
+	var hand_index: int = pose.bone_names.find(from.get("primary_hand_bone_name"))
+	if hand_index < 0:
+		return {"valid": false, "reason": "missing_prepared_primary_hand"}
+	var relation := sample_relationship(from, to, "primary", weight, sample.weapon_transform.basis)
+	if not relation.get("valid", false):
+		return relation
+	var hand: Transform3D = fk.transforms[hand_index]
+	var previous: Transform3D = sample.weapon_transform
+	var weapon: Transform3D = hand * (relation.transform as Transform3D).affine_inverse()
+	if not weapon.is_finite() or not Arm._supported_basis(weapon.basis):
+		return {"valid": false, "reason": "invalid_recomposed_primary_weapon_frame"}
+	var kept: Dictionary = sample.duplicate()
+	kept.weapon_transform = weapon
+	var restored_hand: Transform3D = weapon * relation.transform
+	var position_error: float = hand.origin.distance_to(restored_hand.origin)
+	var rotation_error: Quaternion = (hand.basis.orthonormalized().get_rotation_quaternion().inverse() * restored_hand.basis.orthonormalized().get_rotation_quaternion()).normalized()
+	var angle_error: float = 2.0 * atan2(Vector3(rotation_error.x, rotation_error.y, rotation_error.z).length(), absf(rotation_error.w))
+	if position_error > Arm.POSITION_TOLERANCE_METERS or angle_error > Arm.ANGULAR_TOLERANCE_RADIANS:
+		return {"valid": false, "reason": "recomposed_primary_contact_residual",
+			"position_error_reference_units": position_error, "orientation_error_radians": angle_error}
+	result.sample = kept
+	result.applied = true
+	result.relations["primary"] = relation.transform
+	result.diagnostics = {"primary_contact_recomposed": true,
+		"primary_contact_position_error_reference_units": position_error,
+		"primary_contact_angle_error_radians": angle_error,
+		"weapon_path_position_deviation_reference_units": previous.origin.distance_to(weapon.origin),
+		"weapon_path_angle_deviation_radians": previous.basis.orthonormalized().get_rotation_quaternion().angle_to(weapon.basis.orthonormalized().get_rotation_quaternion())}
 	return result
 
 static func sample_relationship(from: Dictionary, to: Dictionary, kind: String, weight: float, sampled_weapon_basis: Variant = null) -> Dictionary:

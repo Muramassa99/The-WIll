@@ -551,8 +551,10 @@ func _capture_selected_prepared_pose_prepared(allow_preparation: bool, allow_qua
 	# explicit R/F/Save records the finite pose currently shown, with warnings.
 	if not allow_quality_warnings and preview_presenter.is_weapon_facing_reacquisition_required(preview_subviewport):
 		return _prepared_pose_capture_unavailable("weapon_facing_requires_manual_reacquisition")
-	if not allow_quality_warnings and preview_presenter.is_grip_acquisition_pending(preview_subviewport):
-		return _prepared_pose_capture_unavailable("prepared_pose_grip_pending")
+	if preview_presenter.is_grip_acquisition_pending(preview_subviewport):
+		# Wait for transaction completion, not anatomical/contact success. A
+		# completed failure remains recordable; pending work is not a final grip.
+		return _prepared_pose_capture_unavailable("prepared_pose_settling" if allow_quality_warnings else "prepared_pose_grip_pending")
 	var node: CombatAnimationMotionNode = _get_active_motion_node()
 	var draft: Resource = _get_active_draft()
 	if node == null or draft == null:
@@ -600,7 +602,9 @@ func _capture_selected_prepared_pose_prepared(allow_preparation: bool, allow_qua
 		return _prepared_pose_capture_unavailable(String(validation.get("reason", "prepared_pose_capture_failed")))
 	var baseline_source: String = String(_baseline_preparation.get("source", ""))
 	var acquired_frame: bool = int(context.get("primary_acquisition_frame_serial", -1)) >= 0 and not preview_presenter.is_grip_acquisition_pending(preview_subviewport)
-	if not baseline_source.is_empty() or acquired_frame:
+	var acquisition_reason: StringName = StringName(context.get("primary_acquisition_frame_reason", StringName()))
+	var authored_seat_changed: bool = acquired_frame and acquisition_reason in [&"reacquire", PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION, &"geometry_changed"]
+	if not baseline_source.is_empty() or authored_seat_changed:
 		# Acquisition can move the weapon on an existing node too. Record the
 		# realized frame before signing its pose, so curves and playback use the
 		# same endpoints. No rig refresh, neighbour edit or curve-offset rewrite.
@@ -620,6 +624,7 @@ func _capture_selected_prepared_pose_prepared(allow_preparation: bool, allow_qua
 				baseline.set(property, seated_frame[property])
 		signature = PreparedPoseScript.node_pose_signature(node)
 		if baseline != null:
+			PreparedPoseScript.retain_acquired_grip(baseline, snapshot)
 			baseline.prepared_pose = snapshot.duplicate(true)
 			baseline.prepared_pose_signature = PreparedPoseScript.node_pose_signature(baseline)
 		input_key = var_to_bytes([node.get_instance_id(), signature,
@@ -629,6 +634,7 @@ func _capture_selected_prepared_pose_prepared(allow_preparation: bool, allow_qua
 			context.get("primary_acquisition_frame_serial", -1)]).hex_encode().sha256_text()
 		_baseline_preparation.clear()
 	var changed: bool = node.prepared_pose_signature != signature or var_to_bytes(node.prepared_pose) != var_to_bytes(snapshot)
+	PreparedPoseScript.retain_acquired_grip(node, snapshot)
 	node.prepared_pose = snapshot
 	node.prepared_pose_signature = signature
 	_update_recorded_node_quality_feedback(draft, node)
@@ -1700,6 +1706,8 @@ func set_selected_motion_node_two_hand_state(
 		return false
 	motion_node.two_hand_state = state_id
 	motion_node.normalize()
+	var retained_hand_state := refresh_preview and preview_presenter.apply_authoring_hand_state_change(
+		preview_subviewport, motion_node)
 	_apply_motion_node_change(
 		"Motion node two-hand state updated.",
 		persist_change,
@@ -1707,7 +1715,7 @@ func set_selected_motion_node_two_hand_state(
 		refresh_fields,
 		refresh_preview,
 		refresh_summary,
-		PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION
+		StringName() if retained_hand_state else PREVIEW_GRIP_RESOLVE_REASON_HANDLE_POSITION
 	)
 	return true
 
@@ -2925,6 +2933,7 @@ func _build_footer(parent: VBoxContainer) -> void:
 func _request_preview_grip_reacquisition() -> void:
 	if active_wip == null:
 		return
+	PreparedPoseScript.invalidate_acquired_grip(_get_active_motion_node(), "explicit_reacquire")
 	# Every station draft can inherit this grip seed. Neither a completed clip
 	# nor a suspended pose checkpoint may silently restore the previous fit.
 	saved_runtime_cache_reuse_blocked_by_grip = true
@@ -6473,6 +6482,7 @@ func _build_runtime_clip_cache_global_parts(draft: Resource) -> PackedStringArra
 	# Compatible prior tracks can still play in equipped runtime until rebuilt.
 	parts.append(CombatRuntimeClipScript.RUNTIME_CACHE_VERSION)
 	parts.append(String(SurfaceGripSolverScript.REVISION))
+	parts.append(String(PreparedPoseTrackBuilderScript.REVISION))
 	parts.append(String(active_wip.wip_id) if active_wip != null else "")
 	parts.append(String(draft.get("draft_id")))
 	parts.append(String(draft.get("draft_kind")))
@@ -8164,6 +8174,11 @@ func _on_draft_notes_focus_exited() -> void:
 	set_active_draft_notes(draft_notes_edit.text)
 
 func _on_preview_container_resized() -> void:
+	if session_state != null and session_state.playback_active:
+		# Layout changes do not transfer pose ownership back to authoring. Keep
+		# the current solved frame, including its fingers and weapon relationship.
+		_sync_preview_playback_pose_only()
+		return
 	_refresh_preview_scene()
 
 func _register_station_input_actions() -> void:
@@ -8340,11 +8355,11 @@ func _toggle_preview_playback() -> void:
 	if motion_node_chain.is_empty():
 		footer_status_label.text = "Need at least one visible motion node to preview."
 		return
-	capture_selected_prepared_pose(false, true)
+	var captured: Dictionary = capture_selected_prepared_pose(false, true)
 	# Validate the existing authored snapshot before rebuilding retarget data.
 	# That rebuild uses the currently posed shoulder/reach and can change node
 	# signatures even though the user has made no edits since the last render.
-	if _prepare_cached_preview_playback(draft, float(draft.get("preview_playback_speed_scale")), bool(draft.get("preview_loop_enabled"))):
+	if bool(captured.get("valid", false)) and _prepare_cached_preview_playback(draft, float(draft.get("preview_playback_speed_scale")), bool(draft.get("preview_loop_enabled"))):
 		_start_prepared_preview_playback()
 		return
 	active_wip.ensure_combat_animation_station_state()
@@ -8816,6 +8831,7 @@ func apply_selected_motion_node_weapon_facing_delta(delta_degrees: float, begin_
 		return false
 	if not bool(result.get("changed", false)):
 		return true
+	PreparedPoseScript.invalidate_acquired_grip(motion, "weapon_facing_changed")
 	_stage_active_wip_edit("Weapon facing adjusted. Release the control to acquire grip.")
 	_refresh_editor_fields()
 	_refresh_grip_acquisition_status()
